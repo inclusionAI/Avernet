@@ -50,7 +50,7 @@
 | `core/bot_workshop/services/lifecycle_service.py`(service 分支) | 实现 `BotLifecycleViewProtocol` 服务分支(publish 状态→`DisplayState`) | A 定义协议,B 插 service impl | M | P1(impl)、P2(接入 A 的聚合 card) |
 | `openapi_v1/bot_workshop/router_containers.py` | `GET /containers/{bot_id}`(+`/?summary` 含 total/healthy/abnormal + instances[id,node,cpu,mem,status])、`POST /containers/{bot_id}/{instance_id}/restart`、`GET /containers/{bot_id}/{instance_id}/logs` | BaaS 容器实例 metrics(数据源待核);仅运行态服务 oc | M-L | P0(容器 list)、P1(单实例 ops) |
 | `openapi_v1/bot_workshop/router_evaluation.py` | `POST /evaluation/{bot_id}` | `quality /tasks/create`(biz_type=service_bot_single),返回评测页 URL/token;仅服务预发/运行态 | S | P1 |
-| `openapi_v1/bot_workshop/router_editpage.py`(或拆 skill-sets/files/flow/channels/nodes/render-screens 分文件) | `GET/POST/PUT/DELETE /skill-sets/{bot_id}`(+`/{set_id}/{skills,mcps}`)、`GET /files/{bot_id}`、`GET/PUT /flow/{bot_id}`、`GET /flow/{bot_id}/runs`、`GET/PUT /channels/{bot_id}`、`GET /nodes/{bot_id}`、`GET /render-screens/{bot_id}` | skill_center(skill-sets+引用型 skill 版本同步/不可改/血缘)+ per-bot MCP+caller;`files` 委托 build `read-only/tree`;`flow` 依赖 engine(待对齐);`channels` 委托 `/api/channels`;`nodes` 委托 engine `/api/nodes`;`render-screens` 委托 `/api/bot-render-screens` | L | P2 |
+| `openapi_v1/bot_workshop/router_editpage.py`(或拆 skill-sets/flow/channels/nodes/render-screens 分文件) | `GET/POST/PUT/DELETE /skill-sets/{bot_id}`(+`/{set_id}/{skills,mcps}`)、`GET/PUT /flow/{bot_id}`、`GET /flow/{bot_id}/runs`、`GET/PUT /channels/{bot_id}`、`GET /nodes/{bot_id}`、`GET /render-screens/{bot_id}` | skill_center(skill-sets+引用型 skill 版本同步/不可改/血缘)+ per-bot MCP+caller;**files 已并入 `/resources`,不再单建**(`2026-08-18` 复核,见 `2026-08-18-bot-workshop-integration-matrix.md` §3.1.1 / §6.7);`flow` 依赖 engine(待对齐);`channels` 委托 `/api/channels`;`nodes` 委托 engine `/api/nodes`;`render-screens` 委托 `/api/bot-render-screens` | L | P2 |
 | `openapi_v1/bot_workshop/router_space.py`(写) | `POST /migrate/{bot_id}` body `{target_space}`(校验编辑者是否目标空间成员,非成员移除);`SpaceScopeProtocol` prod impl | 新 space 独立表;上游空间中台就绪后换 impl,协议不变 | L | P3 |
 
 **B 量 ≈ 9**(点数略轻但扛 3 个高风险:服务容器 BaaS 数据源 / 编辑页 engine 依赖 / 空间绿地)。**B 依赖 A 的 protocols,不可先于 A 的 contracts**。
@@ -90,7 +90,7 @@ P1(Week2)
 
 P2(Week3)
   A    :router_diag health 接 harness prod;把 B 的 service-lifecycle impl 接入聚合 card(display_state 服务分支)
-  B    :router_editpage(skill-sets+引用skill+MCP+caller /files /flow /channels /nodes /render-screens)
+  B    :router_editpage(skill-sets+引用skill+MCP+caller /flow /channels /nodes /render-screens;files 已并入 /resources,见 matrix §3.1.1)
        + lifecycle /approval
 
 P3(Week4)
