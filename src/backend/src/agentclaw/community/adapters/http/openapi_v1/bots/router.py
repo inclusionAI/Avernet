@@ -46,7 +46,8 @@ from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
-    require_granted_bot,
+    refuse_app_only_caller,
+    require_granted_own_bot,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
@@ -121,7 +122,10 @@ logger = get_logger()
 #: application outright rather than authorize it. ``admission.py`` is the
 #: authority on which route is which; ``test_principal_seam.py`` fails if a
 #: declaration and a mode disagree.
-_GRANT_CHECKED = [Depends(require_granted_bot)]
+_GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
+
+#: What a ``REFUSED`` operation declares: no caller without an end user.
+_REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
 
@@ -244,6 +248,9 @@ def _sync_passport_identity(
     "",
     status_code=201,
     response_model=Envelope[Bot],
+    # REFUSED to a machine caller: no bot exists yet for a grant to cover, and
+    # creation spends the user's quota — see the mode's entry in `admission.py`.
+    dependencies=_REFUSES_APP_ONLY,
     responses={
         **USER_SCOPED_403,
         202: {
@@ -495,7 +502,7 @@ async def get_bots_ceiling(
     "/{bot_id}",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def get_bot(
@@ -513,7 +520,7 @@ async def get_bot(
     "/{bot_id}",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def update_bot(
@@ -569,7 +576,7 @@ async def update_bot(
     "/{bot_id}",
     response_model=Envelope[Deleted],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def delete_bot(
@@ -593,7 +600,7 @@ async def delete_bot(
     "/{bot_id}/restart",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def restart_bot(
@@ -732,7 +739,7 @@ def _complete_auth_status(
     "/{bot_id}/auth-status",
     response_model=Envelope[BotAuthStatus],
     responses=AUTH_STATUS_RESPONSES,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def poll_bot_auth_status(
@@ -781,7 +788,7 @@ async def poll_bot_auth_status(
     "/{bot_id}/status",
     response_model=Envelope[BotStatus],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def get_bot_status(
@@ -809,7 +816,7 @@ async def get_bot_status(
     "/{bot_id}/passport",
     response_model=Envelope[Passport],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def get_bot_passport(
@@ -854,7 +861,7 @@ def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
     "/{bot_id}/startup-script",
     response_model=Envelope[StartupScript],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def get_bot_startup_script(
@@ -882,7 +889,7 @@ async def get_bot_startup_script(
     "/{bot_id}/startup-script",
     response_model=Envelope[StartupScript],
     responses=STARTUP_SCRIPT_WRITE_RESPONSES,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def update_bot_startup_script(
@@ -933,7 +940,7 @@ async def update_bot_startup_script(
     "/{bot_id}/startup-script",
     response_model=Envelope[Deleted],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def delete_bot_startup_script(
@@ -958,5 +965,3 @@ async def delete_bot_startup_script(
         raise BotNotFoundError("bot has no associated entity")
     startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
     return deleted_envelope(request)
-
-
