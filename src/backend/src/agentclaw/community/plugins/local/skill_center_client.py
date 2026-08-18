@@ -4,7 +4,11 @@
 """
 
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+from agentclaw.community.plugin_api.skill_center_client import (
+    SkillCenterClient,
+    SkillCenterTeamCreateRequest,
+    SkillCenterTeamCreateResult,
+)
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
 from agentclaw.community.plugins.local._mock_seam import MockSeam
 
@@ -18,6 +22,12 @@ logger = get_logger()
 )
 class LocalSkillCenterClient(MockSeam, SkillCenterClient):
     """Mock 客户端：发布立即成功，用于本地开发调试。"""
+
+    def create_team(
+        self, request: SkillCenterTeamCreateRequest
+    ) -> SkillCenterTeamCreateResult:
+        logger.info("[LocalMock] create_team: %s", request.team_code)
+        return SkillCenterTeamCreateResult(team_id=f"mock-{request.team_code}")
 
     def upload_and_publish(self, payload: dict) -> dict:
         skill_code = payload.get("skillCode", "local-mock")
@@ -52,10 +62,19 @@ class LocalSkillCenterClient(MockSeam, SkillCenterClient):
         return []
 
     def search_market_skills(
-        self, keyword: str = "", tag: str = "", page: int = 1, page_size: int = 20,
+        self,
+        keyword: str = "",
+        tag: str = "",
+        page: int = 1,
+        page_size: int = 20,
         team_id: str | None = None,
     ) -> dict:
-        logger.info("[LocalMock] search_market_skills: keyword=%s tag=%s team_id=%s", keyword, tag, team_id)
+        logger.info(
+            "[LocalMock] search_market_skills: keyword=%s tag=%s team_id=%s",
+            keyword,
+            tag,
+            team_id,
+        )
         return {"success": True, "data": [], "total": 0}
 
     def get_market_tags(self) -> list[dict]:
@@ -64,7 +83,10 @@ class LocalSkillCenterClient(MockSeam, SkillCenterClient):
 
     def get_download_url(self, skill_code: str, version_number: str) -> dict:
         logger.info("[LocalMock] get_download_url: %s v%s", skill_code, version_number)
-        return {"success": True, "data": {"downloadUrl": "file:///local-mock/skill.zip"}}
+        return {
+            "success": True,
+            "data": {"downloadUrl": "file:///local-mock/skill.zip"},
+        }
 
     def delete_skill(self, skill_code: str) -> dict:
         logger.info("[LocalMock] delete_skill: %s", skill_code)
@@ -79,16 +101,35 @@ class LocalSkillCenterClient(MockSeam, SkillCenterClient):
                 "type": "DIR",
                 "description": None,
                 "children": [
-                    {"name": "SKILL.md", "type": "FILE", "description": "技能描述文件", "children": None},
-                    {"name": "src", "type": "DIR", "description": None, "children": [
-                        {"name": "main.py", "type": "FILE", "description": "主入口文件", "children": None},
-                    ]},
+                    {
+                        "name": "SKILL.md",
+                        "type": "FILE",
+                        "description": "技能描述文件",
+                        "children": None,
+                    },
+                    {
+                        "name": "src",
+                        "type": "DIR",
+                        "description": None,
+                        "children": [
+                            {
+                                "name": "main.py",
+                                "type": "FILE",
+                                "description": "主入口文件",
+                                "children": None,
+                            },
+                        ],
+                    },
                 ],
             },
         }
 
-    def get_file_content(self, skill_code: str, file_path: str, version: str = "") -> dict:
-        logger.info("[LocalMock] get_file_content: %s %s v%s", skill_code, file_path, version)
+    def get_file_content(
+        self, skill_code: str, file_path: str, version: str = ""
+    ) -> dict:
+        logger.info(
+            "[LocalMock] get_file_content: %s %s v%s", skill_code, file_path, version
+        )
         return {
             "success": True,
             "data": {

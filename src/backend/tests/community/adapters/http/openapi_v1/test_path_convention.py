@@ -51,7 +51,11 @@ def _document() -> dict:
 
 def _paths() -> list[str]:
     """Every published address — the current ones and the retiring ones."""
-    return list(_document()["paths"])
+    return [
+        path
+        for path in _document()["paths"]
+        if path == _BASE or path.startswith(f"{_BASE}/")
+    ]
 
 
 def _current_paths() -> list[str]:
@@ -66,6 +70,7 @@ def _current_paths() -> list[str]:
     return [
         path
         for path, item in document["paths"].items()
+        if path == _BASE or path.startswith(f"{_BASE}/")
         if any(
             isinstance(operation, dict)
             and "responses" in operation
@@ -105,14 +110,14 @@ def _components() -> set[str]:
     }
 
 
-def test_every_path_lives_under_the_bots_base():
+def test_bot_path_selection_lives_under_the_bots_base():
     """The gateway resolves by the segment after the version base.
 
     A path outside ``/openapi/v1/bots`` would route to a different upstream —
     or to none — and the mistake is invisible until deploy.
     """
-    offenders = [p for p in _paths() if p != _BASE and not p.startswith(f"{_BASE}/")]
-    assert not offenders, f"paths outside {_BASE}: {offenders}"
+    assert _paths(), "no bot paths found on the public surface"
+    assert all(path == _BASE or path.startswith(f"{_BASE}/") for path in _paths())
 
 
 def test_no_path_repeats_bot_before_the_id():

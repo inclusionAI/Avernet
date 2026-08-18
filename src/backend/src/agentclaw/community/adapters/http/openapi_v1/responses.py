@@ -52,6 +52,14 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UnsupportedEngineError,
     UserIdMismatchError,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors_space import (
+    SpaceErrorCode,
+    SpacePublicErrorMessage,
+)
+from agentclaw.community.adapters.http.openapi_v1.errors_work_order import (
+    WorkOrderErrorCode,
+    WorkOrderPublicErrorMessage,
+)
 from agentclaw.community.core.bot_app_grant.errors import (
     GrantBotNotLiveError,
     GrantIdentityTooLongError,
@@ -93,6 +101,33 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineUpstreamError,
 )
 from agentclaw.community.core.gateway_principal import PrincipalVerificationError
+from agentclaw.community.core.market_favorites.errors import (
+    FavoriteNotFoundError,
+    FavoriteTargetInvalidError,
+)
+from agentclaw.community.core.work_orders.errors import (
+    WorkOrderAccessDeniedError,
+    WorkOrderAlreadyPendingError,
+    WorkOrderAlreadyProcessedError,
+    WorkOrderApplicantAlreadyMemberError,
+    WorkOrderInvalidReasonError,
+    WorkOrderInvalidRemarkError,
+    WorkOrderJoinNotAllowedError,
+    WorkOrderNoReviewerError,
+    WorkOrderNotFoundError,
+    WorkOrderNotificationNotFoundError,
+)
+from agentclaw.community.core.spaces.errors import (
+    PersonalSpaceInvariantError,
+    SpaceAccessDeniedError,
+    SpaceAlreadyExistsError,
+    SpaceCreatorInvariantError,
+    SpaceMemberAlreadyExistsError,
+    SpaceMemberInvalidError,
+    SpaceMemberNotFoundError,
+    SpaceNameInvalidError,
+    SpaceNotFoundError,
+)
 from agentclaw.community.core.mcp.errors import (
     McpConfigValueError,
     McpHeadersInvalidError,
@@ -131,6 +166,9 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTimeoutError,
 )
 from agentclaw.community.plugin_api.passport import PassportError
+from agentclaw.community.plugin_api.skill_center_client import (
+    SkillCenterTeamCreateError,
+)
 
 T = TypeVar("T")
 
@@ -195,6 +233,55 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # two have different fixes. The message says nothing about which user was
     # asked for; both ids are on the warning line in ``principal.py``.
     UserIdMismatchError: (403, "Forbidden"),
+    SpaceAccessDeniedError: (403, "Forbidden"),
+    SpaceNotFoundError: (404, "Not found"),
+    SpaceMemberInvalidError: (400, "Invalid space member"),
+    SpaceMemberNotFoundError: (404, "Not found"),
+    SpaceNameInvalidError: (400, "Invalid space name"),
+    FavoriteTargetInvalidError: (400, "Invalid favorite target"),
+    FavoriteNotFoundError: (404, "Not found"),
+    SpaceAlreadyExistsError: (409, "Space already exists"),
+    SpaceMemberAlreadyExistsError: (409, "Space member already exists"),
+    SpaceCreatorInvariantError: (409, "Space creator cannot be removed or demoted"),
+    PersonalSpaceInvariantError: (409, "Personal space membership is immutable"),
+    SkillCenterTeamCreateError: (
+        502,
+        SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
+    ),
+    WorkOrderAccessDeniedError: (403, WorkOrderPublicErrorMessage.FORBIDDEN),
+    WorkOrderNotFoundError: (404, WorkOrderPublicErrorMessage.NOT_FOUND),
+    WorkOrderNotificationNotFoundError: (
+        404,
+        WorkOrderPublicErrorMessage.NOT_FOUND,
+    ),
+    WorkOrderInvalidReasonError: (
+        400,
+        WorkOrderPublicErrorMessage.INVALID_REASON,
+    ),
+    WorkOrderInvalidRemarkError: (
+        400,
+        WorkOrderPublicErrorMessage.INVALID_REMARK,
+    ),
+    WorkOrderAlreadyPendingError: (
+        409,
+        WorkOrderPublicErrorMessage.ALREADY_PENDING,
+    ),
+    WorkOrderAlreadyProcessedError: (
+        409,
+        WorkOrderPublicErrorMessage.ALREADY_PROCESSED,
+    ),
+    WorkOrderApplicantAlreadyMemberError: (
+        409,
+        WorkOrderPublicErrorMessage.APPLICANT_ALREADY_MEMBER,
+    ),
+    WorkOrderJoinNotAllowedError: (
+        409,
+        WorkOrderPublicErrorMessage.JOIN_NOT_ALLOWED,
+    ),
+    WorkOrderNoReviewerError: (
+        409,
+        WorkOrderPublicErrorMessage.NO_REVIEWER,
+    ),
     InvalidBotLogQueryError: (400, "Invalid log query"),
     SessionNotFoundError: (404, "Not found"),
     BotNotFoundError: (404, "Not found"),
@@ -394,6 +481,17 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 # small, explicit override table lets a category expose a stable actionable
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
+    SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
+    WorkOrderInvalidReasonError: WorkOrderErrorCode.INVALID_REASON,
+    WorkOrderInvalidRemarkError: WorkOrderErrorCode.INVALID_REMARK,
+    WorkOrderAccessDeniedError: WorkOrderErrorCode.ACCESS_DENIED,
+    WorkOrderNotFoundError: WorkOrderErrorCode.NOT_FOUND,
+    WorkOrderNotificationNotFoundError: WorkOrderErrorCode.NOTIFICATION_NOT_FOUND,
+    WorkOrderAlreadyPendingError: WorkOrderErrorCode.ALREADY_PENDING,
+    WorkOrderAlreadyProcessedError: WorkOrderErrorCode.ALREADY_PROCESSED,
+    WorkOrderApplicantAlreadyMemberError: WorkOrderErrorCode.APPLICANT_ALREADY_MEMBER,
+    WorkOrderNoReviewerError: WorkOrderErrorCode.NO_REVIEWER,
+    WorkOrderJoinNotAllowedError: WorkOrderErrorCode.JOIN_NOT_ALLOWED,
     LocalSkillOwnerAmbiguousError: 409104,
     LocalSkillInvalidPackageError: 400101,
     LocalSkillNotReadyError: 409101,

@@ -148,6 +148,17 @@ user_config:
 
     # ── The refusals: operations that still require a human on the wire ──────
 
+    # Space/member/favorite OpenAPI operations are user-only in the first
+    # refactor phase. Keep this explicit even though /** also requires a user:
+    # when the broader public API policy evolves, these routes must remain
+    # fail-closed until app identity semantics for spaces are approved.
+    "/openapi/v1/spaces/**":
+      user: required
+    "/openapi/v1/work-orders/**":
+      user: required
+    "/openapi/v1/work-order-notifications/**":
+      user: required
+
     # Creating a bot. No bot exists yet for a grant to cover, and creation
     # spends the user's quota.
     "POST /openapi/v1/bots":
@@ -377,6 +388,24 @@ user_config:
         #     source: object_store
         #     url: "${BOTS_OPENAPI_URL}"   # e.g. https://<bucket>/bots/openapi-latest.json
         #     refresh_seconds: 300
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      spaces:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      work-orders:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      work-order-notifications:
+        server: backend
         schema:
           source: file
           path: schemas/bots.openapi.json

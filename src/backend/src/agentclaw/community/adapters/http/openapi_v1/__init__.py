@@ -186,6 +186,7 @@ from .contracts import (
     ENGINE_RUNTIME_ERROR_RESPONSES,
     ERROR_RESPONSES,
     USER_SCOPED_ERROR_RESPONSES,
+    SPACE_SCOPED_ERROR_RESPONSES,
 )
 from .dependencies import require_principal
 from .principal import require_granted_addressed_bot, require_granted_own_bot
@@ -201,6 +202,8 @@ from .bot_logs import router as logs_router
 from .resources import router as resources_router
 from .routines import router as routines_router
 from .skills import router as skills_router
+from .spaces import router as spaces_router
+from .work_orders import router as work_orders_router
 
 # Every public route lives under this prefix. Exported so app-level handlers can
 # tell a public request from an internal one (e.g. to envelope validation errors
@@ -342,6 +345,18 @@ def build_public_router() -> APIRouter:
     user" above).
     """
     public = APIRouter()
+    # Space APIs are user-only in the first phase. They are top-level
+    # resources, so they intentionally do not inherit any bot grant gate.
+    public.include_router(
+        spaces_router,
+        responses=SPACE_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        work_orders_router,
+        responses=SPACE_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
     for router in _GROUPS_WITHOUT_CALLER_SCOPE + _MIXED_GROUPS:
         public.include_router(
             router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
