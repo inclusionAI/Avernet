@@ -25,6 +25,7 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 
 LAYOUT_CONTRACT_VERSION = "skills-pool-p3-v1"
 MAPPING_CONTRACT_VERSION = "skills-pool-mapping-v2"
+MAPPING_V3_CONTRACT_VERSION = "skills-pool-mapping-v3"
 CUTOVER_EVIDENCE_CONTRACT_VERSION = "quarantine-v1"
 
 
@@ -186,8 +187,7 @@ class CurrentRuntimeLayoutProbeService:
             return CurrentRuntimeLayoutProbeService._invalid_response(engine)
         if (
             data.status is RuntimeLayoutProbeStatus.READY
-            and data.evidence.get("mapping_contract_version")
-            != MAPPING_CONTRACT_VERSION
+            and not CurrentRuntimeLayoutProbeService._supports_v2(data.evidence)
         ):
             return CurrentRuntimeLayoutProbeService._not_capable(
                 engine,
@@ -199,6 +199,14 @@ class CurrentRuntimeLayoutProbeService:
             layout_contract_version=LAYOUT_CONTRACT_VERSION,
             preparation_id=data.preparation_id,
             evidence=data.evidence,
+        )
+
+    @staticmethod
+    def _supports_v2(evidence: dict[str, Any]) -> bool:
+        legacy = evidence.get("mapping_contract_version")
+        supported = evidence.get("supported_mapping_contract_versions")
+        return legacy == MAPPING_CONTRACT_VERSION or (
+            isinstance(supported, list) and MAPPING_CONTRACT_VERSION in supported
         )
 
     @staticmethod
@@ -260,6 +268,7 @@ __all__ = [
     "CurrentRuntimeLayoutProbeService",
     "LAYOUT_CONTRACT_VERSION",
     "MAPPING_CONTRACT_VERSION",
+    "MAPPING_V3_CONTRACT_VERSION",
     "CUTOVER_EVIDENCE_CONTRACT_VERSION",
     "RuntimeLayoutProbeResult",
     "RuntimeLayoutProbeStatus",

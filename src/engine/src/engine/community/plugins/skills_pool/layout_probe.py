@@ -17,6 +17,7 @@ from engine.community.config import RepoDelivery, current_repo_delivery
 from engine.community.core.skills.layout_planner import (
     LAYOUT_CONTRACT_VERSION,
     MAPPING_CONTRACT_VERSION,
+    MAPPING_V3_CONTRACT_VERSION,
     LayoutIdentity,
     RuntimeLayoutContext,
     resolve_filesystem_skill_layout,
@@ -77,6 +78,10 @@ def _ready_evidence(
         evidence.update(
             {
                 "mapping_contract_version": mapping_contract_version,
+                "supported_mapping_contract_versions": [
+                    MAPPING_CONTRACT_VERSION,
+                    MAPPING_V3_CONTRACT_VERSION,
+                ],
                 "resolved_layout": resolved_filesystem_layout_evidence(
                     layout,
                     local_root=layout.pool_local,

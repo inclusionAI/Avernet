@@ -140,7 +140,8 @@ def mapping_sources_use_pool(
 
     layout = _Layout.for_engine(engine, Path(home))
     pool_roots = tuple(
-        Path(os.path.abspath(root)) for root in (layout.pool_local, layout.pool_repo)
+        Path(os.path.abspath(root))
+        for root in (layout.pool_local, layout.pool_repo, layout.pool_center)
     )
     legacy_roots = tuple(
         Path(os.path.abspath(root))
@@ -630,6 +631,7 @@ def _canonical_pool_source(layout: _Layout, source: Path) -> Path | None:
         (layout.legacy_repo, layout.pool_repo),
         (layout.repo_bridge, layout.pool_repo),
         (layout.pool_repo, layout.pool_repo),
+        (layout.pool_center, layout.pool_center),
     ):
         normalized_root = Path(os.path.abspath(root))
         if source.is_relative_to(normalized_root):
@@ -680,12 +682,12 @@ def _source_failure(
     if source_layout is MappingSourceLayout.LEGACY:
         return _managed_source_failure(
             source,
-            roots=(layout.legacy_local, layout.legacy_repo),
+        roots=(layout.legacy_local, layout.legacy_repo, layout.pool_center),
             outside_reason="source_outside_legacy",
         )
     return _managed_source_failure(
         source,
-        roots=(layout.pool_local, layout.pool_repo),
+        roots=(layout.pool_local, layout.pool_repo, layout.pool_center),
         outside_reason="source_outside_pool",
     )
 
@@ -934,9 +936,9 @@ def _mapping_source_outside_layout(
     source_layout: MappingSourceLayout,
 ) -> bool:
     roots = (
-        (layout.legacy_local, layout.legacy_repo)
+        (layout.legacy_local, layout.legacy_repo, layout.pool_center)
         if source_layout is MappingSourceLayout.LEGACY
-        else (layout.pool_local, layout.pool_repo)
+        else (layout.pool_local, layout.pool_repo, layout.pool_center)
     )
     normalized = Path(os.path.abspath(source))
     return not any(

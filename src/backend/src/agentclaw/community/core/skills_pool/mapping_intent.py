@@ -9,6 +9,22 @@ from agentclaw.community.core.skills_pool.models import (
     RegisteredSkillAsset,
 )
 
+MAPPING_CONTRACT_V2 = "skills-pool-mapping-v2"
+MAPPING_CONTRACT_V3 = "skills-pool-mapping-v3"
+
+
+def mapping_contract_for(
+    mappings: list[PoolSkillMapping],
+    supported_versions: object,
+) -> str:
+    """Select the newest contract required by a complete mapping snapshot."""
+
+    if not any(mapping.corpus == "center" for mapping in mappings):
+        return MAPPING_CONTRACT_V2
+    if not isinstance(supported_versions, list) or MAPPING_CONTRACT_V3 not in supported_versions:
+        raise ValueError("runtime does not explicitly support mapping v3")
+    return MAPPING_CONTRACT_V3
+
 
 def _source_tail(git_path: str, prefix: str) -> PurePosixPath:
     raw = git_path[len(prefix) :]
@@ -43,10 +59,19 @@ def build_logical_skill_mappings(
         elif asset.git_path.startswith("git://"):
             relative = _source_tail(asset.git_path, "git://")
             corpus = "repo"
+        elif asset.git_path.startswith("center://"):
+            if not asset.skill_uuid or not asset.sc_version_number:
+                raise ValueError("center mapping requires structured identity")
+            relative = None
+            corpus = "center"
         else:
             continue
-        link_name = relative.name
-        identity = f"{corpus}:{relative.as_posix()}"
+        link_name = asset.name if corpus == "center" else relative.name
+        identity = (
+            f"center:{asset.skill_uuid}:{asset.sc_version_number}"
+            if corpus == "center"
+            else f"{corpus}:{relative.as_posix()}"
+        )
         if targets.get(link_name) == identity:
             continue
         if link_name in targets:
@@ -55,8 +80,10 @@ def build_logical_skill_mappings(
         mappings.append(
             PoolSkillMapping(
                 corpus=corpus,
-                relative_path=relative.as_posix(),
+                relative_path=None if relative is None else relative.as_posix(),
                 link_name=link_name,
+                skill_uuid=asset.skill_uuid if corpus == "center" else None,
+                sc_version_number=(asset.sc_version_number if corpus == "center" else None),
             )
         )
     return mappings
@@ -178,6 +205,7 @@ __all__ = [
     "logical_skill_mappings_from_evidence",
     "local_locators_from_evidence",
     "local_skill_name",
+    "mapping_contract_for",
     "merge_retired_logical_skill_mappings",
     "retired_logical_skill_mappings",
 ]

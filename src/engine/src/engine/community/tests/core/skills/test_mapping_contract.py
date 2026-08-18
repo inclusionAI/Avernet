@@ -7,6 +7,7 @@ from engine.community.core.skills.exceptions import (
 )
 from engine.community.core.skills.layout_planner import (
     MAPPING_CONTRACT_VERSION,
+    MAPPING_V3_CONTRACT_VERSION,
     SkillLayoutResolutionError,
 )
 from engine.community.plugins.claude_code.layout_pool import (
@@ -105,6 +106,52 @@ def test_mapping_v2_resolves_for_every_filesystem_engine(
     assert (
         resolved.resolved_locators[0]["resolved_locator"]
         == "git://business/reviewer"
+    )
+
+
+@pytest.mark.parametrize(
+    ("engine", "active_root", "center_root"),
+    [
+        ("openclaw", ".openclaw/workspace/skills", ".openclaw/workspace/skills-pool/skill-center"),
+        ("claude_code", ".claude/skills", ".claude_code/workspace/skills-pool/skill-center"),
+        ("aicoding", ".claude/skills", ".aicoding/workspace/skills-pool/skill-center"),
+        ("hermes", ".hermes/skills", ".hermes/workspace/skills-pool/skill-center"),
+    ],
+)
+def test_mapping_v3_projects_structured_center_identity_for_every_runtime(
+    tmp_path: Path,
+    engine: str,
+    active_root: str,
+    center_root: str,
+) -> None:
+    skill_uuid = "2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a"
+    resolved = resolve_mapping_payload(
+        engine=engine,
+        source_layout=MappingSourceLayout.LEGACY,
+        mapping_contract_version=MAPPING_V3_CONTRACT_VERSION,
+        payload=[
+            {
+                "corpus": "center",
+                "skill_uuid": skill_uuid,
+                "sc_version_number": "2026.8.19",
+                "link_name": "risk-review",
+            }
+        ],
+        home=tmp_path,
+    )
+
+    assert resolved.mappings[0].source == str(
+        tmp_path / center_root / skill_uuid / "2026.8.19"
+    )
+    assert resolved.mappings[0].target == str(tmp_path / active_root / "risk-review")
+    assert resolved.resolved_locators == (
+        {
+            "corpus": "center",
+            "skill_uuid": skill_uuid,
+            "sc_version_number": "2026.8.19",
+            "link_name": "risk-review",
+            "resolved_locator": f"center://{skill_uuid}/2026.8.19",
+        },
     )
 
 
