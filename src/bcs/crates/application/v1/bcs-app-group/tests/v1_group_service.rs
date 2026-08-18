@@ -1148,6 +1148,7 @@ async fn create_uses_the_authenticated_human_as_originator() {
         .create(CreateGroup {
             caller: bot_principal("requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("Planning".into()),
                 context: Some("Plan the release".into()),
                 visibility: GroupVisibility::Private,
@@ -1202,6 +1203,7 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
                 None,
             ),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("Protected collaboration".into()),
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -1369,6 +1371,7 @@ async fn create_group_propagates_quota_lookup_database_failure() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 driver_bot_uuid: "driver".into(),
                 name: Some("quota lookup failure".into()),
                 context: None,
@@ -1405,6 +1408,7 @@ async fn create_group_propagates_non_driver_registry_database_failure() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 driver_bot_uuid: "driver".into(),
                 name: Some("registry failure".into()),
                 context: None,
@@ -1501,6 +1505,7 @@ async fn create_rejects_non_bot_driver_and_dm_target_with_declared_code() {
         .create(CreateGroup {
             caller: bot_principal("requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -1551,6 +1556,7 @@ async fn state_machine_create_without_runtime_fails_before_persisting_group() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -1595,6 +1601,7 @@ async fn state_machine_create_rejects_duplicate_participant_binding_names() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -1650,6 +1657,7 @@ async fn state_machine_runtime_failure_rolls_back_created_group() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -1692,6 +1700,7 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: Some("Execute the workflow".into()),
                 visibility: GroupVisibility::Private,
@@ -1791,6 +1800,7 @@ async fn state_machine_create_with_inline_yaml_returns_persisted_definition_ref(
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -1849,6 +1859,7 @@ async fn state_machine_create_defers_initial_run_until_required_channel_is_bound
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("Human review".into()),
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -1893,6 +1904,7 @@ async fn state_machine_create_rejects_human_actors_in_bot_bindings() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -1941,6 +1953,7 @@ async fn state_machine_create_preserves_authenticated_human_in_audit_and_start()
         .create(CreateGroup {
             caller: human_principal_with_profile("staff-1", "alice", Some("Alice"), None),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: Some("Review the release".into()),
                 visibility: GroupVisibility::Private,
@@ -2007,6 +2020,7 @@ async fn state_machine_create_does_not_reread_runtime_for_its_response() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -2045,6 +2059,7 @@ async fn state_machine_start_failure_removes_runtime_session_and_group() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -2110,6 +2125,7 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -2338,6 +2354,7 @@ async fn tenant_metadata_does_not_restrict_bot_collaboration() {
         .create(CreateGroup {
             caller: bot_principal_in_tenant("driver", "tenant-b"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("Cross-tenant collaboration".into()),
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -2454,6 +2471,7 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("Before".into()),
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -2526,6 +2544,7 @@ async fn create_propagates_friendship_lookup_failure() {
         .create(CreateGroup {
             caller: bot_principal("requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -2558,6 +2577,7 @@ async fn create_propagates_protected_participant_friendship_lookup_failure() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -2635,6 +2655,7 @@ async fn create_rejects_duplicate_participant_actor_ids() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -2676,6 +2697,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -2704,6 +2726,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
                 visibility: GroupVisibility::Private,
@@ -2879,6 +2902,7 @@ async fn client_caused_group_errors_map_to_documented_4xx_classes() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
                 visibility: GroupVisibility::Public,
