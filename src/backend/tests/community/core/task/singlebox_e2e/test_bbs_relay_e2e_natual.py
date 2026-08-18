@@ -10,7 +10,7 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
 
 - owner bot(装 ``planning-arch`` + ``search``,通用规划/分解)+「风清扬」(装 ``arch-analysis`` +
   ``bbs-relay-pickup``,BBS 接力执行者)。
-- 任务目标:**整理支付宝公司内部「基础架构」方向技术架构师**。自然链:owner 用通用 planning-arch 规划分解
+- 任务目标:**整理某某某公司内部「基础架构」方向技术架构师**。自然链:owner 用通用 planning-arch 规划分解
   → 子任务"找架构师"经 search 派发 → 候选 bot 都不匹配 → ``on_miss@MAX_DEPTH`` 自然升 BBS
   (``bbs_mode=True``、根 ``PLANNING``、图空闲,即 spec §10.5 可恢复态)。
 - 升 BBS 后本用例**唤醒一次风清扬**:`bbs-relay-pickup` 由风清扬自驱 6 步(发现 → claim → 自判 →
@@ -31,7 +31,9 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
   singlebox 上共用 bot 造成 planning skill 串扰。
 - 风清扬的 ``arch-analysis`` 是真实 LLM 推理,经 ``SingleboxEngineAdapter`` live 调用(唤醒 + 接力中段
   执行都是 live);风清扬本体由 ``SingleboxBotProvisioner`` 真实建 bot + 装 skill,幂等。
-- ``SUB_DOMAINS`` 只取一个方向(基础架构):自然升 BBS + 风清扬自判 ``full`` 一段收口,演练"自然链接力"。
+- ``SUB_DOMAINS`` 只取一个方向(基础架构)。**剧本刻意收窄为单一交付物**(3 位架构师名册)+ ``MAX_DEPTH=1``,
+  使规划只展一层、拆出 **1~3 个扁平子任务**即停(不再像宽目标被切成一堆子方向);全 MISS 自然升 BBS,
+  风清扬自判 ``full`` 一段收口。
 """
 from __future__ import annotations
 
@@ -68,7 +70,8 @@ _BBS_SKILL = str(
     / "specs" / "2026-08-09-task-goal-driven-task-runner-bbs" / "bbs-relay-pickup"
 )
 
-# 任务目标:整理支付宝公司内部「基础架构」方向技术架构师;只取一个方向,自然升 BBS + 风清扬一段收口。
+# 任务目标:整理某某某公司「基础架构」方向 3 位核心架构师名册;单一交付物 + MAX_DEPTH=1 → 规划只展一层、
+# 拆出 1~3 个扁平子任务即停,全 MISS 自然升 BBS,风清扬一段接力收口。
 TASK_ID = f"t_arch_{uuid.uuid4().hex[:6]}"
 SUB_DOMAINS = ["基础架构"]
 _BBS_MAX_DEPTH = 3  # 单方向一段收口;风清扬自判 full 一次唤醒即可
@@ -103,29 +106,40 @@ async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
 
 
 def _execute_body(owner_id: str) -> dict:
-    """``POST /api/task/execute`` 请求体(TaskInfoDTO):整理「基础架构」方向架构师。"""
+    """``POST /api/task/execute`` 请求体(TaskInfoDTO):整理「基础架构」方向架构师。
+
+    剧本收敛为**单一交付物**(一张基础架构方向的小型架构师名册),配 ``MAX_DEPTH=1`` 使规划只展一层:
+    - 目标粒度收窄到"3 位核心架构师姓名/角色/职责",且 instruction 明示"单一交付的人才名册,不要按子方向
+      再拆分",避免 planner 把"基础架构"再切成中间件/存储/云原生/可观测/安全… 等一堆子方向(MAx_DEPTH=1
+      时即使切也只展一层、且 depth-1 miss 直接走 ``miss_depth_exhausted`` 可恢复,不 re-plan 嵌套)。
+    - 预期:owner 规划出 1~3 个扁平子任务 → 普通派发全 MISS(无此类 bot)→ 自然升 BBS(根 PLANNING 可恢复)
+      → 风清扬 claim 时 recover 清掉 HUNG 死分支 → 挂 1 个 bbs scoped 节点自驱 → 收口 DONE。
+    """
     sub = SUB_DOMAINS[0]
     return {
         "task_spec": {
             "metadata": {
                 "task_id": TASK_ID,
-                "title": f"整理支付宝公司内部「{sub}」技术架构师",
+                "title": f"整理某某某公司内部「{sub}」方向技术架构师名册",
                 "instruction": (
-                    f"整理支付宝(蚂蚁集团)内部「{sub}」方向的技术架构师/负责人清单,"
-                    f"给出该方向架构师姓名/角色 + 职责。"
+                    f"整理某某某公司内部「{sub}」方向的 **3 位核心技术架构师**,"
+                    f"给出每位架构师的姓名/角色 + 主要职责。这是一个**单一交付的人才名册**,"
+                    f"不要按子方向(中间件/存储/云原生/可观测/安全 等)再拆分。"
                 ),
             },
-            "context": {"background": "支付宝内部技术架构师梳理", "extend_props": {}},
+            "context": {"background": "某某某公司内部技术架构师梳理", "extend_props": {}},
             "goal": {
-                "objective": f"整理支付宝公司内部「{sub}」方向技术架构师(姓名/角色/职责清单)",
+                "objective": f"整理某某某公司内部「{sub}」方向 3 位核心技术架构师(姓名/角色 + 职责)",
                 "acceptances": [
-                    {"id": "ac1", "description": f"给出「{sub}」方向架构师清单(姓名或角色 + 职责)"},
+                    {"id": "ac1", "description": f"给出「{sub}」方向 3 位架构师的姓名/角色 + 职责"},
                 ],
             },
         },
         "source_channel_type": "bot",
         "source_channel_id": owner_id,
-        "execution_config": {"MAX_DEPTH": 2, "BBS_MAX_DEPTH": _BBS_MAX_DEPTH},
+        # MAX_DEPTH=1:只展一层,depth-1 miss 直走 miss_depth_exhausted 可恢复(不 re-plan 嵌套);
+        # 规划出 1~3 个扁平子任务即停,避免拆成太多。
+        "execution_config": {"MAX_DEPTH": 1, "BBS_MAX_DEPTH": _BBS_MAX_DEPTH},
     }
 
 
