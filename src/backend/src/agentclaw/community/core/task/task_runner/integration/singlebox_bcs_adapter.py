@@ -23,7 +23,7 @@ from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter impo
 )
 
 
-class SingleboxBcsAdapter(BcsHttpAdapter):
+class SingleboxBcsAdapter(BcsHttpAdapter):  # pragma: no cover — live singlebox local BCS (:21000) adapter; exercised by singlebox acceptance / 联调, not CI LOCAL line coverage
     """singlebox 本地 BCS 适配:继承 BcsHttpAdapter,仅覆写响应形状不一致处。"""
 
     async def create_group(self, req: BcsCreateGroupRequest) -> BcsCreateGroupResult:

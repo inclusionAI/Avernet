@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 
@@ -39,6 +39,9 @@ class EngineBuildPlan:
     # 两者同时为空时跳过额外同步。
     extra_sync_source_relpath: str = ""
     extra_sync_target_relpath: str = ""
+    # Extra individual files to copy after the primary rsync. Useful for
+    # preserving a small allowlist inside an otherwise excluded runtime dir.
+    extra_include_files: list[str] = field(default_factory=list)
 
 
 @runtime_checkable

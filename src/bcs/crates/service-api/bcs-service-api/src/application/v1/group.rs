@@ -306,6 +306,7 @@ pub struct GetGroup {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GroupPatch {
     pub name: Option<String>,
+    pub context: Option<String>,
     pub visibility: Option<GroupVisibility>,
     pub delivery_policy: Option<GroupDeliveryPolicy>,
 }
@@ -313,6 +314,7 @@ pub struct GroupPatch {
 impl GroupPatch {
     pub fn is_empty(&self) -> bool {
         self.name.is_none()
+            && self.context.is_none()
             && self.visibility.is_none()
             && self.delivery_policy.is_none()
     }

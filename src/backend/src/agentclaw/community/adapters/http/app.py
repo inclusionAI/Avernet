@@ -360,6 +360,8 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     Forbidden:             403,
     NotFound:              404,
     Conflict:              409,
+    CallbackAuthError:     401,
+    CallbackCorrelationError: 400,
     InternalError:         500,
     CallerIdentityPermissionError: 403,
     CallerIdentityAmbiguousError: 409,
