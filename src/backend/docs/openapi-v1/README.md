@@ -1516,6 +1516,16 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 
 ## Changelog (append a dated line whenever you move the board)
 
+- **2026-08-18** — **Data-init trigger/status contract completed.** The public
+  trigger now forwards the `IAM_TOKEN` cookie through the HTTP boundary into a
+  typed `DataInitServiceProtocol`; the service persists it only when an
+  initialization attempt will actually run. Added
+  `GET /openapi/v1/bots/{bot_id}/data-init` for polling the bounded public state
+  (`not_started`, `pending_init`, `in_progress`, `completed`, or `failed`)
+  without exposing the Bot `ext` bag, credentials, or downstream sync details.
+  Regenerated the Gateway `bots.openapi.json`; the independent OCB/Sofapy copy
+  and real IAM/Engine/downstream E2E remain deployment verification items.
+
 - **2026-08-17** — **TC bot workshop and local workflows.** Added the
   aggregated `/bots/all` inventory, personal-local device/create/read/restart/
   delete/open-folder workflows, dormant activation, cold-start data

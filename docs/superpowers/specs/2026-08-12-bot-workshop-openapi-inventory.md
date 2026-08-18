@@ -15,7 +15,7 @@
 
 ### 0.1 寻址约定（系分 §10.2 + `openapi_v1/__init__.py`）
 - 下表「全路径」列含完整前缀 `/openapi/v1/bots`，路径参数用 `{...}` 表示（`{bot_id}` / `{session_id}` / `{resource_id}` / `{routine_id}` / `{skill_id}` / `{file_type}` / `{model_id}` / `{machine_id}` / `{instance_id}` / `{member_id}` / `{set_id}` / `{server_code}` / `{trace_id}` / `{group_id}` / `{biz_scene}` / `{biz_task_id}` / `{session_key}`）。
-- **组件字面量在前、`{bot_id}` 在后**：如 `/openapi/v1/bots/local/{bot_id}`、`/openapi/v1/bots/diagnostics/{bot_id}/runtime-logs`，不允许 `/{bot_id}/xxx` 形态（`bots` 组件自身是唯一例外，它拥有根 `/openapi/v1/bots/{bot_id}` 及其子资源 `/openapi/v1/bots/{bot_id}/restart` 等）。
+- **存量路径保持兼容，新建 Bot-scoped 路径采用 Bot-first**：已有的 component-first 接口（如 `/openapi/v1/bots/engine/{bot_id}/status`）继续保留；本次新增的单 Bot 操作统一使用 `/openapi/v1/bots/{bot_id}/<component>`，例如 `/{bot_id}/local/restart`、`/{bot_id}/engine/restart` 和 `/{bot_id}/data-init`。集合/发现接口仍使用 literal-first，例如 `/bots/local/devices`、`/bots/all`。
 - literal 子组件必须挂在 `bots` 通配 `/openapi/v1/bots/{bot_id}` 之前（`_SUBGROUPS` 先于 `bots_router`）。
 
 ### 0.2 鉴权与作用域约定
@@ -124,17 +124,17 @@
 | 71 | local | 设备目录树 | `GET /openapi/v1/bots/local/devices/{machine_id}/files` | 新增 | 已开发 | P0 | 选挂载目录；`list_directory` |
 | 72 | local | 创建本地 Bot（201 / 202） | `POST /openapi/v1/bots/local` | 新增 | 已开发 | P0 | 委托 `DesktopBotService`；含 `machine_id`/`mount_path`/`init_config` |
 | 73 | local | 本地 Bot 列表 | `GET /openapi/v1/bots/local` | 新增 | 已开发 | P0 | inventory 已覆盖，可选 |
-| 74 | local | 本地 Bot 详情 | `GET /openapi/v1/bots/local/{bot_id}` | 新增 | 已开发 | P0 | — |
-| 75 | local | 授权轮询 + 完成创建 | `GET /openapi/v1/bots/local/{bot_id}/auth-status` | 新增 | 已开发 | P0 | `create_after_authorization` |
-| 76 | local | 重启本地 Bot | `POST /openapi/v1/bots/local/{bot_id}/restart` | 新增 | 已开发 | P0 | 委托 desktop restart |
-| 77 | local | 删除本地 Bot | `DELETE /openapi/v1/bots/local/{bot_id}` | 新增 | 已开发 | P0 | 委托 desktop delete |
-| 78 | local | 打开目录 | `POST /openapi/v1/bots/local/{bot_id}/open-folder` | 新增 | 已开发 | P0 | `open_folder` |
+| 74 | local | 本地 Bot 详情 | `GET /openapi/v1/bots/{bot_id}/local` | 新增 | 已开发 | P0 | — |
+| 75 | local | 授权轮询 + 完成创建 | `GET /openapi/v1/bots/{bot_id}/local/auth-status` | 新增 | 已开发 | P0 | `create_after_authorization` |
+| 76 | local | 重启本地 Bot | `POST /openapi/v1/bots/{bot_id}/local/restart` | 新增 | 已开发 | P0 | 委托 desktop restart |
+| 77 | local | 删除本地 Bot | `DELETE /openapi/v1/bots/{bot_id}/local` | 新增 | 已开发 | P0 | 委托 desktop delete |
+| 78 | local | 打开目录 | `POST /openapi/v1/bots/{bot_id}/local/open-folder` | 新增 | 已开发 | P0 | `open_folder` |
 | 79 | diagnostics | 运行日志流 | `GET /openapi/v1/bots/diagnostics/{bot_id}/runtime-logs` | 新增 | 已设计未建 | P0 | **已移交其他团队负责，A 线仅待跟进**；当前按指示降低优先级。≠`/logs` trace；待责任团队确认老前端 URL 后决定复用 engine runtime relay，还是通过受限 BaaS exec 实现；必须限制白名单路径及 `tail`/`level` |
-| 80 | engine | 重启引擎 | `POST /openapi/v1/bots/engine/{bot_id}/restart` | 新增 | 已开发 | P0 | **走 `engine_runtime/engine` 既有 relay 范式**(非新建 diagnostics)：复用 `EngineRuntimeRelayProtocol.call(method="POST", path="/api/engine/restart")` 转发到设备 adapter daemon (`<binding>:20003/api/engine/restart`,老前端 `agentclawproxy` 直调的那个),零新 core adapter。**≠** `POST /openapi/v1/bots/{bot_id}/restart`(#8 BaaS restart_bot,re-provision container、断 session);引擎重启只重启 engine 进程、不重置容器/session。router docstring 已订正"故意不暴露 restart"的过时论据 |
+| 80 | engine | 重启引擎 | `POST /openapi/v1/bots/{bot_id}/engine/restart` | 新增 | 已开发 | P0 | **走 `engine_runtime/engine` 既有 relay 范式**(非新建 diagnostics)：复用 `EngineRuntimeRelayProtocol.call(method="POST", path="/api/engine/restart")` 转发到设备 adapter daemon (`<binding>:20003/api/engine/restart`,老前端 `agentclawproxy` 直调的那个),零新 core adapter。**≠** `POST /openapi/v1/bots/{bot_id}/restart`(#8 BaaS restart_bot,re-provision container、断 session);引擎重启只重启 engine 进程、不重置容器/session。router docstring 已订正"故意不暴露 restart"的过时论据 |
 | 81 | diagnostics | 健康分 + 等级 | `GET /openapi/v1/bots/diagnostics/{bot_id}/health` | 新增 | 已设计未建 | P2 | **已移交其他团队负责，A 线仅待跟进**；数据源为 harness，仅 openclaw + 云端，不阻塞 A 线当前联调 |
 | 82 | diagnostics | 触发健康检查 | `POST /openapi/v1/bots/diagnostics/{bot_id}/health-check` | 新增 | 已设计未建 | P2 | **已移交其他团队负责，A 线仅待跟进**；同 #81，仅 openclaw + 云端，由 policy 前门拦截不支持的组合，不阻塞 A 线当前联调 |
 | 83 | bots | 激活沉寂 Bot | `POST /openapi/v1/bots/{bot_id}/activate` | 新增 | 已开发 | P0 | **并回 bots/router.py**(A 方案,§5)，`/{bot_id}` 子资源(像 `/restart`)。helper `_require_personal_cloud_bot` + 委托 `BotDormantActivateServiceProtocol.activate`(`ActivateBotService`)。`bot_type==personal`+cloud 裁决(desktop/service→409) + owner guard(`get_bot`→404);`InvalidBotStateError`→409。30 天·仅非服务·本地豁免·蒙层非状态 |
-| 84 | bots | 初始化配置 | `POST /openapi/v1/bots/{bot_id}/data-init` | 新增 | 已开发 | P0 | 已委托 `DataInitServiceProtocol.trigger_init`（async, fire-and-forget），仅 personal+cloud（desktop/service→409）。**当前仍有联调阻塞，不能视为 legacy 1:1**：OpenAPI handler 尚未像老 `/api` 一样把 Cookie `IAM_TOKEN` 写入 `bot.ext`；同时公开 `Bot` 与 `BotInventoryItem` 均不返回 `ext.data_init_status`，前端没有可执行的轮询契约。联调前须补齐凭证传递，并确定独立 status endpoint（优先）或受控状态字段；创建 checkbox 仍由前端在 Bot 真正存在后单独触发本端点 |
+| 84 | bots | 初始化配置触发与状态查询 | `POST/GET /openapi/v1/bots/{bot_id}/data-init` | 新增 | 已开发，E2E 待验证 | P0 | POST 委托 typed `DataInitServiceProtocol.trigger_init` 异步执行，HTTP Adapter 读取 Cookie `IAM_TOKEN` 并交由 Service 在确需执行后暂存；GET 委托 `get_status`，只返回 `not_started/pending_init/in_progress/completed/failed` 与 `started_at`，不暴露整个 `ext`、IAM token 或下游内部状态。仅 personal+cloud（desktop/service→409）。创建 checkbox 仍在 Bot 真正落库后独立触发；剩余项是实际 IAM/Engine/下游环境 trigger→poll E2E 与现有“读取后立即清除”流程的真实环境验证 |
 | 85 | lifecycle | 开启服务化（personal→service） | `POST /openapi/v1/bots/{bot_id}/lifecycle/upgrade` | 新增 | 已开发 | P1 | 复用 Bot 类型升级；仅 `openclaw/claude_code/teclaw` 云端个人 Bot 可服务化 |
 | 86 | lifecycle | 发布态 / 版本 / 阶段 | `GET /openapi/v1/bots/{bot_id}/lifecycle` | 新增 | 已开发 | P1 | 最多返回两张可见版本卡片 |
 | 87 | lifecycle | 草稿→预发 / 预发→上线 | `POST /openapi/v1/bots/{bot_id}/lifecycle/advance` | 新增 | 已开发 | P1 | body `{stage: prestable\|online}`；兼容旧值 `staging` |
@@ -185,7 +185,7 @@
 | 按阶段 · P3 | 2 | #106–107 |
 
 **A/B 线归属口径（2026-08-13 修订）**：
-- **A 线（lucas）** = 个人云端 Bot + 本地 Bot + 壳层(`/all`) + 空间消费。**已开发 15 项**（ABC 回退后 #2/#14 为存量已完成，#68/#69 已删）。diagnostics 3 项（#79/#81/#82）已移交其他团队负责，A 线仅维护契约对账与进度跟进，不再承担实现；其中 #79 按指示降低优先级，#81/#82 为 P2 且不阻塞当前联调。#84 trigger 虽已开发，但 IAM 凭证与状态查询契约仍是 A 线联调阻塞。
+- **A 线（lucas）** = 个人云端 Bot + 本地 Bot + 壳层(`/all`) + 空间消费。**已开发 15 项**（ABC 回退后 #2/#14 为存量已完成，#68/#69 已删；#84 一行包含 trigger + status 两个 operation）。diagnostics 3 项（#79/#81/#82）已移交其他团队负责，A 线仅维护契约对账与进度跟进，不再承担实现；其中 #79 按指示降低优先级，#81/#82 为 P2 且不阻塞当前联调。#84 的 IAM 凭证传递与安全状态查询已闭环，剩余仅为真实 IAM/Engine/下游 trigger→poll E2E 验证。
 - **B 线（joseph）** = service Bot 生命周期 + 容器/评测 + 编辑页内核(skill-sets/files/flow/channels/nodes/render-screens) + 空间/迁移 + 协作(edit-lock/editors #95–98)。已完成 service Bot 生命周期、edit-lock 和 `/bots/all` service 多版本卡片接入；editors 及其他 B 线项目按各自排期继续。
 
 ---
@@ -195,7 +195,7 @@
 | 易混淆（全路径） | 正确认知 | 对应新端点（全路径） |
 |---|---|---|
 | `GET /openapi/v1/bots/{bot_id}/status` | 是就绪**布尔**（PENDING/ACTIVE/FAILED），**非健康分** | `GET /openapi/v1/bots/diagnostics/{bot_id}/health` |
-| `POST /openapi/v1/bots/{bot_id}/restart` | 重启**进程**且拒 desktop | `POST /openapi/v1/bots/engine/{bot_id}/restart`（≠switch-engine） |
+| `POST /openapi/v1/bots/{bot_id}/restart` | 重启**进程**且拒 desktop | `POST /openapi/v1/bots/{bot_id}/engine/restart`（≠switch-engine） |
 | `GET /openapi/v1/bots/logs/*` | 对话 **trace** | `GET /openapi/v1/bots/diagnostics/{bot_id}/runtime-logs`（运行日志抽屉） |
 | `GET /openapi/v1/bots/resources/*` | **资源库** CRUD | `GET /openapi/v1/bots/files/{bot_id}`（容器目录树） |
 | `GET /openapi/v1/bots/identity/{bot_id}/{file_type}` | `file_type` 覆盖 13 个 MD **待核** | 加法补枚举（同路径） |
@@ -216,8 +216,8 @@
 - 本地 Bot「重启引擎」+「运行日志」本期灰掉（desktop 无能力），后续桌面端补。
 - 回收：30 天无对话→回收，仅非服务，本地豁免，蒙层非状态（改 `bot_dormant` service 逻辑，不动契约）。
 - 容器：BaaS 无实例 metrics 接口，#91 返回 `summary`+`instances[id,node,status]`，cpu/mem 留空。
-- **data-init 触发时机与待补契约（2026-08-13 复核）**：保留 `POST /openapi/v1/bots/{bot_id}/data-init`(#84) 为独立触发端点；创建弹窗勾选后，前端只在同步创建成功或 202 授权完成、Bot 真正落库后再调用，**不给 #1 `POST /bots` 增加 `init_config`，创建链路本身无 init 副作用**。但当前实现尚不能声明与老 `/api` 1:1：老 handler 会把 Cookie `IAM_TOKEN` 暂存到 `bot.ext` 供 `DataInitService` 使用，新 OpenAPI handler 尚未做等价凭证传递；公开 `Bot`/`BotInventoryItem` 又不暴露 `ext.data_init_status`，因此前端没有合法轮询入口。联调前必须补齐 IAM 凭证方案，并优先增加显式 data-init status 查询契约（避免重新公开整个 `ext`）；完成前 #84 仅代表 trigger router 已开发，不代表端到端可用。
+- **data-init 触发与状态闭环（2026-08-18 复核）**：保留 `POST /openapi/v1/bots/{bot_id}/data-init`(#84) 为独立触发端点；创建弹窗勾选后，前端只在同步创建成功或 202 授权完成、Bot 真正落库后再调用，**不给 #1 `POST /bots` 增加 `init_config`，创建链路本身无 init 副作用**。本轮已补齐 HTTP Cookie `IAM_TOKEN` → typed `DataInitServiceProtocol` 的传递，并新增 `GET /openapi/v1/bots/{bot_id}/data-init` 作为安全轮询入口；GET 只返回公开状态和 `started_at`，不重新公开整个 `ext`。本仓契约闭环已完成，剩余交付证据是实际 IAM/Engine/下游环境 trigger→poll E2E，以及现有“读取后立即清除”临时凭证流程的真实环境验证。
 - **业务空间最终口径（2026-08-13 复核）**：`ac_bots.space_id` 是 Bot 归属空间的结构化存储列，不使用 `bot.ext.space_id`。当前已保留的公开能力只有：① #1 创建时接收并写入 `space_id`；② #67 `/bots/all` 通过 `X-Space-Id` + `BusinessSpaceContextProtocol` 解析当前空间，并按 card 的 `space_id` 过滤。ABC 清理已经回退 #2 `/bots` 的 `space` query 和 #14 基础 `Bot.space`，不得再描述为已落地。当前 noop business-space adapter 仅提供 `personal:{owner_id}` fallback；团队空间的 owner/name/kind、成员校验和可见性依赖后续 prod adapter。仓库当前只核到 ORM `plugin_api/models.py:87` 的 nullable 列，未发现 migration/DDL 文件；若生产 DDL 由外部流程执行，需在交付记录中补 owner、目标环境和完成状态，不能仅以 ORM 列认定数据库已升级。
 - **协作能力(edit-lock/editors #95-98)归 B 线/joseph,A 线移交流程（2026-08-12 lucas移交,会话对账后定）**：协作能力本质属服务 bot,非个人云端 bot 核心场景。证据三条:① `collaborator_service.py` 异常名 `BotNotServiceTypeError`——协作者 CRUD 默认拒绝非 service Bot;② `MemberManagementCapabilityService.can_manage_collaborators` 对 non-service 返 `False`,个人云端 Bot 默认无协作者;③ 协作消费端 18 处全在 `core/service_bot/*` 与 `adapters/http/service_bot/*`,`service_bot/router_publish.py` 挂 `CollaboratorPermissionInterceptor` 15 次 ——服务 bot 发布链路才重度依赖协作。老 `/api/bot/collaborator/add` 在非 service 时拒并日志 `"Bot not service type"`。**系分 §10.10 原把 edit-lock/editors 划 A 线**,但代码证据显示其真正"深入"工作在 `service_bot` 模块内(joseph B 线)。决定:**#95-98 整组移交 B 线**——A 线不作公开契约、不动 service;B 线负责公开面+内部改造(协作者空间成员先验 + 唯一 admin,碰红线但属 B 线范围)。**A 线 P1 协作范围清空**,个人云端 Bot 协作能力随团队空间 Bot 开协作后由 B 线统一对外接入。
 - **inventory/dormant 并回 `bots/router.py` + 最终路径 `/all`（C 方案，2026-08-13 复核）**：inventory 的 personal cloud+desktop 数据最终都来自 `ac_bots` 相关 service，职责是“两 service 聚合 + 富字段派生 + 动作矩阵 + 空间横切”；dormant 只有 bot-level 激活动作。最终决定为：删除 `openapi_v1/inventory/` 与 `openapi_v1/dormant/` 独立子包，schema/handler 并入 `bots`，列表路径从早期 `/inventory`、中间 `/cards` 最终定为 `GET /bots/all`，激活保留 `POST /bots/{bot_id}/activate`。单卡 `/all/{bot_id}` 与独立 `/{bot_id}/actions` 已删除；仅保留 `_to_inventory_item` 转换，不再存在 `_to_inventory_actions`。core service `BotInventoryServiceProtocol`/`ActivateBotService` 保持独立；`__init__.py._SUBGROUPS` 不再注册 inventory/dormant router，reserved literal 使用 `all`。
-- **#80 引擎重启 走 openapi relay 转发、不新 core adapter（2026-08-12 lucas定,老前端 URL 印证）**：老前端"重启引擎"实际直调网关 `agentclawproxy-pre/proxypass/<binding>:20003/api/engine/restart?ctoken=...`——即**设备侧 engine adapter daemon** 暴露的 HTTP 端点,**不在 backend**。改版后公开面 = `POST /openapi/v1/bots/engine/{bot_id}/restart`(归既有 `openapi_v1/engine_runtime/engine` 组件,与 status/capabilities/available 同组四端点),**复用 `EngineRuntimeRelayProtocol.call(method="POST", path="/api/engine/restart")`** 把请求转发到同一设备侧端点——零新 core adapter、零 `supervisorctl` exec、零 BaaS exec,纯范式复用。语义 ≠ #8 `POST /openapi/v1/bots/{bot_id}/restart`(后者委托 `BaasService.restart_bot` re-provision 整个 container、断 session);引擎重启只重启 engine 进程、不重置容器/session。`engine_runtime/engine` router 顶 docstring 原说"restart deliberately not wrapped(已被 #8 覆盖)",已订正——老前端 URL 证明 #8 覆盖论错,二语义分离。#81/#82 health/check 与 #79 runtime-logs 待日志 URL 给定后同评估是否走 relay。
+- **#80 引擎重启 走 openapi relay 转发、不新 core adapter（2026-08-12 lucas定,老前端 URL 印证）**：老前端"重启引擎"实际直调网关 `agentclawproxy-pre/proxypass/<binding>:20003/api/engine/restart?ctoken=...`——即**设备侧 engine adapter daemon** 暴露的 HTTP 端点,**不在 backend**。改版后公开面 = `POST /openapi/v1/bots/{bot_id}/engine/restart`(归既有 `openapi_v1/engine_runtime/engine` 组件,与 status/capabilities/available 同组四端点),**复用 `EngineRuntimeRelayProtocol.call(method="POST", path="/api/engine/restart")`** 把请求转发到同一设备侧端点——零新 core adapter、零 `supervisorctl` exec、零 BaaS exec,纯范式复用。语义 ≠ #8 `POST /openapi/v1/bots/{bot_id}/restart`(后者委托 `BaasService.restart_bot` re-provision 整个 container、断 session);引擎重启只重启 engine 进程、不重置容器/session。`engine_runtime/engine` router 顶 docstring 原说"restart deliberately not wrapped(已被 #8 覆盖)",已订正——老前端 URL 证明 #8 覆盖论错,二语义分离。#81/#82 health/check 与 #79 runtime-logs 待日志 URL 给定后同评估是否走 relay。

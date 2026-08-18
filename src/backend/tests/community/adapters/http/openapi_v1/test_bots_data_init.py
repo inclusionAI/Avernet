@@ -1,10 +1,4 @@
-"""Endpoint tests for ``POST /openapi/v1/bots/{bot_id}/data-init`` (Track B #84).
-
-A minimal FastAPI app hosts the bots router with the caller principal overridden
-and only the two services the handler touches bound via the injector — mirroring
-the legacy ``POST /api/bots/{id}/data-init`` fire-and-forget contract: the
-handler dispatches and returns ``in_progress`` without awaiting the async init.
-"""
+"""Endpoint tests for the A-line data-init trigger and status contract."""
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -24,8 +18,6 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 
-# Personal cloud bot with an entity attached — the precondition data-init needs
-# (the same _engine_config_target helper resolves entity_id/entity_type from).
 PERSONAL_BOT = {
     "bot_id": "b1",
     "bot_name": "Cloud",
@@ -48,8 +40,13 @@ def bot_service():
 
 @pytest.fixture
 def data_init_service():
-    svc = AsyncMock()
+    svc = MagicMock()
     svc.trigger_init = AsyncMock(return_value={"status": "completed"})
+    svc.get_status.return_value = {
+        "bot_id": "b1",
+        "status": "in_progress",
+        "started_at": "2026-08-18T08:00:00+00:00",
+    }
     return svc
 
 
@@ -78,50 +75,71 @@ def _ok(resp):
 def test_data_init_dispatches_async_and_returns_in_progress(client, data_init_service):
     data = _ok(client.post("/openapi/v1/bots/b1/data-init", json={"force": False}))
 
-    assert data["bot_id"] == "b1"
-    assert data["status"] == "in_progress"
-    # Fire-and-forget: trigger_init is dispatched via asyncio.ensure_future with
-    # the caller's owner_id + the bot's resolved entity, and never awaited in
-    # the request path.
-    data_init_service.trigger_init.assert_called_once()
-    kwargs = data_init_service.trigger_init.call_args.kwargs
-    assert kwargs == {
+    assert data == {
         "bot_id": "b1",
-        "owner_id": "u1",
-        "entity_id": "u1",
-        "entity_type": "staff",
-        "force": False,
+        "status": "in_progress",
+        "message": "data initialization dispatched",
+        "started_at": None,
     }
+    data_init_service.trigger_init.assert_awaited_once_with(
+        bot_id="b1",
+        owner_id="u1",
+        entity_id="u1",
+        entity_type="staff",
+        force=False,
+        iam_token=None,
+    )
 
 
-def test_data_init_forwards_force_flag(client, data_init_service):
+def test_data_init_forwards_force_and_iam_cookie(client, data_init_service):
+    client.cookies.set("IAM_TOKEN", "iam-secret")
     _ok(client.post("/openapi/v1/bots/b1/data-init", json={"force": True}))
 
-    assert data_init_service.trigger_init.call_args.kwargs["force"] is True
+    kwargs = data_init_service.trigger_init.await_args.kwargs
+    assert kwargs["force"] is True
+    assert kwargs["iam_token"] == "iam-secret"
 
 
-def test_data_init_refuses_desktop_bot(client, bot_service, data_init_service):
+def test_data_init_status_is_safe_and_does_not_expose_ext(client, data_init_service):
+    data = _ok(client.get("/openapi/v1/bots/b1/data-init"))
+
+    assert data == {
+        "bot_id": "b1",
+        "status": "in_progress",
+        "message": None,
+        "started_at": "2026-08-18T08:00:00Z",
+    }
+    assert "ext" not in data
+    data_init_service.get_status.assert_called_once_with("b1", "u1")
+
+
+@pytest.mark.parametrize("method", ["get", "post"])
+def test_data_init_refuses_desktop_bot(client, bot_service, data_init_service, method):
     bot_service.get_bot.return_value = {**PERSONAL_BOT, "bot_type": "desktop"}
 
-    resp = client.post("/openapi/v1/bots/b1/data-init", json={})
+    resp = client.request(method.upper(), "/openapi/v1/bots/b1/data-init", json={} if method == "post" else None)
 
     assert resp.status_code == 409
-    data_init_service.trigger_init.assert_not_called()
+    data_init_service.trigger_init.assert_not_awaited()
+    data_init_service.get_status.assert_not_called()
 
 
-def test_data_init_refuses_service_bot(client, bot_service, data_init_service):
+@pytest.mark.parametrize("method", ["get", "post"])
+def test_data_init_refuses_service_bot(client, bot_service, data_init_service, method):
     bot_service.get_bot.return_value = {**PERSONAL_BOT, "bot_type": "service"}
 
-    resp = client.post("/openapi/v1/bots/b1/data-init", json={})
+    resp = client.request(method.upper(), "/openapi/v1/bots/b1/data-init", json={} if method == "post" else None)
 
     assert resp.status_code == 409
-    data_init_service.trigger_init.assert_not_called()
+    data_init_service.trigger_init.assert_not_awaited()
+    data_init_service.get_status.assert_not_called()
 
 
-def test_data_init_missing_for_owner_is_not_found(client, bot_service):
+@pytest.mark.parametrize("method", ["get", "post"])
+def test_data_init_missing_for_owner_is_not_found(client, bot_service, method):
     bot_service.get_bot.side_effect = BotNotFoundError("bot not found: bX")
 
-    resp = client.post("/openapi/v1/bots/bX/data-init", json={})
+    resp = client.request(method.upper(), "/openapi/v1/bots/bX/data-init", json={} if method == "post" else None)
 
     assert resp.status_code == 404
     assert resp.json()["message"] == "Not found"

@@ -1015,6 +1015,13 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
+- **2026-08-18** —— **data-init 触发/状态契约闭环。** 公开触发接口现在在 HTTP
+  边界读取 `IAM_TOKEN` Cookie，并传入 typed `DataInitServiceProtocol`；Service 只在本次
+  初始化确实需要执行时暂存凭证。新增 `GET /openapi/v1/bots/{bot_id}/data-init`，供前端
+  轮询受控公开状态（`not_started`、`pending_init`、`in_progress`、`completed`、`failed`），
+  不暴露 Bot `ext`、凭证或下游同步细节。Gateway `bots.openapi.json` 已重新生成；独立
+  OCB/Sofapy 副本及真实 IAM/Engine/下游 E2E 仍属于部署验证项。
+
 - **2026-08-17** —— **TC Bot 工作台与本地工作流。** 新增聚合的 `/bots/all`
   清单、个人本地设备/创建/读取/重启/删除/打开目录工作流、休眠 Bot 激活、冷启动数据初始化，
   以及 engine 进程级重启。local 与聚合清单在 Gateway 和后端 admission 两层都保持

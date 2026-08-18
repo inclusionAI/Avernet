@@ -404,12 +404,28 @@ class DataInitRequest(BaseModel):
     )
 
 
-class DataInitResult(BaseModel):
-    """Acknowledgement that cold-start data initialization was dispatched."""
+DataInitStatus = Literal[
+    "not_started", "pending_init", "in_progress", "completed", "failed"
+]
 
-    bot_id: str = Field(description="Bot whose data initialization was started.")
-    status: str = Field(description="Dispatch status; currently `in_progress` when accepted.")
-    message: str | None = Field(default=None, description="Additional dispatch detail, when available.")
+
+class DataInitResult(BaseModel):
+    """Public-safe cold-start data initialization state."""
+
+    bot_id: str = Field(description="Bot whose data initialization state is reported.")
+    status: DataInitStatus = Field(
+        description=(
+            "Current state. A trigger acknowledgement is `in_progress`; read the "
+            "same resource with GET for the persisted state."
+        )
+    )
+    message: str | None = Field(
+        default=None, description="Additional trigger detail, when available."
+    )
+    started_at: datetime | None = Field(
+        default=None,
+        description="Initialization start time, when a running attempt recorded one.",
+    )
 
 # ── Bot inventory card surface ─────────────────────────────────────────────
 # Card list returned by ``/openapi/v1/bots/all``. Action affordances are
