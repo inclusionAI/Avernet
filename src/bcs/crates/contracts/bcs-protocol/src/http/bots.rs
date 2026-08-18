@@ -264,3 +264,20 @@ mod tests {
         assert!(serialized.get("agent_token").is_none());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Bot actor-info config wire (§5.1) — edge-permission reform.
+// ---------------------------------------------------------------------------
+
+/// Body for `PUT /bots/{id}/human-addable`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HumanAddableBody {
+    pub human_addable: bool,
+}
+
+/// Body for `PUT /bots/{id}/friend-approval`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FriendApprovalBody {
+    /// "auto" | "manual"
+    pub friend_approval: String,
+}

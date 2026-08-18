@@ -1,3 +1,4 @@
+pub mod admission;
 pub mod bots;
 pub mod chat_run;
 pub mod friends;
@@ -10,15 +11,17 @@ pub mod provider;
 pub use bots::{
     BotCapabilities, BotDynamicStatus, BotInfo, DiscoverBotEntry, DiscoverBotProviderInfo,
     DiscoverBotsExtendedResponse, DiscoverBotsResponse, DynamicStatusResponse, EngineType,
-    JoinRequest, JoinResponse, LeaveResponse, QueryBotEntry, QueryBotsRequest,
-    SetVisibilityRequest, UpdateStatusRequest, UpdateStatusResponse,
+    FriendApprovalBody, HumanAddableBody, JoinRequest, JoinResponse, LeaveResponse, QueryBotEntry,
+    QueryBotsRequest, SetVisibilityRequest, UpdateStatusRequest, UpdateStatusResponse,
 };
 pub use chat_run::{
     BCS_CHAT_VERSION, BCS_CHAT_VERSION_HEADER, ChatRunCancelResponse, ChatRunResponseContent,
     ChatRunState, ChatRunStatusResponse, ChatRunSubmitResponse,
 };
 pub use friends::{
-    CreateFriendRequestBody, FriendApiResponse, FriendEntry, ListFriendRequestsQuery,
+    AcceptFriendRequestResponse, CreateFriendRequestBody, CreateFriendRequestResponse,
+    DecisionBody, FriendApiResponse, FriendEntry, FriendListResponse, ListRequestsQuery,
+    RevokeFriendResponse, StatusResponse,
 };
 pub use groups::{
     ConfirmProposalResponse, CreateGroupRequest, CreateGroupResponse, EvaluateProposalRequest,

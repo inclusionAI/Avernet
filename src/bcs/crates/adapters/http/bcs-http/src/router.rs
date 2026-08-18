@@ -205,6 +205,27 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/friends/requests/{id}/reject",
             post(routes::friends::reject_friend_request),
         )
+        .route(
+            "/friends/requests/{id}/cancel",
+            post(routes::friends::cancel_friend_request),
+        )
+        .route(
+            "/friends/{actor}/revoke",
+            post(routes::friends::revoke_friend),
+        )
+        .route("/friends", get(routes::friends::list_friends_by_actor))
+        .route(
+            "/bots/{id}/admission",
+            get(routes::admission::get_admission),
+        )
+        .route(
+            "/bots/{id}/human-addable",
+            put(routes::bots::set_human_addable),
+        )
+        .route(
+            "/bots/{id}/friend-approval",
+            put(routes::bots::set_friend_approval),
+        )
         .route("/groups", get(routes::groups::list_groups).post(routes::groups::create_group))
         .route("/groups/my", get(routes::groups::list_my_groups))
         .route(

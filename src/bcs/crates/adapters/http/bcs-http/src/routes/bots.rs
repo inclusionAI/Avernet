@@ -684,3 +684,44 @@ async fn dispatch_visibility_sync_after_update(
 fn invalid_visibility_message() -> &'static str {
     "visibility must be 'public', 'protected', or 'private'"
 }
+
+// ---------------------------------------------------------------------------
+// Edge-permission actor-info config (§5.1). Echo the body for now; the real
+// `bcs_bots.human_addable` / `bcs_bots.friend_approval` column update + repo
+// wiring lands in Installment 2/3. Handlers keep the full extractor signature
+// so the route is reachable and auth-area-consistent.
+// ---------------------------------------------------------------------------
+
+/// `PUT /bots/{id}/human-addable`.
+pub async fn set_human_addable(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    Path(id): Path<String>,
+    Json(body): Json<bcs_protocol::HumanAddableBody>,
+) -> Json<Value> {
+    // TODO(installment-3): enforce caller owns the target bot before updating
+    // bcs_bots config (auth gate missing at this staged echo handler).
+    let _ = caller_actor_id_from_headers(&state, &headers, &uri).await;
+    Json(serde_json::json!({
+        "bot_id": id,
+        "human_addable": body.human_addable,
+    }))
+}
+
+/// `PUT /bots/{id}/friend-approval`.
+pub async fn set_friend_approval(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    Path(id): Path<String>,
+    Json(body): Json<bcs_protocol::FriendApprovalBody>,
+) -> Json<Value> {
+    // TODO(installment-3): enforce caller owns the target bot before updating
+    // bcs_bots config (auth gate missing at this staged echo handler).
+    let _ = caller_actor_id_from_headers(&state, &headers, &uri).await;
+    Json(serde_json::json!({
+        "bot_id": id,
+        "friend_approval": body.friend_approval,
+    }))
+}
