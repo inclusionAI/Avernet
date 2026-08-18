@@ -19,11 +19,11 @@ produces (see ``plugins/prod/mcp_device_payload.convert_to_device_format``):
    engine can reconstruct its own mcporter.json.
 
 Scope: both MCP forms. A REMOTE (URL-based) server gets an endpoint selected and
-its credential inlined; a LOCAL/stdio server is emitted as a ``stdio`` entry
-carrying its launch instruction. Which form an entry takes is **not decided
-here** — the collector resolves it into ``McpComposeInput.stdio``, so this stays
-a pure function of its inputs (and cannot be fooled by a failed MCP Center
-enrichment; see that field's docstring).
+its credential inlined; a LOCAL/stdio server is emitted with its launch
+instruction flattened onto the entry (``command``/``args``/``env``). Which form
+an entry takes is **not decided here** — the collector resolves it into
+``McpComposeInput.stdio``, so this stays a pure function of its inputs (and
+cannot be fooled by a failed MCP Center enrichment; see that field's docstring).
 
 The inlining rule is replicated from ``convert_to_device_format`` (a plugins-layer
 function this core module must not import); a parity test
@@ -35,7 +35,7 @@ import json
 from typing import Any, Iterable
 
 from agentclaw.community.core.config_compose.models import McpComposeInput, StdioLaunch
-from agentclaw.community.kernel.bot_config import McpManifest, McpServerRef, StdioSpec
+from agentclaw.community.kernel.bot_config import McpManifest, McpServerRef
 
 
 __all__ = [
@@ -121,11 +121,9 @@ class McporterComposer:
             server_code=server_code,
             name=name,
             transport=STDIO_TRANSPORT,
-            stdio=StdioSpec(
-                command=launch.command,
-                args=list(launch.args),
-                env=dict(launch.env),
-            ),
+            command=launch.command,
+            args=list(launch.args),
+            env=dict(launch.env),
         )
 
     def _compose_remote(

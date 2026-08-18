@@ -14,7 +14,6 @@ from agentclaw.community.core.config_compose.services.mcporter_composer import (
     McporterComposer,
     mcp_network_priority_for,
 )
-from agentclaw.community.kernel.bot_config import StdioSpec
 
 
 SECRET_TOKEN = "supersecrettoken-inlined-123"
@@ -176,7 +175,7 @@ def test_local_without_resolved_launch_raises_naming_the_registry() -> None:
 
 
 def test_compose_emits_local_stdio_servers() -> None:
-    """LOCAL servers ride the artifact as ``stdio`` entries, no longer dropped."""
+    """LOCAL servers ride the artifact with a flat launch instruction."""
     composer = McporterComposer()
     manifest = composer.compose(
         [
@@ -196,11 +195,10 @@ def test_compose_emits_local_stdio_servers() -> None:
 
     local = manifest.servers[1]
     assert local.transport == STDIO_TRANSPORT
-    assert local.stdio == StdioSpec(
-        command="python3",
-        args=["/home/admin/hitl/hitl_mcp_server.py"],
-        env={"MCP_TRANSPORT": "stdio"},
-    )
+    # The launch instruction rides flat on the entry, not nested under "stdio".
+    assert local.command == "python3"
+    assert local.args == ["/home/admin/hitl/hitl_mcp_server.py"]
+    assert local.env == {"MCP_TRANSPORT": "stdio"}
     # The local form carries no remote fields — a stdio child needs no endpoint
     # and has nothing to authenticate against.
     assert local.endpoint is None
