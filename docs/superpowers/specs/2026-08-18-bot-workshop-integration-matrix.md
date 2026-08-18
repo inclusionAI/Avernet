@@ -1,0 +1,570 @@
+# Bot 工坊 OpenAPI 接入矩阵与分工
+
+- **日期**：2026-08-18
+- **核对分支**：`bot_workshop_reconstruction_v1`
+- **核对提交**：`42f0ab75f1714ad6cb8fa76a48aa17bfc67e4c9d`
+- **文档性质**：开发对账与任务分工文档，不替代正式 API Contract 或领域 Spec。
+- **主要依据**：
+  1. `docs/superpowers/specs/2026-08-12-bot-workshop-openapi-inventory.md` 的产品清单；其中旧的“组件在前、`{bot_id}` 在后”路径约定已经过时，新增 Bot-scoped 接口以当前 Bot-first 规范为准。
+  2. `src/backend/src/agentclaw/community/adapters/http/openapi_v1/admission.py`。
+  3. `src/gateway/configs/schemas/bots.openapi.json`。
+  4. Backend、Engine、BaaS、BCS 中各领域的 Service API、Core 和内部 Adapter。
+  5. `docs/arch/arch.rules.md` 与仓库 `AGENTS.md` 的领域所有权和分层约束。
+
+---
+
+## 1. 定位与架构边界
+
+### 1.1 Bot 工坊是产品聚合面，不是单一领域
+
+Bot 工坊会消费多个独立领域的公开能力，包括：
+
+- Bot Inventory / Bot Management
+- Desktop Bot
+- Service Bot Publication
+- Engine Runtime
+- BaaS/PaaS Runtime
+- Quality / Evaluation
+- Harness / 任务护航与健康诊断
+- Channel
+- Skill Center / Skills Pool / MCP
+- Device Filesystem / Workspace Runtime
+- BCS State Machine
+- Business Space
+- Render Screen
+
+因此：
+
+- “Bot 工坊尚未接入某能力”不等于“该能力属于 Bots Core 且尚未实现”。
+- URL 带 `bot_id` 只是寻址方式，不改变领域所有权。
+- OpenAPI Adapter 只负责身份解释、请求校验、调用 Service API、错误映射和统一响应，不重新实现上游业务规则。
+- Flow、Runtime、Containers 等能力可以由 Gateway 直接路由到领域 Owner，或通过 Backend 的授权 facade 转发；不能默认所有能力都进入 `bots/router.py`。
+
+### 1.2 新增路径规范
+
+新增 Bot-scoped 接口统一使用 Bot-first：
+
+```text
+/openapi/v1/bots/{bot_id}/<component>
+```
+
+例如：
+
+```text
+/openapi/v1/bots/{bot_id}/channels
+/openapi/v1/bots/{bot_id}/evaluations
+/openapi/v1/bots/{bot_id}/render-screens
+/openapi/v1/bots/{bot_id}/files
+/openapi/v1/bots/{bot_id}/skill-sets
+/openapi/v1/bots/{bot_id}/nodes
+```
+
+如果资源本身有独立身份和生命周期，应优先采用独立领域路径，例如：
+
+```text
+/openapi/v1/channels
+/openapi/v1/evaluations
+/openapi/v1/diagnostics
+/openapi/v1/render-screens
+/openapi/v1/spaces
+/openapi/v1/flows
+```
+
+不再为新接口采用以下旧式路径：
+
+```text
+/openapi/v1/bots/channels/{bot_id}
+/openapi/v1/bots/evaluation/{bot_id}
+/openapi/v1/bots/nodes/{bot_id}
+```
+
+### 1.3 公开接入的完成标准
+
+一项能力只有同时满足以下条件，才能标记为“工坊已接入”：
+
+1. 领域 Owner 的 Service API 或上游 Contract 已就绪。
+2. OpenAPI Adapter 已注册且保持薄适配。
+3. 身份、用户作用域、Bot Owner/Collaborator/App grant 规则已明确。
+4. 成功和错误响应符合统一 `Envelope`：`code`、`message`、`data`、`request_id`。
+5. `admission.py` 与 Gateway `route_security` 的身份策略一致。
+6. 生成 OpenAPI 与 Gateway served schema 已同步。
+7. Avernet 与 OCB/Sofapy 两份 Gateway 配置均已更新。
+8. Contract、权限、Gateway 和必要的 E2E 测试已通过。
+
+---
+
+## 2. 分工原则
+
+### 2.1 A 线
+
+A 线负责：
+
+- 个人云端 Bot。
+- 本地 Desktop Bot。
+- 工坊 Bot Inventory 壳层和聚合视图。
+- 沉寂 Bot 激活、初始化配置等个人 Bot 操作。
+- Business Space 在 Bot Inventory 壳层中的消费，包括 `/all` 的空间上下文和筛选；独立 Spaces OpenAPI 与 Bot 迁移归 B 线接入。
+- A 线已实现接口的 OpenAPI、admission、Gateway schema 和联调收口。
+
+A 线不重新实现：
+
+- 业务空间成员和团队 CRUD。
+- Runtime 日志、任务护航、健康诊断和评测领域逻辑。
+- SkillSet、Skills Pool 和 MCP 领域逻辑。
+- BCS Flow 状态机。
+
+### 2.2 B 线
+
+B 线负责：
+
+- Service Bot lifecycle。
+- Service Bot 发布、预发、上线、下线、重试等工坊入口。
+- Service Bot edit-lock。
+- Containers summary、实例状态和重启的工坊接入及 BaaS 上游协调；实例日志仍由日志团队实现。
+- 后续 Service Bot editors/协作者入口；实施前必须等待空间成员模型和统一协作契约明确。
+- 编辑页内核中除 Skills、任务护航/日志/评测外的工坊接入：Container files、Channels、Nodes、Render screens。
+- 独立 Spaces OpenAPI 和 Bot 跨空间迁移的工坊接入；Business Space 实体、成员和权限规则仍由领域 Owner 提供。
+
+B 线不在 Backend 重建 BaaS/Engine/Channel/Render/Business Space 的领域状态。B 线负责的是工坊公开契约、Bot/Stage 授权、薄 Adapter 或 relay、Gateway 配置和联调；上游领域逻辑仍由对应 Owner 实现。
+
+Flow 若用于任务护航，按本次分工交由任务护航团队牵头、BCS 提供 State Machine 能力，B 线不承担其实现。Skills/per-bot MCP 由 Skills 相关同学实现，B 线只配合 Service Bot 上下文联调。
+
+### 2.3 其他团队或其他同学
+
+以下能力不由 A/B 线实现其领域逻辑：
+
+| 能力 | 实施方/领域 Owner | A/B 线责任 |
+|---|---|---|
+| Runtime logs | 日志/Runtime Observability 相关团队 | 跟进 Contract、核对工坊入口，不实现日志采集和存储 |
+| 任务护航、健康诊断、Health Check | 任务护航/Harness 相关团队 | 跟进公开契约和工坊联调，不实现诊断算法 |
+| Evaluation | Quality/任务护航相关团队 | 跟进评测入口和结果页契约，不实现评测任务领域 |
+| Skill sets、引用型 Skill、per-bot MCP | Skills 相关同学 | A/B 线不实现 Skill/MCP 领域逻辑；只配合 Bot 身份、权限和工坊联调 |
+| Flow（任务护航 DAG/运行历史） | 任务护航团队牵头，BCS 团队提供 State Machine | A/B 线只提供 Bot/用户上下文并配合联调，不实现任务护航或状态机 |
+| Nodes | Engine 团队 | B 线负责工坊接入/授权 relay；Engine 实现 Node Contract 和运行态能力 |
+| Channels | Channel 模块 Owner/相关同学 | B 线负责工坊接入；Channel Owner 先补 tenant/owner/bot guard 和领域 Contract |
+| Render screens | Render Screen 模块 Owner/相关同学 | B 线负责工坊接入；Render Screen Owner 提供领域 Contract |
+| Container files | Device Filesystem/Runtime Owner，具体执行人待确认 | B 线负责工坊接入；Runtime Owner 提供文件 Contract，禁止直接操作引擎物理路径 |
+| Business Space 实体与成员 | Business Space/管理后台 Owner | A 线消费空间上下文；B 线接入独立 Spaces API/迁移；领域 Owner 实现实体、成员和权限规则 |
+
+---
+
+## 3. 当前代码快照
+
+基于本文件顶部提交：
+
+| 维度 | 当前值 | 说明 |
+|---|---:|---|
+| `bots.openapi.json` 唯一路径 | **101** | Gateway served schema |
+| `bots.openapi.json` HTTP operations | **139** | GET/POST/PUT/PATCH/DELETE 等操作总数 |
+| `admission.py` 注册项 | **99** | 包括一个 WebSocket admission |
+| A 线清单中已实现 operations | **13** | 其中 `data-init` 仍有端到端阻塞 |
+| B 线 lifecycle admission entries | **10** | 对应 8 个 served paths |
+| B 线 edit-lock admission entries | **4** | 对应 2 个 served paths |
+
+统计时必须区分：
+
+- 功能事项数；
+- 唯一路径数；
+- HTTP operation 数；
+- admission entry 数。
+
+不能把这四种计数混为一个“接口数”。
+
+---
+
+## 4. A 线进展
+
+### 4.1 已实现
+
+| 接口 | 状态 | 上游/说明 |
+|---|---|---|
+| `GET /openapi/v1/bots/all` | 已实现 | `BotInventoryServiceProtocol`；应用调用仍为 `REFUSED`，只允许人类调用 |
+| `GET /openapi/v1/bots/local/devices` | 已实现 | Desktop device inventory |
+| `GET /openapi/v1/bots/local/devices/{machine_id}/files` | 已实现 | 本地设备挂载目录选择，不是容器文件 API |
+| `POST /openapi/v1/bots/local` | 已实现 | 本地 Bot 创建，支持 201/202 |
+| `GET /openapi/v1/bots/local` | 已实现 | 本地 Bot 列表 |
+| `GET /openapi/v1/bots/{bot_id}/local` | 已实现 | 本地 Bot 详情 |
+| `GET /openapi/v1/bots/{bot_id}/local/auth-status` | 已实现 | Passport 授权轮询和完成创建 |
+| `POST /openapi/v1/bots/{bot_id}/local/restart` | 已实现 | Desktop Bot 重启 |
+| `DELETE /openapi/v1/bots/{bot_id}/local` | 已实现 | Desktop Bot 删除 |
+| `POST /openapi/v1/bots/{bot_id}/local/open-folder` | 已实现 | 本地打开目录 |
+| `POST /openapi/v1/bots/{bot_id}/activate` | 已实现 | 沉寂个人云端 Bot 激活 |
+| `POST /openapi/v1/bots/{bot_id}/data-init` | 已实现但 E2E 阻塞 | 见 §4.2 |
+| `POST /openapi/v1/bots/{bot_id}/engine/restart` | 已实现 | 委托 `EngineRuntimeRelayProtocol`；不同于容器重启 |
+
+同时已经完成：
+
+- `POST /openapi/v1/bots` 接收 `space_id`。
+- Passport 响应增加可选 `expire_at`、`certificate_url`。
+- `/all` 使用独立 `BotInventoryItem`，不扩大基础 `Bot` response 的 required contract。
+
+### 4.2 A 线阻塞和待完成
+
+| 事项 | 当前问题 | A 线下一步 | 外部依赖 |
+|---|---|---|---|
+| `data-init` | OpenAPI 未形成 IAM 凭证传递和合法状态查询闭环 | 定义正式 status/repair Contract；不得只写 warning 后返回成功 | IAM/DataInit 上游 |
+| `/all` service Bot 与富字段 | 是否统一聚合以及 health/version/container/lock 等字段的批量策略需收敛 | 只做 read model 编排，不能读取其他领域 Repository | Service lifecycle、Harness、BaaS、Lock 等 Service API |
+| Bot Inventory 空间上下文 | 当前只有 `NoopBusinessSpaceContext` personal fallback | A 线接入 Business Space Owner 的正式上下文 Service API，完成 `/all` 团队空间消费 | Business Space prod adapter |
+| `ac_bots.space_id` DDL | 本仓可见 ORM 字段，但未见仓内 migration 证据 | 在交付记录中明确实际 DDL 执行环境、版本和回滚方式 | 平台数据库变更流程 |
+
+独立 `GET /openapi/v1/spaces` 与 Bot 跨空间迁移归 B 线接入，见 §5.3。Bot 迁移推荐接口二选一：
+
+```text
+POST /openapi/v1/bots/{bot_id}/migrations
+```
+
+或：
+
+```text
+POST /openapi/v1/bot-space-migrations
+```
+
+迁移应由类似 `BotSpaceMigrationServiceProtocol` 的 Application Service 编排，不能复用当前仅负责 AICoding workspace 初始化的 `WorkspaceServiceProtocol`。A 线负责提供 Bot Inventory/空间消费约束，B 线负责公开接入与联调。
+
+### 4.3 授权关系部分成功问题
+
+`LocalBotWorkflowService.poll_auth_status` 在 Desktop Bot 创建成功后写默认授权关系。如果授权关系写入失败，会形成跨系统部分提交。
+
+不得采用以下处理作为最终方案：
+
+```text
+catch exception → warning → 仍返回 ISSUED
+```
+
+因为这会吞掉持久化失败并长期隐藏不一致。应由正式 Contract 选择一种可恢复方案：
+
+- 失败传播并持久化 repair/retry work；
+- 明确的 partial-success 状态和幂等重试入口；
+- 可行时执行补偿删除；
+- 或将两步纳入持久化工作流。
+
+---
+
+## 5. B 线进展
+
+### 5.1 Lifecycle 已实现
+
+以下 10 个 operations 已进入 `admission.py`，统一为 `GRANT_CHECKED_ADDRESSED_BOT`：
+
+| 接口 | 用途 |
+|---|---|
+| `POST /openapi/v1/bots/{bot_id}/lifecycle/upgrade` | personal → service 升级 |
+| `GET /openapi/v1/bots/{bot_id}/lifecycle` | 发布态、版本和阶段 |
+| `DELETE /openapi/v1/bots/{bot_id}/lifecycle` | 删除 lifecycle/降级语义以正式 Contract 为准 |
+| `GET /openapi/v1/bots/{bot_id}/lifecycle/approval` | 查询审批开关 |
+| `PUT /openapi/v1/bots/{bot_id}/lifecycle/approval` | Owner 管理审批开关 |
+| `POST /openapi/v1/bots/{bot_id}/lifecycle/advance` | 草稿推进到预发或上线 |
+| `POST /openapi/v1/bots/{bot_id}/lifecycle/restart` | 重启已发布服务 |
+| `POST /openapi/v1/bots/{bot_id}/lifecycle/cancel-staging` | 取消预发 |
+| `POST /openapi/v1/bots/{bot_id}/lifecycle/offline` | 下线 |
+| `POST /openapi/v1/bots/{bot_id}/lifecycle/retry` | 重试发布动作 |
+
+领域实现委托 `service_bot` publication/lifecycle Service API，OpenAPI Router 不拥有发布策略。
+
+### 5.2 Edit-lock 已实现
+
+| 接口 | 用途 |
+|---|---|
+| `GET /openapi/v1/bots/{bot_id}/edit-lock` | 查询锁 |
+| `POST /openapi/v1/bots/{bot_id}/edit-lock` | 获取锁 |
+| `POST /openapi/v1/bots/{bot_id}/edit-lock/steal` | 抢占锁 |
+| `DELETE /openapi/v1/bots/{bot_id}/edit-lock` | 释放锁 |
+
+委托 `CollaboratorLockService`，四个 operations 均为 `GRANT_CHECKED_ADDRESSED_BOT`。
+
+### 5.3 B 线剩余
+
+| 能力 | 优先级 | 状态 | B 线责任 | 上游责任 |
+|---|---|---|---|---|
+| Containers summary | P0 | 未接入 | 定义工坊所需 read model、Bot/Stage 授权和 facade | BaaS/PaaS 提供实例与 metrics Contract |
+| 单实例重启 | P0 | 未接入 | 提供 Bot-scoped 授权入口和错误规范化 | BaaS 提供幂等实例重启能力 |
+| Editors/协作者 CRUD | 后续批次 | 未接入 | 等统一协作契约后实现 Service Bot 工坊入口 | Business Space/协作 Owner 提供成员与权限规则 |
+| Container files | P2 | 未接入 | 定义只读工坊入口、Bot/Stage 授权和错误规范化 | Device Filesystem/Runtime Owner 提供稳定文件 Contract |
+| Channels | P2 | 未接入 | 建设 Bot-scoped 或独立领域公开入口、Gateway 和联调 | Channel Owner 补 tenant/owner/bot guard 与正式 Service API |
+| Nodes | P2 | 未接入 | 建设 authorized relay、501 capability 语义和 Gateway | Engine Owner 收敛 Node 字段与运行态 Contract |
+| Render screens | P2 | 未接入 | 明确读或 CRUD 范围并建设公开入口 | Render Screen Owner 提供领域权限与 Service API |
+| Spaces list | P3 | 未接入 | 建设独立 Spaces OpenAPI；与 A 线 `/all` 空间消费保持同一语义 | Business Space Owner 提供 prod Service API |
+| Bot migrate | P3 | 未接入 | 建设跨域 Application Service、公开契约和补偿/回滚语义 | Business Space/协作 Owner 提供成员与权限规则 |
+
+任务护航 Flow、Bot/容器 Runtime logs、Health、Evaluation 和 Skills/per-bot MCP 不在本表中作为 B 线实现项，统一按 §6 由其他团队或其他同学负责。
+
+Containers 推荐路径需要与 BaaS Contract 一起确定。例如使用 Bot-scoped facade 时：
+
+```text
+GET  /openapi/v1/bots/{bot_id}/containers
+POST /openapi/v1/bots/{bot_id}/containers/{instance_id}/restart
+```
+
+如果 Gateway 可以在统一身份校验后直接路由 BaaS，也可以采用独立 Runtime domain。无论采用哪种路径，Backend 不保存 BaaS 实例运行状态。容器实例日志的公开路径和 Contract 由日志团队确定；B 线仅提供 Bot/Stage/instance 上下文并配合联调。
+
+---
+
+## 6. 其他团队/其他同学负责的工坊相关能力
+
+本节中的能力仍属于“Bot 工坊产品交付范围”，但领域逻辑不归 A/B 线。分工分为两类：
+
+- Runtime/容器日志、任务护航、健康诊断、Evaluation、Flow 和 Skills/per-bot MCP：由其他团队或其他同学负责公开能力实现，A/B 线只配合需求、身份上下文和联调。
+- Nodes、Channels、Render screens、Container files、Business Space：对应领域 Owner 提供稳定 Contract 和领域能力，B 线仍按原分工负责工坊公开接入；A 线继续负责 Bot Inventory 中的空间消费。
+
+### 6.1 日志、任务护航、诊断和评测
+
+**实施方：日志/Runtime Observability 团队、任务护航/Harness/Quality 相关团队。A/B 线仅配合身份、Bot 上下文和最终联调。**
+
+| 能力 | 领域现状 | 缺口 | 备注 |
+|---|---|---|---|
+| Runtime logs（含容器实例日志） | Bot Inventory 只有 action 声明；日志来源尚需确定 | Runtime Log Contract、受限参数、公开 Adapter、Gateway | 必须限制日志来源、路径、`tail`、level 和敏感信息；A/B 不实现采集或日志公开接口 |
+| Health score | `community/core/harness` 已有领域与内部 API | 稳定 Service API、OpenAPI、能力限制和 Gateway | 当前规划仅 OpenClaw + cloud；由任务护航团队实现 |
+| Health check | Harness 已有诊断能力 | 触发、轮询、报告 Contract | 由任务护航团队实现 |
+| Evaluation | `community/core/quality` 与 `QualityTaskServiceProtocol` 已存在 | 公开创建/查询、结果页 URL/token Contract | 由 Quality/任务护航相关同学实现 |
+
+推荐按独立领域公开：
+
+```text
+/openapi/v1/diagnostics
+/openapi/v1/evaluations
+```
+
+如产品需要 Bot-scoped convenience endpoint，也必须委托 Harness/Quality Service API，不在 Bots Core 重写诊断或评测逻辑。
+
+### 6.2 Skill sets 与 per-bot MCP
+
+**实施方：Skills 相关同学。A/B 线不承担实现。**
+
+当前并非“无现成上游”：仓库已经存在：
+
+```text
+src/backend/src/agentclaw/community/core/skill_center/
+src/backend/src/agentclaw/community/core/skills_pool/
+src/backend/src/agentclaw/community/core/mcp/
+```
+
+并已有 `SkillSetService`、SkillSet 激活/切换、Bot 级布局和 MCP 关联能力。
+
+剩余工作需要 Skills 同学完成：
+
+- 对照工坊产品需求收敛正式 Service API Contract。
+- 明确引用型市场 Skill 的只读和版本语义。
+- 明确 per-bot MCP 与租户级 MCP 配置的边界。
+- 明确 caller、owner、collaborator 和 application grant 的权限规则。
+- 建设公开 OpenAPI Adapter、统一 Envelope 和 Contract tests。
+- 同步 Gateway route/auth/schema 以及 OCB/Sofapy 副本。
+
+候选路径：
+
+```text
+/openapi/v1/bots/{bot_id}/skill-sets
+/openapi/v1/bots/{bot_id}/skill-sets/{skill_set_id}
+/openapi/v1/bots/{bot_id}/skill-sets/{skill_set_id}/mcps
+```
+
+或按独立资源公开：
+
+```text
+/openapi/v1/skill-sets
+/openapi/v1/skill-activations
+/openapi/v1/mcp/bindings
+```
+
+最终路径由 Skills Contract Owner 决定，但不得继续采用 `/bots/skill-sets/{bot_id}` 旧式寻址。
+
+### 6.3 Flow
+
+**实施方：任务护航团队牵头公开能力和产品交付，BCS 团队负责 State Machine 领域能力。A/B 线不承担实现。**
+
+Flow 在原工坊清单中属于任务护航 DAG/YAML 和执行历史。BCS 已存在 State Machine 相关领域实现，并非“上游未落”，但这不代表工坊任务护航公开面已经完成。当前主要缺口是：
+
+- 面向工坊的正式 Service API/OpenAPI Contract；
+- 用户、Bot、Group/Session 的访问控制；
+- 定义、运行、取消、运行图和历史的公开范围；
+- Gateway schema 和路由。
+
+推荐进入 `bcn.openapi.json` 或独立 `flow.openapi.json`，由 Gateway 路由 BCS，或由任务护航团队提供授权 facade。Backend Bots Core 不实现状态机，B 线也不把 Flow 当作编辑页普通 CRUD 自行实现。
+
+### 6.4 Nodes
+
+**领域实现方：Engine 团队；工坊接入方：B 线。**
+
+Engine 已有：
+
+```text
+GET /api/nodes
+Capability.NODE_LIST
+```
+
+剩余工作是 Engine 字段 Contract、Backend authorized relay 或 Gateway direct route，以及 501 capability 语义。B 线负责公开接入和联调，但不保存 Node 状态。
+
+### 6.5 Channels
+
+**领域实现方：Channel 模块 Owner/相关同学；工坊接入方：B 线。**
+
+当前已有：
+
+- `ChannelServiceProtocol`；
+- `src/backend/src/agentclaw/community/core/channel/`；
+- 内部 `/api/channels` Router；
+- Channel DI 和持久化。
+
+但在公开化之前必须先完成 tenant/owner/bot guard 和协作者权限 Contract。不能简单把内部 Router 包装成公开 proxy。
+
+推荐独立：
+
+```text
+/openapi/v1/channels
+```
+
+也可以提供：
+
+```text
+/openapi/v1/bots/{bot_id}/channels
+```
+
+作为 convenience facade，但策略仍归 Channel Service API。B 线不得绕过 guard 直接转发现有内部 Router。
+
+### 6.6 Render screens
+
+**领域实现方：Render Screen 模块 Owner/相关同学；工坊接入方：B 线。**
+
+当前已有 `RenderScreenServiceProtocol` 和内部 CRUD Router。领域 Owner 负责稳定 Contract 和权限规则；B 线需要确认工坊本期只开放读取，还是开放完整 CRUD，并补齐公开 Adapter、Envelope、OpenAPI、Gateway 和联调。
+
+### 6.7 Container files
+
+**领域实现方：Device Filesystem/Runtime Owner，具体执行人待确认；工坊接入方：B 线。**
+
+现有内部能力依赖 `DeviceFilesystemProtocol` 和 Runtime layout。它与用户资源库 `/resources` 是不同领域：
+
+- Resources：用户资源和工作区资源公开契约；
+- Container files：Runtime 容器中的物理文件树。
+
+Backend 不得新增 Engine-specific 物理路径。Runtime Owner 先提供 Runtime Layout Contract 或 Device Filesystem Service API，B 线再建设公开只读入口和 Gateway 配置。
+
+---
+
+## 7. Gateway 与 OpenAPI schema 拆分建议
+
+不要默认把所有工坊能力继续追加到：
+
+```text
+src/gateway/configs/schemas/bots.openapi.json
+```
+
+建议按领域拆分：
+
+```text
+bots.openapi.json
+runtime.openapi.json
+quality.openapi.json
+diagnostics.openapi.json
+skills.openapi.json
+channels.openapi.json
+render-screens.openapi.json
+spaces.openapi.json
+```
+
+Flow 使用：
+
+```text
+bcn.openapi.json
+```
+
+或：
+
+```text
+flow.openapi.json
+```
+
+建议路由 Owner：
+
+| Domain | 推荐 upstream |
+|---|---|
+| Bots、Inventory、Local、Lifecycle facade | Backend |
+| Quality/Evaluation | Backend Quality Adapter |
+| Harness/Diagnostics | Backend Harness Adapter |
+| Skills/MCP | Backend Skill/MCP Adapter |
+| Channels | Backend Channel Adapter |
+| Spaces | Business Space Owner 或 Backend Adapter |
+| Runtime/Files/Nodes | Engine/BaaS，或 Backend authorized facade |
+| Flow | BCS |
+
+每个领域接入都必须同步两套部署配置：
+
+1. Avernet：
+   - `src/gateway/configs/application.yaml`
+   - 对应 `src/gateway/configs/schemas/*.openapi.json`
+2. OCB/Sofapy：
+   - OCB 对应 Gateway `application.yaml`
+   - OCB 对应 served OpenAPI schema
+
+OCB 当前状态必须在 clean checkout 上按 commit/SHA 核对；不能根据有未提交修改的本地工作区直接标记“已完成”。
+
+---
+
+## 8. 剩余任务总表
+
+| 产品能力 | 领域 Owner | 执行分工 | 上游状态 | 工坊公开接入 | 当前结论 |
+|---|---|---|---|---|---|
+| Personal/Local Bot | Bot Inventory/Desktop | A 线 | 已有 | 已实现 | `data-init` 仍阻塞 |
+| Workshop `/all` | Bot Inventory 聚合 | A 线 | 已有 | 已实现 | 富字段批量策略待收敛 |
+| Inventory 空间消费 | Business Space + Bot Inventory | A 线接入 | Prod context adapter 缺失 | 部分实现 | `/all` 当前仅 personal fallback |
+| Spaces list | Business Space | B 线接入 + Business Space Owner | Prod Service API 缺失 | 未实现 | B 线 P3，A 线消费结果 |
+| Bot migrate | 跨域 Application Service | B 线接入 + Business Space/协作 Owner | Migration Service 缺失 | 未实现 | B 线 P3，需跨域设计 |
+| Service lifecycle | Service Bot Publication | B 线 | 已有 | 已实现 | 需持续验证兼容性 |
+| Edit-lock | Collaboration Lock | B 线 | 已有 | 已实现 | 已接入 |
+| Containers summary/restart | BaaS/PaaS Runtime | B 线接入 + BaaS Owner | 部分缺失 | 未实现 | B 线 P0；实例日志归日志团队 |
+| Editors | Collaboration/Space | B 线接入 + 协作 Owner | Contract 待定 | 未实现 | 后续批次 |
+| Runtime/容器日志 | Runtime Observability | 日志相关团队 | 来源/Contract 待定 | 未实现 | A/B 只跟进 |
+| Health/任务护航 | Harness | 任务护航团队 | 内部能力已有 | 未实现 | 其他团队实现 |
+| Evaluation | Quality | Quality/任务护航团队 | Core/Protocol 已有 | 未实现 | 其他团队实现 |
+| Skill sets/per-bot MCP | Skill Center/Skills Pool/MCP | Skills 相关同学 | 大量能力已有 | 未实现 | 其他同学实现 |
+| Flow | Harness/BCS | 任务护航团队 + BCS 团队 | State Machine 已有 | 未实现 | 其他团队实现，A/B 配合 |
+| Nodes | Engine Runtime | B 线接入 + Engine 团队 | Engine API 已有 | 未实现 | 等 Engine Contract/relay |
+| Channels | Channel | B 线接入 + Channel Owner | 内部 CRUD 已有 | 未实现 | 先补 tenant guard |
+| Render screens | Render Screen | B 线接入 + Render Owner | Protocol/CRUD 已有 | 未实现 | 产品公开范围待定 |
+| Container files | Device Filesystem/Runtime | B 线接入 + Runtime Owner | 内部能力已有 | 未实现 | 不能硬编码物理路径 |
+
+---
+
+## 9. 状态维护规则
+
+每次移动一项状态，至少更新：
+
+1. 本文的领域 Owner、执行分工、上游状态和工坊接入状态。
+2. 对应正式 Service API/OpenAPI Contract。
+3. Backend Router 和 `admission.py`，如果请求经过 Backend。
+4. Avernet Gateway route、auth 和 schema。
+5. OCB/Sofapy 对应配置与 schema。
+6. 中英文 OpenAPI README；如新增 Bot path 第一段 literal，同时更新保留名检查。
+7. Contract、权限、schema、Gateway 和必要 E2E 测试证据。
+8. 数据库 DDL、外部配置或部署变更的执行记录与回滚方案。
+
+推荐状态枚举：
+
+```text
+NOT_STARTED
+DOMAIN_EXISTS
+CONTRACT_MISSING
+ADAPTER_MISSING
+GATEWAY_MISSING
+UPSTREAM_BLOCKED
+E2E_BLOCKED
+INTEGRATED
+```
+
+“内部 `/api` 已存在”只能说明 `DOMAIN_EXISTS`，不能直接标记为 `INTEGRATED`。
+
+---
+
+## 10. Validation 记录模板
+
+每次将能力标记为 `INTEGRATED` 时，在 PR 或交付记录中填写：
+
+```markdown
+- 基于提交：<commit sha>
+- Backend targeted tests：<command + result>
+- Backend architecture tests：<command + result>
+- Gateway tests：<command + result>
+- Generated OpenAPI vs served schema：<result>
+- OCB/Sofapy config/schema：<repo sha + result>
+- Singlebox/E2E：<command + result，或未执行原因>
+```
+
+本文当前只记录静态代码核对结果；未在本文中声明新的全量测试执行结果。
