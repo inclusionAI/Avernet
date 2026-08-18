@@ -134,15 +134,41 @@ def logical_skill_mappings_from_evidence(
     parsed: list[PoolSkillMapping] = []
     targets: dict[str, PoolSkillMapping] = {}
     for raw in raw_mappings:
-        if not isinstance(raw, dict) or set(raw) != {
-            "corpus",
-            "relative_path",
-            "link_name",
-        }:
+        if not isinstance(raw, dict):
             raise ValueError("invalid retired mapping evidence")
         corpus = raw.get("corpus")
         relative_path = raw.get("relative_path")
         link_name = raw.get("link_name")
+        if corpus == "center":
+            if set(raw) != {
+                "corpus",
+                "skill_uuid",
+                "sc_version_number",
+                "link_name",
+            }:
+                raise ValueError("invalid retired mapping evidence")
+            skill_uuid = raw.get("skill_uuid")
+            sc_version_number = raw.get("sc_version_number")
+            if not all(
+                isinstance(value, str) and value
+                for value in (skill_uuid, sc_version_number, link_name)
+            ):
+                raise ValueError("invalid retired mapping evidence")
+            mapping = PoolSkillMapping(
+                corpus="center",
+                relative_path=None,
+                link_name=link_name,
+                skill_uuid=skill_uuid,
+                sc_version_number=sc_version_number,
+            )
+            if link_name in targets and targets[link_name] != mapping:
+                raise ValueError("ambiguous retired mapping evidence")
+            targets[link_name] = mapping
+            if mapping not in parsed:
+                parsed.append(mapping)
+            continue
+        if set(raw) != {"corpus", "relative_path", "link_name"}:
+            raise ValueError("invalid retired mapping evidence")
         if (
             corpus not in {"local", "repo"}
             or not isinstance(relative_path, str)

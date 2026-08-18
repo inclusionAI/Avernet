@@ -220,6 +220,30 @@ async def test_claude_code_adapter_propagates_logical_mapping_version() -> None:
 
 
 @pytest.mark.asyncio
+async def test_claude_adapter_serializes_center_v3_for_full_lifecycle() -> None:
+    port = _port()
+    mapping = PoolSkillMappingIntent(
+        corpus="center", relative_path=None, link_name="risk-review",
+        skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a", sc_version_number="2026.8.19",
+    )
+    version = "skills-pool-mapping-v3"
+    adapter = ClaudeCodeSkillsAdapter(port)
+
+    await adapter.activate_pool_layout(PoolLayoutActivateRequest(
+        migration_generation="generation-1", preparation_id="prep-1",
+        mappings=[mapping], mapping_contract_version=version,
+    ))
+    await adapter.publish_pool_mappings([mapping], retired_mappings=[mapping], mapping_contract_version=version)
+    await adapter.verify_pool_mappings([mapping], retired_mappings=[mapping], mapping_contract_version=version)
+
+    expected = {"corpus": "center", "skill_uuid": mapping.skill_uuid, "sc_version_number": mapping.sc_version_number, "link_name": "risk-review"}
+    assert port.activate_pool_layout.await_args.args[0]["mappings"] == [expected]
+    assert port.publish_pool_mappings.await_args.args[0]["mappings"] == [expected]
+    assert port.publish_pool_mappings.await_args.args[0]["retired_mappings"] == [expected]
+    assert port.verify_pool_mappings.await_args.args[0]["mappings"] == [expected]
+
+
+@pytest.mark.asyncio
 async def test_claude_code_adapter_unknown_activation_fails_closed() -> None:
     port = _port()
     port.activate_pool_layout.return_value = {

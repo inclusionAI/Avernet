@@ -1075,8 +1075,8 @@ class SkillExecutionResult:
 
 ### 7.3 Skills Pool mapping wire contract
 
-`SkillsService` 的 Pool activation、publish、verify 使用显式版本协商。当前
-新契约版本为 `skills-pool-mapping-v2`：
+`SkillsService` 的 Pool activation、publish、verify 使用显式版本协商。v2 保留
+给仅含 Local/Repo 的 mapping；v3 在同一完整 mapping 集合加入 Center 时使用：
 
 ```json
 {
@@ -1103,9 +1103,14 @@ class SkillExecutionResult:
 }
 ```
 
-- `corpus` 只允许 `local` 或 `repo`；`relative_path` 必须是规范化的相对
+- v2 的 `corpus` 只允许 `local` 或 `repo`；`relative_path` 必须是规范化的相对
   POSIX 路径；`link_name` 必须是单个规范化路径段。绝对路径、路径逃逸、
   重复 target、未知 corpus 和额外/混合字段全部 fail closed。
+- v3 仍可包含上述 v2 Local/Repo item，并额外允许严格的 Center item：
+  `{"corpus":"center","skill_uuid":"<UUIDv4>","sc_version_number":"<exact>","link_name":"<name>"}`。
+  Center item 不得携带 `relative_path`、裸物理 source/target 或 `current/latest`。
+  Runtime 唯一将其解析为 canonical `skills-pool/skill-center/<skill_uuid>/<sc_version_number>`；
+  `source_layout=legacy|pool` 只影响 Local/Repo，不能搬迁、删除或改写 Center。
 - Backend 不发送 engine-specific source/target。Engine 的
   `layout_planner.py` 使用当前 engine、layout state、repo delivery 与本地
   home 投影物理 source/active target；publish/verify 返回
@@ -1123,9 +1128,12 @@ class SkillExecutionResult:
   的 active layout 以及仍为 `finalizing` 的恢复窗口不适用或尚未完成该
   检查，必须省略此 key，不能用 `false` 或未经校验的 `true` 代替；
   preparation/Legacy evidence 仍按各 Engine 拓扑报告其必需 bridge 检查。
-- 新 Backend 只有在 `/api/skills/layout/probe` 的 READY evidence 明确包含
-  `"mapping_contract_version": "skills-pool-mapping-v2"` 后，才会在已通过
-  rollout gate 且 migration claim 成功的 reconcile 中发送 v2。缺失或旧
+- Probe 保留 `"mapping_contract_version": "skills-pool-mapping-v2"` 供旧 Backend
+  识别，并在新 Runtime 增加 `supported_mapping_contract_versions:[v2,v3]`。新 Backend
+  只有在 Center mapping 所需的 v3 出现在该数组时才发送 v3；否则失败关闭，绝不忽略
+  Center 或降级为物理路径。无 Center 的完整集合继续发送 v2。Backend 在 publish/cutover
+  前对 Center 精确版本执行 ensure；任一 ensure 失败则不发布任何部分 mapping，返回可重试失败。
+  所有请求仍须在已通过 rollout gate 且 migration claim 成功的 reconcile 中发送。缺失或旧
   capability 归类为 `NOT_CAPABLE`，保持 Legacy；probe 本身不能触发
   claim/cutover。已处于 Pool 的 Bot 发起显式 rollback 时也会重新 probe
   当前 binding；若 runtime 已降级或缺少 capability，则 Backend 在首个 v2
@@ -1142,7 +1150,7 @@ class SkillExecutionResult:
   `SkillsPoolReconcileService`、Engine `/api/skills` router 与
   `SkillsService`，以及 OpenClaw、Claude Code、AICoding、Hermes 的
   filesystem composition roots。OpenClaw/Claude Code 内置 consumer
-  直接广告 v2；AICoding/Hermes 由具体 composition root 在接入同一 resolver
+  直接广告 v2+v3；AICoding/Hermes 由具体 composition root 在接入同一 resolver
   后显式广告。旧 composition root 不广告，混部期间保持
   `NOT_CAPABLE`/Legacy。四个 consumer 使用相同 contract tests；Teclaw
   保持 artifact delivery，不消费文件系统 mapping。
