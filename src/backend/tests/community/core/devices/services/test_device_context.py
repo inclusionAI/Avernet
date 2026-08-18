@@ -61,7 +61,7 @@ def test_exception_classes_exist():
         assert str(e) == "test"
 
 
-# ── ConnInfo: typed read-only view ──
+# ── ConnInfo: typed view ──
 
 _BAAS_STYLE_CONN_INFO = {
     "url": "https://<baas-host>/api/v1/bots/team_claw/device-201/invoke-http/20003",
@@ -154,19 +154,34 @@ def test_conn_info_unknown_keys_pass_through():
     assert set(ci.keys()) == {"url", "_provider_mark"}
 
 
-def test_conn_info_is_read_only_and_copies_source():
+def test_conn_info_mutation_parity_with_dict():
+    """Legacy in-place writes keep working (expert_chat overwrites
+    conn["engine_type"] per session) and stay in sync with the typed
+    properties."""
+    ci = ConnInfo({"url": "http://test", "engine_type": "openclaw"})
+    ci["engine_type"] = "teclaw"
+    assert ci.engine_type == "teclaw"
+    assert ci["engine_type"] == "teclaw"
+    ci["device_uuid"] = "DEVICE-002"  # new key
+    assert ci.device_uuid == "DEVICE-002"
+    del ci["device_uuid"]
+    assert ci.device_uuid is None
+    assert "device_uuid" not in ci
+
+
+def test_conn_info_copies_source_on_construction():
     source = {"url": "http://test"}
     ci = ConnInfo(source)
-    with pytest.raises(TypeError):
-        ci["url"] = "http://mutated"  # type: ignore[index]
     # shallow-copied at construction — mutating the source dict afterwards
-    # does not affect the object
+    # does not affect the object, and vice versa
     source["url"] = "http://mutated"
     assert ci.url == "http://test"
+    ci["url"] = "http://written-via-view"
+    assert source["url"] == "http://mutated"
     # to_dict returns a copy; mutating it doesn't affect the object either
     exported = ci.to_dict()
     exported["url"] = "http://mutated"
-    assert ci.url == "http://test"
+    assert ci.url == "http://written-via-view"
 
 
 def test_conn_info_kwargs_construction():

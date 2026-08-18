@@ -6,23 +6,25 @@ dispatchers pick a plugin instance by ``provider``; plugins dial with
 """
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
 ProviderType = Literal["arca", "baas", "teclaw", "local"]
 
 
-class ConnInfo(Mapping[str, Any]):
-    """Dial-out info — typed read-only view over the provider-built conn_info.
+class ConnInfo(MutableMapping[str, Any]):
+    """Dial-out info — typed view over the provider-built conn_info.
 
     Historically conn_info was a bare ``dict[str, Any]``; the only way to
     learn its fields was reading the builder sources. This class declares
     every known field as a typed property with an example, while also
-    implementing the ``Mapping`` protocol so existing dict-style reads
-    (``conn_info["url"]`` / ``conn_info.get("tenant")``) keep working
-    unchanged — the key set and ``==`` semantics match the underlying dict,
-    and unknown builder-produced keys pass through (dict-style access only).
+    implementing the ``MutableMapping`` protocol so existing dict-style
+    access keeps working unchanged — reads (``conn_info["url"]`` /
+    ``conn_info.get("tenant")``), legacy in-place writes (e.g. expert_chat
+    overwrites ``conn["engine_type"]`` per session), the key set, and ``==``
+    semantics all match the underlying dict, and unknown builder-produced
+    keys pass through (dict-style access only).
 
     Each provider writes only the field subset it needs (see
     ``conn_info_builders/``); a property whose field is absent returns the
@@ -49,11 +51,18 @@ class ConnInfo(Mapping[str, Any]):
         merged.update(fields)
         self._data = merged
 
-    # ── Mapping protocol (keeps legacy dict-style reads working; get/keys/
-    #    items/__contains__/__eq__ come from collections.abc.Mapping) ─────
+    # ── MutableMapping protocol (keeps legacy dict-style access working;
+    #    get/keys/items/__contains__/__eq__/pop/update/setdefault come from
+    #    collections.abc) ────────────────────────────────────────────────
 
     def __getitem__(self, key: str) -> Any:
         return self._data[key]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._data[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        del self._data[key]
 
     def __iter__(self) -> Iterator[str]:
         return iter(self._data)

@@ -51,7 +51,7 @@ ctx = resolver.resolve_for_bot(bot_id: str, user_id: str) -> DeviceContext
 | 字段          | 含义                                       |
 | ------------- | ------------------------------------------ |
 | `provider`    | `arca` / `baas` / `teclaw` / `local`       |
-| `conn_info`   | Dial-out fields (`ConnInfo`, a typed read-only Mapping, naming normalized by the resolver schema; see `device_context.ConnInfo` for the field list, types, and examples — dict-style reads stay compatible) |
+| `conn_info`   | Dial-out fields (`ConnInfo`, a typed Mapping view, naming normalized by the resolver schema; see `device_context.ConnInfo` for the field list, types, and examples — dict-style access stays compatible) |
 | `binding_id`  | `ac_entity_device_binding.id`              |
 | `bot_id`      | caller 透传                                |
 | `user_id`     | caller 透传（用于 device_affinity / 审计）|
