@@ -468,3 +468,80 @@ def test_claude_code_normal_template_keeps_claude_mcp_bucket():
 
     assert "clawmind" in codes
     assert "mcp.ant.agentix.112858.aixAicoding" not in codes
+
+
+def test_template_config_clis_append_and_override_defaults():
+    template_config = {
+        "bot_template_config": {
+            "preset_capabilities": {
+                "cli": [
+                    {
+                        "cli_code": "antcode-cli",
+                        "cli_name": "Template AntCode",
+                        "cli_desc": "template override",
+                    },
+                    {
+                        "cli_code": "custom-cli",
+                        "cli_name": "Custom CLI",
+                        "cli_desc": "template appended",
+                    },
+                ]
+            }
+        }
+    }
+
+    items = get_default_cli_items(
+        "aicoding",
+        ext_info={"aicoding": {"template_config": template_config}},
+    )
+    codes = [it["cli_code"] for it in items]
+
+    assert codes.count("antcode-cli") == 1
+    assert "custom-cli" in codes
+    overridden = next(it for it in items if it["cli_code"] == "antcode-cli")
+    assert overridden["cli_name"] == "Template AntCode"
+    assert overridden["cli_desc"] == "template override"
+    appended = next(it for it in items if it["cli_code"] == "custom-cli")
+    assert appended["cli_name"] == "Custom CLI"
+
+
+def test_template_config_top_level_cli_presets_are_ignored():
+    template_config = {
+        "preset_capabilities": {
+            "cli": [
+                {
+                    "cli_code": "custom-cli",
+                    "cli_name": "Custom CLI",
+                }
+            ]
+        }
+    }
+
+    codes = [
+        it["cli_code"]
+        for it in get_default_cli_items(
+            "aicoding",
+            ext_info={"aicoding": {"template_config": template_config}},
+        )
+    ]
+    assert "custom-cli" not in codes
+
+
+def test_template_config_cli_presets_are_aicoding_specific():
+    template_config = {
+        "bot_template_config": {
+            "preset_capabilities": {
+                "cli": [
+                    {
+                        "cli_code": "custom-cli",
+                        "cli_name": "Custom CLI",
+                    }
+                ]
+            }
+        }
+    }
+
+    assert get_default_cli_items(
+        "openclaw",
+        ext_info={"aicoding": {"template_config": template_config}},
+    ) == []

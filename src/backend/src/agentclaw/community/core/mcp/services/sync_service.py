@@ -872,12 +872,16 @@ class MCPSyncService:
         bot_name: Optional[str] = None
         bot_desc: Optional[str] = None
         template_type: Optional[str] = None
+        template_config: Optional[Mapping[str, Any]] = None
         try:
             bot = self.bot_repository.get_by_id_and_owner(bot_id, user_id)
             if bot:
                 bot_name = bot.get("bot_name")
                 bot_desc = bot.get("bot_desc")
                 template_type = bot.get("template_type")
+                raw_template_config = bot.get("template_config")
+                if isinstance(raw_template_config, Mapping):
+                    template_config = raw_template_config
                 engine_type = (
                     bot.get("active_engine") or bot.get("engine_type") or engine_type
                 )
@@ -896,7 +900,13 @@ class MCPSyncService:
             logger.error("[MCPSyncService] %s", error)
             return {"success": False, "error": error}
 
-        default_cli_items = get_default_cli_items(engine_type, template_type)
+        default_cli_items = get_default_cli_items(
+            engine_type,
+            template_type,
+            ext_info={"aicoding": {"template_config": template_config}}
+            if template_config
+            else None,
+        )
         cli_items = _merge_cli_items(current_cli_items, default_cli_items)
         if default_cli_items:
             logger.info(

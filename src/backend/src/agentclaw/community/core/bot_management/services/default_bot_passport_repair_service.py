@@ -147,7 +147,11 @@ class DefaultBotPassportRepairService:
                     owner_workno=target_user_id,
                     mcp_codes=mcp_codes,
                     cli_items=get_default_cli_items(
-                        bot.get("active_engine"), bot.get("template_type")
+                        bot.get("active_engine"),
+                        bot.get("template_type"),
+                        ext_info={"aicoding": {"template_config": bot.get("template_config")}}
+                        if bot.get("template_config")
+                        else None,
                     ),
                     bot_name=bot.get("bot_name"),
                     bot_desc=bot.get("bot_desc"),

@@ -365,7 +365,11 @@ def create_bot_with_authorization(
             engine_type=spec.engine_type,
         ),
         cli_items=get_default_cli_items(
-            spec.engine_type, spec.template_type
+            spec.engine_type,
+            spec.template_type,
+            ext_info={"aicoding": {"template_config": spec.template_config}}
+            if spec.template_config
+            else None,
         ),
         use_first_passport=use_first_passport,
     )
