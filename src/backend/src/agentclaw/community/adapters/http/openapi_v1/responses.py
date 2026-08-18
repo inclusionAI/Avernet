@@ -95,6 +95,10 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
+from agentclaw.community.core.cron.errors import (
+    CronApiTimeoutError,
+    CronRelayError,
+)
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
     EngineHistoryDepthExceededError,
@@ -500,6 +504,13 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     EngineUpstreamError: (502, "Engine service error"),
     # Base of the Engine* errors above — LAST of its group.
     EngineRuntimeError: (502, "Engine service error"),
+    # Cron relay category (routines) — a backstop for engine adapter failures
+    # that escape the handler. The delete/other handlers already wrap the explicit
+    # error_code-bearing CronRelayError into HTTPException themselves; these
+    # entries catch anything the handler does not, so it does not fall through to
+    # the app-level 500 with a vague message. Subclass listed before its base.
+    CronApiTimeoutError: (504, "Cron relay timed out"),
+    CronRelayError: (502, "Cron relay service error"),
     # Transport errors that reach a handler without the relay translating them
     # (e.g. a future caller using the transport directly). The relay already
     # converts the first two; these are the backstop.
