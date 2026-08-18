@@ -4,7 +4,7 @@ WORK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 CONFIG_DIR="$WORK_DIR/configs"
 VENV_DIR="$WORK_DIR/.venv"
-APP_PORT="8888"
+APP_PORT="${GATEWAY_PORT:-${APP_PORT:-8888}}"
 APP_MODE=""
 APP_LOG_DIR="$HOME/logs/gateway"
 
