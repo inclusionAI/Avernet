@@ -200,7 +200,6 @@ from agentclaw.community.core.service_bot.errors import (
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterTeamCreateError,
 )
-)
 
 T = TypeVar("T")
 

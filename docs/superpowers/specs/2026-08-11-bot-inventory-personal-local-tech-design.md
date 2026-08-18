@@ -38,19 +38,19 @@
 
 原方案中有几处需要按当前 `openapi_v1` 代码修正：
 
-1. **用户身份依赖**  
+1. **用户身份依赖**
    当前 `openapi_v1` 用户级公开端点不是 `principal: PrincipalDep + caller_owner_id(principal)` 模式，而是 `owner_id: UserIdDep`。`UserIdDep` 强制要求 `?user_id=` 且必须与已验证 principal 中的用户一致，错误语义由公共面统一处理。
 
-2. **Page builder 参数顺序**  
+2. **Page builder 参数顺序**
    当前 `responses.page` 签名是 `page(total, items, request)`，不是 `page(items, total, page, page_size, request)`。
 
-3. **新 router 注册分类**  
+3. **新 router 注册分类**
    用户级新组应加入 `_SUBGROUPS` 并使用 `USER_SCOPED_ERROR_RESPONSES`；不应加入 `_GROUPS_WITHOUT_CALLER_SCOPE`。`bot_logs` 当前是特殊历史组，不建议把新的用户级日志能力继续塞进它，除非同时改清楚 `user_id` 语义与响应表。
 
-4. **路径组织**  
+4. **路径组织**
    采用 `openapi_v1/<component>/{router.py,schemas.py}`，组件前置路径：`/openapi/v1/bots/<component>/...`。不建 `openapi_v1/bot_inventory/` 这种聚合大包；公开适配层仍按组件拆在 `openapi_v1/inventory/`、`openapi_v1/local/` 等包下。
 
-5. **Service API 优先**  
+5. **Service API 优先**
    HTTP router 注入 `agentclaw.community.api.*` 下的 Protocol；如果现有能力只有 concrete service，没有 Protocol，先补 Service API Protocol，再在 DI 里绑定，避免 adapter 依赖具体实现。
 
 ---
@@ -408,7 +408,7 @@ async def list_inventory_bots(
 
 ### 7.2 `diagnostics`：个人云端 Bot 诊断能力
 
-**路径前缀**: `/openapi/v1/bots/diagnostics`  
+**路径前缀**: `/openapi/v1/bots/diagnostics`
 **包**: `openapi_v1/diagnostics/`
 
 该组件是从另一版方案中最值得借鉴的拆分：运行日志、引擎重启、健康检查都不是 `bots` 的基础 CRUD，也不适合塞进现有 `bot_logs` 或 `engine_runtime/engine` 组。原因：
