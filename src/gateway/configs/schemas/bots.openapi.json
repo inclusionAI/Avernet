@@ -475,6 +475,66 @@
         "title": "BotUpdate",
         "type": "object"
       },
+      "CallerIdentity": {
+        "description": "The end user the caller's credential names, as resolved at the gateway.\n\nEvery field is read off the verified principal — nothing is taken from the\nrequest, so the answer cannot be steered. The display attributes are\noptional because absence is a real state of the identity contract: an\nidentity provider may not supply them, and they are null rather than\ninvented when absent.",
+        "example": {
+          "display_name": "Alice",
+          "full_name": "Alice Zhang",
+          "tenant": "acme-tenant",
+          "user_id": "u-8f3a2c",
+          "username": "alice@example.com"
+        },
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Short display name, when the identity provider supplied one; null otherwise.",
+            "title": "Display Name"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Full name, when the identity provider supplied one; null otherwise.",
+            "title": "Full Name"
+          },
+          "tenant": {
+            "description": "The tenant this caller's requests are scoped to.",
+            "title": "Tenant",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "The caller's end-user id — the exact value to pass as the `user_id` query parameter on every user-scoped operation of this API.",
+            "title": "User Id",
+            "type": "string"
+          },
+          "username": {
+            "description": "The login name the identity provider resolved for the caller.",
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "username",
+          "display_name",
+          "full_name",
+          "tenant"
+        ],
+        "title": "CallerIdentity",
+        "type": "object"
+      },
       "Ceiling": {
         "description": "Per-user bot creation quota.",
         "example": {
@@ -1477,6 +1537,48 @@
           "request_id"
         ],
         "title": "Envelope[Bot]",
+        "type": "object"
+      },
+      "Envelope_CallerIdentity_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CallerIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[CallerIdentity]",
         "type": "object"
       },
       "Envelope_Ceiling_": {
@@ -20724,11 +20826,13 @@
             }
           },
           {
+            "description": "How the identifier filters and keyword query match: 'exact' compares whole values, 'contains' substring-matches.",
             "in": "query",
             "name": "match_mode",
             "required": false,
             "schema": {
               "default": "exact",
+              "description": "How the identifier filters and keyword query match: 'exact' compares whole values, 'contains' substring-matches.",
               "pattern": "^(exact|contains)$",
               "title": "Match Mode",
               "type": "string"
@@ -20747,11 +20851,13 @@
             }
           },
           {
+            "description": "'default' searches the recent window; 'all' searches the full history and requires match_mode='exact' plus an exact identifier filter.",
             "in": "query",
             "name": "time_scope",
             "required": false,
             "schema": {
               "default": "default",
+              "description": "'default' searches the recent window; 'all' searches the full history and requires match_mode='exact' plus an exact identifier filter.",
               "pattern": "^(default|all)$",
               "title": "Time Scope",
               "type": "string"
@@ -20823,7 +20929,7 @@
             }
           },
           {
-            "description": "Data source override: 'db' or 'langfuse'.",
+            "description": "Data source override: 'db' forces the primary chat store; unset lets the service choose.",
             "in": "query",
             "name": "log_source",
             "required": false,
@@ -20836,7 +20942,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Data source override: 'db' or 'langfuse'.",
+              "description": "Data source override: 'db' forces the primary chat store; unset lets the service choose.",
               "title": "Log Source"
             }
           },
@@ -21008,10 +21114,12 @@
             }
           },
           {
+            "description": "Trace identifier of the chat, as returned by the chats listing.",
             "in": "path",
             "name": "trace_id",
             "required": true,
             "schema": {
+              "description": "Trace identifier of the chat, as returned by the chats listing.",
               "title": "Trace Id",
               "type": "string"
             }
@@ -21036,7 +21144,7 @@
             }
           },
           {
-            "description": "Data source override: 'db' or 'langfuse'.",
+            "description": "Data source override: 'db' forces the primary chat store; unset lets the service choose.",
             "in": "query",
             "name": "log_source",
             "required": false,
@@ -21049,7 +21157,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Data source override: 'db' or 'langfuse'.",
+              "description": "Data source override: 'db' forces the primary chat store; unset lets the service choose.",
               "title": "Log Source"
             }
           },
@@ -30475,6 +30583,133 @@
         "summary": "Get Bot Status",
         "tags": [
           "bots"
+        ]
+      }
+    },
+    "/openapi/v1/caller": {
+      "get": {
+        "description": "Return the end user the caller's credential names.\n\nThe identity the gateway resolved and signed: the id to use as `user_id`\non every user-scoped operation, plus the profile attributes the identity\nprovider supplied. Call it once per session and cache the result — the\nvalues only change when the session's credential does.",
+        "operationId": "get_caller_identity_openapi_v1_caller_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CallerIdentity_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Get Caller Identity",
+        "tags": [
+          "caller"
         ]
       }
     },

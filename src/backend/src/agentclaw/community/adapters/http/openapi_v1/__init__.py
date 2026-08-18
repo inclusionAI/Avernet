@@ -176,6 +176,7 @@ from fastapi import APIRouter, Depends
 from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
+from .caller import router as caller_router
 from .bots.engine_config import router as engine_config_router
 from .deprecated import (
     ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
@@ -350,6 +351,15 @@ def build_public_router() -> APIRouter:
     user" above).
     """
     public = APIRouter()
+    # The caller's own identity — the one operation whose answer IS the user,
+    # so it takes no ``user_id`` and can answer no 403: it gets the base error
+    # table, not the user-scoped one. Top-level like ``spaces``, because the
+    # caller is not a bots resource.
+    public.include_router(
+        caller_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
     # Space APIs are user-only in the first phase. They are top-level
     # resources, so they intentionally do not inherit any bot grant gate.
     public.include_router(

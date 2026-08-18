@@ -409,6 +409,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.USER_GATED,
     ("POST", "/openapi/v1/work-order-notifications/read-all"): AdmissionMode.USER_GATED,
     # ── REFUSED — each for its own reason ────────────────────────────────────
+    # The caller's own identity. An app-only caller names no end user, so there
+    # is nothing to return — its scope question is answered by
+    # ``GET /openapi/v1/bots/authorized`` instead.
+    ("GET", "/openapi/v1/caller"): AdmissionMode.REFUSED,
     # No bot exists yet for a grant to cover, and creation spends the user's
     # quota. Auto-granting the new bot would invent consent nobody gave.
     ("POST", "/openapi/v1/bots"): AdmissionMode.REFUSED,
