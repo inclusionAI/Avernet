@@ -51,10 +51,12 @@ pub struct A2aChat {
     /// provider callbacks against `/bot/events` can authenticate the run.
     /// Left `None` for tests / minimal setups that only target WS bots.
     bot_run_context: Option<Arc<dyn BotRunContextPort>>,
-    /// Optional authorization context builder. When wired, A2A delivery fails
-    /// closed before waking the target bot unless BCS can compute an AuthzContext.
-    /// When absent, message-flow preserves the legacy pass-through path so
-    /// bootstrap can defer enforcement until a real authz repo is wired.
+    /// Optional authorization context builder for direct A2A chat metadata.
+    /// When wired and successful, message-flow injects the returned
+    /// AuthzContext into the outgoing `chat.send` frame. Builder failures
+    /// currently allow delivery to continue without `extensions.authz_context`:
+    /// the new grants/AuthzContext/originator_policy path remains metadata-only
+    /// until enforcement is explicitly enabled.
     authz_context_builder: Option<Arc<dyn AuthzContextBuilderCoreService>>,
     default_timeout_ms: u64,
     /// Outbound interceptor chain (security, audit, etc.). Default empty so
@@ -568,17 +570,9 @@ impl A2aChatService for A2aChat {
                 .await;
             match authz_context {
                 Ok(context) => inject_authz_context_into_frame(&mut frame, &context)?,
-                Err(error) => {
-                    if self.run_store.mark_failed(&run_id, error.to_string()).await {
-                        self.emit_run_lifecycle(
-                            DirectChatRunEvent::Failed,
-                            MetricsResult::Error,
-                            client_kind,
-                            DirectChatRunReason::Blocked,
-                        )
-                        .await;
-                    }
-                    return Err(error);
+                Err(_error) => {
+                    // AuthzContext is metadata-only until enforcement is enabled;
+                    // deliver the chat without the extension when construction fails.
                 }
             }
         }

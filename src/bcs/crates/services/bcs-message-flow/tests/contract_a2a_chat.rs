@@ -381,7 +381,7 @@ async fn a2a_chat_injects_unified_authz_context_when_builder_is_wired() {
 }
 
 #[tokio::test]
-async fn a2a_chat_authz_failure_prevents_bot_delivery() {
+async fn a2a_chat_authz_failure_does_not_block_bot_delivery() {
     let (service, bot_delivery, _registry) = build_service(
         vec![
             ("bot-source", "public", Some("owner-1")),
@@ -394,13 +394,25 @@ async fn a2a_chat_authz_failure_prevents_bot_delivery() {
         decision: Decision::Deny,
     }));
 
-    let error = service
+    let outcome = service
         .chat(chat_command("bot-target"))
         .await
-        .expect_err("authz failure must fail closed");
+        .expect("authz builder failure must allow delivery without injection");
 
-    assert!(error.to_string().contains("denied by test authz"));
-    assert!(bot_delivery.frames().await.is_empty());
+    assert_eq!(outcome.status, "running");
+    let chat_send = bot_delivery
+        .frames()
+        .await
+        .into_iter()
+        .find_map(|frame| match frame {
+            BcsFrame::Request(req) if req.method == "chat.send" => req.params,
+            _ => None,
+        })
+        .expect("chat.send frame must be delivered even when authz context is unavailable");
+    assert!(chat_send
+        .get("extensions")
+        .and_then(|extensions| extensions.get("authz_context"))
+        .is_none());
 }
 
 #[tokio::test]
