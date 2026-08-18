@@ -1234,6 +1234,10 @@ impl GroupService for GroupServiceImpl {
             group.label = Some(name.clone());
             persistence_patch.label = Some(name);
         }
+        if let Some(context) = patch.context {
+            group.context = Some(context.clone());
+            persistence_patch.context = Some(context);
+        }
         if let Some(visibility) = patch.visibility {
             if visibility == GroupVisibility::Public {
                 for participant in &group.participants {

@@ -2238,6 +2238,7 @@ async fn update_preserves_hidden_legacy_routing_fields() {
             group_id: "group-1".into(),
             patch: GroupPatch {
                 name: Some("Renamed".into()),
+                context: Some("测试1".into()),
                 delivery_policy: Some(GroupDeliveryPolicy {
                     bot_final_delivery: BotFinalDelivery::InjectObservers,
                 }),
@@ -2262,6 +2263,8 @@ async fn update_preserves_hidden_legacy_routing_fields() {
         DefaultDelivery::InjectObservers
     );
     assert_eq!(stored.label.as_deref(), Some("Renamed"));
+    assert_eq!(stored.context.as_deref(), Some("测试1"));
+    assert_eq!(detail.context.as_deref(), Some("测试1"));
 }
 
 #[tokio::test]
