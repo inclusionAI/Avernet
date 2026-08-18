@@ -96,6 +96,7 @@ class TestSkillSetServiceEngineTypeThreading:
         self, skill_set_service
     ):
         skill_set_service.engine_type = "moltis"
+        skill_set_service.runtime_engine_type = "moltis"
         skill_set_service.is_desktop = True
         skill_set_service.get_active_skills = MagicMock(
             return_value=[

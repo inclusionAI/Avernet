@@ -63,7 +63,7 @@ from agentclaw.community.core.bot_management.readiness import (
     has_stale_baas_publish_failure,
     is_bot_ready,
 )
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
+from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
     AuthStatus,
@@ -2504,7 +2504,7 @@ async def get_bot_work_dir(
 
         resolved_owner_id = owner_id or operator_id
 
-        effective_engine = resolve_engine_for_bot(
+        effective_engine = resolve_runtime_engine_for_bot(
             bot_id=bot_id, owner_id=resolved_owner_id, override=engine_type, bot_repo=bot_repo,
         )
 
@@ -2577,7 +2577,7 @@ async def get_bot_config_dir(
 
         resolved_owner_id = owner_id or operator_id
 
-        effective_engine = resolve_engine_for_bot(
+        effective_engine = resolve_runtime_engine_for_bot(
             bot_id=bot_id, owner_id=resolved_owner_id, override=engine_type, bot_repo=bot_repo,
         )
 

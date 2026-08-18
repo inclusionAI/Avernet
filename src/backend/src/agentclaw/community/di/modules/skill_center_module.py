@@ -559,9 +559,6 @@ class SkillCenterModule(Module):
             bot = bot_repo.get_by_id_and_owner(bot_id, owner_id)
             if bot is None:
                 return None
-            engine = bot.get("active_engine")
-            if not isinstance(engine, str):
-                return None
             state = layout_repository.get(
                 BotSkillLayoutScope(
                     env=str(bot["env"]),
@@ -571,11 +568,12 @@ class SkillCenterModule(Module):
             )
             if not runtime_uses_pool_paths(state):
                 return None
-            paths = pool_paths_for_engine(engine)
+            paths = pool_paths_for_engine(_requested_engine)
             return paths.active, paths.pool_local, paths.pool_repo
 
         return SkillServiceFactory(
             skill_repo=skill_repo,
+            bot_repo=bot_repo,
             skill_repo_sync=skill_repo_sync,
             category_repo=category_repo,
             device_fs_dispatcher=device_fs_dispatcher,

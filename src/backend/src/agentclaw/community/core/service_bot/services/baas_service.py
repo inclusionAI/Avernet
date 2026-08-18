@@ -40,7 +40,7 @@ from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousErr
 
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
+from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     DEFAULT_DEVICE_PROVIDER,
     resolve_device_provider,
@@ -2600,7 +2600,7 @@ class BaasService:  # pragma: no cover
         engine: str = "",
     ) -> EngineSandboxProvider:
         """解析引擎对应的 sandbox provider。"""
-        engine_type = engine or resolve_engine_for_bot(bot_id, owner_id, bot_repo=self._bot_repo)
+        engine_type = engine or resolve_runtime_engine_for_bot(bot_id, owner_id, bot_repo=self._bot_repo)
         try:
             return self._sandbox_registry.resolve(engine_type)
         except Exception as e:

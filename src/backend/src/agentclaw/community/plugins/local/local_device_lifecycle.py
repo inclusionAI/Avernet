@@ -113,9 +113,7 @@ class LocalDeviceLifecycle(LifecycleBase):
         """
         from agentclaw.community.core.bot_management.services.engine_resolver import (
             resolve_engine_for_bot,
-        )
-        from agentclaw.community.core.skill_center.services.skill_set_service import (
-            _get_bot_paths,
+            resolve_runtime_engine_for_bot,
         )
         from agentclaw.community.plugins.local.device_sync import LocalDeviceSyncPlugin
 
@@ -144,23 +142,22 @@ class LocalDeviceLifecycle(LifecycleBase):
                 )
                 continue
             try:
-                engine_type = resolve_engine_for_bot(
+                engine_type = skill_set.get("engine_type") or resolve_engine_for_bot(
                     bot_id=bot_id,
                     owner_id=str(user_id),
                     bot_repo=self._bot_repository,
                 )
-                skills_dir, repo_dir, local_dir = _get_bot_paths(
+                runtime_engine_type = resolve_runtime_engine_for_bot(
+                    bot_id=bot_id,
+                    owner_id=str(user_id),
+                    bot_repo=self._bot_repository,
+                )
+                set_service = self._skill_set_factory_provider().create(
                     user_id=str(user_id),
                     entity_id=str(user_id),
                     bot_id=bot_id,
-                    engine_type=engine_type,
-                )
-                set_service = self._skill_set_factory_provider().create(
-                    skills_dir=skills_dir,
-                    repo_dir=repo_dir,
-                    local_dir=local_dir,
-                    user_id=str(user_id),
-                    bot_id=bot_id,
+                    engine_type=str(engine_type),
+                    runtime_engine_type=runtime_engine_type,
                 )
                 mappings = set_service.get_symlink_mappings(
                     user_id=str(user_id),

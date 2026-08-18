@@ -33,7 +33,10 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
+from agentclaw.community.core.bot_management.services.engine_resolver import (
+    resolve_engine_for_bot,
+    resolve_runtime_engine_for_bot,
+)
 from agentclaw.community.core.mcp.services.passport_scope import filter_passport_mcp_codes
 from agentclaw.community.di import Injected
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
@@ -79,7 +82,7 @@ def _get_path_params(
 
     Returns:
         Tuple of (effective_entity_id, effective_bot_id,
-                  effective_engine_type, effective_entity_type, is_desktop)
+                  effective_engine_type, runtime_engine_type, effective_entity_type, is_desktop)
     """
     # entity_id: use provided or default to user_id (pure ID, no prefix)
     effective_entity_id = entity_id if entity_id else (ctx.user_id if ctx.user_id else "default")
@@ -99,6 +102,12 @@ def _get_path_params(
         override=engine_type,
         bot_repo=bot_repo,
     )
+    runtime_engine = resolve_runtime_engine_for_bot(
+        bot_id=effective_bot_id,
+        owner_id=owner_id_for_lookup,
+        override=engine_type,
+        bot_repo=bot_repo,
+    )
     is_desktop = False
     try:
         bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
@@ -111,7 +120,7 @@ def _get_path_params(
             effective_bot_id, owner_id_for_lookup, e,
         )
 
-    return effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop
+    return effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop
 
 
 # ==================== SkillSet Management APIs ====================
@@ -134,7 +143,7 @@ async def list_skill_sets(
 ) -> SkillSetListResponse:
     """List all skill sets with their skills. Default skill set is listed first."""
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, user_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, user_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -199,7 +208,7 @@ async def create_skill_set(
     # Priority: query param bot_id > request body bot_id > ctx.bot_id > default
     effective_bot_id = bot_id or request.bot_id or ctx.bot_id or "default"
     # Get effective path parameters (pass effective_bot_id directly)
-    effective_entity_id, _, effective_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, request.user_id, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, _, effective_engine, _runtime_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, request.user_id, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -255,7 +264,7 @@ async def list_skill_sets_with_mcps(
     """获取用户所有 skillset 及其关联的 MCP 列表。"""
     # entity_id 优先使用 user_id，否则使用传入的 entity_id
     effective_entity_id_param = user_id or entity_id
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -308,7 +317,7 @@ async def list_skill_set_resources(
 ) -> SkillSetResourcesResponse:
     """获取能力集资源聚合视图（MCP + 默认能力集 CLI）。"""
     effective_entity_id_param = user_id or entity_id
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -370,7 +379,7 @@ async def get_skill_set(
 ) -> SkillSetDetailResponse:
     """Get a skill set by ID."""
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -406,7 +415,7 @@ async def update_skill_set(
     # Priority: query param bot_id > request body bot_id > ctx.bot_id > default
     effective_bot_id = bot_id or request.bot_id or ctx.bot_id or "default"
     # Get effective path parameters (pass effective_bot_id directly)
-    effective_entity_id, _, effective_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, entity_id, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, _, effective_engine, _runtime_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, entity_id, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -456,7 +465,7 @@ async def delete_skill_set(
     # Get effective path parameters
     # entity_id 优先使用 user_id，否则使用传入的 entity_id
     effective_entity_id_param = user_id or entity_id
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -489,7 +498,7 @@ async def get_skill_set_skills(
 ) -> SkillSetSkillsResponse:
     """Get all skills in a skill set."""
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -534,7 +543,7 @@ async def add_skills_to_set(
     effective_bot_id = request.bot_id or bot_id or ctx.bot_id or "default"
     # entity_id 优先使用 request.user_id，否则使用传入的 entity_id
     effective_entity_id_param = request.user_id or entity_id
-    effective_entity_id, _, effective_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, _, effective_engine, _runtime_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
 
     skill_set_service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -583,7 +592,7 @@ async def remove_skill_from_set(
     # Get effective path parameters
     # entity_id 优先使用 user_id，否则使用传入的 entity_id
     effective_entity_id_param = user_id or entity_id
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -612,7 +621,7 @@ async def ensure_default_skill_set(
 ) -> SkillSetDetailResponse:
     """Ensure default skill set exists."""
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -643,7 +652,7 @@ async def get_default_skill_set(
 ) -> SkillSetDetailResponse:
     """Get the default skill set."""
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -683,13 +692,13 @@ async def init_and_sync_default_skills(
     3. Add all git skills to default skill set
     """
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     set_service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -818,13 +827,13 @@ async def set_default_skills(
     import shutil
 
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     set_service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -1042,12 +1051,12 @@ async def set_default_skills_fast(
     Skill symlinks are generated dynamically from DB via get_symlink_mappings().
     """
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     set_service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -1308,7 +1317,7 @@ async def get_skill_set_mcps(
 ) -> SkillSetMCPsResponse:
     """Get all MCP servers in a skill set."""
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -1349,7 +1358,7 @@ async def add_mcp_to_skill_set(
 ) -> AddMCPResponse:
     """Add an MCP server to a skill set."""
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -1403,7 +1412,7 @@ async def remove_mcp_from_skill_set(
 ) -> MessageResponse:
     """Remove an MCP server from a skill set."""
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -1441,7 +1450,7 @@ async def remove_cli_from_default_skill_set(
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
 ) -> MessageResponse:
     """Remove a CLI from the default skill set by updating AgentPass CLI scope."""
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
@@ -1512,7 +1521,7 @@ async def sync_skills_to_device(
     Arca 环境：调用 ArcaDeviceSyncPlugin 推送到容器。
     """
     try:
-        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, _is_desktop = _get_path_params(
+        effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, _is_desktop = _get_path_params(
             ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
         )
         user_id = ctx.user_id or "default"

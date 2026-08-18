@@ -82,7 +82,10 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
+from agentclaw.community.core.bot_management.services.engine_resolver import (
+    resolve_engine_for_bot,
+    resolve_runtime_engine_for_bot,
+)
 from agentclaw.community.core.skill_center.constants import LOCK_HELD_ERRORS
 from agentclaw.community.core.skill_center.errors import (
     SkillDeleteConsistencyError,
@@ -271,7 +274,7 @@ def _get_path_params(
 
     Returns:
         Tuple of (effective_entity_id, effective_bot_id,
-                  effective_engine_type, effective_entity_type, is_desktop)
+                  effective_engine_type, runtime_engine_type, effective_entity_type, is_desktop)
 
     Raises:
         HTTPException 403: if entity_type is staff and entity_id does not match ctx.user_id (IDOR prevention).
@@ -299,6 +302,13 @@ def _get_path_params(
         override=engine_type,
         bot_repo=bot_repo,
     )
+    runtime_engine = resolve_runtime_engine_for_bot(
+        bot_id=effective_bot_id,
+        owner_id=owner_id_for_lookup,
+        override=engine_type,
+        bot_repo=bot_repo,
+    )
+
     is_desktop = False
     try:
         bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
@@ -311,7 +321,7 @@ def _get_path_params(
             effective_bot_id, owner_id_for_lookup, e,
         )
 
-    return effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop
+    return effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop
 
 
 def _resolve_teclaw_local_skill(resolver, bot_id: str, owner_id: str):
@@ -407,7 +417,7 @@ async def upload_skill(
     effective_entity_id_input = user_id or entity_id
 
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_input, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_input, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     owner_id_for_lookup = user_id or entity_id or ctx.user_id or ""
     bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
@@ -445,10 +455,10 @@ async def upload_skill(
     is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(resolver, effective_bot_id, effective_entity_id)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop, is_teclaw=is_teclaw)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop, is_teclaw=is_teclaw)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
     logger.info(f"[skills.upload_skill] Paths: skills_dir={skills_dir}, local_dir={local_dir}, repo_dir={repo_dir}, is_teclaw={is_teclaw}")
 
     # Create per-request service instance with user-specific paths. teclaw gets the
@@ -459,6 +469,7 @@ async def upload_skill(
         local_dir=local_dir,
         local_skill_path_adapter=local_skill_adapter,
         entity_id=effective_entity_id,
+        bot_owner_id=bot_owner_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
     )
@@ -656,11 +667,11 @@ async def create_skill(
     # skills-repo (local: unified ~/.openclaw/workspace/skills/skills-repo).
     # Without scoping it falls back to ~/.moltis/skills-repo and git skill
     # validation can't find the host source.
-    entity_id, bot_id, engine_type, entity_type, is_desktop = _get_path_params(
+    entity_id, bot_id, engine_type, runtime_engine, entity_type, is_desktop = _get_path_params(
         ctx, request.user_id, None, request.bot_id, None, bot_repo=bot_repo
     )
     repo_dir = path_factory.get_bot_skills_repo_dir(
-        entity_id, bot_id, engine_type, entity_type, is_desktop=is_desktop
+        entity_id, bot_id, runtime_engine, entity_type, is_desktop=is_desktop
     )
     service = skill_service_factory.create(
         repo_dir=repo_dir,
@@ -722,24 +733,13 @@ async def get_active_skills(
     logger.info(f"[skills.get_active_skills] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, entity_id={entity_id}")
 
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    runtime_skills_dir = skills_dir
-    if is_desktop and effective_engine in _FILESYSTEM_LAYOUT_ENGINES:
-        probe = await runtime_layout_probe.probe_bot(
-            bot_id=effective_bot_id,
-            user_id=effective_entity_id,
-            engine=effective_engine,
-        )
-        runtime_skills_dir = _desktop_active_root_from_probe(
-            probe,
-            legacy_fallback=skills_dir,
-        )
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -750,6 +750,18 @@ async def get_active_skills(
         bot_id=effective_bot_id,
         engine_type=effective_engine,
     )
+
+    runtime_skills_dir = service.active_dir
+    if is_desktop and runtime_engine in _FILESYSTEM_LAYOUT_ENGINES:
+        probe = await runtime_layout_probe.probe_bot(
+            bot_id=effective_bot_id,
+            user_id=effective_entity_id,
+            engine=runtime_engine,
+        )
+        runtime_skills_dir = _desktop_active_root_from_probe(
+            probe,
+            legacy_fallback=service.active_dir,
+        )
 
     if is_desktop:
         active_skills = await service.get_active_skills_from_device(
@@ -785,7 +797,7 @@ async def get_current_skill_set(
     此接口将在未来版本中移除。
     """
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     switcher = switcher_factory.create(
         entity_id=effective_entity_id,
@@ -817,7 +829,7 @@ async def switch_skill_set(
         proxy_token: agentclawproxy token for syncing symlinks to remote device.
     """
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     switcher = switcher_factory.create(
         entity_id=effective_entity_id,
@@ -854,7 +866,7 @@ async def sync_skill_set(
 ) -> SwitchSkillSetResponse:
     """Sync a skill set to active skills without deactivating others."""
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     switcher = switcher_factory.create(
         entity_id=effective_entity_id,
@@ -898,7 +910,7 @@ async def activate_skill_set(
         proxy_token: agentclawproxy token，用于同步软链到远程设备
     """
     # Get effective path parameters from request body
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(
         ctx, request.entity_id, request.entity_type, request.bot_id, request.engine_type, bot_repo=bot_repo
     )
 
@@ -943,7 +955,7 @@ async def deactivate_skill_set(
         proxy_token: agentclawproxy token，用于同步软链到远程设备
     """
     # Get effective path parameters from request body
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(
         ctx, request.entity_id, request.entity_type, request.bot_id, request.engine_type, bot_repo=bot_repo
     )
 
@@ -988,7 +1000,7 @@ async def get_active_skill_sets(
     返回用户激活的能力集 + 默认能力集（始终在列表中）
     """
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # 使用 repository 直接获取所有激活的能力集
     # 注意：使用 effective_entity_id 而不是 ctx.user_id，以保持一致性
@@ -1032,13 +1044,13 @@ async def activate_skill(
     logger.info(f"[skills.activate_skill] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, skill_id={skill_id}, entity_id={entity_id}")
 
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -1124,13 +1136,13 @@ async def deactivate_skill(
     logger.info(f"[skills.deactivate_skill] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, skill_id={skill_id}, entity_id={entity_id}")
 
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -1202,13 +1214,13 @@ async def deactivate_all_skills(
 ) -> SwitchSkillSetResponse:
     """Deactivate all currently active skills."""
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     switcher = switcher_factory.create(
         entity_id=effective_entity_id,
@@ -1256,24 +1268,24 @@ async def get_skill_readme(
     )
 
     # Start with the caller/request context only to locate the DB record.
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(
         ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
     )
 
     initial_skills_dir = path_factory.get_bot_skills_dir(
-        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type
     )
     initial_local_dir = path_factory.get_bot_skills_local_dir(
         effective_entity_id,
         effective_bot_id,
-        effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop=is_desktop,
         is_teclaw=False,
     )
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
     initial_repo_dir = path_factory.get_bot_skills_repo_dir(
-        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop
+        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop
     )
 
     service = skill_service_factory.create(
@@ -1358,6 +1370,11 @@ async def get_skill_readme(
         owner_id=read_owner_id,
         bot_repo=bot_repo,
     )
+    read_runtime_engine = resolve_runtime_engine_for_bot(
+        bot_id=read_bot_id,
+        owner_id=read_owner_id,
+        bot_repo=bot_repo,
+    )
     if target_bot and (
         (entity_id and entity_id != read_owner_id)
         or (bot_id and bot_id != read_bot_id)
@@ -1380,19 +1397,19 @@ async def get_skill_readme(
     )
 
     read_skills_dir = path_factory.get_bot_skills_dir(
-        read_owner_id, read_bot_id, read_engine, read_entity_type
+        read_owner_id, read_bot_id, read_runtime_engine, read_entity_type
     )
     read_local_dir = path_factory.get_bot_skills_local_dir(
         read_owner_id,
         read_bot_id,
-        read_engine,
+        read_runtime_engine,
         read_entity_type,
         is_desktop=read_is_desktop,
         is_teclaw=read_is_teclaw,
     )
-    path_factory.get_bot_engine_dir(read_owner_id, read_bot_id, read_engine, read_entity_type)
+    path_factory.get_bot_engine_dir(read_owner_id, read_bot_id, read_runtime_engine, read_entity_type)
     read_repo_dir = path_factory.get_bot_skills_repo_dir(
-        read_owner_id, read_bot_id, read_engine, read_entity_type, is_desktop=read_is_desktop
+        read_owner_id, read_bot_id, read_runtime_engine, read_entity_type, is_desktop=read_is_desktop
     )
 
     logger.info(
@@ -1488,13 +1505,13 @@ async def list_local_market_skills(
     logger.info(f"[skills.list_local_market_skills] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, entity_id={entity_id}")
 
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -1527,12 +1544,12 @@ async def get_market_tree(
 
     # Get user-specific paths
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -1575,12 +1592,12 @@ async def list_market_skills(
         raise HTTPException(status_code=400, detail="orderby must be 'latest' or 'hotest'")
 
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -1619,13 +1636,13 @@ async def activate_skills_batch(
 
     # Get user-specific paths
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -1711,13 +1728,13 @@ async def search_market_skills(
 
     # Get user-specific paths
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -1760,13 +1777,13 @@ async def sync_market(
 
     # Get user-specific paths
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -1839,13 +1856,13 @@ async def get_sync_status(
 
     # Get user-specific paths
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -2332,6 +2349,11 @@ async def delete_skill(
     )
     effective_entity_type = str(bot.get("entity_type") or "staff")
     effective_engine = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
+    runtime_engine = resolve_runtime_engine_for_bot(
+        bot_id=effective_bot_id,
+        owner_id=str(bot.get("owner_id") or effective_entity_id),
+        bot_repo=bot_repo,
+    )
     if engine_type and engine_type != effective_engine:
         raise HTTPException(
             status_code=409,
@@ -2347,9 +2369,9 @@ async def delete_skill(
     # so the device-fs path is the workspace-namespace form.
     is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(resolver, effective_bot_id, effective_entity_id)
 
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop, is_teclaw=is_teclaw)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type)
+    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop, is_teclaw=is_teclaw)
+    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type, is_desktop=is_desktop)
 
     service = skill_service_factory.create(
         active_dir=skills_dir,
@@ -2616,6 +2638,11 @@ async def save_skill_parameters(
     trusted_owner_id = str(bot["owner_id"])
     trusted_entity_id = str(bot.get("entity_id") or trusted_owner_id)
     trusted_engine_type = str(bot.get("active_engine") or engine_type)
+    trusted_runtime_engine_type = resolve_runtime_engine_for_bot(
+        bot_id=trusted_bot_id,
+        owner_id=trusted_owner_id,
+        bot_repo=bot_repo,
+    )
     trusted_entity_type = str(bot.get("entity_type") or "staff")
     skill_name = skill.get('link_name') or skill.get('name')
 
@@ -2636,26 +2663,27 @@ async def save_skill_parameters(
         active_dir=path_factory.get_bot_skills_dir(
             trusted_entity_id,
             trusted_bot_id,
-            trusted_engine_type,
+            trusted_runtime_engine_type,
             trusted_entity_type,
         ),
         repo_dir=path_factory.get_bot_skills_repo_dir(
             trusted_entity_id,
             trusted_bot_id,
-            trusted_engine_type,
+            trusted_runtime_engine_type,
             trusted_entity_type,
             is_desktop=is_desktop,
         ),
         local_dir=path_factory.get_bot_skills_local_dir(
             trusted_entity_id,
             trusted_bot_id,
-            trusted_engine_type,
+            trusted_runtime_engine_type,
             trusted_entity_type,
             is_desktop=is_desktop,
             is_teclaw=is_teclaw,
         ),
         local_skill_path_adapter=local_skill_adapter,
         entity_id=trusted_entity_id,
+        bot_owner_id=trusted_owner_id,
         bot_id=trusted_bot_id,
         engine_type=trusted_engine_type,
     )

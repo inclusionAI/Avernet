@@ -151,6 +151,7 @@ class SkillSetService:
         entity_id: str | None = None,
         bot_id: str | None = None,
         engine_type: str | None = None,
+        runtime_engine_type: str | None = None,
         entity_type: str | None = None,
         resolver: "DeviceContextResolver | None" = None,
         device_sync_dispatcher: "DeviceSyncDispatcher | None" = None,
@@ -196,6 +197,7 @@ class SkillSetService:
         self.entity_id = entity_id
         self.entity_type = entity_type or "staff"
         self.engine_type = engine_type or DEFAULT_ENGINE_TYPE
+        self.runtime_engine_type = runtime_engine_type or self.engine_type
 
         self.device_plugin = device_plugin
         self._ext_info_provider = ext_info_provider
@@ -231,7 +233,7 @@ class SkillSetService:
                 user_id=user_id,
                 entity_id=entity_id,
                 bot_id=bot_id,
-                engine_type=engine_type,
+                engine_type=self.runtime_engine_type,
                 entity_type=entity_type,
                 is_desktop=self.is_desktop,
             )
@@ -248,7 +250,7 @@ class SkillSetService:
             pool_paths = self._pool_layout_paths(
                 str(effective_owner),
                 str(self.bot_id),
-                self.engine_type,
+                self.runtime_engine_type,
             )
             if pool_paths is not None:
                 active_path, local_path, repo_path = pool_paths
@@ -1327,11 +1329,11 @@ class SkillSetService:
             "hermes": "/home/admin/.hermes/skills-repo",
         }
         base_skills_dir = Path(
-            ENGINE_SKILLS_DIR_MAP.get(self.engine_type, "/home/admin/.openclaw/workspace/skills")
+            ENGINE_SKILLS_DIR_MAP.get(self.runtime_engine_type, "/home/admin/.openclaw/workspace/skills")
         )
         # aicoding 引擎使用独立的 skills-repo 目录
         skills_repo_dir = Path(
-            ENGINE_SKILLS_REPO_DIR_MAP.get(self.engine_type, str(base_skills_dir / "skills-repo"))
+            ENGINE_SKILLS_REPO_DIR_MAP.get(self.runtime_engine_type, str(base_skills_dir / "skills-repo"))
         )
         pool_layout_paths = None
         pool_owner_id = self.user_id or self.entity_id
@@ -1339,7 +1341,7 @@ class SkillSetService:
             pool_layout_paths = self._pool_layout_paths(
                 str(pool_owner_id),
                 str(self.bot_id),
-                self.engine_type,
+                self.runtime_engine_type,
             )
         if pool_layout_paths is not None:
             active_path, local_path, repo_path = pool_layout_paths
@@ -1363,7 +1365,7 @@ class SkillSetService:
                 get_bot_engine_dir(
                     self.entity_id or "default",
                     self.bot_id,
-                    self.engine_type,
+                    self.runtime_engine_type,
                     self.entity_type or "staff",
                 )
                 / "workspace"
@@ -1377,7 +1379,7 @@ class SkillSetService:
             logger.info(
                 "[get_symlink_mappings] LOCAL+non-desktop → per-bot paths: "
                 "entity=%s bot=%s engine=%s base_skills_dir=%s skills_repo_dir=%s",
-                self.entity_id, self.bot_id, self.engine_type, base_skills_dir, skills_repo_dir,
+                self.entity_id, self.bot_id, self.runtime_engine_type, base_skills_dir, skills_repo_dir,
             )
 
         skills_local_dir = base_skills_dir / "skills-local"
