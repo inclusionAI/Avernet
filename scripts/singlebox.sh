@@ -53,6 +53,7 @@ BCS_DIR="${PROJECT_ROOT}/src/bcs"
 BCSFUSE_DIR="${PROJECT_ROOT}/src/bcsfuse"
 RELAY_DIR="${RELAY_DIR:-${PROJECT_ROOT}/../teamclaw-aicoding-relay}"
 BAAS_DIR="${PROJECT_ROOT}/src/baas"
+GATEWAY_DIR="${PROJECT_ROOT}/src/gateway"
 
 # 默认版本
 DEFAULT_OPENCLAW_VERSION=">=2026.3.28"
@@ -63,6 +64,7 @@ DEFAULT_HERMES_PORT_START="18700"
 DEFAULT_HERMES_PORT_END="18799"
 DEFAULT_BCSFUSE_PORT="8765"
 DEFAULT_FRONTEND_PORT="8000"
+DEFAULT_GATEWAY_PORT="8889"
 OPENCLAW_VERSION="${OPENCLAW_VERSION:-${DEFAULT_OPENCLAW_VERSION}}"
 BCS_PORT="${BCS_PORT:-${DEFAULT_BCS_PORT}}"
 RELAY_PORT="${RELAY_PORT:-${DEFAULT_RELAY_PORT}}"
@@ -73,6 +75,7 @@ HERMES_PORT_START="${HERMES_PORT_START:-${DEFAULT_HERMES_PORT_START}}"
 HERMES_PORT_END="${HERMES_PORT_END:-${DEFAULT_HERMES_PORT_END}}"
 BCSFUSE_PORT="${BCSFUSE_PORT:-${DEFAULT_BCSFUSE_PORT}}"
 FRONTEND_PORT="${FRONTEND_PORT:-${DEFAULT_FRONTEND_PORT}}"
+GATEWAY_PORT="${GATEWAY_PORT:-${DEFAULT_GATEWAY_PORT}}"
 CHAT_ENGINE="${CHAT_ENGINE:-openclaw}"
 BOTS_PROFILE_DIR="${BOTS_PROFILE_DIR:-}"
 BOTS_EXCLUDED_PROFILE_SOURCE="${BOTS_EXCLUDED_PROFILE_SOURCE:-}"
@@ -164,6 +167,7 @@ source "${SCRIPT_DIR}/modules/engine.sh"
 source "${SCRIPT_DIR}/modules/baas.sh"
 source "${SCRIPT_DIR}/modules/backend.sh"
 source "${SCRIPT_DIR}/modules/frontend.sh"
+source "${SCRIPT_DIR}/modules/gateway.sh"
 source "${SCRIPT_DIR}/modules/bcs.sh"
 source "${SCRIPT_DIR}/modules/bcsfuse.sh"
 source "${SCRIPT_DIR}/modules/bots.sh"
@@ -421,6 +425,7 @@ show_help() {
     echo "  --openclaw-version, -ov VERSION Specify openclaw npm version/range (default: ${DEFAULT_OPENCLAW_VERSION})"
     echo "  --bcs-port, -bp PORT          Specify BCS port (default: ${DEFAULT_BCS_PORT})"
     echo "  --frontend-port, -fp PORT     Specify frontend dev server port (default: ${DEFAULT_FRONTEND_PORT})"
+    echo "  --gateway-port PORT           Specify Gateway dev server port (default: ${DEFAULT_GATEWAY_PORT})"
     echo "  --bcs-env local|dev           BCS runtime env; default: local"
     echo "  --bcn-plugin-source source|npm  BCN plugin source: build from repo (source, default) or install"
     echo "                                  @avernet-plugin/openclaw-channel-bcn (npm). Env: BCN_PLUGIN_SOURCE,"
@@ -438,7 +443,7 @@ show_help() {
     echo ""
     echo "Services:"
     # 从各模块收集帮助信息
-    for svc in baas backend bcs bcsfuse frontend engine bots; do
+    for svc in baas backend gateway bcs bcsfuse frontend engine bots; do
         if type -t "${svc}_help" &>/dev/null; then
             echo "  $( "${svc}_help" )"
         fi
@@ -882,6 +887,15 @@ main() {
                 FRONTEND_PORT="$2"
                 shift 2
                 ;;
+            --gateway-port)
+                if [ -z "$2" ] || [ "$2" = -* ]; then
+                    log_error "Port number required for $1"
+                    show_help
+                    exit 1
+                fi
+                GATEWAY_PORT="$2"
+                shift 2
+                ;;
             --engine|-e)
                 if [ -z "$2" ] || [ "$2" = -* ]; then
                     log_error "Engine type required for $1"
@@ -984,7 +998,7 @@ main() {
                 LOCAL_MODE=true
                 shift
                 ;;
-            baas|backend|bcs|bcsfuse|frontend|engine|bots|bcs_bots|bcs_frontend|hybrid|merchant_hybrid|all)
+            baas|backend|gateway|bcs|bcsfuse|frontend|engine|bots|bcs_bots|bcs_frontend|hybrid|merchant_hybrid|all)
                 # Legacy: service name without command defaults to start
                 services+=("$1")
                 if [ -z "$command" ]; then
