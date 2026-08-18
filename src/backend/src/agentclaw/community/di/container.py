@@ -50,6 +50,7 @@ from agentclaw.community.di.modules.system_config_module import SystemConfigModu
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
 from agentclaw.community.di.modules.economy_governance_module import EconomyGovernanceModule
 from agentclaw.community.di.modules.user_list_module import UserListModule
+from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.log import get_logger
@@ -132,6 +133,7 @@ def build_injector(
         # singlebox intentionally uses the real clients for local services.
         HttpClientModule(),
         EconomyGovernanceModule(),
+        TaskDiscoveryModule(),
     ]
 
     modules.extend(modules_for(profile))
