@@ -6,7 +6,7 @@ use bcs_domain::BotCapabilities;
 use bcs_route_security::OutboundUrlGuard;
 use axum::http::{HeaderMap, HeaderName};
 pub use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort};
-use bcs_service_api::application::v1::SessionFileApplicationService;
+use bcs_service_api::application::v1::{GroupService, SessionFileApplicationService};
 use bcs_service_api::{ProviderCredentialRepoPort, ProviderStreamGrayList};
 use bcs_services_container::Services;
 use std::sync::Arc;
@@ -431,6 +431,7 @@ fn purge_expired(runs: &mut HashMap<String, AdminInvocationRun>) {
 #[derive(Clone)]
 pub struct HttpAppState {
     pub services: Services,
+    pub group_application: Option<Arc<dyn GroupService>>,
     pub session_file_application: Option<Arc<dyn SessionFileApplicationService>>,
     pub health: Arc<dyn HealthPort>,
     pub async_chat_poll_wait_max_ms: u64,
@@ -479,6 +480,7 @@ impl HttpAppState {
     pub fn new(services: Services) -> Self {
         Self {
             services,
+            group_application: None,
             session_file_application: None,
             health: Arc::new(DefaultHealthPort),
             async_chat_poll_wait_max_ms: 30_000,
@@ -536,6 +538,11 @@ impl HttpAppState {
         service: Option<Arc<dyn SessionFileApplicationService>>,
     ) -> Self {
         self.session_file_application = service;
+        self
+    }
+
+    pub fn with_group_application(mut self, service: Arc<dyn GroupService>) -> Self {
+        self.group_application = Some(service);
         self
     }
 

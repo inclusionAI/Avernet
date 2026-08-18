@@ -316,6 +316,7 @@ story_user_operates_group_workspace() {
     test_create_group
     test_create_group_with_members
     test_get_group_detail
+    test_patch_group
     test_list_groups
     test_add_member
     test_remove_member
