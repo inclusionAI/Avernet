@@ -1,0 +1,31 @@
+{
+  "module": "task-discovery",
+  "feature": "discovery-autoinitiate-merge",
+  "date": "2026-08-18",
+  "phase": "propose",
+  "status": "awaiting-confirmation",
+  "readiness_score": 8,
+  "artifacts": {
+    "proposal.md": "created",
+    "spec.md": "created",
+    "design.md": "created",
+    "tasks.md": "created"
+  },
+  "clarification": {
+    "snapshot": "produced",
+    "closure": "produced",
+    "questions_asked": 4,
+    "questions_answered": 4
+  },
+  "gates": {
+    "context_findings": "passed",
+    "domain_model": "passed",
+    "requirement_blocking": "passed",
+    "acceptance_alignment": "passed"
+  },
+  "tasks": {
+    "total_slices": 9,
+    "completed": 0,
+    "pending": 9
+  }
+}
