@@ -371,6 +371,37 @@ def test_real_skill_set_service_factory_create_default_branch(test_injector):
     assert isinstance(svc, SkillSetService)
 
 
+
+def test_skill_set_factory_threads_explicit_runtime_engine_to_pool_paths(
+    test_injector,
+):
+    factory = test_injector.get(SkillSetServiceFactory)
+    pool_resolution_calls = []
+
+    def resolve_pool_paths(owner_id, bot_id, engine_type):
+        pool_resolution_calls.append((owner_id, bot_id, engine_type))
+        return (
+            "/pool/active",
+            "/pool/local",
+            "/pool/repo",
+        )
+
+    factory._pool_layout_paths = resolve_pool_paths
+
+    svc = factory.create(
+        user_id="owner-1",
+        entity_id="owner-1",
+        bot_id="bot-1",
+        engine_type="claude_code",
+        runtime_engine_type="aicoding",
+    )
+
+    assert pool_resolution_calls[-1] == ("owner-1", "bot-1", "aicoding")
+    assert svc.engine_type == "claude_code"
+    assert svc.runtime_engine_type == "aicoding"
+    assert str(svc.local_dir) == "/pool/local"
+    assert str(svc.repo_dir) == "/pool/repo"
+
 def test_real_skill_set_service_factory_create_bot_paths_branch(test_injector):
     """user_id/entity_id present → the _get_bot_paths (if) branch the
     routers actually take (skills.py passes user_id/entity_id/bot_id)."""

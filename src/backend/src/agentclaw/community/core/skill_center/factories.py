@@ -515,6 +515,7 @@ class SkillSetServiceFactory:
             effective_runtime_engine = resolve_runtime_engine_for_bot(
                 bot_id or "default",
                 str(owner_id) if owner_id is not None else None,
+                override=engine_type,
                 bot_repo=self._bot_repo,
             )
 

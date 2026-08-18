@@ -118,6 +118,20 @@ class TestSkillSetServiceEngineTypeThreading:
             }
         ]
 
+
+    async def test_get_symlink_mappings_rejects_unknown_runtime_engine(
+        self, skill_set_service
+    ):
+        skill_set_service.runtime_engine_type = "unknown_engine"
+        skill_set_service.get_active_skills = MagicMock(
+            return_value=[
+                {"name": "reviewer", "git_path": "git://business/reviewer"}
+            ]
+        )
+
+        with pytest.raises(ValueError, match="engine Skill layout not implemented"):
+            skill_set_service.get_symlink_mappings()
+
     def test_get_all_skill_sets_with_skills_passes_engine_type(self, skill_set_service, mock_skill_set_repo):
         """get_all_skill_sets_with_skills should pass engine_type to repo.list_all."""
         mock_skill_set_repo.list_all.return_value = []

@@ -149,6 +149,7 @@ async def list_skill_sets(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     skill_sets = service.list_skill_sets(user_id=user_id)
@@ -208,12 +209,13 @@ async def create_skill_set(
     # Priority: query param bot_id > request body bot_id > ctx.bot_id > default
     effective_bot_id = bot_id or request.bot_id or ctx.bot_id or "default"
     # Get effective path parameters (pass effective_bot_id directly)
-    effective_entity_id, _, effective_engine, _runtime_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, request.user_id, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, _, effective_engine, runtime_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, request.user_id, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     try:
@@ -270,6 +272,7 @@ async def list_skill_sets_with_mcps(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     effective_user_id = user_id or ctx.user_id
@@ -323,6 +326,7 @@ async def list_skill_set_resources(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     effective_user_id = user_id or ctx.user_id
@@ -385,6 +389,7 @@ async def get_skill_set(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     skill_set = service.get_skill_set(skill_set_id, user_id=ctx.user_id)
@@ -415,12 +420,13 @@ async def update_skill_set(
     # Priority: query param bot_id > request body bot_id > ctx.bot_id > default
     effective_bot_id = bot_id or request.bot_id or ctx.bot_id or "default"
     # Get effective path parameters (pass effective_bot_id directly)
-    effective_entity_id, _, effective_engine, _runtime_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, entity_id, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, _, effective_engine, runtime_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, entity_id, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
 
     service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     try:
@@ -471,6 +477,7 @@ async def delete_skill_set(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     try:
@@ -504,6 +511,7 @@ async def get_skill_set_skills(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     skills = service.get_set_skills(skill_set_id, user_id=ctx.user_id)
@@ -543,12 +551,13 @@ async def add_skills_to_set(
     effective_bot_id = request.bot_id or bot_id or ctx.bot_id or "default"
     # entity_id 优先使用 request.user_id，否则使用传入的 entity_id
     effective_entity_id_param = request.user_id or entity_id
-    effective_entity_id, _, effective_engine, _runtime_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
+    effective_entity_id, _, effective_engine, runtime_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
 
     skill_set_service = skill_set_service_factory.create(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
 
@@ -598,6 +607,7 @@ async def remove_skill_from_set(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     success = await service.remove_skill_from_set(skill_set_id, skill_id, user_id=effective_entity_id)
@@ -627,6 +637,7 @@ async def ensure_default_skill_set(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     skill_set = service.ensure_default_skill_set(user_id=ctx.user_id, bolt_id=effective_bot_id)
@@ -658,6 +669,7 @@ async def get_default_skill_set(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     skill_set = service.get_default_skill_set(user_id=ctx.user_id, bolt_id=effective_bot_id)
@@ -704,6 +716,7 @@ async def init_and_sync_default_skills(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     skill_service = skill_service_factory.create(
@@ -712,7 +725,7 @@ async def init_and_sync_default_skills(
         local_dir=local_dir,
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
+        engine_type=runtime_engine,
     )
 
     # Step 1: Ensure default skill set exists
@@ -839,6 +852,7 @@ async def set_default_skills(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     skill_service = skill_service_factory.create(
@@ -847,7 +861,7 @@ async def set_default_skills(
         local_dir=local_dir,
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
+        engine_type=runtime_engine,
     )
 
     # Step 1: Ensure default skill set exists
@@ -1062,6 +1076,7 @@ async def set_default_skills_fast(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     skill_service = skill_service_factory.create(
@@ -1070,7 +1085,7 @@ async def set_default_skills_fast(
         local_dir=local_dir,
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
+        engine_type=runtime_engine,
     )
 
     # Step 1: Ensure default skill set exists
@@ -1216,6 +1231,7 @@ async def fix_git_path(
         entity_id="",
         bot_id="default",
         engine_type=DEFAULT_ENGINE_TYPE,
+        runtime_engine_type=DEFAULT_ENGINE_TYPE,
         entity_type="staff"
     )
 
@@ -1323,6 +1339,7 @@ async def get_skill_set_mcps(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     mcps = service.get_set_mcp_servers(skill_set_id, user_id=ctx.user_id)
@@ -1364,6 +1381,7 @@ async def add_mcp_to_skill_set(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     try:
@@ -1418,6 +1436,7 @@ async def remove_mcp_from_skill_set(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     try:
@@ -1456,6 +1475,7 @@ async def remove_cli_from_default_skill_set(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
         entity_type=effective_entity_type
     )
     skill_set = service.get_skill_set(skill_set_id, user_id=effective_entity_id)
@@ -1530,6 +1550,7 @@ async def sync_skills_to_device(
             entity_id=effective_entity_id,
             bot_id=effective_bot_id,
             engine_type=effective_engine,
+            runtime_engine_type=runtime_engine,
             entity_type=effective_entity_type,
         )
 
