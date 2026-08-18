@@ -11,12 +11,14 @@ OpenClaw WebSocket 客户端（纯异步版本）
 
 import asyncio
 import dataclasses
+import ipaddress
 import json
 import os
 import ssl
 import uuid
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 import websockets
 from websockets.asyncio.client import ClientConnection
@@ -28,6 +30,19 @@ logger = get_logger("core-bot-run")
 
 # 事件处理器类型：同步或异步均可，不关心返回值
 EventHandler = Callable[..., Any]
+
+
+def _is_loopback_websocket_uri(uri: str) -> bool:
+    """Return whether a WebSocket URI targets a local engine adapter."""
+    hostname = urlsplit(uri).hostname
+    if not hostname:
+        return False
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
 
 
 class ChatRequestError(Exception):
@@ -109,6 +124,7 @@ class BotWebSocketClient:
         timeout: float = 10.0,
         disable_ssl_verify: bool = True,
         open_timeout: float = 5.0,
+        max_size: int = 10 * 2**20,
     ) -> dict[str, Any]:
         """连接到服务器并完成握手
 
@@ -117,6 +133,8 @@ class BotWebSocketClient:
             disable_ssl_verify: 是否禁用 SSL 证书验证（仅用于测试）
             open_timeout: WebSocket 连接建立（TCP + HTTP 升级）超时时间（秒），
                 None 表示与 timeout 一致
+            max_size: 单条 WebSocket 消息最大字节数，None 表示不限制。
+                websockets 库默认为 1MiB (2**20)，超过会抛 ConnectionClosedError。
 
         Returns:
             握手响应 payload
@@ -146,14 +164,20 @@ class BotWebSocketClient:
         # 会导致 keepalive ping timeout 断连。
         # 连接存活性由服务端应用层 tick 事件（每 30s）保证。
         additional_headers = websockets.Headers(headers)
+        connect_kwargs: dict[str, Any] = {
+            "additional_headers": additional_headers,
+            "ssl": ssl_context,
+            "open_timeout": open_timeout,
+            "ping_interval": None,
+            "max_size": max_size,
+        }
+        if _is_loopback_websocket_uri(self.uri):
+            # websockets reads proxy settings independently of NO_PROXY.
+            # Adapter endpoints are loopback-only and must connect directly.
+            connect_kwargs["proxy"] = None
+            logger.debug("WebSocket connection uses direct loopback transport")
         self._ws = await asyncio.wait_for(
-            websockets.connect(
-                self.uri,
-                additional_headers=additional_headers,
-                ssl=ssl_context,
-                open_timeout=open_timeout,
-                ping_interval=None,
-            ),
+            websockets.connect(self.uri, **connect_kwargs),
             timeout=timeout,
         )
         self._connected = True

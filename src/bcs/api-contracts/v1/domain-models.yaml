@@ -247,6 +247,53 @@ BotCandidate:
       type: boolean
       description: Whether the acting physical Bot has an accepted Friendship.
 
+BotCandidateSearchItem:
+  type: object
+  additionalProperties: false
+  required:
+    - bot
+    - is_friend
+    - tags
+  properties:
+    bot:
+      $ref: "#/PhysicalBot"
+    is_friend:
+      type: boolean
+      description: Whether the acting Actor has an accepted Friendship with this Bot.
+    tags:
+      type: object
+      additionalProperties: true
+      description: Worker-profile tags attached by the legacy search capability.
+    score:
+      type: number
+      format: double
+      description: Semantic relevance score. Omitted for empty-query and name-fallback results.
+    short_profile:
+      type: string
+      description: Short semantic recommendation profile. Omitted for empty-query and name-fallback results.
+
+BotCandidateSearchMode:
+  type: string
+  enum:
+    - empty_query
+    - semantic
+    - name_fallback
+  description: How the candidate-search result was produced.
+
+BotCandidateSearchResult:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - search_mode
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/BotCandidateSearchItem"
+    search_mode:
+      $ref: "#/BotCandidateSearchMode"
+
 BotPage:
   type: object
   additionalProperties: false
@@ -355,6 +402,24 @@ BotCandidatePageEnvelope:
       type: string
     data:
       $ref: "#/BotCandidatePage"
+    request_id:
+      type: string
+
+BotCandidateSearchEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/BotCandidateSearchResult"
     request_id:
       type: string
 
@@ -847,24 +912,22 @@ BotParticipantMode:
     - auto
     - muted
 
+HumanParticipantMode:
+  type: string
+  enum:
+    - present
+    - absent
+
+SessionParticipantMode:
+  oneOf:
+    - $ref: "#/BotParticipantMode"
+    - $ref: "#/HumanParticipantMode"
+
 SessionStatus:
   type: string
   enum:
     - running
     - completed
-
-SessionMessageKind:
-  type: string
-  enum:
-    - text
-    - system
-
-MessageSenderKind:
-  type: string
-  enum:
-    - bot
-    - human
-    - system
 
 SessionParticipant:
   type: object
@@ -994,57 +1057,86 @@ SessionPage:
       type: integer
       minimum: 1
 
-SessionMessage:
+MessageAttachment:
+  type: object
+  additionalProperties: false
+  required:
+    - attachment_id
+    - type
+    - file_name
+  properties:
+    attachment_id:
+      type: string
+    type:
+      type: string
+      enum:
+        - image
+        - file
+    file_name:
+      type: string
+    mime_type:
+      type: string
+    size:
+      type: integer
+      format: int64
+      minimum: 0
+    sha256:
+      type: string
+    url:
+      type: string
+    expires_at:
+      type: integer
+      format: int64
+      minimum: 0
+
+GroupMessage:
   type: object
   additionalProperties: false
   required:
     - id
-    - session_seq
-    - sender_id
-    - sender_type
-    - kind
+    - timestamp
+    - sender
     - content
-    - created_at
+    - message_type
+    - role
   properties:
     id:
       type: string
-    session_seq:
+    timestamp:
       type: integer
+      format: int64
       minimum: 0
-    sender_id:
+    sender:
       type: string
-    sender_type:
-      $ref: "#/MessageSenderKind"
-    kind:
-      $ref: "#/SessionMessageKind"
     content:
       type: string
-    created_at:
-      type: integer
-      minimum: 0
-
-SessionMessagePage:
-  type: object
-  additionalProperties: false
-  required:
-    - messages
-    - next_cursor
-    - has_more
-  properties:
-    messages:
+    message_type:
+      type: string
+      enum:
+        - bot
+        - system
+        - fusion
+    bot_name:
+      type: string
+    role:
+      type: string
+      enum:
+        - user
+        - tool_result
+        - assistant
+        - system
+    run_id:
+      type: string
+    historyMeta:
+      type: object
+      additionalProperties: true
+    metadata:
+      type: object
+      additionalProperties: true
+    attachments:
       type: array
       items:
-        $ref: "#/SessionMessage"
-    next_cursor:
-      type: string
-      nullable: true
-      description: >-
-        Opaque composite cursor (`"created_at:session_seq"`) for the next
-        page. Present (non-null) only when has_more is true; pass it as the
-        `before` query param to fetch the next page. Null when there are no
-        more messages.
-    has_more:
-      type: boolean
+        $ref: "#/MessageAttachment"
 
 SessionCompletionResult:
   type: object
@@ -1279,7 +1371,7 @@ SessionPageEnvelope:
     request_id:
       type: string
 
-SessionMessagePageEnvelope:
+SessionMessagesEnvelope:
   type: object
   additionalProperties: false
   required:
@@ -1293,7 +1385,9 @@ SessionMessagePageEnvelope:
     message:
       type: string
     data:
-      $ref: "#/SessionMessagePage"
+      type: array
+      items:
+        $ref: "#/GroupMessage"
     request_id:
       type: string
 

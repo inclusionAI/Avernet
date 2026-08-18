@@ -177,6 +177,15 @@ process_command() {
     ps -p "$pid" -o command= 2>/dev/null || true
 }
 
+# The desktop launcher reaps ordinary background children when the command
+# shell exits. Services started by an opt-in group therefore need their own
+# session, rather than relying on nohup alone. This helper is called from a
+# background job or an explicit subshell; `exec` replaces that wrapper so the
+# recorded PID is the actual service process and no shell is left waiting.
+start_in_detached_session() {
+    exec perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' "$@"
+}
+
 describe_process() {
     local pid="$1"
     local cwd

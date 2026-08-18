@@ -111,6 +111,38 @@ def test_release_routes_arca_pinned_image_to_template_config():
 
 
 @pytest.mark.unit
+def test_release_routes_arca_merges_template_config_and_pinned_image():
+    svc, baas = _svc("baas")
+    template_config = {
+        "envs": {
+            "AIX_MOS_PLUGIN": "true",
+            "AIX_SKIP_DAEMON": "true",
+            "AIX_SKIP_HARNESS": "true",
+            "BOT_TEMP_INSTALL_SKILL": '["aixcoding-skill"]',
+        },
+        "resource_spec": {"cpu": 2, "memory": 4096},
+        "image": "registry/template:old",
+    }
+
+    svc.release(
+        _BOT,
+        user_id="u1",
+        migration_path="/m/1",
+        publish_stage=PublishStage.VERIFY,
+        extra_envs={"BOT_TYPE": "application"},
+        template_config=template_config,
+        docker_image="registry/arca:v2",
+    )
+
+    kwargs = baas.create_bot.call_args.kwargs
+    assert kwargs["extra_envs"] == {"BOT_TYPE": "application"}
+    assert kwargs["template_config"] == {
+        **template_config,
+        "image": "registry/arca:v2",
+    }
+
+
+@pytest.mark.unit
 def test_release_routes_arca_with_template_uuid_from_system_config():
     resolver = _template_resolver()
     svc, baas = _svc("baas", baas_template_resolver=resolver)
@@ -191,6 +223,34 @@ def test_upgrade_routes_arca_pinned_image_to_template_config():
 
     assert baas.upgrade_bot.call_args.kwargs["template_config"] == {
         "image": "registry/arca:v2"
+    }
+
+
+@pytest.mark.unit
+def test_upgrade_routes_arca_merges_template_config_and_pinned_image():
+    svc, baas = _svc("baas")
+    template_config = {
+        "envs": {"BOT_TEMP_INSTALL_SKILL": '["aixcoding-skill"]'},
+        "resource_spec": {"cpu": 2, "memory": 4096},
+        "image": "registry/template:old",
+    }
+
+    svc.upgrade(
+        "BOT-a",
+        _BOT,
+        user_id="u1",
+        migration_path="/m/1",
+        publish_stage=PublishStage.ONLINE,
+        extra_envs={"BOT_TYPE": "application"},
+        template_config=template_config,
+        docker_image="registry/arca:v2",
+    )
+
+    kwargs = baas.upgrade_bot.call_args.kwargs
+    assert kwargs["extra_envs"] == {"BOT_TYPE": "application"}
+    assert kwargs["template_config"] == {
+        **template_config,
+        "image": "registry/arca:v2",
     }
 
 

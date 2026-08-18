@@ -10,7 +10,13 @@ use bcs_service_api::{
     ProviderBotCoreService, ProviderBotEventCommand, ProviderBotEventCredential,
     ProviderBotEventError, ProviderBotEventOutcome, ProviderBotEventService,
     ProviderCoordinationConfig, ProviderCoordinationEventKind, ProviderCoordinationIntent,
-    RuntimeBotIdentity, ServiceError, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
+    ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
+    ProviderRunTransport, RuntimeBotIdentity, ServiceError, ServiceResult, TaskCompleteCommand,
+    TaskDispatchCommand, TaskMessageCommand,
+    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+};
+use bcs_protocol::stream::{
+    ProviderTextEventState, ProviderTextResponseMode, apply_provider_event_text,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
@@ -22,8 +28,23 @@ const TOOL_ASSIGN_TASK: &str = "bcs_assign_task";
 const TOOL_SEND_TASK_MESSAGE: &str = "bcs_send_task_message";
 const TOOL_TASK_COMPLETE: &str = "bcs_task_complete";
 const COORDINATION_PROCESSED_TTL_MS: u64 = 10 * 60 * 1000;
+const STATE_MACHINE_VISIBLE_TEXT_RETENTION_MS: u64 = 24 * 60 * 60 * 1000;
 
 type StateMachineTerminalKey = (String, String, i32);
+
+struct StateMachineVisibleText {
+    text: String,
+    expires_at_ms: u64,
+}
+
+fn cleanup_expired_visible_text_entries(
+    runs: &mut HashMap<String, StateMachineVisibleText>,
+    now_ms: u64,
+) -> usize {
+    let before = runs.len();
+    runs.retain(|_, entry| now_ms <= entry.expires_at_ms);
+    before.saturating_sub(runs.len())
+}
 
 struct StateMachineTerminalInflightGuard {
     inflight: Arc<StdMutex<HashSet<StateMachineTerminalKey>>>,
@@ -111,6 +132,7 @@ pub struct ProviderBotEvents {
     collaboration_runtime: Option<Arc<dyn CollaborationRuntimeService>>,
     coordination_seen: Arc<Mutex<HashMap<String, u64>>>,
     state_machine_terminals_inflight: Arc<StdMutex<HashSet<StateMachineTerminalKey>>>,
+    state_machine_visible_text: Arc<Mutex<HashMap<String, StateMachineVisibleText>>>,
 }
 
 impl ProviderBotEvents {
@@ -126,6 +148,7 @@ impl ProviderBotEvents {
             collaboration_runtime: None,
             coordination_seen: Arc::new(Mutex::new(HashMap::new())),
             state_machine_terminals_inflight: Arc::new(StdMutex::new(HashSet::new())),
+            state_machine_visible_text: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -286,6 +309,141 @@ impl ProviderBotEvents {
         }
         Ok(())
     }
+
+    async fn ingest_event(
+        &self,
+        command: ProviderEventIngestCommand,
+    ) -> ServiceResult<bcs_service_api::BotEventOutcome> {
+        let Some(runtime) = self.collaboration_runtime.as_ref() else {
+            return self.message_flow.ingest_provider_event(command).await;
+        };
+        let Some(correlation) = runtime
+            .lookup_delivery_correlation(&command.event.run_id)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        else {
+            return self.message_flow.ingest_provider_event(command).await;
+        };
+        if correlation.assignee_bot_id != command.event.bot_id {
+            return Err(ServiceError::Forbidden(
+                "provider event bot does not match state-machine delivery".to_string(),
+            ));
+        }
+
+        let mut event = command.event;
+        let terminal = matches!(event.state,
+            ChatEventState::Final | ChatEventState::Error | ChatEventState::Aborted);
+        let expires_at_ms = self
+            .bot_run_context
+            .get_context(&event.run_id)
+            .await
+            .map(|context| context.deadline_ms)
+            .unwrap_or_else(|| now_ms().saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS))
+            .saturating_add(STATE_MACHINE_VISIBLE_TEXT_RETENTION_MS);
+        let visible_text = {
+            let mut runs = self.state_machine_visible_text.lock().await;
+            let accumulated = runs
+                .entry(event.run_id.clone())
+                .or_insert_with(|| StateMachineVisibleText {
+                    text: String::new(),
+                    expires_at_ms,
+                });
+            accumulated.expires_at_ms = expires_at_ms;
+            apply_provider_event_text(
+                &mut accumulated.text,
+                &event.event_type,
+                &event.event_payload,
+                provider_text_event_state(&event.state),
+                ProviderTextResponseMode::AfterLastToolCall,
+            );
+            let visible_text = accumulated.text.clone();
+            if terminal { runs.remove(&event.run_id); }
+            visible_text
+        };
+        if matches!(event.event_type.as_str(), "chat" | "chat.event")
+            && matches!(event.state, ChatEventState::Delta | ChatEventState::Final)
+            && !visible_text.is_empty()
+        {
+            inject_visible_text(&mut event.event_payload, &visible_text);
+        }
+
+        let runtime_command = HandleBotTerminalEventCommand {
+            bot_id: event.bot_id.clone(),
+            run_id: event.run_id.clone(),
+            event_type: event.event_type.clone(),
+            event_payload: event.event_payload.clone(),
+            state: event.state.clone(),
+            bcs_session_id: event.bcs_session_id.clone(),
+        };
+        if event.state == ChatEventState::Final {
+            let inflight_key = (correlation.state_machine_run_id.clone(),
+                correlation.node_id.clone(), correlation.attempt);
+            if self.state_machine_terminals_inflight.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(inflight_key.clone())
+            {
+                let runtime = runtime.clone();
+                let inflight_guard = StateMachineTerminalInflightGuard {
+                    inflight: self.state_machine_terminals_inflight.clone(),
+                    key: inflight_key,
+                };
+                tokio::spawn(async move {
+                    let _inflight_guard = inflight_guard;
+                    if let Err(error) = runtime.handle_bot_terminal_event(runtime_command).await {
+                        error!(%error, "provider ingest: async state-machine final failed");
+                    }
+                });
+            }
+            return Ok(provider_state_machine_outcome());
+        }
+
+        let outcome = runtime.handle_bot_terminal_event(runtime_command).await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        Ok(if outcome.consumed { provider_state_machine_outcome() }
+            else { provider_state_machine_miss_outcome() })
+    }
+}
+
+fn inject_visible_text(payload: &mut Value, text: &str) {
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("message".to_string(),
+            json!({"content": [{"type": "text", "text": text}]}));
+    }
+}
+
+fn provider_text_event_state(state: &ChatEventState) -> ProviderTextEventState {
+    match state {
+        ChatEventState::Delta => ProviderTextEventState::Delta,
+        ChatEventState::Final => ProviderTextEventState::Final,
+        ChatEventState::Aborted => ProviderTextEventState::Aborted,
+        ChatEventState::Error => ProviderTextEventState::Error,
+        ChatEventState::ToolCallStart => ProviderTextEventState::ToolCallStart,
+        ChatEventState::ToolCallEnd => ProviderTextEventState::ToolCallEnd,
+    }
+}
+
+fn provider_state_machine_outcome() -> bcs_service_api::BotEventOutcome {
+    bcs_service_api::BotEventOutcome {
+        bot_deliveries: Vec::new(), frontend_deliveries: Vec::new(),
+        unregistered_run_ids: Vec::new(), mentions: Vec::new(),
+        delivered_count: 1, failed_count: 0, delivery_results: Vec::new(),
+    }
+}
+
+fn provider_state_machine_miss_outcome() -> bcs_service_api::BotEventOutcome {
+    bcs_service_api::BotEventOutcome {
+        failed_count: 1, delivered_count: 0, ..provider_state_machine_outcome()
+    }
+}
+
+#[async_trait]
+impl ProviderEventIngestService for ProviderBotEvents {
+    async fn ingest_provider_event(
+        &self,
+        command: ProviderEventIngestCommand,
+    ) -> ServiceResult<bcs_service_api::BotEventOutcome> {
+        self.ingest_event(command).await
+    }
 }
 
 #[async_trait]
@@ -298,6 +456,26 @@ impl ProviderBotEventService for ProviderBotEvents {
             return Err(ProviderBotEventError::InvalidRequest(
                 "run_id is required".to_string(),
             ));
+        }
+
+        // COSEC: bind every Provider 2.0 run to one negotiated event source so
+        // a callback cannot inject duplicate or conflicting events into an SSE run.
+        match self
+            .bot_run_context
+            .get_provider_transport(&command.run_id)
+            .await
+        {
+            Some(ProviderRunTransport::Sse | ProviderRunTransport::Negotiating) => {
+                return Err(ProviderBotEventError::TransportConflict(
+                    "transport_conflict".to_string(),
+                ));
+            }
+            Some(ProviderRunTransport::Terminal) => {
+                return Err(ProviderBotEventError::RunTerminated(
+                    "run_terminated".to_string(),
+                ));
+            }
+            Some(ProviderRunTransport::Callback) | None => {}
         }
 
         // Two intake modes (spec §11.2 / §11.3):
@@ -363,7 +541,40 @@ impl ProviderBotEventService for ProviderBotEvents {
             normalize_chat_error_payload(&mut ingest_payload);
         }
 
-        if let Some(collaboration_runtime) = self.collaboration_runtime.as_ref() {
+        if let Some(runtime) = self.collaboration_runtime.as_ref()
+            && runtime.lookup_delivery_correlation(&command.run_id).await
+                .map_err(map_collaboration_runtime_error)?.is_some()
+        {
+            let identity = self.authenticate_event(&command).await?;
+            let outcome = self.ingest_event(ProviderEventIngestCommand {
+                source: ProviderEventSource::Callback,
+                event: BotEventCommand {
+                    bot_id: identity.bot_uuid,
+                    run_id: command.run_id.clone(),
+                    group_id: String::new(),
+                    event_type: ingest_event_type,
+                    event_payload: ingest_payload,
+                    state: command.state.clone(),
+                    bcs_session_id: None,
+                },
+            }).await.map_err(map_service_error)?;
+            if is_terminal {
+                self.bot_run_context.mark_terminal(&command.run_id).await;
+                self.bot_run_context.mark_provider_transport_terminal(&command.run_id).await;
+            }
+            return Ok(ProviderBotEventOutcome {
+                delivered_count: outcome.delivered_count,
+                failed_count: outcome.failed_count,
+            });
+        }
+
+        let has_registered_context = self
+            .bot_run_context
+            .get_context(&command.run_id)
+            .await
+            .is_some();
+        if !has_registered_context {
+            if let Some(collaboration_runtime) = self.collaboration_runtime.as_ref() {
             if let Some(correlation) = collaboration_runtime
                 .lookup_delivery_correlation(&command.run_id)
                 .await
@@ -380,14 +591,6 @@ impl ProviderBotEventService for ProviderBotEvents {
                     );
                     return Err(ProviderBotEventError::Forbidden(
                         "runtime identity does not match state-machine delivery".to_string(),
-                    ));
-                }
-
-                if matches!(command.state, ChatEventState::Final)
-                    && command.message_text.trim().is_empty()
-                {
-                    return Err(ProviderBotEventError::InvalidRequest(
-                        "final state-machine bot event must include text".to_string(),
                     ));
                 }
 
@@ -520,6 +723,7 @@ impl ProviderBotEventService for ProviderBotEvents {
                 });
             }
         }
+        }
 
         let context = self
             .bot_run_context
@@ -579,18 +783,20 @@ impl ProviderBotEventService for ProviderBotEvents {
         let run_id = command.run_id.clone();
         let identity_bot_uuid = identity.bot_uuid.clone();
         let outcome_result = self
-            .message_flow
-            .handle_bot_event(BotEventCommand {
-                bot_id: identity_bot_uuid.clone(),
-                run_id: run_id.clone(),
-                group_id: context_group_id.clone(),
-                event_type: ingest_event_type.clone(),
-                // Callback streaming: the provider's §3 payload (same shape the
-                // SSE path produces). Legacy: synthesized chat.event terminal
-                // payload, so A2A run parsers see it like WS `chat.event` frames.
-                event_payload: ingest_payload.clone(),
-                state: command.state.clone(),
-                bcs_session_id: context_bcs_session_id.clone(),
+            .ingest_event(ProviderEventIngestCommand {
+                source: ProviderEventSource::Callback,
+                event: BotEventCommand {
+                    bot_id: identity_bot_uuid.clone(),
+                    run_id: run_id.clone(),
+                    group_id: context_group_id.clone(),
+                    event_type: ingest_event_type.clone(),
+                    // Callback streaming: the provider's §3 payload (same shape the
+                    // SSE path produces). Legacy: synthesized chat.event terminal
+                    // payload, so A2A run parsers see it like WS `chat.event` frames.
+                    event_payload: ingest_payload.clone(),
+                    state: command.state.clone(),
+                    bcs_session_id: context_bcs_session_id.clone(),
+                },
             })
             .await;
         let outcome = match outcome_result {
@@ -605,6 +811,9 @@ impl ProviderBotEventService for ProviderBotEvents {
 
         if is_terminal {
             self.bot_run_context.mark_terminal(&command.run_id).await;
+            self.bot_run_context
+                .mark_provider_transport_terminal(&command.run_id)
+                .await;
         }
         info!(
             provider_id = %command.provider_id,
@@ -713,6 +922,11 @@ impl ProviderBotEventService for ProviderBotEvents {
             duplicate: false,
         })
     }
+
+    async fn cleanup_expired(&self, now_ms: u64) -> usize {
+        let mut runs = self.state_machine_visible_text.lock().await;
+        cleanup_expired_visible_text_entries(&mut runs, now_ms)
+    }
 }
 
 fn normalize_chat_error_payload(payload: &mut Value) {
@@ -798,11 +1012,6 @@ fn coordination_call_from_command(
             })
         }
         CoordinationMode::NativeMcp => {
-            if command.kind != ProviderCoordinationEventKind::CoordinationIntent {
-                return Err(ProviderBotEventError::InvalidRequest(
-                    "native_mcp coordination requires coordination_intent callbacks".to_string(),
-                ));
-            }
             let expected_server = coordination
                 .mcp_server
                 .as_deref()
@@ -813,23 +1022,77 @@ fn coordination_call_from_command(
                         "native_mcp coordination is missing mcp_server config".to_string(),
                     )
                 })?;
-            let actual_server = command
+            if let Some(actual_server) = command
                 .mcp_server
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    ProviderBotEventError::InvalidRequest(
-                        "native_mcp coordination requires mcp_server".to_string(),
-                    )
-                })?;
-            if actual_server != expected_server {
+                && actual_server != expected_server
+            {
                 return Err(ProviderBotEventError::Forbidden(format!(
-                    "mcp_server mismatch: expected '{}'",
-                    expected_server
+                    "mcp_server mismatch: expected '{expected_server}'"
                 )));
             }
-            coordination_intent_to_call(command.intent.as_ref())
+            match command.kind {
+                ProviderCoordinationEventKind::CoordinationIntent => {
+                    if command
+                        .mcp_server
+                        .as_deref()
+                        .map(str::trim)
+                        .map_or(true, |value| value.is_empty())
+                    {
+                        return Err(ProviderBotEventError::InvalidRequest(
+                            "native_mcp coordination_intent requires mcp_server".to_string(),
+                        ));
+                    }
+                    coordination_intent_to_call(command.intent.as_ref())
+                }
+                ProviderCoordinationEventKind::ToolResult => {
+                    let provider_tool_name = command
+                        .tool_name
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .ok_or_else(|| {
+                            ProviderBotEventError::InvalidRequest(
+                                "native_mcp tool_result requires tool_name".to_string(),
+                            )
+                        })?;
+                    // COSEC: only an exact provider-configured tool name may
+                    // translate an authenticated tool result into a BCS side effect.
+                    let canonical_tool_name = coordination
+                        .tool_name_mapping
+                        .get(provider_tool_name)
+                        .ok_or_else(|| {
+                            ProviderBotEventError::Forbidden(
+                                "native_mcp tool_name is not configured for coordination"
+                                    .to_string(),
+                            )
+                        })?;
+                    let result_text = command
+                        .result_text
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .ok_or_else(|| {
+                            ProviderBotEventError::InvalidRequest(
+                                "native_mcp tool_result requires result_text".to_string(),
+                            )
+                        })?;
+                    let call = CoordinationCall::from_stdout(result_text).ok_or_else(|| {
+                        ProviderBotEventError::InvalidRequest(
+                            "tool_result did not contain a BCS coordination echo".to_string(),
+                        )
+                    })?;
+                    if call.tool != *canonical_tool_name {
+                        return Err(ProviderBotEventError::Forbidden(
+                            "native_mcp tool result does not match configured canonical tool"
+                                .to_string(),
+                        ));
+                    }
+                    Ok(call)
+                }
+            }
         }
         CoordinationMode::NativeTool => {
             if command.kind != ProviderCoordinationEventKind::CoordinationIntent {
@@ -942,4 +1205,32 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_machine_visible_text_expires_one_day_after_run_deadline() {
+        let deadline_ms = 1_000_u64;
+        let expires_at_ms = deadline_ms.saturating_add(STATE_MACHINE_VISIBLE_TEXT_RETENTION_MS);
+        let mut runs = HashMap::from([(
+            "run-1".to_string(),
+            StateMachineVisibleText {
+                text: "partial".to_string(),
+                expires_at_ms,
+            },
+        )]);
+
+        assert_eq!(STATE_MACHINE_VISIBLE_TEXT_RETENTION_MS, 86_400_000);
+        assert_eq!(cleanup_expired_visible_text_entries(&mut runs, expires_at_ms), 0);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(
+            cleanup_expired_visible_text_entries(&mut runs, expires_at_ms + 1),
+            1
+        );
+        assert!(runs.is_empty());
+        assert_eq!(cleanup_expired_visible_text_entries(&mut runs, u64::MAX), 0);
+    }
 }

@@ -5,10 +5,11 @@ pub mod bot_terminal_observer;
 
 use bcs_domain::HumanInputNotificationMode;
 use bcs_service_api::{
-    BotDeliveryPort, ChatRunCleanupPort, ChatRunEventPort, FrontendDeliveryPort,
-    GroupHistoryBotRequestPort, HumanInputReadyEvent, LeaderElectionPort, LeaderStatus,
-    SessionChannelDeliveryOutcome, SessionChannelOutboundPort, StateMachineResultPublishCommand,
-    StateMachineResultPublisherPort,
+    BotDeliveryPort, CanResolveInteractionPort, ChatRunCleanupPort, ChatRunEventPort,
+    FrontendDeliveryPort, GroupHistoryBotRequestPort, HumanInputReadyEvent,
+    InteractionFrontendPort, InteractionProviderPort, InteractionStorePort, LeaderElectionPort,
+    LeaderStatus, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
+    StateMachineResultPublishCommand, StateMachineResultPublisherPort,
 };
 
 pub use metrics::{
@@ -27,6 +28,25 @@ pub async fn chat_run_cleanup_port_contract_tests<T: ChatRunCleanupPort + ?Sized
 pub async fn chat_run_event_port_contract_tests<T: ChatRunEventPort + ?Sized>(_port: &T) {}
 
 pub async fn frontend_delivery_port_contract_tests<T: FrontendDeliveryPort + ?Sized>(_port: &T) {}
+
+pub async fn can_resolve_interaction_port_contract_tests<
+    T: CanResolveInteractionPort + ?Sized,
+>(
+    _port: &T,
+) {
+}
+
+pub async fn interaction_frontend_port_contract_tests<T: InteractionFrontendPort + ?Sized>(
+    _port: &T,
+) {
+}
+
+pub async fn interaction_provider_port_contract_tests<T: InteractionProviderPort + ?Sized>(
+    _port: &T,
+) {
+}
+
+pub async fn interaction_store_port_contract_tests<T: InteractionStorePort + ?Sized>(_port: &T) {}
 
 pub async fn group_history_bot_request_port_contract_tests<
     T: GroupHistoryBotRequestPort + ?Sized,

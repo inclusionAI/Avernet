@@ -16,7 +16,7 @@ from gateway.community.bootstrap._authn import build_authenticator
 from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.config import UserConfig
 from gateway.community.core.access_key import AccessKeyRepository
-from gateway.community.core.app import AppRepository, AppRow
+from gateway.community.core.app import APIKeyGenerator, AppRepository, AppRow
 from gateway.community.core.authn import IdentityChain, authenticate
 from gateway.community.core.bot import BotRepository, BotRow
 from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
@@ -44,6 +44,14 @@ def _userinfo_handler(
 
 _GOOGLE_BODY = {"sub": "g-1", "email": "a@example.com", "name": "A"}
 
+_APP_KEY = APIKeyGenerator.generate()
+# A pre-API-key app token, presented as its holder still would.
+_LEGACY_APP_JWT = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImJhcmUifQ"
+    ".eyJpc3MiOiJnYXRld2F5IiwidHlwIjoiYXBwIiwic3ViIjoiTGVnYWN5IEFwcCJ9"
+    ".c2lnbmF0dXJlLW5vdC12ZXJpZmllZC1ieS10aGUtZ2F0ZXdheQ"
+)
+
 
 def _db() -> DataSourcePlugin:
     db = initialize_database(
@@ -54,8 +62,20 @@ def _db() -> DataSourcePlugin:
             AppRow(
                 app_name="Demo App",
                 app_type="assistant",
-                token="app-key",
+                api_key_hash=APIKeyGenerator.hash_key(_APP_KEY),
+                api_key_prefix=_APP_KEY[:8],
                 owners="org-1",
+                tenant="t",
+            )
+        )
+        # An app registered before the API-key scheme: still authenticates via
+        # the deprecated exact-match path for the transition window.
+        session.add(
+            AppRow(
+                app_name="Legacy App",
+                app_type="assistant",
+                token=_LEGACY_APP_JWT,
+                owners="org-legacy",
                 tenant="t",
             )
         )
@@ -108,7 +128,7 @@ def _google_strategies() -> dict[PrincipalType, IdentityChain]:
 
 async def test_app_only_resolves_app_identity() -> None:
     creds = CredentialBundle(
-        headers={"x-avernet-app-token": "app-key"},
+        headers={"x-avernet-app-token": _APP_KEY},
         cookies={},
         query={},
     )
@@ -175,7 +195,7 @@ async def test_mixed_app_and_google_user_resolve_both() -> None:
     creds = CredentialBundle(
         headers={
             "x-avernet-google-token": "tok",
-            "x-avernet-app-token": "app-key",
+            "x-avernet-app-token": _APP_KEY,
         },
         cookies={},
         query={},
@@ -187,3 +207,24 @@ async def test_mixed_app_and_google_user_resolve_both() -> None:
     )
     assert PrincipalType.USER in result
     assert PrincipalType.APP in result
+
+
+async def test_legacy_app_jwt_still_resolves_app_identity() -> None:
+    """The transition window, end to end through the real strategy.
+
+    An app registered before the API-key scheme presents the JWT it was issued
+    and still authenticates, resolving to the same principal shape as a modern
+    app. Delete with the deprecated path.
+    """
+    creds = CredentialBundle(
+        headers={"x-avernet-app-token": _LEGACY_APP_JWT},
+        cookies={},
+        query={},
+    )
+    result = await authenticate(
+        creds, {PrincipalType.APP: Presence.REQUIRED}, _strategies()
+    )
+    assert PrincipalType.APP in result
+    principal = result[PrincipalType.APP]
+    assert principal.app.app_name == "Legacy App"
+    assert principal.tenant == "t"

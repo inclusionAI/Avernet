@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     future::Future,
     io::{self, Write},
     sync::{Arc, OnceLock},
@@ -23,7 +23,8 @@ use bcs_protocol::{BcsFrame, ChatSendParams};
 use bcs_service_api::port::repo::MessageRepoPort;
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult,
-    BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, ChatEventState,
+    BotDeliveryTarget, BotRunContext, BotRunContextPort, CallbackChannelConfig, CallbackConfig,
+    ChatEventState, ProviderRunTransport,
     CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
     ConfigureGroupRuntimeCommand, DefinitionYamlSource, FrontendDeliveryCommand,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupCoreService,
@@ -1684,7 +1685,7 @@ async fn human_input_remains_persisted_when_judge_fails() {
 }
 
 #[tokio::test]
-async fn human_input_timeout_fails_run_without_bot_retry_and_rejects_late_response() {
+async fn human_input_timeout_ignores_global_retries_and_rejects_late_response() {
     let group = Arc::new(GroupStore::new());
     group.upsert(test_group()).await.expect("seed group");
     let sessions = test_sessions();
@@ -1700,11 +1701,17 @@ async fn human_input_timeout_fails_run_without_bot_retry_and_rejects_late_respon
         delivery.clone(),
         noop_judge(),
     );
+    let definition_yaml = human_input_yaml()
+        .replace(
+            "    nodes:\n",
+            "    defaults:\n      max_attempts: 3\n    nodes:\n",
+        )
+        .replace("60000", "1");
     let started = runtime
         .start_state_machine_run(StartStateMachineRunCommand {
             group_id: "group-1".to_string(),
             session_id: None,
-            definition_yaml: Some(human_input_yaml().replace("60000", "1")),
+            definition_yaml: Some(definition_yaml),
             definition: None,
             definition_ref: None,
             participant_bindings: None,
@@ -1732,6 +1739,7 @@ async fn human_input_timeout_fails_run_without_bot_retry_and_rejects_late_respon
     assert_eq!(view.run.status, StateMachineRunStatus::Failed);
     assert_eq!(view.nodes[0].status, StateMachineNodeStatus::Failed);
     assert_eq!(view.nodes[0].attempt, 0);
+    assert_eq!(view.nodes[0].max_attempts, 1);
     assert!(delivery.commands.lock().await.is_empty());
 
     let late = runtime
@@ -2218,6 +2226,52 @@ async fn single_node_run_completes_session_with_bot_final_text() {
             .and_then(|metadata| metadata["state_machine"]["event"].as_str()),
         Some("output")
     );
+}
+
+#[tokio::test]
+async fn state_machine_bot_delivery_registers_message_flow_run_context() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let run_context = Arc::new(RecordingBotRunContext::default());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        test_sessions(),
+        delivery.clone(),
+        noop_judge(),
+    )
+    .with_bot_run_context(run_context.clone());
+
+    runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(single_node_yaml()),
+            definition: None,
+            definition_ref: None,
+            participant_bindings: None,
+            input: json!({"question": "stream this"}),
+            caller_id: None,
+            authenticated_human: None,
+        })
+        .await
+        .expect("start run");
+
+    let delivery_run_id = delivery.commands.lock().await[0].run_id.clone();
+    let context = run_context
+        .get_context(&delivery_run_id)
+        .await
+        .expect("state-machine delivery run context");
+    assert_eq!(context.bot_id, "driver-bot");
+    assert!(context.group_id.is_empty());
+    assert!(context.bcs_session_id.is_none());
+    assert!(!context.terminal);
+    assert!(context.deadline_ms > bcs_protocol::now_ms());
 }
 
 #[tokio::test]
@@ -3905,6 +3959,60 @@ impl StateMachineDefinitionRepoPort for CountingDefinitionRepo {
 #[derive(Default)]
 struct RecordingDelivery {
     commands: Mutex<Vec<BotDeliveryCommand>>,
+}
+
+#[derive(Default)]
+struct RecordingBotRunContext {
+    contexts: Mutex<HashMap<String, BotRunContext>>,
+}
+
+#[async_trait]
+impl BotRunContextPort for RecordingBotRunContext {
+    async fn put_context(&self, context: BotRunContext) {
+        self.contexts
+            .lock()
+            .await
+            .insert(context.run_id.clone(), context);
+    }
+
+    async fn get_context(&self, run_id: &str) -> Option<BotRunContext> {
+        self.contexts.lock().await.get(run_id).cloned()
+    }
+
+    async fn try_begin_terminal(&self, _run_id: &str) -> bool {
+        true
+    }
+
+    async fn mark_terminal(&self, run_id: &str) -> bool {
+        let mut contexts = self.contexts.lock().await;
+        let Some(context) = contexts.get_mut(run_id) else {
+            return false;
+        };
+        context.terminal = true;
+        true
+    }
+
+    async fn release_terminal(&self, _run_id: &str) {}
+
+    async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
+        false
+    }
+
+    async fn bind_provider_transport(
+        &self,
+        _run_id: &str,
+        _transport: ProviderRunTransport,
+    ) -> bool {
+        false
+    }
+
+    async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
+        None
+    }
+
+    async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
+
+    async fn clear_provider_transport(&self, _run_id: &str) {}
 }
 
 #[async_trait]

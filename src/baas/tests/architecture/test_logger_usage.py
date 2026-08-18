@@ -72,3 +72,96 @@ def test_no_direct_logging_getlogger_outside_legacy_layers():
             + "\n\nUse secbaas.logger.get_logger() instead of "
             "logging.getLogger() to keep logger backends swappable."
         )
+
+
+# --- Canonical logger name whitelist ---
+
+ALLOWED_LOGGER_NAMES = frozenset(
+    {
+        "core-service",
+        "orm",
+        "router",
+        "router-open-api",
+        "router-gateway",
+        "router-admin",
+        "core-bot-run",
+        "core-scheduler",
+        "database",
+        "plugin-sandbox",
+        "plugin-bot-service",
+        "plugin-auth",
+        "bootstrap",
+        "config",
+        "webserver",
+        # Digest stream deliberately kept out of the shared application logs:
+        # monitoring collects ``arca-renew-digest.log`` as a standalone,
+        # comma-separated feed of TTL renewal outcomes.
+        "arca-renew-digest",
+    }
+)
+
+CANONICAL_NAME_PATTERN = r"^[a-z][a-z0-9-]*$"
+
+
+def test_logger_names_are_canonical():
+    """All ``get_logger("...")`` calls must use a canonical name from the
+    whitelist and match the naming style ``^[a-z][a-z0-9-]*$``.
+
+    Logger names become log file names (``{name}.log``); reusing existing
+    canonical names reduces log-file fragmentation.  Adding a new name
+    requires updating ``ALLOWED_LOGGER_NAMES`` in this test.
+    """
+    import re
+
+    name_violations: list[str] = []
+    style_violations: list[str] = []
+
+    for py_file in sorted(SECBAAS.rglob("*.py")):
+        if "__pycache__" in str(py_file):
+            continue
+
+        rel_path = str(py_file.relative_to(SECBAAS))
+
+        try:
+            source = py_file.read_text()
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            # Match get_logger("...")
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "get_logger"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                name = node.args[0].value
+                if name not in ALLOWED_LOGGER_NAMES:
+                    name_violations.append(
+                        f'  {rel_path}:{node.lineno}: get_logger("{name}")'
+                    )
+                if not re.match(CANONICAL_NAME_PATTERN, name):
+                    style_violations.append(
+                        f'  {rel_path}:{node.lineno}: get_logger("{name}") '
+                        f"does not match {CANONICAL_NAME_PATTERN}"
+                    )
+
+    messages = []
+    if name_violations:
+        messages.append(
+            f"\n{len(name_violations)} call(s) use non-canonical logger names:\n"
+            + "\n".join(name_violations)
+            + "\n\nAllowed names: "
+            + ", ".join(sorted(ALLOWED_LOGGER_NAMES))
+        )
+    if style_violations:
+        messages.append(
+            f"\n{len(style_violations)} call(s) violate the naming style:\n"
+            + "\n".join(style_violations)
+        )
+    if messages:
+        raise AssertionError("\n".join(messages))

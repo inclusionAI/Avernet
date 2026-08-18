@@ -12,7 +12,12 @@ from agentclaw.community.core.service_bot.services.deploy.provider_resolver impo
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.devices.protocols import BotQueryProtocol
+    from agentclaw.community.core.devices.services.baas_device_service import (
+        TemplateConfigReader,
+    )
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
+    from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
 
 logger = get_logger()
@@ -25,8 +30,20 @@ class BaasDeviceHeaderUpdateError(DeviceServiceError):
 class BaasDeviceHeaderUpdater:
     """Build and install outbound rules for one BaaS logical Bot."""
 
-    def __init__(self, baas_service: BaasService) -> None:
+    def __init__(
+        self,
+        baas_service: BaasService,
+        *,
+        bot_query: "BotQueryProtocol | None" = None,
+        template_service: "TemplateConfigReader | None" = None,
+        secret_resolver: "SecretResolver | None" = None,
+        theta_master_key_secret: str = "",
+    ) -> None:
         self._baas_service = baas_service
+        self._bot_query = bot_query
+        self._template_service = template_service
+        self._secret_resolver = secret_resolver
+        self._theta_master_key_secret = theta_master_key_secret
 
     def update(
         self,
@@ -55,15 +72,44 @@ class BaasDeviceHeaderUpdater:
 
         try:
             if device.device_provider == TECLAW_DEVICE_PROVIDER:
-                outbound_rule = self._baas_service._build_teclaw_outbound_operation_rule(
-                    agent_pass_token=agent_pass_token,
+                outbound_rule = (
+                    self._baas_service._build_teclaw_outbound_operation_rule(
+                        agent_pass_token=agent_pass_token,
+                    )
                 )
             else:
+                # 引擎解耦：复用创建链路同一套 provisioning 协议解析自定义 egress-key
+                # envelope，避免 bootstrap REPLACE 用部署默认凭证覆盖创建/重启写入的值。
+                from agentclaw.community.core.bot_management.engines import (
+                    resolve_outbound_rule_envelope,
+                )
+
+                extra_properties = resolve_outbound_rule_envelope(
+                    bot_id=bolt_id,
+                    owner_id=owner_id,
+                    bot_query=self._bot_query,
+                    template_service=self._template_service,
+                    secret_resolver=self._secret_resolver,
+                    theta_master_key_secret=self._theta_master_key_secret,
+                )
+                logger.info(
+                    "[BaasDeviceHeaderUpdater.update] outbound envelope: "
+                    "device_id=%s, bolt_id=%s, owner_id=%s, "
+                    "custom_outbound_key_resolved=%s",
+                    device.device_id,
+                    bolt_id,
+                    owner_id,
+                    bool(
+                        isinstance(extra_properties, dict)
+                        and extra_properties.get("outbound_api_key")
+                    ),
+                )
                 outbound_rule = self._baas_service._build_outbound_operation_rule(
                     bot_id=bolt_id,
                     owner_id=owner_id,
                     agent_pass_token=agent_pass_token,
                     agent_code=agent_code,
+                    extra_properties=extra_properties,
                 )
         except Exception as e:
             logger.error(
@@ -133,10 +179,12 @@ class BaasDeviceHeaderUpdater:
             f"device_id={device.device_id}, device_uuid={device_uuid}, "
             f"paas_device_id={paas_device_id}"
         )
-        return [{
-            "baas_device_uuid": device_uuid,
-            "paas_device_id": paas_device_id,
-        }]
+        return [
+            {
+                "baas_device_uuid": device_uuid,
+                "paas_device_id": paas_device_id,
+            }
+        ]
 
     def _update_bot_devices(
         self,
@@ -171,10 +219,12 @@ class BaasDeviceHeaderUpdater:
                 paas_device_id,
                 outbound_rule,
             )
-            updated_devices.append({
-                "device_uuid": device_uuid,
-                "paas_device_id": paas_device_id,
-            })
+            updated_devices.append(
+                {
+                    "device_uuid": device_uuid,
+                    "paas_device_id": paas_device_id,
+                }
+            )
             logger.info(
                 f"[BaasDeviceHeaderUpdater.update] Device updated: "
                 f"device_id={device.device_id}, device_uuid={device_uuid}, "

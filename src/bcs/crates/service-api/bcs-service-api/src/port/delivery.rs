@@ -6,16 +6,11 @@ use crate::{ServiceError, ServiceResult};
 
 pub use bcs_protocol::{BotDeliveryKind, FrontendDeliveryKind, FrontendDeliveryTarget};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProviderTransportPreference {
+    #[default]
+    SseFirst,
     Callback,
-    CallbackSse,
-}
-
-impl Default for ProviderTransportPreference {
-    fn default() -> Self {
-        Self::Callback
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +19,8 @@ pub struct BotDeliveryCommand {
     pub run_id: String,
     pub frame: BcsFrame,
     pub delivery_kind: BotDeliveryKind,
+    /// Request-scoped transport preference for HTTP Provider `chat.send`.
+    /// Non-Provider transports ignore this field.
     pub provider_transport: ProviderTransportPreference,
     /// Opaque inbound HTTP headers explicitly allowlisted by BCS configuration
     /// for forwarding to HTTP provider webhooks. Empty for non-HTTP ingress.

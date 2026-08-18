@@ -12,10 +12,14 @@ bots_stack_script() {
     echo "$stack_script"
 }
 
-BOTS_DYNAMIC_PROFILE_FILES=(
-    "SOUL.md"
+BOTS_DYNAMIC_REQUIRED_PROFILE_FILES=(
     "AGENTS.md"
     "IDENTITY.md"
+    "KNOWLEDGE.md"
+)
+
+BOTS_DYNAMIC_OPTIONAL_PROFILE_FILES=(
+    "SOUL.md"
     "USER.md"
     "TOOLS.md"
     "HEARTBEAT.md"
@@ -25,7 +29,6 @@ BOTS_DYNAMIC_PROFILE_FILES=(
     "OUTPUT.md"
     "RULES.md"
     "SAFETY.md"
-    "KNOWLEDGE.md"
 )
 
 bots_dynamic_enabled() {
@@ -81,8 +84,8 @@ bots_dynamic_fusion_enabled() {
 
 bots_dynamic_has_runtime() {
     local runtime="$1"
-    jq -e --arg runtime "$runtime" \
-        'any(.bots[]; (.runtime.type // "openclaw") == $runtime)' \
+    jq -e --arg runtime "$runtime" --arg excluded_source "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" \
+        'any(.bots[]; ($excluded_source == "" or (.source // "") != $excluded_source) and ((.runtime.type // "openclaw") == $runtime))' \
         "$(bots_dynamic_manifest)" >/dev/null 2>&1
 }
 
@@ -310,7 +313,7 @@ bots_bcn_plugin_load_dir() {
 bots_dynamic_specs() {
     local manifest
     manifest="$(bots_dynamic_manifest)"
-    jq -r '
+    jq -r --arg excluded_source "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" '
       . as $root
       | ($root.port_start // 0 | tonumber) as $start
       | ($root.port_step // 1 | tonumber) as $step
@@ -319,6 +322,7 @@ bots_dynamic_specs() {
       | to_entries[]
       | .key as $idx
       | .value as $bot
+      | select($excluded_source == "" or ($bot.source // "") != $excluded_source)
       | ($bot.runtime.type // "openclaw") as $runtime
       | [
           $bot.name,
@@ -336,7 +340,9 @@ bots_dynamic_specs() {
 }
 
 bots_dynamic_count() {
-    jq -r '.bots | length' "$(bots_dynamic_manifest)"
+    jq -r --arg excluded_source "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" \
+        '[.bots[] | select($excluded_source == "" or (.source // "") != $excluded_source)] | length' \
+        "$(bots_dynamic_manifest)"
 }
 
 bots_dynamic_validate_manifest() {
@@ -443,7 +449,7 @@ bots_dynamic_validate_manifest() {
                 log_error "${name}: source directory not found: ${source_dir}"
                 has_error=true
             else
-                for file in "${BOTS_DYNAMIC_PROFILE_FILES[@]}"; do
+                for file in "${BOTS_DYNAMIC_REQUIRED_PROFILE_FILES[@]}"; do
                     if [ ! -f "${source_dir}/${file}" ]; then
                         log_error "${name}: required profile file missing: ${source_dir}/${file}"
                         has_error=true
@@ -571,13 +577,37 @@ bots_dynamic_model_source_has_fields() {
     local source
     source="$(bots_dynamic_model_config_source)"
     [ -f "$source" ] || return 1
-    jq -e '(.models? != null) or (.agents.defaults.model? != null) or (.agents.defaults.models? != null) or (.agents.defaults.imageModel? != null)' "$source" >/dev/null
+    jq -e '(.models? != null) or (.agents.defaults.model? != null) or (.agents.defaults.models? != null) or (.agents.defaults.imageModel? != null) or (.agents.defaults.thinkingDefault? != null) or (.agents.defaults.timeoutSeconds? != null)' "$source" >/dev/null
 }
 
-bots_dynamic_config_has_model_fields() {
+bots_dynamic_config_matches_model_source() {
     local config_file="$1"
+    local source source_models config_models source_agent_fields config_agent_fields
+    source="$(bots_dynamic_model_config_source)"
+    [ -f "$source" ] && [ -f "$config_file" ] || return 1
+    source_models="$(jq -S -c '.models // null' "$source")" || return 1
+    config_models="$(jq -S -c '.models // null' "$config_file")" || return 1
+    source_agent_fields="$(bots_dynamic_agent_model_fields_json)" || return 1
+    config_agent_fields="$(jq -S -c '
+      (.agents.defaults // {}) as $defaults
+      | {}
+        + (if $defaults.model? != null then {model: $defaults.model} else {} end)
+        + (if $defaults.models? != null then {models: $defaults.models} else {} end)
+        + (if $defaults.imageModel? != null then {imageModel: $defaults.imageModel} else {} end)
+        + (if $defaults.thinkingDefault? != null then {thinkingDefault: $defaults.thinkingDefault} else {} end)
+        + (if $defaults.timeoutSeconds? != null then {timeoutSeconds: $defaults.timeoutSeconds} else {} end)
+    ' "$config_file")" || return 1
+    [ "$source_models" = "$config_models" ] && [ "$source_agent_fields" = "$config_agent_fields" ]
+}
+
+bots_dynamic_config_has_required_model() {
+    local config_file="$1"
+    [ -z "${SINGLEBOX_REQUIRED_OPENCLAW_MODEL:-}" ] && return 0
     [ -f "$config_file" ] || return 1
-    jq -e '(.models? != null) or (.agents.defaults.model? != null) or (.agents.defaults.models? != null) or (.agents.defaults.imageModel? != null)' "$config_file" >/dev/null
+    jq -e --arg expected "$SINGLEBOX_REQUIRED_OPENCLAW_MODEL" '
+      .agents.defaults.model.primary == $expected
+      and (.agents.defaults.models[$expected] != null)
+    ' "$config_file" >/dev/null
 }
 
 bots_dynamic_config_has_bcs_core_tools() {
@@ -604,12 +634,14 @@ bots_dynamic_agent_model_fields_json() {
         printf '{}\n'
         return 0
     fi
-    jq -c '
+    jq -S -c '
       (.agents.defaults // {}) as $defaults
       | {}
         + (if $defaults.model? != null then {model: $defaults.model} else {} end)
         + (if $defaults.models? != null then {models: $defaults.models} else {} end)
         + (if $defaults.imageModel? != null then {imageModel: $defaults.imageModel} else {} end)
+        + (if $defaults.thinkingDefault? != null then {thinkingDefault: $defaults.thinkingDefault} else {} end)
+        + (if $defaults.timeoutSeconds? != null then {timeoutSeconds: $defaults.timeoutSeconds} else {} end)
     ' "$source"
 }
 
@@ -655,8 +687,17 @@ bots_dynamic_copy_profile_files() {
 
     source_dir="$(bots_dynamic_profile_dir)/${source}"
     mkdir -p "$workspace_dir"
-    for file in "${BOTS_DYNAMIC_PROFILE_FILES[@]}"; do
+    for file in "${BOTS_DYNAMIC_REQUIRED_PROFILE_FILES[@]}"; do
         cp "${source_dir}/${file}" "${workspace_dir}/${file}" || return 1
+    done
+    for file in "${BOTS_DYNAMIC_OPTIONAL_PROFILE_FILES[@]}"; do
+        if [ -f "${source_dir}/${file}" ]; then
+            cp "${source_dir}/${file}" "${workspace_dir}/${file}" || return 1
+        else
+            # Profile refresh is authoritative: do not retain prompts removed
+            # from the source profile in an existing runtime workspace.
+            rm -f "${workspace_dir}/${file}"
+        fi
     done
 }
 
@@ -849,8 +890,10 @@ bots_dynamic_setup_profile() {
 
     local config_file="${profile_dir}/openclaw.json"
     if [ "${BCS_BOTS_PRESERVE_FILES:-1}" = "1" ] && [ -f "$config_file" ]; then
-        if bots_dynamic_model_source_has_fields && ! bots_dynamic_config_has_model_fields "$config_file"; then
-            log_info "Refreshing dynamic bot profile with model config: ${profile} (${name})"
+        if bots_dynamic_model_source_has_fields && ! bots_dynamic_config_matches_model_source "$config_file"; then
+            log_info "Refreshing dynamic bot profile with current model config: ${profile} (${name})"
+        elif ! bots_dynamic_config_has_required_model "$config_file"; then
+            log_info "Refreshing dynamic bot profile with required model: ${profile} (${name})"
         elif ! bots_dynamic_config_has_bcs_core_tools "$config_file"; then
             log_info "Refreshing dynamic bot profile with BCS core tool allowlist: ${profile} (${name})"
         elif ! bots_dynamic_config_matches "$name" "$profile" "$port" "$source"; then
@@ -894,9 +937,20 @@ bots_dynamic_start_openclaw() {
         return 1
     fi
 
+    if [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" = "manual" ] && [ -z "${OPENCLAW_OPENAI_API_KEY:-}" ]; then
+        log_error "${name} cannot start: manual model credential is unavailable."
+        return 1
+    fi
+
+    if [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" = "manual" ]; then
+        log_info "${name} manual model credential is present for gateway startup."
+    fi
+
+    # 以下为安全注释COSEC：仅向子进程传递环境中的凭据；生成的 Bot 配置保留 SecretRef。
     NODE_TLS_REJECT_UNAUTHORIZED=0 \
     BCS_IGNORE_CREDENTIALS=1 \
     OPENCLAW_GATEWAY_TOKEN="" \
+    OPENCLAW_OPENAI_API_KEY="${OPENCLAW_OPENAI_API_KEY:-}" \
     PATH="$bcs_cli_dir:$PATH" \
     BOT_DATA_DIR="$profile_dir" \
     BCS_API_BASE_URL="http://127.0.0.1:${BCS_PORT}" \
@@ -904,7 +958,7 @@ bots_dynamic_start_openclaw() {
     OPENCLAW_STATE_DIR="$profile_dir" \
     OPENCLAW_CONFIG_PATH="$profile_dir/openclaw.json" \
     OPENCLAW_WORKSPACE_DIR="$workspace_dir" \
-    nohup openclaw --profile "$profile" gateway run --port "$port" > "$log_file" 2>&1 < /dev/null &
+    start_in_detached_session openclaw --profile "$profile" gateway run --port "$port" > "$log_file" 2>&1 < /dev/null &
     pid="$!"
     cd "$old_pwd" || return 1
 
@@ -1726,6 +1780,9 @@ bots_restart() {
 }
 
 bots_clean() {
+    if type -t hybrid_clean_attached_claude_runtime >/dev/null; then
+        hybrid_clean_attached_claude_runtime || return 1
+    fi
     if bots_dynamic_enabled; then
         bots_dynamic_clean
         return

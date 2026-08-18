@@ -141,6 +141,20 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "approval": _EXEMPT_REASON,
     "auth": _EXEMPT_REASON,
     "bot_public": _EXEMPT_REASON,
+    "bot_startup_script": (
+        "The script's effect is only observable inside a provisioned container: "
+        "it is appended to the start sequence the backend composes and runs "
+        "there, so an end-to-end flow needs a real BaaS device to assert "
+        "anything beyond storage. Covered meanwhile by "
+        "tests/community/repository/bot/test_bot_startup_script_repository.py "
+        "(repository over a real database), "
+        "tests/community/core/bot_startup_script/ (the size cap and the "
+        "absent-is-empty contract the payload path depends on), and the "
+        "start-command composition tests in "
+        "tests/community/core/service_bot/services/test_baas_service_start_cmd.py "
+        "(byte-identical output without a script, and the exit-status guard "
+        "with one). Drain this when singlebox can provision a container."
+    ),
     "channel": _EXEMPT_REASON,
     "caller_identity": (
         "Agent Principal and BaaS outbound-rule calls require remote credentials; "

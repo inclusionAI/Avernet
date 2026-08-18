@@ -301,6 +301,7 @@ dependencies = [
  "bcs-group",
  "bcs-group-store",
  "bcs-http",
+ "bcs-interaction",
  "bcs-judge",
  "bcs-jwt",
  "bcs-leader-election",
@@ -438,6 +439,7 @@ dependencies = [
  "bcs-friend",
  "bcs-service-api",
  "bcs-test-support",
+ "serde_json",
  "tempfile",
  "tokio",
 ]
@@ -494,8 +496,6 @@ dependencies = [
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
- "bcs-message",
- "bcs-message-store",
  "bcs-relation",
  "bcs-service-api",
  "bcs-session",
@@ -648,6 +648,7 @@ dependencies = [
  "bcs-db-local",
  "bcs-organization",
  "bcs-organization-store",
+ "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",
  "bcs-test-support",
@@ -1095,6 +1096,20 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
+]
+
+[[package]]
+name = "bcs-interaction"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-domain",
+ "bcs-service-api",
+ "bcs-test-support",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1680,6 +1695,7 @@ dependencies = [
  "base64 0.22.1",
  "bcs-callback",
  "bcs-domain",
+ "bcs-interaction",
  "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",

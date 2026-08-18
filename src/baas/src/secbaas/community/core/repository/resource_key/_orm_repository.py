@@ -7,7 +7,7 @@ from ._orm_model import ResourceKeyBotMappingModel, ResourceKeyModel
 from ._protocol import ResourceKeyRepository
 from ._record import ResourceKeyRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmResourceKeyRepository(OrmConnectionMixin, ResourceKeyRepository):

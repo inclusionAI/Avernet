@@ -1,5 +1,5 @@
 use bcs_service_api::application::v1::{
-    AuthenticatedCaller, BotParticipantMode, CreateSession, SessionInput, SessionStatus, UpdateSession,
+    AuthenticatedCaller, CreateSession, ParticipantMode, SessionInput, SessionStatus, UpdateSession,
 };
 use serde::Deserialize;
 
@@ -27,7 +27,6 @@ impl From<SessionInputDto> for SessionInput {
         Self { query: dto.query }
     }
 }
-
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -69,7 +68,7 @@ impl UpdateSessionRequest {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateSessionParticipantRequest {
-    pub mode: BotParticipantMode,
+    pub mode: ParticipantMode,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,6 +82,18 @@ pub struct AddSessionParticipantRequest {
 pub struct DeleteSessionQuery {
     #[serde(default)]
     pub acting_bot_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollectSessionRequest {
+    pub participant: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UncollectSessionQuery {
+    pub participant: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,11 +112,9 @@ pub struct ListSessionsQuery {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListSessionMessagesQuery {
-    /// Opaque composite cursor for cursor-based pagination (VYQHI). Encoded
-    /// as `"created_at:session_seq"`. Omit on the first page; pass the
-    /// response's `next_cursor` to fetch the next page.
+    /// Exclusive legacy-compatible millisecond timestamp bound.
     #[serde(default)]
-    pub before: Option<String>,
+    pub before: Option<u64>,
     #[serde(default = "default_messages_limit")]
     pub limit: u64,
     /// Optional viewer identity for message history visibility scoping.

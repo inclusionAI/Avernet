@@ -3,20 +3,26 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bcs_domain::BotDeliveryTarget;
+use bcs_protocol::stream::{
+    ChatState, InteractionKind as WireInteractionKind, InteractionPhase, StreamEvent,
+    parse_stream_event,
+};
 use bcs_protocol::{
     AgentEventPayload, AgentStream, Attachment, BCN_MESSAGE_ID_HEADER, BCN_PROTOCOL_VERSION_HEADER,
     BCN_TIMESTAMP_HEADER, BCN_TRANSPORT_HEADER, BcsFrame, ChatEventPayload,
-    ChatEventState as WireChatState, ContentBlock, MessageContent,
-    ProviderAckResponse, ProviderHistoryResponse, ProviderWebhookBotRef, ProviderWebhookRequest,
-    ProviderWebhookSender, RequestFrame,
+    ChatEventState as WireChatState, ContentBlock, MessageContent, ProviderAckResponse,
+    ProviderHistoryResponse, ProviderWebhookBotRef, ProviderWebhookRequest, ProviderWebhookSender,
+    RequestFrame,
 };
-use bcs_protocol::stream::{ChatState, StreamEvent, parse_stream_event};
 use bcs_route_security::{OutboundUrlError, OutboundUrlGuard};
 use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotEventCommand,
-    BotRunContext, BotRunContextPort, ChatEventState, GroupHistoryBotRequestPort, MessageFlowService,
-    ProviderTransportPreference, ServiceError, ServiceResult,
-    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+    BotRunContext, BotRunContextPort, ChatEventState, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+    GroupHistoryBotRequestPort, InteractionKind, InteractionProviderAck,
+    InteractionProviderCommand, InteractionProviderPort, InteractionService,
+    ProviderInteractionRequestedCommand, ProviderInteractionResolvedCommand,
+    ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
+    ProviderRunTransport, ProviderTransportPreference, ServiceError, ServiceResult,
 };
 use opentelemetry::global;
 use opentelemetry_http::HeaderInjector;
@@ -32,6 +38,8 @@ use crate::sse::{IngestKind, SeqDecision, SeqDedup, classify, parse_sse_block};
 /// Idle timeout for an SSE read loop: if no bytes arrive within this window the
 /// run is considered stuck and closed with a synthesized error terminal (#3).
 const SSE_IDLE_TIMEOUT_MS: u64 = 15 * 60 * 1_000;
+/// Hard limit for a single SSE frame or an unterminated frame buffer.
+const SSE_MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 /// Maximum time for an SSE request to receive response headers. Body liveness
 /// is governed separately by `SSE_IDLE_TIMEOUT_MS` after the stream is accepted.
 const SSE_RESPONSE_HEADER_TIMEOUT_MS: u64 = 125_000;
@@ -47,6 +55,19 @@ const SSE_CTX_RETRY_MAX: u32 = 20;
 /// it recovers below the threshold. Edge-triggered so a sustained backlog logs
 /// twice (enter + recover), not once per frame.
 const SSE_LAG_ALERT_MS: u64 = 5_000;
+
+fn sse_next_read_timeout(now_ms: u64, deadline_ms: u64) -> (Duration, bool) {
+    let idle = Duration::from_millis(SSE_IDLE_TIMEOUT_MS);
+    if deadline_ms == u64::MAX {
+        return (idle, false);
+    }
+    let remaining_ms = deadline_ms.saturating_sub(now_ms);
+    if remaining_ms <= SSE_IDLE_TIMEOUT_MS {
+        (Duration::from_millis(remaining_ms), true)
+    } else {
+        (idle, false)
+    }
+}
 
 #[derive(Debug)]
 enum ProviderAckBodyError {
@@ -82,7 +103,9 @@ impl ProviderClientPolicy {
                 response_header_timeout: Some(Duration::from_millis(
                     SSE_RESPONSE_HEADER_TIMEOUT_MS,
                 )),
-                http2_only: true,
+                // Content negotiation must also reach HTTP/1.1 providers so
+                // they can select JSON callback fallback on this same POST.
+                http2_only: false,
             }
         } else {
             Self {
@@ -104,15 +127,23 @@ struct LagTracker {
     peak_lag_ms: u64,
 }
 
+#[derive(Clone)]
+struct SseInteractionContext {
+    service: Arc<dyn InteractionService>,
+    provider_target: BotDeliveryTarget,
+    provider_bypass_headers: Vec<(String, String)>,
+}
+
 pub struct HttpProviderTransport {
     /// Callback / history client with a 65s total timeout.
     client: reqwest::Client,
-    /// HTTP/2-only SSE client with NO total timeout (#3): a total `.timeout()`
-    /// would cut a long-lived stream. Idle detection is handled in the read loop.
+    /// SSE-capable client with NO total timeout: a total `.timeout()` would cut
+    /// a long-lived stream. HTTP/1.1 remains enabled for JSON callback fallback.
     sse_client: reqwest::Client,
     url_guard: OutboundUrlGuard,
-    message_flow: std::sync::RwLock<Option<Arc<dyn MessageFlowService>>>,
+    event_ingest: std::sync::RwLock<Option<Arc<dyn ProviderEventIngestService>>>,
     bot_run_context: std::sync::RwLock<Option<Arc<dyn BotRunContextPort>>>,
+    interactions: std::sync::RwLock<Option<std::sync::Weak<dyn InteractionService>>>,
 }
 
 impl HttpProviderTransport {
@@ -121,14 +152,9 @@ impl HttpProviderTransport {
     }
 
     pub fn allowing_private_networks_for_tests() -> Self {
-        // Local contract servers are HTTP/1. Production constructors and every
-        // DNS-pinned SSE client keep the strict HTTP/2-only policy.
         Self::with_url_guard_and_sse_policy(
             OutboundUrlGuard::allowing_private_networks_for_tests(),
-            ProviderClientPolicy {
-                http2_only: false,
-                ..ProviderClientPolicy::for_request(true)
-            },
+            ProviderClientPolicy::for_request(true),
         )
     }
 
@@ -151,8 +177,9 @@ impl HttpProviderTransport {
                 .build()
                 .expect("build provider sse client"),
             url_guard,
-            message_flow: std::sync::RwLock::new(None),
+            event_ingest: std::sync::RwLock::new(None),
             bot_run_context: std::sync::RwLock::new(None),
+            interactions: std::sync::RwLock::new(None),
         }
     }
 
@@ -162,17 +189,122 @@ impl HttpProviderTransport {
     /// circular-dependency bootstrap cycle.
     pub fn set_ingest(
         &self,
-        message_flow: Arc<dyn MessageFlowService>,
+        event_ingest: Arc<dyn ProviderEventIngestService>,
         bot_run_context: Arc<dyn BotRunContextPort>,
     ) {
-        *self.message_flow.write().expect("message_flow lock poisoned") = Some(message_flow);
+        *self.event_ingest.write().expect("event_ingest lock poisoned") = Some(event_ingest);
         *self.bot_run_context.write().expect("bot_run_context lock poisoned") = Some(bot_run_context);
+    }
+
+    /// Inject the Application service that owns Provider 2.0 HITL state.
+    pub fn set_interactions(&self, interactions: Arc<dyn InteractionService>) {
+        *self
+            .interactions
+            .write()
+            .expect("interactions lock poisoned") = Some(Arc::downgrade(&interactions));
     }
 }
 
 impl Default for HttpProviderTransport {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[async_trait]
+impl InteractionProviderPort for HttpProviderTransport {
+    async fn resolve_interaction(
+        &self,
+        command: InteractionProviderCommand,
+    ) -> ServiceResult<InteractionProviderAck> {
+        let BotDeliveryTarget::HttpProvider {
+            provider_id,
+            provider_bot_ref,
+            protocol_version,
+            ..
+        } = &command.target
+        else {
+            return Err(ServiceError::InvalidOperation {
+                message: "interaction.resolve requires an HTTP Provider target".to_string(),
+                request_id: Some(command.bcs_run_id),
+            });
+        };
+        if protocol_version != "2.0" {
+            return Err(ServiceError::InvalidOperation {
+                message: "interaction.resolve requires Provider protocol 2.0".to_string(),
+                request_id: Some(command.bcs_run_id),
+            });
+        }
+
+        let mut params = match command.resolution {
+            Value::Object(map) => map,
+            _ => {
+                return Err(ServiceError::InvalidOperation {
+                    message: "interaction resolution must be a JSON object".to_string(),
+                    request_id: Some(command.bcs_run_id),
+                });
+            }
+        };
+        params.insert(
+            "bcsRunId".to_string(),
+            Value::String(command.bcs_run_id.clone()),
+        );
+        params.insert("runId".to_string(), Value::String(command.provider_run_id));
+        params.insert(
+            "interactionId".to_string(),
+            Value::String(command.interaction_id),
+        );
+        params.insert(
+            "kind".to_string(),
+            Value::String(interaction_kind_slug(command.kind).to_string()),
+        );
+        params.insert(
+            "idempotencyKey".to_string(),
+            Value::String(command.idempotency_key),
+        );
+
+        let body = ProviderWebhookRequest {
+            frame_type: "req".to_string(),
+            id: uuid::Uuid::new_v4().to_string(),
+            method: "interaction.resolve".to_string(),
+            params: Some(Value::Object(params)),
+            session_id: command.bcs_session_id,
+            bcn_group_id: command.group_id,
+            to_bot: ProviderWebhookBotRef {
+                provider_id: provider_id.clone(),
+                provider_bot_ref: provider_bot_ref.clone(),
+                tags: Vec::new(),
+            },
+            from: None,
+            message: None,
+            attachments: Vec::new(),
+            before: None,
+            after: None,
+            limit: None,
+            timeout_ms: DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+            extensions: None,
+        };
+        let ack = post_provider::<ProviderAckResponse>(
+            &self.client,
+            &self.url_guard,
+            &command.target,
+            &body,
+            &command.provider_bypass_headers,
+        )
+        .await?;
+        Ok(InteractionProviderAck {
+            ok: ack.ok,
+            retryable: ack.retryable,
+            error: ack.error,
+        })
+    }
+}
+
+fn interaction_kind_slug(kind: InteractionKind) -> &'static str {
+    match kind {
+        InteractionKind::Exec => "exec",
+        InteractionKind::AskUser => "ask_user",
+        InteractionKind::ModeSwitch => "mode_switch",
     }
 }
 
@@ -231,14 +363,49 @@ impl BotDeliveryPort for HttpProviderTransport {
             BotDeliveryTarget::HttpProvider { protocol_version, .. } if protocol_version == "2.0"
         );
         if is_proto2 {
-            let wants_sse = matches!(
-                cmd.provider_transport,
-                ProviderTransportPreference::CallbackSse
-            ) && method == "chat.send";
+            let is_chat_send = method == "chat.send";
+            let wants_sse = is_chat_send
+                && cmd.provider_transport == ProviderTransportPreference::SseFirst;
             let client = if wants_sse { &self.sse_client } else { &self.client };
-            let resp =
-                send_provider_request(client, &self.url_guard, &cmd.target, &body, wants_sse, &cmd.provider_bypass_headers)
-                    .await?;
+            let run_context = self
+                .bot_run_context
+                .read()
+                .expect("bot_run_context lock poisoned")
+                .clone();
+            if is_chat_send {
+                if let Some(context) = run_context.as_ref() {
+                    let began = context
+                        .begin_provider_transport(
+                            &run_id,
+                            bcs_protocol::now_ms().saturating_add(body.timeout_ms),
+                        )
+                        .await;
+                    if !began {
+                        return Err(ServiceError::InvalidOperation {
+                            message: "provider run transport is already registered".to_string(),
+                            request_id: Some(run_id),
+                        });
+                    }
+                }
+            }
+            let resp = match send_provider_request(
+                client,
+                &self.url_guard,
+                &cmd.target,
+                &body,
+                wants_sse,
+                &cmd.provider_bypass_headers,
+            )
+            .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
+                    return Err(error);
+                }
+            };
             let ctype = resp
                 .headers()
                 .get(reqwest::header::CONTENT_TYPE)
@@ -246,9 +413,24 @@ impl BotDeliveryPort for HttpProviderTransport {
                 .unwrap_or("")
                 .to_string();
             if wants_sse && ctype.starts_with("text/event-stream") {
+                if let Some(context) = run_context.as_ref() {
+                    let bound = context
+                        .bind_provider_transport(&run_id, ProviderRunTransport::Sse)
+                        .await;
+                    if !bound {
+                        return Err(ServiceError::InvalidOperation {
+                            message: "provider run is already bound to another transport"
+                                .to_string(),
+                            request_id: Some(run_id),
+                        });
+                    }
+                }
                 let (Some(flow), Some(ctx)) =
-                    (self.message_flow.read().expect("message_flow lock poisoned").clone(), self.bot_run_context.read().expect("bot_run_context lock poisoned").clone())
+                    (self.event_ingest.read().expect("event_ingest lock poisoned").clone(), self.bot_run_context.read().expect("bot_run_context lock poisoned").clone())
                 else {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
                     warn!(
                         target_bot_id = %target_bot_id,
                         provider_id = %provider_id,
@@ -261,6 +443,17 @@ impl BotDeliveryPort for HttpProviderTransport {
                 };
                 let spawn_run_id = run_id.clone();
                 let spawn_bot_id = target_bot_id.clone();
+                let interaction_context = self
+                    .interactions
+                    .read()
+                    .expect("interactions lock poisoned")
+                    .clone()
+                    .and_then(|service| service.upgrade())
+                    .map(|service| SseInteractionContext {
+                        service,
+                        provider_target: cmd.target.clone(),
+                        provider_bypass_headers: cmd.provider_bypass_headers.clone(),
+                    });
                 info!(
                     target_bot_id = %target_bot_id,
                     provider_id = %provider_id,
@@ -268,7 +461,15 @@ impl BotDeliveryPort for HttpProviderTransport {
                     "provider downlink: 2.0 SSE stream accepted; spawning reader"
                 );
                 tokio::spawn(async move {
-                    stream_and_drive(resp, spawn_run_id, spawn_bot_id, flow, ctx).await;
+                    stream_and_drive(
+                        resp,
+                        spawn_run_id,
+                        spawn_bot_id,
+                        flow,
+                        ctx,
+                        interaction_context,
+                    )
+                    .await;
                 });
                 return Ok(BotDeliveryResult {
                     target_bot_id,
@@ -291,6 +492,9 @@ impl BotDeliveryPort for HttpProviderTransport {
             let ack = match read_provider_ack_body(resp, json_body_timeout).await {
                 Ok(ack) => ack,
                 Err(ProviderAckBodyError::Decode(error)) => {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
                     warn!(
                         target_bot_id = %target_bot_id,
                         provider_id = %provider_id,
@@ -305,6 +509,9 @@ impl BotDeliveryPort for HttpProviderTransport {
                     )));
                 }
                 Err(ProviderAckBodyError::Timeout) => {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
                     warn!(
                         target_bot_id = %target_bot_id,
                         provider_id = %provider_id,
@@ -321,6 +528,20 @@ impl BotDeliveryPort for HttpProviderTransport {
                 }
             };
             if ack.ok {
+                if is_chat_send {
+                    if let Some(context) = run_context.as_ref() {
+                        let bound = context
+                            .bind_provider_transport(&run_id, ProviderRunTransport::Callback)
+                            .await;
+                        if !bound {
+                            return Err(ServiceError::InvalidOperation {
+                                message: "provider run is already bound to another transport"
+                                    .to_string(),
+                                request_id: Some(run_id),
+                            });
+                        }
+                    }
+                }
                 info!(
                     target_bot_id = %target_bot_id,
                     provider_id = %provider_id,
@@ -329,6 +550,9 @@ impl BotDeliveryPort for HttpProviderTransport {
                     "provider downlink: 2.0 JSON ack accepted (callback transport)"
                 );
             } else {
+                if let Some(context) = run_context.as_ref() {
+                    context.clear_provider_transport(&run_id).await;
+                }
                 warn!(
                     target_bot_id = %target_bot_id,
                     provider_id = %provider_id,
@@ -580,6 +804,7 @@ fn provider_request_from_frame(
         frame_type: "req".to_string(),
         id: request.id.clone(),
         method: request.method.clone(),
+        params: None,
         session_id,
         bcn_group_id: bcs_group_id,
         to_bot: ProviderWebhookBotRef {
@@ -980,6 +1205,9 @@ fn provider_body_log(body: &ProviderWebhookRequest) -> String {
         Ok(value) => value,
         Err(error) => return format!("{{\"serialize_error\":\"{}\"}}", error),
     };
+    if body.method == "interaction.resolve" {
+        redact_interaction_resolution_params(&mut redacted);
+    }
     if let Some(attachments) = redacted
         .get_mut("attachments")
         .and_then(Value::as_array_mut)
@@ -993,6 +1221,45 @@ fn provider_body_log(body: &ProviderWebhookRequest) -> String {
     serde_json::to_string(&redacted).unwrap_or_else(|error| {
         format!("{{\"serialize_error\":\"{}\"}}", error)
     })
+}
+
+fn redact_interaction_resolution_params(body: &mut Value) {
+    const SAFE_KEYS: &[&str] = &[
+        "bcsRunId",
+        "runId",
+        "interactionId",
+        "kind",
+        "idempotencyKey",
+    ];
+    let Some(params) = body.get_mut("params").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for (key, value) in params {
+        if !SAFE_KEYS.contains(&key.as_str()) {
+            *value = Value::String("<redacted>".to_string());
+        }
+    }
+}
+
+fn sse_data_log(event: &str, data: &str) -> String {
+    if event != "interaction" {
+        return data.to_string();
+    }
+    let Ok(Value::Object(source)) = serde_json::from_str::<Value>(data) else {
+        return serde_json::json!({
+            "redacted": true,
+            "bytes": data.len(),
+        })
+        .to_string();
+    };
+    let mut safe = serde_json::Map::new();
+    for key in ["runId", "seq", "ts", "phase", "interactionId", "kind"] {
+        if let Some(value) = source.get(key) {
+            safe.insert(key.to_string(), value.clone());
+        }
+    }
+    safe.insert("redacted".to_string(), Value::Bool(true));
+    Value::Object(safe).to_string()
 }
 
 fn provider_history_log(response: &ProviderHistoryResponse) -> String {
@@ -1047,8 +1314,9 @@ async fn stream_and_drive(
     resp: reqwest::Response,
     bcn_run_id: String,
     bot_id: String,
-    flow: Arc<dyn MessageFlowService>,
+    flow: Arc<dyn ProviderEventIngestService>,
     ctx: Arc<dyn BotRunContextPort>,
+    interaction_context: Option<SseInteractionContext>,
 ) {
     use futures::StreamExt;
 
@@ -1070,7 +1338,7 @@ async fn stream_and_drive(
     let mut dedup = SeqDedup::default();
     let mut lag = LagTracker::default();
     let mut saw_terminal = false;
-    let idle = Duration::from_millis(SSE_IDLE_TIMEOUT_MS);
+    let mut close_reason = "run_terminal";
 
     // SSE-detail diagnostics: how many frames we consumed, when we started, and
     // how long we blocked waiting on the socket vs processing frames. The gap
@@ -1089,22 +1357,42 @@ async fn stream_and_drive(
     );
 
     'read: loop {
-        let next = tokio::time::timeout(idle, stream.next()).await;
+        let now_ms = bcs_protocol::now_ms();
+        let (read_timeout, deadline_limited) = sse_next_read_timeout(now_ms, deadline_ms);
+        if deadline_limited && read_timeout.is_zero() {
+            close_reason = "run_deadline";
+            warn!(run_id = %bcn_run_id, "sse run deadline reached; closing stream");
+            break 'read;
+        }
+        let next = tokio::time::timeout(read_timeout, stream.next()).await;
         match next {
             Err(_) => {
+                if deadline_limited {
+                    close_reason = "run_deadline";
+                }
                 warn!(
                     target: "bcs_sse_detail",
                     run_id = %bcn_run_id,
                     frames,
                     saw_terminal,
                     elapsed_ms = bcs_protocol::now_ms().saturating_sub(started_ms),
-                    "sse idle timeout; closing run as error"
+                    deadline_limited,
+                    "sse read timeout; closing run as error"
                 );
                 break 'read;
             }
             Ok(None) => {
                 // Stream ended. Flush any trailing buffered (non-empty) frame.
                 if !buf.is_empty() {
+                    if buf.len() > SSE_MAX_FRAME_BYTES {
+                        warn!(
+                            run_id = %bcn_run_id,
+                            frame_bytes = buf.len(),
+                            max_frame_bytes = SSE_MAX_FRAME_BYTES,
+                            "oversized trailing SSE frame; closing run"
+                        );
+                        break 'read;
+                    }
                     frames += 1;
                     if let Some(done) = drive_frame_bytes(
                         &buf,
@@ -1116,6 +1404,7 @@ async fn stream_and_drive(
                         &mut dedup,
                         &mut lag,
                         &flow,
+                        interaction_context.as_ref(),
                     )
                     .await
                     {
@@ -1148,6 +1437,15 @@ async fn stream_and_drive(
                 buf.extend_from_slice(&chunk);
                 while let Some((idx, sep_len)) = find_frame_sep(&buf) {
                     let frame: Vec<u8> = buf.drain(..idx + sep_len).collect();
+                    if frame.len() > SSE_MAX_FRAME_BYTES {
+                        warn!(
+                            run_id = %bcn_run_id,
+                            frame_bytes = frame.len(),
+                            max_frame_bytes = SSE_MAX_FRAME_BYTES,
+                            "oversized SSE frame; closing run"
+                        );
+                        break 'read;
+                    }
                     frames += 1;
                     if let Some(done) = drive_frame_bytes(
                         &frame,
@@ -1159,6 +1457,7 @@ async fn stream_and_drive(
                         &mut dedup,
                         &mut lag,
                         &flow,
+                        interaction_context.as_ref(),
                     )
                     .await
                     {
@@ -1167,6 +1466,15 @@ async fn stream_and_drive(
                             break 'read;
                         }
                     }
+                }
+                if buf.len() > SSE_MAX_FRAME_BYTES {
+                    warn!(
+                        run_id = %bcn_run_id,
+                        buffered_bytes = buf.len(),
+                        max_frame_bytes = SSE_MAX_FRAME_BYTES,
+                        "unterminated SSE frame exceeded buffer limit; closing run"
+                    );
+                    break 'read;
                 }
             }
         }
@@ -1186,6 +1494,16 @@ async fn stream_and_drive(
     }
     // #2: mark the run terminal in the run-context store after closing.
     ctx.mark_terminal(&bcn_run_id).await;
+    ctx.mark_provider_transport_terminal(&bcn_run_id).await;
+    if let Some(interactions) = interaction_context {
+        if let Err(error) = interactions
+            .service
+            .invalidate_run(&bcn_run_id, close_reason, bcs_protocol::now_ms())
+            .await
+        {
+            warn!(run_id = %bcn_run_id, %error, "failed to invalidate run interactions");
+        }
+    }
 }
 
 /// Resolve the run context for `run_id`, retrying a bounded number of times to
@@ -1216,7 +1534,8 @@ async fn drive_frame_bytes(
     deadline_ms: u64,
     dedup: &mut SeqDedup,
     lag: &mut LagTracker,
-    flow: &Arc<dyn MessageFlowService>,
+    flow: &Arc<dyn ProviderEventIngestService>,
+    interaction_context: Option<&SseInteractionContext>,
 ) -> Option<bool> {
     // Decode only the complete frame bytes (#5). Lossy + WARN on invalid UTF-8.
     let text = match std::str::from_utf8(frame_bytes) {
@@ -1239,6 +1558,7 @@ async fn drive_frame_bytes(
         dedup,
         lag,
         flow,
+        interaction_context,
     )
     .await
 }
@@ -1255,7 +1575,8 @@ async fn drive_sse_frame(
     deadline_ms: u64,
     dedup: &mut SeqDedup,
     lag: &mut LagTracker,
-    flow: &Arc<dyn MessageFlowService>,
+    flow: &Arc<dyn ProviderEventIngestService>,
+    interaction_context: Option<&SseInteractionContext>,
 ) -> Option<bool> {
     let frame = parse_sse_block(block)?;
     let data: Value = match serde_json::from_str(&frame.data) {
@@ -1266,7 +1587,7 @@ async fn drive_sse_frame(
                 run_id = %bcn_run_id,
                 event = %frame.event,
                 %error,
-                sse_data = %frame.data,
+                sse_data = %sse_data_log(&frame.event, &frame.data),
                 "sse data not json; dropping frame"
             );
             warn!(run_id = %bcn_run_id, %error, "sse data not json; dropping frame");
@@ -1278,9 +1599,8 @@ async fn drive_sse_frame(
 
     // SSE-detail per-frame trace: `lag_ms` (receipt time minus the engine
     // frame's own ts) measures how far BCS consumption trails the producer.
-    // Goes only to the bcs-sse-detail.log target. Every frame is logged at INFO
-    // with the raw SSE `data:` payload so incidents can be reconstructed by
-    // grepping a run_id from the detail log.
+    // Goes only to the bcs-sse-detail.log target. Interaction business payloads
+    // are reduced to safe correlation metadata before they reach that log.
     {
         let recv_ms = bcs_protocol::now_ms();
         let frame_ts = stream_event_ts(&event);
@@ -1326,13 +1646,93 @@ async fn drive_sse_frame(
             frame_ts = frame_ts.unwrap_or(0),
             recv_ms,
             lag_ms,
-            sse_data = %frame.data,
+            sse_data = %sse_data_log(&frame.event, &frame.data),
             "sse frame recv"
         );
     }
 
+    if matches!(kind, IngestKind::Interaction) {
+        match dedup.accept(stream_event_seq(&event)) {
+            SeqDecision::Duplicate => {
+                warn!(run_id = %bcn_run_id, "duplicate/regressed interaction seq; dropping");
+                return None;
+            }
+            SeqDecision::Gap(gap) => {
+                warn!(run_id = %bcn_run_id, gap, "seq gap before interaction")
+            }
+            SeqDecision::Accept => {}
+        }
+        if bcs_protocol::now_ms() > deadline_ms {
+            warn!(run_id = %bcn_run_id, "run deadline exceeded; dropping interaction frame");
+            if let Some(context) = interaction_context {
+                if let Err(error) = context
+                    .service
+                    .invalidate_run(bcn_run_id, "run_deadline", bcs_protocol::now_ms())
+                    .await
+                {
+                    warn!(run_id = %bcn_run_id, %error, "failed to invalidate expired interactions");
+                }
+            }
+            return None;
+        }
+        let StreamEvent::Interaction(interaction) = event else {
+            return None;
+        };
+        let Some(context) = interaction_context else {
+            warn!(run_id = %bcn_run_id, "interaction service not wired; dropping frame");
+            return None;
+        };
+        let Some(bcs_session_id) = bcs_session_id.clone() else {
+            warn!(run_id = %bcn_run_id, "interaction has no trusted BCS session; dropping frame");
+            return None;
+        };
+        let app_kind = match interaction.kind {
+            WireInteractionKind::Exec => InteractionKind::Exec,
+            WireInteractionKind::AskUser => InteractionKind::AskUser,
+            WireInteractionKind::ModeSwitch => InteractionKind::ModeSwitch,
+        };
+        let result = match interaction.phase {
+            InteractionPhase::Requested => context
+                .service
+                .on_provider_requested(ProviderInteractionRequestedCommand {
+                    bcs_run_id: bcn_run_id.to_string(),
+                    provider_run_id: interaction.run_id,
+                    interaction_id: interaction.interaction_id,
+                    kind: app_kind,
+                    bcs_session_id,
+                    group_id: group_id.to_string(),
+                    bot_id: bot_id.to_string(),
+                    run_deadline_ms: deadline_ms,
+                    provider_target: context.provider_target.clone(),
+                    provider_bypass_headers: context.provider_bypass_headers.clone(),
+                    payload: interaction.raw,
+                    received_at_ms: bcs_protocol::now_ms(),
+                })
+                .await
+                .map(|_| ()),
+            InteractionPhase::Resolved => {
+                context
+                    .service
+                    .on_provider_resolved(ProviderInteractionResolvedCommand {
+                        bcs_run_id: bcn_run_id.to_string(),
+                        provider_run_id: interaction.run_id,
+                        interaction_id: interaction.interaction_id,
+                        kind: app_kind,
+                        payload: interaction.raw,
+                        received_at_ms: bcs_protocol::now_ms(),
+                    })
+                    .await
+            }
+        };
+        if let Err(error) = result {
+            warn!(run_id = %bcn_run_id, %error, "interaction frame handling failed");
+        }
+        return Some(false);
+    }
+
     let (event_type, state, payload, terminal) = match kind {
         IngestKind::Drop => return None,
+        IngestKind::Interaction => unreachable!("interaction handled above"),
         IngestKind::CloseUnsupported => {
             // Approval/HITL is gated this round (#4/D11): close the run with a
             // chat error terminal so the frontend isn't stuck. Not deduped.
@@ -1390,6 +1790,7 @@ fn stream_event_seq(event: &StreamEvent) -> Option<u64> {
     match event {
         StreamEvent::Agent(agent) => agent.seq,
         StreamEvent::Chat(chat) => chat.seq,
+        StreamEvent::Interaction(interaction) => interaction.seq,
         _ => None,
     }
 }
@@ -1400,6 +1801,7 @@ fn stream_event_ts(event: &StreamEvent) -> Option<u64> {
         StreamEvent::Agent(agent) => agent.ts,
         // ChatEvent has no typed `ts`; read it from the retained raw frame.
         StreamEvent::Chat(chat) => chat.raw.get("ts").and_then(Value::as_u64),
+        StreamEvent::Interaction(interaction) => interaction.ts,
         StreamEvent::Ping { ts } => *ts,
         _ => None,
     }
@@ -1411,6 +1813,7 @@ fn ingest_kind_state_slug(kind: &IngestKind) -> &'static str {
             chat_event_state_slug(state)
         }
         IngestKind::CloseUnsupported => "close_unsupported",
+        IngestKind::Interaction => "interaction",
         IngestKind::Drop => "drop",
     }
 }
@@ -1572,7 +1975,7 @@ async fn ingest_synthesized_error(
     group_id: &str,
     bot_id: &str,
     bcs_session_id: &Option<String>,
-    flow: &Arc<dyn MessageFlowService>,
+    flow: &Arc<dyn ProviderEventIngestService>,
 ) {
     warn!(run_id = %bcn_run_id, "sse closed without chat terminal; synthesizing error terminal");
     let payload = build_chat_error_payload(bcn_run_id, group_id);
@@ -1599,7 +2002,7 @@ async fn ingest(
     event_type: String,
     state: ChatEventState,
     payload: Value,
-    flow: &Arc<dyn MessageFlowService>,
+    flow: &Arc<dyn ProviderEventIngestService>,
 ) {
     let cmd = BotEventCommand {
         bot_id: bot_id.to_string(),
@@ -1610,7 +2013,13 @@ async fn ingest(
         state,
         bcs_session_id: bcs_session_id.clone(),
     };
-    if let Err(error) = flow.handle_bot_event(cmd).await {
+    if let Err(error) = flow
+        .ingest_provider_event(ProviderEventIngestCommand {
+            source: ProviderEventSource::Sse,
+            event: cmd,
+        })
+        .await
+    {
         warn!(run_id = %bcn_run_id, %error, "ingest handle_bot_event failed");
     }
 }
@@ -1675,7 +2084,7 @@ Connection: keep-alive\r\n\
     }
 
     #[test]
-    fn sse_policy_is_http2_only_without_total_timeout() {
+    fn sse_policy_allows_http1_fallback_without_total_timeout() {
         let policy = ProviderClientPolicy::for_request(true);
 
         assert_eq!(policy.total_timeout, None);
@@ -1684,12 +2093,24 @@ Connection: keep-alive\r\n\
             policy.response_header_timeout,
             Some(Duration::from_secs(125))
         );
-        assert!(policy.http2_only);
+        assert!(!policy.http2_only);
     }
 
     #[test]
     fn sse_idle_timeout_is_fifteen_minutes() {
         assert_eq!(SSE_IDLE_TIMEOUT_MS, 15 * 60 * 1_000);
+    }
+
+    #[test]
+    fn sse_read_wait_is_capped_by_run_deadline_and_frame_memory_is_bounded() {
+        let (deadline_wait, deadline_limited) = sse_next_read_timeout(1_000, 1_250);
+        assert_eq!(deadline_wait, Duration::from_millis(250));
+        assert!(deadline_limited);
+
+        let (idle_wait, deadline_limited) = sse_next_read_timeout(1_000, u64::MAX);
+        assert_eq!(idle_wait, Duration::from_millis(SSE_IDLE_TIMEOUT_MS));
+        assert!(!deadline_limited);
+        assert_eq!(SSE_MAX_FRAME_BYTES, 8 * 1024 * 1024);
     }
 
     #[test]
@@ -1724,6 +2145,7 @@ Connection: keep-alive\r\n\
             frame_type: "request".to_string(),
             id: "frame-timeout".to_string(),
             method: "chat.send".to_string(),
+            params: None,
             session_id: "session-1".to_string(),
             bcn_group_id: "group-1".to_string(),
             to_bot: ProviderWebhookBotRef {
@@ -1783,6 +2205,7 @@ Connection: keep-alive\r\n\
             frame_type: "event".to_string(),
             id: "frame-1".to_string(),
             method: "chat.send".to_string(),
+            params: None,
             session_id: "session-1".to_string(),
             bcn_group_id: "group-1".to_string(),
             to_bot: ProviderWebhookBotRef {
@@ -1819,8 +2242,66 @@ Connection: keep-alive\r\n\
         );
     }
 
+    #[test]
+    fn provider_body_log_redacts_interaction_answers_and_extensions() {
+        let body = ProviderWebhookRequest {
+            frame_type: "req".to_string(),
+            id: "resolve-frame-1".to_string(),
+            method: "interaction.resolve".to_string(),
+            params: Some(serde_json::json!({
+                "bcsRunId": "bcs-run-1",
+                "runId": "provider-run-1",
+                "interactionId": "interaction-1",
+                "kind": "ask_user",
+                "idempotencyKey": "idem-1",
+                "action": "submit",
+                "answers": {"customer_name": {"values": ["sensitive answer"]}},
+                "providerExtension": {"feedback": "sensitive extension"}
+            })),
+            session_id: "session-1".to_string(),
+            bcn_group_id: "group-1".to_string(),
+            to_bot: ProviderWebhookBotRef {
+                provider_id: "provider-1".to_string(),
+                provider_bot_ref: "bot-1".to_string(),
+                tags: Vec::new(),
+            },
+            from: None,
+            message: None,
+            attachments: Vec::new(),
+            before: None,
+            after: None,
+            limit: None,
+            timeout_ms: 1_000,
+            extensions: None,
+        };
+
+        let logged = provider_body_log(&body);
+
+        assert!(logged.contains("\"action\":\"<redacted>\""));
+        assert!(logged.contains("\"answers\":\"<redacted>\""));
+        assert!(logged.contains("\"providerExtension\":\"<redacted>\""));
+        assert!(!logged.contains("sensitive answer"));
+        assert!(!logged.contains("sensitive extension"));
+    }
+
+    #[test]
+    fn sse_detail_log_redacts_interaction_business_payload() {
+        let logged = sse_data_log(
+            "interaction",
+            r#"{"runId":"run-1","seq":7,"phase":"resolved","interactionId":"i-1","kind":"ask_user","command":"sensitive command","answers":{"name":{"values":["sensitive answer"]}}}"#,
+        );
+
+        assert!(logged.contains("\"interactionId\":\"i-1\""));
+        assert!(logged.contains("\"phase\":\"resolved\""));
+        assert!(!logged.contains("sensitive command"));
+        assert!(!logged.contains("sensitive answer"));
+
+        let malformed = sse_data_log("interaction", "not-json sensitive answer");
+        assert!(!malformed.contains("sensitive answer"));
+    }
+
     #[tokio::test]
-    async fn sse_builder_rejects_http1_while_callback_builder_accepts_it() {
+    async fn sse_and_callback_builders_accept_http1() {
         let callback_addr = spawn_http1_server().await;
         let callback_client = provider_client_builder(ProviderClientPolicy::for_request(false))
             .build()
@@ -1836,12 +2317,12 @@ Connection: keep-alive\r\n\
         let sse_client = provider_client_builder(ProviderClientPolicy::for_request(true))
             .build()
             .unwrap();
-        let error = sse_client
+        let sse_response = sse_client
             .get(format!("http://{sse_addr}"))
             .send()
             .await
-            .unwrap_err();
-        assert!(error.is_request());
+            .unwrap();
+        assert_eq!(sse_response.version(), reqwest::Version::HTTP_11);
     }
 }
 
@@ -1850,7 +2331,10 @@ mod sse_loop_tests {
     use super::*;
     use bcs_service_api::{
         BotEventOutcome, ChatAbortCommand, ChatAbortOutcome, GroupCallbackCommand,
-        GroupCallbackOutcome, TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
+        GroupCallbackOutcome, InteractionFrontendEvent, InteractionRequestedOutcome,
+        InteractionService, InteractionServiceError, ProviderInteractionRequestedCommand,
+        ProviderInteractionResolvedCommand, ResolveInteractionCommand, ResolveInteractionResult,
+        MessageFlowService, TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
         TaskDispatchOutcome, TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
     };
     use std::sync::Mutex;
@@ -1859,6 +2343,58 @@ mod sse_loop_tests {
     #[derive(Default)]
     struct RecordingFlow {
         events: Mutex<Vec<(String, ChatEventState, Value)>>,
+    }
+
+    #[derive(Default)]
+    struct RecordingInteractions {
+        requested: Mutex<Vec<ProviderInteractionRequestedCommand>>,
+        resolved: Mutex<Vec<ProviderInteractionResolvedCommand>>,
+    }
+
+    #[async_trait]
+    impl InteractionService for RecordingInteractions {
+        async fn on_provider_requested(
+            &self,
+            command: ProviderInteractionRequestedCommand,
+        ) -> ServiceResult<InteractionRequestedOutcome> {
+            self.requested.lock().unwrap().push(command);
+            Ok(InteractionRequestedOutcome::Stored)
+        }
+
+        async fn on_provider_resolved(
+            &self,
+            command: ProviderInteractionResolvedCommand,
+        ) -> ServiceResult<()> {
+            self.resolved.lock().unwrap().push(command);
+            Ok(())
+        }
+
+        async fn resolve(
+            &self,
+            _command: ResolveInteractionCommand,
+        ) -> Result<ResolveInteractionResult, InteractionServiceError> {
+            unimplemented!("not used in Provider SSE tests")
+        }
+
+        async fn list_pending(
+            &self,
+            _bcs_session_id: &str,
+        ) -> ServiceResult<Vec<InteractionFrontendEvent>> {
+            Ok(Vec::new())
+        }
+
+        async fn invalidate_run(
+            &self,
+            _bcs_run_id: &str,
+            _reason: &str,
+            _invalidated_at_ms: u64,
+        ) -> ServiceResult<usize> {
+            Ok(0)
+        }
+
+        async fn cleanup_terminal(&self, _terminal_before_ms: u64) -> ServiceResult<usize> {
+            Ok(0)
+        }
     }
 
     impl RecordingFlow {
@@ -1933,6 +2469,16 @@ mod sse_loop_tests {
         }
     }
 
+    #[async_trait]
+    impl ProviderEventIngestService for RecordingFlow {
+        async fn ingest_provider_event(
+            &self,
+            cmd: ProviderEventIngestCommand,
+        ) -> ServiceResult<BotEventOutcome> {
+            self.handle_bot_event(cmd.event).await
+        }
+    }
+
     /// Fixed run-context fake: always resolves with the given group/bot and a
     /// configurable deadline (so the per-frame deadline guard can be exercised).
     struct FixedCtx {
@@ -1959,6 +2505,21 @@ mod sse_loop_tests {
             true
         }
         async fn release_terminal(&self, _run_id: &str) {}
+        async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
+            false
+        }
+        async fn bind_provider_transport(
+            &self,
+            _run_id: &str,
+            _transport: ProviderRunTransport,
+        ) -> bool {
+            false
+        }
+        async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
+            None
+        }
+        async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
+        async fn clear_provider_transport(&self, _run_id: &str) {}
     }
 
     /// Test wrapper: drive the per-frame ingest core over an in-memory SSE text
@@ -1969,7 +2530,7 @@ mod sse_loop_tests {
         bcn_run_id: &str,
         group_id: &str,
         bot_id: &str,
-        flow: &Arc<dyn MessageFlowService>,
+        flow: &Arc<dyn ProviderEventIngestService>,
     ) -> bool {
         run_sse_text_with_deadline(sse_text, bcn_run_id, group_id, bot_id, u64::MAX, flow).await
     }
@@ -1982,7 +2543,7 @@ mod sse_loop_tests {
         group_id: &str,
         bot_id: &str,
         deadline_ms: u64,
-        flow: &Arc<dyn MessageFlowService>,
+        flow: &Arc<dyn ProviderEventIngestService>,
     ) -> bool {
         let mut dedup = SeqDedup::default();
         let mut lag = LagTracker::default();
@@ -2001,6 +2562,7 @@ mod sse_loop_tests {
                 &mut dedup,
                 &mut lag,
                 flow,
+                None,
             )
             .await
             {
@@ -2011,9 +2573,53 @@ mod sse_loop_tests {
     }
 
     #[tokio::test]
+    async fn top_level_interactions_use_application_service_not_message_flow() {
+        let recording_flow = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording_flow.clone();
+        let interactions = Arc::new(RecordingInteractions::default());
+        let context = SseInteractionContext {
+            service: interactions.clone(),
+            provider_target: BotDeliveryTarget::HttpProvider {
+                bot_id: "bot-1".to_string(),
+                provider_id: "provider-1".to_string(),
+                provider_bot_ref: "ref-1".to_string(),
+                webhook_url: "https://provider.example/webhook".to_string(),
+                bcs_to_provider_token: bcs_domain::RedactedToken::new("secret"),
+                protocol_version: "2.0".to_string(),
+            },
+            provider_bypass_headers: Vec::new(),
+        };
+        let session = Some("session-1".to_string());
+        let mut dedup = SeqDedup::default();
+        let mut lag = LagTracker::default();
+
+        let handled = drive_sse_frame(
+            "event: interaction\ndata: {\"runId\":\"provider-run-1\",\"seq\":1,\"phase\":\"requested\",\"interactionId\":\"interaction-1\",\"kind\":\"exec\",\"command\":\"deploy\"}",
+            "bcs-run-1",
+            "group-1",
+            "bot-1",
+            &session,
+            u64::MAX,
+            &mut dedup,
+            &mut lag,
+            &flow,
+            Some(&context),
+        )
+        .await;
+
+        assert_eq!(handled, Some(false));
+        assert!(recording_flow.snapshot().is_empty());
+        let requested = interactions.requested.lock().unwrap();
+        assert_eq!(requested.len(), 1);
+        assert_eq!(requested[0].bcs_run_id, "bcs-run-1");
+        assert_eq!(requested[0].provider_run_id, "provider-run-1");
+        assert_eq!(requested[0].bcs_session_id, "session-1");
+    }
+
+    #[tokio::test]
     async fn read_loop_ingests_delta_then_final_and_dedupes() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
 event: ping\ndata: {\"ts\":1}\n\n\
 event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
@@ -2040,7 +2646,7 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
     #[tokio::test]
     async fn read_loop_synthesizes_error_message_body() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: chat\nid: 1\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"state\":\"error\",\"errorMessage\":\"engine crashed\",\"errorKind\":\"provider_error\"}\n\n";
         let terminal = run_sse_text_for_test(sse, "bcn-run-err", "grp-1", "bot-1", &flow).await;
         assert!(terminal, "error should close the run");
@@ -2060,7 +2666,7 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
     #[tokio::test]
     async fn read_loop_falls_back_from_blank_error_message_body() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: chat\nid: 1\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"state\":\"error\",\"errorMessage\":\"engine crashed\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"   \"}],\"timestamp\":0}}\n\n";
         let terminal = run_sse_text_for_test(sse, "bcn-run-err", "grp-1", "bot-1", &flow).await;
         assert!(terminal, "error should close the run");
@@ -2075,7 +2681,7 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
     #[tokio::test]
     async fn crlf_frame_separators_are_split() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         // CRLF line endings AND CRLF-CRLF frame separators across the byte path.
         let sse = "event: agent\r\nid: 1\r\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\r\n\r\n\
 event: chat\r\nid: 2\r\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"message\":{\"role\":\"assistant\",\"content\":[],\"timestamp\":0}}\r\n\r\n";
@@ -2098,6 +2704,7 @@ event: chat\r\nid: 2\r\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"m
                 &mut dedup,
                 &mut lag,
                 &flow,
+                None,
             )
             .await
             {
@@ -2118,7 +2725,7 @@ event: chat\r\nid: 2\r\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"m
     #[tokio::test]
     async fn dedupe_works_without_sse_id_using_payload_seq() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         // No `id:` lines at all — dedupe must come from StreamEvent.seq (#4).
         let sse = "event: agent\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
 event: agent\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
@@ -2137,13 +2744,13 @@ event: agent\ndata: {\"runId\":\"e\",\"seq\":2,\"stream\":\"thinking\",\"delta\"
     #[tokio::test]
     async fn stream_end_without_terminal_synthesizes_error() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let resp = sse_response(
             "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n",
         )
         .await;
         let ctx: Arc<dyn BotRunContextPort> = Arc::new(FixedCtx { deadline_ms: u64::MAX });
-        stream_and_drive(resp, "bcn-run-1".into(), "bot-1".into(), flow.clone(), ctx).await;
+        stream_and_drive(resp, "bcn-run-1".into(), "bot-1".into(), flow.clone(), ctx, None).await;
         let pairs = recording.pairs();
         // thinking delta, then a synthesized chat error terminal.
         assert_eq!(
@@ -2158,7 +2765,7 @@ event: agent\ndata: {\"runId\":\"e\",\"seq\":2,\"stream\":\"thinking\",\"delta\"
     #[tokio::test]
     async fn approval_frame_closes_run_unsupported() {
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"approval\",\"phase\":\"requested\",\"kind\":\"exec\"}\n\n";
         let terminal = run_sse_text_for_test(sse, "bcn-run-1", "grp-1", "bot-1", &flow).await;
         assert!(terminal, "approval gate must close the run");
@@ -2173,7 +2780,7 @@ event: agent\ndata: {\"runId\":\"e\",\"seq\":2,\"stream\":\"thinking\",\"delta\"
         // A run whose deadline is already in the past must not ingest any frame:
         // the per-frame guard (#2) drops every frame + WARNs before ingest.
         let recording = Arc::new(RecordingFlow::default());
-        let flow: Arc<dyn MessageFlowService> = recording.clone();
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
         let sse = "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
 event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"message\":{\"role\":\"assistant\",\"content\":[],\"timestamp\":0}}\n\n";
         // deadline_ms = 0 is always in the past relative to now_ms().
@@ -2187,7 +2794,7 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
 
         // Sanity: the very same stream with a fresh deadline ingests normally.
         let recording_ok = Arc::new(RecordingFlow::default());
-        let flow_ok: Arc<dyn MessageFlowService> = recording_ok.clone();
+        let flow_ok: Arc<dyn ProviderEventIngestService> = recording_ok.clone();
         let terminal_ok = run_sse_text_with_deadline(
             sse, "bcn-run-1", "grp-1", "bot-1", u64::MAX, &flow_ok,
         )

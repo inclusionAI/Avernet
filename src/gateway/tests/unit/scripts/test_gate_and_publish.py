@@ -21,6 +21,12 @@ main = _mod.main
 _BCN_ARTIFACT = (
     Path(__file__).resolve().parents[3] / "configs" / "schemas" / "bcn.openapi.json"
 )
+_BCN_INTERNAL_ARTIFACT = (
+    Path(__file__).resolve().parents[3]
+    / "configs"
+    / "schemas"
+    / "bcn.internal.openapi.json"
+)
 
 
 def _write(path: Path, paths: dict[str, object]) -> None:
@@ -73,22 +79,70 @@ def test_main_publishes_on_pass(tmp_path: Path) -> None:
     )
 
 
-def test_checked_in_bcn_artifact_is_a_41_operation_openapi_document() -> None:
-    document = json.loads(_BCN_ARTIFACT.read_text(encoding="utf-8"))
-    operations = sum(len(item) for item in document["paths"].values())
+def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None:
+    public_document = json.loads(_BCN_ARTIFACT.read_text(encoding="utf-8"))
+    internal_document = json.loads(_BCN_INTERNAL_ARTIFACT.read_text(encoding="utf-8"))
+    public_operations = sum(len(item) for item in public_document["paths"].values())
+    internal_operations = sum(len(item) for item in internal_document["paths"].values())
 
-    assert document["openapi"] == "3.1.0"
-    assert operations == 41
+    assert public_document["openapi"] == "3.1.0"
+    assert internal_document["openapi"] == "3.1.0"
+    assert public_operations == 34
+    assert internal_operations == 10
+    assert public_operations + internal_operations == 44
     assert all(
-        path.startswith("/openapi/v1/collaboration/") for path in document["paths"]
+        path.startswith("/openapi/v1/collaboration/")
+        for path in public_document["paths"]
     )
+    assert all(
+        path.startswith("/api/v1/collaboration/")
+        for path in internal_document["paths"]
+    )
+
     assert (
         "post"
-        in document["paths"]["/openapi/v1/collaboration/sessions/{session_id}/token"]
+        in public_document["paths"][
+            "/openapi/v1/collaboration/sessions/{session_id}/token"
+        ]
     )
-    websocket = document["paths"]["/openapi/v1/collaboration/messages/ws"]["get"]
+    collection = public_document["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/collect"
+    ]
+    assert set(collection) == {"delete", "post"}
+    for operation in collection.values():
+        assert operation["x-avernet-security"] == {
+            "user": "required",
+            "app": "required",
+        }
+    websocket = public_document["paths"][
+        "/openapi/v1/collaboration/messages/ws"
+    ]["get"]
     assert websocket["x-avernet-protocol"] == "websocket"
     assert websocket["x-avernet-security"] == {}
-    assert "put" in document["paths"][
+    assert (
+        "get"
+        in public_document["paths"][
+            "/openapi/v1/collaboration/bots/{bot_id}/candidates"
+        ]
+    )
+    assert (
         "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
-    ]
+        not in public_document["paths"]
+    )
+
+    assert (
+        "get"
+        in internal_document["paths"][
+            "/api/v1/collaboration/bots/{bot_id}/candidates/search"
+        ]
+    )
+    assert (
+        "put"
+        in internal_document["paths"][
+            "/api/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
+        ]
+    )
+    assert (
+        "/api/v1/collaboration/bots/{bot_id}/candidates"
+        not in internal_document["paths"]
+    )

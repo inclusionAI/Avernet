@@ -8,26 +8,50 @@ and does not reuse — the legacy ``/api/...`` routers.
 Addressing rule
 ---------------
 
-Every operation is addressed ``/openapi/v1/bots/<component>/…``: the component's
-**literal** name comes first, and a bot-scoped operation takes ``{bot_id}`` as
-the first segment *after* it — never before it, and never with a ``/bot/``
-segment in between. The ``bots`` component is the one exception and only
-because it *is* the component the base names: it owns ``/openapi/v1/bots`` and
-``/openapi/v1/bots/{bot_id}``, and its own sub-resources (``/status``,
-``/passport``, ``/restart``, ``/auth-status``, ``/engine-config``) hang off the
-bot record beneath it.
+Every bot-scoped operation is addressed
+``/openapi/v1/bots/{bot_id}/<component>/…``: the bot comes first, and the
+component's literal name hangs off it. A bot is the noun this API is about, so
+the address names the bot before it names what about the bot, and every
+operation on one bot shares one prefix.
 
-The rule exists so a router file states its own address. Under the old shape a
-reader of ``engine_runtime/sessions/router.py`` could not tell whether
-``/openapi/v1/bots/{bot_id}/sessions`` was served there or by a
-``{bot_id}``-shaped route in the bots component, and a second owner under the
-same base could not be added at all — the reason BCS moved its own control
-plane to ``/openapi/v1/bots/collaboration/{bot_id}``.
+The bot is therefore always a **path** parameter — never a query parameter,
+never a body field. Which bot an operation acts on is the address, not an
+argument to the call, and a client that must be told to put the same id in two
+places has been told the address twice.
 
-Because the bots component keeps the bare ``/openapi/v1/bots/{bot_id}``, a bot
-whose id equals a component name is unreachable at that address. The reserved
-names are fixed and documented in ``docs/openapi-v1/README.md``; a test asserts
-the doc's list still equals the routes'.
+That is also what makes authorization mostly mechanical rather than
+per-operation. The grant dependencies (``require_granted_own_bot`` /
+``require_granted_addressed_bot`` — one per grant-checked admission mode, so
+the declaration says which id model a route has) read the addressed bot off
+the path, the same way, for all but four operations on the surface.
+
+**The four are not an oversight, and their handler-side checks are
+load-bearing.** The ``{skill_id}`` skills operations resolve by
+``(skill, actor)``, so the addressed bot's *owner* arrives on the record rather
+than on the wire — a collaborator reaches a skill on someone else's bot
+routinely — and there is nothing for the shared dependency to look a grant up
+against until that read has happened. They are named in
+``admission.SKILL_SCOPED_OPERATIONS``, mounted without the group-level
+dependency rather than exempted from one, and they check the grant themselves.
+**Deleting those checks as obsolete would leave the four unauthorized; the
+dependency does not cover them.**
+
+So ``TODO(#960)`` is *narrowed* by this rule, from seven operations to four, and
+stays open — see ``principal.py`` and ``admission.SKILL_SCOPED_OPERATIONS``.
+
+The account-level operations are the ones with no single bot to name: creating
+a bot, listing them, checking a name, the ``authorized`` groups, the tenant-wide
+MCP catalogue, the trace query (which reads *across* bots), and the load-test
+endpoints. They keep a literal where a bot id would otherwise be read, and they
+are the only things that do.
+
+Because ``{bot_id}`` is a single wildcard segment, a bot whose id equals a
+literal served in that position is unreachable at that address. Bot-first
+addressing is what keeps that list short: every bot-scoped component name moved
+one segment deeper, where it collides with nothing, leaving only the
+account-level literals above. The names are documented in
+``docs/openapi-v1/README.md``; a test asserts the doc's list still equals the
+routes'.
 
 Naming the end user
 -------------------
@@ -112,16 +136,37 @@ parameter on them. ``test_explicit_user_id.py`` is what makes a new route
 impossible to forget — the same trade ``test_path_convention.py`` makes for the
 addressing rule above.
 
+Retiring addresses
+------------------
+
+Nothing was removed. Every address this surface answered before bot-first
+addressing still answers, at the same shape, with the same parameters in the
+same places — including the ones this rule exists to remove, a ``bot_id`` in
+the query string and one in a request body. They live in ``deprecated/``,
+publish ``deprecated: true`` in the document, and answer with ``Deprecation``
+and ``Sunset`` headers (``deprecation.py``).
+
+The window runs from **2026-08-15** to **2027-08-15**. Removal is driven by
+traffic rather than by the date — the access log says when an address has no
+callers left, and that is when it goes — so the sunset is the outer bound a
+client can plan against, not a countdown. ``test_legacy_parity.py`` asserts
+each retiring address and its replacement reach the same decision, which is the
+whole of the compatibility promise.
+
 Mount order
 -----------
 
-The sub-resource groups are mounted **before** the bots group. The wildcard
-``/openapi/v1/bots/{bot_id}`` matches any single segment, so the groups that
-publish a single-segment literal — ``resources`` and ``routines``, which serve
-their own collection roots — would otherwise resolve as "the bot named
-``resources``". Every other component is only reachable at two segments or
-more, so ordering no longer decides its fate; keeping one rule for all of them
-is cheaper than a per-group exception a later edit would get wrong.
+The sub-resource groups are mounted **before** the bots group, and the retiring
+addresses before both. The wildcard ``/openapi/v1/bots/{bot_id}`` matches any
+single segment, so a group publishing a literal there resolves as "the bot
+named ``resources``" if the bots router is reached first.
+
+Under bot-first addressing that hazard is confined to the groups above that
+genuinely keep a literal in the ``{bot_id}`` segment — the account-level ones,
+and the retiring addresses, which are literal-first by definition. The current
+bot-scoped groups are all ``{bot_id}``-first and could be mounted in any order.
+One rule for all of them is still cheaper than a per-group exception a later
+edit would get wrong.
 """
 
 from __future__ import annotations
@@ -131,13 +176,19 @@ from fastapi import APIRouter, Depends
 from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
+from .bots.engine_config import router as engine_config_router
+from .deprecated import (
+    ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
+    GRANT_CHECKED_GROUPS as _LEGACY_GRANT_CHECKED,
+    SELF_CHECKED_GROUPS as _LEGACY_SELF_CHECKED,
+)
 from .contracts import (
     ENGINE_RUNTIME_ERROR_RESPONSES,
     ERROR_RESPONSES,
     USER_SCOPED_ERROR_RESPONSES,
 )
 from .dependencies import require_principal
-from .principal import require_granted_bot
+from .principal import require_granted_addressed_bot, require_granted_own_bot
 from .engine_runtime.approvals import router as engine_approvals_router
 from .engine_runtime.connection import router as engine_connection_router
 from .engine_runtime.engine import router as engine_engine_router
@@ -183,11 +234,13 @@ _MIXED_GROUPS = [
     mcp_router,
 ]
 
-# Order matters: every literal sub-group — these three lists — is registered
-# before the `{bot_id}` wildcard group, which `build_public_router` mounts last.
-# See "Mount order" above for which literals actually depend on it. Splitting the
-# literals across three lists is about which *response table* each gets; it does
-# not change that they all precede `bots`.
+# Order matters: every group in these lists is registered before the `{bot_id}`
+# wildcard group, which `build_public_router` mounts last. Under bot-first
+# addressing most of them no longer depend on it — they open with `{bot_id}`
+# themselves — but the account-level literals below still do, and so do the
+# retiring addresses. See "Mount order" above. Splitting them across lists is
+# about which *response table* each gets; it does not change that they all
+# precede `bots`.
 _SUBGROUPS = [
     # Both authorization groups precede `bots` below. `authorized_apps_router`
     # sits *under* `{bot_id}` so path shape already keeps it distinct, but
@@ -196,6 +249,13 @@ _SUBGROUPS = [
     # claiming it.
     authorized_apps_router,
     authorized_bots_router,
+    # Mixed, like `bots`: its two collection operations declare the grant check
+    # per route, and its four `{skill_id}` operations resolve the bot's owner
+    # from the skill record and check it themselves. A group-level dependency
+    # here would refuse an application holding a valid grant on a *shared* bot,
+    # because it would look the grant up against the delegating user rather than
+    # the owner. See `skills/router.py` and `admission.SKILL_SCOPED_OPERATIONS`.
+    skills_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
@@ -207,16 +267,21 @@ _SUBGROUPS = [
 # outright, which is exactly wrong for the listings (Mode B) and the
 # account-level reads (C/OPEN). `bots` is mixed and declares it per route;
 # `admission.py` is the authority on which is which, and
-# `test_principal_seam.py` fails if a route's declaration and its mode disagree.
+# `test_admission_inventory.py` fails if a route's declaration and its mode
+# disagree.
 #
-# The engine-runtime groups need no entry here: their `OwnerIdDep` already
-# depends on the same check, because it is where the addressed owner comes from
-# for an application caller.
+# The engine-runtime groups are not here because they are not own-bot: they may
+# address a shared bot, so their mount below declares the *addressed-bot*
+# dependency instead.
 _GRANT_CHECKED_SUBGROUPS = [
+    # Engine config is bots-component work at an engine-component address: it
+    # reads and writes a stored blob, so it takes the ordinary error table
+    # rather than the engine-runtime one, and mounting it here is what gives it
+    # both. See ``bots/engine_config.py``.
+    engine_config_router,
     identity_router,
     resources_router,
     routines_router,
-    skills_router,
 ]
 
 # Track C — the engine-runtime groups. Mounted separately because they document
@@ -224,10 +289,11 @@ _GRANT_CHECKED_SUBGROUPS = [
 # return; attaching those surface-wide would make every already-shipped category
 # advertise failures it cannot produce.
 #
-# Each is now literal-prefixed (`/openapi/v1/bots/sessions/{bot_id}` …), so they
-# cannot shadow one another and their order relative to each other and to
-# `_SUBGROUPS` is free. They are still mounted before the bots router for the
-# one rule stated above, not because any of them needs it.
+# Each is `{bot_id}`-first (`/openapi/v1/bots/{bot_id}/sessions` …) and their
+# paths diverge at the segment after it, so they cannot shadow one another and
+# their order relative to each other and to `_SUBGROUPS` is free. They are still
+# mounted before the bots router for the one rule stated above, not because any
+# of them needs it.
 _ENGINE_RUNTIME_GROUPS = [
     engine_sessions_router,
     engine_engine_router,
@@ -252,7 +318,14 @@ _PUBLIC_AUTH = [Depends(require_principal)]
 # wholly own-bot. A no-op for a caller that names an end user — their own
 # operation's owner-scoped resolve already refuses a bot that is not theirs, and
 # re-deciding it here would risk a second, different answer.
-_GRANT_CHECKED = [Depends(require_granted_bot)]
+_GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
+
+# The same authorization for the groups that may address a *shared* bot: the
+# grant is checked against the `owner_id` the request names (defaulting to the
+# caller) rather than pinned to the caller. Which of the two a mount gets is the
+# route's admission mode made visible — `admission.py` records the decision, and
+# `test_admission_inventory.py` fails if a mount and a mode disagree.
+_GRANT_CHECKED_ADDRESSED_BOT = [Depends(require_granted_addressed_bot)]
 
 
 def build_public_router() -> APIRouter:
@@ -281,14 +354,43 @@ def build_public_router() -> APIRouter:
         public.include_router(
             router,
             responses=USER_SCOPED_ERROR_RESPONSES,
-            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_OWN_BOT,
         )
+    # The engine-runtime groups already run this exact check transitively —
+    # their `OwnerIdDep` consumes the owner it returns — so declaring it at the
+    # mount adds no second lookup (FastAPI caches a dependency per request).
+    # It is declared anyway so the mount says what governs the group, the same
+    # way the own-bot mounts above do, instead of the check being visible only
+    # inside `engine_runtime/params.py`.
     for router in _ENGINE_RUNTIME_GROUPS:
         public.include_router(
             router,
             responses=ENGINE_RUNTIME_ERROR_RESPONSES,
-            dependencies=_PUBLIC_AUTH,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_ADDRESSED_BOT,
         )
+    # The addresses this surface used to have. Each legacy group is mounted the
+    # way its replacement is, because the mount decides half of what a caller
+    # experiences and parity means the old address answers as it always did.
+    # The exception is `skills`, whose retiring item operations name no bot for
+    # the grant dependencies to read and so check it themselves — see
+    # `deprecated/__init__.py`.
+    for router in _LEGACY_ENGINE_RUNTIME:
+        public.include_router(
+            router,
+            responses=ENGINE_RUNTIME_ERROR_RESPONSES,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_ADDRESSED_BOT,
+        )
+    for router in _LEGACY_GRANT_CHECKED:
+        public.include_router(
+            router,
+            responses=USER_SCOPED_ERROR_RESPONSES,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_OWN_BOT,
+        )
+    for router in _LEGACY_SELF_CHECKED:
+        public.include_router(
+            router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+        )
+
     # `bots` is mixed too, but stays last for the wildcard-ordering rule above.
     public.include_router(
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH

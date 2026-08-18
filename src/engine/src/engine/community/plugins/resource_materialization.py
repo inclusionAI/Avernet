@@ -13,6 +13,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 import aiofiles
 import httpx
+
 from engine.community.core.resource_materialization.models import (
     ChatAttachmentMaterializationRequest,
     MaterializationRequest,
@@ -161,20 +162,12 @@ class HttpTemporaryUrlPullClient:
     def __init__(
         self,
         *,
-        allowed_hosts: frozenset[str],
         max_bytes: int = 100 * 1024 * 1024,
         timeout_seconds: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        if not allowed_hosts:
-            raise ValueError("temporary URL allowed_hosts is required")
         if max_bytes <= 0 or timeout_seconds <= 0:
             raise ValueError("temporary URL limits must be positive")
-        self._allowed_hosts = {
-            host.strip().lower() for host in allowed_hosts if host.strip()
-        }
-        if not self._allowed_hosts:
-            raise ValueError("temporary URL allowed_hosts is required")
         self._max_bytes = max_bytes
         self._timeout_seconds = timeout_seconds
         self._transport = transport
@@ -184,6 +177,10 @@ class HttpTemporaryUrlPullClient:
         request: ChatAttachmentMaterializationRequest,
         destination: Path,
     ) -> None:
+        max_bytes = min(
+            self._max_bytes,
+            request.download_max_bytes or self._max_bytes,
+        )
         host, port = self._validate_url(request.temporary_url)
         resolved_ips = await self._resolve_public_ips(host, port)
         pinned_ip = min(resolved_ips)
@@ -207,7 +204,7 @@ class HttpTemporaryUrlPullClient:
         )
         # COSEC: connect to the already-validated public IP so DNS cannot be
         # rebound between validation and the first request byte. Host and SNI
-        # retain the allowlisted hostname for HTTP routing and certificate checks.
+        # retain the original hostname for HTTP routing and certificate checks.
         async with (
             httpx.AsyncClient(
                 timeout=timeout,
@@ -228,13 +225,13 @@ class HttpTemporaryUrlPullClient:
                     declared_size = int(content_length)
                 except ValueError as exc:
                     raise ValueError("invalid temporary URL content length") from exc
-                if declared_size > self._max_bytes:
+                if declared_size > max_bytes:
                     raise ValueError("temporary URL response exceeds size limit")
             observed = 0
             async with aiofiles.open(destination, "wb") as stream:
                 async for chunk in response.aiter_bytes():
                     observed += len(chunk)
-                    if observed > self._max_bytes:
+                    if observed > max_bytes:
                         raise ValueError("temporary URL response exceeds size limit")
                     await stream.write(chunk)
 
@@ -242,14 +239,13 @@ class HttpTemporaryUrlPullClient:
         parsed = urlsplit(value)
         host = parsed.hostname.lower() if parsed.hostname else ""
         if (
-            parsed.scheme != "https"
+            parsed.scheme not in {"http", "https"}
             or not host
-            or host not in self._allowed_hosts
             or parsed.username is not None
             or parsed.password is not None
         ):
             raise ValueError("untrusted temporary URL")
-        return host, parsed.port or 443
+        return host, parsed.port or (443 if parsed.scheme == "https" else 80)
 
     @staticmethod
     async def _resolve_public_ips(host: str, port: int) -> frozenset[str]:

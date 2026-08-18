@@ -166,6 +166,10 @@ class TestUpdateDeviceHeaders:
         rule = MagicMock()
         baas._build_outbound_operation_rule.return_value = rule
         baas.get_device_by_uuid.return_value = {"provider_device_id": "PAAS-1"}
+        # bootstrap 重建时须按引擎协议解析自定义 egress-key envelope 并透传，
+        # 避免 REPLACE 用部署默认凭证覆盖创建/重启写入的值。envelope 解析由 aicoding
+        # 引擎函数负责，主链路只透传。
+        envelope = {"outbound_api_key": "theta-xxx"}
         svc = _make_service(baas_service=baas)
         device = AllocatedDevice(
             device_id="BOT-baas",
@@ -177,20 +181,52 @@ class TestUpdateDeviceHeaders:
             },
         )
 
-        svc.update_device_headers(
-            device=device,
-            agent_pass_token="passport-token",
-            agent_code="agent-code",
-        )
+        with patch(
+            "agentclaw.community.core.bot_management.engines"
+            ".resolve_outbound_rule_envelope",
+            return_value=envelope,
+        ) as resolve_envelope:
+            svc.update_device_headers(
+                device=device,
+                agent_pass_token="passport-token",
+                agent_code="agent-code",
+            )
 
+        resolve_envelope.assert_called_once()
+        assert resolve_envelope.call_args.kwargs["bot_id"] == "bot-1"
+        assert resolve_envelope.call_args.kwargs["owner_id"] == "u1"
         baas._build_outbound_operation_rule.assert_called_once_with(
             bot_id="bot-1",
             owner_id="u1",
             agent_pass_token="passport-token",
             agent_code="agent-code",
+            extra_properties=envelope,
         )
         baas._build_teclaw_outbound_operation_rule.assert_not_called()
         baas.update_device_outbound_rule.assert_called_once_with("PAAS-1", rule)
+
+    def test_baas_provider_no_envelope_when_resolver_returns_none(self):
+        """无自定义 key（默认策略/未注入 template_service）时透传 None，行为同旧。"""
+        baas = MagicMock()
+        rule = MagicMock()
+        baas._build_outbound_operation_rule.return_value = rule
+        baas.get_device_by_uuid.return_value = {"provider_device_id": "PAAS-1"}
+        svc = _make_service(baas_service=baas)
+        device = AllocatedDevice(
+            device_id="BOT-baas",
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={"bolt_id": "bot-1", "entity_id": "u1", "device_uuid": "DEVICE-1"},
+        )
+        with patch(
+            "agentclaw.community.core.bot_management.engines"
+            ".resolve_outbound_rule_envelope",
+            return_value=None,
+        ):
+            svc.update_device_headers(device=device, agent_pass_token="t", agent_code="a")
+        baas._build_outbound_operation_rule.assert_called_once_with(
+            bot_id="bot-1", owner_id="u1", agent_pass_token="t", agent_code="a",
+            extra_properties=None,
+        )
 
     def test_build_rule_failure_is_wrapped(self):
         baas = MagicMock()

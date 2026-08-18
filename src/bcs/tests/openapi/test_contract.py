@@ -1,9 +1,9 @@
-"""Approved BCN OpenAPI V1 contract inventory.
+"""Approved BCN public OpenAPI V1 contract inventory.
 
-The contract must expose exactly the approved operations across Bot, Group,
-GroupParticipant, Session, SessionParticipant, Invitation, and Friendship /
-FriendRequest, and must not expose message-send, Internal API, or routing-only
-path aliases.
+The public contract must expose exactly the approved operations across Bot,
+Group, GroupParticipant, Session, SessionParticipant, Invitation, and
+Friendship / FriendRequest, and must not expose session-file, bot candidate search,
+message-send, Internal API, or routing-only path aliases.
 """
 
 import sys
@@ -18,9 +18,9 @@ from scripts.validate_openapi_contract import load_contract  # noqa: E402
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 
 EXPECTED_OPERATIONS = {
-    ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"),
     ("post", "/openapi/v1/collaboration/bots/query"),
     ("get", "/openapi/v1/collaboration/bots/{bot_id}"),
+    ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"),
     ("patch", "/openapi/v1/collaboration/bots/{bot_id}"),
     ("get", "/openapi/v1/collaboration/bots/mine"),
     ("get", "/openapi/v1/collaboration/groups"),
@@ -35,24 +35,17 @@ EXPECTED_OPERATIONS = {
     ("get", "/openapi/v1/collaboration/sessions/{session_id}"),
     ("patch", "/openapi/v1/collaboration/sessions/{session_id}"),
     ("delete", "/openapi/v1/collaboration/sessions/{session_id}"),
+    ("post", "/openapi/v1/collaboration/sessions/{session_id}/collect"),
+    ("delete", "/openapi/v1/collaboration/sessions/{session_id}/collect"),
     ("get", "/openapi/v1/collaboration/sessions/{session_id}/messages"),
-    ("get", "/openapi/v1/collaboration/sessions/{session_id}/files"),
-    ("post", "/openapi/v1/collaboration/sessions/{session_id}/files"),
-    ("get", "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}"),
-    ("delete", "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}"),
-    ("get", "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"),
-    ("put", "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"),
-    ("post", "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/complete"),
-    ("post", "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/share"),
-    ("get", "/openapi/v1/collaboration/sessions/shared-file/content"),
-    ("post", "/openapi/v1/collaboration/sessions/{session_id}/token"),
-    ("get", "/openapi/v1/collaboration/messages/ws"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/participants"),
     ("patch", "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"),
     ("delete", "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"),
     ("post", "/openapi/v1/collaboration/groups/{group_id}/invitations"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/invitations"),
     ("post", "/openapi/v1/collaboration/invitations/{token}/accept"),
+    ("post", "/openapi/v1/collaboration/sessions/{session_id}/token"),
+    ("get", "/openapi/v1/collaboration/messages/ws"),
     ("get", "/openapi/v1/collaboration/bots/{bot_uuid}/friendships"),
     ("delete", "/openapi/v1/collaboration/bots/{bot_uuid}/friendships/{friend_bot_uuid}"),
     ("post", "/openapi/v1/collaboration/bots/{bot_uuid}/friend-requests"),
@@ -72,7 +65,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_41_approved_operations() -> None:
+def test_contract_contains_exactly_the_34_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 
@@ -90,22 +83,10 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
         for method, operation in path_item.items():
             if method.lower() not in HTTP_METHODS:
                 continue
-            operation_key = (method.lower(), path)
-            public_operations = {
-                ("get", "/openapi/v1/collaboration/messages/ws"),
-                ("get", "/openapi/v1/collaboration/sessions/shared-file/content"),
-            }
-            file_operations = {
-                item for item in EXPECTED_OPERATIONS
-                if "/files" in item[1]
-            }
-            expected = (
-                {}
-                if operation_key in public_operations
-                else {"user": "optional", "app": "optional", "bot": "optional"}
-                if operation_key in file_operations
-                else {"user": "required", "app": "required"}
-            )
+            if path == "/openapi/v1/collaboration/messages/ws":
+                expected = {}
+            else:
+                expected = {"user": "required", "app": "required"}
             assert operation["x-avernet-security"] == expected, (
                 f"{method.upper()} {path} has the wrong Gateway security boundary"
             )
@@ -119,6 +100,9 @@ def test_contract_excludes_unapproved_runtime_and_routing_surfaces() -> None:
         "post",
         "/openapi/v1/collaboration/sessions/{session_id}/messages",
     ) not in actual
+    assert ("get", "/openapi/v1/collaboration/sessions/{session_id}/files") not in actual
+    assert ("post", "/openapi/v1/collaboration/sessions/{session_id}/files") not in actual
+    assert ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates/search") not in actual
     assert ("get", "/openapi/v1/bots") not in actual
     assert ("get", "/openapi/v1/bots/discover") not in actual
     assert ("patch", "/openapi/v1/bots/{bot_id}/descriptor") not in actual

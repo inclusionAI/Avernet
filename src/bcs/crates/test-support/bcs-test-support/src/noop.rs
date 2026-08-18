@@ -7,6 +7,7 @@ use bcs_domain::{
 };
 use bcs_service_api::core::{
     SystemMessageDispatchOutcome, SystemMessageDispatcherService, SystemMessageProducerService,
+    WorkerProfile, WorkerProfileCoreService, WorkerRecommendCommand, WorkerRecommendResult,
 };
 use bcs_service_api::*;
 
@@ -1083,6 +1084,53 @@ impl WorkbenchSessionService for NoopWorkbenchSessionService {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct NoopInteractionService;
+
+#[async_trait]
+impl InteractionService for NoopInteractionService {
+    async fn on_provider_requested(
+        &self,
+        _command: ProviderInteractionRequestedCommand,
+    ) -> ServiceResult<InteractionRequestedOutcome> {
+        Ok(InteractionRequestedOutcome::Duplicate)
+    }
+
+    async fn on_provider_resolved(
+        &self,
+        _command: ProviderInteractionResolvedCommand,
+    ) -> ServiceResult<()> {
+        Ok(())
+    }
+
+    async fn resolve(
+        &self,
+        _command: ResolveInteractionCommand,
+    ) -> Result<ResolveInteractionResult, InteractionServiceError> {
+        Err(InteractionServiceError::NotFound)
+    }
+
+    async fn list_pending(
+        &self,
+        _bcs_session_id: &str,
+    ) -> ServiceResult<Vec<InteractionFrontendEvent>> {
+        Ok(Vec::new())
+    }
+
+    async fn invalidate_run(
+        &self,
+        _bcs_run_id: &str,
+        _reason: &str,
+        _invalidated_at_ms: u64,
+    ) -> ServiceResult<usize> {
+        Ok(0)
+    }
+
+    async fn cleanup_terminal(&self, _terminal_before_ms: u64) -> ServiceResult<usize> {
+        Ok(0)
+    }
+}
+
 pub struct NoopBotRuntimeConnectionService;
 
 #[async_trait]
@@ -1506,7 +1554,7 @@ impl HumanActorService for NoopHumanActorService {
 pub struct NoopWorkerProfileService;
 
 #[async_trait]
-impl WorkerProfileService for NoopWorkerProfileService {
+impl WorkerProfileCoreService for NoopWorkerProfileService {
     async fn recommend_workers(
         &self,
         _command: WorkerRecommendCommand,
@@ -1852,6 +1900,26 @@ impl BotRunContextPort for NoopBotRunContextPort {
     }
 
     async fn release_terminal(&self, _run_id: &str) {}
+
+    async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
+        false
+    }
+
+    async fn bind_provider_transport(
+        &self,
+        _run_id: &str,
+        _transport: ProviderRunTransport,
+    ) -> bool {
+        false
+    }
+
+    async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
+        None
+    }
+
+    async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
+
+    async fn clear_provider_transport(&self, _run_id: &str) {}
 }
 
 #[derive(Debug, Default)]
@@ -1927,6 +1995,14 @@ impl ChannelService for NoopChannelService {
         _target: bcs_domain::BindingTarget,
         _channel_type: Option<bcs_domain::ChannelType>,
     ) -> Result<Vec<ChannelBinding>, ChannelUseCaseError> {
+        Ok(Vec::new())
+    }
+
+    async fn list_conversations_by_session(
+        &self,
+        _bcs_session_id: &str,
+        _channel_type: Option<bcs_domain::ChannelType>,
+    ) -> Result<Vec<bcs_domain::ConversationSessionMap>, ChannelUseCaseError> {
         Ok(Vec::new())
     }
 

@@ -9,8 +9,41 @@ use super::agent::{ApprovalData, LifecycleData, PhaseData, ThinkingData, ToolDat
 pub enum StreamEvent {
     Agent(AgentEvent),
     Chat(ChatEvent),
+    Interaction(InteractionEvent),
     Ping { ts: Option<u64> },
     Unknown { event: String, raw: Value },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InteractionPhase {
+    Requested,
+    Resolved,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InteractionKind {
+    Exec,
+    AskUser,
+    ModeSwitch,
+}
+
+/// Common Provider 2.0 interaction envelope.
+///
+/// Kind-specific fields intentionally remain in `raw`: BCS routes and tracks
+/// the interaction, while Provider remains authoritative for its engine-native
+/// options and resolution payload.
+#[derive(Debug, Clone)]
+pub struct InteractionEvent {
+    pub run_id: String,
+    pub seq: Option<u64>,
+    pub ts: Option<u64>,
+    pub session_key: Option<String>,
+    pub phase: InteractionPhase,
+    pub interaction_id: String,
+    pub kind: InteractionKind,
+    pub raw: Value,
 }
 
 #[derive(Debug, Clone)]

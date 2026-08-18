@@ -14,8 +14,10 @@ Three properties, and each fails for a different mistake:
 2. Every operation whose mode says "grant-checked" actually performs the check —
    verified against the built router's *effective* dependencies, not against
    what a handler declares.
-3. The seven operations that check inside their handlers are named, and named
-   only there. Catches the exception list growing by accident.
+3. The operations that check their grant inside a handler are named, and named
+   only there. Seven used to; bot-first addressing removed the reason for three,
+   and the remaining four are the skill-addressed ones, whose owner arrives on
+   the record rather than on the wire.
 
 These are checked against the router the application really builds, so a change
 that satisfies the table but not the wiring still fails.
@@ -26,24 +28,34 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from agentclaw.community.adapters.http.openapi_v1.deprecated import (
+    LEGACY_ROUTES,
+    SELF_CHECKED_ROUTES,
+)
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
     ADMITTING_MODES,
-    BODY_BOT_ID_OPERATIONS,
-    OWNER_ADDRESSED_OPERATIONS,
     SKILL_SCOPED_OPERATIONS,
     AdmissionMode,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
-from agentclaw.community.adapters.http.openapi_v1.principal import require_granted_bot
-
-#: The modes whose contract is "a grant is checked for the addressed bot".
-_GRANT_CHECKED_MODES = frozenset(
-    {
-        AdmissionMode.GRANT_CHECKED_OWN_BOT,
-        AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    }
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    refuse_app_only_caller,
+    require_granted_addressed_bot,
+    require_granted_own_bot,
 )
+
+#: The modes whose contract is "a grant is checked for the addressed bot",
+#: each mapped to the one dependency that spells it. The declaration *is* the
+#: mode — the own-bot dependency never reads an owner off the wire, the
+#: addressed-bot one is the only thing entitled to — so a route carrying the
+#: wrong one is not a naming slip, it is the wrong check.
+_GRANT_DEPENDENCY_BY_MODE = {
+    AdmissionMode.GRANT_CHECKED_OWN_BOT: require_granted_own_bot,
+    AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT: require_granted_addressed_bot,
+}
+
+_GRANT_CHECKED_MODES = frozenset(_GRANT_DEPENDENCY_BY_MODE)
 
 
 def _effective_routes():
@@ -148,64 +160,168 @@ def test_every_public_operation_still_requires_a_principal():
     assert not missing, f"public operations not gated by require_principal: {missing}"
 
 
-def test_every_grant_checked_operation_actually_checks():
-    """A grant-checked mode must mean the check runs, not that someone meant it to.
+@pytest.mark.parametrize(
+    "mode", sorted(_GRANT_DEPENDENCY_BY_MODE, key=lambda m: m.name)
+)
+def test_every_grant_checked_operation_declares_its_modes_dependency(mode):
+    """A grant-checked mode must mean *its* check runs, not just *a* check.
 
     Verified against the assembled router rather than the handler signature,
     because the check is declared three different ways — at ``include_router``
-    for the wholly own-bot groups, per route in the mixed ``bots`` group, and
-    transitively through ``OwnerIdDep`` on the engine-runtime groups. A test
-    that looked for one spelling would pass while the other two rotted.
+    for the wholly own-bot groups, per route in the mixed ``bots`` and
+    ``skills`` groups, and (alongside the mount) transitively through
+    ``OwnerIdDep`` on the engine-runtime groups. A test that looked for one
+    spelling would pass while the others rotted.
+
+    Since the split there is one dependency per mode, and this asserts the
+    pairing in both directions: an own-bot operation carrying the addressed-bot
+    dependency would let an appended ``owner_id`` aim the check at a bot the
+    handler is not acting on — the surface's oldest defect — and an
+    addressed-bot operation carrying the own-bot dependency would refuse every
+    valid grant on a shared bot. Neither is a smaller mistake than a missing
+    check.
+
+    Two named sets are excluded, for the same underlying reason and with
+    different lifetimes. ``SKILL_SCOPED_OPERATIONS`` — the four current
+    ``{skill_id}`` operations — resolve the bot's owner from the skill record,
+    so there is nothing for a dependency to look a grant up against until the
+    handler has read it. The retiring addresses in ``SELF_CHECKED_ROUTES`` are
+    the same problem in the old contract's shape: their bot is in a request body
+    or behind a skill id, and mounting them under a dependency would refuse an
+    application outright rather than defer, turning a working legacy call into a
+    404. Both check it themselves, first, before acting; the second set is empty
+    the day the deprecated package goes. ``test_only_the_named_operations_
+    check_their_own_grant`` is what stops either from growing quietly.
     """
-    expected = {key for key, mode in ADMISSION.items() if mode in _GRANT_CHECKED_MODES}
+    dependency = _GRANT_DEPENDENCY_BY_MODE[mode]
+    expected = {
+        key
+        for key, table_mode in ADMISSION.items()
+        if table_mode is mode
+        and key not in SELF_CHECKED_ROUTES
+        and key not in SKILL_SCOPED_OPERATIONS
+    }
     actual = {
         key
         for key, ctx in _operations()
-        if _depends_on(_dependant_of(ctx), require_granted_bot)
+        if _depends_on(_dependant_of(ctx), dependency)
     }
 
     unchecked = sorted(f"{m} {p}" for m, p in expected - actual)
     unexpected = sorted(f"{m} {p}" for m, p in actual - expected)
 
     assert not unchecked, (
-        "operations marked grant-checked that do not run the check — an "
-        "application would reach these with no authorization at all:\n  "
-        + "\n  ".join(unchecked)
+        f"operations whose mode is {mode.name} that do not declare "
+        f"{dependency.__name__} — an application would reach these with the "
+        "wrong authorization, or none at all:\n  " + "\n  ".join(unchecked)
     )
     assert not unexpected, (
-        "operations running the grant check without a mode that calls for it. "
-        "On an operation that names no bot the check refuses an application "
-        "outright, so this is a refusal nobody asked for:\n  "
-        + "\n  ".join(unexpected)
+        f"operations declaring {dependency.__name__} whose mode is not "
+        f"{mode.name}. The declaration and the table must say the same thing — "
+        "fix whichever one is wrong:\n  " + "\n  ".join(unexpected)
     )
 
 
-def test_the_deferring_operations_are_grant_checked_and_named_once():
-    """The seven exceptions are exceptions to *where*, never to *whether*."""
-    deferring = (
-        BODY_BOT_ID_OPERATIONS | SKILL_SCOPED_OPERATIONS | OWNER_ADDRESSED_OPERATIONS
+def test_only_the_named_operations_check_their_own_grant():
+    """``TODO(#960)`` shrank from seven to four, and this is what holds the line.
+
+    Seven operations used to have their bot somewhere the shared dependency
+    could not see it — one in a request body, four behind a skill id, two under
+    an owner parameter the dependency did not know. Two mechanisms doing one
+    job, and it had already cost one real defect.
+
+    Bot-first addressing removed the reason for three: routines' create takes
+    its bot on the path, and the two skills collection operations name their
+    owner in the query, where ``require_granted_addressed_bot`` reads it.
+
+    The four ``{skill_id}`` operations are not a leftover. They resolve by
+    ``(skill, actor)``, so the bot's owner is an *output* of the read — a
+    collaborator routinely reaches a skill on someone else's bot — and there is
+    nothing for the dependency to look a grant up against until the record is in
+    hand. Mounting them under it refused a valid grant on a shared bot with a
+    404, which is the failure ``test_skills_shared_bot_grant.py`` now pins.
+
+    What is asserted here is that the set is exactly those four: still in a
+    grant-checked mode, still absent from the shared dependency, and not grown
+    by one more operation that merely found the check inconvenient.
+    """
+    self_checking = {
+        key
+        for key, ctx in _operations()
+        if ADMISSION.get(key) in _GRANT_CHECKED_MODES
+        and not _depends_on(_dependant_of(ctx), require_granted_own_bot)
+        and not _depends_on(_dependant_of(ctx), require_granted_addressed_bot)
+        and key not in LEGACY_ROUTES
+    }
+    assert self_checking == SKILL_SCOPED_OPERATIONS, (
+        "the set of operations checking their grant in a handler has changed. "
+        "Adding one is an edit to admission.SKILL_SCOPED_OPERATIONS and needs "
+        "the same justification the four there have — that the addressed bot's "
+        "owner cannot be known before the handler runs.\n"
+        f"  unexpected: {sorted(self_checking - SKILL_SCOPED_OPERATIONS)}\n"
+        f"  no longer:  {sorted(SKILL_SCOPED_OPERATIONS - self_checking)}"
     )
 
-    assert len(deferring) == 7, (
-        "the deferring set changed size. Every entry is an operation the shared "
-        "dependency waves through, so each one added is a promise that a "
-        "handler checks instead — make that deliberate."
-    )
 
-    not_in_table = sorted(f"{m} {p}" for m, p in deferring - set(ADMISSION))
-    assert not not_in_table, f"deferring operations absent from ADMISSION: {not_in_table}"
-
+def test_the_self_checking_operations_are_still_grant_checked():
+    """Self-checking is about *where* the check runs, never *whether*."""
     wrong_mode = sorted(
-        f"{m} {p}" for m, p in deferring if ADMISSION[(m, p)] not in _GRANT_CHECKED_MODES
+        f"{m} {p}"
+        for m, p in SKILL_SCOPED_OPERATIONS
+        if ADMISSION.get((m, p)) not in _GRANT_CHECKED_MODES
     )
-    assert not wrong_mode, (
-        "deferring operations must still be grant-checked modes — deferring is "
-        f"about where the check runs, not whether: {wrong_mode}"
+    assert not wrong_mode, wrong_mode
+
+    not_in_table = sorted(
+        f"{m} {p}" for m, p in SELF_CHECKED_ROUTES if (m, p) not in ADMISSION
+    )
+    assert not not_in_table, (
+        f"self-checking legacy operations absent from ADMISSION: {not_in_table}"
     )
 
-    sets = (BODY_BOT_ID_OPERATIONS, SKILL_SCOPED_OPERATIONS, OWNER_ADDRESSED_OPERATIONS)
-    assert sum(len(part) for part in sets) == len(deferring), (
-        "an operation cannot defer for two different reasons — the sets overlap"
+
+def test_every_refused_operation_declares_its_refusal():
+    """A ``REFUSED`` entry and a ``refuse_app_only_caller`` declaration are one
+    decision written twice, and they must not drift.
+
+    The refusal a machine caller actually receives comes centrally, from
+    ``require_principal`` reading the table — that stays, and it is also the
+    only thing covering an operation *absent* from the table, which has no
+    route to declare anything on. What the declaration adds is that the
+    decision is visible on the route that carries it and holds even if the
+    table entry were mislabelled to an admitting mode.
+
+    Both directions matter: a ``REFUSED`` operation without the declaration is
+    a decision readable only in the table, and an operation declaring it under
+    an admitting mode would refuse callers its mode says to admit. The legacy
+    addresses are exempt in the first direction only — they inherit their
+    replacements' modes and are retiring, so nothing new is declared on them —
+    and today none of them is ``REFUSED`` anyway.
+    """
+    expected = {
+        key
+        for key, mode in ADMISSION.items()
+        if mode is AdmissionMode.REFUSED and key not in LEGACY_ROUTES
+    }
+    actual = {
+        key
+        for key, ctx in _operations()
+        if _depends_on(_dependant_of(ctx), refuse_app_only_caller)
+    }
+
+    undeclared = sorted(f"{m} {p}" for m, p in expected - actual)
+    unexpected = sorted(f"{m} {p}" for m, p in actual - expected - set(LEGACY_ROUTES))
+
+    assert not undeclared, (
+        "REFUSED operations that do not declare refuse_app_only_caller — the "
+        "central check still refuses them, but the decision is invisible at "
+        "the route and unprotected against a mislabelled table entry:\n  "
+        + "\n  ".join(undeclared)
+    )
+    assert not unexpected, (
+        "operations declaring refuse_app_only_caller whose mode is not "
+        "REFUSED — they would refuse callers their mode says to admit:\n  "
+        + "\n  ".join(unexpected)
     )
 
 

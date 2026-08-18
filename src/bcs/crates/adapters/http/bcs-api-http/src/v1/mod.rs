@@ -13,11 +13,12 @@ pub use group_session_connection::group_session_connection_router;
 
 /// Build the v1 router with an injected Principal verification boundary.
 ///
-/// The Internal API deliberately has no business routes in the first batch.
+/// Public and internal collaboration routes that need caller verification share
+/// the same protected boundary.
 pub fn router(state: ApiState) -> Router {
     let protected = Router::new()
         .merge(openapi::protected_router())
-        .merge(internal::router())
+        .merge(internal::protected_router())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             verify_principal::<ApiState>,
@@ -25,5 +26,6 @@ pub fn router(state: ApiState) -> Router {
     Router::new()
         .merge(protected)
         .merge(openapi::public_router())
+        .merge(internal::public_router())
         .with_state(state)
 }

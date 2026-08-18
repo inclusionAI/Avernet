@@ -1,16 +1,18 @@
 """The addressing rule for the whole ``/openapi/v1/bots`` surface.
 
-Every operation is addressed ``/openapi/v1/bots/<component>/…``: the
-component's **literal** name first, and a bot-scoped operation takes
-``{bot_id}`` as the first segment after it. The ``bots`` component is the one
-exception — it *is* the component the base names, so it owns
-``/openapi/v1/bots`` and ``/openapi/v1/bots/{bot_id}``, with its own
-sub-resources beneath the bot.
+Every bot-scoped operation is addressed ``/openapi/v1/bots/{bot_id}/<component>/…``:
+the bot first, the component's literal name after it. The operations that
+address no single bot — creating a bot, listing them, the tenant-wide reads —
+keep a literal in the segment a bot id is otherwise read from, and they are the
+only things that do.
 
 These assertions run against the **generated document** rather than a
 hand-maintained list of addresses, so a route added later that breaks the rule
-fails here instead of in review. See ``openapi_v1/__init__.py`` for why the rule
-exists.
+fails here instead of in review. They are asserted over the *current* contract
+only: the retiring addresses are component-first by definition, and a rule
+asserted over the addresses this API used to have could only be satisfied by
+never having changed them. See ``openapi_v1/__init__.py`` for why the rule
+exists and ``openapi_v1/deprecated/`` for what still answers at the old shape.
 """
 
 from __future__ import annotations
@@ -41,16 +43,54 @@ _RESERVED_ANCHOR = "<!-- reserved-component-names -->"
 _UNROUTED_ANCHOR = "<!-- reserved-component-names-unrouted -->"
 
 
-def _paths() -> list[str]:
+def _document() -> dict:
     app = FastAPI()
     app.include_router(build_public_router())
-    return list(app.openapi()["paths"])
+    return app.openapi()
+
+
+def _paths() -> list[str]:
+    """Every published address — the current ones and the retiring ones."""
+    return list(_document()["paths"])
+
+
+def _current_paths() -> list[str]:
+    """Only the addresses that are part of the current contract.
+
+    The surface answers at two sets of addresses while callers migrate. The
+    addressing rule below is about the shape this API *has*; asserting it over
+    the addresses it *had* could only be satisfied by never having changed
+    them.
+    """
+    document = _document()
+    return [
+        path
+        for path, item in document["paths"].items()
+        if any(
+            isinstance(operation, dict)
+            and "responses" in operation
+            and not operation.get("deprecated", False)
+            for operation in item.values()
+        )
+    ]
 
 
 def _segments(path: str) -> list[str]:
     """*path*'s segments below the ``/openapi/v1/bots`` base."""
     assert path == _BASE or path.startswith(f"{_BASE}/"), path
     return [s for s in path[len(_BASE) :].split("/") if s]
+
+
+#: The groups that address no single bot, so they keep a literal in the segment
+#: a bot id is otherwise read from. Everything else is ``{bot_id}``-first.
+#:
+#: ``logs`` is the one worth knowing about: it takes ``bot_id``, but as a filter
+#: over a tenant-level trace query rather than an address, and three of its five
+#: operations have no bot dimension at all. Forcing it under ``{bot_id}`` would
+#: remove the ability to query across bots.
+_BOT_FREE = frozenset(
+    {"authorized", "ceiling", "check-name", "loadtest", "logs", "mcp"}
+)
 
 
 def _components() -> set[str]:
@@ -85,24 +125,30 @@ def test_no_path_repeats_bot_before_the_id():
     assert not offenders, f"redundant '/bot/' segment: {offenders}"
 
 
-def test_no_component_hides_behind_the_bot_id_wildcard():
-    """A component's own name must precede ``{bot_id}``, never follow it.
+def test_every_bot_scoped_operation_names_the_bot_first():
+    """An operation that acts on one bot is addressed by that bot, first.
 
-    ``/openapi/v1/bots/{bot_id}/status`` is fine — ``status`` is a bots-owned
-    sub-resource of the bot record. ``/openapi/v1/bots/{bot_id}/sessions`` is
-    not: ``sessions`` is a component, so the path claims the bots component
-    serves something another module owns.
+    This is the inverse of what this test used to assert, and the reversal is
+    the point of ``specs/2026-08-15-openapi-v1-bot-first-addressing``. The old
+    rule put each component's literal ahead of ``{bot_id}``, which meant every
+    component name occupied the segment a bot id is read from — fifteen names a
+    bot could never be called. Under bot-first only the operations with no
+    single bot keep a literal there.
+
+    A current path therefore either opens with ``{bot_id}`` or opens with one
+    of the literals in :func:`_bot_free_components`. There is no third shape.
     """
-    components = _components()
     offenders = [
-        p
-        for p in _paths()
-        if (segments := _segments(p))
-        and segments[0].startswith("{")
-        and len(segments) > 1
-        and segments[1] in components
+        path
+        for path in _current_paths()
+        if (segments := _segments(path))
+        and not segments[0].startswith("{")
+        and segments[0] not in _BOT_FREE
     ]
-    assert not offenders, f"component name behind the wildcard: {offenders}"
+    assert not offenders, (
+        "these operations neither address a bot first nor belong to a group "
+        f"that addresses no single bot: {offenders}"
+    )
 
 
 def test_only_the_bots_component_owns_the_bare_wildcard():

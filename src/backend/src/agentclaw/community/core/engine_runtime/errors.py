@@ -56,6 +56,22 @@ class EngineStageNotLiveError(EngineRuntimeError):
     """
 
 
+class EngineStageReadOnlyError(EngineRuntimeError):
+    """The requested stage is a published runtime, and writes do not reach it.
+
+    A ``verify`` or ``online`` runtime is the artefact a release produced. It is
+    replaced by publishing again, never edited in place, so a write addressed to
+    one has no correct effect: applying it would fork the runtime from the record
+    that describes it, and quietly writing the draft instead would report success
+    for an edit the addressed runtime never received.
+
+    Distinct from :class:`EngineStageNotLiveError`, which the same operation
+    raises for a stage that *could* accept the request but has no runtime up.
+    This one does not depend on liveness — publishing a runtime at the named
+    stage would not make the write land — so the two must not be merged.
+    """
+
+
 class EngineHistoryDepthExceededError(EngineRuntimeError):
     """The requested message page reaches past the history depth served.
 
@@ -99,5 +115,6 @@ __all__ = [
     "EngineHistoryDepthExceededError",
     "EngineResourceNotFoundError",
     "EngineStageNotLiveError",
+    "EngineStageReadOnlyError",
     "EngineUpstreamError",
 ]

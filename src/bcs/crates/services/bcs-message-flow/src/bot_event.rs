@@ -1,4 +1,4 @@
-use bcs_domain::SenderType;
+use bcs_domain::{CoordinationMode, CoordinationSurface, SenderType};
 use bcs_protocol::{
     BcsFrame, CoordinationCall, DirectiveAction, EventFrame, GroupContext, RequestFrame,
     RequestSource, ResponseDirective, ResponseMode as WireResponseMode, TOOL_ASSIGN_TASK,
@@ -66,26 +66,34 @@ pub async fn handle_bot_event(
     if cmd.state == ChatEventState::Delta
         && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
     {
-        if !cmd.group_id.is_empty() {
-            match extract_delta_text(&cmd.event_payload) {
-                Some(delta) if !delta.is_empty() => {
-                    flow.message_tracker
-                        .append_chat_delta(&cmd.run_id, delta)
-                        .await;
-                    // Inject the segment-accumulated text as `message` so the
-                    // frontend SDK (which reads message.content[].text, not
-                    // delta_text) can render the streaming reply.
-                    if let Some(acc) = flow.message_tracker.peek_chat_buf(&cmd.run_id).await {
-                        inject_synthesized_message(&mut cmd.event_payload, &acc);
-                    }
+        match extract_delta_text(&cmd.event_payload) {
+            Some(delta) if !delta.is_empty() => {
+                flow.message_tracker
+                    .append_chat_delta(&cmd.run_id, delta)
+                    .await;
+                // Inject the segment-accumulated text as `message` so every
+                // consumer, including direct A2A runs, sees the same shape.
+                if let Some(acc) = flow.message_tracker.peek_chat_buf(&cmd.run_id).await {
+                    inject_synthesized_message(&mut cmd.event_payload, &acc);
                 }
-                Some(_) => {}
-                None => {
-                    let msg_text = extract_message_text(&cmd.event_payload);
-                    if !msg_text.is_empty() {
-                        persist_streaming_chat(flow, &cmd, msg_text).await;
-                    }
+            }
+            Some(_) => {}
+            None => {
+                let msg_text = extract_message_text(&cmd.event_payload);
+                if !msg_text.is_empty() {
+                    persist_streaming_chat(flow, &cmd, msg_text).await;
                 }
+            }
+        }
+    }
+
+    if cmd.state == ChatEventState::Final
+        && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
+        && extract_message_text(&cmd.event_payload).is_empty()
+    {
+        if let Some(accumulated) = flow.message_tracker.peek_chat_buf(&cmd.run_id).await {
+            if !accumulated.is_empty() {
+                inject_synthesized_message(&mut cmd.event_payload, &accumulated);
             }
         }
     }
@@ -716,9 +724,6 @@ async fn relay_final_chat_event(
         // build_send_frame / build_inject_frame signatures. Tracked in the
         // Phase-5 follow-up list (Modify semantics completeness).
         let delivery_kind = bot_delivery_kind(target.delivery_type);
-        let provider_transport = flow
-            .provider_transport_preference(&target.bot_uuid, &delivery_kind, &delivery_target)
-            .await;
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -726,7 +731,7 @@ async fn relay_final_chat_event(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
-                provider_transport,
+                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -854,9 +859,6 @@ async fn handle_task_bot_event(
         .resolve_delivery_target(&entry.driver_bot)
         .await?;
     let delivery_kind = BotDeliveryKind::TaskResult;
-    let provider_transport = flow
-        .provider_transport_preference(&entry.driver_bot, &delivery_kind, &delivery_target)
-        .await;
     let result = flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
@@ -864,7 +866,7 @@ async fn handle_task_bot_event(
             run_id: manager_result_run_id.clone(),
             frame,
             delivery_kind,
-            provider_transport,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await?;
@@ -1334,7 +1336,7 @@ async fn maybe_handle_coordination_echo(
     let Some(call) = CoordinationCall::from_stdout(&result_text) else {
         return Ok(None);
     };
-    if !coordination_tool_name_allowed(data) {
+    if !coordination_tool_name_allowed(flow, cmd, data, &call).await {
         warn!(
             bot_id = %cmd.bot_id,
             group_id = %cmd.group_id,
@@ -1555,7 +1557,80 @@ async fn dispatch_coordination_call(
     }
 }
 
-fn coordination_tool_name_allowed(data: &Value) -> bool {
+async fn coordination_tool_name_allowed(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+    data: &Value,
+    call: &CoordinationCall,
+) -> bool {
+    let surface = coordination_surface_for_run(flow, cmd).await;
+    if let Some(surface) = surface {
+        if surface.mode == CoordinationMode::NativeMcp {
+            return native_mcp_tool_name_allowed(&surface, data, call);
+        }
+    } else {
+        return false;
+    }
+
+    legacy_coordination_tool_name_allowed(data)
+}
+
+async fn coordination_surface_for_run(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+) -> Option<CoordinationSurface> {
+    if let Some(cached) = flow
+        .message_tracker
+        .coordination_surface(&cmd.run_id, &cmd.bot_id)
+        .await
+    {
+        return cached;
+    }
+
+    let resolved = match flow.registry.resolve_coordination_surface(&cmd.bot_id).await {
+        Ok(surface) => Some(surface),
+        Err(error) => {
+            warn!(
+                bot_id = %cmd.bot_id,
+                group_id = %cmd.group_id,
+                run_id = %cmd.run_id,
+                error = %error,
+                "Ignoring coordination echo because the coordination surface could not be resolved"
+            );
+            None
+        }
+    };
+    flow.message_tracker
+        .cache_coordination_surface(&cmd.run_id, &cmd.bot_id, resolved.clone())
+        .await;
+    resolved
+}
+
+fn native_mcp_tool_name_allowed(
+    surface: &CoordinationSurface,
+    data: &Value,
+    call: &CoordinationCall,
+) -> bool {
+    let Some(tool_name) = data
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    // COSEC: Provider tool names are untrusted event input. Exact lookup binds
+    // the result to the configured native MCP surface; aliases and prefixes
+    // must not gain coordination side effects.
+    let Some(canonical_tool) = surface.tool_name_mapping.get(tool_name) else {
+        return false;
+    };
+    // COSEC: The signed/mapped source name and the echoed envelope must agree,
+    // otherwise one mapped tool could smuggle another coordination operation.
+    canonical_tool == &call.tool
+}
+
+fn legacy_coordination_tool_name_allowed(data: &Value) -> bool {
     let Some(name) = data.get("name").and_then(|value| value.as_str()) else {
         // Claude Code command_output callbacks do not always carry the source
         // tool name; authenticated event intake plus task-flow role checks

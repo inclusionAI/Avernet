@@ -148,7 +148,7 @@ def app_client(relay, grants):
 
 
 def _sessions(client, **params):
-    return client.get(f"/openapi/v1/bots/sessions/{BOT}", params=params)
+    return client.get(f"/openapi/v1/bots/{BOT}/sessions", params=params)
 
 
 # ── the invariant ────────────────────────────────────────────────────────────
@@ -207,7 +207,7 @@ def test_the_application_is_bounded_by_the_delegator_not_the_owner(
     client = app_client()
 
     # Granted, but COLLAB is not an operator of it — and never was.
-    assert client.get("/openapi/v1/bots/sessions/b-other").status_code == 404
+    assert client.get("/openapi/v1/bots/b-other/sessions").status_code == 404
 
 
 # ── the grant as an authorization boundary ───────────────────────────────────
@@ -335,7 +335,7 @@ def test_a_human_caller_still_addresses_owners_freely(make_client, relay):
     client = make_client(sessions_router, caller=COLLAB)
 
     response = client.get(
-        f"/openapi/v1/bots/sessions/{BOT}", params={"owner_id": OWNER}
+        f"/openapi/v1/bots/{BOT}/sessions", params={"owner_id": OWNER}
     )
 
     assert response.status_code == 200

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 
 from agentclaw.community.core.skill_center.errors import (
+    LocalSkillEditBusyError,
+    LocalSkillEditLockUnavailableError,
+    LocalSkillLayoutRollbackError,
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
@@ -14,6 +15,15 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.skill_center.services.local_skill_state_service import (
     LocalSkillStateService,
+)
+from agentclaw.community.core.skills_pool.models import (
+    RegisteredSkillAsset,
+    SkillMappingSourceLayout,
+)
+from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditBusyError,
+    SkillsPoolEditLockUnavailableError,
+    SkillsPoolEditRollbackError,
 )
 
 
@@ -33,7 +43,7 @@ class _Skills:
         }
 
     def get_bot_local_skill(self, **kwargs):
-        if self.git_path != "local://one":
+        if not self.git_path.startswith("local://"):
             return None
         return {
             "id": "9",
@@ -43,6 +53,17 @@ class _Skills:
             "name": "one",
             "active": self.active,
         }
+
+    def list_bot_active_assets(self, **_kwargs):
+        if not self.active:
+            return []
+        return [
+            RegisteredSkillAsset(
+                skill_id=9,
+                name="one",
+                git_path=self.git_path,
+            )
+        ]
 
 
 class _Sets:
@@ -121,12 +142,48 @@ class _Runtime:
     def __init__(self, success: bool) -> None:
         self.success = success
         self.calls = 0
-        self.skill_service = MagicMock()
-        self.skill_service.deactivate_skill = AsyncMock(return_value=True)
+        self.publish_results = [True]
+        self.verify_results = [True]
+        self.publish_calls = []
+        self.verify_calls = []
 
     def sync_runtime(self):
         self.calls += 1
         return self.success
+
+    async def publish_mappings(self, **kwargs):
+        self.publish_calls.append(kwargs)
+        return self.publish_results.pop(0)
+
+    async def verify_mappings(self, **kwargs):
+        self.verify_calls.append(kwargs)
+        return self.verify_results.pop(0)
+
+
+class _Layouts:
+    def __init__(self, *, pool: bool = False) -> None:
+        self.pool = pool
+
+    def get(self, scope):
+        types = __import__(
+            "agentclaw.community.core.skills_pool.types",
+            fromlist=[
+                "BotSkillLayoutState",
+                "SkillLayout",
+                "SkillLayoutPhase",
+            ],
+        )
+        state = types.BotSkillLayoutState.legacy_default(scope)
+        if not self.pool:
+            return state
+        return types.BotSkillLayoutState(
+            scope=scope,
+            active_layout=types.SkillLayout.POOL,
+            target_layout=None,
+            phase=types.SkillLayoutPhase.POOL_ACTIVE,
+            migration_generation="generation",
+            persisted=True,
+        )
 
 
 class _Factory:
@@ -149,16 +206,55 @@ def _service(
     associated: bool = True,
     collaborators=None,
     on_acquire=None,
+    pool_layout: bool = False,
+    guard_error=None,
 ):
     skills = _Skills(active=active, git_path=git_path)
     sets = _Sets(skills, associated=associated)
     guard = _Guard(on_acquire)
+    if guard_error is not None:
+        def fail_acquire(*, scope):
+            raise guard_error
+        guard.acquire_for_edit = fail_acquire
     runtime = _Runtime(sync_success)
     factory = _Factory(runtime)
     service = LocalSkillStateService(
-        skills, sets, _Bots(status, entity_id), collaborators or _Collaborators(), factory, guard
+        skills,
+        sets,
+        _Bots(status, entity_id),
+        collaborators or _Collaborators(),
+        factory,
+        guard,
+        runtime,
+        skills,
+        _Layouts(pool=pool_layout),
     )
     return service, skills, sets, guard, runtime, factory
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("guard_error", "expected_error"),
+    [
+        (SkillsPoolEditBusyError("busy"), LocalSkillEditBusyError),
+        (SkillsPoolEditRollbackError("rollback"), LocalSkillLayoutRollbackError),
+        (
+            SkillsPoolEditLockUnavailableError("cache"),
+            LocalSkillEditLockUnavailableError,
+        ),
+    ],
+)
+async def test_state_change_maps_guard_failures_to_public_domain_errors(
+    guard_error, expected_error
+):
+    service, _skills, _sets, _guard, _runtime, _factory = _service(
+        guard_error=guard_error
+    )
+
+    with pytest.raises(expected_error):
+        await service.set_local_skill_active(
+            skill_id="9", actor_id="owner", active=True
+        )
 
 
 @pytest.mark.asyncio
@@ -230,34 +326,106 @@ async def test_idempotent_deactivate_normalizes_current_default_exclusion():
     assert result["active"] is False
     assert result["changed"] is False
     assert sets.events == ["add"]
-    assert runtime.calls == 1
+    assert runtime.calls == 0
+    assert len(runtime.publish_calls) == len(runtime.verify_calls) == 1
 
 
 @pytest.mark.asyncio
-async def test_deactivate_removes_stale_runtime_link_before_sync():
+async def test_deactivate_retires_logical_mapping_without_legacy_file_delete():
     service, _skills, _sets, _guard, runtime, _factory = _service(active=True)
 
     await service.set_local_skill_active(skill_id="9", actor_id="owner", active=False)
 
-    runtime.skill_service.deactivate_skill.assert_awaited_once_with(
-        "one", bolt_id="bot", user_id="owner"
-    )
+    assert runtime.calls == 0
+    assert len(runtime.publish_calls) == len(runtime.verify_calls) == 1
+    call = runtime.publish_calls[0]
+    assert call["mappings"] == []
+    assert [mapping.to_dict() for mapping in call["retired_mappings"]] == [
+        {"corpus": "local", "relative_path": "one", "link_name": "one"}
+    ]
+    assert call["source_layout"] is SkillMappingSourceLayout.LEGACY
+
+
+@pytest.mark.asyncio
+async def test_deactivate_publish_failure_restores_desired_and_runtime_state():
+    service, skills, sets, _guard, runtime, _factory = _service(active=True)
+    runtime.publish_results = [False]
+
+    with pytest.raises(LocalSkillRuntimeSyncError):
+        await service.set_local_skill_active(
+            skill_id="9", actor_id="owner", active=False
+        )
+
+    assert sets.events == ["add", "remove"]
+    assert skills.active is True
+    assert len(runtime.publish_calls) == 1
+    assert runtime.verify_calls == []
     assert runtime.calls == 1
 
 
 @pytest.mark.asyncio
-async def test_deactivate_treats_false_stale_link_cleanup_as_storage_failure():
+async def test_deactivate_verify_failure_restores_through_engine_compatible_sync():
     service, skills, sets, _guard, runtime, _factory = _service(active=True)
-    runtime.skill_service.deactivate_skill.return_value = False
+    runtime.verify_results = [False]
 
-    with pytest.raises(LocalSkillStorageError):
-        await service.set_local_skill_active(skill_id="9", actor_id="owner", active=False)
+    with pytest.raises(LocalSkillRuntimeSyncError):
+        await service.set_local_skill_active(
+            skill_id="9", actor_id="owner", active=False
+        )
 
-    runtime.skill_service.deactivate_skill.assert_awaited_once_with(
-        "one", bolt_id="bot", user_id="owner"
-    )
     assert sets.events == ["add", "remove"]
     assert skills.active is True
+    assert len(runtime.publish_calls) == len(runtime.verify_calls) == 1
+    assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_deactivate_mapping_repository_failure_fails_closed_and_restores_state():
+    service, skills, sets, _guard, runtime, _factory = _service(active=True)
+
+    def fail_to_list_active_assets(**_kwargs):
+        raise RuntimeError("repository unavailable")
+
+    skills.list_bot_active_assets = fail_to_list_active_assets
+
+    with pytest.raises(LocalSkillRuntimeSyncError):
+        await service.set_local_skill_active(
+            skill_id="9", actor_id="owner", active=False
+        )
+
+    assert sets.events == ["add", "remove"]
+    assert skills.active is True
+    assert runtime.publish_calls == []
+    assert runtime.verify_calls == []
+    assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_deactivate_selects_pool_source_layout_after_cutover():
+    service, _skills, _sets, _guard, runtime, _factory = _service(
+        active=True, pool_layout=True
+    )
+
+    await service.set_local_skill_active(skill_id="9", actor_id="owner", active=False)
+
+    assert runtime.publish_calls[0]["source_layout"] is SkillMappingSourceLayout.POOL
+    assert runtime.verify_calls[0]["source_layout"] is SkillMappingSourceLayout.POOL
+
+
+@pytest.mark.asyncio
+async def test_deactivate_invalid_locator_fails_closed_and_restores_desired_state():
+    service, skills, sets, _guard, runtime, _factory = _service(
+        active=True, git_path="local://folder/../one"
+    )
+
+    with pytest.raises(LocalSkillRuntimeSyncError):
+        await service.set_local_skill_active(
+            skill_id="9", actor_id="owner", active=False
+        )
+
+    assert sets.events == ["add", "remove"]
+    assert skills.active is True
+    assert runtime.publish_calls == []
     assert runtime.calls == 1
 
 

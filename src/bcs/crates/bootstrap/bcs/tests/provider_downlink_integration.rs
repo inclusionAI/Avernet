@@ -3,9 +3,11 @@ mod helpers;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{
+    body::Body,
     Json, Router,
     extract::State,
     http::{HeaderMap, header},
+    response::{IntoResponse, Response},
     routing::post,
 };
 use bcs::LlmProviderType;
@@ -470,6 +472,37 @@ async fn state_machine_dispatches_provider_bot_and_accepts_final_callback() {
 }
 
 #[tokio::test]
+async fn state_machine_consumes_sse_deltas_and_empty_final_without_message_flow_relay() {
+    let provider = start_provider_sse_webhook().await;
+    let bots_dir = create_temp_bots_dir();
+    let (bcs_addr, _bcs_server) = start_test_server(&bots_dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let mut driver = MockBot::connect(bcs_addr).await;
+    driver.register("Driver", &["drive"], bcs_addr).await;
+    let registered = register_provider_bot_with_protocol(&client, bcs_addr, provider.url(),
+        "provider-state-machine-sse", "state-machine-sse-worker", "2.0").await;
+    let group_id = create_state_machine_group(&client, bcs_addr, &driver.token,
+        &driver.bot_id, &registered.bot_uuid).await;
+    provider.capture.clear().await;
+
+    let response = client.post(format!("http://{}/groups/{}/state-machine-runs", bcs_addr, group_id))
+        .json(&json!({"input": {"question": "review provider SSE state machine"}}))
+        .send().await.expect("start SSE state-machine run");
+    let status = response.status();
+    let body_text = response.text().await.expect("SSE state-machine run body");
+    assert!(status.is_success(), "start SSE state-machine run failed: {status} {body_text}");
+    let run: Value = serde_json::from_str(&body_text).expect("state-machine run response");
+    let state_machine_run_id = run["run"]["run_id"].as_str().expect("state-machine run id");
+
+    provider.capture.wait_for_method("chat.send").await;
+    let view = wait_for_state_machine_run_status(&client, bcs_addr,
+        state_machine_run_id, "completed").await;
+    assert_eq!(view["nodes"][0]["artifact_text"], "state-machine provider sse");
+    assert!(driver.recv_frame_short().await.is_none(),
+        "state-machine SSE events must not relay through ordinary message-flow");
+}
+
+#[tokio::test]
 async fn provider_callback_timeout_does_not_cancel_slow_state_machine_judge() {
     let provider = start_provider_webhook().await;
     let judge = start_blocking_judge().await;
@@ -789,6 +822,17 @@ async fn start_provider_webhook() -> ProviderServer {
     }
 }
 
+async fn start_provider_sse_webhook() -> ProviderServer {
+    let capture = ProviderCapture::default();
+    let app = Router::new().route("/webhook", post(provider_sse_webhook))
+        .with_state(capture.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await
+        .expect("bind SSE provider webhook");
+    let addr = listener.local_addr().expect("SSE provider addr");
+    let handle = tokio::spawn(async move { let _ = axum::serve(listener, app).await; });
+    ProviderServer { capture, addr, _handle: handle }
+}
+
 async fn provider_webhook(
     State(capture): State<ProviderCapture>,
     headers: HeaderMap,
@@ -822,6 +866,29 @@ async fn provider_webhook(
     Json(json!({ "ok": true }))
 }
 
+async fn provider_sse_webhook(
+    State(capture): State<ProviderCapture>, headers: HeaderMap, Json(body): Json<Value>,
+) -> Response {
+    let authorization = headers.get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok()).map(str::to_string);
+    capture.requests.lock().await.push(CapturedProviderRequest {
+        authorization, body: body.clone(),
+    });
+    if body["method"] != "chat.send" {
+        return Json(json!({"ok": true})).into_response();
+    }
+    let run_id = body["id"].as_str().expect("provider chat.send id");
+    let delta_one = json!({"runId": run_id, "seq": 1, "state": "delta",
+        "deltaText": "state-machine "});
+    let delta_two = json!({"runId": run_id, "seq": 2, "state": "delta",
+        "deltaText": "provider sse"});
+    let final_event = json!({"runId": run_id, "seq": 3, "state": "final",
+        "message": {"content": []}});
+    let stream = format!("event: chat\ndata: {delta_one}\n\nevent: chat\ndata: {delta_two}\n\nevent: chat\ndata: {final_event}\n\n");
+    Response::builder().header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+        .body(Body::from(stream)).expect("SSE provider response")
+}
+
 struct RegisteredProviderBot {
     provider_id: String,
     bot_uuid: String,
@@ -848,6 +915,14 @@ async fn register_provider_bot(
     .await
 }
 
+async fn register_provider_bot_with_protocol(
+    client: &reqwest::Client, bcs_addr: SocketAddr, webhook_url: String,
+    provider_name: &str, provider_bot_ref: &str, protocol_version: &str,
+) -> RegisteredProviderBot {
+    register_provider_bot_with_auth_mode_and_protocol(client, bcs_addr, webhook_url,
+        provider_name, provider_bot_ref, "static_bearer", Some(protocol_version)).await
+}
+
 async fn register_provider_bot_with_auth_mode(
     client: &reqwest::Client,
     bcs_addr: SocketAddr,
@@ -856,14 +931,23 @@ async fn register_provider_bot_with_auth_mode(
     provider_bot_ref: &str,
     auth_mode: &str,
 ) -> RegisteredProviderBot {
+    register_provider_bot_with_auth_mode_and_protocol(client, bcs_addr, webhook_url,
+        provider_name, provider_bot_ref, auth_mode, None).await
+}
+
+async fn register_provider_bot_with_auth_mode_and_protocol(
+    client: &reqwest::Client, bcs_addr: SocketAddr, webhook_url: String,
+    provider_name: &str, provider_bot_ref: &str, auth_mode: &str,
+    protocol_version: Option<&str>,
+) -> RegisteredProviderBot {
+    let mut provider_request = json!({
+        "name": provider_name, "webhook_url": webhook_url, "auth": {"mode": auth_mode}
+    });
+    if let Some(version) = protocol_version { provider_request["protocol_version"] = json!(version); }
     let provider: Value = client
         .post(format!("http://{}/providers", bcs_addr))
         .header("X-Mock-User-Id", "11111111")
-        .json(&json!({
-            "name": provider_name,
-            "webhook_url": webhook_url,
-            "auth": { "mode": auth_mode }
-        }))
+        .json(&provider_request)
         .send()
         .await
         .expect("register provider")

@@ -51,7 +51,7 @@ def with_orm_session[
 
     from secbaas.community.logger import get_logger
 
-    _perf_logger = get_logger("orm-timing")
+    _perf_logger = get_logger("orm")
 
     @wraps(func)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> R:

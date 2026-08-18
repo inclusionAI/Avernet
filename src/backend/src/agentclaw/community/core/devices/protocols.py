@@ -270,3 +270,4 @@ class McpSyncProtocol(Protocol):
             ``{"success": bool, "error": str|None}``.
         """
         ...
+

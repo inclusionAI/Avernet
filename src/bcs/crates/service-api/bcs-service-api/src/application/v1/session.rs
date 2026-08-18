@@ -6,22 +6,6 @@ use super::{ApplicationError, AuthenticatedCaller};
 
 pub use bcs_domain::{ActorKind, ParticipantMode, ParticipantRole};
 
-/// Per-session bot collaboration mode for *client input* only.
-///
-/// V1 session participants can be Bots (added by clients via
-/// `create` / `add_participant` / `update_participant`) or Humans (added by
-/// the legacy invitation-accept path, `join_session_by_invite`, with
-/// `actor_kind: Human, mode: Present`). The V1 `SessionParticipant` *output*
-/// therefore carries the full domain `ParticipantMode` (4 values) so a Human
-/// participant is surfaced verbatim. Client *input* still admits only the two
-/// Bot-valid variants (`auto`, `muted`); Humans never enter via client input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BotParticipantMode {
-    Auto,
-    Muted,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionStatus {
@@ -85,6 +69,13 @@ pub struct SessionCompletionResult {
     pub completed_at: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionCollectionResult {
+    pub session_id: String,
+    pub participant: String,
+    pub collected: bool,
+}
+
 /// Input shape for a session participant on creation.
 ///
 /// Session participants are Bot-only in V1; the facade resolves `bot_uuid`
@@ -145,6 +136,20 @@ pub struct CompleteSession {
 }
 
 #[derive(Debug, Clone)]
+pub struct CollectSession {
+    pub caller: AuthenticatedCaller,
+    pub session_id: String,
+    pub participant: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UncollectSession {
+    pub caller: AuthenticatedCaller,
+    pub session_id: String,
+    pub participant: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct AddSessionParticipant {
     pub caller: AuthenticatedCaller,
     pub session_id: String,
@@ -156,7 +161,7 @@ pub struct UpdateSessionParticipant {
     pub caller: AuthenticatedCaller,
     pub session_id: String,
     pub bot_uuid: String,
-    pub mode: BotParticipantMode,
+    pub mode: ParticipantMode,
 }
 
 #[derive(Debug, Clone)]
@@ -189,6 +194,16 @@ pub trait SessionService: Send + Sync {
         &self,
         command: CompleteSession,
     ) -> Result<SessionCompletionResult, ApplicationError>;
+
+    async fn collect(
+        &self,
+        command: CollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError>;
+
+    async fn uncollect(
+        &self,
+        command: UncollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError>;
 
     async fn add_participant(
         &self,

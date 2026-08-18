@@ -14,7 +14,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from gateway.community.core.authn import RouteSecurity
-from gateway.community.core.forwarding import DomainMap, build_served_openapi
+from gateway.community.core.forwarding import (
+    DomainMap,
+    build_combined_openapi,
+    build_served_openapi,
+)
 from gateway.community.spi.forwarder import Forwarder
 from gateway.community.spi.schema_catalog import SchemaCatalog
 from gateway.community.spi.ws_forwarder import WebSocketForwarder
@@ -31,6 +35,7 @@ class Forwarding:
     schema_catalogs: Mapping[str, SchemaCatalog]
     ws_forwarder: WebSocketForwarder
     refresh_seconds: float = _DEFAULT_REFRESH_SECONDS
+    internal_openapi_domains: tuple[str, ...] = ()
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
     _task: asyncio.Task[None] | None = field(default=None)
 
@@ -83,6 +88,22 @@ class Forwarding:
             description=description,
             rewrites=rewrites,
             mount_prefixes=mount_prefixes,
+        )
+
+    def served_internal_openapi(
+        self,
+        *,
+        title: str,
+        version: str,
+        description: str = "",
+    ) -> dict[str, object]:
+        """The current served OpenAPI document for configured internal APIs."""
+        return build_combined_openapi(
+            self.internal_openapi_domains,
+            self._describe,
+            title=title,
+            version=version,
+            description=description,
         )
 
     def _describe(self, domain: str) -> dict[str, Any]:

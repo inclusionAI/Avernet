@@ -47,20 +47,10 @@ paths:
     $ref: ./openapi/invitations.yaml#/CreateGroupInvitationPath
   /openapi/v1/collaboration/sessions/{session_id}:
     $ref: ./openapi/sessions.yaml#/SessionPath
+  /openapi/v1/collaboration/sessions/{session_id}/collect:
+    $ref: ./openapi/sessions.yaml#/SessionCollectionPath
   /openapi/v1/collaboration/sessions/{session_id}/messages:
     $ref: ./openapi/sessions.yaml#/SessionMessagesPath
-  /openapi/v1/collaboration/sessions/{session_id}/files:
-    $ref: ./openapi/session-files.yaml#/SessionFilesPath
-  /openapi/v1/collaboration/sessions/{session_id}/files/{file_id}:
-    $ref: ./openapi/session-files.yaml#/SessionFilePath
-  /openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content:
-    $ref: ./openapi/session-files.yaml#/SessionFileContentPath
-  /openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/complete:
-    $ref: ./openapi/session-files.yaml#/CompleteSessionFilePath
-  /openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/share:
-    $ref: ./openapi/session-files.yaml#/ShareSessionFilePath
-  /openapi/v1/collaboration/sessions/shared-file/content:
-    $ref: ./openapi/session-files.yaml#/SharedSessionFileContentPath
   /openapi/v1/collaboration/sessions/{session_id}/token:
     $ref: ./openapi/connections.yaml#/SessionConnectionTokenPath
   /openapi/v1/collaboration/sessions/{session_id}/participants:
@@ -95,8 +85,10 @@ components:
       $ref: ./domain-models.yaml#/SessionDetail
     SessionPage:
       $ref: ./domain-models.yaml#/SessionPage
-    SessionMessage:
-      $ref: ./domain-models.yaml#/SessionMessage
+    GroupMessage:
+      $ref: ./domain-models.yaml#/GroupMessage
+    MessageAttachment:
+      $ref: ./domain-models.yaml#/MessageAttachment
     SessionParticipant:
       $ref: ./domain-models.yaml#/SessionParticipant
     SessionFile:

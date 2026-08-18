@@ -24,7 +24,7 @@ DEFAULT_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - [%(process)d] - [%(pr
 DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # 日志文件路径（与 local_setup.sh 一致）
-DEFAULT_LOG_DIR = Path(__file__).parent.parent.parent.parent.parent.parent / "scripts" / ".dependences" / "logs"
+DEFAULT_LOG_DIR = Path(__file__).parent.parent.parent.parent.parent.parent / "scripts" / ".dependencies" / "logs"
 LOG_FILE = DEFAULT_LOG_DIR / "bcsfuse_app.log"
 
 # 确保日志目录存在

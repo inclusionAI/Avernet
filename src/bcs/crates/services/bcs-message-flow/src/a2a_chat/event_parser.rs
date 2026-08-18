@@ -1,3 +1,6 @@
+use bcs_protocol::stream::{
+    ProviderTextEventState, ProviderTextResponseMode, apply_provider_event_text,
+};
 use bcs_service_api::ChatResponseMode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +41,7 @@ pub fn classify_detach_delivery_callback(event_str: &str) -> DetachDeliveryCallb
                 .and_then(|state| state.as_str())
                 .unwrap_or("");
             match state {
-                "delivered" | "accepted" | "submitted" | "running" | "final" => {
+                "delta" | "tool_call_start" | "tool_call_end" | "final" => {
                     DetachDeliveryCallback::Success
                 }
                 "error" | "aborted" => DetachDeliveryCallback::Error(
@@ -49,6 +52,7 @@ pub fn classify_detach_delivery_callback(event_str: &str) -> DetachDeliveryCallb
                 _ => DetachDeliveryCallback::Ignored,
             }
         }
+        "agent" => DetachDeliveryCallback::Success,
         "error" => {
             let error = event
                 .payload
@@ -68,6 +72,7 @@ pub fn drain_chat_event_with_mode(
     accumulated: &mut String,
     response_mode: ChatResponseMode,
 ) -> DrainOutcome {
+    let provider_response_mode = provider_text_response_mode(response_mode);
     let frame = match serde_json::from_str::<bcs_protocol::BcsFrame>(event_str) {
         Ok(frame) => frame,
         Err(_) => return DrainOutcome::Continue,
@@ -89,14 +94,26 @@ pub fn drain_chat_event_with_mode(
 
             match state {
                 "delta" => {
-                    if let Some(text) = chat_event_text(event.payload.as_ref()) {
-                        accumulated.push_str(text);
+                    if let Some(payload) = event.payload.as_ref() {
+                        apply_provider_event_text(
+                            accumulated,
+                            "chat.event",
+                            payload,
+                            ProviderTextEventState::Delta,
+                            provider_response_mode,
+                        );
                     }
                     DrainOutcome::Continue
                 }
                 "final" => {
-                    if let Some(text) = chat_event_text(event.payload.as_ref()) {
-                        merge_final_text(accumulated, text, response_mode);
+                    if let Some(payload) = event.payload.as_ref() {
+                        apply_provider_event_text(
+                            accumulated,
+                            "chat.event",
+                            payload,
+                            ProviderTextEventState::Final,
+                            provider_response_mode,
+                        );
                     }
                     DrainOutcome::Final
                 }
@@ -107,8 +124,19 @@ pub fn drain_chat_event_with_mode(
                     DrainOutcome::Error(error)
                 }
                 "tool_call_start" | "tool_call_end" => {
-                    if response_mode == ChatResponseMode::AfterLastToolCall {
-                        accumulated.clear();
+                    if let Some(payload) = event.payload.as_ref() {
+                        let state = if state == "tool_call_start" {
+                            ProviderTextEventState::ToolCallStart
+                        } else {
+                            ProviderTextEventState::ToolCallEnd
+                        };
+                        apply_provider_event_text(
+                            accumulated,
+                            "chat.event",
+                            payload,
+                            state,
+                            provider_response_mode,
+                        );
                     }
                     DrainOutcome::Continue
                 }
@@ -116,14 +144,14 @@ pub fn drain_chat_event_with_mode(
             }
         }
         "agent" => {
-            let stream = event
-                .payload
-                .as_ref()
-                .and_then(|payload| payload.get("stream"))
-                .and_then(|stream| stream.as_str())
-                .unwrap_or("");
-            if response_mode == ChatResponseMode::AfterLastToolCall && stream == "tool" {
-                accumulated.clear();
+            if let Some(payload) = event.payload.as_ref() {
+                apply_provider_event_text(
+                    accumulated,
+                    "agent",
+                    payload,
+                    ProviderTextEventState::ToolCallEnd,
+                    provider_response_mode,
+                );
             }
             DrainOutcome::Continue
         }
@@ -172,6 +200,13 @@ pub fn drain_chat_event_with_mode(
     }
 }
 
+fn provider_text_response_mode(mode: ChatResponseMode) -> ProviderTextResponseMode {
+    match mode {
+        ChatResponseMode::Full => ProviderTextResponseMode::Full,
+        ChatResponseMode::AfterLastToolCall => ProviderTextResponseMode::AfterLastToolCall,
+    }
+}
+
 fn chat_event_text(payload: Option<&serde_json::Value>) -> Option<&str> {
     payload
         .and_then(|payload| payload.get("message"))
@@ -180,86 +215,4 @@ fn chat_event_text(payload: Option<&serde_json::Value>) -> Option<&str> {
         .and_then(|content| content.first())
         .and_then(|block| block.get("text"))
         .and_then(|text| text.as_str())
-}
-
-fn merge_final_text(accumulated: &mut String, text: &str, response_mode: ChatResponseMode) {
-    if text.is_empty() {
-        return;
-    }
-    if accumulated.is_empty() {
-        accumulated.push_str(text);
-        return;
-    }
-
-    match response_mode {
-        ChatResponseMode::Full => {
-            if final_snapshot_starts_with(text, accumulated.as_str()) {
-                accumulated.clear();
-                accumulated.push_str(text);
-            } else {
-                accumulated.push_str(text);
-            }
-        }
-        ChatResponseMode::AfterLastToolCall => {
-            if final_snapshot_ends_with(text, accumulated.as_str()) {
-                return;
-            }
-            if let Some(deduped) =
-                dedupe_repeated_trailing_delta(text, accumulated.as_str())
-            {
-                accumulated.clear();
-                accumulated.push_str(&deduped);
-                return;
-            }
-            if final_snapshot_starts_with(text, accumulated.as_str()) {
-                accumulated.clear();
-                accumulated.push_str(text);
-            } else {
-                accumulated.push_str(text);
-            }
-        }
-    }
-}
-
-fn final_snapshot_starts_with(text: &str, accumulated: &str) -> bool {
-    if text.starts_with(accumulated) {
-        return true;
-    }
-    text.replace("\n\n", "").starts_with(accumulated)
-}
-
-fn final_snapshot_ends_with(text: &str, accumulated: &str) -> bool {
-    if text == accumulated || text.ends_with(accumulated) {
-        return true;
-    }
-    let compacted = text.replace("\n\n", "");
-    compacted == accumulated || compacted.ends_with(accumulated)
-}
-
-fn dedupe_repeated_trailing_delta(text: &str, accumulated: &str) -> Option<String> {
-    let boundaries = accumulated
-        .char_indices()
-        .map(|(idx, _)| idx)
-        .chain(std::iter::once(accumulated.len()))
-        .collect::<Vec<_>>();
-    for segment_start in boundaries.iter().copied().rev().skip(1) {
-        let segment_len = accumulated.len() - segment_start;
-        if segment_len == 0 || segment_len * 2 > accumulated.len() {
-            continue;
-        }
-        let previous_start = accumulated.len() - segment_len * 2;
-        if !boundaries.contains(&previous_start) {
-            continue;
-        }
-        let repeated = &accumulated[previous_start..segment_start];
-        let trailing = &accumulated[segment_start..];
-        if repeated != trailing {
-            continue;
-        }
-        let deduped = &accumulated[..segment_start];
-        if final_snapshot_ends_with(text, deduped) {
-            return Some(deduped.to_string());
-        }
-    }
-    None
 }

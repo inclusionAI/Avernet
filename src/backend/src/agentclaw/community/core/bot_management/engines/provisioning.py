@@ -59,6 +59,10 @@ class EngineProvisioningStrategy(ABC):
         """Stable identifier this strategy is registered under."""
 
     @abstractmethod
+    def resolve_bot_engine(self, bot: Dict[str, Any]) -> str | None:
+        """Resolve the effective runtime engine for a bot record."""
+
+    @abstractmethod
     def build_extra_envs(self, ctx: BotProvisioningContext) -> Dict[str, str] | None:
         """Return extra env vars to inject into the runtime container."""
 

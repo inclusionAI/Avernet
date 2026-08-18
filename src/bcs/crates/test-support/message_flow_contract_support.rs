@@ -8,6 +8,7 @@ use bcs_protocol::BcsFrame;
 use bcs_service_api::{
     ActorKind, ActorStatus, AgentCredentials, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotDeliveryTarget, BotCapabilities, BotDynamicStatus, BotRegistryCoreService,
+    CoordinationSurface,
     FrontendDeliveryCommand, FrontendDeliveryPort, FrontendDeliveryResult, Group, GroupMessage,
     GroupCoreService, GroupStatus, Participant, ParticipantMode, ParticipantRole, RegisteredBot,
     ProviderTransportPreference, RedactedToken, RouteAndSendResult, RoutingDecision,
@@ -429,6 +430,8 @@ pub struct FakeRegistryService {
     bots: RwLock<HashMap<String, RegisteredBot>>,
     protocol_versions: RwLock<HashMap<String, u32>>,
     delivery_targets: RwLock<HashMap<String, BotDeliveryTarget>>,
+    coordination_surfaces: RwLock<HashMap<String, CoordinationSurface>>,
+    coordination_surface_resolutions: RwLock<HashMap<String, usize>>,
     including_deleted_gets: RwLock<HashMap<String, usize>>,
 }
 
@@ -484,6 +487,22 @@ impl FakeRegistryService {
             .write()
             .await
             .insert(bot_id.to_string(), target);
+    }
+
+    pub async fn set_coordination_surface(&self, bot_id: &str, surface: CoordinationSurface) {
+        self.coordination_surfaces
+            .write()
+            .await
+            .insert(bot_id.to_string(), surface);
+    }
+
+    pub async fn coordination_surface_resolution_count(&self, bot_id: &str) -> usize {
+        self.coordination_surface_resolutions
+            .read()
+            .await
+            .get(bot_id)
+            .copied()
+            .unwrap_or_default()
     }
 
     pub fn provider_target(bot_id: &str) -> BotDeliveryTarget {
@@ -667,6 +686,22 @@ impl BotRegistryCoreService for FakeRegistryService {
         Ok(BotDeliveryTarget::WebSocket {
             bot_id: bot_id.to_string(),
         })
+    }
+
+    async fn resolve_coordination_surface(
+        &self,
+        bot_id: &str,
+    ) -> ServiceResult<CoordinationSurface> {
+        let mut resolutions = self.coordination_surface_resolutions.write().await;
+        *resolutions.entry(bot_id.to_string()).or_default() += 1;
+        drop(resolutions);
+        if let Some(surface) = self.coordination_surfaces.read().await.get(bot_id).cloned() {
+            return Ok(surface);
+        }
+        if !self.bots.read().await.contains_key(bot_id) {
+            return Err(ServiceError::BotNotFound(bot_id.to_string()));
+        }
+        Ok(CoordinationSurface::legacy_upstream())
     }
 }
 

@@ -7,7 +7,7 @@ from ._orm_model import BotDeviceRelModel
 from ._protocol import BotDeviceRelRepository
 from ._record import BotDeviceRelRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 
 class OrmBotDeviceRelRepository(OrmConnectionMixin, BotDeviceRelRepository):

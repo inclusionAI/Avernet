@@ -2,19 +2,23 @@ BotCandidatesPath:
   get:
     operationId: list_bot_candidates
     tags: ["Collaboration / Bots"]
-    summary: List candidate physical Bots from a managed Bot's perspective.
+    summary: >-
+      List candidate physical Bots from a managed Bot's perspective (including Human Actor).
     description: >-
-      Human control-plane operation. The path bot_id must identify a physical
-      Bot managed by the current Human. Results stay in that Bot's environment,
-      exclude the acting Bot, Humans, deleted rows, and unonboarded rows. An
-      empty or whitespace-only name is treated as absent; otherwise matching is
-      a trimmed case-insensitive substring. Status and reachability do not
-      remove candidates.
+      Human control-plane operation. The path bot_id must identify either a
+      physical Bot managed by the current Human or that Human's own Human Actor,
+      identified as human_{subject.id}. Results remain physical Bots, stay in
+      the selected Bot record's environment, and exclude the selected Bot,
+      Humans, deleted rows, and unonboarded rows. An empty or whitespace-only
+      name is treated as absent; otherwise matching is a trimmed case-insensitive
+      substring. Status and reachability do not remove candidates.
     x-avernet-security:
       user: required
       app: required
     x-avernet-behavior:
-      acting_bot: managed_physical_bot
+      acting_bot:
+        - managed_physical_bot
+        - current_human_actor
       result_kind: bot
       environment: same_as_acting_bot
       exclude_self: true
@@ -71,10 +75,9 @@ BotCandidatesPath:
             schema:
               $ref: ../domain-models.yaml#/BotCandidatePageEnvelope
       "400":
-        description: Invalid filter or the acting identity is not a physical Bot.
+        description: Invalid candidate filter.
         x-error-codes:
           - invalid_request
-          - invalid_bot_kind
         content:
           application/json:
             schema:
@@ -88,7 +91,118 @@ BotCandidatesPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Current Human does not manage the acting physical Bot.
+        description: >-
+          Current Human does not manage the selected physical Bot, or the
+          selected Human Actor does not represent the current Human.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Acting Bot is missing, deleted, or unonboarded.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+BotCandidateSearchPath:
+  get:
+    operationId: search_bot_candidates
+    tags: ["Collaboration / Bots"]
+    summary: >-
+      Search candidate physical Bots from a managed Bot's perspective (including Human Actor).
+    description: >-
+      Human control-plane projection of legacy /actors/search. The path bot_id
+      replaces legacy current_bot_uuid, while purpose maps to legacy
+      cooperatable_only. Search first uses the configured semantic worker
+      recommendation service with a fixed top-K of 20. If recommendation is
+      unavailable, empty, or yields no visible Bots, the operation falls back
+      to a trimmed case-insensitive Bot-name substring search. Results contain
+      physical Bots only and preserve recommendation ordering when available.
+      An omitted, empty, or whitespace-only q returns an empty successful
+      result without invoking semantic or name search.
+    x-avernet-security:
+      user: required
+      app: required
+    x-avernet-behavior:
+      legacy_equivalent: /actors/search
+      acting_bot:
+        - managed_physical_bot
+        - current_human_actor
+      result_kind: bot
+      purpose_mapping:
+        discovery:
+          cooperatable_only: false
+        collaboration:
+          cooperatable_only: true
+      top_k: 20
+      primary_ordering: recommendation_score_desc
+      fallback: trimmed_case_insensitive_name_substring
+      empty_query:
+        equivalent_inputs:
+          - omitted
+          - empty
+          - whitespace
+        downstream_search: skip
+      search_modes:
+        - empty_query
+        - semantic
+        - name_fallback
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+      - name: q
+        in: query
+        description: >-
+          Optional natural-language candidate search query. Omitted, empty,
+          and whitespace-only values have identical empty-query semantics.
+        schema:
+          type: string
+      - name: purpose
+        in: query
+        description: >-
+          discovery returns public and protected Bots. collaboration returns
+          public Bots plus accepted friends regardless of non-public visibility.
+        schema:
+          type: string
+          enum:
+            - discovery
+            - collaboration
+          default: discovery
+    responses:
+      "200":
+        description: >-
+          Candidate Bots in recommendation order, or legacy name-fallback order
+          when semantic recommendation does not produce a usable result.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/BotCandidateSearchEnvelope
+      "400":
+        description: Invalid candidate-search query.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          Current Human does not manage the selected physical Bot, or the
+          selected Human Actor does not represent the current Human.
         x-error-codes:
           - forbidden
         content:

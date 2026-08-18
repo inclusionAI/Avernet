@@ -40,6 +40,9 @@ from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    refuse_app_only_caller,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -53,18 +56,21 @@ router = APIRouter(prefix="/openapi/v1/bots/loadtest", tags=["loadtest"])
 #: places, so the test asserts the same bytes the handler returns.
 HELLO_WORLD = "hello world"
 
-# Authenticated, but not user-scoped. Declared on each route rather than
-# inherited from ``build_public_router`` for the reason ``check_bot_name`` does
-# the same: the guard is visible where the operation is, and
+# Authenticated, but not user-scoped — and ``REFUSED`` to a machine caller: no
+# user scope, no bot, and nothing this feature is about (see the admission
+# table). Declared on each route rather than inherited from
+# ``build_public_router`` for the reason ``check_bot_name`` does the same: the
+# guard is visible where the operation is, and
 # ``test_public_routes_require_principal`` walks each route's own dependant,
-# which a group-level dependency does not appear in.
-_AUTH = [Depends(require_principal)]
+# which a group-level dependency does not appear in. The refusal dependency
+# answers the socket plane with the same 1008 close ``require_principal`` uses.
+_AUTH = [Depends(require_principal), Depends(refuse_app_only_caller)]
 
 
 @router.get("/hello", response_model=Envelope[HelloWorld], dependencies=_AUTH)
 @envelope_errors
 async def hello_world(request: Request) -> Envelope[HelloWorld]:
-    """Answer the constant ``hello world``.
+    """Answer the constant "hello world".
 
     Reads nothing and calls nothing, so the response time is the path's, not the
     handler's.

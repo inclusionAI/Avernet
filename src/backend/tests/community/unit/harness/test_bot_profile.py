@@ -47,6 +47,7 @@ def bot_profile(tmp_path: Path):
             bot_repo=bot_repo,
             resolver=resolver,
             device_fs_dispatcher=_LocalIdentityDispatcher(),
+            binding_repo=MagicMock(),
         )
         yield BotProfile(
             identity_service=identity,

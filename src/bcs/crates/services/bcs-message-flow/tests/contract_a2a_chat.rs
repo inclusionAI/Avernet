@@ -9,7 +9,8 @@ use bcs_service_api::{
     BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
     BotRegistryCoreService, CallerContext, ChatResponseMode, ChatRunCancelCommand, ChatRunCleanupPort, ChatRunEventPort, ChatRunQueryCommand,
     AuthorizedOrganizationPair, DirectChatClientKind, DirectChatRunSnapshotPort, FriendCoreService, OrganizationCoreService, RegisteredBot,
-    OrganizationCandidateBot, OrganizationCandidateQuery, ServiceError, ServiceResult,
+    OrganizationCandidateBot, OrganizationCandidateQuery, ProviderTransportPreference,
+    ServiceError, ServiceResult,
     interceptor::{
         BlockReason, InterceptorChain, InterceptorDecision, MessageInterceptor, OutboundMessage,
     },
@@ -139,6 +140,49 @@ fn chat_event_state(state: &str) -> String {
         }
     })
     .to_string()
+}
+
+fn chat_delta_text(text: &str) -> String {
+    serde_json::json!({
+        "type": "event",
+        "event": "chat.event",
+        "payload": {
+            "state": "delta",
+            "delta_text": text
+        }
+    })
+    .to_string()
+}
+
+fn ping_event() -> String {
+    serde_json::json!({
+        "type": "event",
+        "event": "ping",
+        "payload": {}
+    })
+    .to_string()
+}
+
+fn detached_async_command(run_id: &str) -> AsyncA2aChatCommand {
+    AsyncA2aChatCommand {
+        caller: CallerContext::Bot(BotActor {
+            bot_uuid: "bot-source".to_string(),
+        }),
+        target_bot_id: "bot-target".to_string(),
+        message: "hello".to_string(),
+        from_actor_id: Some("api-user".to_string()),
+        run_channel_from: Some("api-user".to_string()),
+        authenticated_staff_id: Some("owner-1".to_string()),
+        tags: Vec::new(),
+        run_id: run_id.to_string(),
+        session_key: format!("session-{run_id}"),
+        timeout_ms: 1_000,
+        client: Some("http-chat-async".to_string()),
+        response_mode: ChatResponseMode::Full,
+        caller_wait_mode: Some("detached".to_string()),
+        organization_code: None,
+        provider_bypass_headers: Vec::new(),
+    }
 }
 
 fn tool_call_event(state: &str) -> String {
@@ -312,6 +356,10 @@ async fn async_chat_creates_run_and_delivers_chat_send_frame() {
         "running"
     );
     assert_eq!(bot_delivery.kinds().await, vec![BotDeliveryKind::Send]);
+    assert_eq!(
+        bot_delivery.provider_transports().await,
+        vec![ProviderTransportPreference::SseFirst]
+    );
     let chat_send = bot_delivery
         .frames()
         .await
@@ -329,6 +377,27 @@ async fn async_chat_creates_run_and_delivers_chat_send_frame() {
     assert_eq!(chat_send["timeout_ms"], serde_json::json!(7_200_000));
     assert_eq!(chat_send["tags"], serde_json::json!(["tag1", "tag2"]));
     assert_eq!(chat_send["extensions"]["caller_wait_mode"], "detached");
+}
+
+#[tokio::test]
+async fn bcs_cli_a2a_chat_requests_callback_provider_transport() {
+    let (service, bot_delivery, _) = build_service(
+        vec![
+            ("bot-source", "public", Some("owner-1")),
+            ("bot-target", "public", None),
+        ],
+        Vec::new(),
+    )
+    .await;
+    let mut command = chat_command("bot-target");
+    command.client = Some("bcs-cli/0.3.0".to_string());
+
+    service.chat(command).await.unwrap();
+
+    assert_eq!(
+        bot_delivery.provider_transports().await,
+        vec![ProviderTransportPreference::Callback]
+    );
 }
 
 #[tokio::test]
@@ -370,6 +439,55 @@ async fn blocking_run_service_records_final_event_and_unregisters_run() {
         "completed"
     );
     assert_eq!(run_port.event_unregistered().await, vec!["blocking-run"]);
+}
+
+#[tokio::test]
+async fn blocking_run_service_keeps_delta_text_when_final_is_empty() {
+    let (service, run_port, run_store) = build_run_service(
+        vec![
+            chat_delta_text("streaming "),
+            chat_delta_text("result"),
+            chat_event_state("final"),
+        ],
+        false,
+    )
+    .await;
+
+    let outcome = service
+        .run_blocking_chat(BlockingA2aChatCommand {
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "bot-source".to_string(),
+            }),
+            target_bot_id: "bot-target".to_string(),
+            message: "hello".to_string(),
+            from_actor_id: Some("api-user".to_string()),
+            run_channel_from: Some("api-user".to_string()),
+            authenticated_staff_id: Some("owner-1".to_string()),
+            tags: Vec::new(),
+            run_id: "delta-empty-final-run".to_string(),
+            session_key: "delta-empty-final-session".to_string(),
+            timeout_ms: 1_000,
+            client: Some("contract-test".to_string()),
+            response_mode: ChatResponseMode::Full,
+            organization_code: None,
+            provider_bypass_headers: Vec::new(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.content, "streaming result");
+    assert_eq!(
+        run_store
+            .get("delta-empty-final-run")
+            .await
+            .unwrap()
+            .accumulated_content,
+        "streaming result"
+    );
+    assert_eq!(
+        run_port.event_unregistered().await,
+        vec!["delta-empty-final-run"]
+    );
 }
 
 #[tokio::test]
@@ -441,12 +559,31 @@ async fn detached_provider_async_run_submits_after_downlink_ack_then_runs_on_cal
         "submitted"
     );
 
+    run_port.send_event("run-detached", ping_event()).await;
+    tokio::task::yield_now().await;
+    assert_eq!(
+        run_store.get("run-detached").await.unwrap().state.as_str(),
+        "submitted",
+        "ping must not acknowledge a detached run"
+    );
+
     run_port
-        .send_event("run-detached", chat_event_state("delivered"))
+        .send_event("run-detached", chat_delta_text("detached "))
         .await;
-    run_port
-        .wait_for_event_unregister("run-detached")
-        .await;
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if run_store
+                .get("run-detached")
+                .await
+                .is_some_and(|run| run.state.as_str() == "running")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("detach acknowledgement should mark the run running");
 
     let status = A2aChatRunService::get_run(
         &service,
@@ -464,17 +601,63 @@ async fn detached_provider_async_run_submits_after_downlink_ack_then_runs_on_cal
     assert_eq!(status.status, "running");
     assert_eq!(
         status.response.as_ref().unwrap()["content"],
-        serde_json::json!("")
+        serde_json::json!("detached ")
     );
     assert_eq!(
         run_store.get("run-detached").await.unwrap().state.as_str(),
         "running"
     );
-    run_store.cleanup_expired(u64::MAX, u64::MAX).await;
+
+    run_port
+        .send_event("run-detached", chat_event("final", "detached result"))
+        .await;
+    run_port
+        .wait_for_event_unregister("run-detached")
+        .await;
     assert_eq!(
         run_store.get("run-detached").await.unwrap().state.as_str(),
-        "running"
+        "completed"
     );
+    assert_eq!(
+        run_store.get("run-detached").await.unwrap().accumulated_content,
+        "detached result"
+    );
+}
+
+#[tokio::test]
+async fn detached_run_completes_when_final_is_the_first_event() {
+    let (service, run_port, run_store) =
+        build_run_service(vec![chat_event("final", "done")], false).await;
+
+    service
+        .start_async_chat(detached_async_command("detach-final-first"))
+        .await
+        .unwrap();
+    run_port
+        .wait_for_event_unregister("detach-final-first")
+        .await;
+
+    let run = run_store.get("detach-final-first").await.unwrap();
+    assert_eq!(run.state.as_str(), "completed");
+    assert_eq!(run.accumulated_content, "done");
+}
+
+#[tokio::test]
+async fn detached_run_fails_when_error_is_the_first_event() {
+    let (service, run_port, run_store) =
+        build_run_service(vec![chat_event("error", "provider failed")], false).await;
+
+    service
+        .start_async_chat(detached_async_command("detach-error-first"))
+        .await
+        .unwrap();
+    run_port
+        .wait_for_event_unregister("detach-error-first")
+        .await;
+
+    let run = run_store.get("detach-error-first").await.unwrap();
+    assert_eq!(run.state.as_str(), "failed");
+    assert_eq!(run.error_message.as_deref(), Some("provider failed"));
 }
 
 #[tokio::test]
@@ -1938,6 +2121,7 @@ fn normalized_friendship(a: &str, b: &str) -> (String, String) {
 struct RecordingDelivery {
     connected: bool,
     frames: RwLock<Vec<BcsFrame>>,
+    provider_transports: RwLock<Vec<ProviderTransportPreference>>,
 }
 
 impl RecordingDelivery {
@@ -1945,11 +2129,16 @@ impl RecordingDelivery {
         Self {
             connected,
             frames: RwLock::new(Vec::new()),
+            provider_transports: RwLock::new(Vec::new()),
         }
     }
 
     async fn frames(&self) -> Vec<BcsFrame> {
         self.frames.read().await.clone()
+    }
+
+    async fn provider_transports(&self) -> Vec<ProviderTransportPreference> {
+        self.provider_transports.read().await.clone()
     }
 }
 
@@ -2072,6 +2261,10 @@ impl BotDeliveryPort for RecordingDelivery {
 
     async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
         let target_bot_id = cmd.target_bot_id().to_string();
+        self.provider_transports
+            .write()
+            .await
+            .push(cmd.provider_transport);
         self.frames.write().await.push(cmd.frame);
         Ok(BotDeliveryResult {
             target_bot_id,

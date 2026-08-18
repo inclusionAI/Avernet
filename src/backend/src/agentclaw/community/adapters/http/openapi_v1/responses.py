@@ -39,9 +39,15 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     ErrorEnvelope,
     Page,
 )
+from agentclaw.community.api.bot_startup_script_service import (
+    MAX_SCRIPT_BYTES,
+    StartupScriptNotEncodableError,
+    StartupScriptTooLargeError,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     GrantNotResolvableError,
     ClusterMismatchError,
+    StartupScriptUnsupportedError,
     MissingPrincipalError,
     UnsupportedEngineError,
     UserIdMismatchError,
@@ -83,6 +89,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineResourceNotFoundError,
     EngineRuntimeError,
     EngineStageNotLiveError,
+    EngineStageReadOnlyError,
     EngineUpstreamError,
 )
 from agentclaw.community.core.gateway_principal import PrincipalVerificationError
@@ -96,12 +103,16 @@ from agentclaw.community.core.mcp.errors import (
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
     FileTooLargeError,
+    InvalidResourcePathError,
     ResourceNotFoundError,
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
     LocalSkillActiveError,
+    LocalSkillEditBusyError,
+    LocalSkillEditLockUnavailableError,
     LocalSkillEditPausedError,
+    LocalSkillLayoutRollbackError,
     LocalSkillInvalidPackageError,
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
@@ -248,6 +259,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # str(exc), which would leak internal ids/paths to external callers.
     DuplicateResourceError: (409, "Resource already exists"),
     ResourceNotFoundError: (404, "Not found"),
+    # The message says the path was rejected but not what the server made of it:
+    # echoing the caller's path back, or naming the segment that failed, turns a
+    # rejection into a probe for how addresses are resolved.
+    InvalidResourcePathError: (400, "Invalid resource path"),
     LocalSkillNotFoundError: (404, "Not found"),
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
@@ -257,15 +272,37 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillTooLargeError: (413, "Skill package is too large"),
     LocalSkillStorageError: (502, "Skill storage operation failed"),
     LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
+    LocalSkillEditBusyError: (409, "Another Skill update is in progress"),
+    LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
+    LocalSkillEditLockUnavailableError: (503, "Skill update service is temporarily unavailable"),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     FileTooLargeError: (413, "File too large for preview"),
+    # Startup script (issue #926): the body is refused at write time so a
+    # caller learns the limit instead of hitting it inside a container. The
+    # limit is interpolated from the constant rather than typed as a literal so
+    # the message cannot drift from what the service actually enforces — and
+    # unlike ``str(exc)`` it carries no caller data or internal path, which is
+    # what the fixed-message rule above is protecting against.
+    # A body JSON accepted but UTF-8 cannot encode — a lone surrogate. The
+    # caller's input, so a 400, not the 500 an unmapped encode error would give.
+    StartupScriptNotEncodableError: (400, "Startup script is not valid UTF-8"),
+    StartupScriptTooLargeError: (
+        413,
+        f"Startup script exceeds the {MAX_SCRIPT_BYTES}-byte limit",
+    ),
+    # ... and refused outright for a bot whose container cannot run one,
+    # rather than stored where it would silently never execute.
+    StartupScriptUnsupportedError: (409, "Startup script is not supported for this bot"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
     InvalidIdentityFileTypeError: (400, "Invalid file type"),
     # ── Engine-runtime (Track C) ──────────────────────────────────────────
     # Ordering inside this block is load-bearing: ``EngineRuntimeError`` is the
-    # base of the four ``Engine*`` errors below it and is listed AFTER them.
+    # base of every ``Engine*`` error below it and is listed AFTER them.
+    # ``test_engine_runtime_base_does_not_swallow_its_leaves`` finds the leaves
+    # by scanning the errors module and its ``__all__``, so a new one is covered
+    # here without editing any list — but it must still be given an entry below.
     # Lookup returns on the first isinstance match in insertion order, so a base
     # placed first would swallow every leaf under it — the trap recorded in the
     # Track B gotchas.
@@ -299,6 +336,13 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # publishing — and from "device not ready", which promises a retry will
     # eventually succeed.
     EngineStageNotLiveError: (409, "No live runtime at the requested stage"),
+    # A write addressed to a published runtime. 409 like the two above, and a
+    # *separate* answer from both: "no live runtime" would send the caller off to
+    # publish one and retry, which would not help, and the caller is entitled to
+    # the operation — it is the addressed runtime that does not take writes.
+    # Deliberately not a 200 with a no-op flag either: automation that checks the
+    # status code would record the write as landed.
+    EngineStageReadOnlyError: (409, "The requested stage is read-only"),
     # An out-of-range page argument, so it joins the 422 FastAPI already returns
     # for page_size > 100 rather than inventing a status. Needs a mapped entry
     # rather than a bare HTTPException: app-level handlers replace an unmapped

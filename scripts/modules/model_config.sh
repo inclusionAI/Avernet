@@ -135,7 +135,7 @@ singlebox_model_config_required_for_services() {
     local service
     for service in "$@"; do
         case "$service" in
-            all|baas|bots|bcs_bots)
+            all|baas|bots|bcs_bots|hybrid|merchant_hybrid)
                 return 0
                 ;;
         esac
@@ -211,6 +211,18 @@ singlebox_model_config_select_mode() {
 }
 
 singlebox_model_config_require_manual_env() {
+    # 以下为安全注释COSEC：仅解析明确的环境变量引用，避免将占位符当作可用凭据。
+    if [ "${OPENCLAW_OPENAI_API_KEY:-}" = "OPENAI_API_KEY" ]; then
+        if [ -z "${OPENAI_API_KEY:-}" ]; then
+            log_error "OPENCLAW_OPENAI_API_KEY references OPENAI_API_KEY, but OPENAI_API_KEY is not set."
+            log_error "Set OPENAI_API_KEY in the launch environment, or set OPENCLAW_OPENAI_API_KEY to a real key in ${PROJECT_ROOT}/.env.local."
+            return 1
+        fi
+        OPENCLAW_OPENAI_API_KEY="$OPENAI_API_KEY"
+        export OPENCLAW_OPENAI_API_KEY
+        log_info "Resolved OpenClaw manual model credential from OPENAI_API_KEY."
+    fi
+
     local missing=()
     [ -n "${OPENCLAW_OPENAI_BASE_URL:-}" ] || missing+=("OPENCLAW_OPENAI_BASE_URL")
     [ -n "${OPENCLAW_OPENAI_API_KEY:-}" ] || missing+=("OPENCLAW_OPENAI_API_KEY")
@@ -227,6 +239,136 @@ singlebox_model_config_require_manual_env() {
     fi
 }
 
+singlebox_model_config_thinking_enabled() {
+    case "${OPENCLAW_ENABLE_THINKING:-false}" in
+        1|true|TRUE|yes|YES|on|ON)
+            printf 'true\n'
+            ;;
+        0|false|FALSE|no|NO|off|OFF|'')
+            printf 'false\n'
+            ;;
+        *)
+            log_error "Invalid OPENCLAW_ENABLE_THINKING: ${OPENCLAW_ENABLE_THINKING}"
+            log_error "Valid values: true, false"
+            return 1
+            ;;
+    esac
+}
+
+singlebox_model_config_apply_thinking_policy() {
+    local output_file="$1"
+    local thinking_enabled thinking_default temporary_file
+    thinking_enabled="$(singlebox_model_config_thinking_enabled)" || return 1
+    if [ "$thinking_enabled" = "true" ]; then
+        thinking_default="medium"
+    else
+        thinking_default="off"
+    fi
+    temporary_file="${output_file}.thinking.$$"
+
+    (
+        umask 077
+        jq \
+            --argjson thinking_enabled "$thinking_enabled" \
+            --arg thinking_default "$thinking_default" '
+          def model_provider_id($model_ref):
+            $model_ref | split("/")[0];
+          def model_id($model_ref):
+            $model_ref | split("/")[1:] | join("/");
+          def needs_glm_thinking_override($config; $model_ref):
+            ($config.models.providers[model_provider_id($model_ref)] // {}) as $provider
+            | (($provider.api // "") == "openai-completions"
+               or ($provider.api // "") == "openai")
+              and ((model_id($model_ref) | ascii_downcase)
+                   | test("(^|/)glm-(4\\.(5|6|7)|5([.-]|$))"));
+          def set_glm_thinking_override:
+            if type != "object" then {} else . end
+            | .params = (if (.params? | type) == "object" then .params else {} end)
+            | .params.extra_body = (
+                if (.params.extra_body? | type) == "object" then .params.extra_body else {} end
+              )
+            | .params.extra_body.enable_thinking = $thinking_enabled;
+          def toggle_thinking_object:
+            if type != "object" then .
+            else
+              (if has("enable_thinking") then
+                 .enable_thinking = $thinking_enabled
+               else . end)
+              | (if (.thinking? | type) == "object" then
+                   if $thinking_enabled then
+                     .thinking |= del(.type)
+                     | if .thinking == {} then del(.thinking) else . end
+                   else
+                     .thinking.type = "disabled"
+                   end
+                 else . end)
+            end;
+          def toggle_model_params:
+            if type != "object" then .
+            else
+              toggle_thinking_object
+              | (if (.extra_body? | type) == "object" then
+                   .extra_body |= toggle_thinking_object
+                 else . end)
+              | (if (.extraBody? | type) == "object" then
+                   .extraBody |= toggle_thinking_object
+                 else . end)
+              | (if (.chat_template_kwargs? | type) == "object"
+                       and (.chat_template_kwargs | has("enable_thinking")) then
+                   .chat_template_kwargs.enable_thinking = $thinking_enabled
+                 else . end)
+              | (if (.chatTemplateKwargs? | type) == "object"
+                       and (.chatTemplateKwargs | has("enable_thinking")) then
+                   .chatTemplateKwargs.enable_thinking = $thinking_enabled
+                 else . end)
+            end;
+          . as $source_config
+          | (.agents.defaults.model.primary? // null) as $primary_model
+          | .agents = (if (.agents? | type) == "object" then .agents else {} end)
+          | .agents.defaults = (
+              if (.agents.defaults? | type) == "object" then .agents.defaults else {} end
+            )
+          | .agents.defaults.thinkingDefault = $thinking_default
+          | if (.agents.defaults.models? | type) == "object" then
+              .agents.defaults.models |= with_entries(
+                .value |= (
+                  if type == "object" and (.params? | type) == "object" then
+                    .params |= toggle_model_params
+                  else . end
+                )
+              )
+            else . end
+          | if ($primary_model | type) == "string"
+               and needs_glm_thinking_override($source_config; $primary_model) then
+              .agents.defaults.models = (
+                if (.agents.defaults.models? | type) == "object" then
+                  .agents.defaults.models
+                else
+                  {}
+                end
+              )
+              | .agents.defaults.models[$primary_model] = (
+                  (.agents.defaults.models[$primary_model] // {})
+                  | set_glm_thinking_override
+                )
+            else . end
+          | if (.agents.defaults.models? | type) == "object" then
+              .agents.defaults.models |= with_entries(
+                .key as $model_ref
+                | if needs_glm_thinking_override($source_config; $model_ref) then
+                    .value |= set_glm_thinking_override
+                  else . end
+              )
+            else . end
+        ' "$output_file" > "$temporary_file"
+    ) || {
+        rm -f "$temporary_file"
+        return 1
+    }
+    mv "$temporary_file" "$output_file"
+    chmod 600 "$output_file"
+}
+
 singlebox_model_config_write_manual() {
     local output_file="$1"
     local provider_id="${OPENCLAW_OPENAI_PROVIDER_ID:-openai-compatible}"
@@ -239,7 +381,6 @@ singlebox_model_config_write_manual() {
         jq -n \
             --arg provider_id "$provider_id" \
             --arg base_url "$OPENCLAW_OPENAI_BASE_URL" \
-            --arg api_key "$OPENCLAW_OPENAI_API_KEY" \
             --arg model_id "$model_id" \
             --arg model_name "$model_name" \
             --arg model_api "$model_api" \
@@ -249,7 +390,11 @@ singlebox_model_config_write_manual() {
             providers: {
               ($provider_id): {
                 baseUrl: $base_url,
-                apiKey: $api_key,
+                apiKey: {
+                  source: "env",
+                  provider: "default",
+                  id: "OPENCLAW_OPENAI_API_KEY"
+                },
                 api: $model_api,
                 models: [
                   {
@@ -473,29 +618,9 @@ singlebox_model_config_export_llm_env() {
             ;;
     esac
 
-    # Pick a fallback reasoning model: prefer a faster non-primary model from the
-    # same provider (e.g. GLM-5.1 for antchat) so local fusion answers finish
-    # before the antchat 90s gateway window. Respect explicit LLM_*_MODEL env vars.
+    # Respect explicit LLM_*_MODEL env vars; otherwise use the primary model
+    # from the openclaw config so that endpoint, token, and model stay consistent.
     local preferred_model="$model_name"
-    if [ -z "${LLM_REASONING_MODEL:-}" ]; then
-        local models fast_candidate
-        models="$(jq -r --arg p "$provider_id" --arg primary "$model_name" '
-            .models.providers[$p].models[]? | select(.id != $primary) | .id
-        ' "$source_file" 2>/dev/null || true)"
-        fast_candidate="$(printf '%s\n' $models | awk '$0=="GLM-5.1"{print; exit}')"
-        if [ -z "$fast_candidate" ]; then
-            fast_candidate="$(printf '%s\n' $models | awk '$0=="Qwen3.5-397B-A17B"{print; exit}')"
-        fi
-        if [ -z "$fast_candidate" ]; then
-            fast_candidate="$(printf '%s\n' $models | awk '$0=="claude-3-5-sonnet"{print; exit}')"
-        fi
-        if [ -z "$fast_candidate" ]; then
-            fast_candidate="$(printf '%s\n' $models | head -1 || true)"
-        fi
-        if [ -n "$fast_candidate" ]; then
-            preferred_model="$fast_candidate"
-        fi
-    fi
 
     export LLM_BASE_URL="${LLM_BASE_URL:-$base_url}"
     export LLM_AUTH_TOKEN="${LLM_AUTH_TOKEN:-$api_key}"
@@ -509,6 +634,45 @@ singlebox_model_config_export_llm_env() {
     export LLM_REASONING_TIMEOUT_MS="${LLM_REASONING_TIMEOUT_MS:-600000}"
 
     log_info "Exported bcsfuse LLM config from ${source_file} (provider=${provider_id}, api_type=${api_type}, model=${model_name})"
+}
+
+singlebox_model_config_export_manual_llm_env() {
+    # When singlebox uses manual mode for the OpenClaw bot config, derive bcsfuse
+    # LLM settings from the same OPENCLAW_OPENAI_* env vars. This mirrors the
+    # home-mode export: base URL, token, and all model selectors are reused so
+    # users do not have to duplicate them in .env.local.
+    if [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" != "manual" ]; then
+        return 0
+    fi
+
+    local base_url="${OPENCLAW_OPENAI_BASE_URL:-}"
+    local api_key="${OPENCLAW_OPENAI_API_KEY:-}"
+    local model_id="${OPENCLAW_OPENAI_MODEL_ID:-}"
+
+    if [ -z "$base_url" ] || [ -z "$api_key" ] || [ -z "$model_id" ]; then
+        return 0
+    fi
+
+    if { [ -z "${LLM_BASE_URL:-}" ] || [ "${LLM_BASE_URL}" = "change_me" ]; }; then
+        export LLM_BASE_URL="$base_url"
+    fi
+    if { [ -z "${LLM_AUTH_TOKEN:-}" ] || [ "${LLM_AUTH_TOKEN}" = "change_me" ]; }; then
+        export LLM_AUTH_TOKEN="$api_key"
+    fi
+    if { [ -z "${LLM_API_TYPE:-}" ] || [ "${LLM_API_TYPE}" = "change_me" ]; }; then
+        export LLM_API_TYPE="openai"
+    fi
+
+    local preferred_model="$model_id"
+    export LLM_FAST_MODEL="${LLM_FAST_MODEL:-$preferred_model}"
+    export LLM_BALANCED_MODEL="${LLM_BALANCED_MODEL:-$preferred_model}"
+    export LLM_REASONING_MODEL="${LLM_REASONING_MODEL:-$preferred_model}"
+    export LLM_LONG_CONTEXT_MODEL="${LLM_LONG_CONTEXT_MODEL:-$preferred_model}"
+    export LLM_EXTRACTION_MODEL="${LLM_EXTRACTION_MODEL:-$preferred_model}"
+    export LLM_DEFAULT_TIMEOUT_MS="${LLM_DEFAULT_TIMEOUT_MS:-120000}"
+    export LLM_REASONING_TIMEOUT_MS="${LLM_REASONING_TIMEOUT_MS:-600000}"
+
+    log_info "Exported bcsfuse LLM config from manual env (api_type=openai, model=${model_id})"
 }
 
 singlebox_model_config_prepare() {
@@ -526,6 +690,7 @@ singlebox_model_config_prepare() {
         manual)
             singlebox_model_config_require_manual_env || return 1
             singlebox_model_config_write_manual "$output_file" || return 1
+            singlebox_model_config_export_manual_llm_env || true
             ;;
         home)
             singlebox_model_config_write_home "$output_file" || return 1
@@ -536,6 +701,7 @@ singlebox_model_config_prepare() {
             log_warn "Singlebox model config mode is mock; bots use fixed-format local model replies."
             ;;
     esac
+    singlebox_model_config_apply_thinking_policy "$output_file" || return 1
 
     SINGLEBOX_MODEL_CONFIG_MODE="$mode"
     SINGLEBOX_MODEL_CONFIG_FILE="$output_file"
@@ -545,4 +711,5 @@ singlebox_model_config_prepare() {
 
     log_info "Singlebox model config mode: ${mode}"
     log_info "Singlebox model config: ${output_file}"
+    log_info "Singlebox model thinking default: $(jq -r '.agents.defaults.thinkingDefault' "$output_file")"
 }

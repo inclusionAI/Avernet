@@ -1467,6 +1467,13 @@ enum ChannelCommands {
     /// List channel bindings
     List,
 
+    /// Find DingTalk conversation IDs by BCS session ID
+    ConversationId {
+        /// BCS session id
+        #[arg(long)]
+        session: String,
+    },
+
     /// Delete a channel binding
     Unbind {
         /// Binding id
@@ -3930,6 +3937,56 @@ pub async fn run() -> Result<()> {
                     }
                 }
 
+                ChannelCommands::ConversationId { session } => {
+                    debug_request!(
+                        debug,
+                        "GET",
+                        "/channels/conversations/by-session",
+                        json!({
+                            "bcs_session_id": session,
+                            "channel_type": "dingtalk"
+                        })
+                    );
+
+                    let result = client
+                        .list_channel_conversations_by_session(session, "dingtalk")
+                        .await?;
+
+                    debug_response!(debug, "200", &result);
+
+                    if cli.json {
+                        println!("{}", serde_json::to_string(&result)?);
+                    } else if let Some(items) =
+                        result.get("items").and_then(|value| value.as_array())
+                    {
+                        println!(
+                            "DingTalk conversations for session {} ({}):",
+                            session,
+                            items.len()
+                        );
+                        for item in items {
+                            let conversation_id = item
+                                .get("conversation_id")
+                                .and_then(|value| value.as_str())
+                                .unwrap_or("?");
+                            let binding_id = item
+                                .get("binding_id")
+                                .and_then(|value| value.as_str())
+                                .unwrap_or("?");
+                            let session_scope = item
+                                .get("session_scope")
+                                .and_then(|value| value.as_str())
+                                .unwrap_or("?");
+                            println!(
+                                "  {} (binding: {}, scope: {})",
+                                conversation_id, binding_id, session_scope
+                            );
+                        }
+                    } else {
+                        println!("{}", serde_json::to_string_pretty(&result)?);
+                    }
+                }
+
                 ChannelCommands::Unbind { id } => {
                     debug_request!(
                         debug,
@@ -5751,6 +5808,28 @@ mod tests {
                 ..
             } => {}
             _ => panic!("expected channel list command"),
+        }
+    }
+
+    #[test]
+    fn test_channel_conversation_id_command_parses_session() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "channel",
+            "conversation-id",
+            "--session",
+            "group_1:session_1",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Channel {
+                command: ChannelCommands::ConversationId { session },
+                ..
+            } => {
+                assert_eq!(session, "group_1:session_1");
+            }
+            _ => panic!("expected channel conversation-id command"),
         }
     }
 

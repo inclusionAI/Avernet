@@ -59,7 +59,17 @@ pub async fn handle_task_dispatch(
             }
         }
     }
-    let target = target.ok_or_else(|| ServiceError::BotNotFound(cmd.target_bot_id.clone()))?;
+    let Some(target) = target else {
+        emit_unknown_task_target_notice(
+            flow,
+            &group,
+            &group_id,
+            manager_session_id.as_deref(),
+            &cmd.target_bot_id,
+        )
+        .await;
+        return Err(ServiceError::BotNotFound(cmd.target_bot_id.clone()));
+    };
     let target_mode = target
         .mode
         .unwrap_or_else(|| ParticipantMode::default_for(target.actor_kind));
@@ -197,9 +207,6 @@ pub async fn handle_task_dispatch(
         }
     };
     let delivery_kind = BotDeliveryKind::TaskDispatch;
-    let provider_transport = flow
-        .provider_transport_preference(&target_bot_id, &delivery_kind, &delivery_target)
-        .await;
     let result = match flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
@@ -207,7 +214,7 @@ pub async fn handle_task_dispatch(
             run_id: effective_task_id.clone(),
             frame,
             delivery_kind,
-            provider_transport,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -306,6 +313,59 @@ pub async fn handle_task_dispatch(
         bot_deliveries: vec![result],
         frontend_deliveries: Vec::new(),
     })
+}
+
+async fn emit_unknown_task_target_notice(
+    flow: &BcsMessageFlow,
+    group: &Group,
+    group_id: &str,
+    session_id: Option<&str>,
+    requested_target: &str,
+) {
+    let Some(system_message) = flow.system_message.as_ref() else {
+        return;
+    };
+    let available_workers = group
+        .participants
+        .iter()
+        .filter(|participant| participant.role == ParticipantRole::Worker)
+        .map(|participant| {
+            participant
+                .bot_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(|name| format!("{} ({})", name, participant.bot_uuid))
+                .unwrap_or_else(|| participant.bot_uuid.clone())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let available_workers = if available_workers.is_empty() {
+        "无".to_string()
+    } else {
+        available_workers
+    };
+    let message = format!(
+        "[协同提醒] 未找到 worker {:?}，任务未派发。当前可用 worker: {}。请使用准确名称或 Bot ID 重试。",
+        requested_target, available_workers
+    );
+    let event = SystemMessageEvent::GenericNotification {
+        group_id: group_id.to_string(),
+        message,
+        receivers: Vec::new(),
+    };
+    let notify_session_id = session_id.unwrap_or(group_id);
+    if let Err(error) = system_message
+        .notify(group_id, event, notify_session_id, &group.participants)
+        .await
+    {
+        warn!(
+            %group_id,
+            %notify_session_id,
+            error = %error,
+            "failed to emit unknown task target notice"
+        );
+    }
 }
 
 pub(crate) async fn emit_task_ledger_status(
@@ -545,9 +605,6 @@ pub async fn handle_task_message(
         }
     };
     let delivery_kind = BotDeliveryKind::TaskMessage;
-    let provider_transport = flow
-        .provider_transport_preference(&manager.bot_uuid, &delivery_kind, &delivery_target)
-        .await;
     let result = flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
@@ -555,7 +612,7 @@ pub async fn handle_task_message(
             run_id: run_id.clone(),
             frame,
             delivery_kind,
-            provider_transport,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await?;

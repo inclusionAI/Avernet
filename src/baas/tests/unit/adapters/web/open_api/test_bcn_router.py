@@ -9,6 +9,7 @@ from secbaas.community.adapters.web.routers.bcn_downlink.bcn_model import (
 from secbaas.community.adapters.web.routers.bcn_downlink.bcn_router import (
     _dispatch_chat_send,
     _dispatch_chat_send_stream,
+    validate_bcn_token,
 )
 from secbaas.community.api.bcn import (
     Attachment as DomainAttachment,
@@ -18,6 +19,27 @@ from secbaas.community.api.bcn import (
 )
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.service.sse import DefaultStreamConverter
+
+
+def test_validate_bcn_token_uses_secret_store_when_env_is_unset(monkeypatch):
+    monkeypatch.delenv("BCS_BAAS_DOWNLINK_TOKEN", raising=False)
+    secret_plugin = MagicMock()
+    secret_plugin.get_secret.return_value = "secret-token"
+
+    assert validate_bcn_token("Bearer secret-token", secret_plugin) == "secret-token"
+    secret_plugin.get_secret.assert_called_once_with(
+        "other_manual_secbaas_bcn_to_provider_token"
+    )
+
+
+def test_validate_bcn_token_accepts_local_stub_when_secret_store_is_unavailable(
+    monkeypatch,
+):
+    monkeypatch.delenv("BCS_BAAS_DOWNLINK_TOKEN", raising=False)
+    secret_plugin = MagicMock()
+    secret_plugin.get_secret.side_effect = RuntimeError("secret store unavailable")
+
+    assert validate_bcn_token("Bearer local-token", secret_plugin) == "local-token"
 
 
 class _StreamService:
@@ -145,8 +167,8 @@ async def test_dispatch_chat_send_passes_attachments():
             "attachments": [
                 {
                     "attachment_id": "att_1",
-                    "type": "image",
-                    "file_name": "photo.png",
+                    "type": "file",
+                    "file_name": "brief.pdf",
                     "url": "https://cdn.example.com/att_1",
                 },
             ],
@@ -159,6 +181,7 @@ async def test_dispatch_chat_send_passes_attachments():
     assert input_.attachments is not None, "ChatSendInput.attachments must not be None"
     assert len(input_.attachments) == 1
     assert input_.attachments[0].attachment_id == "att_1"
+    assert input_.attachments[0].type == "file"
     assert isinstance(input_.attachments[0], DomainAttachment), (
         "attachments must be domain dataclass instances, not Pydantic models"
     )

@@ -16,6 +16,12 @@ call is *for*, not an attribute of any resource.
 Defined once and imported by every engine-runtime router, like ``UserIdDep``:
 a second spelling would be a second thing to keep in step.
 
+``stage`` has since outgrown this group — the per-bot file operations (engine
+config, identity) address the same three runtimes and import it from here for
+that reason. It stays in this package because this is where the vocabulary and
+its enum are defined, not because the group owns the parameter; ``owner_id``,
+whose adjudication *is* engine-runtime's, has not moved either.
+
 ``owner_id`` is also the one parameter on this surface whose *source* depends on
 the caller. For a human it is the request's, defaulting to themselves; for an
 application it comes from the grant record, and a request that names a different
@@ -37,7 +43,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
-    GrantCheckedDep,
+    AddressedBotGrantDep,
 )
 from agentclaw.community.log import get_logger
 
@@ -62,10 +68,24 @@ STAGE_DESCRIPTION = (
     "stage with no live runtime is refused (409)."
 )
 
+#: What an operation that **writes** to a bot's runtime publishes for ``stage``.
+#:
+#: A separate description, not a separate parameter: the write takes the same
+#: values from the same enum, and what differs is the answer it gives for two of
+#: them. Publishing the read's text on a write would advertise verify and online
+#: as addressable there.
+WRITE_STAGE_DESCRIPTION = (
+    "Which of the bot's runtimes this request addresses. Only the draft — the "
+    "bot's own workspace — accepts writes, and it is the default. A published "
+    "runtime is what a release produced and is replaced by publishing again, "
+    "never edited: naming verify or online is refused (409) and nothing is "
+    "written anywhere."
+)
+
 
 async def resolve_owner_id(
     caller: ActingCallerDep,
-    granted_owner_id: GrantCheckedDep,
+    granted_owner_id: AddressedBotGrantDep,
     owner_id: Annotated[
         str | None,
         Query(
@@ -140,9 +160,13 @@ OwnerIdDep = Annotated[str, Depends(resolve_owner_id)]
 #: default and the handler signature states it in one place.
 StageQuery = Annotated[RuntimeStage, Query(description=STAGE_DESCRIPTION)]
 
+#: The same, for a handler that writes to the addressed runtime.
+WriteStageQuery = Annotated[RuntimeStage, Query(description=WRITE_STAGE_DESCRIPTION)]
+
 __all__ = [
     "OWNER_ID_QUERY",
     "OwnerIdDep",
     "StageQuery",
+    "WriteStageQuery",
     "resolve_owner_id",
 ]

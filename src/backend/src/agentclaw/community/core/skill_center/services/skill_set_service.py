@@ -2462,10 +2462,10 @@ class SkillSetSwitcher(_DeviceSyncMixin):
             )
         try:
             lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
-        except SkillsPoolEditPausedError:
+        except SkillsPoolEditPausedError as exc:
             return SwitchResult(
                 success=False,
-                message="Skills are temporarily read-only while layout work is running",
+                message=str(exc),
             )
         try:
             return await self._switch_to_skill_set_unlocked(
@@ -2659,10 +2659,10 @@ class SkillSetSwitcher(_DeviceSyncMixin):
             return await self._sync_skill_set_to_active_unlocked(skill_set_id, user_id)
         try:
             lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
-        except SkillsPoolEditPausedError:
+        except SkillsPoolEditPausedError as exc:
             return SwitchResult(
                 success=False,
-                message="Skills are temporarily read-only while layout work is running",
+                message=str(exc),
             )
         try:
             return await self._sync_skill_set_to_active_unlocked(skill_set_id, user_id)
@@ -2898,10 +2898,10 @@ class SkillSetActivator(_DeviceSyncMixin):
             )
         try:
             lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
-        except SkillsPoolEditPausedError:
+        except SkillsPoolEditPausedError as exc:
             return ActivateResult(
                 success=False,
-                message="Skills are temporarily read-only while layout work is running",
+                message=str(exc),
             )
         try:
             return await self._activate_skill_set_unlocked(
@@ -3038,10 +3038,10 @@ class SkillSetActivator(_DeviceSyncMixin):
             )
         try:
             lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
-        except SkillsPoolEditPausedError:
+        except SkillsPoolEditPausedError as exc:
             return DeactivateResult(
                 success=False,
-                message="Skills are temporarily read-only while layout work is running",
+                message=str(exc),
             )
         try:
             return await self._deactivate_skill_set_unlocked(

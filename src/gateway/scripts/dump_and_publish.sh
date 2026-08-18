@@ -66,6 +66,7 @@ _upstream_dir() {
         backend) echo "src/backend" ;;
         baas)    echo "src/baas" ;;
         bcn)     echo "src/bcs" ;;
+        bcn-internal) echo "src/bcs" ;;
         *)       echo "" ;;
     esac
 }
@@ -75,6 +76,7 @@ _upstream_env() {
         backend) echo "DEPLOY_PROFILE=community" ;;
         baas)    echo "SECBAAS_RUN_MODE=bare" ;;
         bcn)     echo "" ;;
+        bcn-internal) echo "" ;;
         *)       echo "" ;;
     esac
 }
@@ -94,7 +96,7 @@ _dump_upstream() {
         if [[ -n "$env_vars" ]]; then
             export ${env_vars//,/ }
         fi
-        if [[ "$name" == "bcn" ]]; then
+        if [[ "$name" == "bcn" || "$name" == "bcn-internal" ]]; then
             uv run --project "$GATEWAY_DIR" --locked \
                 python "scripts/dump_openapi.py" "$TMPDIR/${name}.openapi.json" "$@"
         else
@@ -147,11 +149,18 @@ main() {
     fi
 
     _dump_upstream bcn
+    _dump_upstream bcn-internal \
+        --entrypoint internal.yaml \
+        --path-prefix /api/v1/collaboration/
     if ! $DRY_RUN; then
         _gate_and_publish \
             bcn \
             "$SCHEMAS_DIR/bcn.openapi.json" \
             "$TMPDIR/bcn.openapi.json"
+        _gate_and_publish \
+            bcn-internal \
+            "$SCHEMAS_DIR/bcn.internal.openapi.json" \
+            "$TMPDIR/bcn-internal.openapi.json"
     fi
 
     log_step "Done"

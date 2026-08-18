@@ -216,6 +216,7 @@
       "operator_names": []
     },
     "workspace": {
+      "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
       "env_folder": "aidesktop_singlebox",
       "openclaw_root": "~/.openclaw"
@@ -350,6 +351,7 @@
       "operator_names": []
     },
     "workspace": {
+      "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
       "claude_code_session_root": "/home/admin/.claude",
       "openclaw_root": "~/.openclaw"

@@ -1,13 +1,14 @@
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
     ActorKind, AddSessionParticipant, ApplicationError, AuthenticatedCaller,
-    AuthenticatedUserIdentity, BotParticipantMode, CompleteSession, CreateSession,
-    CreateSessionOutcome, DeleteResult, DeleteSession,
-    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, MessageSenderKind,
-    Page, ParticipantMode, SessionCompletionResult, SessionDetail, SessionMessage,
-    SessionMessageKind, SessionMessagePage, SessionMessageService, SessionParticipant,
-    SessionService, SessionStatus, UpdateSession, UpdateSessionParticipant,
+    AuthenticatedUserIdentity, CollectSession, CompleteSession, CreateSession,
+    CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant, GetSession,
+    ListSessionMessages, ListSessions, Page, ParticipantMode, SessionCollectionResult,
+    SessionCompletionResult, SessionDetail, SessionMessageService, SessionParticipant,
+    SessionService, SessionStatus, UncollectSession, UpdateSession, UpdateSessionParticipant,
 };
+use bcs_service_api::types::{AttachmentType, MessageAttachment};
+use bcs_service_api::{GroupMessage, GroupMessageType, MessageRole};
 
 fn human_caller() -> AuthenticatedCaller {
     AuthenticatedCaller {
@@ -28,7 +29,10 @@ struct NoopSessionService;
 
 #[async_trait]
 impl SessionService for NoopSessionService {
-    async fn create(&self, _command: CreateSession) -> Result<CreateSessionOutcome, ApplicationError> {
+    async fn create(
+        &self,
+        _command: CreateSession,
+    ) -> Result<CreateSessionOutcome, ApplicationError> {
         Err(ApplicationError::internal("not implemented"))
     }
 
@@ -52,6 +56,20 @@ impl SessionService for NoopSessionService {
         &self,
         _command: CompleteSession,
     ) -> Result<SessionCompletionResult, ApplicationError> {
+        Err(ApplicationError::internal("not implemented"))
+    }
+
+    async fn collect(
+        &self,
+        _command: CollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError> {
+        Err(ApplicationError::internal("not implemented"))
+    }
+
+    async fn uncollect(
+        &self,
+        _command: UncollectSession,
+    ) -> Result<SessionCollectionResult, ApplicationError> {
         Err(ApplicationError::internal("not implemented"))
     }
 
@@ -84,12 +102,8 @@ impl SessionMessageService for NoopSessionMessageService {
     async fn list(
         &self,
         _query: ListSessionMessages,
-    ) -> Result<SessionMessagePage, ApplicationError> {
-        Ok(SessionMessagePage {
-            messages: Vec::new(),
-            next_cursor: None,
-            has_more: false,
-        })
+    ) -> Result<Vec<GroupMessage>, ApplicationError> {
+        Ok(Vec::new())
     }
 }
 
@@ -139,6 +153,16 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
         caller: caller.clone(),
         session_id: "s1".into(),
     };
+    let collect = CollectSession {
+        caller: caller.clone(),
+        session_id: "s1".into(),
+        participant: "bot-1".into(),
+    };
+    let uncollect = UncollectSession {
+        caller: caller.clone(),
+        session_id: "s1".into(),
+        participant: "bot-1".into(),
+    };
     let add = AddSessionParticipant {
         caller: caller.clone(),
         session_id: "s1".into(),
@@ -147,8 +171,8 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
     let update_p = UpdateSessionParticipant {
         caller: caller.clone(),
         session_id: "s1".into(),
-        bot_uuid: "bot-3".into(),
-        mode: BotParticipantMode::Auto,
+        bot_uuid: "human_staff-1".into(),
+        mode: ParticipantMode::Present,
     };
     let remove_p = DeleteSessionParticipant {
         caller,
@@ -162,6 +186,8 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
         &update.caller,
         &delete.caller,
         &complete.caller,
+        &collect.caller,
+        &uncollect.caller,
         &add.caller,
         &update_p.caller,
         &remove_p.caller,
@@ -171,41 +197,82 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
     }
     assert_eq!(create.group_id, "g1");
     assert_eq!(list.status, Some(SessionStatus::Running));
-}
+    assert_eq!(collect.session_id, "s1");
+    assert_eq!(collect.participant, "bot-1");
+    assert_eq!(uncollect.session_id, "s1");
+    assert_eq!(uncollect.participant, "bot-1");
 
-#[test]
-fn session_message_uses_id_not_message_id() {
-    let message = SessionMessage {
-        id: "m1".into(),
-        session_seq: 3,
-        sender_id: "bot-1".into(),
-        sender_type: MessageSenderKind::Bot,
-        kind: SessionMessageKind::Text,
-        content: "hello".into(),
-        created_at: 99,
+    let result = SessionCollectionResult {
+        session_id: "s1".into(),
+        participant: "bot-1".into(),
+        collected: true,
     };
-    let json = serde_json::to_value(&message).expect("serialize SessionMessage");
-    assert_eq!(json["id"], "m1");
-    assert_eq!(json["session_seq"], 3);
-    assert_eq!(json["sender_type"], "bot");
-    assert_eq!(json["kind"], "text");
-    assert!(json.get("message_id").is_none());
+    assert_eq!(serde_json::to_value(result).unwrap()["collected"], true);
 }
 
 #[test]
-fn bot_participant_mode_is_narrower_than_domain_participant_mode() {
-    let auto = serde_json::to_value(BotParticipantMode::Auto).expect("serialize Auto");
-    let muted = serde_json::to_value(BotParticipantMode::Muted).expect("serialize Muted");
-    assert_eq!(auto, "auto");
-    assert_eq!(muted, "muted");
-    // Round-trip the entire vocabulary to prove V1 only has two variants.
-    for raw in ["\"auto\"", "\"muted\""] {
-        let parsed: BotParticipantMode =
-            serde_json::from_str(raw).expect("deserialize BotParticipantMode");
+fn session_message_service_uses_legacy_group_message_wire_shape() {
+    let message = GroupMessage {
+        id: "m1".into(),
+        timestamp: 99,
+        sender: "bot-1".into(),
+        content: "hello".into(),
+        message_type: GroupMessageType::Bot,
+        bot_name: Some("Worker".into()),
+        role: MessageRole::Assistant,
+        run_id: "run-1".into(),
+        history_meta: Some(serde_json::json!({"assistantAggregation": true})),
+        metadata: Some(serde_json::json!({"tool": "search"})),
+        attachments: Some(vec![MessageAttachment {
+            attachment_id: "att-1".into(),
+            attachment_type: AttachmentType::Image,
+            file_name: "result.png".into(),
+            mime_type: Some("image/png".into()),
+            size: Some(42),
+            sha256: Some("abcd".into()),
+            url: Some("https://download.example/result.png".into()),
+            expires_at: Some(123),
+        }]),
+    };
+    let json = serde_json::to_value(&message).expect("serialize GroupMessage");
+    assert_eq!(json["id"], "m1");
+    assert_eq!(json["timestamp"], 99);
+    assert_eq!(json["sender"], "bot-1");
+    assert_eq!(json["message_type"], "bot");
+    assert_eq!(json["role"], "assistant");
+    assert_eq!(json["historyMeta"]["assistantAggregation"], true);
+    assert_eq!(json["metadata"]["tool"], "search");
+    assert_eq!(json["attachments"][0]["type"], "image");
+    assert!(json.get("session_seq").is_none());
+    assert!(json.get("sender_id").is_none());
+    assert!(json.get("created_at").is_none());
+
+    let minimal = GroupMessage {
+        id: "m2".into(),
+        timestamp: 100,
+        sender: "human_staff-1".into(),
+        content: "follow up".into(),
+        message_type: GroupMessageType::Bot,
+        bot_name: None,
+        role: MessageRole::User,
+        run_id: String::new(),
+        history_meta: None,
+        metadata: None,
+        attachments: None,
+    };
+    let minimal_json = serde_json::to_value(minimal).expect("serialize minimal GroupMessage");
+    for omitted in ["bot_name", "run_id", "historyMeta", "metadata", "attachments"] {
+        assert!(minimal_json.get(omitted).is_none(), "{omitted} must be omitted");
+    }
+}
+
+#[test]
+fn session_participant_update_mode_round_trips_bot_and_human_values() {
+    for raw in ["\"auto\"", "\"muted\"", "\"present\"", "\"absent\""] {
+        let parsed: ParticipantMode =
+            serde_json::from_str(raw).expect("deserialize ParticipantMode");
         assert_eq!(serde_json::to_string(&parsed).unwrap(), raw);
     }
-    assert!(serde_json::from_str::<BotParticipantMode>("\"present\"").is_err());
-    assert!(serde_json::from_str::<BotParticipantMode>("\"absent\"").is_err());
 }
 
 #[test]
@@ -251,10 +318,11 @@ fn authenticated_caller_can_be_carried_in_session_command() {
     let command = ListSessionMessages {
         caller: human_caller(),
         session_id: "s1".into(),
-        before: None,
+        before: Some(123),
         limit: 10,
         view_bot_id: None,
     };
     assert_eq!(command.caller.user.expect("User").id, "staff-1");
     assert_eq!(command.session_id, "s1");
+    assert_eq!(command.before, Some(123));
 }

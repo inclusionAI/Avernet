@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bcs_message_flow::{BcsMessageFlow, MemoryBotRunContextStore};
@@ -9,8 +10,9 @@ use bcs_service_api::{
     ChannelOutboundEventKind, ChannelRenderHint, ChatEventState,
     ChatResponseMode, DefaultDelivery,
     FrontendDeliveryTarget, GroupCoreService, GroupKind, GroupStatus, GroupStrategy,
-    MessageFlowService, Participant, ParticipantMode, ParticipantRole,
-    ProviderStreamGrayList, ProviderTransportPreference,
+    CoordinationMode, CoordinationSurface, MessageFlowService, Participant, ParticipantMode,
+    ParticipantRole,
+    ProviderStreamGrayList,
     RoutingMode, RoutingPolicy, ServiceError, ServiceSpec, Session, SessionKind,
     SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageEvent,
     SystemMessageService, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
@@ -94,6 +96,14 @@ impl ChannelService for RecordingChannelService {
         _target: bcs_domain::BindingTarget,
         _channel_type: Option<bcs_domain::ChannelType>,
     ) -> Result<Vec<bcs_domain::ChannelBinding>, ChannelUseCaseError> {
+        Ok(Vec::new())
+    }
+
+    async fn list_conversations_by_session(
+        &self,
+        _bcs_session_id: &str,
+        _channel_type: Option<bcs_domain::ChannelType>,
+    ) -> Result<Vec<bcs_domain::ConversationSessionMap>, ChannelUseCaseError> {
         Ok(Vec::new())
     }
 
@@ -1978,6 +1988,60 @@ async fn manager_worker_task_dispatch_authorizes_manager_role_not_driver_bot_fie
 }
 
 #[tokio::test]
+async fn manager_worker_unknown_target_emits_public_group_notice() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support.registry.insert_named_actor("bot-manager", "Manager").await;
+    support.registry.insert_named_actor("bot-worker", "Worker").await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.driver_bot = "control-plane-owner".to_string();
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    let mut manager = Participant::bot("bot-manager", ParticipantRole::Manager);
+    manager.bot_name = Some("Manager".to_string());
+    let mut worker = Participant::bot("bot-worker", ParticipantRole::Worker);
+    worker.bot_name = Some("Worker".to_string());
+    group.participants = vec![manager, worker];
+    support.group.upsert(group).await.unwrap();
+    let system_message = Arc::new(RecordingSystemMessage::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_system_message(system_message.clone());
+
+    let error = flow
+        .handle_task_dispatch(TaskDispatchCommand {
+            driver_bot_id: "bot-manager".to_string(),
+            group_id: "group-1".to_string(),
+            target_bot_id: "Wrong Worker".to_string(),
+            target_bot_name: None,
+            payload: json!({
+                "message": "do work",
+                "bcs_session_id": "group-1:abcdef12",
+            }),
+        })
+        .await
+        .expect_err("unknown worker must reject task dispatch");
+
+    assert!(matches!(error, ServiceError::BotNotFound(bot) if bot == "Wrong Worker"));
+    assert!(support.bot_delivery.kinds().await.is_empty());
+    let notifications = system_message.notifications.lock().await;
+    assert_eq!(notifications.len(), 1);
+    assert_eq!(notifications[0].session_id, "group-1:abcdef12");
+    match &notifications[0].event {
+        SystemMessageEvent::GenericNotification { message, receivers, .. } => {
+            assert!(message.contains("未找到 worker \"Wrong Worker\""));
+            assert!(message.contains("Worker (bot-worker)"));
+            assert!(message.contains("任务未派发"));
+            assert!(receivers.is_empty(), "empty receivers broadcasts the public notice");
+        }
+        other => panic!("expected GenericNotification, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn agent_tool_result_coordination_echo_dispatches_task() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
@@ -2013,6 +2077,7 @@ async fn agent_tool_result_coordination_echo_dispatches_task() {
             "data": {
                 "phase": "result",
                 "toolCallId": "tool-1",
+                "name": "Bash",
                 "isError": false,
                 "result": {
                     "content": [{"type": "text", "text": echo}],
@@ -2106,6 +2171,217 @@ async fn agent_tool_result_coordination_echo_rejects_unsupported_tool_name() {
     .unwrap();
 
     assert!(support.bot_delivery.kinds().await.is_empty());
+}
+
+#[tokio::test]
+async fn native_mcp_tool_result_coordination_echo_dispatches_from_exact_provider_mapping() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.service_mode = Some("master_slave".to_string());
+    support.group.upsert(group).await.unwrap();
+    support
+        .registry
+        .set_coordination_surface(
+            "bot-driver",
+            CoordinationSurface {
+                mode: CoordinationMode::NativeMcp,
+                mcp_server: Some("bcs".to_string()),
+                mcporter_command: None,
+                tool_name_mapping: BTreeMap::from([(
+                    "mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_assign_task".to_string(),
+                    "bcs_assign_task".to_string(),
+                )]),
+            },
+        )
+        .await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+    let echo = coordination_echo(
+        "bcs_assign_task",
+        json!({
+            "target_bot": "bot-observer",
+            "message": "review this file",
+        }),
+    );
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-driver".to_string(),
+        run_id: "native-manager-run".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: agent_tool_result_payload(
+            Some("mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_assign_task"),
+            "native-tool-1",
+            &echo,
+            false,
+        ),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(support.bot_delivery.kinds().await, vec![BotDeliveryKind::TaskDispatch]);
+    assert_eq!(
+        support
+            .registry
+            .coordination_surface_resolution_count("bot-driver")
+            .await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn native_mcp_coordination_rejects_unmapped_or_mismatched_results_and_resolves_once_per_run() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.service_mode = Some("master_slave".to_string());
+    support.group.upsert(group).await.unwrap();
+    support
+        .registry
+        .set_coordination_surface(
+            "bot-driver",
+            CoordinationSurface {
+                mode: CoordinationMode::NativeMcp,
+                mcp_server: Some("bcs".to_string()),
+                mcporter_command: None,
+                tool_name_mapping: BTreeMap::from([(
+                    "provider_assign_task".to_string(),
+                    "bcs_assign_task".to_string(),
+                )]),
+            },
+        )
+        .await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    for (tool_name, tool_call_id, canonical_tool) in [
+        (Some("unmapped_provider_tool"), "native-tool-unmapped", "bcs_assign_task"),
+        (Some("provider_assign_task"), "native-tool-mismatch", "bcs_send_task_message"),
+        (None, "native-tool-missing-name", "bcs_assign_task"),
+    ] {
+        let echo = coordination_echo(
+            canonical_tool,
+            json!({
+                "target_bot": "bot-observer",
+                "message": "must not dispatch",
+            }),
+        );
+        flow.handle_bot_event(BotEventCommand {
+            bot_id: "bot-driver".to_string(),
+            run_id: "native-rejected-run".to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "agent".to_string(),
+            event_payload: agent_tool_result_payload(
+                tool_name,
+                tool_call_id,
+                &echo,
+                false,
+            ),
+            state: ChatEventState::Delta,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await
+        .unwrap();
+    }
+
+    assert!(support.bot_delivery.kinds().await.is_empty());
+    assert_eq!(
+        support
+            .registry
+            .coordination_surface_resolution_count("bot-driver")
+            .await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn ordinary_tool_result_does_not_resolve_coordination_surface() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-driver".to_string(),
+        run_id: "ordinary-tool-run".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: agent_tool_result_payload(
+            Some("read_file"),
+            "ordinary-tool-1",
+            "plain tool output",
+            false,
+        ),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(
+        support
+            .registry
+            .coordination_surface_resolution_count("bot-driver")
+            .await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn coordination_surface_resolution_failure_is_cached_and_fails_closed() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+    let echo = coordination_echo(
+        "bcs_assign_task",
+        json!({
+            "target_bot": "bot-observer",
+            "message": "must not dispatch",
+        }),
+    );
+
+    for tool_call_id in ["unknown-bot-tool-1", "unknown-bot-tool-2"] {
+        flow.handle_bot_event(BotEventCommand {
+            bot_id: "unknown-bot".to_string(),
+            run_id: "unknown-bot-run".to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "agent".to_string(),
+            event_payload: agent_tool_result_payload(Some("Bash"), tool_call_id, &echo, false),
+            state: ChatEventState::Delta,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await
+        .unwrap();
+    }
+
+    assert!(support.bot_delivery.kinds().await.is_empty());
+    assert_eq!(
+        support
+            .registry
+            .coordination_surface_resolution_count("unknown-bot")
+            .await,
+        1
+    );
 }
 
 #[tokio::test]
@@ -4447,10 +4723,8 @@ async fn manager_worker_task_dispatch_uses_sse_for_eligible_provider_worker() {
     .await
     .expect("task.dispatch should deliver to provider worker");
 
-    assert_eq!(
-        support.bot_delivery.provider_transports().await,
-        vec![ProviderTransportPreference::CallbackSse]
-    );
+    assert_eq!(support.bot_delivery.kinds().await, vec![BotDeliveryKind::TaskDispatch]);
+    assert!(support.bot_delivery.targets().await[0].is_http_provider());
 }
 
 #[tokio::test]
@@ -4470,10 +4744,8 @@ async fn manager_worker_task_message_uses_sse_for_eligible_provider_manager() {
     .await
     .expect("task.message should deliver to provider manager");
 
-    assert_eq!(
-        support.bot_delivery.provider_transports().await,
-        vec![ProviderTransportPreference::CallbackSse]
-    );
+    assert_eq!(support.bot_delivery.kinds().await, vec![BotDeliveryKind::TaskMessage]);
+    assert!(support.bot_delivery.targets().await[0].is_http_provider());
 }
 
 #[tokio::test]
@@ -4515,12 +4787,10 @@ async fn manager_worker_task_result_uses_sse_for_eligible_provider_manager() {
     .expect("worker final should deliver task result to provider manager");
 
     assert_eq!(
-        support.bot_delivery.provider_transports().await,
-        vec![
-            ProviderTransportPreference::Callback,
-            ProviderTransportPreference::CallbackSse,
-        ]
+        support.bot_delivery.kinds().await,
+        vec![BotDeliveryKind::TaskDispatch, BotDeliveryKind::TaskResult]
     );
+    assert!(support.bot_delivery.targets().await[1].is_http_provider());
 }
 
 #[tokio::test]

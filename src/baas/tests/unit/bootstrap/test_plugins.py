@@ -53,3 +53,58 @@ class TestPluginContainerStandalone:
         assert sandbox["k8s"] == "stub"
         assert sandbox["docker"] == "stub"
         assert sandbox["poolab"] == "stub"
+
+
+class TestAliyunAckSelector:
+    """The aliyun_ack option resolves to AliyunAckSandboxPlugin."""
+
+    def _container(self, with_templates: bool = True):
+        from secbaas.community.bootstrap.plugins import PluginContainer
+
+        container = PluginContainer()
+        cfg = {
+            "plugins": {
+                "secret": "stub",
+                "sandbox": {"arca": "aliyun_ack"},
+            }
+        }
+        if with_templates:
+            cfg["aliyun_ack_template"] = {
+                "ALIYUN_ACK_TEMPLATE_default": {
+                    "cluster": {
+                        "endpoint": "https://ack.example.com",
+                        "kubeconfig": "apiVersion: v1\nkind: Config\n",
+                        "region": "cn-hangzhou",
+                    },
+                    "pod": {"image": "test:latest"},
+                }
+            }
+        container.config.from_dict(cfg)
+        return container
+
+    def test_aliyun_ack_selector_wired(self):
+        from secbaas.community.api.device_manage import ArcaCredentials
+        from secbaas.community.plugins.sandbox.arca.aliyun_ack import (
+            AliyunAckSandboxPlugin,
+        )
+
+        creds = ArcaCredentials(
+            template_id=1,
+            template_uuid="u",
+            base_url="http://x",
+            api_key="k",
+            arca_template_id="ALIYUN_ACK_TEMPLATE_default",
+        )
+        plugin = self._container().arca_sandbox_plugin_factory(creds)
+        assert isinstance(plugin, AliyunAckSandboxPlugin)
+        assert "ALIYUN_ACK_TEMPLATE_default" in plugin._ack_templates
+
+    def test_aliyun_ack_default_selector(self):
+        from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin
+
+        container = self._container()
+        container.config.from_dict(
+            {"plugins": {"secret": "stub", "sandbox": {"arca": "stub"}}}
+        )
+        plugin = container.arca_sandbox_plugin_factory()
+        assert plugin is StubArcaSandboxPlugin

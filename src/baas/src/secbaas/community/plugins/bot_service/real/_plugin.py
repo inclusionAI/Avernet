@@ -13,6 +13,7 @@ Reference: RFC 0002 atomic commit 1
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -31,6 +32,24 @@ logger = get_logger("plugin-bot-service")
 _SUPPORTED_RUNTIME_ENGINE_TYPES = frozenset(
     {"openclaw", "teclaw", "aicoding", "hermes", "claude_code"}
 )
+_CLAUDE_CODE_NORMAL_TEMPLATE = "normalCC"
+_BINDING_MAX_ATTEMPTS = 2
+_BINDING_RETRY_DELAY_SECONDS = 0.1
+
+
+def resolve_claude_code_engine(active_engine: str, template_type: str | None) -> str:
+    """Resolve the adapter engine for a ``claude_code`` active engine.
+
+    A ``claude_code`` active engine routes to the ``aicoding`` adapter while the
+    bot still carries a non-normal template, and to ``claude_code`` once the bot
+    uses the plain (``normalCC``) template. All other engines are unchanged.
+    """
+    if active_engine != "claude_code":
+        return active_engine
+    tt = template_type.strip() if isinstance(template_type, str) else ""
+    if tt and tt != _CLAUDE_CODE_NORMAL_TEMPLATE:
+        return "aicoding"
+    return "claude_code"
 
 
 class AiohttpBotServicePlugin(BotServicePlugin):
@@ -215,23 +234,39 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         url = f"{self._base_url.rstrip('/')}/api/service-bot/publish/{bot_id}/binding"
         params = {"owner_id": owner_id, "stage": stage}
 
-        try:
-            session = await self._get_session()
-            async with session.get(url, params=params) as resp:
-                await self._raise_for_http_error(resp)
-                data: dict[str, Any] = await resp.json()
-                logger.debug(
-                    "[bot-service] get_binding url=%s params=%s status=%d",
-                    url,
-                    params,
-                    resp.status,
+        for attempt in range(1, _BINDING_MAX_ATTEMPTS + 1):
+            try:
+                session = await self._get_session()
+                async with session.get(url, params=params) as resp:
+                    await self._raise_for_http_error(resp)
+                    data: dict[str, Any] = await resp.json()
+                    logger.debug(
+                        "[bot-service] get_binding url=%s params=%s status=%d",
+                        url,
+                        params,
+                        resp.status,
+                    )
+                return self._check_response_envelope(data)
+            except (TimeoutError, aiohttp.ClientError) as exc:
+                retryable = isinstance(
+                    exc, (TimeoutError, aiohttp.ClientConnectionError)
                 )
-            return self._check_response_envelope(data)
-        except (TimeoutError, aiohttp.ClientError) as exc:
-            raise PaasError(
-                ErrorCode.PLATFORM_UNAVAILABLE,
-                f"AgentClaw binding request failed: {exc}",
-            ) from exc
+                if retryable and attempt < _BINDING_MAX_ATTEMPTS:
+                    logger.warning(
+                        "[bot-service] get_binding transient request error; "
+                        "retrying attempt=%d/%d bot_id=%s stage=%s error=%s",
+                        attempt,
+                        _BINDING_MAX_ATTEMPTS,
+                        bot_id,
+                        stage,
+                        type(exc).__name__,
+                    )
+                    await asyncio.sleep(_BINDING_RETRY_DELAY_SECONDS)
+                    continue
+                raise PaasError(
+                    ErrorCode.PLATFORM_UNAVAILABLE,
+                    f"AgentClaw binding request failed: {exc}",
+                ) from exc
 
     async def get_binding(
         self,
@@ -322,22 +357,27 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                         engine_type,
                     )
 
+            consumed_engine_type = resolve_claude_code_engine(
+                engine_type, inner.get("template_type")
+            )
+
             logger.info(
                 "[bot-service] get_binding raw: bot_id=%s engine_type=%r "
                 "active_runtime_engine_type=%r consumed_engine_type=%r "
-                "template_type=%r device_provider=%r",
+                "template_type=%r routed_engine_type=%r device_provider=%r",
                 resolved_bot_id,
                 original_engine_type,
                 runtime_engine_type,
                 engine_type,
                 inner.get("template_type"),
+                consumed_engine_type,
                 inner.get("device_provider"),
             )
             return BotBindingData(
                 bot_id=resolved_bot_id,
                 owner_id=inner.get("owner_id", owner_id),
                 bot_type=bot_type,
-                engine_type=engine_type,
+                engine_type=consumed_engine_type,
                 publish_id=inner.get("publish_id"),
                 publish_status=inner.get("publish_status"),
                 binding_id=inner.get("binding_id", 0),

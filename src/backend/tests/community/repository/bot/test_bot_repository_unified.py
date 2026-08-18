@@ -7,7 +7,8 @@ SQLite twin: (1) env-scoping on every query/update, (2)
 other non-allowlisted fields silently ignored), (3)
 ``get_device_provider_*`` performs the real ac_bots ⟕
 ac_entity_device_binding join (was a None stub). Plus: plain INSERT
-(no unique key), single conditional soft-delete, search_bots JOIN.
+(refused on a duplicate key, never an upsert), single conditional
+soft-delete, search_bots JOIN.
 """
 import json
 from contextlib import contextmanager
@@ -82,7 +83,7 @@ def _data(**ov):
     return base
 
 
-# ── insert (plain INSERT — table has no unique key) ─────────────────
+# ── insert (plain INSERT, never an upsert) ─────────────────────────
 
 def test_insert_and_get(repo):
     rec = repo.insert(_data())
@@ -168,9 +169,22 @@ def test_get_unique_by_id_preserves_single_and_missing_lookups(repo):
 
 
 def test_insert_plain_not_upsert(repo):
+    """``insert`` inserts; it never quietly becomes an update.
+
+    ``uk_bot_id_entity_id_env_tenant`` makes a second row on the same key
+    impossible, so "not an upsert" now shows up as the write being refused
+    rather than as two rows. What matters is the same either way: the caller's
+    data does not silently replace a bot that is already there.
+    """
+    from sqlalchemy.exc import IntegrityError
+
     a = repo.insert(_data())
-    b = repo.insert(_data())
-    assert a["id"] != b["id"]
+
+    with pytest.raises(IntegrityError):
+        repo.insert(_data(bot_name="Bot Two"))
+
+    assert repo.get_by_id_and_owner("bot-1", "emp1")["bot_name"] == "Bot One"
+    assert a["id"] > 0
 
 
 # ── env-scoping (adopt prod) ────────────────────────────────────────
@@ -188,8 +202,15 @@ def test_get_env_scoped(repo, db):
 
 
 def test_explicit_env_default_bot_read_and_ext_update_are_isolated(repo, db):
-    pre = repo.insert(_data(bot_id="default", ext={"source": "pre"}))
-    prod = repo.insert(_data(bot_id="default", ext={"source": "prod"}))
+    # Distinct entity_id so both rows can exist before the env split: entity_id
+    # is in uk_bot_id_entity_id_env_tenant but in none of the queries below,
+    # which key on (bot_id, owner_id, env).
+    pre = repo.insert(
+        _data(bot_id="default", entity_id="staff_pre", ext={"source": "pre"})
+    )
+    prod = repo.insert(
+        _data(bot_id="default", entity_id="staff_prod", ext={"source": "prod"})
+    )
     with db.orm_session() as s:
         s.query(BotModel).filter(BotModel.id == pre["id"]).update(
             {BotModel.env: "pre"}
@@ -217,8 +238,16 @@ def test_explicit_env_default_bot_read_and_ext_update_are_isolated(repo, db):
 
 
 def test_explicit_env_ext_update_rolls_back_when_multiple_rows_match(repo, db):
-    first = repo.insert(_data(bot_id="default", ext={"row": 1}))
-    second = repo.insert(_data(bot_id="default", ext={"row": 2}))
+    # Same (bot_id, owner_id, env) — which is what the guard keys on — but
+    # distinct entity_id, so the pair is legal under the unique key. That is
+    # the only way this state is reachable now, and it is reachable: entity_id
+    # is not part of what update_ext_by_id_owner_and_env matches on.
+    first = repo.insert(
+        _data(bot_id="default", entity_id="staff_a", ext={"row": 1})
+    )
+    second = repo.insert(
+        _data(bot_id="default", entity_id="staff_b", ext={"row": 2})
+    )
     with db.orm_session() as s:
         s.query(BotModel).filter(BotModel.id.in_([first["id"], second["id"]])).update(
             {BotModel.env: "prod"}, synchronize_session=False

@@ -35,6 +35,15 @@ from engine.community.plugins.skills_pool.layout_probe import (
 )
 
 
+def claude_code_retirement_active_roots(
+    *,
+    home: str | Path = "/home/admin",
+) -> tuple[Path, ...]:
+    """Return Claude Code-owned historical active roots eligible for retirement."""
+
+    return (Path(home) / ".claude_code/workspace/skills",)
+
+
 def inspect_claude_code_runtime_layout(
     *,
     expected_contract_version: str = LAYOUT_CONTRACT_VERSION,
@@ -64,6 +73,7 @@ def publish_claude_code_pool_mappings(
         home=home,
         engine="claude_code",
         source_layout=source_layout,
+        additional_retirement_roots=claude_code_retirement_active_roots(home=home),
     )
 
 
@@ -80,6 +90,7 @@ def verify_claude_code_pool_mappings(
         home=home,
         engine="claude_code",
         source_layout=source_layout,
+        additional_retirement_roots=claude_code_retirement_active_roots(home=home),
     )
 
 
@@ -94,6 +105,7 @@ __all__ = [
     "RuntimeLayoutInspectionStatus",
     "SkillMapping",
     "activate_claude_code_pool",
+    "claude_code_retirement_active_roots",
     "inspect_claude_code_runtime_layout",
     "publish_claude_code_pool_mappings",
     "rollback_claude_code_pool",

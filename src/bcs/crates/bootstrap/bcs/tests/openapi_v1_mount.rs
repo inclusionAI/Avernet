@@ -93,7 +93,7 @@ async fn mounted_session_file_routes_use_the_real_facade_and_public_token_bounda
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
     let client = reqwest::Client::new();
     let protected_url = format!(
-        "http://{addr}/openapi/v1/collaboration/sessions/missing-session/files"
+        "http://{addr}/api/v1/collaboration/sessions/missing-session/files"
     );
 
     let missing = client
@@ -118,7 +118,7 @@ async fn mounted_session_file_routes_use_the_real_facade_and_public_token_bounda
 
     let public = client
         .get(format!(
-            "http://{addr}/openapi/v1/collaboration/sessions/shared-file/content?token=invalid"
+            "http://{addr}/api/v1/collaboration/sessions/shared-file/content?token=invalid"
         ))
         .send()
         .await
@@ -169,6 +169,36 @@ async fn mounted_session_token_route_authenticates_before_reaching_the_applicati
     assert_eq!(valid.status(), reqwest::StatusCode::NOT_FOUND);
     let envelope: serde_json::Value = valid.json().await.expect("JSON envelope");
     assert_eq!(envelope["data"]["error_code"], "session_not_found");
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn mounted_session_collection_routes_require_a_gateway_principal() {
+    let bots_dir = helpers::create_temp_bots_dir();
+    let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
+    config.metrics.enabled = false;
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
+    let (addr, handle) = server.run_on_random_port().await.expect("start server");
+    let client = reqwest::Client::new();
+    let url = format!(
+        "http://{addr}/openapi/v1/collaboration/sessions/missing-session/collect"
+    );
+
+    let collect = client
+        .post(&url)
+        .json(&json!({"participant": "bot-1"}))
+        .send()
+        .await
+        .expect("missing-principal collect request");
+    assert_eq!(collect.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let uncollect = client
+        .delete(format!("{url}?participant=bot-1"))
+        .send()
+        .await
+        .expect("missing-principal uncollect request");
+    assert_eq!(uncollect.status(), reqwest::StatusCode::UNAUTHORIZED);
 
     handle.abort();
 }

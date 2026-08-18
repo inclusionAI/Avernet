@@ -7,7 +7,7 @@ use serde_json::{Map, Value};
 
 use crate::ServiceResult;
 
-use super::message_flow::ChatEventState;
+use super::message_flow::{BotEventOutcome, ChatEventState, ProviderEventIngestCommand};
 
 /// Default lifetime for an HTTP Provider `chat.send` callback correlation.
 pub const DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
@@ -180,6 +180,8 @@ pub enum ProviderBotEventError {
     RunNotFound(String),
     #[error("Run terminated: {0}")]
     RunTerminated(String),
+    #[error("Transport conflict: {0}")]
+    TransportConflict(String),
     #[error("Bot not found: {0}")]
     BotNotFound(String),
     #[error("Internal error: {0}")]
@@ -240,4 +242,16 @@ pub trait ProviderBotEventService: Send + Sync {
         &self,
         command: ProviderBotCoordinationCommand,
     ) -> Result<ProviderBotCoordinationOutcome, ProviderBotEventError>;
+
+    async fn cleanup_expired(&self, _now_ms: u64) -> usize {
+        0
+    }
+}
+
+#[async_trait]
+pub trait ProviderEventIngestService: Send + Sync {
+    async fn ingest_provider_event(
+        &self,
+        command: ProviderEventIngestCommand,
+    ) -> ServiceResult<BotEventOutcome>;
 }

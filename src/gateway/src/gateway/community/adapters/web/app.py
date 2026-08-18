@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.openapi.docs import get_swagger_ui_html
 
 from gateway.community import __version__
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
@@ -32,6 +33,7 @@ DOCS_TAGS = [
 ]
 
 _API_DESCRIPTION = "Avernet Gateway — A configuration-driven forwarding plane (UNDER ACTIVE DEVELOPMENT)."
+_INTERNAL_API_DESCRIPTION = "Avernet Gateway internal APIs."
 
 
 def create_app() -> FastAPI:
@@ -119,6 +121,23 @@ def create_app() -> FastAPI:
         )
 
     app.openapi = _served_openapi  # type: ignore[method-assign]
+
+    if enable_docs:
+        @app.get("/internal-openapi.json", include_in_schema=False)
+        async def internal_openapi() -> dict[str, Any]:
+            return bs.served_internal_openapi(
+                title=f"{config.app_name} internal",
+                version=__version__,
+                description=_INTERNAL_API_DESCRIPTION,
+            )
+
+        @app.get("/internal-docs", include_in_schema=False)
+        async def internal_docs() -> Any:
+            return get_swagger_ui_html(
+                openapi_url="/internal-openapi.json",
+                title=f"{config.app_name} - Internal API docs",
+                swagger_ui_parameters={"supportedSubmitMethods": []},
+            )
 
     # Admin endpoints (credential issuance/registration) — explicit routes, so
     # they win over the catch-all forward. Unauthenticated (single-box/dev only).

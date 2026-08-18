@@ -11,7 +11,7 @@ from ._orm_model import WsRelaySessionModel
 from ._protocol import WsRelaySessionRepository
 from ._record import WsRelaySessionRecord
 
-log = get_logger("orm-repository")
+log = get_logger("orm")
 
 # Valid state transitions for _validate_transition
 # Same-status transitions are idempotent (no-op)

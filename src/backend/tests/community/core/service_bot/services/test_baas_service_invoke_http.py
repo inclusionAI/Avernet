@@ -64,6 +64,7 @@ def http(baas_http):
 @pytest.fixture
 def baas_service(fake_binding_repo, baas_http, general_http):
     return BaasService(
+        startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base=BASE_URL,
         tenant="team_claw",
         template_uuid="tpl",

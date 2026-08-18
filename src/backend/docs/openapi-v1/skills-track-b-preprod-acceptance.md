@@ -50,10 +50,10 @@ this contract.
 ## Owner lifecycle
 
 1. With the owner principal, upload the ZIP to
-   `POST /openapi/v1/bots/skills/upload?bot_id=<owner-bot-id>`. Verify `201`,
+   `POST /openapi/v1/bots/<owner-bot-id>/skills`. Verify `201`,
    `201000`, `operation=created`, and `active=false`.
-2. List with `GET /openapi/v1/bots/skills?bot_id=<owner-bot-id>` and fetch
-   `GET /openapi/v1/bots/skills/<skill-id>`. Verify metadata-only Envelope/Page
+2. List with `GET /openapi/v1/bots/<owner-bot-id>/skills` and fetch
+   `GET /openapi/v1/bots/<owner-bot-id>/skills/<skill-id>`. Verify metadata-only Envelope/Page
    data, owner scope, and no owner, actor, tenant, path, package, or manifest
    fields.
 3. While the Bot is intentionally offline but database access remains available,

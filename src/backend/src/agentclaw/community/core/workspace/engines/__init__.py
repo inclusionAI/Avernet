@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
+from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
 from agentclaw.community.core.workspace.engines.openclaw import OpenClawSandboxProvider
 from agentclaw.community.di import config as cfg
@@ -46,4 +47,5 @@ def create_engine_sandbox_registry(
     registry = EngineSandboxRegistry()
     registry.register(OpenClawSandboxProvider(workspace=workspace))
     registry.register(ClaudeCodeSandboxProvider(workspace=workspace))
+    registry.register(AICodingSandboxProvider(workspace=workspace))
     return registry
