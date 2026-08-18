@@ -30,15 +30,15 @@ Router 只负责参数、DTO 和 Envelope。Facade 负责权限、状态选择�
 4. 发布详情内部仍校验 `source_bot_pk/source_bot_id/env`，publication ID 不是授权依据。
 5. 失败信息、设备 ID、工作流 ID、内部主机和原始上游响应不进入公开响应。
 6. 审批配置只允许 Owner 写严格布尔值。
-7. 抢锁保持原能力的 Owner/Admin 门槛。
+7. 抢锁只允许通过 Bot Member 权限校验的调用人；底层强制操作不能绕过授权。
 
 ## 状态与卡片
 
 | 存储状态 | 生命周期详情状态 | 统一列表展示态 |
 | --- | --- | --- |
 | `draft` | `draft` | `service_draft` |
-| `building/built/validate_pub/online_pub/failed` | `deploying` | `service_staging` |
-| `validating` | `staging` | `service_staging` |
+| `building/built/validate_pub/online_pub/failed` | `deploying` | `service_deploying` |
+| `validating` | `prestable` | `service_prestable` |
 | `success` | `running` | `service_online` |
 | `released` | `offline` | `service_offline` |
 | `upgraded` | 不展示 | 不展示 |
@@ -48,12 +48,15 @@ Router 只负责参数、DTO 和 Envelope。Facade 负责权限、状态选择�
 
 ## 生命周期约束
 
-- `draft -> staging`：调用 `PublishFlowService.process()`；有协作者时要求持锁。
-- `staging -> running`：检查审批，未要求审批时继续发布。
-- `staging -> draft`：取消预发，状态回退并登记 VERIFY 运行时销毁任务。
+- `draft -> prestable`：调用 `PublishFlowService.process()`；有协作者时要求持锁。
+- `prestable -> running`：检查审批，未要求审批时继续发布。
+- `prestable -> draft`：取消预发，状态回退并登记 VERIFY 运行时销毁任务。
 - `running -> offline`：检查审批；下线后沿用现有逻辑创建下一版草稿。
 - `failed -> retry`：复用现有持久发布任务重试。
-- `staging/running -> restart`：复用现有 crash-safe 重启任务。
+- `prestable/running -> restart`：复用现有 crash-safe 重启任务。
+
+请求中的旧值 `staging` 作为 `prestable` 的兼容别名保留，产品状态和新文档不再输出
+`staging`。
 
 转服务 Bot 复用统一组合策略，仅允许 `openclaw/claude_code/teclaw`；本地、
 `aicoding/hermes/moltis` 不可服务化。

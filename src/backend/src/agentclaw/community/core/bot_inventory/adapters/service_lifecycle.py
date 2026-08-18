@@ -22,11 +22,10 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.utils.env_utils import get_current_env
 
 
-_STAGING = {
+_DEPLOYING = {
     PublishStatus.BUILDING.value,
     PublishStatus.BUILT.value,
     PublishStatus.VALIDATE_PUB.value,
-    PublishStatus.VALIDATING.value,
     PublishStatus.ONLINE_PUB.value,
     PublishStatus.FAILED.value,
 }
@@ -54,11 +53,25 @@ class ServiceLifecycleView(ServiceLifecyclePort):
     def _display_state(status: str) -> DisplayState:
         if status == PublishStatus.DRAFT.value:
             return DisplayState.SERVICE_DRAFT
-        if status in _STAGING:
-            return DisplayState.SERVICE_STAGING
+        if status in _DEPLOYING:
+            return DisplayState.SERVICE_DEPLOYING
+        if status == PublishStatus.VALIDATING.value:
+            return DisplayState.SERVICE_PRESTABLE
         if status in _ONLINE:
             return DisplayState.SERVICE_ONLINE
         return DisplayState.SERVICE_OFFLINE
+
+    @staticmethod
+    def _product_status(status: str) -> str:
+        if status == PublishStatus.DRAFT.value:
+            return "draft"
+        if status in _DEPLOYING:
+            return "deploying"
+        if status == PublishStatus.VALIDATING.value:
+            return "prestable"
+        if status in _ONLINE:
+            return "running"
+        return "offline"
 
     @staticmethod
     def _visible(records: Iterable[BotPublishRecord]) -> list[BotPublishRecord]:
@@ -98,13 +111,13 @@ class ServiceLifecycleView(ServiceLifecyclePort):
         record: BotPublishRecord,
         all_records: Sequence[BotPublishRecord],
     ) -> tuple[BotAction, ...]:
-        actions: list[BotAction] = [BotAction.VIEW, BotAction.CHAT, BotAction.EDIT]
+        actions: list[BotAction] = [BotAction.VIEW]
 
         def add(*items: BotAction) -> None:
             actions.extend(item for item in items if item not in actions)
 
         if record.status == PublishStatus.DRAFT.value:
-            add(BotAction.PUBLISH_STAGING)
+            add(BotAction.EDIT, BotAction.PUBLISH_STAGING)
             if not any(item.status in _PUBLISHED_HISTORY for item in all_records):
                 add(BotAction.DELETE)
         elif record.status == PublishStatus.VALIDATING.value:
@@ -114,7 +127,7 @@ class ServiceLifecycleView(ServiceLifecyclePort):
                 BotAction.CANCEL_STAGING,
             )
         elif record.status == PublishStatus.SUCCESS.value:
-            add(BotAction.RESTART, BotAction.OFFLINE)
+            add(BotAction.CHAT, BotAction.RESTART, BotAction.OFFLINE)
         elif record.status == PublishStatus.FAILED.value:
             add(BotAction.RETRY)
         return tuple(actions)
@@ -166,7 +179,8 @@ class ServiceLifecycleView(ServiceLifecyclePort):
                     publication_id=record.id,
                     version=record.version,
                     display_state=self._display_state(record.status),
-                    status=record.status,
+                    status=self._product_status(record.status),
+                    internal_status=record.status,
                     actions=self._record_actions(record, records),
                     live_version=live.version if live else None,
                 )
@@ -177,7 +191,8 @@ class ServiceLifecycleView(ServiceLifecyclePort):
                     publication_id=None,
                     version=None,
                     display_state=DisplayState.SERVICE_DRAFT,
-                    status=str(bot.get("status") or ""),
+                    status="draft",
+                    internal_status=str(bot.get("status") or ""),
                     actions=(BotAction.VIEW,),
                 ),
             )

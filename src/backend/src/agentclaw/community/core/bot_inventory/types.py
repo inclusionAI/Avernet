@@ -28,6 +28,10 @@ class DisplayState(StrEnum):
     LOCAL_PENDING = "local_pending"
     LOCAL_FAILED = "local_failed"
     SERVICE_DRAFT = "service_draft"
+    SERVICE_DEPLOYING = "service_deploying"
+    SERVICE_PRESTABLE = "service_prestable"
+    # Retained for clients generated from the pre-PD contract. New service
+    # projections use the two precise states above.
     SERVICE_STAGING = "service_staging"
     SERVICE_ONLINE = "service_online"
     SERVICE_OFFLINE = "service_offline"
@@ -69,6 +73,7 @@ class ServiceLifecycleCard:
     display_state: DisplayState
     status: str
     actions: tuple[BotAction, ...]
+    internal_status: str | None = None
     live_version: int | None = None
 
 
@@ -95,6 +100,7 @@ class BotInventoryItem:
     publication_id: int | None = None
     publication_version: int | None = None
     live_version: int | None = None
+    internal_status: str | None = None
 
 
 @dataclass(frozen=True)

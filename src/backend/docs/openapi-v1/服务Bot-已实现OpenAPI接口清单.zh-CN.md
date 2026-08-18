@@ -21,23 +21,32 @@
 | 4 | DELETE | `/{bot_id}/lifecycle` | 删除从未正式发布的初始草稿 Bot |
 | 5 | GET | `/{bot_id}/lifecycle/approval` | 查询发布/下线审批开关 |
 | 6 | PUT | `/{bot_id}/lifecycle/approval` | Owner 修改发布/下线审批开关 |
-| 7 | POST | `/{bot_id}/lifecycle/advance` | 将当前版本推进到 `staging` 或 `online` |
-| 8 | POST | `/{bot_id}/lifecycle/restart` | 重启 `staging` 或 `online` 运行时 |
+| 7 | POST | `/{bot_id}/lifecycle/advance` | 将当前版本推进到 `prestable` 或 `online` |
+| 8 | POST | `/{bot_id}/lifecycle/restart` | 重启 `prestable` 或 `online` 运行时 |
 | 9 | POST | `/{bot_id}/lifecycle/cancel-staging` | 销毁预发运行时并退回草稿 |
 | 10 | POST | `/{bot_id}/lifecycle/offline` | 下线当前线上版本 |
 | 11 | POST | `/{bot_id}/lifecycle/retry` | 重试最新失败的发布任务 |
 | 12 | GET | `/{bot_id}/edit-lock` | 查询编辑锁 |
 | 13 | POST | `/{bot_id}/edit-lock` | 获取编辑锁 |
 | 14 | DELETE | `/{bot_id}/edit-lock` | 释放自己持有的编辑锁 |
-| 15 | POST | `/{bot_id}/edit-lock/steal` | Owner/Admin 抢占编辑锁 |
+| 15 | POST | `/{bot_id}/edit-lock/steal` | Bot Member 及以上抢占编辑锁 |
 
 ## 关键语义
 
-- 稳定产品状态：`draft/deploying/staging/running/offline`。
+- 稳定产品状态：`draft/deploying/prestable/running/offline`。
+- `stage=staging` 作为旧客户端兼容别名继续接受，响应统一使用 `prestable`。
 - 服务 Bot 卡片以 `card_id=service:{bot_id}:{publication_id}` 作为稳定标识。
 - 同一 Bot 最多展示两张卡；`upgraded` 不展示，多个 `released` 只保留最新一个。
 - 存在 `success/upgraded/released` 历史时不允许删除 Bot。
 - 无权限与 Bot 不存在统一返回 `404`，避免通过错误差异枚举 Bot。
+- 服务 Bot 直接创建和授权完成路径会在产生外部副作用前拒绝不支持服务化的引擎。
+- 编辑锁仅在“存在协作者且存在草稿”时需要；Bot Member 及以上可抢占。
+
+## 外部依赖与后续批次
+
+- 团队空间成员可见性依赖业务空间生产 Adapter，未接入时保持拒绝优先。
+- Flow、Channel、Skill Set 和文件使用统一 Bot 能力，不在服务生命周期模块重复建设。
+- 容器实例、评测和独立协作者 CRUD 不属于本期已实现范围。
 
 ## 兼容性
 

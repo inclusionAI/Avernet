@@ -127,7 +127,7 @@ def test_list_projects_latest_two_and_deduplicates_released(deps, monkeypatch):
         (PublishStatus.VALIDATE_PUB, "deploying", []),
         (
             PublishStatus.VALIDATING,
-            "staging",
+            "prestable",
             ["publish_online", "restart_publish", "cancel_staging"],
         ),
         (PublishStatus.ONLINE_PUB, "deploying", []),
@@ -150,6 +150,7 @@ def test_projection_status_and_actions(
     result = deps.facade.get_publication("bot-1", 1, actor_id="owner", owner_id="owner")
 
     assert result["status"] == product_status
+    assert result["internal_status"] == status.value
     assert result["available_actions"] == actions
 
 
@@ -386,6 +387,30 @@ async def test_staging_runs_when_actor_holds_lock(deps, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_prestable_stage_alias_runs_the_existing_publish_flow(deps, monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    row = record(1, PublishStatus.DRAFT)
+    deps.publish_repo.list_by_source_bot.return_value = [row]
+    deps.lock_service.get_lock_info.return_value = SimpleNamespace(
+        has_collaborators=False,
+        lock=None,
+    )
+    deps.flow_service.process = AsyncMock(
+        return_value=SimpleNamespace(model_dump=lambda: {"status": "building"})
+    )
+
+    result = await deps.facade.advance(
+        "bot-1", "prestable", actor_id="owner", owner_id="owner"
+    )
+
+    assert result["action"] == "publish_staging"
+    deps.flow_service.process.assert_awaited_once_with(1, "owner")
+
+
+@pytest.mark.asyncio
 async def test_online_returns_existing_approval_without_starting_flow(
     deps, monkeypatch
 ):
@@ -533,6 +558,13 @@ def test_delete_is_owner_only_and_delegates_domain_rule(deps, monkeypatch):
 
 def test_lock_operations_require_membership_and_delegate(deps):
     lock = SimpleNamespace(holder_user_id="member")
+    deps.lock_service.get_lock_info.return_value = SimpleNamespace(
+        lock=None,
+        holder_name=None,
+        has_collaborators=True,
+        is_owner=False,
+    )
+    deps.publish_repo.list_by_source_bot.return_value = [record(1, PublishStatus.DRAFT)]
     deps.lock_service.acquire_lock.return_value = lock
     deps.lock_service.steal_lock.return_value = lock
     deps.lock_service.release_lock.return_value = True
@@ -541,18 +573,58 @@ def test_lock_operations_require_membership_and_delegate(deps):
         deps.facade.acquire_lock("bot-1", actor_id="member", owner_id="owner") is lock
     )
     assert deps.facade.release_lock("bot-1", actor_id="member", owner_id="owner")
-    assert (
-        deps.facade.get_lock("bot-1", actor_id="member", owner_id="owner")
-        is deps.lock_service.get_lock_info.return_value
-    )
-    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.ADMIN
+    info = deps.facade.get_lock("bot-1", actor_id="member", owner_id="owner")
+    assert info.has_collaborators is True
+    assert info.need_lock is True
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.MEMBER
     assert deps.facade.steal_lock("bot-1", actor_id="member", owner_id="owner") is lock
 
 
-def test_steal_lock_requires_admin_or_owner(deps):
-    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.MEMBER
+def test_lock_is_not_created_without_collaborators(deps):
+    assert deps.facade.acquire_lock("bot-1", actor_id="owner", owner_id="owner") is None
+    assert deps.facade.steal_lock("bot-1", actor_id="owner", owner_id="owner") is None
+    deps.lock_service.acquire_lock.assert_not_called()
+    deps.lock_service.steal_lock.assert_not_called()
+
+
+def test_lock_projection_does_not_require_lock_without_draft(deps):
+    deps.lock_service.get_lock_info.return_value = SimpleNamespace(
+        lock=None,
+        holder_name=None,
+        has_collaborators=True,
+        is_owner=False,
+    )
+    deps.publish_repo.list_by_source_bot.return_value = [
+        record(1, PublishStatus.SUCCESS)
+    ]
+
+    info = deps.facade.get_lock("bot-1", actor_id="member", owner_id="owner")
+
+    assert info.has_collaborators is True
+    assert info.need_lock is False
+
+
+def test_lock_takeover_requires_bot_membership(deps):
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.NONE
 
     with pytest.raises(ServicePublicationNotFoundError):
         deps.facade.steal_lock("bot-1", actor_id="member", owner_id="owner")
 
     deps.lock_service.steal_lock.assert_not_called()
+
+
+def test_lock_is_rejected_without_an_editable_draft(deps):
+    deps.lock_service.get_lock_info.return_value = SimpleNamespace(
+        lock=None,
+        holder_name=None,
+        has_collaborators=True,
+        is_owner=False,
+    )
+    deps.publish_repo.list_by_source_bot.return_value = [
+        record(1, PublishStatus.SUCCESS)
+    ]
+
+    with pytest.raises(ServicePublicationConflictError):
+        deps.facade.acquire_lock("bot-1", actor_id="member", owner_id="owner")
+
+    deps.lock_service.acquire_lock.assert_not_called()

@@ -277,6 +277,9 @@ class BotInventoryService:
             publication_id=publication_id,
             publication_version=(lifecycle_card.version if lifecycle_card else None),
             live_version=(lifecycle_card.live_version if lifecycle_card else None),
+            internal_status=(
+                lifecycle_card.internal_status if lifecycle_card else None
+            ),
         )
 
 

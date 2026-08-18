@@ -542,6 +542,8 @@
               "local_pending",
               "local_failed",
               "service_draft",
+              "service_deploying",
+              "service_prestable",
               "service_staging",
               "service_online",
               "service_offline"
@@ -553,6 +555,18 @@
             "description": "Engine currently assigned to the bot.",
             "title": "Engine",
             "type": "string"
+          },
+          "internal_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stored service-publication status for diagnostics; null for non-service cards.",
+            "title": "Internal Status"
           },
           "kind": {
             "description": "Inventory category used to render the bot card.",
@@ -653,7 +667,7 @@
             "description": "Business space containing the bot, when resolved."
           },
           "status": {
-            "description": "Raw lifecycle status reported by the owning service.",
+            "description": "Lifecycle status used by the owning view. Service cards expose draft/deploying/prestable/running/offline; other cards retain their owning service's status.",
             "title": "Status",
             "type": "string"
           }
@@ -4655,8 +4669,9 @@
         "description": "Target stage for advancing the current service-Bot publication.",
         "properties": {
           "stage": {
-            "description": "Advance the current draft to staging or staging to online.",
+            "description": "Advance draft to prestable or prestable to online. The legacy value 'staging' is accepted as an alias for 'prestable'.",
             "enum": [
+              "prestable",
               "staging",
               "online"
             ],
@@ -4675,8 +4690,9 @@
         "description": "Published runtime selected for restart.",
         "properties": {
           "stage": {
-            "description": "Restart the staging or online runtime.",
+            "description": "Restart the prestable or online runtime. The legacy value 'staging' is accepted as an alias for 'prestable'.",
             "enum": [
+              "prestable",
               "staging",
               "online"
             ],
@@ -6514,8 +6530,9 @@
             "type": "string"
           },
           "target": {
-            "description": "Product state the deployment is trying to reach.",
+            "description": "Product state the deployment is trying to reach. The legacy staging value remains schema-compatible but is no longer emitted.",
             "enum": [
+              "prestable",
               "staging",
               "running"
             ],
@@ -6612,10 +6629,11 @@
             "type": "integer"
           },
           "status": {
-            "description": "Stable product lifecycle state for this version card.",
+            "description": "Stable product lifecycle state for this version card. The legacy staging value remains schema-compatible but is no longer emitted.",
             "enum": [
               "draft",
               "deploying",
+              "prestable",
               "staging",
               "running",
               "offline"

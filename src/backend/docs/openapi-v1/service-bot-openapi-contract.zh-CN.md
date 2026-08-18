@@ -29,7 +29,7 @@
 | GET | `/{bot_id}/edit-lock` | 查询编辑锁 |
 | POST | `/{bot_id}/edit-lock` | 获取编辑锁 |
 | DELETE | `/{bot_id}/edit-lock` | 释放自己的编辑锁 |
-| POST | `/{bot_id}/edit-lock/steal` | Owner/Admin 抢占编辑锁 |
+| POST | `/{bot_id}/edit-lock/steal` | Bot Member 及以上抢占编辑锁 |
 
 完整示例：
 
@@ -47,12 +47,13 @@ GET /openapi/v1/bots/20260817_abcd1234/lifecycle?user_id=165137&owner_id=168944
   "bot_id": "20260817_abcd1234",
   "card_id": "service:20260817_abcd1234:102",
   "kind": "service",
-  "display_state": "service_staging",
-  "status": "validating",
+  "display_state": "service_prestable",
+  "status": "prestable",
+  "internal_status": "validating",
   "publication_id": 102,
   "publication_version": 3,
   "live_version": 2,
-  "actions": ["view", "chat", "edit", "publish_online", "restart", "cancel_staging"]
+  "actions": ["view", "publish_online", "restart", "cancel_staging"]
 }
 ```
 
@@ -80,7 +81,7 @@ GET /openapi/v1/bots/20260817_abcd1234/lifecycle?user_id=165137&owner_id=168944
         "publication_id": 102,
         "card_id": "service:20260817_abcd1234:102",
         "version": 3,
-        "status": "staging",
+        "status": "prestable",
         "internal_status": "validating",
         "live_version": 2,
         "deployment": null,
@@ -95,8 +96,12 @@ GET /openapi/v1/bots/20260817_abcd1234/lifecycle?user_id=165137&owner_id=168944
 }
 ```
 
-稳定产品状态为 `draft/deploying/staging/running/offline`。前端使用 `status` 和
+稳定产品状态为 `draft/deploying/prestable/running/offline`。前端使用 `status` 和
 `available_actions` 渲染，不根据 `internal_status` 自行推断动作。
+
+统一列表的服务 Bot 展示态分别为 `service_draft/service_deploying/`
+`service_prestable/service_online/service_offline`。旧值 `service_staging` 仅保留在
+schema 中用于兼容，不再由新投影产生。
 
 ## 推进和重启请求
 
@@ -106,10 +111,11 @@ GET /openapi/v1/bots/20260817_abcd1234/lifecycle?user_id=165137&owner_id=168944
 POST /openapi/v1/bots/{bot_id}/lifecycle/advance?user_id=165137
 Content-Type: application/json
 
-{"stage":"staging"}
+{"stage":"prestable"}
 ```
 
-`stage` 只能是 `staging` 或 `online`。重启使用同样的 stage 枚举：
+`stage` 使用 `prestable` 或 `online`。为兼容已接入的旧客户端，后端仍接受
+`staging`，并按 `prestable` 处理。重启使用同样的 stage 枚举：
 
 ```http
 POST /openapi/v1/bots/{bot_id}/lifecycle/restart?user_id=165137
@@ -148,13 +154,36 @@ Content-Type: application/json
 - Owner 可修改 `should_approval`。
 - 开启审批后，非 Owner 的上线和下线需要审批。
 - 草稿进入预发时，如果 Bot 存在协作者，操作者必须持有编辑锁。
-- Member 可获取和释放自己的锁；只有 Owner/Admin 可以抢锁。
+- 编辑锁只适用于“存在协作者且存在可编辑草稿”的服务 Bot；其他状态返回
+  `need_lock=false`，也不能创建或抢占新锁。
+- Member 可获取、释放自己的锁并抢占编辑锁。
 - 未持锁推进预发返回 423。
+
+## 服务 Bot 动作矩阵
+
+| 产品状态 | 统一列表动作 |
+| --- | --- |
+| `draft` | `view/edit/publish_staging`；仅从未正式发布的初始草稿额外有 `delete` |
+| `deploying` | `view` |
+| `prestable` | `view/publish_online/restart/cancel_staging` |
+| `running` | `view/chat/restart/offline` |
+| `offline` | `view` |
+
+生命周期详情中的 `available_actions` 使用领域命令名，其中重启为
+`restart_publish`；前端应以接口返回动作作为最终依据。
 
 ## 删除语义
 
 只有 Owner 可以删除，且必须是从未正式发布的初始草稿。只要同一 Bot 曾存在
 `success/upgraded/released` 任一历史状态，即永久禁止删除整个服务 Bot。
+
+## 交付边界
+
+- 空间成员可见性和角色映射依赖业务空间生产 Adapter；当前未接入时保持拒绝优先，
+  不会因 `X-Space-Id` 自动放宽权限。
+- Flow、Channel、Skill Set、文件复用统一 Bot OpenAPI，由对应能力模块提供，
+  本生命周期模块不重复实现。
+- 容器实例、评测以及独立协作者 CRUD 属后续批次，不包含在本文第一期接口内。
 
 ## 主要错误
 

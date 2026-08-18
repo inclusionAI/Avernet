@@ -55,7 +55,7 @@ def _lock_payload(info: Any, *, acquired: bool | None = None) -> EditLock:
         holder_name=getattr(info, "holder_name", None),
         has_collaborators=has_collaborators,
         is_owner_holder=bool(getattr(info, "is_owner", False)),
-        need_lock=has_collaborators,
+        need_lock=bool(getattr(info, "need_lock", has_collaborators)),
     )
 
 
@@ -309,6 +309,6 @@ async def steal_edit_lock(
         ServicePublicationFacadeProtocol
     ),
 ) -> Envelope[EditLock]:
-    facade.steal_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
+    lock = facade.steal_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
     info = facade.get_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
-    return envelope(_lock_payload(info, acquired=True), request)
+    return envelope(_lock_payload(info, acquired=lock is not None), request)

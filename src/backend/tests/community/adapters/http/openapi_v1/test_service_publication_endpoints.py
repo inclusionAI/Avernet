@@ -227,6 +227,26 @@ async def test_edit_lock_handlers():
     assert acquired.data.acquired is True
     assert released.data.released is True
     assert stolen.data.holder_user_id == "actor"
+    assert stolen.data.acquired is True
+
+
+@pytest.mark.asyncio
+async def test_lock_payload_reports_draft_applicability_and_failed_takeover():
+    facade = Mock()
+    facade.steal_lock.return_value = None
+    facade.get_lock.return_value = SimpleNamespace(
+        lock=None,
+        holder_name=None,
+        has_collaborators=True,
+        is_owner=False,
+        need_lock=False,
+    )
+
+    response = await steal_edit_lock("bot-1", request(), "actor", "owner", facade)
+
+    assert response.data.has_collaborators is True
+    assert response.data.need_lock is False
+    assert response.data.acquired is False
 
 
 def test_routes_follow_component_first_contract():

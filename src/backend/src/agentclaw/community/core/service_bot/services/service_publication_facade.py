@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
@@ -61,6 +62,17 @@ _PUBLISHED_HISTORY = {
     PublishStatus.UPGRADED.value,
     PublishStatus.RELEASED.value,
 }
+
+
+@dataclass(frozen=True)
+class _ServiceEditLockInfo:
+    """Public lock projection enriched with service-draft applicability."""
+
+    lock: Any
+    holder_name: str | None
+    has_collaborators: bool
+    is_owner: bool
+    need_lock: bool
 
 
 class ServicePublicationFacade:
@@ -147,7 +159,7 @@ class ServicePublicationFacade:
         if status in _DEPLOYING or status == PublishStatus.FAILED.value:
             return "deploying"
         if status == PublishStatus.VALIDATING.value:
-            return "staging"
+            return "prestable"
         if status == PublishStatus.SUCCESS.value:
             return "running"
         if status == PublishStatus.RELEASED.value:
@@ -166,13 +178,13 @@ class ServicePublicationFacade:
             PublishStatus.BUILT.value,
             PublishStatus.VALIDATE_PUB.value,
         }:
-            action, target = "publish_staging", "staging"
+            action, target = "publish_staging", "prestable"
         elif effective == PublishStatus.ONLINE_PUB.value:
             action, target = "publish_online", "running"
         elif effective == PublishStatus.SUCCESS.value:
             action, target = "restart_publish", "running"
         else:
-            action, target = "publish_staging", "staging"
+            action, target = "publish_staging", "prestable"
         return {
             "action": action,
             "target": target,
@@ -479,7 +491,7 @@ class ServicePublicationFacade:
         actor_id: str,
         owner_id: str,
     ) -> dict[str, Any]:
-        if stage == "staging":
+        if stage in {"staging", "prestable"}:
             bot, record = self._resolve_action_record(
                 bot_id,
                 PublishStatus.DRAFT,
@@ -520,6 +532,7 @@ class ServicePublicationFacade:
     ) -> dict[str, Any]:
         status = {
             "staging": PublishStatus.VALIDATING,
+            "prestable": PublishStatus.VALIDATING,
             "online": PublishStatus.SUCCESS,
         }.get(stage)
         if status is None:
@@ -595,12 +608,42 @@ class ServicePublicationFacade:
             raise ServicePublicationConflictError("service bot deletion failed")
         return True
 
+    def _service_lock_info(
+        self, bot: dict[str, Any], *, actor_id: str
+    ) -> _ServiceEditLockInfo:
+        info = self._lock_service.get_lock_info(
+            bot["bot_id"], bot["owner_id"], actor_id
+        )
+        records = self._publish_repo.list_by_source_bot(bot["id"], get_current_env())
+        has_draft = any(
+            record.status == PublishStatus.DRAFT.value for record in records
+        )
+        return _ServiceEditLockInfo(
+            lock=info.lock,
+            holder_name=info.holder_name,
+            has_collaborators=info.has_collaborators,
+            is_owner=info.is_owner,
+            need_lock=info.has_collaborators and has_draft,
+        )
+
     def get_lock(self, bot_id: str, *, actor_id: str, owner_id: str) -> Any:
         bot, _ = self._resolve_bot(bot_id, actor_id=actor_id, owner_id=owner_id)
-        return self._lock_service.get_lock_info(bot_id, bot["owner_id"], actor_id)
+        return self._service_lock_info(bot, actor_id=actor_id)
+
+    def _lockable_draft(self, bot: dict[str, Any], *, actor_id: str) -> bool:
+        info = self._service_lock_info(bot, actor_id=actor_id)
+        if not info.has_collaborators:
+            return False
+        if not info.need_lock:
+            raise ServicePublicationConflictError(
+                "edit lock is only available for a service bot draft"
+            )
+        return True
 
     def acquire_lock(self, bot_id: str, *, actor_id: str, owner_id: str) -> Any:
         bot, _ = self._resolve_bot(bot_id, actor_id=actor_id, owner_id=owner_id)
+        if not self._lockable_draft(bot, actor_id=actor_id):
+            return None
         return self._lock_service.acquire_lock(bot_id, bot["owner_id"], actor_id)
 
     def release_lock(self, bot_id: str, *, actor_id: str, owner_id: str) -> bool:
@@ -614,6 +657,11 @@ class ServicePublicationFacade:
             bot_id,
             actor_id=actor_id,
             owner_id=owner_id,
-            required_level=PermissionLevel.ADMIN,
+            # COSEC: the lock service assumes authorization was already checked.
+            # PD explicitly grants lock takeover to every Bot member, so prove
+            # that relationship here before invoking the forceful operation.
+            required_level=PermissionLevel.MEMBER,
         )
+        if not self._lockable_draft(bot, actor_id=actor_id):
+            return None
         return self._lock_service.steal_lock(bot_id, bot["owner_id"], actor_id)

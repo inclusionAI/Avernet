@@ -17,8 +17,9 @@ class ServiceDeployment(BaseModel):
     action: Literal["publish_staging", "publish_online", "restart_publish"] = Field(
         description="Lifecycle action being executed or most recently failed."
     )
-    target: Literal["staging", "running"] = Field(
-        description="Product state the deployment is trying to reach."
+    target: Literal["prestable", "staging", "running"] = Field(
+        description="Product state the deployment is trying to reach. "
+        "The legacy staging value remains schema-compatible but is no longer emitted."
     )
     status: Literal["running", "failed"] = Field(
         description="Current deployment execution state."
@@ -58,8 +59,11 @@ class ServicePublication(BaseModel):
         description="Stable UI identity composed from bot_id and publication_id."
     )
     version: int = Field(description="Monotonic service-Bot publication version.")
-    status: Literal["draft", "deploying", "staging", "running", "offline"] = Field(
-        description="Stable product lifecycle state for this version card."
+    status: Literal[
+        "draft", "deploying", "prestable", "staging", "running", "offline"
+    ] = Field(
+        description="Stable product lifecycle state for this version card. "
+        "The legacy staging value remains schema-compatible but is no longer emitted."
     )
     internal_status: str = Field(
         description="Stored publication state; use status for stable UI behavior."
@@ -145,8 +149,9 @@ class LifecycleAdvanceRequest(BaseModel):
 
     model_config = _STRICT
 
-    stage: Literal["staging", "online"] = Field(
-        description="Advance the current draft to staging or staging to online."
+    stage: Literal["prestable", "staging", "online"] = Field(
+        description="Advance draft to prestable or prestable to online. "
+        "The legacy value 'staging' is accepted as an alias for 'prestable'."
     )
 
 
@@ -155,8 +160,9 @@ class LifecycleRestartRequest(BaseModel):
 
     model_config = _STRICT
 
-    stage: Literal["staging", "online"] = Field(
-        description="Restart the staging or online runtime."
+    stage: Literal["prestable", "staging", "online"] = Field(
+        description="Restart the prestable or online runtime. "
+        "The legacy value 'staging' is accepted as an alias for 'prestable'."
     )
 
 

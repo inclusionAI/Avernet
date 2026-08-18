@@ -4,7 +4,7 @@
 
 - [x] 同一个服务 Bot 可以展开为多张版本卡片。
 - [x] 最多展示最新两个版本；多个 `released` 只保留最新一个，`upgraded` 不展示。
-- [x] 生命周期详情状态统一为 `draft/deploying/staging/running/offline`。
+- [x] 生命周期详情状态统一为 `draft/deploying/prestable/running/offline`。
 - [x] 下线后保留最近一个下线版本，同时自动创建的新草稿可继续编辑和发布。
 - [x] 下线后的服务 Bot 不允许删除。
 - [x] 只有从未正式发布的初始草稿允许 Owner 删除。
@@ -12,7 +12,7 @@
 - [x] 本地 Bot 不允许服务化。
 - [x] Owner、Admin、Member 可以查询并执行发布生命周期动作。
 - [x] Owner 控制审批开关；开启后非 Owner 的上线和下线需要审批。
-- [x] 编辑锁纳入第一期，复用现有协作锁；它只约束协作草稿发布预发。
+- [x] 编辑锁纳入第一期，复用现有协作锁；它只约束存在协作者的服务 Bot 草稿。
 - [x] Flow、Channel、Skill Set、文件等复用统一 Bot 能力，不在本模块重复开发。
 
 ## 已完成实现
@@ -29,12 +29,16 @@
 - [x] 旧内部接口兼容保留；公开契约采用最新 dev 的 bot-first 路径。
 - [x] `/openapi/v1/bots/all` 已接入服务 Bot 多版本卡片。
 - [x] publication 已使用批量查询，避免逐 Bot N+1。
+- [x] 直接创建服务 Bot 时提前校验引擎组合，拒绝不支持服务化的引擎。
+- [x] 服务 Bot 卡片按产品状态输出严格动作矩阵，不在部署/下线状态暴露编辑或对话动作。
+- [x] Bot Member 及以上可以获取、释放自己的锁和抢占编辑锁。
 
 ## 外部协作项
 
 - [ ] 空间模块明确成员模型后，将空间访问规则组合进服务 Bot Access Policy。
 - [ ] 前端以 `bot_id + publication_id` 作为卡片和动作目标，不以 `bot_id` 单独定位版本。
 - [ ] 前端使用 `status` 和 `available_actions` 渲染，不自行解释 `internal_status`。
+- [ ] 团队空间生产 Adapter 接入后，补齐“空间 Member+ 可见”的真实成员校验。
 
 ## 空间能力不阻塞项
 

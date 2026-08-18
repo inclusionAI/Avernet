@@ -71,8 +71,11 @@ def test_cards_are_batched_and_expand_each_service_bot(monkeypatch) -> None:
     repo.list_by_source_bots.assert_called_once_with((10, 11), "dev")
     assert [card.publication_id for card in result["service-1"]] == [4, 3]
     assert result["service-1"][0].display_state is DisplayState.SERVICE_DRAFT
+    assert result["service-1"][0].status == "draft"
+    assert result["service-1"][0].internal_status == PublishStatus.DRAFT.value
     assert BotAction.DELETE not in result["service-1"][0].actions
     assert result["service-2"][0].display_state is DisplayState.SERVICE_ONLINE
+    assert result["service-2"][0].status == "running"
     assert result["service-2"][0].live_version == 7
 
 
@@ -80,9 +83,10 @@ def test_cards_are_batched_and_expand_each_service_bot(monkeypatch) -> None:
 @pytest.mark.parametrize(
     ("status", "state"),
     [
-        (PublishStatus.BUILDING, DisplayState.SERVICE_STAGING),
-        (PublishStatus.ONLINE_PUB, DisplayState.SERVICE_STAGING),
-        (PublishStatus.FAILED, DisplayState.SERVICE_STAGING),
+        (PublishStatus.BUILDING, DisplayState.SERVICE_DEPLOYING),
+        (PublishStatus.ONLINE_PUB, DisplayState.SERVICE_DEPLOYING),
+        (PublishStatus.FAILED, DisplayState.SERVICE_DEPLOYING),
+        (PublishStatus.VALIDATING, DisplayState.SERVICE_PRESTABLE),
         (PublishStatus.RELEASED, DisplayState.SERVICE_OFFLINE),
     ],
 )
@@ -104,4 +108,43 @@ def test_missing_publish_rows_keep_a_safe_read_only_card(monkeypatch) -> None:
     )["service-1"]
 
     assert cards[0].publication_id is None
+    assert cards[0].status == "draft"
+    assert cards[0].internal_status == "ACTIVE"
     assert cards[0].actions == (BotAction.VIEW,)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (
+            PublishStatus.DRAFT,
+            (
+                BotAction.VIEW,
+                BotAction.EDIT,
+                BotAction.PUBLISH_STAGING,
+                BotAction.DELETE,
+            ),
+        ),
+        (PublishStatus.BUILDING, (BotAction.VIEW,)),
+        (
+            PublishStatus.VALIDATING,
+            (
+                BotAction.VIEW,
+                BotAction.PUBLISH_ONLINE,
+                BotAction.RESTART,
+                BotAction.CANCEL_STAGING,
+            ),
+        ),
+        (
+            PublishStatus.SUCCESS,
+            (BotAction.VIEW, BotAction.CHAT, BotAction.RESTART, BotAction.OFFLINE),
+        ),
+        (PublishStatus.FAILED, (BotAction.VIEW, BotAction.RETRY)),
+        (PublishStatus.RELEASED, (BotAction.VIEW,)),
+    ],
+)
+def test_service_actions_follow_the_confirmed_product_matrix(status, expected) -> None:
+    row = record(1, 10, "service-1", status, 1)
+
+    assert ServiceLifecycleView._record_actions(row, [row]) == expected

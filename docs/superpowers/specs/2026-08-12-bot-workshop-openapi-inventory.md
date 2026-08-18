@@ -137,18 +137,18 @@
 | 84 | bots | 初始化配置 | `POST /openapi/v1/bots/{bot_id}/data-init` | 新增 | 已开发 | P0 | 已委托 `DataInitServiceProtocol.trigger_init`（async, fire-and-forget），仅 personal+cloud（desktop/service→409）。**当前仍有联调阻塞，不能视为 legacy 1:1**：OpenAPI handler 尚未像老 `/api` 一样把 Cookie `IAM_TOKEN` 写入 `bot.ext`；同时公开 `Bot` 与 `BotInventoryItem` 均不返回 `ext.data_init_status`，前端没有可执行的轮询契约。联调前须补齐凭证传递，并确定独立 status endpoint（优先）或受控状态字段；创建 checkbox 仍由前端在 Bot 真正存在后单独触发本端点 |
 | 85 | lifecycle | 开启服务化（personal→service） | `POST /openapi/v1/bots/{bot_id}/lifecycle/upgrade` | 新增 | 已开发 | P1 | 复用 Bot 类型升级；仅 `openclaw/claude_code/teclaw` 云端个人 Bot 可服务化 |
 | 86 | lifecycle | 发布态 / 版本 / 阶段 | `GET /openapi/v1/bots/{bot_id}/lifecycle` | 新增 | 已开发 | P1 | 最多返回两张可见版本卡片 |
-| 87 | lifecycle | 草稿→预发 / 预发→上线 | `POST /openapi/v1/bots/{bot_id}/lifecycle/advance` | 新增 | 已开发 | P1 | body `{stage: staging\|online}` |
+| 87 | lifecycle | 草稿→预发 / 预发→上线 | `POST /openapi/v1/bots/{bot_id}/lifecycle/advance` | 新增 | 已开发 | P1 | body `{stage: prestable\|online}`；兼容旧值 `staging` |
 | 88 | lifecycle | 下线 | `POST /openapi/v1/bots/{bot_id}/lifecycle/offline` | 新增 | 已开发 | P1 | 下线后保留最新 `released` 版本 |
-| 89 | lifecycle | 重启发布 | `POST /openapi/v1/bots/{bot_id}/lifecycle/restart` | 新增 | 已开发 | P1 | body `{stage: staging\|online}` |
+| 89 | lifecycle | 重启发布 | `POST /openapi/v1/bots/{bot_id}/lifecycle/restart` | 新增 | 已开发 | P1 | body `{stage: prestable\|online}`；兼容旧值 `staging` |
 | 90 | lifecycle | 发布 / 下线审批开关 | `GET /PUT /openapi/v1/bots/{bot_id}/lifecycle/approval` | 新增 | 已开发 | P2 | Owner 管理开关；开启后非 Owner 的上线/下线进入审批 |
 | 91 | containers | 实例列表 | `GET /openapi/v1/bots/containers/{bot_id}` | 新增 | 未开工 | P0 | `summary{total,healthy,abnormal}` + `instances[id,node,status]`；cpu/mem 留空待 BaaS |
 | 92 | containers | 单实例重启 | `POST /openapi/v1/bots/containers/{bot_id}/{instance_id}/restart` | 新增 | 未开工 | P0 | 仅异常态 |
 | 93 | containers | 单实例日志 | `GET /openapi/v1/bots/containers/{bot_id}/{instance_id}/logs` | 新增 | 未开工 | P0 | — |
 | 94 | evaluation | 创建评测任务 | `POST /openapi/v1/bots/evaluation/{bot_id}` | 新增 | 未开工 | P1 | 返回评测页 URL/token；仅服务预发/运行态；委托 `quality` |
-| 95 | edit-lock | 获取 / 抢占编辑锁 | `POST /openapi/v1/bots/{bot_id}/edit-lock`(+`/steal`) | 新增 | 已开发 | P1 | 复用 `CollaboratorLockService.acquire/steal`；抢占仅 Owner/Admin |
+| 95 | edit-lock | 获取 / 抢占编辑锁 | `POST /openapi/v1/bots/{bot_id}/edit-lock`(+`/steal`) | 新增 | 已开发 | P1 | 复用 `CollaboratorLockService.acquire/steal`；仅“有协作者且有草稿”需要锁，Bot Member+ 可抢占 |
 | 96 | edit-lock | 释放编辑锁 | `DELETE /openapi/v1/bots/{bot_id}/edit-lock` | 新增 | 已开发 | P1 | 复用 `CollaboratorLockService.release_lock` |
 | 97 | edit-lock | 编辑锁信息 | `GET /openapi/v1/bots/{bot_id}/edit-lock` | 新增 | 已开发 | P1 | 复用 `CollaboratorLockService.get_lock_info` |
-| 98 | editors | 协作者管理 | `GET/POST/PATCH/DELETE /openapi/v1/bots/editors/{bot_id}`(+`/{member_id}`) | 新增 | 已设计未建 | P1 | **归 B 线/joseph**:协作本质属服务 bot(`CollaboratorService` 的 `BotNotServiceTypeError` 对非 service 默认拒);"空间成员先验集合 + 唯一管理员"是 service 改造(碰红线,`collaborator_service` 内部逻辑)。A 线不做 |
+| 98 | editors | 协作者管理 | `GET/POST/PATCH/DELETE /openapi/v1/bots/editors/{bot_id}`(+`/{member_id}`) | 新增 | 后续批次 | P1 | 本期只交付 edit-lock；独立协作者 CRUD 待空间成员模型和统一协作契约完成后实施 |
 | 99 | skill-sets | 能力集分组 + 引用型 Skill + per-bot MCP | `GET/POST/PUT/DELETE /openapi/v1/bots/skill-sets/{bot_id}`(+`/{set_id}/skills`、`/mcps`) | 新增 | 未开工 | P2 | 引用型 Skill（市场/工坊，引用后只读）+ per-bot MCP 绑定（带 caller 字段） |
 | 100 | files | 容器目录树 | `GET /openapi/v1/bots/files/{bot_id}` | 新增 | 未开工 | P2 | 委托 `service_bot/router_build.py:read-only/tree`；本地 Bot 只读；≠`/resources` |
 | 101 | flow | 任务护航 DAG/YAML 编排 | `GET/PUT /openapi/v1/bots/flow/{bot_id}` | 新增 | 未开工 | P2 | 引擎 = BCS State Machine；P2 前需 BCS owner 进 openapi 或允许直调 |
