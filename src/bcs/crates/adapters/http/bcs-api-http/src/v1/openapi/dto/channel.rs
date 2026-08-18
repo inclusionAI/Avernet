@@ -1,7 +1,7 @@
 use bcs_domain::{
     BindingStatus, BindingTarget, ChannelBinding, ChannelType, GroupChatScope, Visibility,
 };
-use bcs_service_api::CreateBindingCommand;
+use bcs_service_api::application::channel::CreateBindingCommand;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

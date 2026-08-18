@@ -4,7 +4,7 @@ use bcs_service_api::application::v1::{
     BotService, FriendshipService, GroupService, InvitationService, SessionMessageService,
     SessionFileApplicationService, SessionService,
 };
-use bcs_service_api::ChannelService;
+use bcs_service_api::application::channel::ChannelService;
 
 use crate::v1::openapi::SessionFileUrlProjector;
 

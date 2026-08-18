@@ -183,6 +183,7 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
         "Collaboration / Groups",
         "Collaboration / Sessions",
         "Collaboration / Invitations",
+        "Collaboration / Channels",
     ]
 
 

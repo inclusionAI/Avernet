@@ -95,7 +95,7 @@ ChannelBinding:
     outbound_visibility: { $ref: "#/Visibility" }
     env: { type: string }
     status: { $ref: "#/BindingStatus" }
-    created_by: { type: string, nullable: true }
+    created_by: { type: [string, "null"] }
     config:
       type: object
       additionalProperties: true
