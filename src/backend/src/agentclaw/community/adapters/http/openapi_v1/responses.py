@@ -84,6 +84,12 @@ from agentclaw.community.core.bot_chat.errors import (
 from agentclaw.community.core.bot_management.create_flow import (
     AuthStatusUnavailableError,
 )
+from agentclaw.community.core.bot_inventory.errors import (
+    BotInventoryOperationNotAllowedError,
+    BotInventoryPermissionError,
+    BotInventoryUpstreamError,
+)
+from agentclaw.community.core.bot_dormant.activate_service import InvalidBotStateError
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
     DeviceNotBoundError,
@@ -320,6 +326,11 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Bot is not in a valid state for this operation",
     ),
     BotOperationNotAllowedError: (409, "Operation not supported for this bot"),
+    BotInventoryOperationNotAllowedError: (409, "Operation not supported for this bot"),
+    # Dormant activate: a bot that is not RECYCLED cannot be reactivated.
+    InvalidBotStateError: (409, "Operation not supported for this bot"),
+    BotInventoryPermissionError: (404, "Not found"),
+    BotInventoryUpstreamError: (502, "Desktop service error"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
     PassportError: (502, "Authorization service error"),

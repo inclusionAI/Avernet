@@ -276,10 +276,10 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
             # parameter existed.
             assert not params["owner_id"].get("required", False), path
 
-    # 16 current operations, and the same 16 answering at their former
-    # addresses while callers migrate. The number halves again when the
-    # deprecated package is deleted.
-    assert len(engine_runtime) == 32
+    # 17 current operations. Sixteen also answer at their former addresses
+    # while callers migrate; engine restart was introduced after bot-first
+    # addressing and therefore has no legacy alias.
+    assert len(engine_runtime) == 33
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (
@@ -294,6 +294,7 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
         "operations declared in _OWNER_ADDRESSED_ELSEWHERE, and to nothing "
         "else by accident"
     )
+
 
 
 def test_the_stage_enum_publishes_exactly_the_three_runtimes():

@@ -166,7 +166,7 @@ DDL. Full ruling and per-endpoint mapping in
 | Group | Endpoints | Owner | Pri | Router | State |
 |---|---|---|---|---|---|
 | sessions | 7 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **IMPLEMENTED — PR #630**; operators + stages 2026-08-09 |
-| engine (read-only) | 3 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **IMPLEMENTED — PR #630** |
+| engine (read/write) | 4 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **IMPLEMENTED — PR #630**; process restart added 2026-08-17 |
 | connection | 1 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **IMPLEMENTED — PR #630** |
 | approvals | 3 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **IMPLEMENTED — PR #630** |
 | models | 2 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/models/` | ✅ **IMPLEMENTED — PR #630** |
@@ -181,11 +181,14 @@ DDL. Full ruling and per-endpoint mapping in
 > `…/connection` endpoint returns one complete socket URL, credential included,
 > and the caller builds the connection itself.
 >
-> `engine/switch` and `engine/restart` are deliberately excluded — wrapping
-> `switch` would be a back door around #494's `engine`-immutability ruling on
-> `PUT /openapi/v1/bots/{bot_id}`, and `restart` would give one bot two restart
-> verbs. `session-favorites` and the `/api/openclaw` HTTP trio are **deferred,
-> not cancelled** (both additive later). Reasons in `engine-surface.md`.
+> `engine/switch` remains deliberately excluded: wrapping it would be a back
+> door around #494's `engine`-immutability ruling on
+> `PUT /openapi/v1/bots/{bot_id}`. Engine-process restart is now exposed as
+> `POST /openapi/v1/bots/{bot_id}/engine/restart`; it relays the daemon restart
+> and is distinct from the bot-level `/restart`, which re-provisions the whole
+> container. Because this operation was introduced after bot-first addressing,
+> it has no component-first retiring alias. `session-favorites` and the
+> `/api/openclaw` HTTP trio remain **deferred, not cancelled**.
 >
 > **Routines is Track C's worked precedent, not a Track B one.** Backend
 > `/api/cron` → `CronRelayService` → `DeviceAdapterTransport` → engine has been
@@ -940,8 +943,9 @@ literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-approvals  authorized  ceiling  check-name  connection  engine  identity
-loadtest  logs  mcp  models  resources  routines  sessions  skills
+approvals  authorized  all  ceiling  check-name  connection  engine  identity
+loadtest  local  logs  mcp  models  resources  routines  sessions
+skills
 ```
 
 Nine of those fifteen — `approvals`, `connection`, `engine`, `identity`,
@@ -1511,6 +1515,16 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 ---
 
 ## Changelog (append a dated line whenever you move the board)
+
+- **2026-08-17** — **TC bot workshop and local workflows.** Added the
+  aggregated `/bots/all` inventory, personal-local device/create/read/restart/
+  delete/open-folder workflows, dormant activation, cold-start data
+  initialization, and engine-process restart. Local and aggregate inventory
+  remain human-only at both Gateway and backend admission; the remaining bot
+  surface continues to admit an application only within its live grants. The
+  engine restart has only its bot-first address because no earlier public route
+  existed to retire. Regenerated Gateway `bots.openapi.json` is the release
+  artifact for this surface and must be copied unchanged to the OCB Gateway.
 
 - **2026-08-15** — **Bot-first addressing.** Every bot-scoped operation moved
   to `/openapi/v1/bots/{bot_id}/<component>/…`, reversing the component-first

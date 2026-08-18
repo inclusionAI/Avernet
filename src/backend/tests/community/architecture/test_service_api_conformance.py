@@ -38,6 +38,10 @@ import inspect
 
 import pytest
 
+from agentclaw.community.api.bot_dormant_service import (
+    BotDormantActivateServiceProtocol,
+)
+from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
 )
@@ -49,6 +53,7 @@ from agentclaw.community.api.bot_app_grant_service import (
     BotAppGrantServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.local_bot_workflow_service import LocalBotWorkflowServiceProtocol
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
@@ -68,8 +73,23 @@ from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
+from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
+from agentclaw.community.core.bot_inventory.protocols import (
+    BotInventoryBotPort,
+    DesktopBotInventoryPort,
+)
+from agentclaw.community.core.bot_inventory.services.bot_inventory_service import (
+    BotInventoryService,
+)
+from agentclaw.community.core.bot_inventory.services.local_bot_workflow import (
+    LocalBotWorkflowService,
+)
+from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     BotStartupScriptService,
+)
+from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
+    DesktopBotService,
 )
 from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
@@ -94,7 +114,12 @@ from agentclaw.community.core.spaces.services import SpaceMemberService, SpaceSe
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
     (BotAppGrantServiceProtocol, BotAppGrantService),
+    (BotInventoryServiceProtocol, BotInventoryService),
     (BotStartupScriptServiceProtocol, BotStartupScriptService),
+    (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),
+    (BotDormantActivateServiceProtocol, ActivateBotService),
+    (BotInventoryBotPort, BotService),
+    (DesktopBotInventoryPort, DesktopBotService),
     (EngineConfigServiceProtocol, EngineConfigService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),

@@ -14,6 +14,7 @@ def test_supported_engine_types():
     assert "moltis" in SUPPORTED_ENGINE_TYPES
     assert "aicoding" in SUPPORTED_ENGINE_TYPES
     assert "hermes" in SUPPORTED_ENGINE_TYPES
+    assert "teclaw" in SUPPORTED_ENGINE_TYPES
 
 
 def test_get_engine_types_returns_default_when_no_env():

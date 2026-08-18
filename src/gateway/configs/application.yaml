@@ -177,6 +177,16 @@ user_config:
     "/openapi/v1/work-order-notifications/**":
       user: required
 
+    # Bot workshop aggregation is not grant-filtered yet, and local workflows
+    # expose host devices/directories and desktop actions. Keep both surfaces
+    # human-only until the backend has an application-safe scope contract.
+    "GET /openapi/v1/bots/all":
+      user: required
+    "/openapi/v1/bots/local/**":
+      user: required
+    "/openapi/v1/bots/{bot_id}/local/**":
+      user: required
+
     # Creating a bot. No bot exists yet for a grant to cover, and creation
     # spends the user's quota.
     "POST /openapi/v1/bots":

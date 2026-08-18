@@ -197,6 +197,7 @@ from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
 from .engine_runtime.sessions import router as engine_sessions_router
 from .identity import router as identity_router
+from .local import router as local_router
 from .loadtest import router as loadtest_router
 from .mcp import router as mcp_router
 from .bot_logs import router as logs_router
@@ -265,6 +266,9 @@ _SUBGROUPS = [
     # because it would look the grant up against the delegating user rather than
     # the owner. See `skills/router.py` and `admission.SKILL_SCOPED_OPERATIONS`.
     skills_router,
+    # Local workflows are human-only rather than grant-checked. Their admission
+    # entries and gateway route security refuse application-only callers.
+    local_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
