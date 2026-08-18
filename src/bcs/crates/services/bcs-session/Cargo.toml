@@ -16,6 +16,8 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+bcs-bot = { workspace = true }
+bcs-group = { workspace = true }
 bcs-group-store = { workspace = true }
 bcs-test-support = { workspace = true }
 tokio = { workspace = true }
