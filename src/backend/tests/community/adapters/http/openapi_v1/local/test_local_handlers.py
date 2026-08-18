@@ -175,22 +175,43 @@ def test_local_auth_status_completes_creation(client, auth_rel):
     auth_rel.create_relationship.assert_called_once()
 
 
-def test_local_auth_status_continues_after_relationship_write_failure(client, auth_rel):
-    """A relationship write failure after the bot is created is partial success,
-    not an overall 500: the bot is usable and an owner-side reconciler can retry
-    the grant. Mirrors the README #560 direction for external-identity writes."""
+def test_local_auth_status_normalizes_relationship_write_failure(client, auth_rel):
     auth_rel.create_relationship.side_effect = RuntimeError("relationship write failed")
 
-    data = _ok(
-        client.get(
-            "/openapi/v1/bots/l1/local/auth-status",
-            params={"bot_name": "Local", "machine_id": "m1", "engine": "openclaw"},
-        )
+    response = client.get(
+        "/openapi/v1/bots/l1/local/auth-status",
+        params={"bot_name": "Local", "machine_id": "m1", "engine": "openclaw"},
     )
 
-    assert data["status"] == "ISSUED"
-    assert data["bot"]["bot_id"] == "l1"
+    assert response.status_code == 502
+    assert response.json()["code"] == 502000
+    assert response.json()["message"] == "Desktop service error"
     auth_rel.create_relationship.assert_called_once()
+
+
+def test_local_auth_status_rejects_missing_agent_code(client, desktop_service, auth_rel):
+    desktop_service.create_after_authorization.return_value = dict(LOCAL)
+
+    response = client.get(
+        "/openapi/v1/bots/l1/local/auth-status",
+        params={"bot_name": "Local", "machine_id": "m1", "engine": "openclaw"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["code"] == 502000
+    auth_rel.create_relationship.assert_not_called()
+
+
+def test_local_auth_status_rejects_empty_relationship_result(client, auth_rel):
+    auth_rel.create_relationship.return_value = None
+
+    response = client.get(
+        "/openapi/v1/bots/l1/local/auth-status",
+        params={"bot_name": "Local", "machine_id": "m1", "engine": "openclaw"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["code"] == 502000
 
 
 def test_restart_and_open_folder_verify_ownership(client, desktop_service):

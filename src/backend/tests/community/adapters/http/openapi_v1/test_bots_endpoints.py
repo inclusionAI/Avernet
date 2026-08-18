@@ -33,6 +33,12 @@ from agentclaw.community.api.skill_set_service_factory import (
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
+from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
+    NoopBusinessSpaceContext,
+)
+from agentclaw.community.core.bot_inventory.protocols import (
+    BusinessSpaceContextProtocol,
+)
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
@@ -134,6 +140,10 @@ def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, au
             binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
             binder.bind(AuthRelationshipPlugin, to=auth_rel)
             binder.bind(BotStartupScriptServiceProtocol, to=startup_script)
+            binder.bind(
+                BusinessSpaceContextProtocol,
+                to=NoopBusinessSpaceContext(),
+            )
 
     app = FastAPI()
     app.include_router(router)
@@ -316,6 +326,59 @@ def test_create_bot_201(client, svc, passport):
     svc.create_bot.assert_called_once()
 
 
+def test_create_bot_owner_relationship_failure_is_enveloped_502(
+    client, passport, auth_rel
+):
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac",
+    }
+    auth_rel.create_relationship.return_value = None
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        resp = client.post("/openapi/v1/bots", json=_CREATE_BODY)
+
+    assert resp.status_code == 502
+    assert resp.json()["code"] == 502000
+    assert resp.json()["message"] == "Authorization relationship service error"
+    assert resp.json()["data"] is None
+
+
+def test_create_bot_normalizes_unexpected_relationship_failure(
+    client, passport, auth_rel
+):
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac",
+    }
+    auth_rel.create_relationship.side_effect = RuntimeError("downstream unavailable")
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        response = client.post("/openapi/v1/bots", json=_CREATE_BODY)
+
+    assert response.status_code == 502
+    assert response.json()["code"] == 502000
+    assert response.json()["message"] == "Authorization relationship service error"
+
+
+def test_create_bot_rejects_unresolved_business_space_before_side_effects(
+    client, svc, passport
+):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            "bot_name": "N2",
+            "bot_desc": "D",
+            "engine": "teclaw",
+            "cluster_name": "ANDC",
+            "bot_type": "personal",
+            "space_id": "team:unknown",
+        },
+    )
+
+    assert response.status_code == 404
+    passport.apply_passport.assert_not_called()
+    svc.create_bot.assert_not_called()
+
+
 def test_create_bot_202_pending(client, passport):
     passport.apply_first_agent_passport.return_value = {"token": None, "iframe_url": "http://auth"}
     with patch.object(bots_router, "generate_bot_id", return_value="default"):
@@ -356,6 +419,34 @@ def test_auth_status_issued(client, svc, passport):
     svc.create_bot.assert_called_once()
 
 
+def test_auth_status_missing_agent_code_is_enveloped_before_create(
+    client, svc, passport
+):
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.return_value = {"agent_code": None}
+
+    response = client.get("/openapi/v1/bots/b1/auth-status")
+
+    assert response.status_code == 502
+    assert response.json()["code"] == 502000
+    assert response.json()["message"] == "Authorization service error"
+    svc.create_bot.assert_not_called()
+
+
+def test_auth_status_agent_identity_query_failure_is_enveloped_before_create(
+    client, svc, passport
+):
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.side_effect = RuntimeError("identity unavailable")
+
+    response = client.get("/openapi/v1/bots/b1/auth-status")
+
+    assert response.status_code == 502
+    assert response.json()["code"] == 502000
+    assert response.json()["message"] == "Authorization service error"
+    svc.create_bot.assert_not_called()
+
+
 def test_auth_status_issued_preserves_create_attributes(client, svc, passport):
     """Re-supplied attributes reach completion so the bot isn't downgraded."""
     passport.query_auth_status.return_value = {"status": "ISSUED"}
@@ -371,6 +462,23 @@ def test_auth_status_issued_preserves_create_attributes(client, svc, passport):
     assert kw["engine_type"] == "teclaw"  # not defaulted to openclaw
     assert kw["bot_name"] == "NewBot"
     assert kw["bot_desc"] == "d"
+
+
+def test_auth_status_rejects_unresolved_business_space_before_polling(
+    client, svc, passport
+):
+    response = client.get(
+        "/openapi/v1/bots/b1/auth-status",
+        params={
+            "engine": "teclaw",
+            "cluster_name": "ANDC",
+            "space_id": "team:unknown",
+        },
+    )
+
+    assert response.status_code == 404
+    passport.query_auth_status.assert_not_called()
+    svc.create_bot.assert_not_called()
 
 
 def test_auth_status_engine_cluster_mismatch_400(client, svc):
@@ -441,6 +549,18 @@ def test_update_syncs_passport_identity(client, passport):
     assert kw["bot_id"] == "b1"
     assert kw["user_id"] == "u1"
     assert kw["bot_name"] == "Renamed"
+
+
+def test_update_passport_failure_is_enveloped_502(client, svc, passport):
+    passport.update_passport.side_effect = RuntimeError("downstream unavailable")
+
+    resp = client.put("/openapi/v1/bots/b1", json={"bot_name": "Renamed"})
+
+    assert svc.update_bot.called
+    assert resp.status_code == 502
+    assert resp.json()["code"] == 502000
+    assert resp.json()["message"] == "Authorization service error"
+    assert resp.json()["data"] is None
 
 
 def test_update_without_identity_change_skips_passport(client, passport):

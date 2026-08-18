@@ -23,11 +23,8 @@ from agentclaw.community.core.bot_inventory.types import (
     LocalBotCreateCommand,
 )
 from agentclaw.community.core.errors import NotFound
-from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
-
-logger = get_logger()
 
 
 class LocalBotWorkflowService:
@@ -201,28 +198,29 @@ class LocalBotWorkflowService:
             _raise_if_desktop_service_error(exc)
             raise
         agent_code = result.get("agent_code")
-        if agent_code:
-            # The bot is already created on the device here, so a failing
-            # owner-default authorization relationship write is a partial
-            # success rather than an overall 500: the bot is usable and an
-            # owner-side reconciler can retry the grant. This mirrors the
-            # #560 chosen direction for external-identity write failures,
-            # applied where bot creation has already unblocked the caller.
-            try:
-                self._auth_relationship.create_relationship(
-                    work_no=owner_id,
-                    agent_code=str(agent_code),
-                    description="Bot owner default authorization",
-                    operator_work_no=owner_id,
-                    operator_name=owner_id,
-                )
-            except Exception:
-                logger.warning(
-                    "[local_bot_workflow] authorization relationship write "
-                    "failed after bot creation; bot_id=%s owner_id=%s",
-                    bot_id,
-                    owner_id,
-                )
+        if not isinstance(agent_code, str) or not agent_code.strip():
+            raise BotInventoryUpstreamError(
+                "desktop creation returned no agent_code"
+            )
+        # This relationship is part of the completed creation contract. Surface
+        # failures instead of acknowledging ISSUED with missing authorization
+        # state; durable cross-system repair remains a separate responsibility.
+        try:
+            relationship = self._auth_relationship.create_relationship(
+                work_no=owner_id,
+                agent_code=agent_code,
+                description="Bot owner default authorization",
+                operator_work_no=owner_id,
+                operator_name=owner_id,
+            )
+        except Exception as exc:  # noqa: BLE001 — normalize plugin implementations
+            raise BotInventoryUpstreamError(
+                "authorization relationship write failed"
+            ) from exc
+        if relationship is None:
+            raise BotInventoryUpstreamError(
+                "authorization relationship write failed"
+            )
         return LocalAuthStatusResult(status="ISSUED", bot=result)
 
     def restart(

@@ -136,6 +136,9 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterHTTPStatusError,
     DeviceAdapterTimeoutError,
 )
+from agentclaw.community.plugin_api.auth_relationship import (
+    AuthRelationshipError,
+)
 from agentclaw.community.plugin_api.passport import PassportError
 from agentclaw.community.core.service_bot.errors import (
     ServicePublicationConflictError,
@@ -269,6 +272,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
     PassportError: (502, "Authorization service error"),
+    AuthRelationshipError: (502, "Authorization relationship service error"),
     # Engine-config failures. None of these is a BotServiceError, so the base
     # mapping below does not cover them and they would otherwise escape the
     # envelope. They are also plain RuntimeError *siblings*, not a hierarchy, so

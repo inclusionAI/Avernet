@@ -1,8 +1,8 @@
 # Bot 工坊 OpenAPI 接入矩阵与分工
 
 - **日期**：2026-08-18
-- **核对分支**：`rongzhi_dev_0811`
-- **核对基线提交**：`61c1832bebcbe2008ad33e83fd1f07bb99eace00`
+- **核对分支**：`bot_workshop_reconstruction_v1`
+- **核对基线提交**：`f167df1285c0ee7e2b985619e94d28fb6113dfc6`
 - **核对方式**：上述基线提交 + 本轮工作区变更（最终提交 SHA 以合入记录为准）
 - **文档性质**：开发对账与任务分工文档，不替代正式 API Contract 或领域 Spec。
 - **主要依据**：
@@ -207,7 +207,7 @@ Flow 若用于任务护航，按本次分工交由任务护航团队牵头、BCS
 | `data-init` 真实环境验证 | 本仓 API 闭环已完成：Cookie `IAM_TOKEN` 在 HTTP 边界解析并传入 typed Service API，新增安全状态查询；尚缺真实 IAM/Engine/下游环境的 E2E 证据 | 完成 singlebox/集成环境 trigger→poll→completed/failed 验证，并验证现有“读取后立即清除”临时凭证流程 | IAM、Engine 与数据初始化下游环境 |
 | `/all` service Bot 与富字段 | 是否统一聚合以及 health/version/container/lock 等字段的批量策略需收敛 | 只做 read model 编排，不能读取其他领域 Repository | Service lifecycle、Harness、BaaS、Lock 等 Service API |
 | Bot Inventory 空间上下文 | 当前只有 `NoopBusinessSpaceContext` personal fallback | A 线接入 Business Space Owner 的正式上下文 Service API，完成 `/all` 团队空间消费 | Business Space prod adapter |
-| `ac_bots.space_id` DDL | 本仓可见 ORM 字段，但未见仓内 migration 证据 | 在交付记录中明确实际 DDL 执行环境、版本和回滚方式 | 平台数据库变更流程 |
+| `ac_bots.space_id` DDL | 已按本仓约定补入 OpenAPI README 的带外 DDL 权威记录；尚无平台执行证据 | 发布前取得环境、变更单/版本、执行时间、结果和回滚负责人 | 平台数据库变更流程 |
 
 独立 `GET /openapi/v1/spaces` 与 Bot 跨空间迁移归 B 线接入，见 §5.3。Bot 迁移推荐接口二选一：
 
@@ -225,18 +225,18 @@ POST /openapi/v1/bot-space-migrations
 
 ### 4.3 授权关系部分成功问题
 
-`LocalBotWorkflowService.poll_auth_status` 在 Desktop Bot 创建成功后写默认授权关系。如果授权关系写入失败，会形成跨系统部分提交。
+公开 Bot 工坊涉及的三条外部身份写路径已经统一停止“记日志后返回成功”：
 
-不得采用以下处理作为最终方案：
+- 云端 Bot 创建和授权完成：owner 授权关系写失败会传播，`None` 结果视为失败；
+- Local Bot 授权完成：owner 授权关系写失败会传播，`None` 结果映射为上游失败；
+- 公开 OpenAPI 更新 Bot：Passport 元数据同步异常统一映射为 502 Envelope。
 
-```text
-catch exception → warning → 仍返回 ISSUED
-```
+这些入口在外部写失败时都不会再向调用方确认成功；已签发 Passport 但缺少 `agent_code` 的不完整身份也会 fail-closed。需要注意，前一步 Bot/设备写入可能已经发生，当前 Contract 尚未证明通用重试是幂等的，因此不能把简单重试当作完整恢复方案。遗留内部 `/api` 更新路由仍采用日志后继续；它不属于本轮公开 OpenAPI 收口，需由对应维护者处理。
 
-因为这会吞掉持久化失败并长期隐藏不一致。应由正式 Contract 选择一种可恢复方案：
+仍需注意：Bot 数据写入和外部身份写入是跨系统两步操作，当前仓库没有持久化 repair/reconciliation worker。生产交付仍应由 Contract Owner 补充至少一种长期恢复机制：
 
-- 失败传播并持久化 repair/retry work；
-- 明确的 partial-success 状态和幂等重试入口；
+- 持久化 repair/retry work；
+- 明确的 partial-success 状态和幂等恢复入口；
 - 可行时执行补偿删除；
 - 或将两步纳入持久化工作流。
 
@@ -608,3 +608,24 @@ PYTHONDONTWRITEBYTECODE=1 <Avernet gateway venv>/bin/pytest -q \
 ```
 
 Gateway schema 已由 Backend 生成器更新并同步到 OCB/Sofapy 工作区。尚未执行真实 IAM/Engine/数据初始化下游 E2E，也未为 OCB 修改生成独立提交 SHA；因此这两项仍不能标记为部署完成。
+
+在将本分支 rebase 到 2026-08-18 的最新 `origin/dev`（`90d7fbce7`）并完成本轮 A 线收口后，追加执行：
+
+```text
+# Bot 工坊 Backend 广覆盖回归
+254 passed, 18 warnings
+
+# Backend architecture 全套
+147 passed, 17 warnings
+
+# Gateway route security / served OpenAPI / domain map
+152 passed
+
+# Backend 生成 OpenAPI 与 Gateway pinned schema
+PATHS=101
+OPERATIONS=140
+SCHEMA_CMP=0
+
+# Python SAST 本地阻断扫描
+passed
+```
