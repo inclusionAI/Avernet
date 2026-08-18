@@ -161,26 +161,31 @@ ChannelsBindingsCollectionPath:
             schema: { $ref: "#/CreatedChannelBindingEnvelope" }
       "400":
         x-error-codes: [invalid_request, invalid_channel_params]
+        description: Bad request — malformed body or invalid channel params.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
       "401":
         x-error-codes: [unauthenticated]
+        description: Authentication required — missing or invalid principal.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
       "403":
         x-error-codes: [forbidden]
+        description: Forbidden — a human caller is required for this operation.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
       "404":
         x-error-codes: [channel_binding_not_found]
+        description: Not found — the referenced target or binding does not exist.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
       "409":
         x-error-codes: [channel_binding_conflict]
+        description: Conflict — an active binding already exists for the account.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
@@ -201,11 +206,13 @@ ChannelsBindingsCollectionPath:
             schema: { $ref: "#/ChannelBindingPageEnvelope" }
       "401":
         x-error-codes: [unauthenticated]
+        description: Authentication required — missing or invalid principal.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
       "403":
         x-error-codes: [forbidden]
+        description: Forbidden — a human caller is required for this operation.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
@@ -246,16 +253,19 @@ ChannelsBindingsByTargetPath:
             schema: { $ref: "#/ChannelBindingPageEnvelope" }
       "400":
         x-error-codes: [invalid_request]
+        description: Bad request — invalid or missing parameters.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
       "401":
         x-error-codes: [unauthenticated]
+        description: Authentication required — missing or invalid principal.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
       "403":
         x-error-codes: [forbidden]
+        description: Forbidden — a human caller is required for this operation.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
@@ -285,21 +295,25 @@ ChannelsBindingsIdPath:
             schema: { $ref: "#/ChannelBindingOkEnvelope" }
       "400":
         x-error-codes: [invalid_request, invalid_channel_params]
+        description: Bad request — malformed body or invalid channel params.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
       "401":
         x-error-codes: [unauthenticated]
+        description: Authentication required — missing or invalid principal.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
       "403":
         x-error-codes: [forbidden]
+        description: Forbidden — a human caller is required for this operation.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
       "404":
         x-error-codes: [channel_binding_not_found]
+        description: Not found — the referenced target or binding does not exist.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
@@ -322,16 +336,19 @@ ChannelsBindingsIdPath:
             schema: { $ref: "#/ChannelBindingOkEnvelope" }
       "401":
         x-error-codes: [unauthenticated]
+        description: Authentication required — missing or invalid principal.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
       "403":
         x-error-codes: [forbidden]
+        description: Forbidden — a human caller is required for this operation.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
       "404":
         x-error-codes: [channel_binding_not_found]
+        description: Not found — the referenced target or binding does not exist.
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
