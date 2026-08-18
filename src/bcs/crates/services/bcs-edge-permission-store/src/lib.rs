@@ -17,9 +17,11 @@ use async_trait::async_trait;
 use bcs_db_api::{DbError, DbExecuteResult, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
 use bcs_domain::edge_permission::{
     EdgeGrant, EdgeStatus, GrantKind, OriginatorPolicyType, PermissionProfile, ProfileStatus,
+    PermissionRequest, RequestKind, RequestStatus,
 };
 pub use bcs_service_api::port::repo::EdgeGrantRepoPort;
 pub use bcs_service_api::port::repo::PermissionProfileRepoPort;
+pub use bcs_service_api::port::repo::PermissionRequestRepoPort;
 use bcs_service_api::{ServiceError, ServiceResult};
 use sha2::{Digest, Sha256};
 use tracing::warn;
@@ -533,6 +535,339 @@ impl PermissionProfileRepoPort for DbPermissionProfileStore {
     }
 }
 
+/// DB-backed `PermissionRequestRepoPort` implementation (T9).
+///
+/// Same plumbing as [`DbPermissionProfileStore`]: `Arc<dyn DbPlugin>` + flavor.
+/// Owns the SQL for `permission_requests`.
+pub struct DbPermissionRequestStore {
+    db: Arc<dyn DbPlugin>,
+    flavor: EdgeGrantSqlFlavor,
+}
+
+impl DbPermissionRequestStore {
+    pub fn new(db: Arc<dyn DbPlugin>, flavor: EdgeGrantSqlFlavor) -> Self {
+        Self { db, flavor }
+    }
+
+    pub fn mysql(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, EdgeGrantSqlFlavor::Mysql)
+    }
+
+    pub fn sqlite(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, EdgeGrantSqlFlavor::Sqlite)
+    }
+
+    pub fn flavor(&self) -> EdgeGrantSqlFlavor {
+        self.flavor
+    }
+
+    async fn execute(&self, operation: &'static str, statement: DbStatement) -> ServiceResult<()> {
+        self.db
+            .execute(statement)
+            .await
+            .map(|_| ())
+            .map_err(|err| {
+                warn!(operation, error = %err, "db_permission_request: execute failed");
+                service_db_error(operation, err)
+            })
+    }
+
+    async fn query(
+        &self,
+        operation: &'static str,
+        statement: DbStatement,
+    ) -> ServiceResult<Vec<DbRow>> {
+        self.db.query(statement).await.map_err(|err| {
+            warn!(operation, error = %err, "db_permission_request: query failed");
+            service_db_error(operation, err)
+        })
+    }
+
+    /// Idempotent INSERT on PK `request_id`: SQLite
+    /// `ON CONFLICT(request_id) DO NOTHING` vs MySQL `INSERT IGNORE`.
+    fn insert_request_sql(&self) -> &'static str {
+        match self.flavor {
+            EdgeGrantSqlFlavor::Mysql => {
+                "INSERT IGNORE INTO permission_requests \
+                 (request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+                  requested_rules, message, status, decision_reason, created_by, decided_by, \
+                  created_at, updated_at, decided_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            }
+            EdgeGrantSqlFlavor::Sqlite => {
+                "INSERT INTO permission_requests \
+                 (request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+                  requested_rules, message, status, decision_reason, created_by, decided_by, \
+                  created_at, updated_at, decided_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+                 ON CONFLICT(request_id) DO NOTHING"
+            }
+        }
+    }
+
+    const SELECT_REQUEST_SQL: &'static str =
+        "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+                requested_rules, message, status, decision_reason, created_by, decided_by, \
+                created_at, updated_at, decided_at \
+         FROM permission_requests WHERE request_id = ? AND env = ? LIMIT 1";
+
+    const LIST_INBOX_ALL_SQL: &'static str =
+        "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+                requested_rules, message, status, decision_reason, created_by, decided_by, \
+                created_at, updated_at, decided_at \
+         FROM permission_requests WHERE to_id = ? AND env = ? ORDER BY updated_at DESC";
+
+    const LIST_INBOX_STATUS_SQL: &'static str =
+        "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+                requested_rules, message, status, decision_reason, created_by, decided_by, \
+                created_at, updated_at, decided_at \
+         FROM permission_requests WHERE to_id = ? AND env = ? AND status = ? \
+         ORDER BY updated_at DESC";
+}
+
+#[async_trait]
+impl PermissionRequestRepoPort for DbPermissionRequestStore {
+    async fn insert(&self, request: PermissionRequest) -> ServiceResult<()> {
+        self.execute(
+            "insert_request",
+            DbStatement::with_params(
+                self.insert_request_sql(),
+                vec![
+                    DbValue::from(request.request_id),
+                    DbValue::from(request.edge_id),
+                    DbValue::from(request.env),
+                    DbValue::from(request.from_id),
+                    DbValue::from(request.to_id),
+                    DbValue::from(request_kind_str(request.request_kind)),
+                    DbValue::from(request.requested_ref_id),
+                    json_to_db_value(&request.requested_rules),
+                    DbValue::from(request.message),
+                    DbValue::from(request_status_str(request.status)),
+                    DbValue::from(request.decision_reason),
+                    DbValue::from(request.created_by),
+                    DbValue::from(request.decided_by),
+                    DbValue::from(request.created_at as i64),
+                    DbValue::from(request.updated_at as i64),
+                    request
+                        .decided_at
+                        .map(|t| DbValue::from(t as i64))
+                        .unwrap_or(DbValue::Null),
+                ],
+            ),
+        )
+        .await
+    }
+
+    async fn get(&self, request_id: &str, env: &str) -> Option<PermissionRequest> {
+        let rows = self
+            .query(
+                "get_request",
+                DbStatement::with_params(
+                    Self::SELECT_REQUEST_SQL,
+                    vec![DbValue::from(request_id), DbValue::from(env)],
+                ),
+            )
+            .await;
+        match rows {
+            Ok(rows) => rows
+                .into_iter()
+                .next()
+                .and_then(|row| match row_to_permission_request(&row) {
+                    Ok(r) => Some(r),
+                    Err(err) => {
+                        warn!(error = %err, "db_permission_request: get row skipped");
+                        None
+                    }
+                }),
+            Err(err) => {
+                warn!(error = %err, "db_permission_request: get failed");
+                None
+            }
+        }
+    }
+
+    async fn list_inbox(
+        &self,
+        to_id: &str,
+        env: &str,
+        status: Option<RequestStatus>,
+    ) -> Vec<PermissionRequest> {
+        let rows = match status {
+            Some(s) => {
+                self.query(
+                    "list_inbox_status",
+                    DbStatement::with_params(
+                        Self::LIST_INBOX_STATUS_SQL,
+                        vec![
+                            DbValue::from(to_id),
+                            DbValue::from(env),
+                            DbValue::from(request_status_str(s)),
+                        ],
+                    ),
+                )
+                .await
+            }
+            None => {
+                self.query(
+                    "list_inbox_all",
+                    DbStatement::with_params(
+                        Self::LIST_INBOX_ALL_SQL,
+                        vec![DbValue::from(to_id), DbValue::from(env)],
+                    ),
+                )
+                .await
+            }
+        };
+        match rows {
+            Ok(rows) => rows
+                .iter()
+                .filter_map(|row| match row_to_permission_request(row) {
+                    Ok(r) => Some(r),
+                    Err(err) => {
+                        warn!(error = %err, "db_permission_request: list_inbox row skipped");
+                        None
+                    }
+                })
+                .collect(),
+            Err(err) => {
+                warn!(error = %err, "db_permission_request: list_inbox failed");
+                Vec::new()
+            }
+        }
+    }
+
+    async fn decide(
+        &self,
+        request_id: &str,
+        env: &str,
+        status: RequestStatus,
+        decided_by: &str,
+        decision_reason: Option<&str>,
+        decided_at: u64,
+    ) -> ServiceResult<()> {
+        self.execute(
+            "decide_request",
+            DbStatement::with_params(
+                "UPDATE permission_requests SET status = ?, decided_by = ?, \
+                     decision_reason = ?, decided_at = ?, updated_at = ? \
+                 WHERE request_id = ? AND env = ?",
+                vec![
+                    DbValue::from(request_status_str(status)),
+                    DbValue::from(decided_by),
+                    match decision_reason {
+                        Some(s) => DbValue::from(s),
+                        None => DbValue::Null,
+                    },
+                    DbValue::from(decided_at as i64),
+                    DbValue::from(now_millis() as i64),
+                    DbValue::from(request_id),
+                    DbValue::from(env),
+                ],
+            ),
+        )
+        .await
+    }
+
+    async fn backfill_edge_id(
+        &self,
+        request_id: &str,
+        env: &str,
+        edge_id: &str,
+    ) -> ServiceResult<()> {
+        self.execute(
+            "backfill_edge_id",
+            DbStatement::with_params(
+                "UPDATE permission_requests SET edge_id = ?, updated_at = ? \
+                 WHERE request_id = ? AND env = ?",
+                vec![
+                    DbValue::from(edge_id),
+                    DbValue::from(now_millis() as i64),
+                    DbValue::from(request_id),
+                    DbValue::from(env),
+                ],
+            ),
+        )
+        .await
+    }
+}
+
+fn row_to_permission_request(row: &DbRow) -> ServiceResult<PermissionRequest> {
+    let created_at = row
+        .get_i64("created_at")
+        .map_err(|err| service_db_error("created_at", err))?
+        .unwrap_or(0) as u64;
+    let updated_at = row
+        .get_i64("updated_at")
+        .map_err(|err| service_db_error("updated_at", err))?
+        .unwrap_or(0) as u64;
+    let decided_at = row
+        .get_i64("decided_at")
+        .map_err(|err| service_db_error("decided_at", err))?
+        .map(|v| v as u64);
+    Ok(PermissionRequest {
+        request_id: required_string(row, "request_id")?,
+        edge_id: optional_string(row, "edge_id")?,
+        env: required_string(row, "env")?,
+        from_id: required_string(row, "from_id")?,
+        to_id: required_string(row, "to_id")?,
+        request_kind: parse_request_kind(&required_string(row, "request_kind")?)?,
+        requested_ref_id: optional_string(row, "requested_ref_id")?,
+        requested_rules: parse_json_opt(&optional_string(row, "requested_rules")?)?,
+        message: optional_string(row, "message")?,
+        status: parse_request_status(&required_string(row, "status")?)?,
+        decision_reason: optional_string(row, "decision_reason")?,
+        created_by: required_string(row, "created_by")?,
+        decided_by: optional_string(row, "decided_by")?,
+        created_at,
+        updated_at,
+        decided_at,
+    })
+}
+
+fn parse_request_kind(value: &str) -> ServiceResult<RequestKind> {
+    match value {
+        "connect" => Ok(RequestKind::Connect),
+        "permission_profile" => Ok(RequestKind::PermissionProfile),
+        "rules" => Ok(RequestKind::Rules),
+        "revoke" => Ok(RequestKind::Revoke),
+        other => Err(ServiceError::InternalError(format!(
+            "unknown request_kind: {}",
+            other
+        ))),
+    }
+}
+
+fn parse_request_status(value: &str) -> ServiceResult<RequestStatus> {
+    match value {
+        "pending" => Ok(RequestStatus::Pending),
+        "approved" => Ok(RequestStatus::Approved),
+        "rejected" => Ok(RequestStatus::Rejected),
+        "cancelled" => Ok(RequestStatus::Cancelled),
+        other => Err(ServiceError::InternalError(format!(
+            "unknown request status: {}",
+            other
+        ))),
+    }
+}
+
+fn request_kind_str(kind: RequestKind) -> &'static str {
+    match kind {
+        RequestKind::Connect => "connect",
+        RequestKind::PermissionProfile => "permission_profile",
+        RequestKind::Rules => "rules",
+        RequestKind::Revoke => "revoke",
+    }
+}
+
+fn request_status_str(status: RequestStatus) -> &'static str {
+    match status {
+        RequestStatus::Pending => "pending",
+        RequestStatus::Approved => "approved",
+        RequestStatus::Rejected => "rejected",
+        RequestStatus::Cancelled => "cancelled",
+    }
+}
+
 fn row_to_permission_profile(row: &DbRow) -> ServiceResult<PermissionProfile> {
     let revision = row
         .get_i64("revision")
@@ -1016,5 +1351,118 @@ mod tests {
         assert_eq!(after.env, "prod");
         assert_eq!(after.created_by, "system");
         assert_eq!(after.created_at, seeded.created_at);
+    }
+
+    // ---- DbPermissionRequestStore (T9) ----
+
+    /// Request store backed by a fresh LocalSqliteDbPlugin with the full
+    /// 16-column `permission_requests` schema (mirrors 006_edge_permission.sql).
+    async fn request_store() -> DbPermissionRequestStore {
+        let db = LocalSqliteDbPlugin::new().expect("local sqlite");
+        db.execute(DbStatement::new(
+            "CREATE TABLE permission_requests (\
+                request_id VARCHAR(128) NOT NULL, \
+                edge_id VARCHAR(128), \
+                env VARCHAR(32) NOT NULL, \
+                from_id VARCHAR(128) NOT NULL, \
+                to_id VARCHAR(128) NOT NULL, \
+                request_kind VARCHAR(32) NOT NULL, \
+                requested_ref_id VARCHAR(128), \
+                requested_rules TEXT, \
+                message TEXT, \
+                status VARCHAR(16) NOT NULL DEFAULT 'pending', \
+                decision_reason TEXT, \
+                created_by VARCHAR(128) NOT NULL, \
+                decided_by VARCHAR(128), \
+                created_at INTEGER NOT NULL, \
+                updated_at INTEGER NOT NULL, \
+                decided_at INTEGER, \
+                PRIMARY KEY (request_id))",
+        ))
+        .await
+        .expect("create permission_requests");
+        DbPermissionRequestStore::sqlite(Arc::new(db))
+    }
+
+    fn sample_request(id: &str, env: &str) -> PermissionRequest {
+        PermissionRequest {
+            request_id: id.to_string(),
+            edge_id: None,
+            env: env.to_string(),
+            from_id: "human_a".to_string(),
+            to_id: "bot_b".to_string(),
+            request_kind: RequestKind::Connect,
+            requested_ref_id: None,
+            requested_rules: None,
+            message: Some("hi".to_string()),
+            status: RequestStatus::Pending,
+            decision_reason: None,
+            created_by: "human_a".to_string(),
+            decided_by: None,
+            created_at: 1,
+            updated_at: 1,
+            decided_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn request_insert_and_get() {
+        let store = request_store().await;
+        store
+            .insert(sample_request("req_1", "dev"))
+            .await
+            .expect("insert");
+        let got = store.get("req_1", "dev").await.expect("found");
+        assert_eq!(got.status, RequestStatus::Pending);
+        assert!(got.edge_id.is_none(), "pending → no edge_id");
+        assert_eq!(got.request_kind, RequestKind::Connect);
+        assert!(store.get("req_x", "dev").await.is_none(), "missing → None");
+    }
+
+    #[tokio::test]
+    async fn request_list_inbox_all_and_status_filter() {
+        let store = request_store().await;
+        store
+            .insert(sample_request("r1", "dev"))
+            .await
+            .expect("insert r1");
+        store
+            .insert(sample_request("r2", "dev"))
+            .await
+            .expect("insert r2");
+        // decide r2 → approved
+        store
+            .decide("r2", "dev", RequestStatus::Approved, "85020", Some("ok"), 99)
+            .await
+            .expect("decide");
+        let all = store.list_inbox("bot_b", "dev", None).await;
+        assert_eq!(all.len(), 2, "both visible without filter");
+        let pending = store
+            .list_inbox("bot_b", "dev", Some(RequestStatus::Pending))
+            .await;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].request_id, "r1");
+        let approved = store
+            .list_inbox("bot_b", "dev", Some(RequestStatus::Approved))
+            .await;
+        assert_eq!(approved.len(), 1);
+        assert_eq!(approved[0].request_id, "r2");
+        assert_eq!(approved[0].decided_by.as_deref(), Some("85020"));
+        assert_eq!(approved[0].decided_at, Some(99));
+    }
+
+    #[tokio::test]
+    async fn request_backfill_edge_id() {
+        let store = request_store().await;
+        store
+            .insert(sample_request("r1", "dev"))
+            .await
+            .expect("insert");
+        store
+            .backfill_edge_id("r1", "dev", "eg_1")
+            .await
+            .expect("backfill");
+        let got = store.get("r1", "dev").await.expect("found");
+        assert_eq!(got.edge_id.as_deref(), Some("eg_1"));
     }
 }
