@@ -335,11 +335,28 @@ async fn require_staff_no(
 fn channel_error(error: ChannelUseCaseError) -> HttpAdapterError {
     match error {
         ChannelUseCaseError::NotFound(id) => HttpAdapterError::NotFound(id),
+        ChannelUseCaseError::Conflict(message) => HttpAdapterError::Conflict(message),
         ChannelUseCaseError::InvalidParams(message) => HttpAdapterError::BadRequest(message),
         ChannelUseCaseError::Internal(error) => match error {
             ServiceError::Conflict(message) => HttpAdapterError::Conflict(message),
             other => HttpAdapterError::Service(other),
         },
+    }
+}
+
+#[cfg(test)]
+mod conflict_mapping_tests {
+    use super::channel_error;
+    use crate::error::HttpAdapterError;
+    use bcs_service_api::ChannelUseCaseError;
+
+    #[test]
+    fn channel_error_maps_top_level_conflict_to_http_conflict() {
+        let mapped = channel_error(ChannelUseCaseError::Conflict("dup".to_string()));
+        assert!(matches!(
+            mapped,
+            HttpAdapterError::Conflict(ref msg) if msg.as_str() == "dup"
+        ));
     }
 }
 

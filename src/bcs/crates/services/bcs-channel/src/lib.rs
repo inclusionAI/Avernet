@@ -1408,7 +1408,7 @@ impl ChannelService for BcsChannelService {
             .await?
             .is_some()
         {
-            return Err(ChannelUseCaseError::InvalidParams(format!(
+            return Err(ChannelUseCaseError::Conflict(format!(
                 "active binding already exists for account_ref {account_ref}"
             )));
         }
