@@ -155,10 +155,8 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         .with_auth_chain(state.auth_chain.clone(), state.auth_config.clone())
         .with_outbound_url_guard(state.outbound_url_guard.clone())
         .with_admin_invocation_runs(state.admin_invocation_runs.clone())
-        // TODO(installment-3): replace Noop with real ConnectService/AdmissionService
-        // once the edge-permission service impls land. Transitional DI only.
-        .with_connect(Arc::new(bcs_test_support::NoopConnectService))
-        .with_admission(Arc::new(bcs_test_support::NoopAdmissionService))
+        .with_connect(state.connect_service.clone())
+        .with_admission(state.admission_service.clone())
         .with_user_identity(Arc::new(
             ChainUserIdentityPort::new(state.auth_chain.clone()),
         ))
@@ -697,6 +695,8 @@ mod tests {
             user_identity_port: None,
             outbound_url_guard: OutboundUrlGuard::allowing_private_networks_for_tests(),
             admin_invocation_runs: Arc::new(bcs_http::state::AdminInvocationStore::default()),
+            connect_service: Arc::new(bcs_test_support::NoopConnectService),
+            admission_service: Arc::new(bcs_test_support::NoopAdmissionService),
         })
     }
 

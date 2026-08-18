@@ -1032,6 +1032,16 @@ pub struct BcsServerState {
 
     /// Process-local organization-admin invocation callback associations.
     pub admin_invocation_runs: Arc<AdminInvocationStore>,
+
+    /// Edge-permission ConnectService (real DB-backed impl in the production
+    /// path; Noop in the in-memory/dev path). Injected into the HTTP adapter
+    /// `HttpAppState` for the `/friends/*` connect endpoints.
+    pub connect_service: Arc<dyn bcs_service_api::application::ConnectService>,
+
+    /// Edge-permission AdmissionService (real DB-backed impl in the production
+    /// path; Noop in the in-memory/dev path). Injected into the HTTP adapter
+    /// `HttpAppState` for collaboration authorization decisions.
+    pub admission_service: Arc<dyn bcs_service_api::application::AdmissionService>,
 }
 
 impl std::fmt::Debug for BcsServerState {
@@ -1068,6 +1078,8 @@ impl std::fmt::Debug for BcsServerState {
             )
             .field("group_session_secret_access", &"<SecretAccessPort>")
             .field("outbound_url_guard", &self.outbound_url_guard)
+            .field("connect_service", &"<ConnectService>")
+            .field("admission_service", &"<AdmissionService>")
             .finish()
     }
 }
@@ -2261,6 +2273,8 @@ impl Default for BcsServerState {
             user_identity_port,
             outbound_url_guard,
             admin_invocation_runs,
+            connect_service: Arc::new(bcs_test_support::NoopConnectService),
+            admission_service: Arc::new(bcs_test_support::NoopAdmissionService),
         }
     }
 }
@@ -2499,6 +2513,7 @@ fn build_use_case_bundle(
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     callback_url_guard: OutboundUrlGuard,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
+    profile_store: Arc<dyn bcs_service_api::port::repo::PermissionProfileRepoPort>,
 ) -> UseCaseBundle {
     let candidate_search =
         build_candidate_search_bindings(config, bot_registry.clone(), friend.clone(), fuse_client);
@@ -2602,7 +2617,8 @@ fn build_use_case_bundle(
             relation,
             config.onboard_binding_enabled,
             config.default_visibility.clone(),
-        )),
+        )
+        .with_profiles(profile_store)),
         bot_query: bot_use_cases.clone(),
         bot_management: bot_use_cases.clone(),
         bot_runtime: bot_use_cases.clone(),
@@ -3472,6 +3488,7 @@ impl BcsServer {
             Some(message_repo.clone()),
             callback_url_guard.clone(),
             provider_stream_gray_list.clone(),
+            Arc::new(bcs_test_support::NoopPermissionProfileRepo),
         );
         let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
         let terminal_observer: Arc<dyn BotTerminalObserverPort> =
@@ -3753,6 +3770,8 @@ impl BcsServer {
             user_identity_port,
             outbound_url_guard: callback_url_guard,
             admin_invocation_runs,
+            connect_service: Arc::new(bcs_test_support::NoopConnectService),
+            admission_service: Arc::new(bcs_test_support::NoopAdmissionService),
         });
 
         Self { config, state }
@@ -3983,6 +4002,94 @@ impl BcsServer {
 
             (friend_store, friend_request_store)
         };
+
+        // Edge-permission stores + services (T16): real DB-backed impls back
+        // the `connect`/`admission` `HttpAppState` fields. Stores follow the
+        // same `db_kind` match as the relation/friend stores above; services
+        // hold the env-isolation string the composition root resolved.
+        let (edge_grant_store, profile_store, request_store, bot_config_store): (
+            Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>,
+            Arc<dyn bcs_service_api::port::repo::PermissionProfileRepoPort>,
+            Arc<dyn bcs_service_api::port::repo::PermissionRequestRepoPort>,
+            Arc<dyn bcs_service_api::port::repo::BotActorConfigRepoPort>,
+        ) = {
+            let edge_grant_repo = match db_kind {
+                DbPluginKind::LocalSqlite => {
+                    Arc::new(bcs_edge_permission_store::DbEdgeGrantStore::sqlite(
+                        db_plugin.clone(),
+                    ))
+                }
+                DbPluginKind::Mysql => {
+                    Arc::new(bcs_edge_permission_store::DbEdgeGrantStore::mysql(
+                        db_plugin.clone(),
+                    ))
+                }
+                DbPluginKind::External(provider) => {
+                    panic!(
+                        "external database plugin '{}' has no edge-grant store wiring",
+                        provider
+                    )
+                }
+            };
+            let profile_repo = match db_kind {
+                DbPluginKind::LocalSqlite => Arc::new(
+                    bcs_edge_permission_store::DbPermissionProfileStore::sqlite(db_plugin.clone()),
+                ),
+                DbPluginKind::Mysql => Arc::new(
+                    bcs_edge_permission_store::DbPermissionProfileStore::mysql(db_plugin.clone()),
+                ),
+                DbPluginKind::External(provider) => {
+                    panic!(
+                        "external database plugin '{}' has no permission-profile store wiring",
+                        provider
+                    )
+                }
+            };
+            let request_repo = match db_kind {
+                DbPluginKind::LocalSqlite => Arc::new(
+                    bcs_edge_permission_store::DbPermissionRequestStore::sqlite(db_plugin.clone()),
+                ),
+                DbPluginKind::Mysql => Arc::new(
+                    bcs_edge_permission_store::DbPermissionRequestStore::mysql(db_plugin.clone()),
+                ),
+                DbPluginKind::External(provider) => {
+                    panic!(
+                        "external database plugin '{}' has no permission-request store wiring",
+                        provider
+                    )
+                }
+            };
+            let bot_config_repo = match db_kind {
+                DbPluginKind::LocalSqlite => Arc::new(
+                    bcs_edge_permission_store::DbBotActorConfigStore::sqlite(db_plugin.clone()),
+                ),
+                DbPluginKind::Mysql => Arc::new(
+                    bcs_edge_permission_store::DbBotActorConfigStore::mysql(db_plugin.clone()),
+                ),
+                DbPluginKind::External(provider) => {
+                    panic!(
+                        "external database plugin '{}' has no bot-actor-config store wiring",
+                        provider
+                    )
+                }
+            };
+            (edge_grant_repo, profile_repo, request_repo, bot_config_repo)
+        };
+        let edge_permission_env = crate::env::resolve_env();
+        let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
+            Arc::new(bcs_edge_permission::DbConnectService::new(
+                edge_grant_store.clone(),
+                profile_store.clone(),
+                request_store.clone(),
+                bot_config_store.clone(),
+                edge_permission_env,
+            ));
+        let admission_service: Arc<dyn bcs_service_api::application::AdmissionService> =
+            Arc::new(bcs_edge_permission::DbAdmissionService::new(
+                edge_grant_store.clone(),
+                bot_config_store.clone(),
+                profile_store.clone(),
+            ));
         let bot_connections = Arc::new(BotConnectionRegistry::new());
         let mut bot_runtime_for_session =
             Bot::new_with_friend(bot_registry.clone(), friend_svc.clone())
@@ -4143,6 +4250,7 @@ impl BcsServer {
             Some(message_repo.clone()),
             outbound_url_guard.clone(),
             provider_stream_gray_list.clone(),
+            profile_store.clone(),
         );
         let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
         let terminal_observer: Arc<dyn BotTerminalObserverPort> =
@@ -4453,6 +4561,8 @@ impl BcsServer {
             user_identity_port,
             outbound_url_guard,
             admin_invocation_runs,
+            connect_service,
+            admission_service,
         });
 
         Ok(Self { config, state })
