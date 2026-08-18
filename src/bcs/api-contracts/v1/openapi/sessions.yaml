@@ -10,8 +10,30 @@ CreateSessionRequest:
   properties:
     title:
       type: string
+    kind:
+      $ref: ../domain-models.yaml#/SessionKind
+    acting_bot_id:
+      type: string
+      minLength: 1
+      description: >-
+        Optional Bot identity to create the Session as. A Human caller may use
+        only a Bot they own; a Bot caller may use only its own identity.
+    creator_role:
+      type: string
+      description: >-
+        Role assigned when a permitted non-member creator joins a public
+        Group for this Session. Driver is intentionally unavailable.
+      enum:
+        - consultant
+        - manager
+        - worker
+        - observer
     input:
       $ref: ../domain-models.yaml#/SessionInput
+    meta:
+      $ref: ../domain-models.yaml#/SessionMetadata
+    context_delivery:
+      $ref: ../domain-models.yaml#/ContextDelivery
 
 SessionParticipantInput:
   type: object
@@ -98,8 +120,10 @@ GroupSessionsPath:
     tags: ["Collaboration / Sessions"]
     summary: Create a Session under a Group.
     x-avernet-security:
-      user: required
-      app: required
+      user: optional
+      app: optional
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
     requestBody:
