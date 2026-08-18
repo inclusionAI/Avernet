@@ -64,6 +64,20 @@ fn map_channel_error(error: ChannelUseCaseError) -> ApplicationError {
     }
 }
 
+/// For the list paths (list_bindings / list_bindings_by_target) an
+/// `InvalidParams` from the service is a provider-unavailable
+/// server-config state — `redact_bindings -> provider_for` fails for a
+/// `channel_type` whose provider was disabled/removed after the binding
+/// was persisted. That is not a client bad-request; surface it as 500
+/// `internal_error` so the GET contract (200/401/403/500 only) stays
+/// faithful rather than emitting an undocumented 400.
+fn map_list_channel_error(error: ChannelUseCaseError) -> ApplicationError {
+    match error {
+        ChannelUseCaseError::InvalidParams(message) => ApplicationError::internal(message),
+        other => map_channel_error(other),
+    }
+}
+
 async fn create_binding(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
@@ -99,7 +113,7 @@ async fn list_bindings(
     let bindings = channel_service(&state, &request_id)?
         .list_bindings()
         .await
-        .map_err(|error| application_error_response(&request_id, map_channel_error(error)))?;
+        .map_err(|error| application_error_response(&request_id, map_list_channel_error(error)))?;
     let items = bindings.into_iter().map(ChannelBindingDto::from).collect();
     Ok((
         StatusCode::OK,
@@ -127,7 +141,7 @@ async fn list_bindings_by_target(
     let bindings = channel_service(&state, &request_id)?
         .list_bindings_by_target(target, channel_type)
         .await
-        .map_err(|error| application_error_response(&request_id, map_channel_error(error)))?;
+        .map_err(|error| application_error_response(&request_id, map_list_channel_error(error)))?;
     let items = bindings.into_iter().map(ChannelBindingDto::from).collect();
     Ok((
         StatusCode::OK,
