@@ -265,6 +265,9 @@ async def test_openclaw_adapter_serializes_center_v3_for_full_lifecycle() -> Non
     await adapter.verify_pool_mappings([mapping], retired_mappings=[mapping], mapping_contract_version=version)
 
     expected = {"corpus": "center", "skill_uuid": mapping.skill_uuid, "sc_version_number": mapping.sc_version_number, "link_name": "risk-review"}
+    assert port.activate_pool_layout.await_args.args[0]["mapping_contract_version"] == version
+    assert port.publish_pool_mappings.await_args.args[0]["mapping_contract_version"] == version
+    assert port.verify_pool_mappings.await_args.args[0]["mapping_contract_version"] == version
     assert port.activate_pool_layout.await_args.args[0]["mappings"] == [expected]
     assert port.publish_pool_mappings.await_args.args[0]["mappings"] == [expected]
     assert port.publish_pool_mappings.await_args.args[0]["retired_mappings"] == [expected]

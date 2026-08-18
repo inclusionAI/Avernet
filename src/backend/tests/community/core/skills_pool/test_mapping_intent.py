@@ -2,10 +2,14 @@ import pytest
 
 from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
+    logical_skill_mappings_from_evidence,
     local_locators_from_evidence,
     mapping_contract_for,
 )
-from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+from agentclaw.community.core.skills_pool.models import (
+    PoolSkillMapping,
+    RegisteredSkillAsset,
+)
 
 
 def test_builds_logical_intent_without_engine_paths() -> None:
@@ -94,6 +98,29 @@ def test_center_mapping_requires_explicit_runtime_v3_capability() -> None:
         mappings,
         ["skills-pool-mapping-v2", "skills-pool-mapping-v3"],
     ) == "skills-pool-mapping-v3"
+
+
+def test_restores_structured_center_retirement_for_retry() -> None:
+    assert logical_skill_mappings_from_evidence(
+        {
+            "retired_mappings": [
+                {
+                    "corpus": "center",
+                    "skill_uuid": "2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+                    "sc_version_number": "2026.8.19",
+                    "link_name": "risk-review",
+                }
+            ]
+        }
+    ) == [
+        PoolSkillMapping(
+            corpus="center",
+            relative_path=None,
+            link_name="risk-review",
+            skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+            sc_version_number="2026.8.19",
+        )
+    ]
 
 
 @pytest.mark.parametrize(
