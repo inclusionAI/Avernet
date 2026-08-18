@@ -83,6 +83,10 @@ components:
       $ref: ./domain-models.yaml#/GroupDetail
     SessionDetail:
       $ref: ./domain-models.yaml#/SessionDetail
+    SessionInput:
+      $ref: ./domain-models.yaml#/SessionInput
+    SessionMetadata:
+      $ref: ./domain-models.yaml#/SessionMetadata
     SessionPage:
       $ref: ./domain-models.yaml#/SessionPage
     GroupMessage:
