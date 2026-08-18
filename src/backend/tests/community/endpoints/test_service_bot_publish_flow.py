@@ -37,6 +37,7 @@ from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_GENERAL,
     HttpClient,
 )
+from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from tests.community.factories.access import make_staff_user
 from tests.community.framework import (
@@ -138,6 +139,7 @@ def _seed_draft(world) -> None:
     # Local mode roots skills-local at ~/.openclaw/...; null it so the user-skill
     # host path uses the prod bolt-data root the SourceRefResolver knows.
     world.get(SkillRepoSyncPlugin).set_override("get_local_skills_root", lambda: None)
+    _install_default_mcp_catalog(world)
 
     binding_repo = world.get(DeviceBindingRepository)
     src_binding_id = binding_repo.insert_binding(
@@ -150,8 +152,9 @@ def _seed_draft(world) -> None:
         "owner_id": _OWNER, "owner_name": _OWNER,
         "bot_type": "service", "status": "ACTIVE",
         "entity_id": _OWNER, "entity_type": "staff", "creator_id": _OWNER,
-        # teclaw engine: no default MCP servers, and its skill paths fall back to
-        # openclaw's so the SourceRefResolver resolves shared + user skills.
+        # teclaw engine: its default MCP roster is resolved through the seam
+        # installed by ``_install_default_mcp_catalog``, and its skill paths fall
+        # back to openclaw's so the SourceRefResolver resolves shared + user skills.
         # TODO(task-15): teclaw inherits openclaw skill paths only via the
         # ENGINE_SKILLS_DIR_MAP `.get(default=openclaw)` fallback — give teclaw an
         # explicit entry + matching resolver rule once its layout is pinned.
@@ -212,6 +215,59 @@ def _advance(world, pid: int, target, ext: dict) -> None:
     world.get(BotPublishRepositoryProtocol).update_status_with_ext(
         publish_id=pid, target_status=target, ext=ext, source_status=PublishStatus.DRAFT,
     )
+
+
+def _install_default_mcp_catalog(world) -> None:
+    """Resolve the engine's *default* MCP roster through the MCP Center seam.
+
+    The teclaw artifact path composes every MCP as a unit and fails the whole
+    build when one cannot be resolved — deliberate, since a silently dropped
+    MCP boots the bot without a capability its owner configured.
+    ``NoopMCPCenterPlugin`` resolves nothing, so once teclaw gained a default
+    roster the seeding alone failed every publish here, for a reason unrelated
+    to what these cases assert.
+
+    Derived from ``_DEFAULT_MCP_SERVERS_BY_ENGINE`` rather than a hardcoded
+    list: adding a server to the roster must not silently skip it here.
+    Servers the local-MCP registry owns (``hitl``) are left unresolved on
+    purpose — they are stdio, and the collector resolves their launch
+    instruction from that registry, so answering REMOTE here would misclassify
+    them. Anything outside the roster still resolves to ``None``, which is what
+    ``_seed_failing_mcp`` relies on to drive the build-failure case.
+    """
+    from agentclaw.community.core.mcp.services._defaults import (
+        _DEFAULT_MCP_SERVERS_BY_ENGINE,
+    )
+    from agentclaw.community.core.mcp.services.local_mcp_registry import (
+        LocalMCPRegistry,
+    )
+
+    registry = LocalMCPRegistry()
+    remote_roster = {
+        code
+        for cfg in _DEFAULT_MCP_SERVERS_BY_ENGINE.get(_ENGINE, [])
+        if (code := cfg["server_code"]) and registry.get_mcp_detail(code) is None
+    }
+
+    def _detail(server_code: str):
+        if server_code not in remote_roster:
+            return None
+        return {
+            "server_code": server_code,
+            "serverCode": server_code,
+            "name": server_code,
+            "runMode": "REMOTE",
+            "endpoints": [
+                {
+                    "env": "PROD",
+                    "networkType": "OFFICE",
+                    "transportProtocol": "STREAMABLE_HTTP",
+                    "url": f"https://mcp.test.invalid/{server_code}",
+                }
+            ],
+        }
+
+    world.get(MCPCenterPlugin).set_override("get_mcp_detail", _detail)
 
 
 def _seed_failing_mcp(world) -> None:
