@@ -219,7 +219,11 @@ The shared service preserves the legacy authorization order and semantics:
    Group access.
 
 The V1 `acting_bot_id` maps to `requested_creator`. Legacy `created_by` maps to
-the same field. Neither adapter performs the ownership lookup.
+the same field. Despite its Bot-oriented name, the V1 field is the explicit
+creator Actor selector: it accepts either the authenticated Human Actor ID or
+a Bot ID owned by that Human. A Bot caller may select only itself. Omitting the
+field selects the authenticated caller implicitly. Neither adapter performs
+the ownership lookup.
 
 ### Session kind
 
@@ -247,13 +251,22 @@ participant modes with the existing defaults.
   non-member creator.
 - A Human invoking a StateMachine service is present as an Observer with
   `Present` mode so Human nodes can route input correctly.
-- An explicitly supplied Human `created_by` is added to a new private Session
-  as a Human Driver when no earlier rule added that Human.
+- An explicitly supplied Human creator is added to a new private Chat Session
+  as a Human Driver when no earlier rule added that Human. Legacy expresses
+  this through `created_by`; V1 expresses it through `acting_bot_id` containing
+  the authenticated `human_{user.id}` Actor ID.
 - An inferred Human creator is not automatically added, preserving the legacy
   proxy behavior.
 
-Participant construction occurs before the create write so a required
-participant persistence failure cannot be silently ignored.
+Public creators and StateMachine Human Observers are part of the initial
+Session roster, matching legacy behavior. A private Chat Session's explicit
+Human creator is deliberately deferred until after the create write and added
+through `SessionManagementService::add_participant`. That preserves the legacy
+`participant_join_seq[human_id] = 0` history-visibility boundary. The deferred
+add runs only for a newly created Session, never for reactivation, and completes
+before StateMachine startup or SessionContext delivery. A deferred-add failure
+is returned instead of being reduced to the legacy handler's warning-only
+behavior.
 
 ### Input
 
@@ -335,7 +348,7 @@ Its request uses V1 field names:
 {
   "title": "optional title",
   "kind": "chat",
-  "acting_bot_id": "optional-owned-bot",
+  "acting_bot_id": "optional-human-actor-or-owned-bot",
   "creator_role": "consultant",
   "input": "a string or an object",
   "meta": {
@@ -345,6 +358,15 @@ Its request uses V1 field names:
   "context_delivery": "send"
 }
 ```
+
+`acting_bot_id` is retained as the V1 wire name, but its documented value is
+an optional explicit creator Actor ID. A Human caller may pass its own
+`human_{user.id}` ID or a Bot ID it owns; a Bot caller may pass only its own
+Bot ID. Other Human IDs, unowned Bots, and cross-Bot selection are forbidden.
+When omitted, the authenticated caller is the inferred creator. For public
+Groups an inferred creator not already in the Group roster is added to the
+Session just like legacy; for private Chat Groups an inferred Human creator is
+not added.
 
 `creator_role` maps to legacy `caller_role` and is relevant only when a public
 Group creator is not already a Group participant.
@@ -439,7 +461,10 @@ Also cover:
 - Bot self creation and rejection of another creator;
 - private Group access and public non-member insertion;
 - public role validation;
-- explicit versus inferred Human creator behavior;
+- explicit versus inferred Human creator behavior, including public inferred
+  Human insertion and private inferred Human omission;
+- private explicit Human insertion as Driver with
+  `participant_join_seq[human_id] = 0`;
 - raw string and object input preservation;
 - raw metadata preservation;
 - omitted input preservation;
@@ -457,7 +482,12 @@ Also cover:
 ### V1 adapter and application tests
 
 - Human and Bot Gateway callers map to the neutral caller.
-- Human `acting_bot_id` ownership and Bot self-only behavior are enforced.
+- Human `acting_bot_id` accepts only the authenticated Human Actor or an owned
+  Bot, while Bot callers remain self-only.
+- Omitted `acting_bot_id` inserts an inferred Human into a public Session but
+  not a private Chat Session.
+- Explicit Human `acting_bot_id` preserves the public creator role and the
+  private Driver plus join-sequence behavior.
 - String/object input round-trips exactly.
 - `kind`, `meta`, `creator_role`, and `context_delivery` map correctly.
 - Unknown fields, input arrays/scalars other than string, and a V1
