@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping
 
-from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.bot_inventory.errors import BotInventoryUpstreamError
 from agentclaw.community.log import get_logger
 
@@ -100,22 +99,6 @@ class BotInventoryService:
         total = len(cards)
         start = (page - 1) * page_size
         return cards[start : start + page_size], total
-
-    def _get_row(self, *, bot_id: str, owner_id: str) -> Mapping[str, Any]:
-        try:
-            return self._bot.get_bot(bot_id, owner_id)
-        except Exception as exc:
-            if not _is_not_found_error(exc):
-                raise
-            try:
-                local_rows = self._desktop.list_user_bots(owner_id)
-            except Exception as desktop_exc:
-                _raise_if_desktop_service_error(desktop_exc)
-                raise
-            for row in local_rows:
-                if str(row.get("bot_id") or "") == bot_id:
-                    return row
-            raise
 
     def _list_cloud_rows(
         self, *, owner_id: str, keyword: str | None, engine: str | None
@@ -304,10 +287,6 @@ def _passport_id(ext: Mapping[str, Any]) -> str | None:
     if isinstance(passport, Mapping):
         return _optional_str(passport.get("agent_code") or passport.get("agent_id"))
     return None
-
-
-def _is_not_found_error(exc: Exception) -> bool:
-    return isinstance(exc, NotFound) or exc.__class__.__name__ == "BotNotFoundError"
 
 
 def _raise_if_desktop_service_error(exc: Exception) -> None:

@@ -175,6 +175,24 @@ def test_local_auth_status_completes_creation(client, auth_rel):
     auth_rel.create_relationship.assert_called_once()
 
 
+def test_local_auth_status_continues_after_relationship_write_failure(client, auth_rel):
+    """A relationship write failure after the bot is created is partial success,
+    not an overall 500: the bot is usable and an owner-side reconciler can retry
+    the grant. Mirrors the README #560 direction for external-identity writes."""
+    auth_rel.create_relationship.side_effect = RuntimeError("relationship write failed")
+
+    data = _ok(
+        client.get(
+            "/openapi/v1/bots/l1/local/auth-status",
+            params={"bot_name": "Local", "machine_id": "m1", "engine": "openclaw"},
+        )
+    )
+
+    assert data["status"] == "ISSUED"
+    assert data["bot"]["bot_id"] == "l1"
+    auth_rel.create_relationship.assert_called_once()
+
+
 def test_restart_and_open_folder_verify_ownership(client, desktop_service):
     assert _ok(client.post("/openapi/v1/bots/l1/local/restart"))["bot_id"] == "l1"
     assert _ok(client.post("/openapi/v1/bots/l1/local/open-folder", json={"folder_path": "src"}))["bot_id"] == "l1"

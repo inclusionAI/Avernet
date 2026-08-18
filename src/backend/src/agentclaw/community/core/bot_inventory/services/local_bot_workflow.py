@@ -23,8 +23,11 @@ from agentclaw.community.core.bot_inventory.types import (
     LocalBotCreateCommand,
 )
 from agentclaw.community.core.errors import NotFound
+from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
+
+logger = get_logger()
 
 
 class LocalBotWorkflowService:
@@ -199,13 +202,27 @@ class LocalBotWorkflowService:
             raise
         agent_code = result.get("agent_code")
         if agent_code:
-            self._auth_relationship.create_relationship(
-                work_no=owner_id,
-                agent_code=str(agent_code),
-                description="Bot owner default authorization",
-                operator_work_no=owner_id,
-                operator_name=owner_id,
-            )
+            # The bot is already created on the device here, so a failing
+            # owner-default authorization relationship write is a partial
+            # success rather than an overall 500: the bot is usable and an
+            # owner-side reconciler can retry the grant. This mirrors the
+            # #560 chosen direction for external-identity write failures,
+            # applied where bot creation has already unblocked the caller.
+            try:
+                self._auth_relationship.create_relationship(
+                    work_no=owner_id,
+                    agent_code=str(agent_code),
+                    description="Bot owner default authorization",
+                    operator_work_no=owner_id,
+                    operator_name=owner_id,
+                )
+            except Exception:
+                logger.warning(
+                    "[local_bot_workflow] authorization relationship write "
+                    "failed after bot creation; bot_id=%s owner_id=%s",
+                    bot_id,
+                    owner_id,
+                )
         return LocalAuthStatusResult(status="ISSUED", bot=result)
 
     def restart(
