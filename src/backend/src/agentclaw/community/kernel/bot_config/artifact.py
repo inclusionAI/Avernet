@@ -41,10 +41,11 @@ from typing import Any
 # engine could observe. Distinct from the per-bot content ``version`` below.
 # v4: MCP credentials are inlined into the server entry; the ``auth_ref``
 # secret-by-reference field was removed (no container-side secret broker).
-# v5: the local (stdio) MCP launch instruction is flattened onto the server
-# entry — top-level ``command``/``args``/``env`` replace the nested ``stdio``
-# object, matching the flat shape MCP clients themselves consume.
-SCHEMA_VERSION = 5
+# The local (stdio) MCP launch instruction rides flat on the server entry —
+# top-level ``command``/``args``/``env``, the shape MCP clients themselves
+# consume (an early v4 iteration nested it under a ``stdio`` object;
+# ``from_dict`` still re-flattens that form on read).
+SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -159,9 +160,9 @@ def _mcp_server_from_dict(data: dict[str, Any]) -> McpServerRef:
 
     A remote entry omits ``command``/``args``/``env`` entirely, so the dataclass
     defaults apply — and artifacts published before the local form existed
-    deserialize unchanged. A pre-v5 local entry (nested ``{"stdio": {...}}``,
-    as pinned by schema_version 4 snapshots) is re-flattened on read so stored
-    artifacts stay loadable across the contract bump.
+    deserialize unchanged. A legacy local entry (nested ``{"stdio": {...}}``,
+    as pinned by snapshots from before the flat form) is re-flattened on read
+    so stored artifacts stay loadable.
     """
     legacy_stdio = data.get("stdio")
     fields = {k: v for k, v in data.items() if k != "stdio"}
