@@ -87,9 +87,11 @@ _EXPECTED_TASK_COUNT = len(_MOCK_TASKS)
 _EXPECTED_TASK_IDS = {t["task_id"] for t in _MOCK_TASKS}
 _EXPECTED_PROJECT_NAMES = {t["project_name"] for t in _MOCK_TASKS}
 
-# 默认 db 文件路径(与 router.py / lifecycle.py 的 9 级上溯一致 → 项目根/scripts/.dependencies/data/)
+# 默认 db 文件路径:上溯到项目根 → scripts/.dependencies/data/discovered_tasks.db
+# 测试文件在 src/backend/tests/community/core/task/singlebox_e2e/ → 距项目根 8 级
+# router.py 在 src/backend/src/agentclaw/community/adapters/http/task_discovery/ → 距项目根 9 级
 _DATA_FILE = Path(__file__).resolve()
-for _ in range(9):
+for _ in range(8):
     _DATA_FILE = _DATA_FILE.parent
 _DATA_FILE = _DATA_FILE / "scripts" / ".dependencies" / "data" / "discovered_tasks.db"
 
