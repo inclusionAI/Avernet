@@ -313,3 +313,49 @@ def test_bcsfuse_paths_served_with_user_security() -> None:
                 assert operation["x-avernet-security"] == {"user": "required"}, (
                     f"{method} {path}"
                 )
+
+
+_HARNESS_ARTIFACT = (
+    Path(__file__).resolve().parents[4]
+    / "configs"
+    / "schemas"
+    / "harness.openapi.json"
+)
+
+
+def _harness_served() -> dict[str, Any]:
+    # The harness domain mounts at /openapi/v1/harness/bots/**, not
+    # /openapi/v1/harness; pass the real mount prefix so its paths survive the
+    # served-doc namespace filter.
+    dm = DomainMap.from_yaml(_SHIPPED_CONFIG, variables=_BCSFUSE_VARS)
+    mount_prefixes = {name: domain.mount_prefix for name, domain in dm.domains.items()}
+    rewrites = {name: domain.rewrite for name, domain in dm.domains.items()}
+    describe = {"harness": json.loads(_HARNESS_ARTIFACT.read_text())}
+    return build_served_openapi(
+        ["harness"],
+        describe.__getitem__,
+        _SHIPPED_RULES,
+        title="gateway",
+        version="0.1.0",
+        description="test",
+        rewrites=rewrites,
+        mount_prefixes=mount_prefixes,
+    )
+
+
+def test_harness_paths_served_with_user_security() -> None:
+    paths = _harness_served()["paths"]
+    assert set(paths) == {
+        "/openapi/v1/harness/bots/{bot_id}/diagnose",
+        "/openapi/v1/harness/bots/{bot_id}/preview",
+        "/openapi/v1/harness/bots/{bot_id}/apply",
+        "/openapi/v1/harness/bots/{bot_id}/rollback",
+        "/openapi/v1/harness/bots/{bot_id}/dim-report",
+        "/openapi/v1/harness/bots/{bot_id}/dim-history",
+    }
+    for path, item in paths.items():
+        for method, operation in item.items():
+            if method in _METHODS:
+                assert operation["x-avernet-security"] == {"user": "required"}, (
+                    f"{method} {path}"
+                )

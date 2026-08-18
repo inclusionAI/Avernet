@@ -246,6 +246,37 @@ def test_shipped_config_routes_bcsfuse_clean_paths() -> None:
         assert requirement[PrincipalType.USER] is Presence.REQUIRED, path
 
 
+def test_shipped_config_routes_harness_to_backend() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
+    security = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    harness = dm.http_domain_for("/openapi/v1/harness/bots/bot-1/diagnose")
+    assert harness is not None
+    assert harness.server.name == "backend"
+    assert harness.server.base_url == "http://backend:8080"
+    assert harness.serves_http
+    assert harness.rewrite is None
+    assert (
+        harness.upstream_path("/openapi/v1/harness/bots/bot-1/diagnose")
+        == "/openapi/v1/harness/bots/bot-1/diagnose"
+    )
+    assert harness.schema.location == "schemas/harness.openapi.json"
+
+    # The one /openapi/v1/harness/** route_security rule covers every operation.
+    for method, path in [
+        ("POST", "/openapi/v1/harness/bots/bot-1/diagnose"),
+        ("POST", "/openapi/v1/harness/bots/bot-1/preview"),
+        ("POST", "/openapi/v1/harness/bots/bot-1/apply"),
+        ("POST", "/openapi/v1/harness/bots/bot-1/rollback"),
+        ("GET", "/openapi/v1/harness/bots/bot-1/dim-report"),
+        ("GET", "/openapi/v1/harness/bots/bot-1/dim-history"),
+    ]:
+        requirement = security.resolve(method, path)
+        assert requirement is not None, path
+        assert requirement[PrincipalType.USER] is Presence.REQUIRED, path
+
+
 # ── protocols ────────────────────────────────────────────────────────────────
 
 
