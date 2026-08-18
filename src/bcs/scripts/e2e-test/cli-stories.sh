@@ -471,16 +471,18 @@ story_cli_operator_runs_sessions_and_services() {
 # User story: An operator validates channel-management behavior before a provider is installed.
 #
 # Flow:
-#   Attempt to bind a channel -> list bindings -> unbind a missing binding -> list again.
+#   Attempt to bind a channel -> list bindings -> resolve a session's conversations
+#   -> unbind a missing binding -> list again.
 #
 # Critical assertions:
 #   - Bind fails with the explicit disabled-bridge contract and never leaks the supplied secret.
 #   - List returns a well-formed items array.
+#   - Conversation lookup returns no DingTalk mapping for an unknown session.
 #   - Disabled-bridge unbind follows the documented no-op acknowledgement.
 #   - No phantom binding appears after the rejected and no-op operations.
 story_cli_operator_validates_channel_management() {
     info "Story: an operator validates channel management through bcs-cli"
-    local account="cli-channel-$$" missing_id="cli-missing-binding-$$"
+    local account="cli-channel-$$" missing_id="cli-missing-binding-$$" session_id="cli-missing-session-$$"
 
     info "CLI story: bcs-cli channel bind"
     if bcs_cli_json CEO channel bind \
@@ -504,6 +506,10 @@ story_cli_operator_validates_channel_management() {
 
     _cli_story_run "operator lists channel bindings" CEO channel list || return
     assert_eq "CLI channel list exposes items" "$(_cli_json_has_path "$BCS_CLI_STDOUT" "items")" "1"
+
+    _cli_story_run "operator resolves DingTalk conversations for a session" CEO channel conversation-id \
+        --session "$session_id" || return
+    assert_json_eq "CLI channel conversation lookup remains empty" "$BCS_CLI_STDOUT" "items" "[]"
 
     _cli_story_run "operator unbinds a missing disabled-bridge binding" CEO channel unbind --id "$missing_id" || return
     assert_json_eq "CLI channel unbind acknowledges the no-op" "$BCS_CLI_STDOUT" "ok" "true"

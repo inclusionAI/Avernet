@@ -7,7 +7,7 @@ use async_trait::async_trait;
 
 use bcs_domain::{
     Attachment, BindingTarget, GroupChatScope, ChannelBinding, ChannelConfig, ChannelType,
-    ParticipantRole, Visibility,
+    ConversationSessionMap, ParticipantRole, Visibility,
 };
 
 use crate::core::ServiceError;
@@ -173,6 +173,12 @@ pub trait ChannelService: Send + Sync {
         target: BindingTarget,
         channel_type: Option<ChannelType>,
     ) -> Result<Vec<ChannelBinding>, ChannelUseCaseError>;
+    /// Query the channel conversation mappings associated with a BCS session.
+    async fn list_conversations_by_session(
+        &self,
+        bcs_session_id: &str,
+        channel_type: Option<ChannelType>,
+    ) -> Result<Vec<ConversationSessionMap>, ChannelUseCaseError>;
     async fn set_binding_status(&self, id: &str, active: bool)
         -> Result<(), ChannelUseCaseError>;
     async fn update_binding_config(

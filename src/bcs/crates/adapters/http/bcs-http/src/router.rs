@@ -131,6 +131,10 @@ fn build_api_routes() -> Router<HttpAppState> {
             get(routes::channel::list_bindings_by_target),
         )
         .route(
+            "/channels/conversations/by-session",
+            get(routes::channel::list_conversations_by_session),
+        )
+        .route(
             "/channels/bindings/{id}",
             patch(routes::channel::set_binding_status).delete(routes::channel::delete_binding),
         )
