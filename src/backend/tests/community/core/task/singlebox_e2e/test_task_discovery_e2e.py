@@ -1,4 +1,4 @@
-"""任务主动发现 — singlebox 真实端到端集成用例(发现 → session 创建 → 通知投递)。
+"""任务主动发现 — singlebox 真实端到端集成用例(发现 → session 创建 → 通知投递 → 发送任务给大模型)。
 
 gated by ``SINGLEBOX_TASK_E2E=1``。本地起后端 singlebox 时设置:
 
@@ -12,16 +12,18 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地起后端 singlebox 时设置:
   4) 验证响应: success / discovered count / task_id / session_id / notification_sent
   5) GET /api/public/task-discovery/status      → 验证任务状态可查询
   6) 验证 engine session 实际存在(GET /api/sessions/{id} 可达)
+  7) WebSocket 连接 engine,将发现的任务内容发送给大模型,验证回复
 
 关键架构前提:
   - DiscoveryService 编排 TaskReader(读 SQLite db)→ SessionCreator(调 engine POST /api/sessions)→ NotifySenderPlugin(投递通知)
   - 每个 pending_confirmation 任务 → 一个 engine session + 通知投递(供用户前端确认)
   - session_url 不在 discover 阶段构建 — 用户 bot 没有单独的 session_url
-  - 任务执行不在本测试范围(由 task 执行框架负责)
+  - 任务执行: 本测试通过 WebSocket 向 engine session 发送任务内容,验证大模型可响应
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import unittest
 from pathlib import Path
@@ -196,43 +198,126 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
                 self.assertIsNotNone(t.get("priority"), f"task {t.get('task_id')} priority 为空")
 
             # 6) 验证 engine session 实际存在
-            #    通过 backend GET /api/bots/{bot_id}/connection 获取 per-bot engine 地址,
-            #    再直查 GET /api/sessions 确认 session 落在正确的 engine 上
+            #    链路同 singlebox_engine_adapter._resolve_target():
+            #    GET /api/bots/{bot_id} → binding_id → GET /api/v1/devices/{binding_id}/connection
             first_sid = tasks[0].get("session_id")
-            try:
-                conn_resp = await cli.get(
-                    f"{_BACKEND}/api/bots/{bot_id}/connection",
-                    headers={"x-user-id": _USER_ID},
-                )
-                conn_resp.raise_for_status()
-                conn_data = (conn_resp.json().get("data") or {})
-                target = conn_data.get("target") or ""
-                if target:
-                    eng_resp = await cli.get(
-                        f"http://{target}/api/sessions",
-                        params={"limit": 100, "offset": 0},
-                        headers={"x-user-id": _USER_ID},
-                    )
-                    if eng_resp.status_code == 200:
-                        eng_sessions = eng_resp.json().get("data") or []
-                        found = any(
-                            first_sid in (s.get("id") or s.get("session_id") or "")
-                            for s in eng_sessions
-                        )
-                        print(f"[engine] {target} 返回 {len(eng_sessions)} 条, "
-                              f"first_sid={first_sid} found={found}")
-                        self.assertTrue(
-                            found,
-                            f"session {first_sid} 未在 per-bot engine({target})中找到",
-                        )
-                    else:
-                        print(f"[engine] {target} 查询 HTTP {eng_resp.status_code}, 跳过")
-                else:
-                    print("[engine] connection 返回无 target, 跳过")
-            except Exception as exc:  # noqa: BLE001
-                print(f"[engine] session 查询异常({exc!r}), 跳过")
+            bot_resp = await cli.get(f"{_BACKEND}/api/bots/{bot_id}")
+            bot_resp.raise_for_status()
+            binding_id = (bot_resp.json().get("data") or {}).get("binding_id")
+            self.assertIsNotNone(binding_id, f"bot {bot_id} 无 binding_id")
+            conn_resp = await cli.get(f"{_BACKEND}/api/v1/devices/{binding_id}/connection")
+            conn_resp.raise_for_status()
+            target = (conn_resp.json().get("data") or {}).get("target") or ""
+            self.assertTrue(target, f"未取到 engine target: {conn_resp.json()}")
+            print(f"[engine] target={target} (binding_id={binding_id})")
+
+            eng_resp = await cli.get(
+                f"http://{target}/api/sessions",
+                params={"limit": 100, "offset": 0},
+                headers={"x-user-id": _USER_ID},
+            )
+            eng_resp.raise_for_status()
+            eng_sessions = eng_resp.json().get("data") or []
+            found = any(
+                first_sid in (s.get("id") or s.get("session_id") or "")
+                for s in eng_sessions
+            )
+            print(f"[engine] {target} 返回 {len(eng_sessions)} 条, "
+                  f"first_sid={first_sid} found={found}")
+            self.assertTrue(
+                found,
+                f"session {first_sid} 未在 per-bot engine({target})中找到",
+            )
+
+            # 7) WebSocket 连接 engine,将发现的任务内容发送给大模型
+            #    协议同 singlebox_engine_adapter._ws_chat_roundtrip():
+            #    connect(proto3 握手) → chat.send → 收到 state=final 事件
+            task = _MOCK_TASKS[0]
+            task_message = (
+                f"请帮我处理以下任务:\n"
+                f"项目名称: {task['project_name']}\n"
+                f"任务描述: {task['description']}\n"
+                f"业务场景: {task['business_scenario']}\n"
+                f"优先级: {task['priority']}"
+            )
+            reply = await self._ws_chat(target, first_sid, task_message)
+            print(f"[chat] 大模型回复: {reply}")
+            self.assertTrue(reply, "大模型回复为空")
+            self.assertNotIn("[错误]", reply, f"大模型回复包含错误: {reply}")
+            self.assertNotIn("[超时]", reply, f"大模型回复超时: {reply}")
+
+            # 8) 回查消息历史确认 assistant 记录存在
+            #    引擎可能将用户消息归为 user/tool_result,只断言 assistant 存在。
+            import base64
+            encoded_id = base64.urlsafe_b64encode(first_sid.encode()).decode()
+            msg_resp = await cli.get(
+                f"http://{target}/api/sessions/{encoded_id}/messages",
+                params={"limit": 10, "offset": 0},
+                headers={"x-user-id": _USER_ID},
+            )
+            if msg_resp.status_code == 200:
+                messages = msg_resp.json().get("data") or []
+                roles = [m.get("role") for m in messages]
+                self.assertIn("assistant", roles, "消息历史中缺少 assistant 消息")
+                print(f"[messages] 共 {len(messages)} 条, roles={roles}")
 
         print("[done] task_discovery e2e 全链路验证通过")
+
+    async def _ws_chat(self, target: str, session_key: str, message: str) -> str:
+        """开 WebSocket:connect 握手 → chat.send → 读到 final → 返回回复文本。
+
+        协议同 singlebox_engine_adapter._ws_chat_roundtrip()。
+        """
+        import websockets
+
+        ws_path = "/api/openclaw/ws"
+        uri = f"ws://{target}{ws_path}"
+        connect_params = {
+            "minProtocol": 3,
+            "maxProtocol": 3,
+            "client": {"id": "task-discovery-e2e", "version": "1.0.0", "platform": "linux", "mode": "operator"},
+            "role": "operator",
+        }
+
+        async with websockets.connect(uri, open_timeout=10) as ws:
+            # 1) 握手
+            await ws.send(json.dumps({
+                "type": "req", "id": "1", "method": "connect", "params": connect_params,
+            }))
+            hs = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            if not hs.get("ok"):
+                return f"[握手失败] {json.dumps(hs)[:200]}"
+
+            # 2) 发消息
+            await ws.send(json.dumps({
+                "type": "req", "id": "2", "method": "chat.send",
+                "params": {"sessionKey": session_key, "message": message},
+            }))
+            ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            if not ack.get("ok"):
+                return f"[发送被拒绝] {json.dumps(ack)[:200]}"
+
+            # 3) 读事件到 final
+            while True:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=60)
+                except asyncio.TimeoutError:
+                    return "[超时] 60秒内未收到回复"
+                data = json.loads(raw)
+                if data.get("type") != "event" or data.get("event") != "chat":
+                    continue
+                payload = data.get("payload") or {}
+                state = payload.get("state")
+                if state == "final":
+                    message_obj = payload.get("message") or {}
+                    contents = message_obj.get("content") or []
+                    texts = [
+                        c.get("text", "") for c in contents
+                        if isinstance(c, dict) and c.get("type") == "text"
+                    ]
+                    return "\n".join(texts) if texts else json.dumps(payload, ensure_ascii=False)[:500]
+                if state == "error":
+                    return f"[错误] {payload.get('errorMessage', 'unknown')}"
 
 
 if __name__ == "__main__":

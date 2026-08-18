@@ -82,18 +82,37 @@ class HttpSessionCreator:
     async def _resolve_engine_target(
         self, bot_id: str, owner_id: str, user_id: str,
     ) -> str:
-        """通过 backend connection API 查 per-bot engine 的 target 地址。
+        """通过 backend API 查 per-bot engine 的 target 地址。
+
+        个人 bot 没有 publish record，``/api/bots/{bot_id}/connection`` 会 404，
+        所以先查 bot detail 拿 ``binding_id``，再用
+        ``/api/v1/devices/{binding_id}/connection`` 查 target。
 
         Returns:
-            如 ``127.0.0.1:20010``
+            如 ``localhost:20010``
         """
         async with httpx.AsyncClient(timeout=30.0) as cli:
-            resp = await cli.get(
-                f"{self._backend_url}/api/bots/{bot_id}/connection",
+            # Step 1: 查 bot detail 拿 binding_id
+            bot_resp = await cli.get(
+                f"{self._backend_url}/api/bots/{bot_id}",
+                params={"owner_id": owner_id},
                 headers={"x-user-id": user_id},
             )
-            resp.raise_for_status()
-            data = (resp.json().get("data") or {})
+            bot_resp.raise_for_status()
+            bot_data = (bot_resp.json().get("data") or {})
+            binding_id = bot_data.get("binding_id")
+            if not binding_id:
+                raise RuntimeError(
+                    f"bot {bot_id} has no binding_id (owner={owner_id})"
+                )
+
+            # Step 2: 用 binding_id 查 device connection
+            conn_resp = await cli.get(
+                f"{self._backend_url}/api/v1/devices/{binding_id}/connection",
+                headers={"x-user-id": user_id},
+            )
+            conn_resp.raise_for_status()
+            data = (conn_resp.json().get("data") or {})
             target = data.get("target") or ""
             if not target:
                 raise RuntimeError(
