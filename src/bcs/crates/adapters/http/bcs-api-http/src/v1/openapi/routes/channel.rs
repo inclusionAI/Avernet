@@ -7,7 +7,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use bcs_service_api::application::v1::{require_authenticated_user, AuthenticatedCaller, ApplicationError};
-use bcs_service_api::{ChannelService, ChannelUseCaseError, ServiceError};
+use bcs_service_api::application::channel::{ChannelService, ChannelUseCaseError};
 
 use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
@@ -59,9 +59,6 @@ fn map_channel_error(error: ChannelUseCaseError) -> ApplicationError {
         }
         ChannelUseCaseError::InvalidParams(message) => {
             ApplicationError::invalid("invalid_channel_params", message)
-        }
-        ChannelUseCaseError::Internal(ServiceError::Conflict(message)) => {
-            ApplicationError::conflict("channel_binding_conflict", message)
         }
         ChannelUseCaseError::Internal(other) => ApplicationError::internal(other.to_string()),
     }
