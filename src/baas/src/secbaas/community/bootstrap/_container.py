@@ -226,7 +226,11 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ticket_repository=repository.ticket_repository,
         paas_service_facade=services.paas_facade,
         file_transfer_backend=services.file_transfer_backend,
-        ttl_renewal_schedule_repository=ttl_renewal_schedule_repo,
+        ttl_renewal_schedule_repository=(
+            providers.Singleton(TtlRenewalScheduleRepository, database=_db_manager)
+            if _HAS_ENTERPRISE_RENEWAL
+            else providers.Object(None)
+        ),
     )
 
     cron_lifecycle = providers.Singleton(

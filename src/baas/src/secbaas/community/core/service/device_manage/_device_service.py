@@ -1082,7 +1082,6 @@ class DefaultDeviceService(DeviceService):
                         )
                         next_renew_at = expiration_dt - timedelta(hours=12)
                         self._schedule_repo.register(
-                            get_current_env(),
                             sandbox_id=provider_device_id,
                             source_table="baas_device",
                             source_id=record.id,
@@ -2186,7 +2185,6 @@ class DefaultDeviceService(DeviceService):
                 and self._schedule_repo is not None
             ):
                 self._schedule_repo.set_status(
-                    get_current_env(),
                     source_table="baas_device",
                     source_id=record.id,
                     status="STOPPED",
@@ -2354,7 +2352,6 @@ class DefaultDeviceService(DeviceService):
             and self._schedule_repo is not None
         ):
             self._schedule_repo.set_status(
-                get_current_env(),
                 source_table="baas_device",
                 source_id=record.id,
                 status="STOPPED",
