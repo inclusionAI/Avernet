@@ -69,7 +69,9 @@ from agentclaw.community.core.bot_management.services.engine_resolver import (
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError as DeviceFileTooLargeError,
 )
+from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
     FileTooLargeError,
@@ -199,6 +201,34 @@ def _file_coords(
         bot_id=bot_id, owner_id=owner_id, override=None, bot_repo=bot_repo
     )
     return ("staff", owner_id, engine_type)
+
+
+def _is_baas_bot_not_found(exc: Exception) -> bool:
+    """Recognize the BaaS deletion response across direct and proxy calls."""
+    if "BOT_NOT_FOUND" in str(exc) or "NO_DEVICES_FOUND" in str(exc):
+        return True
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return False
+    response = exc.response
+    if response.status_code != 404:
+        return False
+    try:
+        return any(marker in response.text for marker in ("BOT_NOT_FOUND", "NO_DEVICES_FOUND"))
+    except httpx.ResponseNotRead:
+        return False
+
+
+def _raise_upload_lifecycle_error(
+    *, exc: Exception, bot_id: str, owner_id: str, bot_repo: BotRepository
+) -> None:
+    """Map a concurrent BaaS deletion to the public upload lifecycle errors."""
+    if not _is_baas_bot_not_found(exc):
+        return
+    if bot_repo.get_by_id_and_owner(bot_id, owner_id) is None:
+        raise HTTPException(status_code=404, detail="Bot not found") from exc
+    raise HTTPException(
+        status_code=409, detail="Bot is being deleted; retry is not available"
+    ) from exc
 
 
 def _to_file_entry(entry: dict[str, Any]) -> FileEntry:
@@ -415,13 +445,29 @@ async def upload_resource(
     # changed. Closing it needs an exclusive-create on the engine's write API,
     # since ``DeviceFileSystem`` has no conditional-create to make the check and
     # the write one operation; see the spec's known-limitation section.
-    occupied = await file_svc.exists(
-        entity_type=entity_type,
-        entity_id=entity_id,
-        bot_id=bot_id,
-        engine_type=engine_type,
-        path=safe,
-    )
+    try:
+        occupied = await file_svc.exists(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            path=safe,
+        )
+    except (BaasServiceError, httpx.HTTPStatusError) as exc:
+        _raise_upload_lifecycle_error(
+            exc=exc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo
+        )
+        logger.exception("[upload_resource] BaaS duplicate probe failed")
+        raise HTTPException(
+            status_code=502, detail="Upload storage failed"
+        ) from exc
+    except DeviceNotBoundError:
+        raise
+    except Exception as exc:
+        logger.exception("[upload_resource] duplicate probe failed")
+        raise HTTPException(
+            status_code=502, detail="Upload storage failed"
+        ) from exc
     if occupied and not overwrite:
         raise DuplicateResourceError(f"Resource already exists: {safe}")
     try:
@@ -446,6 +492,22 @@ async def upload_resource(
         # logged here so it is still diagnosable.
         logger.warning("[upload_resource] rejected upload: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc))
+    except (BaasServiceError, httpx.HTTPStatusError) as exc:
+        # A delete may win after this request resolved its workspace but before
+        # the engine write, including when a desktop proxy reports the 404
+        # directly as an HTTPStatusError. Do not turn that expected lifecycle
+        # race into an unhandled 500.
+        _raise_upload_lifecycle_error(
+            exc=exc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo
+        )
+        logger.exception("[upload_resource] BaaS storage failed")
+        raise HTTPException(status_code=502, detail="Upload storage failed") from exc
+    except DeviceNotBoundError:
+        # The workspace disappeared after the duplicate probe, typically because
+        # a concurrent delete released its device binding.  Preserve the domain
+        # error so ``@envelope_errors`` returns the public lifecycle-conflict
+        # response instead of collapsing it into a storage 502.
+        raise
     except Exception:
         # Device write failure → 502. No record is written below, so a failed
         # upload leaves neither bytes nor a row.

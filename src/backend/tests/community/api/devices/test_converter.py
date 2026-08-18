@@ -1,5 +1,10 @@
 """Tests for device API converter."""
-from agentclaw.community.adapters.http.devices.converter import connection_info_to_response
+from types import SimpleNamespace
+
+from agentclaw.community.adapters.http.devices.converter import (
+    connection_info_to_response,
+    record_to_response,
+)
 from agentclaw.community.core.devices.models import DeviceConnectionInfo
 
 
@@ -33,3 +38,19 @@ class TestConnectionInfoToResponse:
         resp = connection_info_to_response(info)
         assert resp.available is False
         assert resp.message == "本地引擎未连接"
+
+
+def test_record_to_response_supports_releasing_status():
+    record = SimpleNamespace(
+        id=1,
+        entity_id="staff-1",
+        entity_type="staff",
+        device_id="device-1",
+        device_provider="baas",
+        env="dev",
+        device_props={},
+        status="RELEASING",
+        last_alive_at=None,
+    )
+
+    assert record_to_response(record).status == "RELEASING"

@@ -72,6 +72,7 @@ class FakeRestartLockRepo:
             holder_user_id=holder_user_id,
             lock_token=uuid.uuid4().hex,
             gmt_create=self.now,
+            gmt_modified=self.now,
         )
         self.rows[key] = rec
         return rec
@@ -87,12 +88,21 @@ class FakeRestartLockRepo:
             return rec
         return None
 
-    def release(self, env, entity_id, bot_id, lock_token):
+    def release(
+        self, env, entity_id, bot_id, lock_token, *, expected_gmt_modified=None
+    ):
         self.release_calls += 1
         key = (env, entity_id, bot_id)
         rec = self.rows.get(key)
         # Compare-and-delete: only remove the row if the token still matches.
-        if rec is not None and rec.lock_token == lock_token:
+        if (
+            rec is not None
+            and rec.lock_token == lock_token
+            and (
+                expected_gmt_modified is None
+                or rec.gmt_modified == expected_gmt_modified
+            )
+        ):
             del self.rows[key]
             return True
         return False
@@ -1588,7 +1598,9 @@ class TestStaleReaper:
         # fails because the *other* worker holds the freshly-reacquired lock.
         repo.acquire.side_effect = [None, None]
         stale = SimpleNamespace(
-            lock_token="A", gmt_create=datetime(2026, 5, 28, 12, 0, 0)
+            lock_token="A",
+            gmt_create=datetime(2026, 5, 28, 12, 0, 0),
+            gmt_modified=datetime(2026, 5, 28, 12, 0, 0),
         )
         repo.get_if_stale.return_value = stale
         repo.release.return_value = False  # token "A" no longer matches → no-op
@@ -1599,7 +1611,13 @@ class TestStaleReaper:
         assert result is None  # suppressed — did not steal the newer lock
         # The reap released using the STALE row's token (fencing), not a blind
         # delete of whatever currently occupies the key.
-        repo.release.assert_called_once_with("dev", "ent", "bot001", "A")
+        repo.release.assert_called_once_with(
+            "dev",
+            "ent",
+            "bot001",
+            "A",
+            expected_gmt_modified=stale.gmt_modified,
+        )
         assert repo.acquire.call_count == 2
 
 

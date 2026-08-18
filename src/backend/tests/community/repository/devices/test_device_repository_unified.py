@@ -350,6 +350,80 @@ def test_release_binding_is_soft_delete(repo, db):
     assert rec.gmt_modified > pre  # advanced DB-side
 
 
+def test_claim_binding_release_claims_stopped_binding(repo):
+    bid = repo.insert_binding(**_binding(status="STOPPED"))
+
+    assert repo.claim_binding_release(
+        binding_id=bid, release_reason="bot deleted", released_by="emp-9"
+    ) is True
+    record = repo.get_by_id(bid)
+    assert record.status == "RELEASING"
+    assert record.release_reason == "bot deleted"
+    assert record.released_by == "emp-9"
+    assert record.released_at is not None
+    assert repo.claim_binding_release(
+        binding_id=bid, release_reason="retry", released_by="emp-10"
+    ) is False
+
+
+def test_release_binding_finalizes_claimed_binding(repo):
+    bid = repo.insert_binding(**_binding(status="ACTIVE"))
+    assert repo.claim_binding_release(
+        binding_id=bid, release_reason="bot deleted", released_by="emp-9"
+    ) is True
+
+    repo.release_binding(
+        binding_id=bid, release_reason="bot deleted", released_by="emp-9"
+    )
+
+    assert repo.get_by_id(bid).status == "RELEASED"
+
+
+def test_status_callbacks_do_not_reopen_released_binding(repo):
+    bid = repo.insert_binding(**_binding(status="ACTIVE"))
+    repo.release_binding(
+        binding_id=bid, release_reason="bot deleted", released_by="emp-9"
+    )
+
+    repo.update_status(binding_id=bid, status="FAILED")
+    repo.update_status_and_alive_at(binding_id=bid, status="ACTIVE")
+
+    assert repo.get_by_id(bid).status == "RELEASED"
+
+
+def test_publish_activation_restores_only_unclaimed_release(repo):
+    bid = repo.insert_binding(**_binding(status="RELEASED"))
+
+    assert repo.activate_publish_binding(binding_id=bid) is True
+    assert repo.get_by_id(bid).status == "ACTIVE"
+
+
+def test_publish_activation_does_not_restore_claimed_release(repo):
+    bid = repo.insert_binding(**_binding(status="ACTIVE"))
+    repo.release_binding(
+        binding_id=bid, release_reason="bot deleted", released_by="emp-9"
+    )
+
+    assert repo.activate_publish_binding(binding_id=bid) is False
+    assert repo.get_by_id(bid).status == "RELEASED"
+
+
+def test_props_update_does_not_reopen_claimed_release(repo):
+    bid = repo.insert_binding(**_binding(status="ACTIVE"))
+    assert repo.claim_binding_release(
+        binding_id=bid, release_reason="bot deleted", released_by="emp-9"
+    ) is True
+
+    repo.update_device_props(
+        binding_id=bid, props={"destroy_publish_id": "publish-1"}
+    )
+
+    record = repo.get_by_id(bid)
+    assert record.status == "RELEASING"
+    assert record.release_reason == "bot deleted"
+    assert record.device_props["destroy_publish_id"] == "publish-1"
+
+
 def test_update_status_advances_gmt_modified(repo):
     bid = repo.insert_binding(**_binding())
     pre = repo.get_by_id(bid).gmt_modified

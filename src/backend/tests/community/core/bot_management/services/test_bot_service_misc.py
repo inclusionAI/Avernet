@@ -6,6 +6,8 @@ check_bot_name_exists, generate_bot_id.
 from __future__ import annotations
 
 import json
+from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call as mock_call, patch
 
 import pytest
@@ -552,6 +554,125 @@ class TestDeleteBot:
         result = svc.delete_bot("bot001", "user001")
         assert result is True
         svc._repository.soft_delete_by_owner.assert_called_once_with("bot001", "user001")
+
+    def test_concurrent_delete_waits_for_durable_completion(self):
+        """A joined request waits for the holder's post-delete sweeps."""
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.side_effect = [_make_bot(binding_id=None), None]
+        svc._restart_lock_repo.acquire.return_value = None
+        svc._restart_lock_repo.get_if_stale.return_value = None
+        svc._restart_lock_repo.get.side_effect = [SimpleNamespace(), None]
+
+        assert svc.delete_bot("bot001", "user001") is True
+
+        svc._passport_plugin.destroy_passport.assert_not_called()
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        svc._restart_lock_repo.release.assert_not_called()
+
+    def test_joined_delete_propagates_post_delete_sweep_failure(self):
+        """A missing row alone never turns an incomplete cleanup into success."""
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.side_effect = [_make_bot(binding_id=None), None]
+        svc._restart_lock_repo.acquire.return_value = None
+        svc._restart_lock_repo.get_if_stale.return_value = None
+        svc._restart_lock_repo.get.return_value = None
+        grants = MagicMock()
+        grants.revoke_all_for_bot.side_effect = RuntimeError("grant store unavailable")
+        svc._bot_app_grant_provider = lambda: grants
+
+        with pytest.raises(BotServiceError, match="grant store unavailable"):
+            svc.delete_bot("bot001", "user001")
+
+        svc._passport_plugin.destroy_passport.assert_not_called()
+        svc._repository.soft_delete_by_owner.assert_not_called()
+
+    def test_concurrent_delete_surfaces_a_winner_that_released_without_deleting(self):
+        svc = _make_service()
+        bot = _make_bot(binding_id=None)
+        svc._repository.get_by_id_and_owner.side_effect = [bot, bot]
+        svc._restart_lock_repo.acquire.return_value = None
+        svc._restart_lock_repo.get_if_stale.return_value = None
+        svc._restart_lock_repo.get.return_value = None
+
+        with pytest.raises(BotServiceError, match="did not complete"):
+            svc.delete_bot("bot001", "user001")
+
+        svc._passport_plugin.destroy_passport.assert_not_called()
+        svc._repository.soft_delete_by_owner.assert_not_called()
+
+    def test_reacquired_delete_lock_rechecks_that_the_bot_is_still_live(self):
+        """A lock acquired after the winner completes must join its success."""
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.side_effect = [
+            _make_bot(binding_id=None),
+            None,
+        ]
+        svc._restart_lock_repo.acquire.side_effect = [
+            None,
+            SimpleNamespace(lock_token="reacquired-delete-lock"),
+        ]
+        svc._restart_lock_repo.get_if_stale.return_value = None
+
+        assert svc.delete_bot("bot001", "user001") is True
+
+        svc._passport_plugin.destroy_passport.assert_not_called()
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        svc._restart_lock_repo.release.assert_called_once_with(
+            "dev",
+            "staff_user001",
+            "delete:bot001",
+            "reacquired-delete-lock",
+        )
+
+    def test_delete_stale_reaper_fences_a_renewed_lock(self):
+        svc = _make_service()
+        stale = SimpleNamespace(
+            lock_token="delete-lock", gmt_modified=datetime(2000, 1, 1)
+        )
+        svc._restart_lock_repo.acquire.return_value = None
+        svc._restart_lock_repo.get_if_stale.return_value = stale
+
+        assert svc._try_acquire_delete_lock("dev", "staff_user001", "bot001", "user001") is None
+
+        svc._restart_lock_repo.release.assert_called_once_with(
+            "dev",
+            "staff_user001",
+            "delete:bot001",
+            "delete-lock",
+            expected_gmt_modified=stale.gmt_modified,
+        )
+
+    def test_delete_lock_heartbeat_marks_refresh_exception_as_lease_loss(self):
+        svc = _make_service()
+        svc._restart_lock_repo.refresh.side_effect = [True, RuntimeError("db unavailable")]
+
+        with patch.object(
+            bot_service_module, "DELETE_LOCK_HEARTBEAT_SECONDS", 0.01
+        ):
+            stop, lease_lost, thread = svc._start_delete_lock_heartbeat(
+                "dev", "staff_user001", "bot001", "delete-lock"
+            )
+            assert lease_lost.wait(timeout=1)
+            stop.set()
+            thread.join(timeout=1)
+
+        assert not thread.is_alive()
+
+    def test_delete_releases_its_operation_lock_after_completion(self):
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+        svc._restart_lock_repo.acquire.return_value = SimpleNamespace(lock_token="delete-lock")
+
+        with patch.object(bot_service_module, "get_current_env", return_value="dev"):
+            assert svc.delete_bot("bot001", "user001") is True
+
+        svc._restart_lock_repo.release.assert_called_once_with(
+            "dev", "staff_user001", "delete:bot001", "delete-lock"
+        )
+        svc._restart_lock_repo.refresh.assert_called_once_with(
+            "dev", "staff_user001", "delete:bot001", "delete-lock"
+        )
 
     def test_syncs_bcn_provider_delete_after_soft_delete(self):
         svc = _make_service()

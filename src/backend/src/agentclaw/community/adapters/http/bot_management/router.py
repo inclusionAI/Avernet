@@ -16,6 +16,7 @@ from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Query, Request, Response, Depends, Path
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.auth.dependencies import require_operator, get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -2293,7 +2294,12 @@ async def delete_bot(
 
         resolved_owner_id = owner_id or operator_id
 
-        bot_service.delete_bot(bot_id=bot_id, user_id=resolved_owner_id)
+        # ``BotService.delete_bot`` is synchronous and may wait for a
+        # concurrent deletion result.  Do not block this async route's event
+        # loop while the service performs provider calls or that join.
+        await run_in_threadpool(  # allow-run-in-threadpool: BotService API is synchronous.
+            bot_service.delete_bot, bot_id=bot_id, user_id=resolved_owner_id
+        )
 
         return ApiResponse(
             success=True,

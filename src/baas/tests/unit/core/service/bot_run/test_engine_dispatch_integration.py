@@ -106,7 +106,7 @@ _CASES = [
         "openclaw",
         "sess-oc",
         "/api/openclaw/ws",
-        f"agent:main:session:{_RUN_ID}:user:{_USER_ID}",
+        f"session:{_RUN_ID}:user:{_USER_ID}",
         "agent:main:sess-oc",
     ),
     ("teclaw", "sess-tc", "/api/teclaw/ws", None, "sess-tc"),

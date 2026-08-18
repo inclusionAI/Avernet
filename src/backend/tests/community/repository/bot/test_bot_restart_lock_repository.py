@@ -4,8 +4,10 @@ Tests the repository behavior with in-memory SQLite — the same single ORM
 body that runs on prod OceanBase, so the UNIQUE guard, token-fenced release,
 and DB-side staleness are exercised against a real database.
 """
-import pytest
 from contextlib import contextmanager
+from datetime import datetime
+
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -129,3 +131,33 @@ def test_get_if_stale_judges_db_side(repo):
     assert repo.get_if_stale("dev", "ent_c", "bot_c3", 0) is not None
     # Absent row → None regardless of TTL.
     assert repo.get_if_stale("dev", "ent_c", "missing", 0) is None
+
+
+def test_refresh_renews_only_the_owned_lock(repo):
+    lock = repo.acquire("dev", "ent_refresh", "bot_refresh", "owner")
+    assert lock is not None
+
+    assert repo.refresh("dev", "ent_refresh", "bot_refresh", lock.lock_token) is True
+    assert repo.refresh("dev", "ent_refresh", "bot_refresh", "wrong-token") is False
+
+
+def test_stale_reap_does_not_delete_a_lock_renewed_after_observation(repo):
+    lock = repo.acquire("dev", "ent_reap", "bot_reap", "owner")
+    assert lock is not None
+    with repo._db.orm_session() as db:
+        db.query(BotRestartLockModel).filter(
+            BotRestartLockModel.id == lock.id
+        ).update({BotRestartLockModel.gmt_modified: datetime(2000, 1, 1)})
+
+    stale = repo.get_if_stale("dev", "ent_reap", "bot_reap", 1)
+    assert stale is not None
+    assert repo.refresh("dev", "ent_reap", "bot_reap", lock.lock_token) is True
+
+    assert repo.release(
+        "dev",
+        "ent_reap",
+        "bot_reap",
+        lock.lock_token,
+        expected_gmt_modified=stale.gmt_modified,
+    ) is False
+    assert repo.get("dev", "ent_reap", "bot_reap") is not None

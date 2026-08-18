@@ -88,7 +88,29 @@ class DeviceBindingRepository(Protocol):
         release_reason: str | None,
         released_by: str,
     ) -> None:
-        """释放设备，标记绑定记录为 RELEASED 状态."""
+        """Finalize a claimed release by transitioning it to ``RELEASED``.
+
+        This is idempotent for an already released binding.  Callers must first
+        win :meth:`claim_binding_release`; it is not an authorization to begin
+        another provider release for an arbitrary binding.
+        """
+        ...
+
+    @abstractmethod
+    def claim_binding_release(
+        self,
+        *,
+        binding_id: int,
+        release_reason: str | None,
+        released_by: str,
+    ) -> bool:
+        """Atomically claim a releasable binding as ``RELEASING``.
+
+        The successful caller exclusively owns provider destruction and must
+        later call :meth:`release_binding`.  A ``False`` result means another
+        lifecycle transition won; it must never be followed by another
+        destructive provider call.
+        """
         ...
 
     @abstractmethod
@@ -99,6 +121,16 @@ class DeviceBindingRepository(Protocol):
     @abstractmethod
     def update_status_and_alive_at(self, *, binding_id: int, status: str) -> None:
         """更新设备状态并刷新 alive 时间戳."""
+        ...
+
+    @abstractmethod
+    def activate_publish_binding(self, *, binding_id: int) -> bool:
+        """Activate a publish-flow binding without overriding a claimed release.
+
+        A normal publish-flow release has no device-service release audit data and
+        may be restored by a rollback. A binding claimed by device deletion keeps
+        its release audit fields and must remain unavailable.
+        """
         ...
 
     @abstractmethod

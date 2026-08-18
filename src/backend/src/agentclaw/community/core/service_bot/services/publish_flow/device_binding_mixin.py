@@ -87,9 +87,8 @@ class DeviceBindingMixin:
             "overall_progress": progress.get("overall_progress", {}),
         }
 
-        self._publish_service.update_device_binding_with_props(
+        self._publish_service.activate_publish_binding_with_props(
             binding_id=binding_id,
-            status=DeviceBindingStatus.ACTIVE,
             device_props=device_props,
         )
 

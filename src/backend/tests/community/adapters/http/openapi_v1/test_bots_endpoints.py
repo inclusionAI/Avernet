@@ -251,6 +251,16 @@ def test_delete_bot(client, svc):
     svc.delete_bot.assert_called_once_with("b1", "u1")
 
 
+def test_delete_bot_runs_sync_service_in_threadpool(client, svc):
+    with patch.object(
+        bots_router, "run_in_threadpool", new_callable=AsyncMock, return_value=True
+    ) as run:
+        data = _ok(client.delete("/openapi/v1/bots/b1"))
+
+    assert data == {"deleted": True}
+    run.assert_awaited_once_with(svc.delete_bot, "b1", "u1")
+
+
 def test_restart_bot(client):
     data = _ok(client.post("/openapi/v1/bots/b1/restart"))
     assert data["status"] == "PENDING"

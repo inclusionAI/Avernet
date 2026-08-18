@@ -9,6 +9,7 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
@@ -399,22 +400,41 @@ class BotRestartLockRepositoryProtocol(Protocol):
     ) -> Optional[BotRestartLockRecord]:
         """Return the lock row only if it is older than ``ttl_seconds``.
 
-        Staleness is evaluated DB-side (comparing ``gmt_create`` against the
+        Staleness is evaluated DB-side (comparing ``gmt_modified`` against the
         database clock) to avoid app/DB clock-skew. Returns ``None`` when no
         row exists or the existing row is still fresh.
         """
         ...
 
     @abstractmethod
-    def release(
+    def refresh(
         self, env: str, entity_id: str, bot_id: str, lock_token: str
+    ) -> bool:
+        """Renew an owned lock's DB-side heartbeat timestamp.
+
+        The token guard means a stale holder cannot extend a lock reaped and
+        acquired by another operation. Returns ``False`` when ownership was
+        lost, allowing the caller to fail rather than continue unfenced.
+        """
+        ...
+
+    @abstractmethod
+    def release(
+        self,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        lock_token: str,
+        *,
+        expected_gmt_modified: datetime | None = None,
     ) -> bool:
         """Release the lock by hard-deleting the row — only if it's still ours.
 
         Compare-and-delete: ``DELETE WHERE (env, entity_id, bot_id) matches AND
         lock_token = :lock_token``. The token guard prevents deleting a row that
-        a different holder acquired after ours was reaped (the stale-reaper and
-        late-async-release races). Returns ``True`` if a row was deleted.
+        a different holder acquired after ours was reaped. When supplied,
+        ``expected_gmt_modified`` also fences stale reaping against a heartbeat
+        renewal by the same holder. Returns ``True`` if a row was deleted.
         """
         ...
 

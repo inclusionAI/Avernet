@@ -118,6 +118,19 @@ logger = get_logger()
 # blocked from restarting.
 RESTART_LOCK_TTL_SECONDS = 120
 
+# A delete can legitimately spend longer than a restart in provider teardown.
+# It keeps its lease alive, while an abandoned worker becomes recoverable after
+# this DB-clock interval.
+DELETE_LOCK_TTL_SECONDS = 120
+DELETE_LOCK_HEARTBEAT_SECONDS = 10
+DELETE_LOCK_JOIN_TIMEOUT_SECONDS = 300
+
+# Deletion shares the durable, fenced lock implementation used by restart, but
+# uses a separate key namespace.  A restart must not accidentally join a
+# deletion (or vice versa), while duplicate deletes must coalesce before either
+# request reaches Passport or the final soft-delete CAS.
+_DELETE_LOCK_KEY_PREFIX = "delete:"
+
 # Passport refresh is callback-driven and retryable. Keep caller-instance
 # fan-out bounded while still attempting every instance before reporting an
 # aggregate failure.
@@ -875,12 +888,133 @@ class BotService:
                 env, entity_id, bot_id, stale.gmt_create,
             )
             # Compare-and-delete on the stale row's token: if another worker
-            # already reaped+reacquired, the token won't match and this is a
-            # no-op — the acquire below then fails and we suppress, instead of
-            # stealing their fresh lock.
-            self._restart_lock_repo.release(env, entity_id, bot_id, stale.lock_token)
+            # already reaped+reacquired, or the same holder refreshed its
+            # heartbeat, this is a no-op. The acquire below then fails and we
+            # suppress instead of stealing their fresh lock.
+            self._restart_lock_repo.release(
+                env,
+                entity_id,
+                bot_id,
+                stale.lock_token,
+                expected_gmt_modified=stale.gmt_modified,
+            )
 
         return self._restart_lock_repo.acquire(env, entity_id, bot_id, holder_user_id)
+
+    def _try_acquire_delete_lock(
+        self, env: str, entity_id: str, bot_id: str, holder_user_id: str
+    ) -> Optional[BotRestartLockRecord]:
+        """Acquire the durable operation lock for a complete bot deletion.
+
+        The underlying lock is intentionally namespaced so a delete joins only
+        another delete.  This guards every destructive step, not just device
+        release: Passport destruction and the terminal soft-delete CAS are
+        otherwise still reachable by two concurrent requests.
+        """
+        lock_key = f"{_DELETE_LOCK_KEY_PREFIX}{bot_id}"
+        lock = self._restart_lock_repo.acquire(env, entity_id, lock_key, holder_user_id)
+        if lock is not None:
+            return lock
+
+        stale = self._restart_lock_repo.get_if_stale(
+            env, entity_id, lock_key, DELETE_LOCK_TTL_SECONDS
+        )
+        if stale is not None:
+            self._restart_lock_repo.release(
+                env,
+                entity_id,
+                lock_key,
+                stale.lock_token,
+                expected_gmt_modified=stale.gmt_modified,
+            )
+        return self._restart_lock_repo.acquire(env, entity_id, lock_key, holder_user_id)
+
+    def _start_delete_lock_heartbeat(
+        self, env: str, entity_id: str, bot_id: str, lock_token: str
+    ) -> tuple[threading.Event, threading.Event, threading.Thread]:
+        """Keep a deletion lease live while its blocking provider calls run."""
+        lock_key = f"{_DELETE_LOCK_KEY_PREFIX}{bot_id}"
+        try:
+            lease_established = self._restart_lock_repo.refresh(
+                env, entity_id, lock_key, lock_token
+            )
+        except Exception as exc:
+            raise BotServiceError("Failed to establish bot deletion lock lease") from exc
+        if not lease_established:
+            raise BotServiceError("Failed to establish bot deletion lock lease")
+
+        stop = threading.Event()
+        lease_lost = threading.Event()
+
+        def _heartbeat() -> None:
+            while not stop.wait(DELETE_LOCK_HEARTBEAT_SECONDS):
+                try:
+                    refreshed = self._restart_lock_repo.refresh(
+                        env, entity_id, lock_key, lock_token
+                    )
+                except Exception:
+                    lease_lost.set()
+                    logger.exception(
+                        "[bot_service.delete_bot] Failed to refresh deletion lock lease "
+                        "for bot %s",
+                        bot_id,
+                    )
+                    return
+                if not refreshed:
+                    lease_lost.set()
+                    logger.error(
+                        "[bot_service.delete_bot] Lost deletion lock lease for bot %s",
+                        bot_id,
+                    )
+                    return
+
+        thread = threading.Thread(
+            target=_heartbeat,
+            name=f"bot-delete-lease-{bot_id}",
+            daemon=True,
+        )
+        thread.start()
+        return stop, lease_lost, thread
+
+    def _join_delete_result(
+        self, env: str, entity_id: str, bot_id: str, user_id: str, bot: Dict[str, Any]
+    ) -> bool:
+        """Wait for the current holder's durable deletion result.
+
+        The lock must disappear before a missing bot row means success: the
+        holder still has two failure-propagating persistence sweeps to run
+        after its soft delete. Once the holder has released the fence, this
+        duplicate reruns those idempotent sweeps against the original bot
+        context before reporting the durable completed result. That both waits
+        for an in-flight holder and repairs a holder that failed after the row
+        became invisible, without repeating Passport or device destruction.
+        """
+        lock_key = f"{_DELETE_LOCK_KEY_PREFIX}{bot_id}"
+        deadline = time.monotonic() + DELETE_LOCK_JOIN_TIMEOUT_SECONDS
+        while True:
+            if self._restart_lock_repo.get(env, entity_id, lock_key) is not None:
+                if time.monotonic() >= deadline:
+                    raise BotServiceError("Timed out waiting for concurrent bot deletion")
+                time.sleep(0.1)
+                continue
+            if self._repository.get_by_id_and_owner(bot_id, user_id) is None:
+                self._finish_post_delete_sweeps(bot_id, user_id, bot)
+                return True
+            raise BotServiceError("Concurrent bot deletion did not complete")
+
+    def _finish_post_delete_sweeps(
+        self, bot_id: str, user_id: str, bot: Dict[str, Any]
+    ) -> None:
+        """Run the failure-propagating cleanup that completes a soft delete.
+
+        Both operations are idempotent. A joining request may therefore safely
+        rerun them after the lock holder releases its fence; any persistence
+        error remains visible instead of converting a partially cleaned delete
+        into a successful duplicate response.
+        """
+        self._sweep_grants_that_raced_the_deletion(bot_id, user_id)
+        if bot_id != "default":
+            self._sweep_startup_script_that_raced_the_deletion(bot_id, bot)
 
     async def get_bot_by_ip_and_user(self, ip: str, user_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -3398,6 +3532,12 @@ class BotService:
         if not user_id:
             raise BotServiceError("User ID is required for deleting bot")
 
+        delete_lock: BotRestartLockRecord | None = None
+        delete_lock_env: str | None = None
+        delete_lock_entity_id: str | None = None
+        delete_lock_heartbeat_stop: threading.Event | None = None
+        delete_lock_lease_lost: threading.Event | None = None
+        delete_lock_heartbeat_thread: threading.Thread | None = None
         try:
             # Get bot by bot_id and owner_id (user_id)
             bot = self._repository.get_by_id_and_owner(bot_id, user_id)
@@ -3423,6 +3563,59 @@ class BotService:
                 earliest_bot_id = earliest.get("bot_id")
                 if earliest_bot_id and bot_id == earliest_bot_id:
                     raise BotOperationNotAllowedError("不能删除首个创建的 Bot，该 Bot 受保护")
+
+            # A device-release claim alone only prevents duplicate provider
+            # destruction.  Keep the rest of deletion (Passport + bot row)
+            # under the same durable operation fence as well.  The losing
+            # request joins the in-flight deletion without repeating any
+            # destructive operation; the winning request reports any failure.
+            delete_lock_env = get_current_env()
+            delete_lock_entity_id = bot.get("entity_id") or user_id
+            delete_lock = self._try_acquire_delete_lock(
+                delete_lock_env,
+                delete_lock_entity_id,
+                bot_id,
+                user_id,
+            )
+            if delete_lock is None:
+                logger.info(
+                    "[bot_service.delete_bot] Deletion already in progress for bot %s "
+                    "(env=%s, entity_id=%s); joining duplicate request.",
+                    bot_id,
+                    delete_lock_env,
+                    delete_lock_entity_id,
+                )
+                return self._join_delete_result(
+                    delete_lock_env, delete_lock_entity_id, bot_id, user_id, bot
+                )
+
+            # A duplicate may acquire only after the first holder has already
+            # soft-deleted the row and released its lock. Re-read while owning
+            # the new fence so that pre-lock state cannot trigger destructive
+            # cleanup a second time. A missing row is the durable success
+            # result of the holder we just raced.
+            locked_bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+            if locked_bot is None:
+                logger.info(
+                    "[bot_service.delete_bot] Bot %s was deleted before the "
+                    "reacquired deletion lock could proceed.",
+                    bot_id,
+                )
+                self._finish_post_delete_sweeps(bot_id, user_id, bot)
+                return True
+            bot = locked_bot
+            (
+                delete_lock_heartbeat_stop,
+                delete_lock_lease_lost,
+                delete_lock_heartbeat_thread,
+            ) = (
+                self._start_delete_lock_heartbeat(
+                    delete_lock_env,
+                    delete_lock_entity_id,
+                    bot_id,
+                    delete_lock.lock_token,
+                )
+            )
 
             # Withdraw every application authorization standing against this
             # bot — whoever delegated it — before anything destructive happens.
@@ -3503,6 +3696,9 @@ class BotService:
                         logger.error(f"[bot_service.delete_bot] Failed to release device for binding {binding_id}: {e}")
                         raise BotServiceError(f"设备释放失败，无法删除 Bot: {e}")
 
+            if delete_lock_lease_lost is not None and delete_lock_lease_lost.is_set():
+                raise BotServiceError("Lost bot deletion lock lease before Passport destruction")
+
             # Step 2: 通知 Passport 服务销毁 Passport（阻塞流程）
             try:
                 self._passport_plugin.destroy_passport(bot_id, user_id)
@@ -3511,15 +3707,15 @@ class BotService:
                 logger.error(f"[bot_service.delete_bot] destroyPassport failed: bot_id={bot_id}, owner_workno={user_id}, error={e}")
                 raise BotServiceError(f"销毁 Passport 失败: {e}")
 
+            if delete_lock_lease_lost is not None and delete_lock_lease_lost.is_set():
+                raise BotServiceError("Lost bot deletion lock lease before soft delete")
+
             # Soft delete the bot (use soft_delete_by_owner to ensure we only delete the owner's bot)
             result = self._repository.soft_delete_by_owner(bot_id, user_id)
             if not result:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
-            self._sweep_grants_that_raced_the_deletion(bot_id, user_id)
-
-            if bot_id != "default":
-                self._sweep_startup_script_that_raced_the_deletion(bot_id, bot)
+            self._finish_post_delete_sweeps(bot_id, user_id, bot)
 
             self._sync_provider_bot_delete_to_bcn(bot_id, user_id)
 
@@ -3546,6 +3742,18 @@ class BotService:
         except Exception as e:
             logger.error(f"[bot_service.delete_bot] Failed to delete bot {bot_id}: {e}")
             raise BotServiceError(f"Failed to delete bot: {e}")
+        finally:
+            if delete_lock_heartbeat_stop is not None:
+                delete_lock_heartbeat_stop.set()
+            if delete_lock_heartbeat_thread is not None:
+                delete_lock_heartbeat_thread.join(timeout=1)
+            if delete_lock is not None:
+                self._restart_lock_repo.release(
+                    delete_lock_env,
+                    delete_lock_entity_id,
+                    f"{_DELETE_LOCK_KEY_PREFIX}{bot_id}",
+                    delete_lock.lock_token,
+                )
 
     def _sweep_grants_that_raced_the_deletion(
         self, bot_id: str, user_id: str

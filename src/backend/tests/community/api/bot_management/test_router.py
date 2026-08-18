@@ -780,6 +780,20 @@ class TestDeleteBot:
         assert resp.status_code == 200
         assert resp.json()["success"] is True
 
+    def test_runs_sync_service_in_threadpool(self, client):
+        tc, svc, _ = client
+        import agentclaw.community.adapters.http.bot_management.router as router_module
+
+        with patch.object(
+            router_module, "run_in_threadpool", new_callable=AsyncMock, return_value=None
+        ) as run:
+            resp = tc.delete("/api/bots/default")
+
+        assert resp.status_code == 200
+        run.assert_awaited_once_with(
+            svc.delete_bot, bot_id="default", user_id="test_user"
+        )
+
     def test_bot_not_found(self, client):
         tc, svc, _ = client
         svc.delete_bot.side_effect = BotNotFoundError("nope")

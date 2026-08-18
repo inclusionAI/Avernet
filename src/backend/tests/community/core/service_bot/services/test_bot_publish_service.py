@@ -100,6 +100,56 @@ def _create_mock_record(
     )
 
 
+class TestDeviceBindingUpdates:
+    def test_publish_callback_merges_props_without_reusing_binding(self):
+        binding_repo = MagicMock()
+        service = _make_service(Mock(), device_binding_repo=binding_repo)
+
+        service.update_device_binding_with_props(
+            binding_id=42,
+            status="ACTIVE",
+            device_props={"publish_id": "p-1"},
+        )
+
+        binding_repo.update_status_and_alive_at.assert_called_once_with(
+            binding_id=42, status="ACTIVE"
+        )
+        binding_repo.update_device_props.assert_called_once_with(
+            binding_id=42, props={"publish_id": "p-1"}
+        )
+        binding_repo.reuse_binding.assert_not_called()
+
+    def test_publish_success_reactivates_only_an_unclaimed_binding(self):
+        binding_repo = MagicMock()
+        binding_repo.activate_publish_binding.return_value = True
+        service = _make_service(Mock(), device_binding_repo=binding_repo)
+
+        service.activate_publish_binding_with_props(
+            binding_id=42,
+            device_props={"publish_id": "p-1"},
+        )
+
+        binding_repo.activate_publish_binding.assert_called_once_with(binding_id=42)
+        binding_repo.update_device_props.assert_called_once_with(
+            binding_id=42, props={"publish_id": "p-1"}
+        )
+        binding_repo.update_status_and_alive_at.assert_not_called()
+        binding_repo.reuse_binding.assert_not_called()
+
+    def test_publish_success_refuses_claimed_release(self):
+        binding_repo = MagicMock()
+        binding_repo.activate_publish_binding.return_value = False
+        service = _make_service(Mock(), device_binding_repo=binding_repo)
+
+        with pytest.raises(BotPublishServiceError, match="active release claim"):
+            service.activate_publish_binding_with_props(
+                binding_id=42,
+                device_props={"publish_id": "p-1"},
+            )
+
+        binding_repo.update_device_props.assert_not_called()
+
+
 class TestCreatePublishImagePolicy:
     def _create(self, *, source_bot, common_config_value=None, is_teclaw=False):
         publish_repo = Mock()
