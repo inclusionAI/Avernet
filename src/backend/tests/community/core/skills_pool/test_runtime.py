@@ -12,6 +12,9 @@ from agentclaw.community.core.skills_pool.models import (
 )
 from agentclaw.community.core.skills_pool.quarantine import RuntimeQuarantineCleanupStatus
 from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
+from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    MAPPING_V3_CONTRACT_VERSION,
+)
 
 
 class FakeResolver:
@@ -62,6 +65,16 @@ class FakeTransport:
 class FakeProbe:
     async def probe_bot(self, **kwargs):
         return kwargs
+
+
+class CenterEnsureTransport(FakeTransport):
+    async def invoke(self, conn_info, method, path, *, body, timeout):
+        if path.endswith("/center/ensure"):
+            self.calls.append(
+                {"conn_info": conn_info, "method": method, "path": path, "body": body, "timeout": timeout}
+            )
+            return {"success": True, "data": {"ok": body["items"], "failed": []}}
+        return await super().invoke(conn_info, method, path, body=body, timeout=timeout)
 
 
 class FutureStatusTransport(FakeTransport):
@@ -223,6 +236,34 @@ async def test_pool_runtime_returns_typed_quarantine_cleanup_result() -> None:
 
     assert result.status is RuntimeQuarantineCleanupStatus.CLEANED
     assert result.evidence == {"generation_scoped": True}
+
+
+@pytest.mark.asyncio
+async def test_center_mapping_is_ensured_before_full_v3_publish() -> None:
+    transport = CenterEnsureTransport()
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+    mapping = PoolSkillMapping(
+        corpus="center",
+        relative_path=None,
+        link_name="risk-review",
+        skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+        sc_version_number="2026.8.19",
+    )
+
+    assert await runtime.publish_mappings(
+        bot_id="bot-1",
+        user_id="owner-1",
+        mappings=[mapping],
+        mapping_contract_version=MAPPING_V3_CONTRACT_VERSION,
+    )
+    assert [call["path"] for call in transport.calls] == [
+        "/api/skills/center/ensure",
+        "/api/skills/layout/mappings/publish",
+    ]
 
 
 @pytest.mark.asyncio

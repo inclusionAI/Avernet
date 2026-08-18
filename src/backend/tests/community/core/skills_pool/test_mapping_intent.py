@@ -3,6 +3,7 @@ import pytest
 from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
     local_locators_from_evidence,
+    mapping_contract_for,
 )
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 
@@ -35,6 +36,64 @@ def test_builds_logical_intent_without_engine_paths() -> None:
             "link_name": "reviewer",
         },
     ]
+
+
+def test_builds_structured_center_intent_without_runtime_paths() -> None:
+    mappings = build_logical_skill_mappings(
+        [
+            RegisteredSkillAsset(
+                skill_id=3,
+                name="risk-review",
+                git_path="center://2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+                skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+                sc_version_number="2026.8.19",
+            )
+        ]
+    )
+
+    assert [mapping.to_dict() for mapping in mappings] == [
+        {
+            "corpus": "center",
+            "skill_uuid": "2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+            "sc_version_number": "2026.8.19",
+            "link_name": "risk-review",
+        }
+    ]
+
+
+def test_rejects_center_mapping_without_structured_exact_version() -> None:
+    with pytest.raises(ValueError, match="structured identity"):
+        build_logical_skill_mappings(
+            [
+                RegisteredSkillAsset(
+                    skill_id=3,
+                    name="risk-review",
+                    git_path="center://2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+                )
+            ]
+        )
+
+
+def test_center_mapping_requires_explicit_runtime_v3_capability() -> None:
+    mappings = build_logical_skill_mappings(
+        [
+            RegisteredSkillAsset(
+                skill_id=3,
+                name="risk-review",
+                git_path="center://2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+                skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+                sc_version_number="2026.8.19",
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="explicitly support mapping v3"):
+        mapping_contract_for(mappings, ["skills-pool-mapping-v2"])
+
+    assert mapping_contract_for(
+        mappings,
+        ["skills-pool-mapping-v2", "skills-pool-mapping-v3"],
+    ) == "skills-pool-mapping-v3"
 
 
 @pytest.mark.parametrize(

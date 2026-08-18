@@ -515,6 +515,8 @@ class SkillRepository(
                     skill_id=row.id,
                     name=row.name,
                     git_path=row.git_path,
+                    skill_uuid=getattr(row, "skill_uuid", None),
+                    sc_version_number=getattr(row, "sc_version_number", None),
                 )
                 for row in rows
             ]
@@ -570,6 +572,16 @@ class SkillRepository(
                         skill_id=int(row["id"]),
                         name=str(row["name"]),
                         git_path=git_path,
+                        skill_uuid=(
+                            str(row["skill_uuid"])
+                            if row.get("skill_uuid") is not None
+                            else None
+                        ),
+                        sc_version_number=(
+                            str(row["sc_version_number"])
+                            if row.get("sc_version_number") is not None
+                            else None
+                        ),
                     )
                 )
         return assets
