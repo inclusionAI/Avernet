@@ -18,10 +18,12 @@ use bcs_db_api::{DbError, DbExecuteResult, DbPlugin, DbRow, DbSqlFlavor, DbState
 use bcs_domain::edge_permission::{
     EdgeGrant, EdgeStatus, GrantKind, OriginatorPolicyType, PermissionProfile, ProfileStatus,
     PermissionRequest, RequestKind, RequestStatus,
+    BotActorConfig,
 };
 pub use bcs_service_api::port::repo::EdgeGrantRepoPort;
 pub use bcs_service_api::port::repo::PermissionProfileRepoPort;
 pub use bcs_service_api::port::repo::PermissionRequestRepoPort;
+pub use bcs_service_api::port::repo::BotActorConfigRepoPort;
 use bcs_service_api::{ServiceError, ServiceResult};
 use sha2::{Digest, Sha256};
 use tracing::warn;
@@ -791,6 +793,95 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
     }
 }
 
+/// DB-backed `BotActorConfigRepoPort` implementation (T12).
+///
+/// Narrow read of `bcs_bots` decision columns for connect/admission. Same
+/// plumbing as [`DbPermissionProfileStore`]: `Arc<dyn DbPlugin>` + flavor.
+/// Reads across MySQL (TINYINT(1)) and SQLite (INTEGER) via `get_bool`, which
+/// coerces integer 0/1 to bool.
+pub struct DbBotActorConfigStore {
+    db: Arc<dyn DbPlugin>,
+    flavor: EdgeGrantSqlFlavor,
+}
+
+impl DbBotActorConfigStore {
+    pub fn new(db: Arc<dyn DbPlugin>, flavor: EdgeGrantSqlFlavor) -> Self {
+        Self { db, flavor }
+    }
+
+    pub fn mysql(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, EdgeGrantSqlFlavor::Mysql)
+    }
+
+    pub fn sqlite(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, EdgeGrantSqlFlavor::Sqlite)
+    }
+
+    pub fn flavor(&self) -> EdgeGrantSqlFlavor {
+        self.flavor
+    }
+
+    async fn query(
+        &self,
+        operation: &'static str,
+        statement: DbStatement,
+    ) -> ServiceResult<Vec<DbRow>> {
+        self.db.query(statement).await.map_err(|err| {
+            warn!(operation, error = %err, "db_bot_actor_config: query failed");
+            service_db_error(operation, err)
+        })
+    }
+
+    #[cfg(test)]
+    async fn execute(&self, operation: &'static str, statement: DbStatement) -> ServiceResult<()> {
+        self.db
+            .execute(statement)
+            .await
+            .map(|_| ())
+            .map_err(|err| {
+                warn!(operation, error = %err, "db_bot_actor_config: execute failed");
+                service_db_error(operation, err)
+            })
+    }
+
+    /// SELECT the 7 decision columns for `(bot_uuid, env)`. Excludes soft-deleted
+    /// rows, mirroring the bot store read (`COALESCE(is_deleted, 0) = 0`).
+    const SELECT_BOT_CONFIG_SQL: &'static str =
+        "SELECT bot_uuid, env, visibility, human_addable, friend_approval, status, created_by \
+         FROM bcs_bots \
+         WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 LIMIT 1";
+}
+
+#[async_trait]
+impl BotActorConfigRepoPort for DbBotActorConfigStore {
+    async fn get(&self, bot_id: &str, env: &str) -> Option<BotActorConfig> {
+        let rows = self
+            .query(
+                "get_bot_actor_config",
+                DbStatement::with_params(
+                    Self::SELECT_BOT_CONFIG_SQL,
+                    vec![DbValue::from(bot_id), DbValue::from(env)],
+                ),
+            )
+            .await;
+        match rows {
+            Ok(rows) => rows.into_iter().next().and_then(|row| {
+                match row_to_bot_actor_config(&row) {
+                    Ok(config) => Some(config),
+                    Err(err) => {
+                        warn!(error = %err, "db_bot_actor_config: get row skipped");
+                        None
+                    }
+                }
+            }),
+            Err(err) => {
+                warn!(error = %err, "db_bot_actor_config: get failed");
+                None
+            }
+        }
+    }
+}
+
 fn row_to_permission_request(row: &DbRow) -> ServiceResult<PermissionRequest> {
     let created_at = row
         .get_i64("created_at")
@@ -925,6 +1016,27 @@ fn row_to_edge_grant(row: &DbRow) -> ServiceResult<EdgeGrant> {
             &required_string(row, "originator_policy_type")?,
         )?,
         originator_policy_data: parse_json_opt(&optional_string(row, "originator_policy_data")?)?,
+    })
+}
+
+/// Map a `bcs_bots` row to a [`BotActorConfig`].
+///
+/// `human_addable` is stored as MySQL TINYINT(1) / SQLite INTEGER; `get_bool`
+/// coerces integer 0/1 to bool (works across both flavors). `created_by` is
+/// `NULL` for legacy bots.
+fn row_to_bot_actor_config(row: &DbRow) -> ServiceResult<BotActorConfig> {
+    let human_addable = row
+        .get_bool("human_addable")
+        .map_err(|err| service_db_error("human_addable", err))?
+        .unwrap_or(false);
+    Ok(BotActorConfig {
+        bot_id: required_string(row, "bot_uuid")?,
+        env: required_string(row, "env")?,
+        visibility: required_string(row, "visibility")?,
+        human_addable,
+        friend_approval: required_string(row, "friend_approval")?,
+        status: required_string(row, "status")?,
+        created_by: optional_string(row, "created_by")?,
     })
 }
 
@@ -1464,5 +1576,111 @@ mod tests {
             .expect("backfill");
         let got = store.get("r1", "dev").await.expect("found");
         assert_eq!(got.edge_id.as_deref(), Some("eg_1"));
+    }
+
+    // ---- DbBotActorConfigStore (T12) ----
+
+    /// Bot-config store backed by a fresh LocalSqliteDbPlugin with a minimal
+    /// `bcs_bots` schema (the 7 decision cols + the soft-delete flag the read
+    /// filters on). Mirrors the bcs_bot-store DDL (`bot_uuid`, `env`,
+    /// `visibility`, `status`, `created_by`) + the T6 SQLite DDL additions
+    /// (`human_addable` INTEGER, `friend_approval` TEXT).
+    async fn bot_config_store() -> DbBotActorConfigStore {
+        let db = LocalSqliteDbPlugin::new().expect("local sqlite");
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_bots (\
+                bot_uuid TEXT NOT NULL, \
+                env TEXT NOT NULL, \
+                visibility TEXT NOT NULL DEFAULT 'public', \
+                human_addable INTEGER NOT NULL DEFAULT 0, \
+                friend_approval TEXT NOT NULL DEFAULT 'auto', \
+                status TEXT NOT NULL DEFAULT 'online', \
+                created_by TEXT, \
+                is_deleted INTEGER NOT NULL DEFAULT 0, \
+                PRIMARY KEY (bot_uuid, env))",
+        ))
+        .await
+        .expect("create bcs_bots");
+        DbBotActorConfigStore::sqlite(Arc::new(db))
+    }
+
+    /// Seed a `bcs_bots` row.
+    async fn seed_bot(
+        store: &DbBotActorConfigStore,
+        bot_uuid: &str,
+        env: &str,
+        visibility: &str,
+        human_addable: bool,
+        friend_approval: &str,
+        status: &str,
+        created_by: Option<&str>,
+    ) {
+        store
+            .execute(
+                "seed_bot",
+                DbStatement::with_params(
+                    "INSERT INTO bcs_bots \
+                     (bot_uuid, env, visibility, human_addable, friend_approval, status, created_by) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    vec![
+                        DbValue::from(bot_uuid),
+                        DbValue::from(env),
+                        DbValue::from(visibility),
+                        DbValue::from(human_addable),
+                        DbValue::from(friend_approval),
+                        DbValue::from(status),
+                        match created_by {
+                            Some(v) => DbValue::from(v),
+                            None => DbValue::Null,
+                        },
+                    ],
+                ),
+            )
+            .await
+            .expect("seed bot");
+    }
+
+    #[tokio::test]
+    async fn bot_actor_config_get_roundtrip() {
+        let store = bot_config_store().await;
+        // Public, human-addable, auto-approval bot owned by user 85020.
+        seed_bot(
+            &store,
+            "20260421_x:85020",
+            "dev",
+            "public",
+            true,
+            "auto",
+            "online",
+            Some("85020"),
+        )
+        .await;
+        let cfg = store
+            .get("20260421_x:85020", "dev")
+            .await
+            .expect("bot exists");
+        assert_eq!(cfg.bot_id, "20260421_x:85020");
+        assert_eq!(cfg.env, "dev");
+        assert_eq!(cfg.visibility, "public");
+        assert!(cfg.human_addable, "human_addable true round-trips from INTEGER 1");
+        assert_eq!(cfg.friend_approval, "auto");
+        assert_eq!(cfg.status, "online");
+        assert_eq!(cfg.created_by.as_deref(), Some("85020"));
+    }
+
+    #[tokio::test]
+    async fn bot_actor_config_missing_returns_none_and_legacy_owner() {
+        let store = bot_config_store().await;
+        // Missing bot -> None (non-fallible).
+        assert!(store.get("nope", "dev").await.is_none());
+        // Different env -> None (PK is bot_uuid + env).
+        seed_bot(&store, "bot_b", "prod", "protected", false, "manual", "hidden", None).await;
+        assert!(store.get("bot_b", "dev").await.is_none());
+        // Same env row reads back; human_addable=false, created_by=None (legacy).
+        let cfg = store.get("bot_b", "prod").await.expect("bot exists in prod");
+        assert!(!cfg.human_addable);
+        assert_eq!(cfg.friend_approval, "manual");
+        assert_eq!(cfg.status, "hidden");
+        assert!(cfg.created_by.is_none(), "legacy bot has no created_by");
     }
 }

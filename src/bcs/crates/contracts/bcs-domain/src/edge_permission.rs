@@ -262,6 +262,33 @@ pub struct AuthzContext {
     pub signature: Option<Vec<u8>>,
 }
 
+/// Bot-level config consumed by connect/admission decisions (spec §3.2).
+///
+/// Read from `bcs_bots` (T12): a narrow projection of the columns
+/// ConnectService (T13) and AdmissionService (T14) need to decide an
+/// add/connect/admit. `visibility` decides who can discover/add;
+/// `human_addable` the human-direction gate; `friend_approval` whether an
+/// add needs manual approval (`auto` vs `manual`); `status` the
+/// collaboration on/off switch (`hidden` ⇒ reject). `created_by` is included
+/// so T13's ownership check can read it here without a second query (NULL
+/// for legacy bots — auto-claim per the ownership rules).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BotActorConfig {
+    pub bot_id: String,
+    pub env: String,
+    /// `public` | `protected` | `private`.
+    pub visibility: String,
+    /// Human-direction add gate (mirrors `bcs_bots.human_addable`).
+    pub human_addable: bool,
+    /// `auto` | `manual` — whether an add needs manual approval.
+    pub friend_approval: String,
+    /// `online` | `hidden` — `hidden` ⇒ admission rejects (spec §4.3).
+    pub status: String,
+    /// Owner of the bot; `None` for legacy bots (auto-claim, spec §3.2).
+    #[serde(default)]
+    pub created_by: Option<String>,
+}
+
 /// Reason code for an admission decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
