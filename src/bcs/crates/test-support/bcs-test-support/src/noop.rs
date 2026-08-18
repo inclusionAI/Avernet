@@ -1998,6 +1998,14 @@ impl ChannelService for NoopChannelService {
         Ok(Vec::new())
     }
 
+    async fn list_conversations_by_session(
+        &self,
+        _bcs_session_id: &str,
+        _channel_type: Option<bcs_domain::ChannelType>,
+    ) -> Result<Vec<bcs_domain::ConversationSessionMap>, ChannelUseCaseError> {
+        Ok(Vec::new())
+    }
+
     async fn set_binding_status(
         &self,
         _id: &str,

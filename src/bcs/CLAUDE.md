@@ -528,6 +528,9 @@ bcs-cli collaborate run workflow.yaml --session <session_id> \
 
 # Fuse contexts
 bcs-cli fuse --group <group_id> --question "如何协调？" --participants bot1,bot2
+
+# Resolve DingTalk conversation IDs from a BCS session ID
+bcs-cli channel conversation-id --session <session_id>
 ```
 
 ## Scenario Testing

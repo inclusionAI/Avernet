@@ -1448,6 +1448,32 @@ impl ChannelService for BcsChannelService {
         self.redact_bindings(bindings)
     }
 
+    async fn list_conversations_by_session(
+        &self,
+        bcs_session_id: &str,
+        channel_type: Option<ChannelType>,
+    ) -> Result<Vec<ConversationSessionMap>, ChannelUseCaseError> {
+        let bcs_session_id = normalize_required(bcs_session_id, "bcs_session_id")?;
+        let channel_type = channel_type
+            .as_deref()
+            .map(|value| normalize_required(value, "channel_type"))
+            .transpose()?;
+        let mappings = self
+            .conversations
+            .list_by_bcs_session(bcs_session_id)
+            .await?;
+        let mut filtered = Vec::with_capacity(mappings.len());
+        for mapping in mappings {
+            let Some(binding) = self.bindings.get(&mapping.binding_id).await? else {
+                continue;
+            };
+            if channel_type.is_none_or(|expected| binding.channel_type == expected) {
+                filtered.push(mapping);
+            }
+        }
+        Ok(filtered)
+    }
+
     async fn set_binding_status(&self, id: &str, active: bool) -> Result<(), ChannelUseCaseError> {
         let _guard = self.binding_admin_lock.lock().await;
         let Some(binding) = self.bindings.get(id).await? else {
@@ -3378,6 +3404,77 @@ mod tests {
         assert_eq!(bindings[0].id, "binding_1");
         assert_eq!(bindings[0].config["client_secret"], "<redacted>");
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_conversations_by_session_filters_channel_type() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_dingtalk",
+                "robot_1",
+                BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        let mut other_binding = active_binding(
+            "binding_other",
+            "other_1",
+            BindingTarget::Group {
+                group_id: "group_1".to_string(),
+            },
+            Visibility::FullTranscript,
+        );
+        other_binding.channel_type = "other".to_string();
+        harness.binding_repo.create(other_binding).await?;
+        for (binding_id, conversation_id) in [
+            ("binding_dingtalk", "ding_conversation"),
+            ("binding_other", "other_conversation"),
+        ] {
+            harness
+                .conversation_repo
+                .upsert(bcs_domain::ConversationSessionMap {
+                    binding_id: binding_id.to_string(),
+                    im_conversation_id: conversation_id.to_string(),
+                    im_conversation_type: "2".to_string(),
+                    session_scope: SessionScope::Conversation,
+                    im_user_id: None,
+                    bcs_session_id: "group_1:session_1".to_string(),
+                    last_active_at: 42,
+                })
+                .await?;
+        }
+
+        let mappings = harness
+            .service
+            .list_conversations_by_session(
+                " group_1:session_1 ",
+                Some(" dingtalk ".to_string()),
+            )
+            .await?;
+
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].binding_id, "binding_dingtalk");
+        assert_eq!(mappings[0].im_conversation_id, "ding_conversation");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_conversations_by_session_rejects_blank_session_id() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+
+        let error = harness
+            .service
+            .list_conversations_by_session("   ", Some("dingtalk".to_string()))
+            .await
+            .expect_err("blank session id must fail");
+
+        assert!(matches!(error, ChannelUseCaseError::InvalidParams(_)));
         Ok(())
     }
 

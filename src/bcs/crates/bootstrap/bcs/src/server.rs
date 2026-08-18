@@ -574,6 +574,17 @@ impl ChannelService for DisabledChannelService {
         Ok(Vec::new())
     }
 
+    async fn list_conversations_by_session(
+        &self,
+        _bcs_session_id: &str,
+        _channel_type: Option<bcs_domain::ChannelType>,
+    ) -> std::result::Result<
+        Vec<bcs_domain::ConversationSessionMap>,
+        bcs_service_api::application::channel::ChannelUseCaseError,
+    > {
+        Ok(Vec::new())
+    }
+
     async fn set_binding_status(
         &self,
         _id: &str,
