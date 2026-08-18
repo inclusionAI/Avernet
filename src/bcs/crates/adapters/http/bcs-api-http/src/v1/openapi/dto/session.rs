@@ -1,6 +1,6 @@
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedCaller, BotParticipantMode, CreateSession, DeliveryType,
-    IdentityPolicy, ParticipantRole, Principal, SessionCaller, SessionKind, SessionStatus,
+    ApplicationError, AuthenticatedCaller, CreateSession, DeliveryType, IdentityPolicy,
+    ParticipantMode, ParticipantRole, Principal, SessionCaller, SessionKind, SessionStatus,
     UpdateSession, select_principal,
 };
 use serde::Deserialize;

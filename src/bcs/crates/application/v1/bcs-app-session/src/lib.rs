@@ -25,11 +25,11 @@ use bcs_service_api::application::v1::{
     message::{ListSessionMessages, SessionMessageService},
     require_authenticated_user, require_human,
     session::{
-        AddSessionParticipant, BotParticipantMode, CollectSession, CompleteSession, CreateSession,
-        CreateSessionOutcome, DeleteSession, DeleteSessionParticipant, GetSession, ListSessions,
-        SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionParticipant,
-        SessionService, SessionStatus as V1SessionStatus, SessionSummary, UncollectSession,
-        UpdateSession, UpdateSessionParticipant,
+        AddSessionParticipant, CollectSession, CompleteSession, CreateSession, CreateSessionOutcome,
+        DeleteSession, DeleteSessionParticipant, GetSession, ListSessions, SessionCollectionResult,
+        SessionCompletionResult, SessionDetail, SessionParticipant, SessionService,
+        SessionStatus as V1SessionStatus, SessionSummary, UncollectSession, UpdateSession,
+        UpdateSessionParticipant,
     },
 };
 use bcs_service_api::port::repo::SessionRepoPort;

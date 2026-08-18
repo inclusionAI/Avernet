@@ -23,9 +23,9 @@ use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
     AddSessionParticipant, AuthenticatedAppIdentity, AuthenticatedBotIdentity, AuthenticatedCaller,
-    AuthenticatedUserIdentity, BotParticipantMode, CollectSession, CompleteSession, CreateSession,
-    DeleteSession, DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions,
-    SessionMessageService, SessionParticipantInput, SessionService,
+    AuthenticatedUserIdentity, CollectSession, CompleteSession, CreateSession, DeleteSession,
+    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, SessionMessageService,
+    SessionParticipantInput, SessionService,
     SessionStatus as V1SessionStatus, UncollectSession, UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
@@ -441,7 +441,7 @@ fn launch_caller(caller: AuthenticatedCaller) -> SessionCaller {
     }
 }
 
-fn participant_input(bot_uuid: &str, _mode: Option<BotParticipantMode>) -> SessionParticipantInput {
+fn participant_input(bot_uuid: &str, _mode: Option<ParticipantMode>) -> SessionParticipantInput {
     SessionParticipantInput {
         bot_uuid: bot_uuid.to_string(),
     }

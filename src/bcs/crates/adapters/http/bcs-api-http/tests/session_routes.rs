@@ -14,8 +14,8 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::application::v1::{
     AddGroupParticipant, AddSessionParticipant, ApplicationError, AuthenticatedAppIdentity,
-    AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, BotParticipantMode,
-    CollectSession, CompleteSession, CreateGroup, CreateSession, CreateSessionOutcome, DeleteGroup,
+    AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, CollectSession,
+    CompleteSession, CreateGroup, CreateSession, CreateSessionOutcome, DeleteGroup,
     DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, GetGroup,
     GetSession, GroupDetail, GroupService, GroupSummary, ListGroups, ListSessionMessages,
     ListSessions, Page, SessionCollectionResult, SessionCompletionResult, SessionDetail,
