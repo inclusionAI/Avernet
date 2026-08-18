@@ -71,7 +71,7 @@ def resolve_engine_for_bot(
     """Resolve the default/data engine for a Bot.
 
     This returns ``bot.active_engine`` and is the default resolver for data
-    ownership: SkillSet.engine_type, active SkillSet queries, MCP/AgentPass
+    ownership: SkillSet.engine_type, active SkillSet queries, MCP/authorization
     scope, and NAS ownership. Runtime/path/provider callers must use
     :func:`resolve_runtime_engine_for_bot` explicitly.
     """
