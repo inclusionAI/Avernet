@@ -2021,7 +2021,17 @@ impl Default for BcsServerState {
         )
         .expect("default channel runtime must initialize");
         let channel_service = channel_runtime.service.clone();
-        let openapi_v1 = openapi_v1.with_channel_service(channel_service.clone());
+        // Only mount the OpenAPI channel surface when the bridge is enabled.
+        // When disabled, `channel_runtime.service` is `DisabledChannelService`
+        // whose set_binding_status/update_binding_config/delete_binding all
+        // return Ok(()) without persisting — mounting it would make PATCH/DELETE
+        // falsely 200 for any binding id. Leaving the slot unset makes the
+        // handlers fail-closed as 500 internal_error instead.
+        let openapi_v1 = if channel_bridge_enabled(&config) {
+            openapi_v1.with_channel_service(channel_service.clone())
+        } else {
+            openapi_v1
+        };
         let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
                 provider_bot_core.clone(),
@@ -3428,7 +3438,17 @@ impl BcsServer {
         )
         .expect("in-memory channel runtime must initialize");
         let channel_service = channel_runtime.service.clone();
-        let openapi_v1 = openapi_v1.with_channel_service(channel_service.clone());
+        // Only mount the OpenAPI channel surface when the bridge is enabled.
+        // When disabled, `channel_runtime.service` is `DisabledChannelService`
+        // whose set_binding_status/update_binding_config/delete_binding all
+        // return Ok(()) without persisting — mounting it would make PATCH/DELETE
+        // falsely 200 for any binding id. Leaving the slot unset makes the
+        // handlers fail-closed as 500 internal_error instead.
+        let openapi_v1 = if channel_bridge_enabled(&config) {
+            openapi_v1.with_channel_service(channel_service.clone())
+        } else {
+            openapi_v1
+        };
         let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
                 provider_bot_core.clone(),
@@ -4055,7 +4075,17 @@ impl BcsServer {
             bot_registry.clone(),
         )?;
         let channel_service = channel_runtime.service.clone();
-        let openapi_v1 = openapi_v1.with_channel_service(channel_service.clone());
+        // Only mount the OpenAPI channel surface when the bridge is enabled.
+        // When disabled, `channel_runtime.service` is `DisabledChannelService`
+        // whose set_binding_status/update_binding_config/delete_binding all
+        // return Ok(()) without persisting — mounting it would make PATCH/DELETE
+        // falsely 200 for any binding id. Leaving the slot unset makes the
+        // handlers fail-closed as 500 internal_error instead.
+        let openapi_v1 = if channel_bridge_enabled(&config) {
+            openapi_v1.with_channel_service(channel_service.clone())
+        } else {
+            openapi_v1
+        };
         register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
         let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
