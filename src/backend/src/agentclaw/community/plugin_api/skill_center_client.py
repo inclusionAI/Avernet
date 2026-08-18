@@ -1,15 +1,7 @@
-"""SkillCenter 开放 API 客户端协议。
-
-对接 SkillCenter 的核心接口：
-- POST /api/v1/skills/upload/publish   （上传发布）
-- GET  /api/v1/skills/upload/status/{skillCode} （查询状态）
-- GET  /api/v1/skills/{skillCode}/versions      （版本列表）
-- GET  /api/v1/skills/market/search             （市场搜索）
-- GET  /api/v1/skills/market/tags               （市场标签）
-- GET  /api/v1/skills/{skillCode}/versions/{ver}/download （版本下载）
-"""
+"""Legacy SkillCenter Client and the Q5 SkillCenter Gateway Plugin APIs."""
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.plugin_api.base import Plugin
@@ -134,4 +126,72 @@ class SkillCenterClient(Plugin, Protocol):
         Returns:
             SkillCenter 响应 dict，含 data.path / data.content 等。
         """
+        ...
+
+
+class SkillCenterGatewayErrorCode(str, Enum):
+    """Stable errors a Q5 gateway exposes without leaking an SC SDK or HTTP."""
+
+    BUSINESS = "business_error"
+    TIMEOUT = "timeout"
+    UNKNOWN_RESPONSE = "unknown_response"
+    PROTOCOL = "protocol_error"
+    UNAVAILABLE = "unavailable"
+
+
+class SkillCenterGatewayError(RuntimeError):
+    """Normalized Q5 gateway error; retry and Attempt decisions stay upstream."""
+
+    def __init__(self, code: SkillCenterGatewayErrorCode, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@runtime_checkable
+class SkillCenterGateway(Plugin, Protocol):
+    """Team-scoped Q5 API for the new Space/Center lifecycle.
+
+    Each operation carrying a Skill identity requires its resolved SC ``team_id``
+    as a request argument. This Protocol never selects a default Team and never
+    retries a POST; its caller owns Attempt and ``RESULT_UNKNOWN`` handling.
+    """
+
+    def create_team(self, *, name: str, request_id: str) -> dict:
+        """Create the SC Team for one TC Space mapping request."""
+        ...
+
+    def close_team(self, team_id: str) -> dict:
+        """Close a previously mapped SC Team."""
+        ...
+
+    def upload_and_publish(self, payload: dict, *, team_id: str) -> dict:
+        """Submit exactly one publish POST; this method never retries it."""
+        ...
+
+    def query_publish_status(self, skill_code: str, *, team_id: str) -> dict:
+        """Read the status for one immutable SC skill identity."""
+        ...
+
+    def get_skill_detail(self, skill_code: str, *, team_id: str) -> dict:
+        """Read metadata by immutable ``skillCode``."""
+        ...
+
+    def list_versions(self, skill_code: str, *, team_id: str) -> list[dict]:
+        """List versions for one immutable SC skill identity."""
+        ...
+
+    def get_download_url(
+        self, skill_code: str, version_number: str, *, team_id: str
+    ) -> dict:
+        """Resolve one exact ``skillCode + versionNumber`` download."""
+        ...
+
+    def search_market_skills(
+        self, keyword: str = "", tag: str = "", page: int = 1, page_size: int = 20
+    ) -> dict:
+        """Search the public market; it is not Space-Team scoped."""
+        ...
+
+    def get_market_tags(self) -> list[dict]:
+        """List public-market tags."""
         ...

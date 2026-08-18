@@ -15,7 +15,12 @@ from agentclaw.community.plugin_api.skill_center_client import (
 )
 from agentclaw.community.plugins.community.skill_center_client import (
     CommunitySkillCenterClient,
+    CommunitySkillCenterGateway,
     SkillCenterUnsupportedError,
+)
+from agentclaw.community.plugin_api.skill_center_client import (
+    SkillCenterGatewayError,
+    SkillCenterGatewayErrorCode,
 )
 
 
@@ -76,3 +81,10 @@ def test_get_file_content_raises():
 def test_delete_skill_raises():
     with pytest.raises(SkillCenterUnsupportedError):
         _client().delete_skill("s1")
+
+
+def test_q5_gateway_is_explicitly_unavailable_in_the_community_build():
+    with pytest.raises(SkillCenterGatewayError) as raised:
+        CommunitySkillCenterGateway().create_team(name="Risk", request_id="request-1")
+
+    assert raised.value.code is SkillCenterGatewayErrorCode.UNAVAILABLE

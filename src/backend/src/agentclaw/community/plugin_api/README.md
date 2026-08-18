@@ -7,7 +7,7 @@ Plugin Protocol declarations (the kernel's outbound interface to swappable capab
 ```yaml
 purpose: "Plugin Protocol declarations (the kernel's outbound interface to swappable capabilities)."
 provides:
-  - "27 plugin Protocol classes (AuthPlugin, CachePlugin, DatabasePlugin, …)"
+  - "Plugin Protocol classes including SkillCenterClient and the team-scoped SkillCenterGateway"
   - "Plugin marker"
   - "@plugin_impl decorator + Mode/Flavor enums"
   - "IMPL_REGISTRY"
@@ -25,4 +25,4 @@ internal_dependencies:
 
 ### Change impact
 
-Changing a Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
+Changing a Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). The Q5 SkillCenterGateway is intentionally separate from the Legacy SkillCenterClient: its consumers must pass a request-level SC Team and must not inherit legacy defaults. Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
