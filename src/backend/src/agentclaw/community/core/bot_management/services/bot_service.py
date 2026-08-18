@@ -1246,6 +1246,7 @@ class BotService:
         template_type: Optional[str] = None,
         template_config: Optional[Dict[str, Any]] = None,
         cookie: Optional[str] = None,
+        space_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new bot with async device allocation.
@@ -1383,6 +1384,7 @@ class BotService:
                 "ext": ext,
                 "bot_type": resolved_bot_type,
                 "template_type": template_type,  # Template type (e.g., "applicationCoding")
+                "space_id": space_id,  # Business-space ownership (PRD §0.1): NULL → personal fallback
             }
 
             bot_record = self._repository.insert(bot_data)

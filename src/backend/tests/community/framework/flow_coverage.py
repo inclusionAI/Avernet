@@ -138,6 +138,11 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "engine_runtime": _ENGINE_RUNTIME_EXEMPT_REASON,
     # antcode relocated to agentclaw/corp/core (B11 T3.3) — no longer a core module.
     "bot_dormant": _EXEMPT_REASON,
+    "bot_inventory": (
+        "New public inventory/local Bot aggregation module. Covered by HTTP endpoint, "
+        "service conformance, and architecture tests in this change; drain when "
+        "singlebox has a signed /openapi/v1 principal flow for the new routes."
+    ),
     "approval": _EXEMPT_REASON,
     "auth": _EXEMPT_REASON,
     "bot_public": _EXEMPT_REASON,

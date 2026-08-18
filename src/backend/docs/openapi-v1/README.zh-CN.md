@@ -144,7 +144,7 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 | 组 | 端点数 | 负责人 | 优先级 | 路由 | 状态 |
 |---|---|---|---|---|---|
 | sessions | 7 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **已实现 —— PR #630**；运维者 + 阶段 2026-08-09 |
-| engine（只读） | 3 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **已实现 —— PR #630** |
+| engine（读写） | 4 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **已实现 —— PR #630**；2026-08-17 新增进程级重启 |
 | connection | 1 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **已实现 —— PR #630** |
 | approvals | 3 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **已实现 —— PR #630** |
 | models | 2 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/models/` | ✅ **已实现 —— PR #630** |
@@ -157,10 +157,12 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 > **WebSocket 不包装**：新的 `…/connection` 端点返回一条完整的 socket URL（凭据在其中），
 > 由调用方自己建连。
 >
-> `engine/switch` 与 `engine/restart` 刻意排除 —— 包装 `switch` 等于给 #494 在
-> `PUT /openapi/v1/bots/{bot_id}` 上的 `engine` 不可变裁定开后门，包装 `restart`
-> 会让同一个 bot 有两个重启动词。`session-favorites` 与 `/api/openclaw` HTTP
-> 三件套是**延后，不是取消**（两者以后再加都是增量）。理由见 `engine-surface.zh-CN.md`。
+> `engine/switch` 仍刻意排除：包装它等于给 #494 在
+> `PUT /openapi/v1/bots/{bot_id}` 上的 `engine` 不可变裁定开后门。进程级重启现在通过
+> `POST /openapi/v1/bots/{bot_id}/engine/restart` 暴露，它转发 engine daemon 的重启，
+> 与重新制备整个容器的 Bot 级 `/restart` 语义不同。该操作在 bot-first 寻址之后才新增，
+> 因而没有 component-first 的退役别名。`session-favorites` 与 `/api/openclaw` HTTP
+> 三件套仍是**延后，不是取消**。
 >
 > **routines 是 Track C 的样板，而不是 Track B 的。** 后端 `/api/cron` →
 > `CronRelayService` → `DeviceAdapterTransport` → engine 一直就是生产上的形状，
@@ -644,8 +646,9 @@ id 恰好等于该段上的某个字面量，它在该地址上就不可达。�
 
 <!-- reserved-component-names -->
 ```text
-approvals  authorized  ceiling  check-name  connection  engine  identity
-loadtest  logs  mcp  models  resources  routines  sessions  skills
+approvals  authorized  all  ceiling  check-name  connection  engine  identity
+loadtest  local  logs  mcp  models  resources  routines  sessions
+skills
 ```
 
 其中九个 —— `approvals`、`connection`、`engine`、`identity`、`models`、`resources`、
@@ -1009,6 +1012,13 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
+- **2026-08-17** —— **TC Bot 工作台与本地工作流。** 新增聚合的 `/bots/all`
+  清单、个人本地设备/创建/读取/重启/删除/打开目录工作流、休眠 Bot 激活、冷启动数据初始化，
+  以及 engine 进程级重启。local 与聚合清单在 Gateway 和后端 admission 两层都保持
+  human-only；其余 Bot 面只允许应用在实时授权范围内访问。engine restart 只发布 bot-first
+  地址，因为此前没有可供退役的公共路径。本次生成的 Gateway `bots.openapi.json` 是该公共面的
+  发布产物，必须原样同步到独立 OCB Gateway。
+
 - **2026-08-15** —— **Agent 在前的寻址。** 每个带 Agent 作用域的操作都迁到
   `/openapi/v1/bots/{bot_id}/<component>/…`，推翻了 2026-08-03 的组件在前规则。原先九个
   在查询串里取 `bot_id`、一个在请求体里取的操作，现在都从路径上取 —— 它们的地址上本来就
@@ -1236,7 +1246,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   之前 —— 这让那些路由文件无法自述地址，也让共享 base 之下再容纳第二个 owner 变得不可能
   （BCS 从另一侧撞上同一冲突，并以同样方式解决）。`skills` 另外获得一段字面的 `catalog`，
   否则它的两类资源都会去争 `/openapi/v1/bots/{bot_id}/skills/{…}`。`channels` 是删除而非搁置。
-  已发布路径 41 条（此前 43 条）。handler、schema、状态码、鉴权规则与租户隔离规则均未改变
+  当时已发布路径 41 条（此前 43 条）。handler、schema、状态码、鉴权规则与租户隔离规则均未改变
   —— 只改地址，且**不提供兼容别名**：该界面尚无可达的外部调用方，因此没有需要保留的契约。
   网关钉住的 `bots.openapi.json` 经真实兼容性闸门（`--allow-breaking`）重新生成；它自
   Track C 起就已过期，只有 32 条路径，而后端发布的是 43 条。新增测试

@@ -73,6 +73,10 @@ engine: APIRouter = relocate(
     engine_router,
     legacy_router("/openapi/v1/bots/engine", "engine"),
     bot_first_to_component_first("engine"),
+    # Restart was added after bot-first addressing. It never had a
+    # component-first public address, so manufacturing a deprecated alias would
+    # expand rather than preserve the compatibility surface.
+    skip=lambda method, path: method == "POST" and path.endswith("/engine/restart"),
 )
 
 models: APIRouter = relocate(

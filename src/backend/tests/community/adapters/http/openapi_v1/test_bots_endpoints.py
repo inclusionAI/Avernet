@@ -210,7 +210,23 @@ def test_status(client):
 
 def test_passport(client):
     data = _ok(client.get("/openapi/v1/bots/b1/passport"))
-    assert data == {"bot_id": "b1", "passport_id": "ac-1"}
+    # passport_id (agent_code/agent_id) is the existence signal; the license
+    # fields stay nullable when the PassportPlugin did not return them.
+    assert data["bot_id"] == "b1"
+    assert data["passport_id"] == "ac-1"
+    assert data["expire_at"] is None
+    assert data["certificate_url"] is None
+
+
+def test_passport_forwards_license_fields(client, passport):
+    passport.query_agent_passport.return_value = {
+        "agent_code": "ac-1",
+        "expire_at": "2027-01-01T00:00:00Z",
+        "certificate_url": "https://cert/ac-1",
+    }
+    data = _ok(client.get("/openapi/v1/bots/b1/passport"))
+    assert data["expire_at"] == "2027-01-01T00:00:00Z"
+    assert data["certificate_url"] == "https://cert/ac-1"
 
 
 def test_passport_missing_is_404(client, passport):
@@ -281,10 +297,8 @@ def test_mutating_not_found_masked(client, svc):
 
 # ----- create + auth-status (Task 8) ---------------------------------------
 
-# openclaw is in the default SUPPORTED_ENGINE_TYPES registry; teclaw is NOT
-# (it is only available where ENGINE_TYPES is configured to include it), so the
-# create path's engine check would reject it here. Tests that specifically need
-# the teclaw/ANDC pairing patch the registry.
+# openclaw and teclaw are both in the default SUPPORTED_ENGINE_TYPES registry.
+# Tests that need a narrower registry still patch _get_engine_types explicitly.
 _CREATE_BODY = {
     "bot_name": "NewBot", "bot_desc": "d", "engine": "openclaw",
     "cluster_name": "ACRA", "bot_type": "personal",
@@ -718,7 +732,11 @@ def test_passport_accepts_the_local_plugin_identifier(client, passport):
         "agent_id": "b1", "agent_code": None, "mcps": [],
     }
     data = _ok(client.get("/openapi/v1/bots/b1/passport"))
-    assert data == {"bot_id": "b1", "passport_id": "b1"}
+    # ``agent_id`` sets passport_id; license fields stay null when absent.
+    assert data["bot_id"] == "b1"
+    assert data["passport_id"] == "b1"
+    assert data["expire_at"] is None
+    assert data["certificate_url"] is None
 
 
 def test_passport_prefers_agent_code_when_both_present(client, passport):
