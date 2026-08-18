@@ -350,21 +350,27 @@ user_config:
     # Each domain may also declare:
     #
     #   match: <path pattern>
-    #     Which paths this domain claims: literal segments, then `**`. Unset
-    #     means `<base_path>/<domain name>/**` — the leading-segment routing
-    #     every domain had before patterns, so a domain that says nothing keeps
-    #     its address exactly. Declare one to put a domain BENEATH another, on a
-    #     different upstream.
+    #     Which paths this domain claims: literal segments, optionally
+    #     continued by `{param}` segments (each claims ONE segment, whatever it
+    #     holds — literals may follow it), then `**`. Unset means
+    #     `<base_path>/<domain name>/**` — the leading-segment routing every
+    #     domain had before patterns, so a domain that says nothing keeps its
+    #     address exactly. Declare one to put a domain BENEATH another, on a
+    #     different upstream — `/openapi/v1/bots/{bot_id}/shell/**` claims the
+    #     shell subtree of every bot while `/openapi/v1/bots/**` keeps the rest.
     #
     #     Resolution matches first and ranks second: every domain claiming the
     #     path AND answering the request's plane is a candidate, and the most
-    #     specific (most literal segments) wins. The plane filters the
-    #     candidates, so claiming a prefix for one plane leaves the other
-    #     plane's resolution of the same path untouched.
+    #     specific (most literal segments, parameters breaking ties) wins. The
+    #     plane filters the candidates, so claiming a prefix for one plane
+    #     leaves the other plane's resolution of the same path untouched.
     #
-    #     Startup REFUSES a pattern that does not pin `base_path` plus at least
-    #     one more literal segment. `match: /**` is an open proxy into that
-    #     domain's upstream, and this is the check that makes it untypable.
+    #     Startup REFUSES a pattern whose leading LITERAL segments do not pin
+    #     `base_path` plus at least one more literal segment — a parameter pins
+    #     nothing, so it may only appear after that. `match: /**` is an open
+    #     proxy into that domain's upstream, and this is the check that makes
+    #     it untypable. It also refuses two patterns that claim a common path
+    #     with equal specificity, where the winner would be undefined.
     #
     #   protocols: [http] | [websocket] | [http, websocket]
     #     Which plane serves it. Unset means `[http]`, so every domain below

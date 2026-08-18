@@ -92,6 +92,11 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     # bot-first change, which is why it was not in this set before.
     ("get", "/openapi/v1/bots/{bot_id}/skills"),
     ("post", "/openapi/v1/bots/{bot_id}/skills"),
+    # The product chat reads address a bot that may be shared with the acting
+    # user, so they take the owner half of ``(owner, bot_id)`` for the same
+    # reason and with the same default — the caller's own bot.
+    ("get", "/openapi/v1/bots/{bot_id}/chats"),
+    ("get", "/openapi/v1/bots/{bot_id}/chats/{trace_id}"),
 }
 
 
@@ -285,8 +290,9 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
     assert sorted(carrying_owner) == sorted(
         set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE
     ), (
-        "owner_id belongs to the engine-runtime operations, the three "
-        "authorization operations, and to nothing else by accident"
+        "owner_id belongs to the engine-runtime operations and the "
+        "operations declared in _OWNER_ADDRESSED_ELSEWHERE, and to nothing "
+        "else by accident"
     )
 
 
