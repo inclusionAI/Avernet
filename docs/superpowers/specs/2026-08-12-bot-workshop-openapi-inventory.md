@@ -85,8 +85,8 @@
 | 32 | models | 模型列表 | `GET /openapi/v1/bots/models/{bot_id}` | 已有 | 已完成 | — | — |
 | 33 | models | 模型详情 | `GET /openapi/v1/bots/models/{bot_id}/{model_id}` | 已有 | 已完成 | — | `{model_id}` 实为 path 参数 |
 | 34 | identity | MD / 身份文件列表 | `GET /openapi/v1/bots/identity/{bot_id}` | 已有 | 已完成 | — | 「MD 管理」入口 |
-| 35 | identity | 读单个 MD | `GET /openapi/v1/bots/identity/{bot_id}/{file_type}` | 升级 | 待升级 | P2 | `file_type` 是否覆盖 13 个 MD 待核；未覆盖加法补枚举 |
-| 36 | identity | 写单个 MD | `PUT /openapi/v1/bots/identity/{bot_id}/{file_type}` | 升级 | 待升级 | P2 | 同上 |
+| 35 | identity | 读单个 MD | `GET /openapi/v1/bots/identity/{bot_id}/{file_type}` | 已有 | 已完成 | — | 2026-08-18 复核：`IdentityFileType` 与 Core `VALID_IDENTITY_FILES` 一致，已覆盖 16 种文件；遗留是 Service Bot 协作者访问语义，不是枚举缺失 |
+| 36 | identity | 写单个 MD | `PUT /openapi/v1/bots/identity/{bot_id}/{file_type}` | 已有 | 已完成 | — | 同 #35；当前 admission 仍为 Owner-only，是否允许协作者读写需由 Collaboration/Business Space 契约逐项确认 |
 | 37 | bot_logs | 对话 trace 检索 | `GET /openapi/v1/bots/logs/traces` | 已有 | 已完成 | — | **≠运行日志抽屉**；`user_id` 此处是「被查人」非「调用者」 |
 | 38 | bot_logs | trace 详情 | `GET /openapi/v1/bots/logs/traces/{trace_id}` | 已有 | 已完成 | — | — |
 | 39 | bot_logs | 会话 trace | `GET /openapi/v1/bots/logs/sessions/{session_key}/traces` | 已有 | 已完成 | — | — |
@@ -143,19 +143,19 @@
 | 90 | lifecycle | 发布 / 下线审批开关 | `GET /PUT /openapi/v1/bots/{bot_id}/lifecycle/approval` | 新增 | 已开发 | P2 | Owner 管理开关；开启后非 Owner 的上线/下线进入审批 |
 | 91 | containers | 实例列表 | `GET /openapi/v1/bots/containers/{bot_id}` | 新增 | 未开工 | P0 | `summary{total,healthy,abnormal}` + `instances[id,node,status]`；cpu/mem 留空待 BaaS |
 | 92 | containers | 单实例重启 | `POST /openapi/v1/bots/containers/{bot_id}/{instance_id}/restart` | 新增 | 未开工 | P0 | 仅异常态 |
-| 93 | containers | 单实例日志 | `GET /openapi/v1/bots/containers/{bot_id}/{instance_id}/logs` | 新增 | 未开工 | P0 | — |
-| 94 | evaluation | 创建评测任务 | `POST /openapi/v1/bots/evaluation/{bot_id}` | 新增 | 未开工 | P1 | 返回评测页 URL/token；仅服务预发/运行态；委托 `quality` |
+| 93 | containers | 单实例日志 | `GET /openapi/v1/bots/containers/{bot_id}/{instance_id}/logs` | 新增 | 未开工 | P0 | Runtime/容器日志领域归日志/Observability 团队；B 线只配合 Bot/Stage/instance 上下文和工坊接入 |
+| 94 | evaluation | 创建评测任务 | `POST /openapi/v1/bots/evaluation/{bot_id}` | 新增 | 未开工 | P1 | Quality/任务护航相关同学负责公开契约与实现；A/B 线只配合 Bot 身份、权限和工坊联调 |
 | 95 | edit-lock | 获取 / 抢占编辑锁 | `POST /openapi/v1/bots/{bot_id}/edit-lock`(+`/steal`) | 新增 | 已开发 | P1 | 复用 `CollaboratorLockService.acquire/steal`；仅“有协作者且有草稿”需要锁，Bot Member+ 可抢占 |
 | 96 | edit-lock | 释放编辑锁 | `DELETE /openapi/v1/bots/{bot_id}/edit-lock` | 新增 | 已开发 | P1 | 复用 `CollaboratorLockService.release_lock` |
 | 97 | edit-lock | 编辑锁信息 | `GET /openapi/v1/bots/{bot_id}/edit-lock` | 新增 | 已开发 | P1 | 复用 `CollaboratorLockService.get_lock_info` |
 | 98 | editors | 协作者管理 | `GET/POST/PATCH/DELETE /openapi/v1/bots/editors/{bot_id}`(+`/{member_id}`) | 新增 | 后续批次 | P1 | 本期只交付 edit-lock；独立协作者 CRUD 待空间成员模型和统一协作契约完成后实施 |
-| 99 | skill-sets | 能力集分组 + 引用型 Skill + per-bot MCP | `GET/POST/PUT/DELETE /openapi/v1/bots/skill-sets/{bot_id}`(+`/{set_id}/skills`、`/mcps`) | 新增 | 未开工 | P2 | 引用型 Skill（市场/工坊，引用后只读）+ per-bot MCP 绑定（带 caller 字段） |
-| 100 | files | 容器目录树 | `GET /openapi/v1/bots/files/{bot_id}` | 新增 | 未开工 | P2 | 委托 `service_bot/router_build.py:read-only/tree`；本地 Bot 只读；≠`/resources` |
-| 101 | flow | 任务护航 DAG/YAML 编排 | `GET/PUT /openapi/v1/bots/flow/{bot_id}` | 新增 | 未开工 | P2 | 引擎 = BCS State Machine；P2 前需 BCS owner 进 openapi 或允许直调 |
-| 102 | flow | 工作流执行历史 | `GET /openapi/v1/bots/flow/{bot_id}/runs` | 新增 | 未开工 | P2 | = DEMO §0.4 日志分析 |
-| 103 | channels | 钉钉机器人配置 CRUD | `GET/POST/PUT/DELETE /openapi/v1/bots/channels/{bot_id}` | 新增 | 未开工 | P2 | 现有 `channels/` 目录零路由 |
-| 104 | nodes | 节点 | `GET /openapi/v1/bots/nodes/{bot_id}` | 新增 | 未开工 | P2 | 委托 engine `/api/nodes`；字段待产品 |
-| 105 | render-screens | 副屏 | `GET /openapi/v1/bots/render-screens/{bot_id}` | 新增 | 未开工 | P2 | 委托 `/api/bot-render-screens`；字段待产品 |
+| 99 | skill-sets | 能力集分组 + 引用型 Skill + per-bot MCP | `GET/POST/PUT/DELETE /openapi/v1/bots/skill-sets/{bot_id}`(+`/{set_id}/skills`、`/mcps`) | 新增 | 未开工 | P2 | Skills 相关同学负责领域逻辑和公开契约；A/B 线不实现，只配合 Bot 上下文与联调 |
+| ~~100~~ | ~~files~~ | ~~容器目录树~~ | ~~`GET /openapi/v1/bots/files/{bot_id}`~~ | ~~新增~~ | **已并入 `/resources`**(2026-08-18 复核) | — | 不再单开 `/files` 接口;统一走 `/openapi/v1/bots/{bot_id}/resources`:`ResourceFileService` facade 按 `bot_type` 分支(personal/desktop→workspace file tree;service→`service_bot/router_build.py:read-only/tree`);service 侧写操作经 `read_only_rules`(`ac_bot_publish.ext.read_only_rules`)+ 全路径只读 **403 fail-closed**;内部 `/api/service-bot/read-only/tree` 作 legacy 保留。详见 `2026-08-18-bot-workshop-integration-matrix.md` §3.1.1 / §6.7 |
+| 101 | flow | 任务护航 DAG/YAML 编排 | `GET/PUT /openapi/v1/bots/flow/{bot_id}` | 新增 | 未开工 | P2 | 任务护航团队牵头，BCS 提供 State Machine 正式 Service API/OpenAPI Contract；不得让工坊直调内部 `/api` |
+| 102 | flow | 工作流执行历史 | `GET /openapi/v1/bots/flow/{bot_id}/runs` | 新增 | 未开工 | P2 | 同 #101；任务护航团队负责运行语义，BCS 提供状态机契约，A/B 线仅配合上下文和联调 |
+| 103 | channels | 渠道配置 CRUD | `GET/POST/PUT/DELETE /openapi/v1/bots/channels/{bot_id}` | 新增 | 未开工 | P2 | 内部 `ChannelServiceProtocol` 与 `/api/channels` CRUD 已有；公开面缺失，且需先收敛 tenant/owner/bot guard |
+| 104 | nodes | 节点 | `GET /openapi/v1/bots/nodes/{bot_id}` | 新增 | 未开工 | P2 | Engine 内部 `GET /api/nodes` 与 capability 已有；公开字段 Contract/relay 尚缺 |
+| 105 | render-screens | 副屏 | `GET /openapi/v1/bots/render-screens/{bot_id}` | 新增 | 未开工 | P2 | 内部 `RenderScreenServiceProtocol` 与 `/api/bot-render-screens` CRUD 已有；公开读/写范围和鉴权 Contract 尚缺 |
 | 106 | spaces | 当前用户空间列表（切换器） | `GET /openapi/v1/spaces` | 新增 | 未开工 | P3 | `SpaceScopeProtocol` prod；工坊只 own list + 迁移；**唯一不带 `/bots` 中段** |
 | 107 | migrate | 个人↔团队迁移 | `POST /openapi/v1/bots/migrate/{bot_id}` | 新增 | 未开工 | P3 | body `{target_space}`；校验编辑者是否目标空间成员，非成员移除 |
 
@@ -170,23 +170,23 @@
 | **表格条目数** | 107 | #1–#107；包含 #14 schema 和已删除的 #68/#69 |
 | **有效条目数** | 105 | 排除已删除 #68/#69；仍包含 #14 schema |
 | **有效 endpoint rows** | 104 | 有效条目再排除 #14 schema；多 Method/子路径分组仍按一行计，本文不混算 HTTP operation 数 |
-| 按归类 · 已有 | 62 | 包含 #14 schema；若只算 endpoint rows 则为 61 |
-| 按归类 · 升级 | 5 | #1 create、#11 passport、#35/#36 identity、#67 统一列表接入 service |
+| 按归类 · 已有 | 64 | #35/#36 的 16 种 Identity 文件已于 2026-08-18 复核完成；包含 #14 schema，若只算 endpoint rows 则为 63 |
+| 按归类 · 升级 | 3 | #1 create、#11 passport、#67 统一列表接入 service |
 | 按归类 · 新增 | 38 | #70–107；已删除 #68/#69 不计 |
-| 按完成 · 已完成 | 62 | 存量 60 + #2/#14 ABC 回退；包含 #14 schema |
+| 按完成 · 已完成 | 64 | 原统计 62 + 已关闭的 #35/#36 Identity；包含 #14 schema |
 | 按完成 · 已开发 | 24 | A 线 15 项 + lifecycle 6(#85–90) + edit-lock 3(#95–97) |
 | 按完成 · 已删除 | 2 | ~~#68~~ 单卡片 + ~~#69~~ actions |
-| 按完成 · 待升级 | 2 | #35/#36 identity `file_type` 13 MD 待核 P2 |
+| 按完成 · 待升级 | 0 | #35/#36 已复核关闭；当前遗留为协作者权限语义，不是 schema 升级 |
 | 按完成 · 已设计未建 | 4 | diagnostics 3(#79/#81/#82) + editors 1(B线) |
 | 按完成 · 未开工 | 13 | containers/evaluation/skill-sets/files/flow/channels/nodes/render-screens/spaces/migrate 等 |
 | 按阶段 · P0 | 19 | #1/#11/#67/#70–80/#83–84/#91–93；已删除 #68/#69 不计 |
 | 按阶段 · P1 | 10 | #85–89/#94–98 |
-| 按阶段 · P2 | 12 | #35–36/#81–82/#90/#99–105 |
+| 按阶段 · P2 | 10 | #81–82/#90/#99–105；#35/#36 已关闭，不再计入排期 |
 | 按阶段 · P3 | 2 | #106–107 |
 
 **A/B 线归属口径（2026-08-13 修订）**：
 - **A 线（lucas）** = 个人云端 Bot + 本地 Bot + 壳层(`/all`) + 空间消费。**已开发 15 项**（ABC 回退后 #2/#14 为存量已完成，#68/#69 已删；#84 一行包含 trigger + status 两个 operation）。diagnostics 3 项（#79/#81/#82）已移交其他团队负责，A 线仅维护契约对账与进度跟进，不再承担实现；其中 #79 按指示降低优先级，#81/#82 为 P2 且不阻塞当前联调。#84 的 IAM 凭证传递与安全状态查询已闭环，剩余仅为真实 IAM/Engine/下游 trigger→poll E2E 验证。
-- **B 线（joseph）** = service Bot 生命周期 + 容器/评测 + 编辑页内核(skill-sets/files/flow/channels/nodes/render-screens) + 空间/迁移 + 协作(edit-lock/editors #95–98)。已完成 service Bot 生命周期、edit-lock 和 `/bots/all` service 多版本卡片接入；editors 及其他 B 线项目按各自排期继续。
+- **B 线（joseph）** = service Bot 生命周期 + Containers summary/restart + 编辑页公开接入（container files/channels/nodes/render-screens）+ 空间/迁移 + 协作(edit-lock/editors #95–98)。已完成 service Bot 生命周期、edit-lock 和 `/bots/all` service 多版本卡片接入；editors 及其他 B 线接入项按各自排期继续。Runtime/容器日志、Evaluation、Health/任务护航、Flow、Skill sets/引用型 Skill/per-bot MCP 的领域逻辑和公开契约由对应团队或同学负责，A/B 线只配合身份上下文和联调。
 
 ---
 
@@ -197,15 +197,15 @@
 | `GET /openapi/v1/bots/{bot_id}/status` | 是就绪**布尔**（PENDING/ACTIVE/FAILED），**非健康分** | `GET /openapi/v1/bots/diagnostics/{bot_id}/health` |
 | `POST /openapi/v1/bots/{bot_id}/restart` | 重启**进程**且拒 desktop | `POST /openapi/v1/bots/{bot_id}/engine/restart`（≠switch-engine） |
 | `GET /openapi/v1/bots/logs/*` | 对话 **trace** | `GET /openapi/v1/bots/diagnostics/{bot_id}/runtime-logs`（运行日志抽屉） |
-| `GET /openapi/v1/bots/resources/*` | **资源库** CRUD | `GET /openapi/v1/bots/files/{bot_id}`（容器目录树） |
-| `GET /openapi/v1/bots/identity/{bot_id}/{file_type}` | `file_type` 覆盖 13 个 MD **待核** | 加法补枚举（同路径） |
+| `GET /openapi/v1/bots/resources/*` | **资源库** CRUD;**本期起也承载容器/沙箱只读目录树**(service bot 经 `read_only_rules` + 写 403 fail-closed) | 不再单独建设 `/files `(2026-08-18 复核,详见 matrix §3.1.1 / §6.7) |
+| `GET /openapi/v1/bots/identity/{bot_id}/{file_type}` | `file_type` 已覆盖 16 种 Identity 文件；**不是待补枚举** | 协作者是否可读写仍需 Collaboration/Business Space 契约确认（当前 Owner-only） |
 | `DELETE /openapi/v1/bots/{bot_id}` | **拒 desktop + service** | 本地走 `DELETE /openapi/v1/bots/{bot_id}/local`；服务走 `POST /openapi/v1/bots/{bot_id}/lifecycle/offline` |
 
 ---
 
 ## 4. P2 闸门（外部确认，不阻塞 P0/P1）
 
-- **任务护航 flow**（#101/#102）：引擎 = BCS State Machine（owner = BCS），P2 开工前需 BCS 把 `/state-machine-runs/*` 加进 openapi 或允许工坊直调内部（系分 §10.11-1）。
+- **任务护航 flow**（#101/#102）：任务护航团队牵头，BCS 提供 State Machine 能力；开工前必须形成正式 Service API/OpenAPI Contract，不允许工坊绕过边界直调内部 `/api`。
 
 ## 5. 已关闭决议（系分 §10.11，落 `combo_policy`）
 

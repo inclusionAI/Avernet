@@ -55,10 +55,16 @@ Bot 工坊会消费多个独立领域的公开能力，包括：
 /openapi/v1/bots/{bot_id}/channels
 /openapi/v1/bots/{bot_id}/evaluations
 /openapi/v1/bots/{bot_id}/render-screens
-/openapi/v1/bots/{bot_id}/files
 /openapi/v1/bots/{bot_id}/skill-sets
 /openapi/v1/bots/{bot_id}/nodes
 ```
+
+> **不再单独新增 `/openapi/v1/bots/{bot_id}/files` 接口**。容器/沙箱目录树的需求统一并入
+> `/openapi/v1/bots/{bot_id}/resources` 模块:`ResourceFileService` 作为 facade,按
+> `bot_type` 在内部 选择真源(personal/desktop 走 workspace file tree;service bot 走
+> publish-sandbox `read-only/tree`);写操作经 `read_only_rules`(来自
+> `ac_bot_publish.ext.read_only_rules`)与 service-bot 全路径只读策略后 **403 fail-closed**
+> 拒绝。详见 §3.1.1 与 §6.7。
 
 如果资源本身有独立身份和生命周期，应优先采用独立领域路径，例如：
 
@@ -171,6 +177,92 @@ Flow 若用于任务护航，按本次分工交由任务护航团队牵头、BCS
 
 不能把这四种计数混为一个“接口数”。
 
+### 3.1 Bot 工坊二级页面端到端对账
+
+本节按“从工坊列表进入 Bot 详情/编辑页后，页面实际需要什么”重新核对，
+而不是按仓库中是否出现相似名词判断。结论是：**二级页面 OpenAPI 尚未齐备**。
+已有能力主要覆盖 Bot 基础信息、Engine、调试会话、模型、审批、Service
+lifecycle 和 edit-lock；编辑页内核及运行治理仍有整块缺口。
+
+判定口径：
+
+- `INTEGRATED`：Backend 公开 Router、admission、Avernet Gateway 路由/鉴权、
+  pinned schema 和上游 Service API 均已具备。
+- `OWNER_ONLY`：公开接口存在，但当前只能按 Owner 自有 Bot 使用，不能直接认定
+  Service Bot 协作者的二级页也可用。
+- `SEMANTIC_MISMATCH`：存在近似公开接口，但资源含义不同，不能替代页面需求。
+- `DOMAIN_EXISTS`：只有内部 `/api`、Core 或 Protocol；尚无工坊公开 OpenAPI。
+- `MISSING`：公开 Adapter、admission、Gateway/schema 均缺失，并可能还缺稳定上游 Contract。
+
+#### 3.1.1 已有或可复用能力
+
+| 二级页区域 | 当前公开能力 | admission / 协作者语义 | Gateway / schema | 结论 |
+|---|---|---|---|---|
+| Bot 基础信息、改名、描述、状态、Passport | `GET/PUT/DELETE /openapi/v1/bots/{bot_id}`、`/status`、`/passport` | `GRANT_CHECKED_OWN_BOT` | 已由 `/openapi/v1/bots/**` 转发并进入 pinned schema | `OWNER_ONLY`；Owner 页面可用，不能作为 Service Bot 协作者详情页的完整 bootstrap |
+| Engine 状态、能力、候选、重启 | `/{bot_id}/engine/status`、`capabilities`、`available`、`restart` | `GRANT_CHECKED_ADDRESSED_BOT` | 已同步 | `INTEGRATED` |
+| Engine 配置 | `GET/PUT /{bot_id}/engine/config`，另保留 `engine-config` 兼容入口 | 当前 canonical config 为 `GRANT_CHECKED_OWN_BOT` | 已同步 | `OWNER_ONLY`；若协作者被允许修改发布配置，需要单独收敛权限 |
+| 调试会话与消息 | `GET/POST /{bot_id}/sessions`、session 详情/更新/删除、消息列表/清空 | 全部 `GRANT_CHECKED_ADDRESSED_BOT` | 已同步 | `INTEGRATED` |
+| 模型 | `GET /{bot_id}/models`、`/{model_id}` | `GRANT_CHECKED_ADDRESSED_BOT` | 已同步 | `INTEGRATED` |
+| 审批模式 | `GET/PUT /{bot_id}/approvals/mode`、`GET /modes` | `GRANT_CHECKED_ADDRESSED_BOT` | 已同步 | `INTEGRATED`；仍受各 Engine capability 限制，可能返回 501 |
+| Engine 连接诊断 | `GET /{bot_id}/connection` | `GRANT_CHECKED_ADDRESSED_BOT` | 已同步 | `INTEGRATED`；它提供连接信息，不是 Runtime logs 或健康诊断 |
+| Identity / MD 管理 | `GET /{bot_id}/identity`、`GET/PUT /{file_type}` | `GRANT_CHECKED_OWN_BOT` | 已同步 | `OWNER_ONLY`；当前枚举与 Core 白名单一致，实际支持 16 种文件（含原需求所称 13 类），不再是“枚举待补” |
+| Startup script | `GET/PUT/DELETE /{bot_id}/startup-script` | `GRANT_CHECKED_OWN_BOT` | 已同步 | `OWNER_ONLY` |
+| 用户/工作区 Resources(本期起也承载容器/沙箱只读目录树) | `/{bot_id}/resources` 下 list/delete/stat/upload/download/preview/mkdir | `GRANT_CHECKED_OWN_BOT` | 已同步 | `OWNER_ONLY`;并已决定**不再单独新增 `/files` 接口**,Service Bot 沙箱只读目录树统一并入 `/resources`:`ResourceFileService` facade 按 `bot_type` 内部分支真源(personal/desktop → workspace file tree;service → publish-sandbox `read-only/tree`),写操作对 service bot 经 `read_only_rules`(`ac_bot_publish.ext.read_only_rules`)+ 全路径只读策略 **403 fail-closed**。落地需补:`service-bot write 操作 fail-closed 路径` 与 `read_only_rules 接入 ResourceFileService.is_readonly` |
+| Routines | `/{bot_id}/routines` CRUD、run、runs | `GRANT_CHECKED_OWN_BOT` | 已同步 | `OWNER_ONLY`；属于定时任务能力，不等于任务护航 Flow |
+| Local Skills | `/{bot_id}/skills` 及单 Skill 激活/停用/删除 | collection 支持 addressed bot；单 Skill 操作在 handler 内按记录做 grant check | 已同步 | 接口本身可用，但为 `SEMANTIC_MISMATCH`：不是能力集分组、引用型市场 Skill 或 per-bot MCP |
+| 租户级 MCP 目录/配置 | `/bots/mcp/servers`、`tenants`、server config/permissions | 目录为 `OPEN`；账户配置要求 human，application 被拒绝 | 已同步 | `SEMANTIC_MISMATCH`：不是 per-bot MCP binding |
+| Service lifecycle | `/{bot_id}/lifecycle` 下 upgrade/read/delete/approval/advance/restart/cancel-staging/offline/retry | 全部 `GRANT_CHECKED_ADDRESSED_BOT` | 已同步 | `INTEGRATED` |
+| Edit lock | `GET/POST/DELETE /{bot_id}/edit-lock`、`POST /steal` | 全部 `GRANT_CHECKED_ADDRESSED_BOT` | 已同步 | `INTEGRATED` |
+
+`IdentityFileType` 和 Core `VALID_IDENTITY_FILES` 当前均覆盖 16 项：
+`RULES`、`OKR`、`SAFETY`、`SOUL`、`OUTPUT`、`MEMORY`、`IDENTITY`、
+`AGENTS`、`USER`、`TOOLS`、`HEARTBEAT`、`BOOTSTRAP`、`KNOWLEDGE`、
+`CLAUDE`、`GREETING`、`README`。因此旧清单 #35/#36 的“13 个 MD 待核”
+已经可以关闭；真正遗留的是协作者访问语义，而不是文件枚举。
+
+#### 3.1.2 缺失或只有内部能力的区域
+
+| 二级页区域 | 公开 OpenAPI / admission / Gateway schema | 仓库上游现状 | 状态与负责人 |
+|---|---|---|---|
+| Containers summary / 实例状态 | 全部缺失 | BaaS 有设备/发布相关能力，但未形成工坊所需 summary + instances 稳定 Contract，且无 CPU/Memory metrics | `MISSING`；B 线接入，BaaS/PaaS Owner 补 Contract |
+| 单实例重启 | 全部缺失 | 存在若干 BaaS restart 能力，但未形成按 Bot/Stage/instance 寻址且可证明幂等的公开 Contract | `MISSING`；B 线 + BaaS Owner |
+| Runtime logs / 容器实例日志 | 全部缺失 | `/bots/logs/*` 是对话 trace，不是 Runtime 日志；日志来源和脱敏 Contract 未定 | `MISSING`；日志/Runtime Observability 团队，A/B 只配合上下文 |
+| Evaluation | 全部缺失 | `QualityTaskServiceProtocol` 和内部 `/api/quality` 已有 | `DOMAIN_EXISTS`；Quality/任务护航同学建设公开契约 |
+| Health score / Health check | 全部缺失 | Harness Core 与内部 `/api/harness` 已有 | `DOMAIN_EXISTS`；任务护航/Harness 团队 |
+| Skill sets / 引用型 Skill / per-bot MCP | 全部缺失 | Skill Center、SkillSet Service、内部 `/api/skillsets` 和 MCP 关联能力已有 | `DOMAIN_EXISTS`；Skills 同学负责，不得把现有 Local Skills/MCP 目录误算为完成 |
+| ~~Container files~~(已并入 `/resources`) | 不再单独建设公开 `/files`;旧内部 `/api/service-bot/read-only/tree` 仍可作 legacy 保留 | 内部 `/api/service-bot/read-only/tree` 可读目录树,但仍依赖 Runtime layout 和内部响应规范 | `FOLDED_INTO_RESOURCES`(见 §3.1.1 / §6.7);B 线不再为此单开公开接口;落地仍需在 `ResourceFileService` 加 service-bot sandbox 分支、`read_only_rules` 接入 `is_readonly` 以及写操作 403 fail-closed |
+| Flow / runs | 全部缺失 | BCS 已实现 State Machine HTTP 路由，但正式 OpenAPI Contract 未覆盖工坊 Flow | `DOMAIN_EXISTS` / `CONTRACT_MISSING`；任务护航团队牵头，BCS Owner 提供状态机 Contract |
+| Channels | 全部缺失 | `ChannelServiceProtocol` 与内部 `/api/channels` CRUD 已有 | `DOMAIN_EXISTS`；B 线接入，Channel Owner 先收敛 tenant/owner/bot guard |
+| Nodes | 全部缺失 | Engine 有内部 `GET /api/nodes` 与 capability | `DOMAIN_EXISTS`；B 线接入，Engine Owner 提供字段 Contract/relay |
+| Render screens | 全部缺失 | `RenderScreenServiceProtocol` 与内部 `/api/bot-render-screens` CRUD 已有 | `DOMAIN_EXISTS`；B 线接入，Render Owner 明确公开读/写范围 |
+| Editors / 协作者 CRUD | 全部缺失 | edit-lock 已有，但成员来源、唯一管理员和空间权限 Contract 未完成 | `MISSING`；B 线后续批次 + Business Space/协作 Owner |
+| Spaces list | `/openapi/v1/spaces` 缺失 | 当前只有 `NoopBusinessSpaceContext` personal fallback，prod Service API 未接入 | `MISSING`；B 线接入 + Business Space Owner |
+| Bot 跨空间迁移 | `/{bot_id}/migrations` 或独立 migration resource 均缺失 | 跨域 Application Service、补偿和回滚语义缺失 | `MISSING`；B 线 + Business Space/协作 Owner |
+
+上述缺失路径在当前 `admission.py` 中没有注册项，在
+`src/gateway/configs/schemas/bots.openapi.json` 中也没有 operation；Gateway 的
+`/openapi/v1/bots/**` 通配转发规则只能转发已经存在的请求，**不能把一个没有
+Backend/上游 Contract 的接口变成已接入能力**。
+
+#### 3.1.3 二级页整体判定
+
+- **Owner 的基础详情/调试页：大部分具备**，但 Container、日志、健康、评测和
+  编辑页内核仍缺。
+- **Service Bot 发布页：lifecycle + edit-lock 已具备**，Containers、Evaluation、
+  Editors 仍缺。
+- **Service Bot 协作者编辑页：不能判定完成**。Sessions、Engine runtime、Models、
+  Approvals、Lifecycle、Edit-lock 已使用 addressed-bot 语义；Bot 基础详情、Identity、
+  Engine config、Startup Script、Resources、Routines 等仍是 Owner-only。需要产品和
+  Collaboration/Business Space Contract 明确哪些区域允许协作者读写，再逐项调整，
+  不能把 `GRANT_CHECKED_OWN_BOT` 直接批量放宽。
+- **应用身份调用：也不能等同于页面已完成**。Gateway 对 `/bots/**` 允许 user/app
+  可选只是把身份送到 Backend；最终是否允许由 admission 和 bot grant 决定。
+- **当前 Frontend 也尚未完成 OpenAPI 切换**。`ServiceBotController.ts` 仍调用
+  `/api/service-bot/publish/*`、`/api/bot/collaborator/*` 和
+  `/api/service-bot/read-only/tree`，`BotRenderController.ts` 仍调用
+  `/api/bot-render-screens`。所以即便 lifecycle/edit-lock 的公开端已经存在，也不能把
+  “Backend OpenAPI 已具备”直接写成“二级页面端到端已交付”；前端迁移和联调仍需单列验收。
+
 ---
 
 ## 4. A 线进展
@@ -281,7 +373,7 @@ POST /openapi/v1/bot-space-migrations
 | Containers summary | P0 | 未接入 | 定义工坊所需 read model、Bot/Stage 授权和 facade | BaaS/PaaS 提供实例与 metrics Contract |
 | 单实例重启 | P0 | 未接入 | 提供 Bot-scoped 授权入口和错误规范化 | BaaS 提供幂等实例重启能力 |
 | Editors/协作者 CRUD | 后续批次 | 未接入 | 等统一协作契约后实现 Service Bot 工坊入口 | Business Space/协作 Owner 提供成员与权限规则 |
-| Container files | P2 | 未接入 | 定义只读工坊入口、Bot/Stage 授权和错误规范化 | Device Filesystem/Runtime Owner 提供稳定文件 Contract |
+| ~~Container files~~ | ~~P2~~ | 已并入 `/resources` | 不再单独建设 `/files`;落地仍在 `ResourceFileService` 内做 service-bot sandbox 分支与 `read_only_rules` 合并,写操作全路径 403 fail-closed。详见 §3.1.1 / §6.7 | Device Filesystem/Runtime Owner 提供内部 `read-only/tree` Contract 与路径规范 |
 | Channels | P2 | 未接入 | 建设 Bot-scoped 或独立领域公开入口、Gateway 和联调 | Channel Owner 补 tenant/owner/bot guard 与正式 Service API |
 | Nodes | P2 | 未接入 | 建设 authorized relay、501 capability 语义和 Gateway | Engine Owner 收敛 Node 字段与运行态 Contract |
 | Render screens | P2 | 未接入 | 明确读或 CRUD 范围并建设公开入口 | Render Screen Owner 提供领域权限与 Service API |
@@ -428,16 +520,20 @@ Capability.NODE_LIST
 
 当前已有 `RenderScreenServiceProtocol` 和内部 CRUD Router。领域 Owner 负责稳定 Contract 和权限规则；B 线需要确认工坊本期只开放读取，还是开放完整 CRUD，并补齐公开 Adapter、Envelope、OpenAPI、Gateway 和联调。
 
-### 6.7 Container files
+### 6.7 Container files(已并入 `/resources`,不再单独建设 `/files` 接口)
 
-**领域实现方：Device Filesystem/Runtime Owner，具体执行人待确认；工坊接入方：B 线。**
+**决定(2026-08-18 复核)**:不单开 `/openapi/v1/bots/{bot_id}/files`;容器/沙箱目录树需求统一合并到 `/openapi/v1/bots/{bot_id}/resources` 模块(详见 §3.1.1)。理由:`/resources` 已经有完整的 list/upload/download/preview/mkdir/stat/delete,个人/本地 Bot 的工作区目录树已覆盖;为 service bot 只读沙箱再新开一条公开接口与现有能力重叠,徒增一份契约/docs/测试。
 
-现有内部能力依赖 `DeviceFilesystemProtocol` 和 Runtime layout。它与用户资源库 `/resources` 是不同领域：
+合并后的边界仍有上限保护:
 
-- Resources：用户资源和工作区资源公开契约；
-- Container files：Runtime 容器中的物理文件树。
+- 公开契约仍是 `/openapi/v1/bots/{bot_id}/resources` 一条;`ResourceFileService` 作为 facade,按 `bot_type` 内部选择真源:
+  - personal/desktop bot → engine workspace file tree(现状)
+  - service bot → publish-sandbox `provider.list_directory`(`router_build.py:read-only/tree`)
+- 只读规则:`/resources` 现有 `is_readonly` 只覆盖 workspace identity dotfile;需要扩展为在 `bot_type=service` 时合并 `ac_bot_publish.ext.read_only_rules`(custom + default),并对 service bot **全路径只读**。
+- 写操作 fail-closed:service bot 调 `POST /resources/upload`、`POST /resources/mkdir`、`DELETE /resources` 必须返回 403,守住 publish-sandbox 不可写。
+- 内部 `/api/service-bot/read-only/tree`(`service_bot/router_build.py:166-189`)保持不变,作为老前端/调试遗留,不宣布弃用,后续等公开 facade 与 read_only_rules 合并稳定再清。
 
-Backend 不得新增 Engine-specific 物理路径。Runtime Owner 先提供 Runtime Layout Contract 或 Device Filesystem Service API，B 线再建设公开只读入口和 Gateway 配置。
+上游 Contract 仍由 Device Filesystem/Runtime Owner 提供(`provider.list_directory` 稳定 Contract 与路径规范);B 线不再为 `files` 单建公开 Adapter,但 `ResourceFileService` facade 内分支与 `read_only_rules` 合并这块落地仍需 A 线 `/resources` owner(lucas-xzp)与 B 线 service-bot/Joseph 协作。Backend 一律不得直接拼接 Engine 物理路径,必须经 provider Contract。
 
 ---
 
@@ -484,7 +580,7 @@ flow.openapi.json
 | Skills/MCP | Backend Skill/MCP Adapter |
 | Channels | Backend Channel Adapter |
 | Spaces | Business Space Owner 或 Backend Adapter |
-| Runtime/Files/Nodes | Engine/BaaS，或 Backend authorized facade |
+| Runtime/Containers/Nodes | Engine/BaaS,或 Backend authorized facade(`Files` 已并入 `/resources`,见 §3.1.1 / §6.7)|
 | Flow | BCS |
 
 每个领域接入都必须同步两套部署配置：
@@ -526,7 +622,7 @@ flow.openapi.json
 | Nodes | Engine Runtime | B 线接入 + Engine 团队 | Engine API 已有 | 未实现 | 等 Engine Contract/relay |
 | Channels | Channel | B 线接入 + Channel Owner | 内部 CRUD 已有 | 未实现 | 先补 tenant guard |
 | Render screens | Render Screen | B 线接入 + Render Owner | Protocol/CRUD 已有 | 未实现 | 产品公开范围待定 |
-| Container files | Device Filesystem/Runtime | B 线接入 + Runtime Owner | 内部能力已有 | 未实现 | 不能硬编码物理路径 |
+| ~~Container files~~(已并入 `/resources`) | Device Filesystem/Runtime | 已并入 `/resources`(A 线 `/resources` owner + B 线 service-bot 协作);不再单开 `/files` 接口 | 内部 `read-only/tree` 已有;未做 facade 分支 + `read_only_rules` 合并 + 写 403 fail-closed | 部分归入 `/resources` backlog | 落地仍需在 `ResourceFileService` 补分支,不要硬编码 Engine 物理路径 |
 
 ---
 
