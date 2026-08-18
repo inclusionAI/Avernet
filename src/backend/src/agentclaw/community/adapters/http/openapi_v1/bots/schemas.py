@@ -8,7 +8,7 @@ internal names belong in ``#`` comments.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -295,6 +295,22 @@ class Ceiling(BaseModel):
     )
 
 
+class PassportMcp(BaseModel):
+    """A single MCP (Model-Context-Protocol server) identifier bound to the passport."""
+
+    mcp_code: str | None = Field(default=None, description="Stable code identifying the MCP server.")
+    mcp_name: str | None = Field(default=None, description="Display name of the MCP server.")
+    mcp_desc: str | None = Field(default=None, description="Human-readable description of the MCP server.")
+
+
+class PassportCli(BaseModel):
+    """A single CLI identifier bound to the passport."""
+
+    cli_code: str | None = Field(default=None, description="Stable code identifying the CLI tool.")
+    cli_name: str | None = Field(default=None, description="Display name of the CLI tool.")
+    cli_desc: str | None = Field(default=None, description="Human-readable description of the CLI tool.")
+
+
 class Passport(BaseModel):
     """Agent Passport (identity credential) summary."""
 
@@ -303,6 +319,11 @@ class Passport(BaseModel):
             "example": {
                 "bot_id": "20260813_a7k2m9p1",
                 "passport_id": "20260813_a7k2m9p1",
+                "expire_at": "2030-01-01T00:00:00Z",
+                "mcps": [],
+                "clis": [],
+                "skills": [],
+                "certificate_url": None,
             }
         }
     )
@@ -313,6 +334,30 @@ class Passport(BaseModel):
         "identity credential downstream services authenticate the bot "
         "against. An opaque string whose shape is deployment-defined; it may "
         "equal the bot_id."
+    )
+    expire_at: str | None = Field(
+        default=None,
+        description="Expiry of the passport credential as reported by the "
+        "identity provider, as a string whose format is provider-defined. "
+        "Absent when the credential does not expire or the provider did not "
+        "report it.",
+    )
+    mcps: list[PassportMcp] = Field(
+        default_factory=list,
+        description="MCP servers the passport is authorized to invoke.",
+    )
+    clis: list[PassportCli] = Field(
+        default_factory=list,
+        description="CLI tools the passport is authorized to run.",
+    )
+    skills: Any | None = Field(
+        default=None,
+        description="Skills attached to the passport, in the shape returned "
+        "by the identity provider. Absent when no skills are bound.",
+    )
+    certificate_url: str | None = Field(
+        default=None,
+        description="URL of the passport certificate, if the provider issued one.",
     )
 
 

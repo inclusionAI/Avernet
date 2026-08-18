@@ -806,7 +806,18 @@ async def get_bot_passport(
     if not passport_id:
         # No passport issued for this bot yet — a missing sub-resource is a 404.
         raise BotNotFoundError(f"passport not found: {bot_id}")
-    return envelope(Passport(bot_id=bot_id, passport_id=passport_id), request)
+    return envelope(
+        Passport(
+            bot_id=bot_id,
+            passport_id=passport_id,
+            expire_at=info.get("expire_at"),
+            mcps=info.get("mcps") or [],
+            clis=info.get("clis") or [],
+            skills=info.get("skills"),
+            certificate_url=info.get("certificate_url"),
+        ),
+        request,
+    )
 
 
 def _audit_actor(caller: ActingCaller, owner_id: str) -> str:

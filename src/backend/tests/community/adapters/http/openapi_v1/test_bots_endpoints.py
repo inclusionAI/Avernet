@@ -210,7 +210,34 @@ def test_status(client):
 
 def test_passport(client):
     data = _ok(client.get("/openapi/v1/bots/b1/passport"))
-    assert data == {"bot_id": "b1", "passport_id": "ac-1"}
+    assert data == {
+        "bot_id": "b1",
+        "passport_id": "ac-1",
+        "expire_at": None,
+        "mcps": [],
+        "clis": [],
+        "skills": None,
+        "certificate_url": None,
+    }
+
+
+def test_passport_surfaces_full_detail(client, passport):
+    """The public passport response mirrors the internal /api/bots/{id}/passport
+    detail dict, not just the identity summary."""
+    passport.query_agent_passport.return_value = {
+        "agent_code": "ac-1",
+        "expire_at": "2030-01-01T00:00:00Z",
+        "mcps": [{"mcp_code": "m1", "mcp_name": "M1", "mcp_desc": "desc"}],
+        "clis": [{"cli_code": "c1", "cli_name": "C1", "cli_desc": "d"}],
+        "skills": [{"skill_code": "s1"}],
+        "certificate_url": "https://idp.example.com/cert/ac-1",
+    }
+    data = _ok(client.get("/openapi/v1/bots/b1/passport"))
+    assert data["expire_at"] == "2030-01-01T00:00:00Z"
+    assert data["mcps"] == [{"mcp_code": "m1", "mcp_name": "M1", "mcp_desc": "desc"}]
+    assert data["clis"] == [{"cli_code": "c1", "cli_name": "C1", "cli_desc": "d"}]
+    assert data["skills"] == [{"skill_code": "s1"}]
+    assert data["certificate_url"] == "https://idp.example.com/cert/ac-1"
 
 
 def test_passport_missing_is_404(client, passport):
@@ -718,7 +745,15 @@ def test_passport_accepts_the_local_plugin_identifier(client, passport):
         "agent_id": "b1", "agent_code": None, "mcps": [],
     }
     data = _ok(client.get("/openapi/v1/bots/b1/passport"))
-    assert data == {"bot_id": "b1", "passport_id": "b1"}
+    assert data == {
+        "bot_id": "b1",
+        "passport_id": "b1",
+        "expire_at": None,
+        "mcps": [],
+        "clis": [],
+        "skills": None,
+        "certificate_url": None,
+    }
 
 
 def test_passport_prefers_agent_code_when_both_present(client, passport):
