@@ -409,6 +409,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-domain",
  "bcs-service-api",
  "bcs-storage-api",
  "bytes",
