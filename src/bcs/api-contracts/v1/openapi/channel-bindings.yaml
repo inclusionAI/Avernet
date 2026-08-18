@@ -137,7 +137,7 @@ ChannelBindingOkEnvelope:
   properties:
     code: { const: 20000 }
     message: { type: string }
-    data: {}
+    data: { type: "null" }
     request_id: { type: string }
 
 ChannelsBindingsCollectionPath:
