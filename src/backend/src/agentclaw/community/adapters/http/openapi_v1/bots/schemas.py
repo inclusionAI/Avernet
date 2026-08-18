@@ -292,9 +292,10 @@ class BotAuthStatus(BaseModel):
         "(e.g. 'REJECTED', 'EXPIRED') is terminal and is answered as a 400 "
         "with the state kept in data.status."
     )
-    # One producer today: the POST poll sets it when the authorization service
-    # has no status for the bot yet (see poll_bot_auth_status). The provider's
-    # own message is still not wired through — that remains a separate change.
+    # One producer today: the auth-status poll (either spelling) sets it when
+    # the authorization service has no status for the bot yet — see
+    # _complete_auth_status. The provider's own message is still not wired
+    # through; that remains a separate change.
     message: str | None = Field(
         default=None,
         description="Human-readable note accompanying the status — for "

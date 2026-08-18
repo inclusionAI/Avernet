@@ -462,9 +462,9 @@ def test_post_auth_status_terminal_state_is_400(client, passport):
 def test_post_auth_status_passport_not_ready_is_pending(client, svc, passport):
     """A passport service with no status yet answers PENDING, not an error.
 
-    On the POST spelling only: the retiring GET keeps its frozen 502 (see
-    test_missing_auth_status_is_enveloped), and the internal /api/bots route
-    keeps raising. Nothing may be created on this answer.
+    Both public spellings answer this way (the GET's twin is
+    test_missing_auth_status_is_pending_not_an_error); the internal /api/bots
+    route keeps raising. Nothing may be created on this answer.
     """
     passport.query_auth_status.return_value = None
     data = _ok(client.post("/openapi/v1/bots/b1/auth-status", json={}))
@@ -634,14 +634,17 @@ def test_desktop_bot_type_rejected(client, svc):
     svc.create_bot.assert_not_called()
 
 
-def test_missing_auth_status_is_enveloped(client, passport):
-    """R3/F18: a null query_auth_status must not escape as a raw 500 detail."""
+def test_missing_auth_status_is_pending_not_an_error(client, svc, passport):
+    """R3/F18 successor: a null query_auth_status must not escape as a 500 —
+    and on this public surface it is not an error at all. The GET answers the
+    not-ready wait exactly as its POST replacement does (shared completion
+    body); the internal /api/bots route keeps raising."""
     passport.query_auth_status.return_value = None
-    resp = client.get("/openapi/v1/bots/b1/auth-status")
-    assert resp.status_code == 502
-    body = resp.json()
-    assert body["code"] == 502000
-    assert body["data"] is None
+    data = _ok(client.get("/openapi/v1/bots/b1/auth-status"))
+    assert data["status"] == "PENDING"
+    assert "not ready" in data["message"]
+    assert data["bot"] is None
+    svc.create_bot.assert_not_called()
 
 
 def test_rejected_authorization_is_not_reported_as_success(client, passport):

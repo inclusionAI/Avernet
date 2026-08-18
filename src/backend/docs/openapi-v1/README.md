@@ -1032,10 +1032,11 @@ GET  /openapi/v1/bots/b-1/auth-status?engine=openclaw&bot_name=N
   →  POST /openapi/v1/bots/b-1/auth-status   {"engine": "openclaw", "bot_name": "N"}
 ```
 
-The POST also answers differently in one situation the GET reported as a
-fault: while the authorization service has no status for the bot yet (the
-Passport is not ready), the POST answers 200 with `status: "PENDING"` and a
-message saying so — keep polling — where the GET keeps its frozen 502.
+One behaviour change ships with the method move, on both spellings: while
+the authorization service has no status for the bot yet (the Passport is not
+ready), the poll answers 200 with `status: "PENDING"` and a message saying so
+— keep polling — where this operation used to answer 502. The internal
+`/api/bots/auth-status` route is unchanged.
 
 Two renames come with it, and they are the only parameter changes in the
 migration: `skills` spells its owner locator `owner_id` like the rest of the

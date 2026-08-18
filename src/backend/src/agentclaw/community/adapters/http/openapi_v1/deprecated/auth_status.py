@@ -8,12 +8,13 @@ says so, and its inputs moved from the query string into a request body, where
 a create's attributes belong.
 
 The old contract is owned here, whole: the same query parameters with the same
-names, descriptions and validation, answering exactly as the GET always did.
-That includes its error behaviour — a passport service that returns no status
-is still a 502 here, where the POST reports a not-ready PENDING, because a
-frozen contract does not grow new behaviour and the difference is one more
-reason to move. Both spellings run the same completion body
-(``_complete_auth_status``), so they cannot drift apart in what they create.
+names, descriptions and validation. Both spellings run the same completion
+body (``_complete_auth_status``), so they answer identically and cannot drift
+apart in what they create — including the one behaviour change shipped with
+the method move: a passport service that returns no status yet answers as a
+not-ready PENDING on both spellings rather than the 502 this address used to
+map it to. A wait must not read as an outage on the address unmigrated callers
+are still polling, and diverging the two would make the shared body a lie.
 
 It shares the package's deprecation window (see ``middleware.py``); like every
 address here, removal is driven by the access log, not the date.
@@ -105,6 +106,10 @@ async def get_bot_auth_status(
     Every restriction create enforces is re-applied to the echoed values:
     the same engine registry check, the same engine/cluster pairing, and the
     same personal/service restriction on bot_type.
+
+    While the authorization service has no status for the bot yet — the
+    Passport is not ready — the poll answers PENDING with a message saying
+    so, rather than an error: keep polling.
     """
     return _complete_auth_status(
         bot_id=bot_id,

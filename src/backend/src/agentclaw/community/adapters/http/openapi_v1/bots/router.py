@@ -664,6 +664,8 @@ def _complete_auth_status(
     The one implementation behind both spellings of the poll — the POST (body)
     and the retiring GET (query parameters). The two must answer identically,
     and sharing the body is what makes that a property rather than a promise.
+    That includes the passport-not-ready answer below: a wait must not read as
+    an outage on either spelling.
     """
     # Validate against the engine completion will actually use, not against the
     # supplied value: omitting ``engine`` does not mean "no engine", it means
@@ -681,21 +683,39 @@ def _complete_auth_status(
         raise UnsupportedEngineError(effective_engine)
     if cluster_name is not None:
         validate_engine_cluster(effective_engine, cluster_name)
-    result = complete_bot_authorization(
-        user_id=owner_id,
-        nick_name=owner_id,
-        bot_id=bot_id,
-        spec=BotCreateSpec(
-            entity_id=owner_id,
-            engine_type=engine or DEFAULT_ENGINE_TYPE,
-            bot_type=bot_type or "personal",
-            bot_name=bot_name,
-            bot_desc=bot_desc,
-        ),
-        bot_service=bot_service,
-        passport_plugin=passport_plugin,
-        auth_rel_plugin=auth_rel_plugin,
-    )
+    try:
+        result = complete_bot_authorization(
+            user_id=owner_id,
+            nick_name=owner_id,
+            bot_id=bot_id,
+            spec=BotCreateSpec(
+                entity_id=owner_id,
+                engine_type=engine or DEFAULT_ENGINE_TYPE,
+                bot_type=bot_type or "personal",
+                bot_name=bot_name,
+                bot_desc=bot_desc,
+            ),
+            bot_service=bot_service,
+            passport_plugin=passport_plugin,
+            auth_rel_plugin=auth_rel_plugin,
+        )
+    except AuthStatusUnavailableError:
+        # The passport service answered with no status at all — typically the
+        # apply is still propagating and the Passport is not ready yet. On this
+        # public surface that is a wait, not a fault: the 502 it used to map to
+        # made every caller's first poll after a 202 look like an outage.
+        # PENDING keeps the documented poll loop intact — PENDING/ISSUED are
+        # the two non-terminal states — and the message says what the wait is.
+        # The internal /api/bots/auth-status route keeps raising; only this
+        # surface's two spellings answer the wait as a wait.
+        return envelope(
+            BotAuthStatus(
+                status=AuthStatus.PENDING,
+                message="Passport is not ready yet; keep polling.",
+                bot=None,
+            ),
+            request,
+        )
     # PENDING (still waiting) and ISSUED (done) are successful outcomes of the
     # poll. Any other state — REJECTED, EXPIRED, anything the passport service
     # adds later — is a terminal failure: reporting it as 200/OK would let a
@@ -742,36 +762,19 @@ async def poll_bot_auth_status(
     Passport is not ready — the poll answers PENDING with a message saying
     so, rather than an error: keep polling.
     """
-    try:
-        return _complete_auth_status(
-            bot_id=bot_id,
-            request=request,
-            owner_id=owner_id,
-            engine=body.engine,
-            cluster_name=body.cluster_name,
-            bot_name=body.bot_name,
-            bot_desc=body.bot_desc,
-            bot_type=body.bot_type,
-            bot_service=bot_service,
-            passport_plugin=passport_plugin,
-            auth_rel_plugin=auth_rel_plugin,
-        )
-    except AuthStatusUnavailableError:
-        # The passport service answered with no status at all — typically the
-        # apply is still propagating and the Passport is not ready yet. On this
-        # spelling that is a wait, not a fault: answering 502 (as the retiring
-        # GET still does, its contract being frozen) made every caller's first
-        # poll after a 202 look like an outage. PENDING keeps the documented
-        # poll loop intact — PENDING/ISSUED are the two non-terminal states —
-        # and the message says what the wait is.
-        return envelope(
-            BotAuthStatus(
-                status=AuthStatus.PENDING,
-                message="Passport is not ready yet; keep polling.",
-                bot=None,
-            ),
-            request,
-        )
+    return _complete_auth_status(
+        bot_id=bot_id,
+        request=request,
+        owner_id=owner_id,
+        engine=body.engine,
+        cluster_name=body.cluster_name,
+        bot_name=body.bot_name,
+        bot_desc=body.bot_desc,
+        bot_type=body.bot_type,
+        bot_service=bot_service,
+        passport_plugin=passport_plugin,
+        auth_rel_plugin=auth_rel_plugin,
+    )
 
 
 @router.get(
