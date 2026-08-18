@@ -13,9 +13,9 @@ description rather than a hand-kept list, so an operation added later is covered
 without editing this file.
 
 The refusal is the load-bearing part. Making the user explicit must not make it
-*forgeable*: until delegation lands the only user a caller may name is itself,
-so a parameter naming anyone else is a 403 and nothing about who may call what
-has changed.
+*forgeable*: a human caller may name only themselves, while an application may
+name only the end user carried by its verified delegation context. A mismatch is
+a 403, so making the parameter explicit does not widen who may act for whom.
 """
 
 from __future__ import annotations
