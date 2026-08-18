@@ -88,7 +88,10 @@ ChannelBinding:
     channel_type: { type: string }
     account_ref: { type: string }
     target: { $ref: "#/BindingTarget" }
-    group_chat_scope: { $ref: "#/GroupChatScope" }
+    group_chat_scope:
+      oneOf:
+        - $ref: "#/GroupChatScope"
+        - type: "null"
     outbound_visibility: { $ref: "#/Visibility" }
     env: { type: string }
     status: { $ref: "#/BindingStatus" }
@@ -281,7 +284,7 @@ ChannelsBindingsIdPath:
           application/json:
             schema: { $ref: "#/ChannelBindingOkEnvelope" }
       "400":
-        x-error-codes: [invalid_request]
+        x-error-codes: [invalid_request, invalid_channel_params]
         content:
           application/json:
             schema: { $ref: ../shared.yaml#/ErrorEnvelope }
