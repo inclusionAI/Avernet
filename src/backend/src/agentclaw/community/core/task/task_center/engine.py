@@ -372,7 +372,9 @@ class ExecutionEngine:
         不再有 ``root_verified``:根目标是否满足由框架经 owner 复核(``_on_pass_collect``→``plan(root)``→
         ``has_gap=False``→``_maybe_finish_graph``)判定,**不由接力 bot 自报**。scoped 节点 PASS→DONE 走正常
         PASS 传播(parent=root;守卫对 ``run_mode=="bbs"`` 触发的 root 复核放行,见 §10.5 seam 对应处);
-        FAIL+gaps→FAILED 走 FAIL 传播。最后清根 ``bbs_owner`` 释放 claim。
+        FAIL+gaps→**删 scoped 节点**(丢弃本次接力尝试:不翻 FAILED、不 ``output_patch`` fold);
+        图回到 root ``PLANNING``+``bbs_mode`` 可恢复态等下段重新 claim/attach,**不进 FAIL 传播**。
+        最后清根 ``bbs_owner`` 释放 claim。
 
         持有者校验:``root.run_info.extend_props['bbs_owner']`` 须 == ``patch.assignee``(调用方
         ``report_bbs_result`` 设 ``patch.assignee=bot_id``);非持有者 → ``TaskStateError``(在校验抛,
@@ -389,16 +391,34 @@ class ExecutionEngine:
             root = next((n for n in graph.tasks if n.node_id == patch.task_id), None)
             if root is None or root.run_info.extend_props.get("bbs_owner") != patch.assignee:
                 raise TaskStateError(f"on_bbs_report: 非claim持有者 task={patch.task_id}")
+            # FAIL:丢弃本次接力尝试——删 scoped 节点(不翻 FAILED、不 fold output_patch/gaps 作 checkpoint);
+            # 图回 root PLANNING+bbs_mode 可恢复态等下段重 claim/attach,不进 PASS/FAIL 传播。
+            # PASS / fold-only(无 acceptance):scoped 终态翻转(PASS→DONE)或 fold(output_patch/exec_error)走原路径。
+            is_fail = (patch.acceptance_result is not None
+                       and patch.acceptance_result.verdict == AcceptanceVerdict.FAIL)
             try:
-                # scoped 节点终态翻转(acceptance→DONE/FAILED)或 fold(output_patch/exec_error)
-                result = self._graph.update_task_node_info(patch)
+                if is_fail:
+                    if not patch.acceptance_result.gaps:
+                        raise TaskStateError("on_bbs_report: FAIL 验收强制要求 gaps")
+                    prev = next((n for n in graph.tasks if n.node_id == patch.node_id), None)
+                    self._graph.delete_task_node(patch.task_id, patch.node_id)
+                    result = NodeOpResult(
+                        task_id=patch.task_id, node_id=patch.node_id, success=True,
+                        prev_status=(prev.status if prev else None), new_status=None)
+                    logger.info("[on_bbs_report] task=%s FAIL → 删 scoped 节点 %s(gaps=%s),claim 释放",
+                                patch.task_id, patch.node_id, patch.acceptance_result.gaps)
+                else:
+                    # scoped 节点终态翻转(acceptance→DONE)或 fold(output_patch/exec_error)
+                    result = self._graph.update_task_node_info(patch)
             finally:
-                # 无论翻态是否抛,都清根 bbs_owner 释放 claim
+                # 无论 FAIL 删节点 / PASS 翻态是否抛,都清根 bbs_owner 释放 claim
                 self._graph.update_task_node_info(
                     TaskNodePatch(task_id=patch.task_id, node_id=patch.task_id,
                                   extend_props_patch={"bbs_owner": None}))
-            # 收口交 engine 既有路径:scoped DONE→PASS 传播(parent=root,owner 复核根 gap);FAILED→FAIL 传播
-            if self._is_graph_terminal(patch.task_id):
+            # 收口:FAIL 已删节点(无 DONE/FAILED 可传播);PASS → scoped DONE→owner 复核根 gap 收口
+            if is_fail:
+                pass  # 图回可恢复态,等下段重 claim;无 PASS/FAIL 传播
+            elif self._is_graph_terminal(patch.task_id):
                 logger.info("[on_bbs_report] task=%s 图已终态,不再驱动", patch.task_id)
             else:
                 node = next((n for n in self._graph.query_task_dashboard(patch.task_id).tasks

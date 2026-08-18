@@ -411,6 +411,39 @@ class TaskGraphService:
         ]
         return len(prune)
 
+    def delete_task_node(self, task_id: str, node_id: str) -> None:
+        """删除单个节点(及其 DEPENDENCY 后代子树 + 相关边)。根(``task_id``)永不可删。
+
+        用于 ``on_bbs_report`` 收到 verdict=FAIL:丢弃本次接力尝试(不翻 FAILED、不 fold output_patch),
+        图回到 root PLANNING + bbs_mode 可恢复态等下段重新 claim/attach。bbs scoped 节点是叶子,但实现按
+        子树删(节点 + DEPENDENCY 后代)以通用。锁:再取同 task 的 RLock(re-entrant 安全,调用方通常已持)。
+        """
+        with self._lock_for(task_id):
+            graph = self._require_graph(task_id)
+            if node_id == task_id:
+                raise TaskStateError(f"delete_task_node: 根节点不可删 task={task_id}")
+            if not any(n.node_id == node_id for n in graph.tasks):
+                raise NodeNotFoundError(f"delete_task_node: node_id={node_id} 不存在于 task={task_id}")
+            children: dict[str, list[str]] = {}
+            for rel in graph.relations:
+                if rel.type == RelationType.DEPENDENCY:
+                    children.setdefault(rel.src_id, []).append(rel.dst_id)
+            prune: set[str] = set()
+            stack = [node_id]
+            while stack:
+                nid = stack.pop()
+                if nid in prune or nid == task_id:
+                    continue
+                prune.add(nid)
+                for child in children.get(nid, []):
+                    if child not in prune:
+                        stack.append(child)
+            graph.tasks = [n for n in graph.tasks if n.node_id not in prune]
+            graph.relations = [
+                r for r in graph.relations
+                if r.src_id not in prune and r.dst_id not in prune
+            ]
+
     def attach_bbs_node(
         self, task_id: str, parent_node_id: str, task_spec: TaskSpec, bot_id: str
     ) -> TaskNode:

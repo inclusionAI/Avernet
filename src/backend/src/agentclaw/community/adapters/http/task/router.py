@@ -189,7 +189,7 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
 )
 
-task_callback_router = APIRouter(prefix="/task_loop/callback", tags=["task-callback"])
+task_callback_router = APIRouter(prefix="/api/task_loop/callback", tags=["task-callback"])
 
 _TERMINAL = {Status.DONE, Status.FAILED, Status.HUNG}
 
