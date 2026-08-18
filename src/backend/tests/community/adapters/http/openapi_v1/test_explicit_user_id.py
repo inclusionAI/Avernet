@@ -319,7 +319,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: ``none`` then moved 16 → 35 when the 19 collaboration operations for Spaces,
 #: work orders and recipient notifications were added. None of those operations
 #: addresses a bot, so the path and query counts remain unchanged.
-_BOT_ID_PLACEMENT = {"path": 54, "query": 1, "none": 35}
+#:
+#: ``path`` then moved 54 → 56 when the two Bot Chats operations were added.
+_BOT_ID_PLACEMENT = {"path": 56, "query": 1, "none": 35}
 
 
 def _schema() -> dict:
@@ -398,8 +400,9 @@ def test_the_pinned_number_of_operations_take_it():
     # 60 on the merge base, +3 for the startup-script operations, +2 for the
     # resources file endpoints re-addressed by workspace path (#1000), then -4
     # for the files-only resources group, then +19 for Spaces, work orders and
-    # recipient-notification operations added by the collaboration API.
-    assert len(taking) == 80
+    # recipient-notification operations added by the collaboration API, then +2
+    # for the Bot Chats operations.
+    assert len(taking) == 82
 
 
 def test_the_exempt_operations_take_none():

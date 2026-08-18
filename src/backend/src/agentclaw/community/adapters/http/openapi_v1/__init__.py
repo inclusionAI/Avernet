@@ -199,6 +199,7 @@ from .identity import router as identity_router
 from .loadtest import router as loadtest_router
 from .mcp import router as mcp_router
 from .bot_logs import router as logs_router
+from .bot_chats import router as chats_router
 from .resources import router as resources_router
 from .routines import router as routines_router
 from .skills import router as skills_router
@@ -252,6 +253,10 @@ _SUBGROUPS = [
     # claiming it.
     authorized_apps_router,
     authorized_bots_router,
+    # Product Bot Chat reads are bot-first and use the product service's
+    # owner/collaborator adjudication. Their own route dependency checks an
+    # app-only caller's grant against the addressed owner.
+    chats_router,
     # Mixed, like `bots`: its two collection operations declare the grant check
     # per route, and its four `{skill_id}` operations resolve the bot's owner
     # from the skill record and check it themselves. A group-level dependency
