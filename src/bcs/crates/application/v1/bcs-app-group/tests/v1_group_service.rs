@@ -247,6 +247,27 @@ impl Fixture {
             .await
             .expect("assign test Bot owner");
     }
+
+    async fn add_bot_owned_by(
+        &self,
+        bot_uuid: &str,
+        owner_staff_no: &str,
+        visibility: &str,
+    ) {
+        let capabilities = BotCapabilities {
+            name: Some(bot_uuid.to_string()),
+            visibility: visibility.into(),
+            ..Default::default()
+        };
+        self.bots
+            .register(bot_uuid.to_string(), capabilities)
+            .await
+            .expect("register bot");
+        self.bots
+            .save_created_by(bot_uuid, owner_staff_no, true)
+            .await
+            .expect("assign test Bot owner");
+    }
 }
 
 struct FailingDb;
@@ -2533,7 +2554,11 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
 }
 
 #[tokio::test]
-async fn create_propagates_friendship_lookup_failure() {
+async fn create_does_not_friendship_check_driver_against_caller() {
+    // caller↔driver was dropped: a protected driver the caller neither owns nor
+    // is friends with is no longer friendship-checked (there are no protected
+    // participants that would consult the friend store either), so even a
+    // failing friend store must not block creation of the group.
     let friends = Arc::new(FriendCore::with_repo(Arc::new(FailingFriendRepo)));
     let fixture = Fixture::new_with_friends(friends).await;
     fixture.add_public_bot("requester").await;
@@ -2559,10 +2584,10 @@ async fn create_propagates_friendship_lookup_failure() {
         })
         .await;
 
-    assert!(matches!(
-        result,
-        Err(ApplicationError::Internal(message)) if message.contains("friend store unavailable")
-    ));
+    assert!(
+        result.is_ok(),
+        "driver must be ungated vs caller; got {result:?}"
+    );
 }
 
 #[tokio::test]
@@ -3042,4 +3067,153 @@ async fn session_only_nonmember_dm_summary_omits_peer_actor() {
         panic!("expected DM summary");
     };
     assert!(summary.peer_actor.is_none());
+}
+
+mod originator_v1_policy {
+    //! V1 create-group originator authorization (caller↔originator, not
+    //! caller↔driver). Tests run the `for_v1_openapi` core branch.
+    use super::*;
+
+    fn chat_group(
+        originator: Option<String>,
+        participants: Vec<CreateParticipant>,
+    ) -> CreateGroup {
+        chat_group_with_driver("driver", originator, participants)
+    }
+
+    fn chat_group_with_driver(
+        driver: &str,
+        originator: Option<String>,
+        participants: Vec<CreateParticipant>,
+    ) -> CreateGroup {
+        CreateGroup {
+            caller: human_principal_with_profile("staff-1", "alice", Some("Alice"), None),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: Some("Planning".into()),
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: driver.into(),
+                participants,
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
+                    },
+                }),
+                originator,
+            }),
+        }
+    }
+
+    fn collaboration_originator(detail: GroupDetail) -> String {
+        let GroupDetail::Collaboration(it) = detail else {
+            panic!("expected collaboration detail, got {detail:?}");
+        };
+        it.originator_actor_id.to_string()
+    }
+
+    #[tokio::test]
+    async fn originator_defaults_to_caller_when_omitted() {
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        let detail = fixture
+            .service
+            .create(chat_group(None, vec![]))
+            .await
+            .expect("create group");
+        assert_eq!(collaboration_originator(detail), "human_staff-1");
+    }
+
+    #[tokio::test]
+    async fn originator_accepts_explicit_caller_self() {
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        let detail = fixture
+            .service
+            .create(chat_group(Some("human_staff-1".into()), vec![]))
+            .await
+            .expect("create group");
+        assert_eq!(collaboration_originator(detail), "human_staff-1");
+    }
+
+    #[tokio::test]
+    async fn originator_rejects_bot_not_owned_by_caller() {
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        fixture.add_bot_owned_by("bot-other", "someone-else", "public").await;
+        let err = fixture
+            .service
+            .create(chat_group(Some("bot-other".into()), vec![]))
+            .await
+            .expect_err("unowned originator must be rejected");
+        assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn originator_rejects_unregistered_originator() {
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        let err = fixture
+            .service
+            .create(chat_group(Some("does-not-exist".into()), vec![]))
+            .await
+            .expect_err("unregistered originator must be rejected");
+        assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn originator_rejects_other_human_originator() {
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        let err = fixture
+            .service
+            .create(chat_group(Some("human_staff-2".into()), vec![]))
+            .await
+            .expect_err("another human as originator must be rejected");
+        assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn owned_bot_originator_accepted_when_driver_reachable() {
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        fixture.add_bot_owned_by("bot-o", "staff-1", "public").await;
+        let detail = fixture
+            .service
+            .create(chat_group(Some("bot-o".into()), vec![]))
+            .await
+            .expect("owned-bot originator with public driver");
+        assert_eq!(collaboration_originator(detail), "bot-o");
+    }
+
+    #[tokio::test]
+    async fn owned_bot_originator_rejects_unreachable_driver() {
+        let fixture = Fixture::new().await;
+        fixture.add_bot_owned_by("driver", "someone-else", "protected").await;
+        fixture.add_bot_owned_by("bot-o", "staff-1", "public").await;
+        let err = fixture
+            .service
+            .create(chat_group_with_driver(
+                "driver",
+                Some("bot-o".into()),
+                vec![],
+            ))
+            .await
+            .expect_err("driver not reachable from originator bot");
+        assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn driver_not_gated_against_caller_when_originator_is_human() {
+        // caller staff-1 does NOT own the driver and is not its friend; with
+        // caller↔driver dropped and originator=caller (default), the group
+        // must still be created (driver ungated vs caller).
+        let fixture = Fixture::new().await;
+        fixture.add_bot_owned_by("driver", "someone-else", "protected").await;
+        let detail = fixture
+            .service
+            .create(chat_group_with_driver("driver", None, vec![]))
+            .await
+            .expect("driver ungated vs caller");
+        assert_eq!(collaboration_originator(detail), "human_staff-1");
+    }
 }
