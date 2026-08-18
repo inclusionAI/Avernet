@@ -266,6 +266,9 @@ user_config:
     "/openapi/v1/bcsfuse/**":
       user: required
 
+    "/openapi/v1/harness/**":
+      user: required
+
     # BCN verifies the short-lived session credential carried by this exact
     # WebSocket handshake. Keep every other collaboration operation, including
     # session-token issuance, on the required User Principal boundary above.
@@ -380,6 +383,14 @@ user_config:
         schema:
           source: file
           path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      harness:
+        match: /openapi/v1/harness/bots/**
+        server: backend
+        protocols: [http]
+        schema:
+          source: file
+          path: schemas/harness.openapi.json
           refresh_seconds: 300
       collaboration:
         server: bcs

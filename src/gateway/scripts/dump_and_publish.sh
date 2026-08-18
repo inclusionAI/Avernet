@@ -132,11 +132,21 @@ main() {
     fi
 
     # ── backend ────────────────────────────────────────────────────────────────
-    _dump_upstream backend
+    # bots domain
+    _dump_upstream backend --path-prefix /openapi/v1/bots
     if ! $DRY_RUN; then
         _gate_and_publish \
             backend \
             "$SCHEMAS_DIR/bots.openapi.json" \
+            "$TMPDIR/backend.openapi.json"
+    fi
+
+    # harness domain
+    _dump_upstream backend --path-prefix /openapi/v1/harness
+    if ! $DRY_RUN; then
+        _gate_and_publish \
+            harness \
+            "$SCHEMAS_DIR/harness.openapi.json" \
             "$TMPDIR/backend.openapi.json"
     fi
 
