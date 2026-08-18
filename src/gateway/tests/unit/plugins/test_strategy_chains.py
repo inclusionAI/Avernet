@@ -15,7 +15,6 @@ from gateway.community.core.authn import IdentityChain
 from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
 from gateway.community.plugins.authn.app_token import AppTokenStrategy
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
-from gateway.community.plugins.authn.dev_header import DevHeaderUserStrategy
 from gateway.community.plugins.authn.google_token import GoogleUserStrategy
 from gateway.community.spi.authn import PrincipalType
 
@@ -26,7 +25,6 @@ def _pool():
         "bot_token": BotTokenStrategy(registry=None),
         "app_token": AppTokenStrategy(registry=None),
         "access_key_token": AccessKeyTokenStrategy(registry=None),
-        "dev_header": DevHeaderUserStrategy(),
     }
 
 
@@ -154,11 +152,11 @@ def _user_chain_names(chains) -> list[str]:
 
 
 def test_dev_mock_absent_without_env(tmp_path, monkeypatch):
-    """Pool membership alone activates nothing — the env var is the switch."""
+    """Without the env var the user chain is exactly what config declared."""
     monkeypatch.delenv("GATEWAY_AUTH_MOCK", raising=False)
     cfg = _declared_config(tmp_path, monkeypatch)
     chains = _strategy_chains(_pool(), user_config=cfg)
-    _append_dev_mock(chains, _pool())
+    _append_dev_mock(chains)
     assert _user_chain_names(chains) == ["google"]
 
 
@@ -166,26 +164,16 @@ def test_dev_mock_appended_last_with_env(tmp_path, monkeypatch):
     monkeypatch.setenv("GATEWAY_AUTH_MOCK", "1")
     cfg = _declared_config(tmp_path, monkeypatch)
     chains = _strategy_chains(_pool(), user_config=cfg)
-    _append_dev_mock(chains, _pool())
+    _append_dev_mock(chains)
     assert _user_chain_names(chains) == ["google", "dev_header"]
 
 
-def test_dev_mock_env_without_pool_entry_is_skipped(tmp_path, monkeypatch):
-    monkeypatch.setenv("GATEWAY_AUTH_MOCK", "1")
-    cfg = _declared_config(tmp_path, monkeypatch)
-    pool = {k: v for k, v in _pool().items() if k != "dev_header"}
-    chains = _strategy_chains(pool, user_config=cfg)
-    _append_dev_mock(chains, pool)
-    assert _user_chain_names(chains) == ["google"]
-
-
-def test_dev_mock_not_duplicated_when_declared(tmp_path, monkeypatch):
-    """A config that already names dev_header does not get it twice."""
-    monkeypatch.setenv("GATEWAY_AUTH_MOCK", "1")
+def test_dev_mock_cannot_be_declared_in_config(tmp_path, monkeypatch):
+    """The mock is env-only: it is not in the DI pool, so a config overlay
+    that names it is refused at boot rather than silently honoured."""
     (tmp_path / "application.yaml").write_text(
         "user_config:\n  identity_strategies:\n    user: [google, dev_header]\n"
     )
     monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
-    chains = _strategy_chains(_pool(), user_config=_user_config())
-    _append_dev_mock(chains, _pool())
-    assert _user_chain_names(chains) == ["google", "dev_header"]
+    with pytest.raises(KeyError, match="unknown strategy 'dev_header'"):
+        _strategy_chains(_pool(), user_config=_user_config())
