@@ -176,8 +176,8 @@ from fastapi import APIRouter, Depends
 from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
-from .caller import router as caller_router
 from .bots.engine_config import router as engine_config_router
+from .caller import router as caller_router
 from .deprecated import (
     ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
     GRANT_CHECKED_GROUPS as _LEGACY_GRANT_CHECKED,
