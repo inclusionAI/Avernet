@@ -82,7 +82,15 @@ async def list_tasks(
 ) -> ApiResponse[list[TaskSummaryDTO]]:
     """列任务摘要(轻量投影),按 run_id 降序(最新在前)。可选 ``status`` 过滤图级状态。
 
-    visualization/看板列表视图用;不返回完整图对象。"""
+    visualization/看板列表视图用;不返回完整图对象。非法 ``status`` 过滤值 → 400
+    (显式可读,非 500:``Status(invalid)`` 会抛 ``ValueError``,router 层先校验截断)。"""
+    from fastapi import HTTPException
+
+    from agentclaw.community.core.task.domain.models import Status
+    if status is not None and status not in {s.value for s in Status}:
+        raise HTTPException(
+            status_code=400, detail=f"invalid status filter: {status}",
+        ) from None
     items = service.list_tasks(status)
     return ApiResponse(success=True, message="OK", error_code=200, data=[summary_to_dto(s) for s in items])
 

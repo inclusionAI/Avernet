@@ -121,6 +121,7 @@ import agentclaw.community.adapters.http.task_discovery.router as _disc_router  
 
 _orig_build_service = _disc_router._build_service
 _orig_resolve_db_path = _disc_router._resolve_db_path
+_orig_task_reader = _disc_router.SqliteTaskReader
 
 
 class _ForcedDiscoveryFailure(RuntimeError):
@@ -131,8 +132,23 @@ def _build_service_failure(*_args, **_kwargs):
     raise _ForcedDiscoveryFailure("forced discovery build failure")
 
 
-def _resolve_db_path_failure(*_args, **_kwargs):
-    raise _ForcedDiscoveryFailure("forced status path failure")
+class _FailingTaskReader:
+    """Stand-in for ``SqliteTaskReader`` whose read raises inside the handler's try.
+
+    ``/status`` calls ``SqliteTaskReader(db_path).read_discovered_tasks()`` *inside*
+    its ``try/except`` (unlike ``_resolve_db_path``, which sits outside). Substituting
+    the reader — not the path resolver — is what keeps the forced raise caught by the
+    handler rather than escaping as an unhandled 500.
+    """
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
+
+    def read_discovered_tasks(self):
+        raise _ForcedDiscoveryFailure("forced status read failure")
+
+    def read_pending_tasks(self):
+        raise _ForcedDiscoveryFailure("forced status read failure")
 
 
 def _disc_clean_env(_world) -> None:
@@ -152,15 +168,16 @@ def _seed_discover_err(_world) -> None:
 
 
 def _seed_status_ok(_world) -> None:
-    # Restore both seams (discover_err may have patched _build_service earlier)
-    # so the final discovery case leaves the router module pristine.
+    # Restore every seam (earlier error cases may have patched them) so the final
+    # discovery case leaves the router module pristine.
     _disc_router._build_service = _orig_build_service
     _disc_router._resolve_db_path = _orig_resolve_db_path
+    _disc_router.SqliteTaskReader = _orig_task_reader
     _disc_clean_env(_world)
 
 
 def _seed_status_err(_world) -> None:
-    _disc_router._resolve_db_path = _resolve_db_path_failure
+    _disc_router.SqliteTaskReader = _FailingTaskReader
 
 
 # ===== POST /openapi/v1/task/execute =====
@@ -250,10 +267,10 @@ def list_ok():
     path="/openapi/v1/task/list",
     scenario="invalid_status_filter",
     input=CaseInput(query_params={"status": "INVALID_STATUS"}),
-    expect=ExpectError(status=500),
+    expect=ExpectError(status=400),
 )
 def list_invalid_status_filter():
-    """Non-enum status → Status(...) ValueError (uncaught) → 500."""
+    """Non-enum status → router rejects with 400 (not an uncaught ValueError 500)."""
 
 
 # ===== POST /openapi/v1/task/callback/report =====
@@ -578,7 +595,7 @@ def discovery_discover_build_failure():
     expect=ExpectError(status=200, json_contains={"success": False}),
 )
 def discovery_status_build_failure():
-    """Forced ``_resolve_db_path`` raise → handler's except → {success: false} 200."""
+    """Forced ``SqliteTaskReader.read`` raise (inside the try) → handler's except → {success: false} 200."""
 
 
 @endpoint_test(
