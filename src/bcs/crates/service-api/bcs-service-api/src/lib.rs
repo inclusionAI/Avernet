@@ -61,6 +61,10 @@ pub use application::session::{
     CreateOrReactivateCommand, CreateOrReactivateOutcome, SessionManagementService,
     SessionUseCaseError,
 };
+pub use application::session_launch::{
+    CreateSessionLaunch, ReactivateSessionLaunch, SessionCaller, SessionLaunchError,
+    SessionLaunchOutcome, SessionLaunchRequest, SessionLaunchService,
+};
 pub use application::session_files::{
     CapabilitiesView, DeleteFileCommand, DownloadRoute, PrepareUploadCommand, PrepareUploadResult,
     SessionFileService, SessionFileUseCaseError, ShareConsumeResult, ShareMintCommand,
