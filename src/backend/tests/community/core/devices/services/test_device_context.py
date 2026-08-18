@@ -120,13 +120,23 @@ def test_conn_info_defaults_for_absent_fields():
     assert ci.use_proxy is False
     assert ci.sandbox_id is None
     assert ci.target == ""
-    # the alias is added by the resolver layer, not derived inside ConnInfo
-    assert ci.binding_id is None
     assert ci.engine_port is None
     assert ci.paas_device_id is None
     assert ci.device_uuid is None
     assert ci.available is True
     assert ci.message == ""
+
+
+def test_conn_info_binding_id_falls_back_to_legacy_bind_id():
+    """The typed property also works on conn_info that never went through
+    the resolver's bind_id → binding_id alias step (the filesystem
+    dispatcher's legacy path wraps builder-raw dicts)."""
+    assert ConnInfo({"bind_id": 201}).binding_id == 201
+    # the resolver-normalized binding_id key wins when both are present
+    assert ConnInfo({"bind_id": 201, "binding_id": 202}).binding_id == 202
+    assert ConnInfo({}).binding_id is None
+    # bind_id stays strict — it reports only its own key
+    assert ConnInfo({"binding_id": 202}).bind_id is None
 
 
 def test_conn_info_mapping_compat_with_plain_dict_reads():

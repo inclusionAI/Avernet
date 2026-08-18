@@ -38,9 +38,11 @@ class ConnInfo(dict):
     ``tests/community/contract/test_conn_info_schema.py``):
     ``url`` / ``token`` / ``headers`` / ``use_proxy`` / ``sandbox_id`` /
     ``target`` / ``engine_type``. The one exception is the binding-routed
-    path of ``DeviceContextResolver.resolve_for_binding_invoke``, where the
-    transport fetches address/token per binding at call time, so no
-    transport fields are pre-filled.
+    path of ``DeviceContextResolver.resolve_for_binding_invoke``: it
+    pre-fills only routing fields (``engine_type`` / ``engine_port`` /
+    ``type`` / ``headers={}`` / ``device_affinity``) and no address or
+    credential fields (``url`` / ``token`` / ``target`` / ``sandbox_id`` /
+    ``use_proxy``) — the transport fetches those per binding at call time.
     """
 
     __slots__ = ()
@@ -61,8 +63,8 @@ class ConnInfo(dict):
         example (baas invoke-http):
         ``"https://<baas-host>/api/v1/bots/<tenant>/<bot_uuid>/invoke-http/20003"``;
         example (local direct): ``"http://127.0.0.1:20003"``.
-        Default ``""`` — the binding-routed path pre-fills nothing; the
-        transport fetches the address per binding.
+        Default ``""`` — the binding-routed path carries no address fields;
+        the transport fetches the address per binding.
         """
         return self.get("url", "")
 
@@ -76,6 +78,9 @@ class ConnInfo(dict):
         """HTTP headers the request must carry.
 
         Example: ``{"x-proxypass-token": "tok"}``; ``{}`` for local direct.
+        When the key is absent the default is a fresh throwaway dict — do
+        not add headers by mutating the returned value; write
+        ``conn_info["headers"] = {...}`` instead.
         """
         return self.get("headers", {})
 
@@ -135,11 +140,16 @@ class ConnInfo(dict):
     def binding_id(self) -> int | None:
         """``ac_entity_device_binding.id``. Example: ``201``.
 
-        ``None`` means this path didn't carry it (e.g. the legacy arca
-        path) — the transport's ``invoke`` branches on its presence to pick
-        baas /http-info vs the fallback.
+        Falls back to the legacy ``bind_id`` key when ``binding_id`` is
+        absent, so the typed property also works on conn_info that never
+        went through the resolver's ``_normalize_schema`` alias step (e.g.
+        the filesystem dispatcher's legacy path wraps builder-raw dicts).
+        ``None`` means neither key is present (e.g. the legacy arca path) —
+        the transport's ``invoke`` branches on its presence to pick baas
+        /http-info vs the fallback.
         """
-        return self.get("binding_id")
+        binding_id = self.get("binding_id")
+        return binding_id if binding_id is not None else self.get("bind_id")
 
     @property
     def bind_id(self) -> int | None:
