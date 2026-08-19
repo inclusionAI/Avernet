@@ -721,8 +721,12 @@ impl GroupServiceImpl {
             .await?;
         // The driver is ungated against the caller (caller↔driver is not
         // checked). Only when the originator is a caller-owned Bot distinct
-        // from the caller must the driver be reachable from that originator.
-        if originator != principal.actor_id() {
+        // from both the caller and the driver must the driver be reachable
+        // from that originator (an originator that is itself the driver is
+        // self-reachable; a protected bot cannot friend itself).
+        if originator != principal.actor_id()
+            && originator != request.driver_bot_uuid
+        {
             self.ensure_originator_can_reach_driver(&originator, &request.driver_bot_uuid)
                 .await?;
         }
