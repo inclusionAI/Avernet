@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
 import time
 import uuid
@@ -434,6 +435,31 @@ class SingleboxBotProvisioner:
         if not data.get("success"):
             raise RuntimeError(f"onboard_to_bcn failed (PUT /api/bots/{bot_id}): {data.get('message') or data}")
         return data
+
+    async def set_bcs_visibility(self, bot_id: str, visibility: str = "public") -> dict[str, Any]:
+        """``PUT /bots/{bot_uuid}/visibility`` 到 BCS(:21000) 设**单个 bot** 的 BCS visibility。
+
+        bot_uuid = ``{bot_id}:{owner_id}``(BCN onboard 时的 bcn_bot_id 格式,owner=本 provisioner 的
+        user_id)。singlebox ``BCS_AUTH_MOCK=1``,无需真 token。
+
+        为何需要:BCS 建群 ``ensure_reachable`` 对 ``visibility=="protected"`` 的成员 bot 做好友校验
+        (403 "not friends");``visibility=="public"`` 直接放行(不查好友)。singlebox bcs-config
+        ``default_visibility="protected"`` 是公共配置不能动,故对**要进协作群的成员 bot** 单独 PUT 成
+        ``public``,绕开好友校验、让真 ``form_coop_group`` 建群过(UI 可见真群)。只调你要的 bot,不改全局。
+        """
+        bcs_url = os.environ.get("BCS_API_BASE_URL", "http://127.0.0.1:21000").rstrip("/")
+        bot_uuid = f"{bot_id}:{self._user_id}"
+        r = await self._http.put(
+            f"{bcs_url}/bots/{bot_uuid}/visibility",
+            headers={"accept": "application/json"},
+            json={"visibility": visibility},
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(
+                f"set_bcs_visibility failed (PUT {bcs_url}/bots/{bot_uuid}/visibility "
+                f"visibility={visibility}): {r.status_code} {r.text[:200]}"
+            )
+        return r.json() if r.text else {}
 
     # ===== install skills =====
     async def install_skills(

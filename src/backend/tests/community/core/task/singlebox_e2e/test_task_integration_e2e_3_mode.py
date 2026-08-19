@@ -197,9 +197,11 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
         coop_a_id = await prov.create_bot(bot_name=_COOP_BOT_A)
         await prov.install_skills(coop_a_id, [_ACCEPTANCE_SKILL])
         await prov.onboard_to_bcn(coop_a_id)  # 入网 BCN:coop_group 成员建群前必须,否则 form_coop_group 404 bot_not_found({bot_id}:{owner} 不在 BCN)
+        await prov.set_bcs_visibility(coop_a_id)  # 设 BCS visibility=public(只此 bot):ensure_reachable 跳过好友校验,否则 protected 撞 403 not friends
         coop_b_id = await prov.create_bot(bot_name=_COOP_BOT_B)
         await prov.install_skills(coop_b_id, [_ACCEPTANCE_SKILL])
         await prov.onboard_to_bcn(coop_b_id)  # 同上(协作群两成员都要在 BCN)
+        await prov.set_bcs_visibility(coop_b_id)  # 同上
         jy_id = await prov.create_bot(bot_name=_JY_BOT_NAME)
         await prov.install_skills(jy_id, [_ARCH_SKILL, _BBS_SKILL])
         await prov._aclose()
