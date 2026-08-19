@@ -12,7 +12,10 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     AddSkillsRequest,
     SearchRequest,
 )
-from agentclaw.community.adapters.http.skill_center.skillsets import add_skills_to_set
+from agentclaw.community.adapters.http.skill_center.skillsets import (
+    add_skills_to_set,
+    get_default_skill_set,
+)
 from agentclaw.community.adapters.http.skill_center.skills import (
     activate_skill,
     deactivate_skill,
@@ -280,7 +283,9 @@ async def test_legacy_skill_set_batch_keeps_domain_partial_success() -> None:
             return kwargs["identifier"]
 
         async def add_skill(self, **_kwargs):
-            raise SkillSetControlPlaneConflictError("duplicate")
+            raise SkillSetControlPlaneConflictError(
+                "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
+            )
 
     response = await add_skills_to_set(
         "set-1",
@@ -323,3 +328,62 @@ async def test_legacy_skill_set_batch_propagates_infrastructure_failure() -> Non
 
     assert failure.value.status_code == 500
     assert failure.value.detail == "Skill set operation failed"
+
+
+@pytest.mark.asyncio
+async def test_legacy_skill_set_batch_does_not_hide_mutation_busy() -> None:
+    class _ControlPlane:
+        def resolve_legacy_skill_id(self, **kwargs):
+            return kwargs["identifier"]
+
+        async def add_skill(self, **_kwargs):
+            raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY")
+
+    with pytest.raises(HTTPException) as failure:
+        await add_skills_to_set(
+            "set-1",
+            AddSkillsRequest(skill_ids=["7"], user_id="owner", bot_id="bot"),
+            entity_id=None,
+            entity_type=None,
+            bot_id=None,
+            engine_type=None,
+            ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+            bot_repo=_Bots(),
+            control_plane=_ControlPlane(),
+        )
+
+    assert failure.value.status_code == 400
+    assert failure.value.detail == "BOT_MUTATION_BUSY"
+
+
+@pytest.mark.asyncio
+async def test_legacy_default_detail_projects_historical_false_as_active() -> None:
+    class _Service:
+        def get_default_skill_set(self, **_kwargs):
+            return {
+                "id": "1",
+                "name": "Default",
+                "description": None,
+                "is_default": True,
+                "is_builtin": True,
+                "is_active": False,
+                "user_id": "owner",
+                "bolt_id": "bot",
+                "engine_type": "openclaw",
+                "gmt_created": "",
+                "gmt_modified": "",
+            }
+
+    factory = SimpleNamespace(create=lambda **_kwargs: _Service())
+    response = await get_default_skill_set(
+        user_id="owner",
+        entity_id="owner",
+        entity_type="staff",
+        bot_id="bot",
+        engine_type="openclaw",
+        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+        bot_repo=_Bots(),
+        skill_set_service_factory=factory,
+    )
+
+    assert response.data.is_active is True

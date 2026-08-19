@@ -89,8 +89,10 @@ from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousErr
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
+    LocalSkillRuntimeSyncError,
     SkillDeleteConsistencyError,
     SkillReferencedBySkillSetError,
+    SkillSetManagedResourceError,
 )
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditGuard,
@@ -1069,14 +1071,20 @@ async def activate_skill(
     # now resolves to an ``ac_skill.id`` through the unified desired-state
     # control plane.  Non-decimal relative paths/link names are legacy wire,
     # not a second activation model.
-    result = await _set_legacy_asset_active_if_resolved(
-        asset_service=asset_service,
-        skill_reference=request.relative_path or skill_id,
-        source_path=request.source_path,
-        bot_id=effective_bot_id,
-        actor_id=ctx.user_id,
-        active=True,
-    )
+    try:
+        result = await _set_legacy_asset_active_if_resolved(
+            asset_service=asset_service,
+            skill_reference=request.relative_path or skill_id,
+            source_path=request.source_path,
+            bot_id=effective_bot_id,
+            actor_id=ctx.user_id,
+            active=True,
+        )
+    except LocalSkillRuntimeSyncError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to synchronize activated skills to runtime",
+        ) from exc
     if result is not None:
         return ActivateResponse(
             success=True,
@@ -1177,14 +1185,20 @@ async def deactivate_skill(
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    result = await _set_legacy_asset_active_if_resolved(
-        asset_service=asset_service,
-        skill_reference=skill_id,
-        source_path="",
-        bot_id=effective_bot_id,
-        actor_id=ctx.user_id,
-        active=False,
-    )
+    try:
+        result = await _set_legacy_asset_active_if_resolved(
+            asset_service=asset_service,
+            skill_reference=skill_id,
+            source_path="",
+            bot_id=effective_bot_id,
+            actor_id=ctx.user_id,
+            active=False,
+        )
+    except LocalSkillRuntimeSyncError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to synchronize deactivated skills to runtime",
+        ) from exc
     if result is not None:
         return DeactivateResponse(success=True, message="Skill deactivated successfully")
 
@@ -1598,86 +1612,55 @@ async def activate_skills_batch(
     request: ActivateSkillsRequest,
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     entity_id: Optional[str] = Query(None, description="Entity ID (纯ID，不需要前缀)"),
     entity_type: Optional[str] = Query(None, description="Entity type (staff/proj/team, default: staff)"),
     bot_id: Optional[str] = Query(None, description="Bot ID"),
     engine_type: Optional[str] = Query(None, description="Engine type override; defaults to bot's active_engine"),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
-    resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    device_sync_dispatcher: DeviceSyncDispatcher = Injected(DeviceSyncDispatcher),
+    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
 ) -> ActivateSkillsResponse:
-    """Batch activate skills from market."""
-    logger.info(f"[skills.activate_skills_batch] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, paths={request.skill_paths}, entity_id={entity_id}")
-
-    # Get user-specific paths
-    # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
-
-    # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-
-    # Create per-request service instance with user-specific paths
-    service = skill_service_factory.create(
-        active_dir=skills_dir,
-        repo_dir=repo_dir,
-        local_dir=local_dir,
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
+    """Compatibility batch adapter over the canonical Direct control plane."""
+    _, effective_bot_id, _, _, _ = _get_path_params(
+        ctx,
+        entity_id,
+        entity_type,
+        bot_id,
+        engine_type,
+        bot_repo=bot_repo,
     )
+    results: dict[str, list[dict[str, str]]] = {"success": [], "failed": []}
+    for path in request.skill_paths:
+        try:
+            skill_id = asset_service.resolve_legacy_skill_id(
+                skill_reference=path,
+                source_path=path,
+                bot_id=effective_bot_id,
+                actor_id=ctx.user_id,
+            )
+            item = await asset_service.set_active(
+                skill_id=skill_id,
+                bot_id=effective_bot_id,
+                actor_id=ctx.user_id,
+                active=True,
+            )
+            results["success"].append(
+                {
+                    "id": str(item.get("id") or skill_id),
+                    "link_name": str(
+                        item.get("link_name") or item.get("name") or skill_id
+                    ),
+                    "path": str(item.get("git_path") or path),
+                }
+            )
+        except (LocalSkillNotFoundError, SkillSetManagedResourceError) as exc:
+            results["failed"].append(
+                {"path": path, "error": str(exc) or type(exc).__name__}
+            )
+        except LocalSkillRuntimeSyncError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Failed to synchronize activated skills to runtime",
+            ) from exc
 
-    # activate_skills_batch is async — direct await. run_in_threadpool over
-    # an async function silently discards the inner coroutine (same bug as
-    # activate_skill above).
-    results = await service.activate_skills_batch(
-        request.skill_paths,
-        user_id=ctx.user_id,
-        bolt_id=effective_bot_id,
-    )
-
-    # 关键修复：批量激活后同步软链到设备（支持 Arca 模式）
-    try:
-        ctx_dev = resolver.resolve_for_bot(effective_bot_id, effective_entity_id)
-        device_sync = device_sync_dispatcher.dispatch(ctx_dev)
-        skill_set_service = skill_set_service_factory.create(
-            user_id=ctx.user_id,
-            entity_id=effective_entity_id,
-            bot_id=effective_bot_id,
-            engine_type=effective_engine,
-            entity_type=effective_entity_type,
-        )
-        mapping_kwargs: dict[str, Any] = {
-            "user_id": ctx.user_id,
-            "bolt_id": effective_bot_id,
-        }
-        if service.runtime_uses_pool_paths:
-            mapping_kwargs["additional_skill_paths"] = [
-                item["path"] for item in results["success"]
-            ]
-        symlinks = skill_set_service.get_symlink_mappings(**mapping_kwargs)
-        symlinks_dict = [sm.to_dict() for sm in symlinks]
-        sync_result = device_sync.sync_symlinks(symlinks_dict)
-        logger.info(f"[skills.activate_skills_batch] Device sync result: {sync_result}")
-    except Exception as e:
-        logger.warning(f"[skills.activate_skills_batch] Device sync skipped or failed: {e}")
-        _require_pool_runtime_sync_success(
-            service,
-            None,
-            detail="Failed to synchronize activated skills to runtime",
-        )
-    else:
-        _require_pool_runtime_sync_success(
-            service,
-            sync_result,
-            detail="Failed to synchronize activated skills to runtime",
-        )
-
-    logger.info(f"[skills.activate_skills_batch] Success: {len(results['success'])} activated, {len(results['failed'])} failed")
     return ActivateSkillsResponse(
         success=True,
         data=ActivateSkillsResults(

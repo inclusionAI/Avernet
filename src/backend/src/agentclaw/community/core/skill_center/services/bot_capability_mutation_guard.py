@@ -94,9 +94,24 @@ class BotCapabilityMutationGuard:
                 lease.lost.set()
                 return
 
-    @staticmethod
-    def ensure_valid(lease: BotCapabilityMutationLease) -> None:
+    def ensure_valid(self, lease: BotCapabilityMutationLease) -> None:
         if lease.lost.is_set():
+            raise BotCapabilityMutationLockUnavailableError()
+        # Compare-and-renew synchronously at every database/runtime boundary.
+        # The heartbeat limits long-running exposure; this check prevents a
+        # holder that lost its token between heartbeats from committing or
+        # compensating based only on a stale in-process flag.
+        try:
+            renewed = self._cache.renew_lock_strict(
+                lease.key,
+                lease.token,
+                ttl=self._LOCK_TTL_SECONDS,
+            )
+        except Exception as exc:
+            lease.lost.set()
+            raise BotCapabilityMutationLockUnavailableError() from exc
+        if not renewed:
+            lease.lost.set()
             raise BotCapabilityMutationLockUnavailableError()
 
     def release(self, lease: BotCapabilityMutationLease) -> bool:

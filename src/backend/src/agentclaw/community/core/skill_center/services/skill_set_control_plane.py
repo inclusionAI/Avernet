@@ -104,6 +104,10 @@ class SkillSetControlPlaneService:
         self._runtime = runtime
         self._legacy_factory = legacy_factory
         self._passport = passport
+        # Architecture Rule 12 boundary: authorization is delegated to the
+        # DI-registered CollaboratorServiceProtocol.  This module never imports
+        # a concrete RBAC implementation or reimplements membership policy; it
+        # only interprets the hook result as this domain's 403 outcome.
         self._collaborators = collaborators
         self._mutation_guard = mutation_guard
         self._edit_guard = edit_guard
@@ -239,9 +243,16 @@ class SkillSetControlPlaneService:
         bot = self._bot_repo.get_by_id(bot_id)
         if bot is not None:
             return self.get_set(bot_id=bot_id, actor_id=actor_id, set_id=set_id)
-        return self._repository.get_set(
+        if bot_id != "default":
+            raise LocalSkillNotFoundError()
+        item = self._repository.get_set(
             bot_id=bot_id, set_id=set_id, engine_type="openclaw"
         )
+        # The released no-Bot compatibility wire is owner-scoped.  ``default``
+        # is a shared sentinel rather than a globally readable Bot identity.
+        if str(item.get("user_id") or "") != actor_id:
+            raise SkillSetAccessDeniedError()
+        return item
 
     def update_set(
         self,
@@ -418,15 +429,18 @@ class SkillSetControlPlaneService:
         )
 
     async def sync(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
-        """Compatibility command for legacy sync's single-select semantics."""
+        """Compatibility command that adds this Set without disabling peers."""
         bot = self._bot(bot_id, actor_id)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
             actor_id=actor_id,
             action="skill_set_sync",
-            mutation=lambda: self._repository.replace_active_set(
-                bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+            mutation=lambda: self._repository.set_active(
+                bot_id=bot_id,
+                set_id=set_id,
+                active=True,
+                engine_type=self._engine(bot),
             ),
         )
 
@@ -492,6 +506,7 @@ class SkillSetControlPlaneService:
             try:
                 if not is_bot_ready(bot):
                     raise LocalSkillNotReadyError()
+                self._ensure_mutation_lease(mutation_lease)
                 mutation_result = mutation()
                 self._ensure_mutation_lease(mutation_lease)
                 # An inactive-set membership change has no runtime projection

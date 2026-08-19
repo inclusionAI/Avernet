@@ -65,8 +65,10 @@ class _AnyMutationGuard(_MutationGuard):
 class _Repository:
     def __init__(self) -> None:
         self.restore_calls = []
+        self.set_active_calls = []
 
-    def set_active(self, **_kwargs) -> SkillSetMutation:
+    def set_active(self, **kwargs) -> SkillSetMutation:
+        self.set_active_calls.append(kwargs)
         return SkillSetMutation(
             item={"id": "set-1", "name": "set", "is_default": False, "is_active": True},
             changed=True,
@@ -88,6 +90,21 @@ class _CreateRepository(_Repository):
             "id": "set-1",
             "name": kwargs["name"],
             "bolt_id": kwargs["bot_id"],
+            "is_default": False,
+            "is_active": False,
+        }
+
+
+class _LegacyReadRepository(_Repository):
+    def __init__(self, *, owner_id: str) -> None:
+        super().__init__()
+        self.owner_id = owner_id
+
+    def get_set(self, **_kwargs):
+        return {
+            "id": "set-1",
+            "bolt_id": "default",
+            "user_id": self.owner_id,
             "is_default": False,
             "is_active": False,
         }
@@ -339,6 +356,55 @@ def test_legacy_create_retains_only_virtual_default_bot_compatibility():
     assert result["bolt_id"] == "default"
     assert repository.create_calls[0]["owner_id"] == "actor"
     assert mutation_guard.scope.entity_id == "actor"
+
+
+def test_legacy_virtual_default_read_is_owner_scoped():
+    service = SkillSetControlPlaneService(
+        repository=_LegacyReadRepository(owner_id="owner"),
+        bot_repo=_MissingBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        collaborators=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+    )
+
+    assert service.get_legacy_set(
+        bot_id="default", actor_id="owner", set_id="set-1"
+    )["id"] == "set-1"
+    with pytest.raises(SkillSetAccessDeniedError):
+        service.get_legacy_set(
+            bot_id="default", actor_id="other", set_id="set-1"
+        )
+
+
+@pytest.mark.asyncio
+async def test_legacy_sync_activates_additively_without_replacing_other_sets():
+    repository = _Repository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        collaborators=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+    )
+
+    await service.sync(bot_id="bot-1", actor_id="true-owner", set_id="set-1")
+
+    assert repository.set_active_calls == [
+        {
+            "bot_id": "bot-1",
+            "set_id": "set-1",
+            "active": True,
+            "engine_type": "openclaw",
+        }
+    ]
 
 
 def test_skill_set_acl_denial_is_forbidden_not_not_found():

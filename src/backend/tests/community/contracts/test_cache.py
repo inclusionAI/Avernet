@@ -68,3 +68,19 @@ def test_marketcache_partitions_persisted_skill_data_by_current_tenant(world) ->
 
     with avernet_tenant_scope("tenant-a"):
         assert mc.get("market_skills_list_default") == {"skills": ["tenant-a"]}
+
+
+def _assert_strict_lock_renewal_contract(cache: CachePlugin) -> None:
+    token = cache.acquire_lock_strict("contract:renew", ttl=30)
+    assert token is not None
+    assert cache.renew_lock_strict("contract:renew", token, ttl=60) is True
+    assert cache.renew_lock_strict("contract:renew", "stale-token", ttl=60) is False
+    assert cache.release_lock("contract:renew", token) is True
+
+
+def test_local_cache_strict_lock_renewal_conforms(world) -> None:
+    _assert_strict_lock_renewal_contract(world.get(CachePlugin))
+
+
+def test_community_cache_strict_lock_renewal_conforms(community_world) -> None:
+    _assert_strict_lock_renewal_contract(community_world.get(CachePlugin))

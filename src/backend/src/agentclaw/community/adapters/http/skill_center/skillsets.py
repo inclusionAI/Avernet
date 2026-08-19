@@ -505,8 +505,14 @@ async def add_skills_to_set(
             except (
                 LocalSkillNotFoundError,
                 SkillSetControlPlaneNotFoundError,
-                SkillSetControlPlaneConflictError,
             ) as exc:
+                results["failed"].append({"skill_id": skill_id, "error": str(exc)})
+            except SkillSetControlPlaneConflictError as exc:
+                if str(exc) not in {
+                    "RESOURCE_DIRECT_ACTIVE",
+                    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+                }:
+                    raise
                 results["failed"].append({"skill_id": skill_id, "error": str(exc)})
         success_count = len(results["success"])
         failed_count = len(results["failed"])
@@ -584,6 +590,7 @@ async def ensure_default_skill_set(
     skill_set = service.ensure_default_skill_set(user_id=ctx.user_id, bolt_id=effective_bot_id)
     # Remove 'skills' key if present to avoid Pydantic validation error
     skill_set_clean = {k: v for k, v in skill_set.items() if k != 'skills'}
+    skill_set_clean['is_active'] = True
     # Map bolt_id to bot_id for frontend
     skill_set_clean['bot_id'] = skill_set_clean.get('bolt_id') or "default"
     # Remove original bolt_id from response
@@ -617,6 +624,7 @@ async def get_default_skill_set(
         raise HTTPException(status_code=404, detail="No default skill set found")
     # Remove 'skills' key if present to avoid Pydantic validation error
     skill_set_clean = {k: v for k, v in skill_set.items() if k != 'skills'}
+    skill_set_clean['is_active'] = True
     # Map bolt_id to bot_id for frontend
     skill_set_clean['bot_id'] = skill_set_clean.get('bolt_id') or "default"
     # Remove original bolt_id from response
