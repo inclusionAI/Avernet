@@ -11,6 +11,7 @@ pub mod friendship;
 pub mod group;
 pub mod group_session_connection;
 pub mod identity;
+pub mod internal_bot_attributes;
 pub mod invitation;
 pub mod message;
 pub mod principal;
@@ -30,6 +31,7 @@ pub use identity::{
     AuthenticatedAccessKeyIdentity, AuthenticatedAppIdentity, AuthenticatedBotIdentity,
     AuthenticatedCaller, AuthenticatedUserIdentity,
 };
+pub use internal_bot_attributes::*;
 pub use invitation::*;
 pub use message::*;
 pub use principal::{AuthenticatedUser, BotPrincipal, HumanPrincipal, Principal};
