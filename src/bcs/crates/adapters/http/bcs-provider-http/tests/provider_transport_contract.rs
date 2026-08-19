@@ -903,7 +903,8 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
         .with_state(captured.clone());
     let (webhook_url, server) = spawn_server(app).await;
 
-    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests()
+        .with_chat_run_timeout_ms(42_000);
     let result = transport
         .deliver(BotDeliveryCommand {
             target: provider_target(webhook_url),
@@ -954,6 +955,7 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
     assert_eq!(request.body["from"]["name"], "Sender Bot");
     assert_eq!(request.body["message"]["text"], "observe");
     assert_eq!(request.body["attachments"][0]["attachment_id"], "att-1");
+    assert_eq!(request.body["timeout_ms"], 3_600_000);
 
     server.abort();
 }
