@@ -8,12 +8,11 @@
 from typing import TYPE_CHECKING, Any
 
 from secbaas.community.api.bot_runtime import BotBindingInfo
-from secbaas.community.core.service.config._constants import SystemConfigKey
 from secbaas.community.logger import get_logger
 
 if TYPE_CHECKING:
-    from secbaas.community.api.config_manage._protocols import (
-        SystemConfigManageService,
+    from secbaas.community.api.eval_env._protocols import (
+        EvalBindingResolverProtocol,
     )
     from secbaas.community.core.repository.ac_bot import AcBotRepository
     from secbaas.community.core.repository.ac_bot_publish import (
@@ -24,9 +23,6 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger("core-bot-run")
-
-# default_tag 键名（与 OCB 侧 device_props 中的键一致）
-_DYNAMIC_ENV_TAG_KEY = "AGENTCLAW_DEFAULT_TAG"
 
 # 支持的 engine_type 白名单：openclaw/teclaw（老引擎）+ 3 个新引擎。
 _SUPPORTED_ENGINES = frozenset(
@@ -75,12 +71,12 @@ class BotBindingResolver:
         ac_bot_repo: "AcBotRepository",
         publish_repo: "AcBotPublishRepository",
         binding_repo: "DeviceBindingRepository",
-        system_config_service: "SystemConfigManageService | None" = None,
+        eval_binding_resolver: "EvalBindingResolverProtocol | None" = None,
     ):
         self._ac_bot_repo = ac_bot_repo
         self._publish_repo = publish_repo
         self._binding_repo = binding_repo
-        self._system_config_service = system_config_service
+        self._eval_binding_resolver = eval_binding_resolver
 
     def resolve(
         self,
@@ -125,11 +121,11 @@ class BotBindingResolver:
 
         # Step 2: For service bots, resolve binding based on lifecycle_stage
         if ac_bot.bot_type == "service":
-            # eval 生命周期阶段 → 检查开关后决定走 eval binding 还是降级走 online
+            # eval 生命周期阶段 → 委托 Plugin 决定走 eval binding 还是降级走 online
             if lifecycle_stage in ("eval", "default"):
-                if self._is_eval_env_enabled():
-                    # 开关开启：走 eval binding 解析
-                    resolved_binding_id = self._resolve_eval_binding(
+                if self._eval_binding_resolver is not None and self._eval_binding_resolver.is_eval_env_enabled():
+                    # Plugin 启用：走 eval binding 解析
+                    resolved_binding_id = self._eval_binding_resolver.resolve_eval_binding(
                         bot_id=bot_id,
                         entity_id=entity_id,
                         env=env,
@@ -141,7 +137,7 @@ class BotBindingResolver:
                         return None
                     binding_id = resolved_binding_id
                 else:
-                    # 开关关闭：降级走 online 生产路由
+                    # Plugin 未注入或功能关闭：降级走 online 生产路由
                     logger.warning(
                         f"[resolve] Eval env disabled, fallback to online: "
                         f"bot_id={bot_id}, lifecycle_stage={lifecycle_stage}"
@@ -329,96 +325,26 @@ class BotBindingResolver:
         entity_id: str,
         env: str,
     ) -> int | None:
-        """解析 eval 生命周期阶段的 binding_id（场景三：服务 Bot 主动发起评测）。
+        """解析 eval 生命周期阶段的 binding_id。
 
-        从 binding 的 device_props 中按 AGENTCLAW_DEFAULT_TAG + bot_id 匹配，
-        逻辑同 OCB 侧 _resolve_eval_binding_id。
-
-        过滤规则：
-        - status="RELEASED" 的 binding 不参与匹配
-
-        Args:
-            bot_id: Bot ID
-            entity_id: 实体 ID
-            env: 环境
-
-        Returns:
-            匹配的 binding_id，无匹配返回 None
+        已迁移至 EvalBindingResolverProtocol Plugin。
+        此方法保留为兼容入口，委托 Plugin 处理。
         """
-        # 分页查询所有 binding
-        all_bindings = []
-        _page_size = 200
-        _page = 1
-        while True:
-            _total, _rows = self._binding_repo.list_bindings(
-                env=env,
-                entity_id=entity_id,
-                entity_type=None,
-                status=None,
-                page=_page,
-                page_size=_page_size,
-            )
-            all_bindings.extend(_rows)
-            if _page * _page_size >= _total:
-                break
-            _page += 1
-
-        # 按 device_props 精细过滤
-        matched = []
-        for b in all_bindings:
-            # 过滤 RELEASED 状态
-            if b.status == "RELEASED":
-                continue
-            device_props = b.device_props or {}
-            # 必须有 AGENTCLAW_DEFAULT_TAG
-            if not device_props.get(_DYNAMIC_ENV_TAG_KEY):
-                continue
-            # 按 bot_id 过滤
-            if "bot_id" in device_props and device_props["bot_id"] != bot_id:
-                continue
-            matched.append(b)
-
-        if not matched:
+        if self._eval_binding_resolver is None:
+            logger.warning("[_resolve_eval_binding] Plugin 未注入，返回 None")
             return None
-
-        # 优先匹配 AGENTCLAW_DEFAULT_TAG == "eval" 的 binding
-        eval_bindings = [
-            b for b in matched
-            if b.device_props.get(_DYNAMIC_ENV_TAG_KEY) == "eval"
-        ]
-        if eval_bindings:
-            return eval_bindings[0].id
-
-        # 回退到第一个匹配的 binding
-        return matched[0].id
+        return self._eval_binding_resolver.resolve_eval_binding(
+            bot_id=bot_id,
+            entity_id=entity_id,
+            env=env,
+        )
 
     def _is_eval_env_enabled(self) -> bool:
         """检查评测环境开关是否开启。
 
-        安全默认策略：
-        - system_config_service 为 None → False（安全默认）
-        - get_config 异常 → False（安全默认）
-        - config 为 None → False（安全默认）
-        - conf_value 为空 → False（安全默认）
-        - conf_value 为 "true" → True
-
-        Returns:
-            True=评测环境开启，False=评测环境关闭（降级走 online）
+        已迁移至 EvalBindingResolverProtocol.is_eval_env_enabled()。
+        此方法保留为兼容入口，委托 Plugin 处理。
         """
-        if self._system_config_service is None:
+        if self._eval_binding_resolver is None:
             return False
-
-        try:
-            config = self._system_config_service.get_config(
-                SystemConfigKey.EVAL_ENV_ENABLED
-            )
-        except Exception as e:
-            logger.warning(
-                "[_is_eval_env_enabled] 读取配置异常, fallback disabled: %s", e,
-            )
-            return False
-
-        if config is None:
-            return False
-
-        return (config.conf_value or "").strip().lower() == "true"
+        return self._eval_binding_resolver.is_eval_env_enabled()

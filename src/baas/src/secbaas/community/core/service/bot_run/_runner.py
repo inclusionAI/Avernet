@@ -90,6 +90,7 @@ class BotRunner:
         dispatchers: list[MessageDispatcher],
         system_config_service: SystemConfigManageService | None = None,
         default_request_timeout: float = 30.0,
+        eval_session_log: Any | None = None,
     ):
         self._bot_service_selector = bot_service_selector
         self._run_repository = run_repository
@@ -97,6 +98,7 @@ class BotRunner:
         self._dispatchers = dispatchers
         self._system_config_service = system_config_service
         self._default_request_timeout = default_request_timeout
+        self._eval_session_log = eval_session_log
         self._dispatcher_map: dict[str, MessageDispatcher] = {
             d.__class__.__name__: d for d in self._dispatchers
         }
@@ -192,7 +194,7 @@ class BotRunner:
             attachments=attachments,
         )
 
-        chat_metadata = build_chat_metadata(metadata, run_id=message_id)
+        chat_metadata = build_chat_metadata(metadata, run_id=message_id, eval_session_log=self._eval_session_log)
         # 5. 上报日志关联(后台执行,不阻塞主链路)
         self._fire_and_forget_report(
             run_id=message_id,
@@ -266,7 +268,7 @@ class BotRunner:
 
         route = await self._resolve_bot_route(bot_id, metadata)
 
-        # eval 对话 session 日志与保护性校验
+        # eval 对话 session 日志与保护性校验 — 委托 Plugin
         eval_id = metadata.get("eval_id")
         if eval_id:
             logger.info(
@@ -274,6 +276,13 @@ class BotRunner:
                 eval_id,
                 bot_id,
             )
+            if self._eval_session_log is not None:
+                self._eval_session_log.log_eval_session(
+                    eval_id=eval_id,
+                    bot_id=bot_id,
+                    session_id=metadata.get("session_id", ""),
+                    method="deliver_message",
+                )
 
         # 3. 创建会话
         actual_session_id = await self._create_session(
@@ -286,7 +295,7 @@ class BotRunner:
 
         # 4. 委托 dispatcher 异步发送
         wait_result = parse_wait_result(metadata)
-        chat_metadata = build_chat_metadata(metadata, run_id=message_id)
+        chat_metadata = build_chat_metadata(metadata, run_id=message_id, eval_session_log=self._eval_session_log)
         await self._select_dispatcher(bot_id, metadata=metadata).dispatch_send(
             bot_service=route.bot_service,
             run_id=message_id,
@@ -358,7 +367,7 @@ class BotRunner:
 
         route = await self._resolve_bot_route(bot_id, metadata)
 
-        # eval 对话 session 日志与保护性校验
+        # eval 对话 session 日志与保护性校验 — 委托 Plugin
         eval_id = metadata.get("eval_id")
         if eval_id:
             logger.info(
@@ -366,6 +375,13 @@ class BotRunner:
                 eval_id,
                 bot_id,
             )
+            if self._eval_session_log is not None:
+                self._eval_session_log.log_eval_session(
+                    eval_id=eval_id,
+                    bot_id=bot_id,
+                    session_id=metadata.get("session_id", ""),
+                    method="deliver_message_stream",
+                )
 
         raw_session_id = metadata.get("session_id")
 

@@ -102,18 +102,25 @@ async def deliver_message(
     metadata = request.metadata or {}
     callback = None
 
-    # 注入 eval 路由 Header 到 metadata
-    if x_eval_id:
-        metadata["eval_id"] = x_eval_id
-        metadata.setdefault("session_id", x_eval_id)
-        if not x_eval_id.startswith("eval"):
-            logger.warning(
-                f"deliver_message: x-eval-id format mismatch: {x_eval_id}, "
-                f"expected 'eval-...' format"
+    # 注入 eval 路由 Header 到 metadata — 委托 EvalSessionLogProtocol Plugin
+    if x_eval_id or x_default_tag:
+        from secbaas.community.api.eval_env._protocols import EvalSessionLogProtocol
+        # 从容器获取 eval_session_log Plugin（懒加载避免循环依赖）
+        try:
+            eval_session_log = Provide[ApplicationContainer.services.eval_session_log]
+            metadata = eval_session_log.extract_eval_headers(
+                metadata=metadata,
+                x_eval_id=x_eval_id,
+                x_default_tag=x_default_tag,
             )
-    if x_default_tag:
-        metadata["default_tag"] = x_default_tag
-        metadata.setdefault("bot_options", {})["lifecycle_stage"] = x_default_tag
+        except Exception:
+            # 降级：直接注入（兼容旧路径）
+            if x_eval_id:
+                metadata["eval_id"] = x_eval_id
+                metadata.setdefault("session_id", x_eval_id)
+            if x_default_tag:
+                metadata["default_tag"] = x_default_tag
+                metadata.setdefault("bot_options", {})["lifecycle_stage"] = x_default_tag
     if request.callback_url is not None:
         metadata["callback_url"] = request.callback_url
         callback = "http_callback"
@@ -243,18 +250,25 @@ async def deliver_message_stream(
     metadata = request.metadata or {}
     metadata["stream"] = "true"
 
-    # 注入 eval 路由 Header 到 metadata
-    if x_eval_id:
-        metadata["eval_id"] = x_eval_id
-        metadata.setdefault("session_id", x_eval_id)
-        if not x_eval_id.startswith("eval"):
-            logger.warning(
-                f"deliver_message_stream: x-eval-id format mismatch: {x_eval_id}, "
-                f"expected 'eval-...' format"
+    # 注入 eval 路由 Header 到 metadata — 委托 EvalSessionLogProtocol Plugin
+    if x_eval_id or x_default_tag:
+        from secbaas.community.api.eval_env._protocols import EvalSessionLogProtocol
+        # 从容器获取 eval_session_log Plugin（懒加载避免循环依赖）
+        try:
+            eval_session_log = Provide[ApplicationContainer.services.eval_session_log]
+            metadata = eval_session_log.extract_eval_headers(
+                metadata=metadata,
+                x_eval_id=x_eval_id,
+                x_default_tag=x_default_tag,
             )
-    if x_default_tag:
-        metadata["default_tag"] = x_default_tag
-        metadata.setdefault("bot_options", {})["lifecycle_stage"] = x_default_tag
+        except Exception:
+            # 降级：直接注入（兼容旧路径）
+            if x_eval_id:
+                metadata["eval_id"] = x_eval_id
+                metadata.setdefault("session_id", x_eval_id)
+            if x_default_tag:
+                metadata["default_tag"] = x_default_tag
+                metadata.setdefault("bot_options", {})["lifecycle_stage"] = x_default_tag
 
     logger.info(
         f"deliver_message_stream: bot_id={bot_id}, app_id={api_key_record.app_id}, "

@@ -163,11 +163,13 @@ def binding_data_to_info(data: BotBindingData) -> BotBindingInfo:
 def build_chat_metadata(
     metadata: dict[str, Any] | None,
     run_id: str,
+    eval_session_log: Any | None = None,
 ) -> dict[str, str] | None:
     """从 metadata 中构造 chat_metadata，用于透传到 WS chat 请求。
 
     参考 _report_log_relation 的取值逻辑，提取 biz_task_id / biz_scene。
-    当 metadata 中包含 eval_id / default_tag 时，增加观测字段。
+    当 metadata 中包含 eval_id / default_tag 时，通过
+    EvalSessionLogProtocol Plugin 增加观测字段。
     """
     metadata = metadata or {}
     biz_task_id = (
@@ -189,7 +191,14 @@ def build_chat_metadata(
         "biz_task_id": str(biz_task_id),
         "biz_scene": str(biz_scene),
     }
-    # eval 观测字段注入
+    # eval 观测字段注入 — 委托 Plugin
+    if eval_session_log is not None:
+        enriched = eval_session_log.enrich_chat_metadata(
+            metadata=chat_metadata,
+            run_id=run_id,
+        )
+        return enriched
+    # 降级路径：Plugin 未注入时直接注入
     eval_id = metadata.get("eval_id")
     if eval_id:
         chat_metadata["eval_id"] = str(eval_id)

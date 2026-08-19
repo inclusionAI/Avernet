@@ -136,6 +136,7 @@ class BaasBotService(BotService):
         wss_resolver: DefaultBotWssDispatcher,
         session_service: DefaultSessionService,
         engine_adapter_registry: BotEngineAdapterRegistry | None = None,
+        eval_consistency_check: Any | None = None,
     ) -> None:
         self._config = config
         self._client_pool = client_pool
@@ -144,6 +145,8 @@ class BaasBotService(BotService):
         # Registry 只服务 aicoding / hermes / claude_code；openclaw / teclaw 不注册。
         # 引擎差异由 registry 分流:命中 adapter 走 adapter,否则走原始分支。
         self._engine_adapter_registry = engine_adapter_registry
+        # 评测一致性检查 Plugin
+        self._eval_consistency_check = eval_consistency_check
 
     # ── 公开方法 (BotService Protocol) ───────────────────────────────────────
 
@@ -398,26 +401,32 @@ class BaasBotService(BotService):
         """
         baas_session_id = binding_info.baas_session_id
 
-        # eval 消息一致性检查与日志
+        # eval 消息一致性检查与日志 — 委托 Plugin
         if chat_metadata and chat_metadata.get("eval_id"):
             logger.info(
                 "[BaasBotService.send_message] sending eval message: eval_id=%s, session_id=%s",
                 chat_metadata.get("eval_id"),
                 session_id,
             )
-            # 一致性检查：验证 binding 的 AGENTCLAW_DEFAULT_TAG 与请求的 default_tag 一致
-            binding_default_tag = (binding_info.device_props or {}).get(
-                "AGENTCLAW_DEFAULT_TAG", ""
-            )
-            request_default_tag = chat_metadata.get("default_tag", "")
-            if binding_default_tag and request_default_tag and binding_default_tag != request_default_tag:
-                logger.warning(
-                    "[BaasBotService.send_message] default_tag mismatch: "
-                    "binding=%s, request=%s, session_id=%s",
-                    binding_default_tag,
-                    request_default_tag,
-                    session_id,
+            if self._eval_consistency_check is not None:
+                self._eval_consistency_check.check_default_tag_consistency(
+                    binding_info=binding_info,
+                    chat_metadata=chat_metadata,
                 )
+            else:
+                # 降级：内联一致性检查（兼容旧路径）
+                binding_default_tag = (binding_info.device_props or {}).get(
+                    "AGENTCLAW_DEFAULT_TAG", ""
+                )
+                request_default_tag = chat_metadata.get("default_tag", "")
+                if binding_default_tag and request_default_tag and binding_default_tag != request_default_tag:
+                    logger.warning(
+                        "[BaasBotService.send_message] default_tag mismatch: "
+                        "binding=%s, request=%s, session_id=%s",
+                        binding_default_tag,
+                        request_default_tag,
+                        session_id,
+                    )
 
         try:
             conn_info = await self._resolve_ws_connection_for_binding(
@@ -485,7 +494,7 @@ class BaasBotService(BotService):
         baas_session_id = binding_info.baas_session_id
         engine_type = binding_info.engine_type
 
-        # eval 消息一致性检查与日志
+        # eval 消息一致性检查与日志 — 委托 Plugin
         if chat_metadata and chat_metadata.get("eval_id"):
             logger.info(
                 "[BaasBotService.send_message_stream] sending eval message: "
@@ -493,19 +502,25 @@ class BaasBotService(BotService):
                 chat_metadata.get("eval_id"),
                 session_id,
             )
-            # 一致性检查：验证 binding 的 AGENTCLAW_DEFAULT_TAG 与请求的 default_tag 一致
-            binding_default_tag = (binding_info.device_props or {}).get(
-                "AGENTCLAW_DEFAULT_TAG", ""
-            )
-            request_default_tag = chat_metadata.get("default_tag", "")
-            if binding_default_tag and request_default_tag and binding_default_tag != request_default_tag:
-                logger.warning(
-                    "[BaasBotService.send_message_stream] default_tag mismatch: "
-                    "binding=%s, request=%s, session_id=%s",
-                    binding_default_tag,
-                    request_default_tag,
-                    session_id,
+            if self._eval_consistency_check is not None:
+                self._eval_consistency_check.check_default_tag_consistency(
+                    binding_info=binding_info,
+                    chat_metadata=chat_metadata,
                 )
+            else:
+                # 降级：内联一致性检查（兼容旧路径）
+                binding_default_tag = (binding_info.device_props or {}).get(
+                    "AGENTCLAW_DEFAULT_TAG", ""
+                )
+                request_default_tag = chat_metadata.get("default_tag", "")
+                if binding_default_tag and request_default_tag and binding_default_tag != request_default_tag:
+                    logger.warning(
+                        "[BaasBotService.send_message_stream] default_tag mismatch: "
+                        "binding=%s, request=%s, session_id=%s",
+                        binding_default_tag,
+                        request_default_tag,
+                        session_id,
+                    )
 
         try:
             conn_info = await self._resolve_ws_connection_for_binding(
