@@ -12,6 +12,9 @@ from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
+from agentclaw.community.core.bot_management.bot_space import (
+    BotSpaceAccessProtocol,
+)
 from agentclaw.community.core.market_favorites.services import MarketFavoriteService
 from agentclaw.community.core.repository.implementations.market_favorites import (
     MarketFavoriteRepository,
@@ -37,6 +40,11 @@ class SpacesModule(Module):
             scope=singleton,
         )
         binder.bind(SpaceAccessService, to=SpaceAccessService, scope=singleton)
+        binder.bind(
+            BotSpaceAccessProtocol,
+            to=SpaceAccessService,
+            scope=singleton,
+        )
         binder.bind(
             SpaceAccessServiceProtocol,
             to=SpaceAccessService,

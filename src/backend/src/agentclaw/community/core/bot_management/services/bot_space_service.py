@@ -5,6 +5,7 @@ from __future__ import annotations
 from injector import inject
 
 from agentclaw.community.core.bot_management.bot_space import (
+    BotSpaceAccessProtocol,
     BotSpaceAssignmentResult,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
@@ -14,7 +15,6 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.models import SpaceType
-from agentclaw.community.api.space_service import SpaceAccessServiceProtocol
 
 
 class BotSpaceService:
@@ -28,7 +28,7 @@ class BotSpaceService:
     def __init__(
         self,
         repository: BotRepository,
-        space_access: SpaceAccessServiceProtocol,
+        space_access: BotSpaceAccessProtocol,
     ) -> None:
         self._repository = repository
         self._space_access = space_access

@@ -30,6 +30,7 @@ from agentclaw.community.core.engine_runtime.models import EngineResult
 
 from .conftest import BOT, OWNER, fails, ok
 
+
 #: The engine-runtime paths, taken from the routers themselves rather than
 #: guessed from a segment. Segment-matching was wrong the moment engine config
 #: moved to ``/{bot_id}/engine/config``: it sits under the ``engine`` literal by
@@ -115,6 +116,12 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("post", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"),
     ("get", "/openapi/v1/bots/{bot_id}/diagnostics/health"),
     ("post", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"),
+    ("get", "/openapi/v1/bots/{bot_id}/channels"),
+    ("post", "/openapi/v1/bots/{bot_id}/channels"),
+    ("get", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
+    ("patch", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
+    ("put", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"),
 }
 
 
@@ -209,9 +216,7 @@ def test_the_connection_build_receives_the_named_stage(relay):
     attach_injector(app, Injector([_M()]))
     client = user_scoped_client(app, OWNER)
 
-    resp = client.get(
-        f"/openapi/v1/bots/{BOT}/connection", params={"stage": "online"}
-    )
+    resp = client.get(f"/openapi/v1/bots/{BOT}/connection", params={"stage": "online"})
     assert resp.status_code == 200, resp.json()
     assert [b["stage"] for b in connections.builds] == ["online"]
 
@@ -269,9 +274,7 @@ def _operations(schema: dict):
 
 def _query_params(operation: dict) -> dict[str, dict]:
     return {
-        p["name"]: p
-        for p in operation.get("parameters", [])
-        if p.get("in") == "query"
+        p["name"]: p for p in operation.get("parameters", []) if p.get("in") == "query"
     }
 
 
@@ -311,7 +314,6 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
         "owner_id belongs to engine-runtime and the explicitly listed "
         "owner-addressed operations, and to nothing else by accident"
     )
-
 
 
 def test_the_stage_enum_publishes_exactly_the_three_runtimes():
