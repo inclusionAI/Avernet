@@ -9,6 +9,15 @@ from typing import Any, Protocol, runtime_checkable
 class BotSkillAssetServiceProtocol(Protocol):
     def get_skill(self, *, skill_id: str, bot_id: str, actor_id: str) -> dict[str, Any]: ...
 
+    def resolve_legacy_skill_id(
+        self,
+        *,
+        skill_reference: str,
+        source_path: str,
+        bot_id: str,
+        actor_id: str,
+    ) -> str: ...
+
     async def set_active(
         self, *, skill_id: str, bot_id: str, actor_id: str, active: bool
     ) -> dict[str, Any]: ...

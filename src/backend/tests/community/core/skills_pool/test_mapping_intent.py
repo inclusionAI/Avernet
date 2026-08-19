@@ -165,6 +165,24 @@ def test_rejects_duplicate_active_target() -> None:
         )
 
 
+def test_repo_runtime_name_uses_skill_name_not_path_tail() -> None:
+    with pytest.raises(ValueError, match="duplicate managed target"):
+        build_logical_skill_mappings(
+            [
+                RegisteredSkillAsset(
+                    skill_id=1,
+                    name="report",
+                    git_path="git://ops/weekly-report",
+                ),
+                RegisteredSkillAsset(
+                    skill_id=2,
+                    name="report",
+                    git_path="git://finance/monthly-report",
+                ),
+            ]
+        )
+
+
 def test_validates_and_keys_engine_returned_locator_evidence() -> None:
     assets = [
         RegisteredSkillAsset(

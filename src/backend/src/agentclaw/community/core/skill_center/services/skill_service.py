@@ -1308,6 +1308,12 @@ class SkillService:
                 "delegating to SkillRepoSyncPlugin"
             )
             result = self.sync_repo()
+            # The local Plugin only acquires/refreshed the host-side corpus.
+            # Keep the public operation equivalent to GitSyncService: one
+            # successful fetch is followed by exactly one DB scan and one
+            # atomic cache refresh (owned by sync_skills_from_git).
+            if result.get("success"):
+                result["database"] = self.sync_skills_from_git()
             result.setdefault("error", None)
             return result
 
@@ -1506,6 +1512,30 @@ class SkillService:
         except Exception as e:
             logger.error(f"[get_skill_readme] Unexpected error: skill_id={skill_id}, error={type(e).__name__}: {e}")
             raise
+
+    def get_repository_skill_content(self, skill_id: str) -> str | None:
+        """Read exactly the governed Repo asset's ``SKILL.md`` from global storage.
+
+        This deliberately does not reuse the historical README fallback or a
+        Bot-scoped workspace path.  Repo content is an environment-shared
+        artifact and its consumable contract is the literal global
+        ``skills-repo/<git-relative-path>/SKILL.md`` file.
+        """
+        if not skill_id.isdecimal():
+            return None
+        skill = self._skill_repo.get_by_id(skill_id)
+        git_path = str((skill or {}).get("git_path") or "")
+        if not git_path.startswith("git://"):
+            return None
+        relative_path = git_path[len("git://") :]
+        try:
+            root = self._get_market_repo_dir().resolve()
+            manifest = (root / relative_path / "SKILL.md").resolve()
+            if root not in manifest.parents or not manifest.is_file():
+                return None
+            return SkillParser.decode_content_for_display(manifest.read_bytes())
+        except (OSError, ValueError):
+            return None
 
     def _get_readme_from_repo(self, skill_id: str) -> str | None:
         """从仓库中查找技能的 README"""

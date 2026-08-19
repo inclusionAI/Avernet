@@ -716,7 +716,6 @@ class GitSyncService(LifecycleBase):
                 ], return_exceptions=True)
 
                 subtree_failed = False
-                skills_updated = False
                 skill_renames = {}
                 for subtree, res in zip(self.config.subtrees, results, strict=True):
                     if isinstance(res, Exception):
@@ -728,31 +727,35 @@ class GitSyncService(LifecycleBase):
                         if not res.get("success", False):
                             subtree_failed = True
                         if subtree.get("name") == "skills":
-                            skills_updated = res.get("updated", False)
                             skill_renames = res.get("renames", {}) or {}
 
                 if subtree_failed:
                     result["error"] = "Subtree sync failed"
                     return result
 
-                # subtree 没变也可能 DB 是空的（singlebox SQLite 内存库重启清空，
-                # 但 bare repo 在磁盘 → up_to_date → skills_updated=False）。DB 空时
-                # 强制灌一次（sync_skills_from_git 幂等，prod DB 持久不会空）。
-                needs_db_seed = skills_updated or await self._market_db_empty()
+                # Canonical sync is one observable operation: even an
+                # up-to-date Git tree must re-scan DB facts and rebuild cache.
+                # Otherwise a partial prior scan or a lost cache looks like a
+                # successful sync and the caller cannot self-heal it.
+                db_result = await self._update_database(git_renames=skill_renames)
+                result["database"] = db_result
+                if int(db_result.get("failed", 0)) > 0:
+                    result["error"] = "Database scan failed"
+                    return result
 
-                if needs_db_seed:
-                    # 5. Update database (skills only)
-                    db_result = await self._update_database(git_renames=skill_renames)
-                    result["database"] = db_result
+                # 6. Refresh cache (atomic overwrite, no invalidation)
+                cache_result = await self._refresh_cache_async()
+                if not isinstance(cache_result, dict) or not cache_result.get(
+                    "cache_refreshed", False
+                ):
+                    result["error"] = "Market cache refresh failed"
+                    return result
+                result["cache_refreshed"] = True
 
-                    # 6. Refresh cache (atomic overwrite, no invalidation)
-                    await self._refresh_cache_async()
-                    result["cache_refreshed"] = True
-
-                    # 7. Upload skills-repo tar.gz to OSS for VM download
-                    # singlebox/offline 无 OSS → enable_oss_sync=false 时跳过。
-                    if self.config.enable_oss_sync:
-                        await self._run_sync(self._sync_upload_skills_repo_to_oss)
+                # 7. Upload skills-repo tar.gz to OSS for VM download
+                # singlebox/offline 无 OSS → enable_oss_sync=false 时跳过。
+                if self.config.enable_oss_sync:
+                    await self._run_sync(self._sync_upload_skills_repo_to_oss)
 
                 # 8. Always refresh meta JSON URL so new VMs can download
                 # even when the code hasn't changed (presigned URLs expire).
@@ -797,7 +800,15 @@ class GitSyncService(LifecycleBase):
             return result
 
         result["database"] = await self._update_database(git_renames={})
-        await self._refresh_cache_async()
+        if int(result["database"].get("failed", 0)) > 0:
+            result["error"] = "Database scan failed"
+            return result
+        cache_result = await self._refresh_cache_async()
+        if not isinstance(cache_result, dict) or not cache_result.get(
+            "cache_refreshed", False
+        ):
+            result["error"] = "Market cache refresh failed"
+            return result
         result["cache_refreshed"] = True
         result["success"] = True
         return result
