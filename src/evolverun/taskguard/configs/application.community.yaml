@@ -1,0 +1,58 @@
+# TaskGuard Community Default Configuration
+# Open-source defaults — SQLite database, basic alerts, no internal endpoints
+
+database:
+  type: sqlite
+  sqlite:
+    path: ~/.taskguard/workflow/engine.db
+
+alerts:
+  dingtalk:
+    enabled: false
+    webhook_url: ""
+  http_callback:
+    enabled: true
+    url: ""
+    sign_secret: ""
+
+approval:
+  provider: basic
+
+server:
+  port: 3001
+  host: "0.0.0.0"
+
+execution:
+  asyncRun: false
+  runTimeoutMs: 600000
+  flowTimeoutMinutes: 30
+  maxConcurrentFlows: 10
+
+contextCompression:
+  enabled: true
+  defaultMaxTokens: 8000
+
+llm:
+  defaultModel: "claude-sonnet-4-20250514"
+  maxTokens: 16384
+
+flowControl:
+  maxRetries: 3
+  retryDelayMs: 5000
+
+scheduler:
+  enabled: true
+  checkIntervalMs: 30000
+
+webhook:
+  enabled: false
+  port: 3002
+
+# NOT included (internal-only, provided by corp extensions):
+# - ZDAS/MySQL configuration
+# - BaaS keys
+# - YuQue knowledge source
+# - AgentMind knowledge source
+# - TeClaw configuration
+# - clawweb URL / IAM token / corpId
+# - DingTalk enterprise robot credentials

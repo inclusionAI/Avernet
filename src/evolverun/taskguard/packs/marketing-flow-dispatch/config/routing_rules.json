@@ -1,0 +1,36 @@
+{
+  "description": "营销智评分流规则配置 - 根据 buName 路由到不同的下游 bot",
+  "version": "1.1.0",
+  "rules": [
+    {
+      "name": "金融线营销评审",
+      "field": "buName",
+      "match_mode": "regex_any",
+      "keywords": [
+        "网商", "R88", "小微业务", "蚂蚁星河", "消金", "消费金融",
+        "花呗", "车生活", "信用购", "借呗", "信用卡", "还款",
+        "财富", "黑卡", "基金", "余额宝", "股票", "理财",
+        "大稳健", "大权益", "帮你投", "小荷包", "保险", "险", "财保"
+      ],
+      "target_bot_uuid": "20260514_adan6ap1:461514",
+      "target_bot_id": "20260514_adan6ap1:461514",
+      "target_bot_name": "下游评审bot"
+    },
+    {
+      "name": "支付线营销评审",
+      "field": "buName",
+      "match_mode": "regex_any",
+      "keywords": [
+        "支付", "常规支付", "用户运营", "收单", "商家服务",
+        "跨境", "国际支付", "线下支付", "付款", "转账"
+      ],
+      "target_bot_uuid": "20260514_adan6ap1:461514",
+      "target_bot_id": "20260514_adan6ap1:461514",
+      "target_bot_name": "下游评审bot"
+    }
+  ],
+  "default_action": {
+    "type": "reject",
+    "message": "该活动对应的buName暂无对应bot"
+  }
+}

@@ -1,0 +1,28 @@
+id: activity-legalrisk-review
+version: 1.0.0
+title: 活动法务风险评审
+description: |
+  有奖促销/抽奖类活动法务风险评审工作流（所有审查规则内化在 prompt 中，不依赖外部 skill。
+  完整执行：文档读取 → 关键词命中 → 9类风险全面审查 → 格式化输出 →
+  用户确认 → 结果上报 + 语雀文档创建。
+  支持语雀文档和Word版活动规则的评审。
+
+workflows:
+  - id: "activity-legalrisk-review"
+    file: workflows/activity-legalrisk-review.yaml
+
+facades:
+  - command: legalreview
+    workflowId: activity-legalrisk-review
+    aliases: [lr, legal-review]
+    description: "活动法务风险评审。用法: /legalreview --docUrl <文档URL> --projectName <项目名>"
+    params:
+      - key: docUrl
+        required: true
+        description: "活动规则文档 URL（语雀链接或可访问文档链接）"
+      - key: projectName
+        required: true
+        description: "项目名称（用于 workspace 目录命名）"
+      - key: subTaskId
+        required: false
+        description: "子任务ID（推进风控评审状态时使用，可选）"

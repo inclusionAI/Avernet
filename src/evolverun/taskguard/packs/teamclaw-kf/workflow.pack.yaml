@@ -1,0 +1,34 @@
+id: teamclaw-kf
+version: "1.0.0"
+title: TeamClaw 用户问题处理
+description: |
+  TeamClaw 客服问题处理全流程：身份提取 → 知识库搜索 → 问题分类 → 日志收集 → 综合分析 → 解决/升级。
+  支持知识库命中直接回复、MCP 使用咨询、缺陷/需求创建、值班查询等场景。
+
+workflows:
+  - id: teamclaw-kf-support
+    file: workflows/teamclaw-kf-support.yaml
+  - id: teamclaw-kf-direct-support
+    file: workflows/teamclaw-kf-direct-support.yaml
+
+facades:
+  - command: kf
+    defaultWorkflow: teamclaw-kf-support
+    aliases: [kf-support, teamclaw-support]
+    help:
+      title: TeamClaw 客服支持
+      summary: 处理 TeamClaw 用户问题，包括知识库搜索、日志分析、缺陷创建等
+      examples:
+        - "/kf 用户反馈WebSocket连接失败"
+        - "/kf Bot权限怎么配置"
+        - "/kf 帮我创建一个缺陷"
+        - "/kf 本周值班是谁"
+  - command: kf-direct
+    defaultWorkflow: teamclaw-kf-direct-support
+    aliases: [kf-direct-support]
+    help:
+      title: TeamClaw 直接技能支持
+      summary: 直接调用 teamclaw-support 技能处理用户问题，跳过多阶段编排
+      examples:
+        - "/kf-direct WebSocket连接失败"
+        - "/kf-direct Bot权限配置"

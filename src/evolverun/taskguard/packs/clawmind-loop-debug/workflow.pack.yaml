@@ -1,0 +1,11 @@
+id: clawmind-loop-debug
+version: 1.0.0
+title: 闭环调试
+description: 对目标 workflow 执行闭环调试：启动→轮询→分析→判定→修复→重跑，循环直到通过或达上限。支持业务示例对比和人工介入检测。
+workflows:
+  - id: "clawmind-loop-debug"
+    file: workflows/clawmind-loop-debug.yaml
+facades:
+  - command: clawmind-loop-debug
+    defaultWorkflow: clawmind-loop-debug
+    aliases: [loop-debug]

@@ -1,0 +1,11 @@
+id: risk-review-pipeline
+version: 1.0.0
+title: 营销活动风险评审全流程
+description: 拆分 Pipeline 为独立节点，实现子模块级可见性、可重试、并行执行。核心评审链 data-preprocessing → [scenario|prize|gameplay] → [config-risk|biz-risk] → aggregate 可并行处理。
+workflows:
+  - id: "risk-review-pipeline"
+    file: workflows/risk-review-pipeline.yaml
+facades:
+  - command: riskreview
+    defaultWorkflow: risk-review-pipeline
+    aliases: [rr]

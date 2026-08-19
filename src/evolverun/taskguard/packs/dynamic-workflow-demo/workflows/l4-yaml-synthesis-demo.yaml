@@ -1,0 +1,127 @@
+# ============================================================================
+# L4: LLM YAML 合成 (YAML Synthesizer)
+# ============================================================================
+# LLM 从自然语言目标生成完整 WorkflowSpec YAML，
+# 引擎校验（Schema + Semantic + Security 三阶段）后执行。
+#
+# L4 并非一个 NodeExecutor，而是一个独立的 ControllerAction
+# （action: "synthesize"），在流程创建之前运行。
+# 此 YAML 工作流用于触发合成动作，演示 L4 的完整管道：
+#   用户输入目标 → LLM 生成 YAML → 三阶段验证 → 人工审批（可选）→ 引擎执行
+#
+# 场景：用户输入"帮我审查这个项目的代码质量"，
+# LLM 生成对应的工作流 YAML，验证通过后自动执行。
+# ============================================================================
+id: l4-yaml-synthesis-demo
+version: 1
+title: L4 YAML 合成演示
+
+input:
+  mode: mixed
+  requiredParams: [goal]
+  sources:
+    params: true
+    message: true
+
+identity:
+  key: "{{input.params.goal}}"
+  label: "L4演示: {{input.params.goal}}"
+  duplicatePolicy: allow
+
+outputs:
+  synthesisResult:
+    from: "{{nodeOutput.synthesize}}"
+    public: true
+    description: "合成结果（含生成的 YAML 和验证状态）"
+  executionResult:
+    from: "{{nodeOutput.run-synthesized}}"
+    public: true
+    description: "合成工作流的执行结果"
+
+defaults:
+  progress:
+    enabled: true
+    sink: chat
+
+messages:
+  onCreated: |
+    L4 YAML 合成演示已启动。
+
+    目标: {{input.params.goal}}
+
+    流程将:
+    1️⃣ LLM 根据目标生成 WorkflowSpec YAML
+    2️⃣ 三阶段验证（Schema → Semantic → Security）
+    3️⃣ 人工审批（如果策略要求）
+    4️⃣ 引擎执行合成的工作流
+
+  onFinished: "L4 YAML 合成演示已完成。"
+
+nodes:
+  # ── P1: 触发合成 ──
+  # yaml-synthesizer 是占位执行器类型，实际由 Controller 的
+  # handleSynthesize 处理。此节点触发 L4 合成管道。
+  - id: synthesize
+    title: LLM YAML 合成
+    phase: P1
+    dependsOn: []
+    executor:
+      type: yaml-synthesizer
+      goal: "{{input.params.goal}}"
+      # 合成配置（可覆盖默认配置）:
+      # model: "gpt-4o"           — 使用的 LLM 模型
+      # maxCorrections: 3         — 验证失败时最大修正轮数
+      # validateOnly: false       — 仅验证不执行
+      #
+      # 合成管道:
+      # ┌─────────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+      # │ 构建Prompt  │ →  │ 调用LLM  │ →  │ 解析YAML  │ →  │ 三阶段验证 │
+      # └─────────────┘    └──────────┘    └──────────┘    └──────────┘
+      #                                                          │
+      #                                              ┌───────────┘
+      #                                              ▼
+      #                                        ┌──────────┐
+      #                                        │ 验证通过? │
+      #                                        └──────────┘
+      #                                         │        │
+      #                                        是        否 → 构建修正上下文 → 重新调用LLM
+      #                                         │              (最多maxCorrections轮)
+      #                                         ▼
+      #                                   ┌───────────┐
+      #                                   │ 人工审批?  │
+      #                                   └───────────┘
+      #                                    │       │       │
+      #                                 never   on-warning  always
+      #                                    │       │       │
+      #                                    ▼       ▼       ▼
+      #                                   直接执行  有warning时  等待用户
+      #                                            等待用户     confirm/reject
+      #
+      # 安全约束（沙箱策略）:
+      # - 允许的执行器: embedded-agent, done, dynamic-template,
+      #   goal-evaluator, llm-orchestrator, loop-group, subagent, action
+      # - 禁止的执行器: cli-script, mcp-call, baas-call, bcs-route,
+      #   bcs-approval-batch, human-wait, collaboration, subworkflow
+      # - 禁止模板注入: {{process.env.*}}, {{require(*)}}, {{eval(*)}}
+      # - 密钥检测: sk-* 密钥模式, password= 等赋值模式
+      # - 节点数量上限: 默认50
+
+  # ── P2: 执行合成的工作流 ──
+  # 合成成功后，Controller 将合成的 WorkflowSpec 传递给 handleRun
+  # 作为新的运行实例执行。此节点标记执行位置。
+  - id: run-synthesized
+    title: 执行合成工作流
+    phase: P2
+    dependsOn: [synthesize]
+    executor:
+      type: done
+      message: "合成工作流执行完成"
+
+  # ── P3: 完成 ──
+  - id: finalize
+    title: 演示完成
+    phase: P3
+    dependsOn: [run-synthesized]
+    executor:
+      type: done
+      message: "L4 YAML 合成演示完成"

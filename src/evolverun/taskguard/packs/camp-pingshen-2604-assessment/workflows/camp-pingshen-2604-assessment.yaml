@@ -1,0 +1,475 @@
+id: camp-pingshen-2604-assessment
+version: 14
+title: 活动风险评估 (2604版)
+
+input:
+  mode: mixed
+  requiredParams:
+    - docUrl
+    - projectName
+  optionalParams:
+    - subTaskId
+  sources:
+    params: true
+    message: true
+
+identity:
+  key: "{{input.params.projectName}}"
+  label: "活动评审: {{input.params.projectName}}"
+  duplicatePolicy: allow
+
+outputs:
+  finalResult:
+    from: "{{nodeOutput.stage6-report.result}}"
+    public: true
+    description: "完整风险评估报告"
+
+defaults:
+  progress:
+    enabled: true
+    sink: chat
+  user:
+    id: system
+    name: System
+
+messages:
+  onCreated: "活动评审流程已创建：{{workflow.title}}"
+  onFinished: "活动评审流程已完成：{{workflow.title}}"
+
+workflow:
+  onStart: []
+
+nodes:
+  # ═══════════════════════════════════════════════════
+  # Stage 0: 需求解析 — 语雀文档读取+子链接合并
+  # ═══════════════════════════════════════════════════
+  - id: stage0-fetch
+    title: 读取语雀文档并合并子链接
+    phase: P1
+    dependsOn: []
+    executor:
+      type: embedded-agent
+      skillName: camp-pingshen-2604-skill
+      outputMode: json
+      prompt: >
+        执行 Stage 0：需求解析（Briefing）
+
+
+        你必须先读取指南文件：~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/guides/stage0_briefing.md
+
+
+        项目名称：{{input.params.projectName}}
+        语雀文档URL：{{input.params.docUrl}}
+
+        执行步骤：
+
+        1. 使用 MCP 工具 skylark_resolve_url 解析语雀 URL，获取 doc_id：
+           mcporter call --server mcp.ant.faas.skylarkmcpserver.skylarkmcpserver --tool skylark_resolve_url url='{{input.params.docUrl}}'
+
+        2. 使用 MCP 工具 skylark_doc_detail 获取主文档内容：
+           mcporter call --server mcp.ant.faas.skylarkmcpserver.skylarkmcpserver --tool skylark_doc_detail doc_id=<id>
+
+        3. 扫描主文档内容中所有的语雀链接
+
+        4. 对每个子链接重复步骤1-2
+
+        5. 将合并内容写入文件：~/.openclaw/workspace/workspace/{{input.params.projectName}}/complete_content.md
+
+        完成后输出 JSON：
+        {
+          "status": "completed",
+          "contentFile": "workspace/{{input.params.projectName}}/complete_content.md"
+        }
+      timeoutSeconds: 180
+      contextPolicy:
+        history: tail
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [status, contentFile]
+        properties:
+          status:
+            type: string
+          contentFile:
+            type: string
+
+  # ═══════════════════════════════════════════════════
+  # Stage 1: 活动类型判断
+  # ═══════════════════════════════════════════════════
+  - id: stage1-type
+    title: 活动类型判断
+    phase: P2
+    dependsOn: [stage0-fetch]
+    executor:
+      type: embedded-agent
+      skillName: camp-pingshen-2604-skill
+      outputMode: json
+      prompt: >
+        执行 Stage 1：定义活动类型
+
+        【文件路径 - 必须使用完整绝对路径】
+        读取文件：
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/guides/stage1_type.md
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/frameworks/camp_type.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/complete_content.md
+
+        写入文件：
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_type.md
+
+        核心规则：
+        - 活动类型必须来自六大标准白名单
+        - 复合活动必须拆分列出
+
+        完成后输出 JSON：
+        {
+          "status": "completed",
+          "activityType": "主要活动类型",
+          "isCompound": true或false,
+          "types": ["类型1", "类型2"]
+        }
+      timeoutSeconds: 120
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [status, activityType]
+
+  # 验证 Stage 1
+  - id: validate-s1
+    title: 验证Stage1-活动类型
+    phase: P2
+    dependsOn: [stage1-type]
+    executor:
+      type: cli-script
+      command: python3
+      args:
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/run_validation.py
+        - "1"
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}
+      outputMode: text
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+
+  # ═══════════════════════════════════════════════════
+  # Stage 2: 活动拆解
+  # ═══════════════════════════════════════════════════
+  - id: stage2-split
+    title: 活动拆解
+    phase: P3
+    dependsOn: [validate-s1]
+    executor:
+      type: embedded-agent
+      skillName: camp-pingshen-2604-skill
+      outputMode: json
+      prompt: >
+        执行 Stage 2：活动拆解
+
+        【文件路径 - 必须使用完整绝对路径】
+        读取文件：
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/guides/stage2_split.md
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/frameworks/camp_split.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/complete_content.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_type.md
+
+        写入文件：
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_split.md
+
+        核心规则：
+        - 必须包含四个维度
+        - 四同判定放在完成活动维度
+        - 预算计算只计实物/现金
+
+        完成后输出 JSON：
+        {
+          "status": "completed",
+          "hasFourDimensions": true,
+          "budgetCalculated": true或"信息不足"
+        }
+      timeoutSeconds: 120
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [status, hasFourDimensions]
+
+  # 验证 Stage 2
+  - id: validate-s2
+    title: 验证Stage2-活动拆解
+    phase: P3
+    dependsOn: [stage2-split]
+    executor:
+      type: cli-script
+      command: python3
+      args:
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/run_validation.py
+        - "2"
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}
+      outputMode: text
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+
+  # ═══════════════════════════════════════════════════
+  # Stage 3: 风险识别
+  # ═══════════════════════════════════════════════════
+  - id: stage3-risk
+    title: 风险识别
+    phase: P4
+    dependsOn: [validate-s2]
+    executor:
+      type: embedded-agent
+      skillName: camp-pingshen-2604-skill
+      outputMode: json
+      prompt: >
+        执行 Stage 3：风险识别
+
+        【文件路径 - 必须使用完整绝对路径】
+        读取文件：
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/guides/stage3_risk.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/complete_content.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_type.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_split.md
+
+        写入文件：
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_risktype.md
+
+        【必须遵守 - 否则会被 BLOCK】
+        - 必须使用七大标准风险术语：虚假身份、机器行为、虚假交易、众包行为、回退行为、强塞行为、黄牛转卖
+        - 严禁自创风险术语！以下内容禁止出现：
+          * "批量账号套利" / "套利" / "薅羊毛" / "羊毛党"
+          * "刷量风险" / "切版套利" / "套现风险"
+        - 机器风险判断：消耗积分+限频次+非竞争 = 机器风险不成立
+
+        完成后输出 JSON：
+        {
+          "status": "completed",
+          "riskTypes": ["风险1", "风险2"]
+        }
+      timeoutSeconds: 120
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [status, riskTypes]
+
+  # 验证 Stage 3
+  - id: validate-s3
+    title: 验证Stage3-风险识别
+    phase: P4
+    dependsOn: [stage3-risk]
+    executor:
+      type: cli-script
+      command: python3
+      args:
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/run_validation.py
+        - "3"
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}
+      outputMode: text
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+
+  # ═══════════════════════════════════════════════════
+  # Stage 4: 评分评级
+  # ═══════════════════════════════════════════════════
+  - id: stage4-level
+    title: 评分评级
+    phase: P5
+    dependsOn: [validate-s3]
+    executor:
+      type: embedded-agent
+      skillName: camp-pingshen-2604-skill
+      outputMode: json
+      prompt: >
+        执行 Stage 4：评分评级
+
+        【文件路径 - 必须使用完整绝对路径】
+        读取文件：
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/guides/stage4_level.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/complete_content.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_type.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_split.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_risktype.md
+
+        写入文件：
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_risklevel.md
+
+        核心规则：
+        - 10维度评分表，分值范围要正确
+        - 总计<10分低风险，10-20分中风险，≥20分高风险
+
+        完成后输出 JSON：
+        {
+          "status": "completed",
+          "totalScore": 总分数字,
+          "riskLevel": "低风险/中风险/高风险"
+        }
+      timeoutSeconds: 120
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [status, totalScore, riskLevel]
+
+  # 验证 Stage 4
+  - id: validate-s4
+    title: 验证Stage4-评分评级
+    phase: P5
+    dependsOn: [stage4-level]
+    executor:
+      type: cli-script
+      command: python3
+      args:
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/run_validation.py
+        - "4"
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}
+      outputMode: text
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+
+  # ═══════════════════════════════════════════════════
+  # Stage 5: 风险评估意见
+  # ═══════════════════════════════════════════════════
+  - id: stage5-output
+    title: 风险评估意见
+    phase: P6
+    dependsOn: [validate-s4]
+    executor:
+      type: embedded-agent
+      skillName: camp-pingshen-2604-skill
+      outputMode: json
+      prompt: >
+        执行 Stage 5：最终输出
+
+        【文件路径 - 必须使用完整绝对路径】
+        读取文件：
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/guides/stage5_output.md
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/frameworks/camp_advice.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/complete_content.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_type.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_split.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_risktype.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_risklevel.md
+
+        写入文件：
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/insights.md
+
+        核心规则：
+        - 仅两大块：主要风险 + 风险评估意见
+        - 人群ID使用【人群ID：XXXXX】格式
+        - 实时风控与机刷人群ID互斥：
+          * 如果建议了"接入实时风控传入设备/网络信息"，则删除所有机刷人群ID（OXQMY6A62/LMYFCVPR3）
+          * 如果要使用机刷人群ID，则不要建议实时风控
+          * 二选一，不能同时出现
+        - 每条主要风险必须有对应防控建议
+        - 严禁使用非标准术语（套利/薅羊毛/刷量等）
+
+        完成后输出 JSON：
+        {
+          "status": "completed",
+          "riskLevel": "低/中/高风险"
+        }
+      timeoutSeconds: 120
+
+  # 验证 Stage 5
+  - id: validate-s5
+    title: 验证Stage5-评估意见
+    phase: P6
+    dependsOn: [stage5-output]
+    executor:
+      type: cli-script
+      command: python3
+      args:
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/run_validation.py
+        - "5"
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}
+      outputMode: text
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+
+  # ═══════════════════════════════════════════════════
+  # Stage 6: 生成报告
+  # ═══════════════════════════════════════════════════
+  - id: stage6-report
+    title: 生成评估报告
+    phase: P7
+    dependsOn: [validate-s5]
+    triggerRule: one_success
+    executor:
+      type: embedded-agent
+      skillName: camp-pingshen-2604-skill
+      outputMode: json
+      prompt: >
+        执行 Stage 6：报告生成
+
+        【文件路径 - 必须使用完整绝对路径】
+        读取文件：
+        - ~/.openclaw/workspace/skills/skills-local/camp-pingshen-2604-skill/guides/stage6_report.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/complete_content.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_type.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_split.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_risktype.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/activity_risklevel.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/insights.md
+
+        写入文件：
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/report.md
+        - ~/.openclaw/workspace/workspace/{{input.params.projectName}}/_state.json
+
+        执行步骤：
+        1. 整合所有文件生成 report.md
+        2. 创建语雀文档
+        3. 更新 _state.json
+      timeoutSeconds: 180
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [status, reportFile]
+        properties:
+          status:
+            type: string
+          reportFile:
+            type: string
+
+  # ═══════════════════════════════════════════════════
+  # 推进子任务
+  # ═══════════════════════════════════════════════════
+  - id: update-subtask
+    title: 推进子任务状态
+    phase: P7
+    dependsOn: [validate-s5]
+    executor:
+      type: mcp-call
+      server: mcp.ant.agentix.165147.activityReviewManagementV2
+      tool: update_subtask_info
+      args:
+        request/subTaskId: "{{input.params.subTaskId}}"
+        request/taskStatus: "COMPLETED"
+      outputMode: json
+      timeoutMs: 30000
+
+  # ═══════════════════════════════════════════════════
+  # 流程完成
+  # ═══════════════════════════════════════════════════
+  - id: done
+    title: 评审完成
+    phase: P7
+    dependsOn: [stage6-report]
+    join: any
+    executor:
+      type: done

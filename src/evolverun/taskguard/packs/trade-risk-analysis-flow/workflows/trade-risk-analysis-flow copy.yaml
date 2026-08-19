@@ -1,0 +1,1283 @@
+id: trade-risk-analysis-flow
+version: 7
+title: 交易风险分析流程（v4 - 意图路由 + 扁平化revise循环 + 能力迭代判断）
+input:
+  mode: mixed
+  requiredParams:
+    - userInput
+  sources:
+    params: true
+    message: true
+    files:
+      maxCount: 3
+      allowedExtensions:
+        - .sql
+        - .json
+        - .txt
+identity:
+  key: "{{input.params.userInput}}"
+  label: "风险分析-{{input.params.userInput}}"
+  duplicatePolicy: allow
+outputs:
+  intentResult:
+    from: "{{nodeOutput.intent-recognition}}"
+    public: true
+    description: "意图识别与路由结果"
+  deepAnalysisResult:
+    from: "{{nodeOutput.deep-analysis}}"
+    public: true
+    description: "深度分析结果"
+  dimaTicketId:
+    from: "{{nodeOutput.dima-creator.workItemId}}"
+    public: true
+    description: "DIMA 工单号"
+  sqlExecResult:
+    from: "{{nodeOutput.coverage-sql-exec}}"
+    public: true
+    description: "覆盖分析SQL执行结果"
+  coverageResult:
+    from: "{{nodeOutput.coverage-analysis}}"
+    public: true
+    description: "现有能力覆盖分析结果"
+  iterationJudgmentResult:
+    from: "{{nodeOutput.iteration-judgment}}"
+    public: true
+    description: "能力迭代判断结果"
+  riskCardResult:
+    from: "{{nodeOutput.card-generation}}"
+    public: true
+    description: "风险卡片生成结果"
+  taskPublishResult:
+    from: "{{nodeOutput.card-push}}"
+    public: true
+    description: "任务发布结果"
+defaults:
+  progress:
+    enabled: true
+    sink: chat
+  contextPolicy:
+    embeddedAgent:
+      history: tail
+      tailMessages: 12
+messages:
+  onCreated: |
+    🚀 交易风险分析流程已创建（v3 - 意图路由 + DIMA循环 + 能力迭代判断）
+
+    用户输入：{{input.params.userInput}}
+
+    流程将根据意图自动路由：
+    1️⃣ DIMA需求 → 直接进入DIMA工单创建循环
+    2️⃣ 风险分析 → 深度分析 → 人工审核 → 视结论进入DIMA或结束
+    3️⃣ 信息缺失 → 补充信息 → 重新识别（最多3轮）
+
+    DIMA创建后 → 覆盖分析 → 能力迭代判断 → 卡片生成/流程结束
+
+  onFinished: |
+    ✅ 交易风险分析流程已完成
+
+    📊 意图路由：{{nodeOutput.intent-recognition.route_path | default: ""}}
+    📋 DIMA 工单：{{nodeOutput.dima-creator.workItemId | default: "未创建"}}
+    🔗 工单链接：{{nodeOutput.dima-creator.url | default: "无"}}
+    📈 覆盖分析：{{nodeOutput.coverage-analysis.coverageRate | default: "-"}}%
+    🔄 能力迭代：{{nodeOutput.iteration-judgment.needIteration | default: "-"}}
+
+nodes:
+    # ============================================================
+    # 节点 ①：意图识别与路由（intent-classifier v7.1）
+    # 三条路径：path1_dima / path2_risk_analysis / path3_supplement
+    # ============================================================
+    - id: intent-recognition
+      title: 1️⃣ 意图识别与路由
+      phase: P1
+      dependsOn: []
+      triggerRule: all_success
+      retry:
+        maxAttempts: 1
+        backoffMs: 0
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        skillName: intent-classifier
+        outputMode: json
+        prompt: |
+          请识别用户意图并进行参数提取和校验，输出路由路径。
+
+          用户输入：{{input.params.userInput}}
+          用户补充信息：{{workflowData.supplementInfo | default: ""}}
+
+          你需要完成：
+          1. 意图识别与路由判断：
+             - 路径1 (path1_dima)：用户明确提"策略迭代/能力迭代/提需求/新建策略"等，且提供需求背景+价值+优先级
+             - 路径2 (path2_risk_analysis)：用户诉求"风险分析/疑似漏过/疑似误伤"，需提供ID+日期或SQL
+             - 路径3 (path3_supplement)：信息缺失、权限不足、意图不明，需要补充
+          2. 参数提取（所有路径均需提取，供下游节点使用）：
+             - uid, tradeNo, digitalPoiId, sampleSql, tables, dateRange, dateStart, dateEnd, sceneAbbr, riskDescription
+          3. DIMA字段提取（路径1必填，路径2可选）：
+             - background, value, priority, dsl, originalRequest, sampleScope
+          4. 参数校验：
+             - 业务场景、SQL口径、日期、表权限
+
+          输出 JSON 格式（严格遵守以下结构）：
+          {
+            "displayMarkdown": "🎯 意图识别结果\n- 路由路径：path1_dima/path2_risk_analysis/path3_supplement\n- 意图类型：...\n- 置信度：...\n- 校验结果：...\n- 缺失字段：...",
+            "_suppressJsonDump": true,
+            "route_path": "path1_dima|path2_risk_analysis|path3_supplement",
+            "intent_type": "能力/策略迭代|风险分析|意图不明",
+            "is_complete": true/false,
+            "confidence": 0.0-1.0,
+            "missing_fields": [],
+            "dimaFields": {
+              "background": "",
+              "value": "",
+              "priority": "P0|P1|P2|P3",
+              "dsl": "",
+              "original_request": "漏过|误伤|待确认",
+              "sample_scope": { "type": "trade_no_and_dt|sql", "trade_no": "", "trade_dt": "", "sql_query": "" }
+            },
+            "preValidation": {
+              "allPassed": true/false,
+              "validationItems": [
+                { "item": "业务场景", "status": "passed|failed", "detail": "" },
+                { "item": "SQL口径", "status": "passed|failed|skipped", "detail": "" },
+                { "item": "日期", "status": "passed|failed", "detail": "" },
+                { "item": "表权限", "status": "passed|skipped", "detail": "" }
+              ],
+              "missingItems": []
+            },
+            "validationSummary": "格式化的校验结果文本",
+            "extractedParams": {
+              "uid": "", "tradeNo": "", "digitalPoiId": [], "sampleSql": "",
+              "dateRange": "", "dateStart": "", "dateEnd": "",
+              "tables": [], "sceneAbbr": "", "riskDescription": ""
+            },
+            "businessScene": { "type": "", "industry": "", "entities": "" },
+            "riskType": ""
+          }
+
+          ⚠️ displayMarkdown 字段必须填写，内容为面向用户的可读摘要（Markdown格式），只包含：路由路径、意图类型、置信度、校验结果、缺失字段。不要在 displayMarkdown 中放入 extractedParams/dimaFields 等大字段详情。
+
+          ⚠️ 重要：
+          1. route_path 决定流程走向，必须准确判断
+          2. path1_dima：信息完备的DIMA需求，跳过深度分析和报告审核
+          3. path2_risk_analysis：信息完备的风险分析需求，进入深度分析
+          4. path3_supplement：关键信息缺失或意图不明
+          5. 所有路径都尽可能提取 extractedParams
+          6. dateStart/dateEnd 必须为 yyyyMMdd 格式
+          7. ⛔ extractedParams.sampleSql 必须是完整的SQL语句原文（如 SELECT distinct trade_no FROM ... WHERE ...），绝不许填写类型标签（如"sql"、"trade_no_and_dt"），类型标签只填在 dimaFields.sample_scope.type
+      outputContract:
+        required: true
+        schema:
+          type: object
+          required:
+            - route_path
+            - intent_type
+            - is_complete
+            - extractedParams
+          properties:
+            route_path:
+              type: string
+            intent_type:
+              type: string
+            is_complete:
+              type: boolean
+            missing_fields:
+              type: array
+            dimaFields:
+              type: object
+            preValidation:
+              type: object
+            extractedParams:
+              type: object
+      onResult:
+        branches:
+          - branchId: path1_dima
+            match:
+              route_path: path1_dima
+            complete: false
+          - branchId: path2_risk_analysis
+            match:
+              route_path: path2_risk_analysis
+            complete: false
+          - branchId: path3_supplement
+            match:
+              route_path: path3_supplement
+            complete: false
+
+    # ============================================================
+    # 节点 ②：补充信息（path3_supplement 分支）
+    # 人工补充 → revise 回流至意图识别重新判断（取消 loop-group 避免卡死）
+    # ============================================================
+    - id: supplement-prompt
+      title: 📝 补充信息
+      phase: P1
+      dependsOn:
+        - intent-recognition
+      branchId: path3_supplement
+      triggerRule: all_success
+      executor:
+        type: human
+        prompt: |
+          ⚠️ 信息不完备，请补充以下缺失信息：
+
+          {{nodeOutput.intent-recognition.validationSummary | default: ""}}
+
+          已识别意图：{{nodeOutput.intent-recognition.intent_type | default: "意图不明"}}
+          缺失字段：{{nodeOutput.intent-recognition.missing_fields | default: ""}}
+
+          💡 请使用自然语言补充缺失信息，提交后系统将重新进行意图识别。
+
+          示例补充：
+          - "uid是2088302454098292，是虚假刷单漏过了"
+          - "样本是 apmktcdm.dwd_ap_mkt_act_zfxfq_eqt_use_di 表里2026-01-28的数据"
+          - "需求背景：游戏代刷漏过；需求价值：减少资损；优先级：P0"
+        inputSchema:
+          type: object
+          properties:
+            feedback:
+              type: string
+              title: "补充信息"
+              description: "请用自然语言描述需要补充的信息"
+        actions:
+          confirm:
+            next: succeed-current
+          revise:
+            feedbackPath: "workflowData.supplementInfo"
+            feedbackMode: append-line
+            target: intent-recognition
+            reset: target-and-descendants
+            next: rerun-target
+          reject:
+            next: fail-flow
+        commandHints:
+          confirm:
+            label: "⏭️ 跳过补充（结束流程）"
+          revise:
+            label: "📝 revise <补充内容>"
+          reject:
+            label: "❌ 结束流程"
+
+    # ============================================================
+    # 节点 ②-B：补充信息完成（confirm 后终点节点）
+    # confirm 跳过后流程继续走到此节点，给出明确结束消息再结束
+    # ============================================================
+    - id: supplement-complete
+      title: ⏭️ 流程结束（跳过补充）
+      phase: P1
+      dependsOn:
+        - supplement-prompt
+      triggerRule: all_success
+      retry:
+        maxAttempts: 1
+        backoffMs: 2000
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        outputMode: text
+        prompt: |
+          用户已选择跳过信息补充，请输出一条简洁的结束消息。
+
+          当前识别结果：{{nodeOutput.intent-recognition.intent_type | default: "意图不明"}}
+          缺失字段：{{nodeOutput.intent-recognition.missing_fields | join: ", " | default: "未知"}}
+
+          请用友好语气告知：由于关键信息不完整且用户选择跳过，本次风险分析流程已结束。如需继续请重新发起流程并提供完整信息。
+
+          直接输出纯文本，不要 JSON 格式。
+        contextPolicy:
+          history: tail
+          tailMessages: 4
+
+    # ============================================================
+    # 节点 ③：深度分析（path2_risk_analysis 分支）
+    # 调用 alipaygame-daishua-risk-analysis skill
+    # ============================================================
+    - id: deep-analysis
+      title: 2️⃣ 深度分析
+      phase: P2
+      dependsOn:
+        - intent-recognition
+      branchId: path2_risk_analysis
+      triggerRule: all_success
+      retry:
+        maxAttempts: 2
+        backoffMs: 3000
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        skillName: alipaygame-daishua-risk-analysis
+        outputMode: json
+        prompt: |
+          请对以下样本进行深度风险分析：
+
+          用户输入：{{input.params.userInput}}
+          样本范围：{{nodeOutput.intent-recognition.extractedParams.sampleSql | default: ""}}
+          uid：{{nodeOutput.intent-recognition.extractedParams.uid | default: ""}}
+          trade_no：{{nodeOutput.intent-recognition.extractedParams.tradeNo | default: ""}}
+          日期范围：{{nodeOutput.intent-recognition.extractedParams.dateRange | default: ""}}
+
+          输出 JSON 格式：
+          {
+            "relatedAccounts": 0,
+            "riskEvidence": 0,
+            "suspiciousUpstream": 0,
+            "capitalLoop": false,
+            "deepRiskTechniques": "",
+            "deepRiskFeatures": "",
+            "capitalLoopDetail": "",
+            "suspiciousAccounts": [],
+            "reportSummary": "",
+            "analysisMethod": "skill",
+            "riskConclusion": "风险漏过|误伤|无风险",
+            "reportFull": "完整的深度分析报告文本"
+          }
+        contextPolicy:
+          history: tail
+          tailMessages: 10
+      outputContract:
+        required: true
+        schema:
+          type: object
+
+    # ============================================================
+    # 节点 ③-B：深度分析报告格式化（将原始 JSON 翻译为可读文本）
+    # ============================================================
+    - id: deep-analysis-formatter
+      title: 📄 格式化深度分析报告
+      phase: P2
+      dependsOn:
+        - deep-analysis
+      branchId: path2_risk_analysis
+      triggerRule: all_success
+      retry:
+        maxAttempts: 1
+        backoffMs: 2000
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        outputMode: text
+        prompt: |
+          请将以下深度分析原始输出格式化为 Markdown 报告。
+
+          原始输出：
+          {{nodeOutput.deep-analysis}}
+
+          格式化要求：
+          1. 用 ## 做分组标题，用 - 做列表项
+          2. 基础指标：关联账户数、风险证据数、可疑上游数、资金闭环、风险结论
+          3. 风险手法、风险特征、资金闭环详情各一段，内容完整不省略
+          4. 分析摘要和完整报告完整呈现
+          5. 风险结论醒目标记：风险漏过/误伤 → ⚠️，无风险 → ✅
+
+          直接输出 Markdown，不要 JSON，不要代码块。
+        contextPolicy:
+          history: tail
+          tailMessages: 2
+
+    # ============================================================
+    # 节点 ④：深度分析报告审核（3条决策路径）
+    # 1) 报告无问题 → 流程结束
+    # 2) 是风险漏过场景 → 创建DIMA需求
+    # 3) 是误伤场景 → 创建DIMA需求
+    # ============================================================
+    - id: deep-analysis-review
+      title: 🔍 深度分析报告审核
+      phase: P2
+      dependsOn:
+        - deep-analysis-formatter
+      triggerRule: all_success
+      retry:
+        maxAttempts: 1
+        backoffMs: 0
+        on:
+          - executor-failed
+      executor:
+        type: human
+        prompt: |
+          风险结论：{{nodeOutput.deep-analysis.riskConclusion | default: ""}}
+          风险手法：{{nodeOutput.deep-analysis.deepRiskTechniques | default: ""}}
+
+          🎯 请选择审核结论
+        inputSchema:
+          type: object
+          properties:
+            decision:
+              type: string
+              title: "审核结论"
+              description: "填 ok(报告无问题,结束) / risk_miss(风险漏过,进DIMA) / false_positive(误伤,进DIMA)"
+            feedback:
+              type: string
+              title: "修改/补充信息"
+              description: "如需修改需求或补充信息以便重新分析，请在此填写"
+        actions:
+          confirm:
+            saveAs:
+              workflowData.reviewDecision: '{{input.decision | default: ""}}'
+            next: succeed-current
+          revise:
+            feedbackPath: "workflowData.deepAnalysisFeedback"
+            feedbackMode: append-line
+            target: deep-analysis
+            reset: target-and-descendants
+            next: rerun-target
+          reject:
+            next: fail-flow
+        commandHints:
+          confirm:
+            label: "✅ ok=无问题 / risk_miss=漏过→DIMA / false_positive=误伤→DIMA"
+          revise:
+            label: "📝 修改/补充后重新分析"
+          reject:
+            label: "❌ 结束流程"
+      onResult:
+        branches:
+          - branchId: review_ok
+            match:
+              decision: ok
+            complete: true
+          - branchId: review_need_dima
+            match: {}
+            complete: false
+
+    # ============================================================
+    # 节点 ④-B：审核后DIMA路由网关
+    # 只在 review_need_dima 分支下激活（review_ok 时不触发）
+    # 作为 dima-loop 的依赖中介，确保 review_ok 不会触发 dima-loop
+    # 模型内部根据 reviewDecision 判断是 risk_miss 还是 false_positive
+    # ============================================================
+    - id: dima-after-review
+      title: 3️⃣-D 审核后DIMA路由
+      phase: P2
+      dependsOn:
+        - deep-analysis-review
+      branchId: review_need_dima
+      triggerRule: all_success
+      executor:
+        type: embedded-agent
+        outputMode: json
+        prompt: |
+          请根据深度分析审核决定，输出对应 DIMA 路由信息。
+
+          审核决定：{{workflowData.reviewDecision | default: ""}}
+
+          规则：
+          - 若 reviewDecision=risk_miss → route="review_risk_miss", original_request="漏过"
+          - 若 reviewDecision=false_positive → route="review_false_positive", original_request="误伤"
+          - 其他 → route="unknown"
+
+          直接输出 JSON：
+          {"confirmed": true, "route": "...", "original_request": "..."}
+      outputContract:
+        schema:
+          type: object
+          properties:
+            confirmed:
+              type: boolean
+            route:
+              type: string
+            original_request:
+              type: string
+
+    # ============================================================
+    # 节点 ④-C位置已合并到 ④-B，保留注释占位避免重新编号产生困惑
+    # ============================================================
+
+    # ============================================================
+    # 节点 ⑤：DIMA需求创建（loop-group，最多3轮补全）
+    # 两种入口：path1_dima 直通 / 审核后进入
+    # 使用 loop-group 实现补全循环，until is_ready=true 退出
+    # ============================================================
+    - id: dima-after-intent
+      title: 1️⃣-D DIMA直通路由
+      phase: P2
+      dependsOn:
+        - intent-recognition
+      branchId: path1_dima
+      triggerRule: all_success
+      executor:
+        type: embedded-agent
+        outputMode: json
+        prompt: |
+          确认路由：用户意图为DIMA需求直通，需要进行DIMA工单创建。
+          输出: {"confirmed": true, "route": "path1_dima"}
+      outputContract:
+        schema:
+          type: object
+          properties:
+            confirmed:
+              type: boolean
+            route:
+              type: string
+
+    # ============================================================
+    # 节点 ⑤-A：DIMA需求准备（扁平化，取消 loop-group 避免 revise 卡死）
+    # ============================================================
+    - id: dima-preparator
+      title: 4️⃣.1 DIMA需求准备
+      phase: P2
+      dependsOn:
+        - dima-after-intent
+        - dima-after-review
+      triggerRule: one_success
+      retry:
+        maxAttempts: 1
+        backoffMs: 0
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        skillName: dima-preparator
+        outputMode: json
+        prompt: |
+          ⚠️ 你当前正在执行 dima-preparator skill，任务是：根据下方提供的输入数据，直接推理并输出 JSON，禁止调用任何外部工具。
+
+          ## Step 1：判断进入路径
+
+          检查下方「路径A输入」中的 dimaFields.background 是否非空：
+          - 非空 → 路径A（DIMA需求直通），直接使用 dimaFields 的值
+          - 为空 → 路径B（深度分析审核后转DIMA），必须从「路径B输入」中提炼字段
+
+          ## Step 2：数据源映射
+
+          ### 路径A输入（DIMA需求直通）
+          - 需求背景：{{nodeOutput.intent-recognition.dimaFields.background | default: ""}}
+          - 需求价值：{{nodeOutput.intent-recognition.dimaFields.value | default: ""}}
+          - 优先级：{{nodeOutput.intent-recognition.dimaFields.priority | default: ""}}
+          - DSL 定义：{{nodeOutput.intent-recognition.dimaFields.dsl | default: ""}}
+          - 原始迭代诉求：{{nodeOutput.intent-recognition.dimaFields.original_request | default: ""}}
+          - 样本口径：{{nodeOutput.intent-recognition.dimaFields.sample_scope | default: ""}}
+
+          ### 路径B输入（深度分析审核后转DIMA）
+          - 深度分析摘要：{{nodeOutput.deep-analysis.reportSummary | default: ""}}
+          - 风险手法：{{nodeOutput.deep-analysis.deepRiskTechniques | default: ""}}
+          - 风险特征：{{nodeOutput.deep-analysis.deepRiskFeatures | default: ""}}
+          - 审核决定：{{workflowData.reviewDecision | default: ""}}
+          - 用户原始输入：{{input.params.userInput}}
+
+          ### 用户补充信息（revise 回流时可用）
+          {{workflowData.dimaSupplementInfo | default: ""}}
+
+          ## Step 3：字段填充规则
+
+          请按以下规则将上述数据源映射到标准字段，禁止为空字符串（空字符串视为缺失）：
+
+          | DIMA字段 | 路径A取值 | 路径B推导规则 |
+          |---------|---------|-------------|
+          | 需求背景.业务目标 | dimaFields.background | 从 userInput 提取一句话概述业务场景，如"XX平台虚假交易风险防控" |
+          | 需求背景.核心痛点 | dimaFields.background | deep-analysis.reportSummary 前两句，失败则填"从深度分析提炼风险场景" |
+          | 需求价值.预计挽回月资金 | dimaFields.value 中的金额 | "待评估"（是有效值，非空） |
+          | 需求价值.计算逻辑 | dimaFields.value | "日均虚假交易额 × 虚假占比 × 平均补贴" |
+          | 需求价值.提升目标 | dimaFields.value | reviewDecision=risk_miss → "降低风险漏过率"；false_positive → "降低误伤率" |
+          | 风险DSL定义.风险名称 | dimaFields.dsl 解析 | ["{{nodeOutput.deep-analysis.deepRiskTechniques | default: '待细化' | truncate: 20}}"] |
+          | 风险DSL定义.DSL逻辑 | dimaFields.dsl 解析 | {"特征组 1 (聚集性)": "{{nodeOutput.deep-analysis.deepRiskFeatures | default: '从深度分析提取' | truncate: 50}}", "特征组 2 (机械化)": "待细化", "特征组 3 (心智缺失)": "待细化"} |
+          | 处置优先级.优先级 | dimaFields.priority | "P1" |
+          | 处置优先级.手法类型 | — | "建议从风险手法推断或填'待确认'" |
+          | 处置优先级.偏好说明 | — | reviewDecision=risk_miss → "召回率优先"；false_positive → "误杀率控制" |
+          | 处置优先级.考核指标 | — | "准确率 > 95%" |
+          | 原始迭代诉求 | dimaFields.original_request | reviewDecision=risk_miss → "漏过"；false_positive → "误伤" |
+          | 样本口径 | dimaFields.sample_scope | intent-recognition.extractedParams.sampleSql / tradeNo / dateRange |
+
+          **关键约定**：输出前必须检查每个字段，如果被填充为""则视为缺失（应输出 is_ready=false）。但像"待评估"、"P1"、"待细化"这类显式默认值是有效值。
+
+          ## Step 4：输出格式
+
+          直接输出合法 JSON，不要 Markdown 代码块，不要额外说明：
+
+          {
+            "draft_data": {
+              "需求背景": {"业务目标": "...", "核心痛点": "..."},
+              "需求价值": {"预计挽回月资金": "...", "计算逻辑": "...", "提升目标": "..."},
+              "风险 DSL 定义": {
+                "风险名称": ["..."],
+                "DSL 逻辑": {
+                  "特征组 1 (聚集性)": "...",
+                  "特征组 2 (机械化)": "...",
+                  "特征组 3 (心智缺失)": "..."
+                }
+              },
+              "处置优先级": {"优先级": "P1", "手法类型": "...", "偏好说明": "...", "考核指标": "..."},
+              "原始迭代诉求": "漏过/误伤",
+              "样本口径": {"type": "trade_no_and_dt|sql", "trade_no": "...", "trade_dt": "...", "sql_query": "..."}
+            },
+            "is_ready": true/false,
+            "missing_fields": [{"field_name": "", "sub_field": "", "question": ""}],
+            "questions": [],
+            "validationSummary": "路径A/B：字段已填充。"
+          }
+      outputContract:
+        required: true
+        schema:
+          type: object
+
+    # ============================================================
+    # 节点 ⑤-A-B：DIMA需求格式化（将原始 JSON 翻译为可读文本）
+    # ============================================================
+    - id: dima-formatter
+      title: 📄 格式化DIMA需求数据
+      phase: P2
+      dependsOn:
+        - dima-preparator
+      triggerRule: all_success
+      retry:
+        maxAttempts: 1
+        backoffMs: 2000
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        outputMode: text
+        prompt: |
+          请将以下 DIMA 需求准备结果格式化为 Markdown 报告。
+
+          完备性：{{nodeOutput.dima-preparator.is_ready | default: "未知"}}
+          校验摘要：{{nodeOutput.dima-preparator.validationSummary | default: ""}}
+          缺失字段：{{nodeOutput.dima-preparator.missing_fields | default: "无"}}
+
+          原始数据：
+          {{nodeOutput.dima-preparator}}
+
+          格式化要求：
+          1. 用 ## 做分组标题，用 - 做列表项
+          2. 分组顺序：准备状态、需求背景、需求价值、风险DSL定义、处置优先级、原始迭代诉求、样本口径
+          3. 嵌套字段用缩进层级
+          4. 缺失字段用 ⚠️ 标记
+          5. 不得省略任何字段
+
+          直接输出 Markdown，不要 JSON，不要代码块。
+        contextPolicy:
+          history: tail
+          tailMessages: 2
+
+    # ============================================================
+    # 节点 ⑤-B：DIMA结果审核（人工 → 统一收口，不管完不完整都过人工）
+    #   - 完整 → confirm 通过，触发 dima-creator
+    #   - 不完整 → revise 补充信息，回流 dima-preparator 重新生成
+    # ============================================================
+    - id: dima-check
+      title: 4️⃣.2 DIMA结果审核
+      phase: P2
+      dependsOn:
+        - dima-formatter
+      triggerRule: all_success
+      executor:
+        type: human
+        prompt: |
+          完备性：{{nodeOutput.dima-preparator.is_ready | default: "未知"}}
+          缺失字段：{{nodeOutput.dima-preparator.missing_fields | default: "无"}}
+          风险结论：{{nodeOutput.deep-analysis.riskConclusion | default: ""}}
+
+          ✅ 信息完备时可直接 confirm 创建工单。
+          ⚠️ 信息不完整时可选择 revise 补充后重新生成。
+        inputSchema:
+          type: object
+          properties:
+            feedback:
+              type: string
+              title: "补充/备注"
+              description: "如需补充信息请填写，确认通过可留空"
+        actions:
+          confirm:
+            saveAs:
+              workflowData.dimaChecked: "true"
+            next: succeed-current
+          revise:
+            feedbackPath: "workflowData.dimaSupplementInfo"
+            feedbackMode: append-line
+            target: dima-preparator
+            reset: target-and-descendants
+            next: rerun-target
+          reject:
+            next: fail-flow
+        commandHints:
+          confirm:
+            label: "✅ confirm 通过并创建"
+          revise:
+            label: "📝 revise <补充内容>"
+          reject:
+            label: "❌ 结束流程"
+
+    # ============================================================
+    # 节点 ⑤-C：DIMA工单创建
+    # ============================================================
+    - id: dima-creator
+      title: 4️⃣.3 DIMA工单创建
+      phase: P2
+      dependsOn:
+        - dima-check
+      triggerRule: all_success
+      retry:
+        maxAttempts: 2
+        backoffMs: 3000
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        skillName: dima-creator
+        outputMode: json
+        prompt: |
+          请使用 dima-creator skill 创建 DIMA 工单。
+
+          ## 完备的DIMA字段数据
+
+          {{nodeOutput.dima-preparator.draft_data | default: ""}}
+
+          请直接使用以上 draft_data 创建工单，格式化内容、生成标题、调用 MCP 创建。
+
+          输出 JSON 格式：
+          {
+            "workItemId": "工单ID",
+            "status": "completed",
+            "url": "工单链接",
+            "message": "✅ DIMA 工单已创建",
+            "original_request": "漏过/误伤",
+            "sample_scope": {}
+          }
+      outputContract:
+        required: false
+        schema:
+          type: object
+          properties:
+            workItemId:
+              type: string
+            status:
+              type: string
+            url:
+              type: string
+            message:
+              type: string
+
+    # ============================================================
+    # 节点 ⑥：覆盖分析 - SQL 执行（建表 + 关联稽核）
+    # 使用脚本执行耗时SQL，产出中间表供下游覆盖分析使用
+    # ============================================================
+    - id: coverage-sql-exec
+      title: 5️⃣.1 覆盖分析-SQL执行
+      phase: P3
+      dependsOn:
+        - dima-creator
+      triggerRule: all_success
+      retry:
+        maxAttempts: 2
+        backoffMs: 3000
+        on:
+          - executor-failed
+      executor:
+        type: cli-script
+        command: bash /home/admin/openclawExt/clawmind/packs/trade-risk-analysis-flow/scripts/coverage-sql-exec.sh
+        env:
+          USER_INPUT: '{{input.params.userInput}}'
+          ALIPAY_UID: '{{nodeOutput.intent-recognition.extractedParams.uid | default: ""}}'
+          TRADE_NO: '{{nodeOutput.intent-recognition.extractedParams.tradeNo | default: ""}}'
+          DIGITAL_POI_ID: '{{nodeOutput.intent-recognition.extractedParams.digitalPoiId | default: ""}}'
+          SAMPLE_SCOPE: '{{nodeOutput.intent-recognition.extractedParams.sampleSql | default: ""}}'
+          DIMA_SAMPLE_SQL_QUERY: '{{nodeOutput.intent-recognition.dimaFields.sample_scope.sql_query | default: ""}}'
+          DATE_RANGE: '{{nodeOutput.intent-recognition.extractedParams.dateRange | default: ""}}'
+          DATE_START: '{{nodeOutput.intent-recognition.extractedParams.dateStart | default: ""}}'
+          DATE_END: '{{nodeOutput.intent-recognition.extractedParams.dateEnd | default: ""}}'
+          TABLES: '{{nodeOutput.intent-recognition.extractedParams.tables | default: ""}}'
+          RISK_TYPE: '{{nodeOutput.intent-recognition.riskType | default: ""}}'
+          SCENE_ABBR: '{{nodeOutput.intent-recognition.extractedParams.sceneAbbr | default: ""}}'
+          PROJECT_ID: "410894"
+          DEBUG: "1"
+        outputMode: json
+        timeoutMs: 900000
+      outputContract:
+        required: true
+        schema:
+          type: object
+          required:
+            - success
+            - sampleTable
+            - allinTable
+            - sampleCount
+          properties:
+            success:
+              type: boolean
+            sampleTable:
+              type: string
+            allinTable:
+              type: string
+            sampleCount:
+              type: number
+            matchedCount:
+              type: number
+            riskCount:
+              type: number
+            permissionChecked:
+              type: boolean
+            error:
+              type: string
+            errorDetail:
+              type: string
+            executedSqls:
+              type: array
+              items:
+                type: object
+                properties:
+                  step:
+                    type: string
+                  sql:
+                    type: string
+            executionLogs:
+              type: array
+              items:
+                type: string
+            extractedParams:
+              type: object
+            diagnostics:
+              type: object
+              properties:
+                sampleEmptyWarning:
+                  type: boolean
+                countQueryId:
+                  type: string
+                countSql:
+                  type: string
+                step3Strategy:
+                  type: string
+                step3Status:
+                  type: number
+                step3Sql:
+                  type: string
+                step3QueryId:
+                  type: string
+                step4Status:
+                  type: number
+                step4Sql:
+                  type: string
+                step4QueryId:
+                  type: string
+                validationWarnings:
+                  type: string
+                sampleSqlRawValue:
+                  type: string
+                sampleSqlInvalid:
+                  type: boolean
+            queryIds:
+              type: array
+              items:
+                type: object
+                properties:
+                  step:
+                    type: string
+                  queryId:
+                    type: string
+
+    # ============================================================
+    # 节点 ⑦：覆盖分析 - 报告生成（Step 5~7）
+    # 从 coverage-sql-exec 读取中间表信息，执行轻量分析SQL生成报告
+    # ============================================================
+    - id: coverage-analysis
+      title: 5️⃣.2 覆盖分析报告
+      phase: P3
+      dependsOn:
+        - coverage-sql-exec
+      triggerRule: all_success
+      retry:
+        maxAttempts: 2
+        backoffMs: 3000
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        skillName: bussiness-scene-cheat-cover-analyzer
+        outputMode: json
+        prompt: |
+          请使用 bussiness-scene-cheat-cover-analyzer skill 执行覆盖分析报告生成（Step 5~7）。
+
+          ⚠️ 重要：Step 1~4 的 SQL 已由前置节点 coverage-sql-exec 完成执行，中间表已就绪。你只需要执行 Step 5（基础信息分析）、Step 6（风险分布分析）、Step 7（报告生成）。
+
+          ## 前置节点产出
+
+          样本表：{{nodeOutput.coverage-sql-exec.sampleTable | default: ""}}
+          宽表：{{nodeOutput.coverage-sql-exec.allinTable | default: ""}}
+          样本总量：{{nodeOutput.coverage-sql-exec.sampleCount | default: 0}}
+          关联匹配数：{{nodeOutput.coverage-sql-exec.matchedCount | default: 0}}
+          有风险标签数：{{nodeOutput.coverage-sql-exec.riskCount | default: 0}}
+          日期范围：{{nodeOutput.coverage-sql-exec.dateStart | default: ""}} ~ {{nodeOutput.coverage-sql-exec.dateEnd | default: ""}}
+
+          ## 原始输入参数
+
+          原始输入：{{input.params.userInput}}
+          风险类型：{{nodeOutput.intent-recognition.riskType | default: ""}}
+
+          ## 执行要求
+
+          1. 使用宽表执行基础信息分析（Step 5）
+          2. 使用宽表执行风险分布分析（Step 6）
+          3. 生成完整覆盖分析报告（Step 7）
+
+          **不要**重新执行 Step 1~4，这些已完成。
+
+          输出 JSON 格式：
+          {
+            "total": 0, "covered": 0, "uncovered": 0, "coverageRate": 0.0,
+            "riskTechniques": "", "riskFeatures": "",
+            "coveredRiskLabels": "", "uncoveredRiskLabels": "",
+            "coveredDetails": [], "uncoveredDetails": [],
+            "analysisSummary": "", "isFullyCovered": false, "needDeepAnalysis": false
+          }
+        timeoutSeconds: 600
+        contextPolicy:
+          history: tail
+          tailMessages: 8
+      outputContract:
+        required: false
+        schema:
+          type: object
+          required:
+            - total
+            - covered
+            - coverageRate
+            - isFullyCovered
+          properties:
+            total:
+              type: number
+            covered:
+              type: number
+            coverageRate:
+              type: number
+            isFullyCovered:
+              type: boolean
+            needDeepAnalysis:
+              type: boolean
+
+    # ============================================================
+    # 节点 ⑦-B：覆盖分析报告格式化
+    # ============================================================
+    - id: coverage-analysis-formatter
+      title: 📄 格式化覆盖分析报告
+      phase: P3
+      dependsOn:
+        - coverage-analysis
+      triggerRule: all_success
+      retry:
+        maxAttempts: 1
+        backoffMs: 2000
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        outputMode: text
+        prompt: |
+          请将以下覆盖分析原始输出格式化为 Markdown 报告。
+
+          原始输出：
+          {{nodeOutput.coverage-analysis}}
+
+          格式化要求：
+          1. 用 ## 做分组标题，用 - 做列表项
+          2. 顶部醒目展示：覆盖率（百分比）、总样本数、已覆盖数、未覆盖数
+          3. 分组：基础指标、风险手法与特征、已覆盖风险标签、未覆盖风险标签、覆盖详情、分析摘要
+          4. 覆盖详情中 coveredDetails 和 uncoveredDetails 逐条展示
+          5. 不得省略任何字段
+
+          直接输出 Markdown，不要 JSON，不要代码块。
+        contextPolicy:
+          history: tail
+          tailMessages: 2
+
+    # ============================================================
+    # 节点 ⑧：能力迭代判断（iteration-decision-maker 四象限决策）
+    # - 需要能力迭代 → 生成知识卡片
+    # - 不需要 → 流程结束
+    # 四象限决策矩阵：
+    #   漏过 + 覆盖率>90% → 无需迭代
+    #   漏过 + 覆盖率<90% → 需要迭代
+    #   误伤 + 覆盖率>5%  → 需要迭代
+    #   误伤 + 覆盖率<5%  → 无需迭代
+    # ============================================================
+    - id: iteration-judgment
+      title: 6️⃣ 能力迭代判断
+      phase: P3
+      dependsOn:
+        - coverage-analysis-formatter
+      triggerRule: all_success
+      retry:
+        maxAttempts: 1
+        backoffMs: 0
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        skillName: iteration-decision-maker
+        outputMode: json
+        prompt: |
+          请使用 iteration-decision-maker skill 基于四象限决策矩阵判断是否需要能力迭代。
+
+          ## 必填输入参数（从上游自动获取）
+
+          ### original_intent（原始迭代诉求）
+          来源1 - 深度分析审核决定转换：{{workflowData.reviewDecision | replace: 'risk_miss', '漏过' | replace: 'false_positive', '误伤' | default: ""}}
+          来源2 - DIMA直通时意图识别：{{nodeOutput.intent-recognition.dimaFields.original_request | default: ""}}
+          请优先使用来源1，如来源1为空则使用来源2。必须是"漏过"或"误伤"。
+
+          ### coverage_rate（覆盖率，0.0-1.0）
+          来源：覆盖分析结果
+          覆盖率：{{nodeOutput.coverage-analysis.coverageRate | default: 0}}
+
+          ## 可选参数（使用默认值即可）
+          - threshold_critique: 0.90（漏过场景的覆盖率阈值）
+          - threshold_false_positive: 0.05（误伤场景的覆盖率阈值）
+
+          ## 四象限决策矩阵
+
+          | 原始诉求 | 覆盖率 | 决策 | 原因 |
+          |---------|--------|------|------|
+          | 漏过 | >90% | 无需迭代 | 能力已足够覆盖 |
+          | 漏过 | <90% | 需要迭代 | 覆盖率不足，需优化能力 |
+          | 误伤 | >5% | 需要迭代 | 覆盖>5%被业务认为是误伤，需优化灵敏度 |
+          | 误伤 | <5% | 无需迭代 | 覆盖率<5%可接受，策略克制 |
+
+          ## 辅助信息
+
+          覆盖分析数据：{{nodeOutput.coverage-analysis | default: ""}}
+          审核决定：{{workflowData.reviewDecision | default: ""}}
+          风险类型：{{nodeOutput.intent-recognition.riskType | default: ""}}
+
+          输出 JSON 格式：
+          {
+            "original_intent": "漏过|误伤",
+            "coverage_rate": 0.0,
+            "coverage_rate_display": "40.0%",
+            "needIteration": true/false,
+            "decision": "需要迭代|无需迭代",
+            "reason": "判断原因说明",
+            "next_action": "call_anticheat_generate_card|end_flow",
+            "next_skill": "anticheat-generate-card|null",
+            "uncoveredRisk": "未覆盖的风险描述",
+            "suggestedCardType": "风险规则|风险特征|风控策略"
+          }
+      outputContract:
+        required: true
+        schema:
+          type: object
+          required:
+            - needIteration
+            - reason
+            - original_intent
+            - coverage_rate
+          properties:
+            needIteration:
+              type: boolean
+            reason:
+              type: string
+            original_intent:
+              type: string
+            coverage_rate:
+              type: number
+            coverage_rate_display:
+              type: string
+            decision:
+              type: string
+            next_action:
+              type: string
+            next_skill:
+              type: string
+            uncoveredRisk:
+              type: string
+            suggestedCardType:
+              type: string
+      onResult:
+        branches:
+          - branchId: need_iteration
+            match:
+              needIteration: true
+            complete: false
+          - branchId: no_iteration
+            match:
+              needIteration: false
+            complete: true
+
+    # ============================================================
+    # 节点 ⑨：卡片生成+审核（loop-group，最多3轮审核循环）
+    # ============================================================
+    # ============================================================
+    # 节点 ⑨-A：生成知识卡片（扁平化，取消 loop-group）
+    # ============================================================
+    - id: card-generation
+      title: 7️⃣ 生成知识卡片
+      phase: P4
+      dependsOn:
+        - iteration-judgment
+      branchId: need_iteration
+      triggerRule: all_success
+      retry:
+        maxAttempts: 2
+        backoffMs: 3000
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        skillName: anticheat-generate-card
+        outputMode: json
+        prompt: |
+          请使用 anticheat-generate-card skill 生成风险知识卡片。
+
+          ⚠️ 重要：仅生成卡片，不执行卡片推送。
+
+          ## 输入数据
+
+          覆盖分析数据：{{nodeOutput.coverage-analysis | default: ""}}
+          能力迭代判断：{{nodeOutput.iteration-judgment | default: ""}}
+          深度分析数据：{{nodeOutput.deep-analysis | default: ""}}
+          业务场景：{{nodeOutput.intent-recognition.businessScene | default: ""}}
+          风险类型：{{nodeOutput.intent-recognition.riskType | default: ""}}
+          提取参数：{{nodeOutput.intent-recognition.extractedParams | default: ""}}
+          DIMA需求信息：{{nodeOutput.dima-preparator.draft_data | default: ""}}
+          修改意见：{{workflowData.riskCardFeedback | default: ""}}
+
+          基于以上数据生成完整知识卡片。
+      contextPolicy:
+        history: tail
+        tailMessages: 6
+      outputContract:
+        required: true
+        schema:
+          type: object
+
+    # ============================================================
+    # 节点 ⑨-A-B：卡片内容格式化（将原始 JSON 翻译为可读文本）
+    # ============================================================
+    - id: card-formatter
+      title: 📄 格式化知识卡片
+      phase: P4
+      dependsOn:
+        - card-generation
+      branchId: need_iteration
+      triggerRule: all_success
+      retry:
+        maxAttempts: 1
+        backoffMs: 2000
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        outputMode: text
+        prompt: |
+          请将以下风险知识卡片原始输出格式化为 Markdown 报告。
+
+          原始输出：
+          {{nodeOutput.card-generation}}
+
+          格式化要求：
+          1. 顶部一行醒目展示：卡片ID / 业务线
+          2. 用 ## 做分组标题，用 - 做列表项
+          3. 嵌套字段用缩进层级，列表类字段逐条展示
+          4. 分组顺序：基本信息、原始输入、风险分析、迭代上下文、DIMA需求
+          5. 不得省略任何字段
+
+          直接输出 Markdown，不要 JSON，不要代码块。
+        contextPolicy:
+          history: tail
+          tailMessages: 2
+
+    # ============================================================
+    # 节点 ⑨-B：卡片结果审核（人工 → revise 回流 card-generation）
+    # ============================================================
+    - id: card-review
+      title: 📝 卡片结果审核
+      phase: P4
+      dependsOn:
+        - card-formatter
+      triggerRule: all_success
+      executor:
+        type: human
+        prompt: |
+          卡片ID：{{nodeOutput.card-generation.card_id | default: ""}}
+          业务线：{{nodeOutput.card-generation.metadata.business_line | default: ""}}
+          风险手法：{{nodeOutput.deep-analysis.deepRiskTechniques | default: ""}}
+          覆盖率：{{nodeOutput.coverage-analysis.coverageRate | default: ""}}
+          迭代诉求：{{nodeOutput.iteration-judgment.original_intent | default: ""}}
+
+          💡 请选择操作：
+        inputSchema:
+          type: object
+          properties:
+            feedback:
+              type: string
+              title: "修改意见"
+              description: "如需修改，请描述具体修改要求"
+        actions:
+          confirm:
+            saveAs:
+              workflowData.riskCardApproved: "true"
+            next: succeed-current
+          revise:
+            feedbackPath: "workflowData.riskCardFeedback"
+            feedbackMode: append-line
+            target: card-generation
+            reset: target-and-descendants
+            next: rerun-target
+          reject:
+            next: fail-flow
+        commandHints:
+          confirm:
+            label: "✅ confirm"
+          revise:
+            label: "📝 revise <修改意见>"
+          reject:
+            label: "❌ 结束流程"
+
+    # ============================================================
+    # 节点 ⑩：推送卡片（task-publisher-skill）
+    # ============================================================
+    # 修复说明（2026-06-28）:
+    #   旧实现将上游 JSON dump 给 skill，让 LLM 自行解析构造 submitTask 参数，
+    #   导致字段严重遗漏（缺失率>50%），dima_request 完全丢失。
+    #   新实现在模板层直接预构造所有参数，引擎渲染后 LLM 只需机械调用 tool。
+    #   content 为 String，extraData 为 Map<String,String>，所有 value 都是字符串。
+    # ============================================================
+    - id: card-push
+      title: 9️⃣ 推送卡片
+      phase: P4
+      dependsOn:
+        - card-review
+      triggerRule: all_success
+      retry:
+        maxAttempts: 2
+        backoffMs: 3000
+        on:
+          - executor-failed
+      executor:
+        type: embedded-agent
+        skillName: task-publisher-skill
+        outputMode: json
+        prompt: |
+          你是一个任务发布助手。请严格按照下面的参数调用 task-publisher-skill 的 submitTask 工具。不要修改、省略或重新解释任何字段值。
+
+          ## submitTask 参数（已由 workflow 引擎预填充，直接原样使用）
+
+          ```json
+          {
+            "taskCode": "RISK_ANALYSIS",
+            "content": "【风险卡片】\n卡片ID：{{nodeOutput.card-generation.card_id}}\n业务线：{{nodeOutput.card-generation.metadata.business_line}}\n\n{{nodeOutput.card-generation}}\n",
+            "assignerType": "SERVICE_BOT",
+            "extraData": {
+              "cardId": "{{nodeOutput.card-generation.card_id}}",
+              "flowId": "{{workflow.id}}",
+              "cardJson": "{{nodeOutput.card-generation}}"
+            }
+          }
+          ```
+
+          重要约束：
+          1. 直接调用 submitTask，不要询问用户确认。
+          2. 参数中的 `{{...}}` 标记已由 workflow 引擎预填充为实际值，直接原样传递即可。
+          3. content 是 String 类型，必须保持为完整的多行文本字符串，仅包含卡片内容。
+          4. extraData 中所有 value 都必须是 String 类型。
+          5. 输出 JSON 格式：{"success": true/false, "taskId": "", "taskCode": "RISK_ANALYSIS", "error": ""}
+
+    # ============================================================
+    # 节点 ⑪：流程完成
+    # ============================================================
+    - id: complete-done
+      title: ✅ 流程完成
+      phase: P4
+      dependsOn:
+        - card-push
+      triggerRule: all_success
+      executor:
+        type: done

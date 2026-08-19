@@ -1,0 +1,163 @@
+# ============================================================================
+# L2: LLM 条件评估 + 目标驱动循环 (Goal Evaluator)
+# ============================================================================
+# 扩展 on-result 分支选择为 LLM 驱动的评估。
+# goal-evaluator 节点循环执行直到目标达成或达到 maxAttempts。
+# 每轮 LLM 判断当前输出是否满足目标，若不满足则调整策略重试。
+#
+# 场景：代码安全审查 — 循环审查直到没有高危问题，
+# 或达到最大尝试次数后返回当前最佳结果。
+# ============================================================================
+id: l2-goal-evaluator-demo
+version: 1
+title: L2 目标评估循环演示
+
+input:
+  mode: mixed
+  requiredParams: [target]
+  sources:
+    params: true
+    message: true
+
+identity:
+  key: "{{input.params.target}}"
+  label: "L2演示: {{input.params.target}}"
+  duplicatePolicy: allow
+
+outputs:
+  finalReport:
+    from: "{{nodeOutput.finalize}}"
+    public: true
+    description: "最终审查报告"
+  goalMet:
+    from: "{{nodeOutput.security-review.goalMet}}"
+    public: true
+    description: "目标是否达成"
+
+defaults:
+  progress:
+    enabled: true
+    sink: chat
+
+messages:
+  onCreated: "L2 目标评估循环演示已启动：{{input.params.target}}"
+  onFinished: "L2 演示已完成。"
+
+nodes:
+  # ── P1: 初始扫描 ──
+  - id: initial-scan
+    title: 初始安全扫描
+    phase: P1
+    dependsOn: []
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        对目标进行初步安全扫描: {{input.params.target}}
+
+        检查以下方面:
+        1. 代码注入风险
+        2. 敏感数据泄露
+        3. 认证授权缺陷
+        4. 配置安全问题
+
+        严格输出 JSON:
+        {
+          "findings": [
+            { "type": "注入", "severity": "high", "description": "..." },
+            { "type": "泄露", "severity": "medium", "description": "..." }
+          ],
+          "criticalCount": 0,
+          "highCount": 0,
+          "mediumCount": 0
+        }
+
+  # ── P2: 目标评估循环 ──
+  # goal-evaluator 循环执行：每轮评估目标是否达成
+  # 若未达成，将修正建议反馈给下一轮扫描
+  - id: security-review
+    title: 安全审查迭代
+    phase: P2
+    dependsOn: [initial-scan]
+    executor:
+      type: goal-evaluator
+      goal: "审查目标 {{input.params.target}} 的安全报告，确保没有高危(high)安全问题。如果存在高危问题，提出修正建议后重新扫描。"
+      maxAttempts: 3
+      evaluatorPrompt: >
+        评估当前安全扫描结果是否满足目标：无高危安全问题。
+
+        当前扫描结果: {{nodeOutput.initial-scan}}
+
+        判断标准:
+        - criticalCount === 0 且 highCount === 0 → 目标达成
+        - 否则 → 目标未达成，需要修正
+
+        严格输出 JSON:
+        {
+          "goalMet": true 或 false,
+          "reason": "判断理由",
+          "suggestions": ["修正建议1", "修正建议2"]
+        }
+      iterationNode:
+        type: embedded-agent
+        outputMode: json
+        prompt: >
+          根据安全审查反馈修正问题:
+
+          上一轮扫描结果: {{nodeOutput.initial-scan}}
+          修正建议: {{nodeOutput.security-review.suggestions}}
+
+          重新扫描并输出修正后的结果 JSON。
+
+  # ── P3: 分支判定（LLM 评估） ──
+  # 基于 goal-evaluator 的结果走不同路径
+  - id: report-pass
+    title: 生成通过报告
+    phase: P3
+    branchId: passed
+    dependsOn: [security-review]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        安全审查已通过。生成通过报告。
+
+        最终扫描结果: {{nodeOutput.security-review}}
+
+        严格输出 JSON:
+        {
+          "status": "passed",
+          "summary": "安全审查通过，无高危问题",
+          "details": "..."
+        }
+
+  - id: report-fail
+    title: 生成风险报告
+    phase: P3
+    branchId: failed
+    dependsOn: [security-review]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        安全审查未通过（达到最大尝试次数仍有高危问题）。生成风险报告。
+
+        最终扫描结果: {{nodeOutput.security-review}}
+
+        严格输出 JSON:
+        {
+          "status": "failed",
+          "summary": "仍存在高危安全问题",
+          "remainingRisks": ["..."],
+          "recommendations": ["人工介入", "紧急修复"]
+        }
+
+  # ── P4: 完成 ──
+  - id: finalize
+    title: 最终汇总
+    phase: P4
+    dependsOn: [report-pass, report-fail]
+    triggerRule: one_success
+    executor:
+      type: done
+      message: "L2 目标评估循环演示完成"

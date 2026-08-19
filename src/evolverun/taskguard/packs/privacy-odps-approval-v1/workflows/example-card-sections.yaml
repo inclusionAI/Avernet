@@ -1,0 +1,319 @@
+# ODPS 隐私审批 — Card-Section 增强交互卡片配置示例
+# ============================================================================
+# 本文件演示如何在现有 workflow 中启用 cardSections 逐项确认。
+# 复制目标节点 executor 中的 cardSections / saveAs 到你的 workflow 中即可生效。
+# ============================================================================
+
+# ── 场景1：GDG 审批人资产确权确认（拆分后新增）────────────────────────────────
+# 参考：asset_confirm 节点
+
+- id: asset_confirm
+  title: 资产确权推荐GDG审批人确认
+  executor:
+    type: approval
+    skillName: odps-asset-confirm
+    approvalType: ASSET_CONFIRM
+    skipWhen:
+      nodeOutput.check_completeness.is_complete: true
+    message: |
+      ODPS 申请 {{input.params.applicationId}} 资产确权推荐待 GDG 审批人确认。
+      请从推荐候选资产中选择并确认最合适的确权方案。
+    cardTitle: 资产确权推荐确认
+    workflowUrl: "{{nodeOutput.fetch_context.context.approveUrl}}"
+    approvers:
+      # test 环境走 test_dgd_staff_no，否则走 dgd_staff_no
+      - empId: "{{workflowData.config.test_dgd_staff_no | default: workflowData.config.dgd_staff_no}}"
+        name: GDG审批人
+    cardFields:
+      - label: 申请人
+        value: "{{nodeOutput.fetch_context.context.applicantStaffNo | default: '—'}}"
+      - label: AI推荐Top1
+        value: "{{nodeOutput.recommend_authorize.authorize_recommendation.candidate_assets.0.authAssetName | default: '无推荐'}}"
+      - label: 当前确权资产
+        value: "{{nodeOutput.fetch_context.context.authorizeAssetName | default: '未配置'}}"
+
+    cardSections:
+      - id: "assetSelection"
+        title: "资产确权推荐确认"
+        icon: "🏠"
+        description: "请核对 AI 推荐方案，默认接受 Top1 推荐，如需更换请点击「手动指定其他资产」。"
+        style: "info"
+        fields:
+          - id: "recommendDetail"
+            label: "AI推荐详情"
+            expected: |
+              推荐资产列表：
+              {{nodeOutput.recommend_authorize.authorize_recommendation.candidate_assets}}
+
+              推荐理由：{{nodeOutput.recommend_authorize.authorize_recommendation.ai_analysis.reason | default: nodeOutput.recommend_authorize.authorize_recommendation.remark_suggestion}}
+            expectedLabel: "分析"
+            # 纯展示：候选资产list自动渲染，无需审批人操作
+          - id: "authAsset"
+            label: "确认确权资产"
+            expected: "{{nodeOutput.recommend_authorize.authorize_recommendation.candidate_assets.0.authAssetName | default: '无推荐'}}"
+            expectedLabel: "AI推荐(Top1)"
+            actual: "{{nodeOutput.fetch_context.context.authorizeAssetName | default: ''}}"
+            actualLabel: "当前配置"
+            actions:
+              - { key: "accept", label: "✓ 采用Top1推荐", type: "primary" }
+              - { key: "customize", label: "手动指定其他资产", autoFill: "{{nodeOutput.fetch_context.context.authorizeAssetName | default: ''}}" }
+            customizable: true
+            placeholder: "如需指定其他资产请填写"
+
+    delivery:
+      private:
+        primary: card-web
+      dingtalkGroup:
+        primary: card-web
+      collaboration:
+        primary: bcs-route
+    approvalPolicy: any
+    saveAs:
+      workflowData.asset_confirmed: "{{result.approved}}"
+      workflowData.gdg_confirmed_asset: "{{result.detail.assetSelection.authAsset.value}}"
+      workflowData.gdg_recommend_reason: "{{nodeOutput.recommend_authorize.authorize_recommendation.ai_analysis.reason | default: nodeOutput.recommend_authorize.authorize_recommendation.remark_suggestion}}"
+      workflowData.gdg_reviewer: "{{result.reviewer}}"
+      workflowData.gdg_confirm_note: "{{result.comment}}"
+
+  phase: P3
+  dependsOn:
+    - recommend_authorize
+  outputContract:
+    schema:
+      type: object
+      properties:
+        approved:
+          type: boolean
+          nullable: true
+        reviewer:
+          type: string
+          nullable: true
+        comment:
+          type: string
+          nullable: true
+
+
+# ── 场景2：申请人对信息补充与过滤核对（拆分后 applicant_review）──────────────
+# 资产确权已拆出给 GDG，申请人卡片中只展示 GDG 确认结果
+
+- id: applicant_review
+  title: 申请人对信息及推荐方案核对确认
+  executor:
+    type: approval
+    skillName: odps-supplement-approval
+    approvalType: SUPPLEMENT_COMPLETE
+    skipWhen:
+      nodeOutput.check_completeness.is_complete: true
+    message: |
+      申请 {{input.params.applicationId}} 信息不完整，
+      请核对以下 AI 推荐内容，如有异议请逐项说明；如无法补充，请点击"拒绝"。
+    cardTitle: 工单申请信息补充（含推荐核对）
+    workflowUrl: "{{nodeOutput.fetch_context.context.approveUrl}}"
+    approvers:
+      # test 环境走 test_applicant_staff_no，否则走实际申请人
+      - empId: "{{workflowData.config.test_applicant_staff_no | default: nodeOutput.fetch_context.context.applicantStaffNo}}"
+        name: 申请人
+    cardFields:
+      - label: 申请ID
+        value: "{{input.params.applicationId}}"
+
+    cardSections:
+      - id: "assetDisplay"
+        title: "资产确权确认结果"
+        icon: "🏠"
+        description: "GDG 审批人已确认的资产确权方案如下，请知悉"
+        style: "success"
+        fields:
+          - id: "confirmedAsset"
+            label: "已确认确权资产"
+            expected: |
+              {{workflowData.gdg_confirmed_asset | default: nodeOutput.recommend_authorize.authorize_recommendation.candidate_assets.0.authAssetName}}
+              推荐理由：{{workflowData.gdg_recommend_reason | default: nodeOutput.recommend_authorize.authorize_recommendation.ai_analysis.reason}}
+            expectedLabel: "详情"
+            # 纯展示，无actions，无actual
+
+      - id: "scenarioReview"
+        title: "业务场景信息补充"
+        icon: "📝"
+        description: "请根据AI建议自行补充业务场景说明，确认后提交。"
+        style: "info"
+        fields:
+          - id: "scenarioSupplement"
+            label: "业务场景补充"
+            expected: "{{nodeOutput.check_completeness.scenario_item.suggestion | default: '请详细说明具体业务场景、数据如何被使用、预期产出'}}"
+            expectedLabel: "AI建议参考"
+            actions:
+              - { key: "customize", label: "自行填写", autoFill: "" }
+            customizable: true
+            placeholder: "请根据实际情况详细描述业务场景"
+
+      - id: "filterReview"
+        title: "行级过滤推荐核对"
+        icon: "🔍"
+        description: |
+          AI判断需过滤：{{nodeOutput.recommend_filter.filter_recommendation.needs_filter | default: 'false'}}，判定理由：{{nodeOutput.recommend_filter.filter_recommendation.reason | default: '无'}}。
+          请核对过滤条件建议。
+        style: "warning"
+        fields:
+          - id: "filterWhere"
+            label: "过滤条件"
+            expected: "{{nodeOutput.recommend_filter.filter_recommendation.recommended_where | default: '无'}}"
+            expectedLabel: "AI推荐 WHERE"
+            actual: "{{nodeOutput.fetch_context.context.whereCondition | default: '无'}}"
+            actualLabel: "当前 WHERE"
+            actions:
+              - { key: "accept", label: "接受推荐", type: "primary" }
+              - { key: "keep", label: "保持现有" }
+              - { key: "customize", label: "自定义条件", autoFill: "{{nodeOutput.fetch_context.context.whereCondition | default: ''}}" }
+            customizable: true
+            placeholder: "如需调整过滤条件请直接填写完整 WHERE 子句"
+
+    delivery:
+      private:
+        primary: card-web
+      dingtalkGroup:
+        primary: card-web
+      collaboration:
+        primary: bcs-route
+    approvalPolicy: any
+    onRevise:
+      target: check_completeness
+      reset: target-and-descendants
+    saveAs:
+      workflowData.risk_adjustment: "{{nodeOutput.check_completeness.risk_adjustment}}"
+      workflowData.review_approved: "{{result.approved}}"
+      workflowData.review_rejected: "{{not result.approved}}"
+      workflowData.review_note: "{{result.note}}"
+      workflowData.review_reviewer: "{{result.reviewer}}"
+      workflowData.filter_review: "{{result.detail.filterReview}}"
+      workflowData.scenario_review: "{{result.detail.scenarioReview}}"
+      workflowData.chosen_filter_action: "{{result.detail.filterReview.filterWhere.action}}"
+      workflowData.chosen_filter_value: "{{result.detail.filterReview.filterWhere.value}}"
+      workflowData.scenario_supplement_action: "{{result.detail.scenarioReview.scenarioSupplement.action}}"
+      workflowData.scenario_supplement_value: "{{result.detail.scenarioReview.scenarioSupplement.value}}"
+
+  phase: P5
+  dependsOn:
+    - check_completeness
+  outputContract:
+    schema:
+      type: object
+      properties:
+        approved:
+          type: boolean
+          nullable: true
+        reviewer:
+          type: string
+          nullable: true
+
+
+# ── 场景3：专家审批确认（替代 human 节点）─────────────────────────────────
+# 原有 human_confirm（type: human）如要逐项确认，可替换为 type: approval + cardSections
+
+- id: expert_review
+  title: 专家逐项确认审批决策
+  executor:
+    type: approval
+    skillName: odps-expert-review
+    approvalType: HUMAN_CONFIRM
+    message: |
+      请确认最终审批决策中的关键字段：
+      - 决策：{{nodeOutput.approval_decision.decision}}
+      - 风险等级：{{nodeOutput.approval_decision.final_risk_level}}
+    cardTitle: 审批决策确认（逐项核对）
+    approvers:
+      - empId: "{{workflowData.config.test_dgd_staff_no | default: workflowData.config.dgd_staff_no}}"
+        name: 审批专家
+
+    cardFields:
+      - label: 申请ID
+        value: "{{input.params.applicationId}}"
+      - label: 最终决策
+        value: "{{nodeOutput.approval_decision.decision}}"
+      - label: 风险等级
+        value: "{{nodeOutput.approval_decision.final_risk_level}}"
+
+    cardSections:
+      - id: "authDecisionReview"
+        title: "确权决策确认"
+        icon: "🔐"
+        style: "info"
+        fields:
+          - id: "decision"
+            label: "审批决策"
+            expected: "{{nodeOutput.approval_decision.decision}}"
+            expectedLabel: "AI建议"
+            actions:
+              - { key: "agree", label: "同意执行", type: "primary" }
+              - { key: "revise", label: "退回修改", type: "default" }
+
+          - id: "candidateAsset"
+            label: "确权资产"
+            expected: "{{nodeOutput.approval_decision.pending_writes.authorize_judgment | default: '未配置'}}"
+            expectedLabel: "执行方案"
+            actions:
+              - { key: "accept", label: "确认", type: "primary" }
+              - { key: "customize", label: "修改资产", autoFill: "" }
+            customizable: true
+            placeholder: "如要更换确权资产，请填写"
+
+      - id: "filterDecisionReview"
+        title: "过滤条件确认"
+        icon: "🔍"
+        style: "warning"
+        fields:
+          - id: "whereCondition"
+            label: "行级过滤 WHERE"
+            expected: "{{nodeOutput.recommend_filter.filter_recommendation.recommended_where | default: '无需过滤'}}"
+            expectedLabel: "推荐条件"
+            actions:
+              - { key: "accept", label: "确认使用", type: "primary" }
+              - { key: "customize", label: "修改条件", autoFill: "" }
+            customizable: true
+            placeholder: "如需调整过滤条件请填写"
+
+    delivery:
+      private:
+        primary: card-web
+      dingtalkGroup:
+        primary: card-web
+    approvalPolicy: any
+
+    saveAs:
+      workflowData.expert_review_detail: "{{result.detail}}"
+      workflowData.expert_confirm_action: "{{result.detail.authDecisionReview.decision.action}}"
+      workflowData.expert_asset_value: "{{result.detail.authDecisionReview.candidateAsset.value}}"
+      workflowData.expert_filter_value: "{{result.detail.filterDecisionReview.whereCondition.value}}"
+      workflowData.confirmNote: "{{result.note}}"
+      workflowData.expert_reviewer: "{{result.reviewer}}"
+
+  outputContract:
+    schema:
+      type: object
+      properties:
+        approved:
+          type: boolean
+          nullable: true
+        reviewer:
+          type: string
+          nullable: true
+
+
+# ── 下游节点消费 saveAs 示例 ───────────────────────────────────────────────
+
+# 例如在 execute_approval 前加一个 action/script 节点，读取已确认的字段：
+# - id: prepare_execution
+#   executor:
+#     type: action
+#     action: odps.prepare_execution
+#     args:
+#       authorize-judgment: "{{workflowData.gdg_confirmed_asset | default: workflowData.expert_asset_value}}"
+#       where-condition: "{{workflowData.chosen_filter_value | default: workflowData.expert_filter_value}}"
+
+
+# ── saveAs 模板路径速查 ──────────────────────────────────────────────────
+# result.detail.<sectionId>.<fieldId>.action  → 选择的操作 key
+# result.detail.<sectionId>.<fieldId>.actionLabel → 选择的操作文案
+# result.detail.<sectionId>.<fieldId>.value → 最终值（accept=expected, keep=actual, customize=用户输入）
+# result.detail.<sectionId>.<fieldId>.expected → 原始 expected 值
+# result.detail.<sectionId>.<fieldId>.actual → 原始 actual 值

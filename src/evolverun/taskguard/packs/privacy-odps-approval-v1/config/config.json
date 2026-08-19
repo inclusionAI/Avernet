@@ -1,0 +1,18 @@
+{
+  "dgd_staff_no": "422737",
+  "dgd_nickname": "牧确",
+  "dgd_bot_id": "",
+  "dgd_business_lines": [],
+  "mcp_server_ds": "mcp.ant.faas.dataphinDsmp.dataSecurity",
+  "mcp_server_task": "mcp.ant.agenttaskcore.taskmanagement",
+  "task_code": "odps_privacy_review",
+  "retry_count": 3,
+  "retry_delay": 2,
+  "timeout": 30,
+  "max_supplement_rounds": 2,
+  "auto_check_enabled": true,
+  "ai_assessment_model": "default",
+  "test_applicant_staff_no": "334018",
+  "test_dgd_staff_no": "334018",
+  "hitl_card_id": "card_odps_supplement_v12"
+}

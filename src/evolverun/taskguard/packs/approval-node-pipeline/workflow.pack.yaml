@@ -1,0 +1,16 @@
+id: approval-node-pipeline
+version: 1.0.0
+title: 人工审批钉钉卡片工作流
+description: 演示审批卡片钉钉通道和网页通道的分发、审批人校验、审批策略（any/all/majority）和分支路由。
+workflows:
+  - id: "approval-card-demo"
+    file: workflows/approval-card-demo.yaml
+  - id: "approval-web-demo"
+    file: workflows/approval-web-demo.yaml
+facades:
+  - command: approval
+    defaultWorkflow: approval-card-demo
+    aliases: [ap]
+  - command: approval-web
+    defaultWorkflow: approval-web-demo
+    aliases: [aw]

@@ -1,0 +1,29 @@
+id: nl-branching-demo
+version: "1.1.0"
+title: 自然语言分支选择演示
+description: |
+  RFC-010 NL Interaction 演示 Pack。
+  - nl-branch-selection: 使用 keywordAliases，用户输入"快速"/"深入"等自然语言触发分支（isExactMatch 精确匹配路径）
+  - ai-interpreted-branch: 不定义 keywordAliases，由 AI Agent 通过 workflow_choice 工具解读意图（hint 引导 + L0 回退路径）
+
+workflows:
+  - id: nl-branch-selection
+    file: workflows/nl-branch-selection.yaml
+  - id: ai-interpreted-branch
+    file: workflows/ai-interpreted-branch.yaml
+
+facades:
+  - command: nl-branch
+    defaultWorkflow: nl-branch-selection
+    help:
+      title: 自然语言分支选择（L1 优先）
+      summary: 演示 keywordAliases 关键词匹配触发分支，用户只需说"快速"或"深入"
+      examples:
+        - "/nl-branch 任务标题"
+  - command: ai-branch
+    defaultWorkflow: ai-interpreted-branch
+    help:
+      title: AI 解读分支（L0 回退）
+      summary: 演示无 keywordAliases 时由 AI Agent 解读自然语言触发分支
+      examples:
+        - "/ai-branch 审核目标"

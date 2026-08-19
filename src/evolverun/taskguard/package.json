@@ -1,0 +1,100 @@
+{
+  "name": "@avernet/taskguard",
+  "version": "0.1.0",
+  "description": "Universal YAML DAG workflow engine with TaskFlow persistence",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      }
+    },
+    "./platform/openclaw-entry": {
+      "import": {
+        "types": "./dist/esm/platform/openclaw-entry.d.ts",
+        "default": "./dist/esm/platform/openclaw-entry.js"
+      }
+    },
+    "./platform/hermes-entry": {
+      "import": {
+        "types": "./dist/esm/platform/hermes-entry.d.ts",
+        "default": "./dist/esm/platform/hermes-entry.js"
+      }
+    },
+    "./platform/mcp-entry": {
+      "import": {
+        "types": "./dist/esm/platform/mcp-entry.d.ts",
+        "default": "./dist/esm/platform/mcp-entry.js"
+      }
+    },
+    "./community": {
+      "import": {
+        "types": "./dist/esm/community/index.d.ts",
+        "default": "./dist/esm/community/index.js"
+      }
+    },
+    "./*": {
+      "import": {
+        "types": "./dist/esm/*.d.ts",
+        "default": "./dist/esm/*"
+      }
+    },
+    "./*/*": {
+      "import": {
+        "types": "./dist/esm/*/*.d.ts",
+        "default": "./dist/esm/*/*"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tshy && node ./scripts/fix-exports-wildcards.mjs && node ./scripts/bundle-runtime.mjs && node ./scripts/generate-facade-skills.mjs && node ./scripts/copy-runtime-assets.mjs",
+    "build:all": "npm run build",
+    "test": "node --import tsx --test tests/*.test.ts tests/**/*.test.ts"
+  },
+  "peerDependencies": {
+    "openclaw": "*"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.235",
+    "@modelcontextprotocol/sdk": "*",
+    "cron-parser": "*",
+    "express": "*",
+    "js-yaml": "^4.3.1",
+    "yaml": "*",
+    "zod": "*"
+  },
+  "devDependencies": {
+    "@types/express": "*",
+    "@types/js-yaml": "^4.0.9",
+    "@types/supertest": "*",
+    "esbuild": "*",
+    "supertest": "*",
+    "tshy": "*",
+    "tsx": "*",
+    "typescript": "*"
+  },
+  "tshy": {
+    "dialects": [
+      "esm"
+    ],
+    "exports": {
+      ".": "./src/index.ts",
+      "./platform/openclaw-entry": "./src/platform/openclaw-entry.ts",
+      "./platform/hermes-entry": "./src/platform/hermes-entry.ts",
+      "./platform/mcp-entry": "./src/platform/mcp-entry.ts",
+      "./community": "./src/community/index.ts",
+      "./*": "./src/*.ts",
+      "./*/*": "./src/*/*.ts"
+    }
+  },
+  "module": "./dist/esm/index.js",
+  "main": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts"
+}

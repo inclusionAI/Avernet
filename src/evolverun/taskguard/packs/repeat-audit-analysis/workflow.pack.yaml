@@ -1,0 +1,12 @@
+id: repeat-audit-analysis
+version: 1.0.0
+title: 重复稽核任务处理 Pipeline
+description: 自动完成重复稽核告警任务的全流程分析，识别欺诈/盗用/外卡风险场景，执行场景化风险研判，生成处置建议与分析报告
+workflows:
+  - id: "repeat-audit-analysis"
+    file: workflows/repeat-audit-analysis.yaml
+facades:
+  - command: repeat-audit-analysis
+    workflowId: repeat-audit-analysis
+    defaultWorkflow: repeat-audit-analysis
+    description: 重复稽核告警分析 — 识别场景、查询稽核事件、策略分析、风险研判、生成处置建议

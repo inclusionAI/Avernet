@@ -1,0 +1,450 @@
+id: risk-review-pipeline
+version: 1
+title: 营销活动风险评审全流程
+
+input:
+  mode: mixed
+  requiredParams: [activityId]
+  sources:
+    params: true
+    message: true
+
+identity:
+  key: "{{input.params.activityId}}"
+  label: "评审: {{input.params.activityId}}"
+  duplicatePolicy: allow
+
+outputs:
+  reviewResult:
+    from: "{{nodeOutput.aggregate-risk}}"
+    public: true
+    description: "评审结果"
+  hasRisk:
+    from: "{{nodeOutput.aggregate-risk.has_risk}}"
+    public: true
+    description: "是否有风险"
+  riskSummary:
+    from: "{{nodeOutput.aggregate-risk.risk_summary}}"
+    public: true
+    description: "风险摘要"
+
+defaults:
+  progress:
+    enabled: true
+    sink: chat
+
+messages:
+  onCreated: "营销活动评审流程已创建：活动{{input.params.activityId}}"
+  onFinished: "营销活动评审已完成，请查看结果。"
+
+nodes:
+  # ════════════════════════════════════════════════════════════════
+  # P1: 数据获取与初始化
+  # ════════════════════════════════════════════════════════════════
+
+  - id: fetch-data
+    title: 按ID获取活动数据
+    phase: P1
+    dependsOn: []
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/fetch_data.py
+      args:
+        id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 60000
+    retry:
+      maxAttempts: 3
+      backoffMs: 3000
+      on: [executor-failed]
+
+  - id: warm-mcp
+    title: 预热MCP服务
+    phase: P1
+    dependsOn: []
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/mcp_adapter.py
+      outputMode: text
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+
+  - id: verify-data
+    title: 校验活动数据
+    phase: P1
+    dependsOn: [fetch-data]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        校验活动数据查询结果。
+
+        fetch-data 返回：{{nodeOutput.fetch-data}}
+
+        规则：
+        - 如果 count 为 0 或 files 为空数组，说明该活动ID不存在数据，流程应终止
+        - 如果 count > 0 且 files 非空，说明数据获取成功，流程可继续
+
+        严格输出 JSON（不输出 Markdown，不输出解释）：
+        {"dataExists": true或false, "activityId": "活动ID", "fileCount": 数字, "reason": "原因说明"}
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [dataExists, activityId]
+        properties:
+          dataExists:
+            type: boolean
+          activityId:
+            type: string
+          fileCount:
+            type: number
+          reason:
+            type: string
+    onResult:
+      if:
+        path: dataExists
+        equals: false
+      then:
+        complete: true
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+
+  # ════════════════════════════════════════════════════════════════
+  # P2: 会话信息与数据注入
+  # ════════════════════════════════════════════════════════════════
+
+  - id: get-session-info
+    title: 获取会话信息
+    phase: P2
+    dependsOn: [verify-data]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/get_session_info.py
+      args:
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 30000
+
+  - id: check-init-files
+    title: 检查初始化文件
+    phase: P2
+    dependsOn: [get-session-info]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        检查活动 {{input.params.activityId}} 的初始化文件是否已存在，决定是否需要执行数据注入步骤。
+
+        会话信息：{{nodeOutput.get-session-info}}
+
+        需要检查两个文件：
+        1. references/event_property_{{input.params.activityId}}.json — MCP注入数据
+        2. references/final_res_{{input.params.activityId}}.json — 最终结果
+
+        规则：
+        - 两个文件都存在 → needsInject=false（可跳过注入）
+        - 任一文件不存在 → needsInject=true（必须执行注入）
+        - 用户传入 force=true → needsInject=true（强制执行）
+
+        用户参数：{{input.params}}
+
+        严格输出 JSON（不输出 Markdown，不输出解释）：
+        {"needsInject": true或false, "eventPropertyExists": true或false, "finalResExists": true或false, "reason": "说明"}
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+    onResult:
+      if:
+        path: needsInject
+        equals: false
+      then:
+        saveAs:
+          workflowData.skipInject: "true"
+
+  - id: inject-promo-info
+    title: 注入活动信息
+    phase: P2
+    dependsOn: [check-init-files]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        根据 check-init-files 的结果决定是否执行数据注入。
+
+        check-init-files 输出：{{nodeOutput.check-init-files}}
+        workflowData.skipInject：{{workflowData.skipInject}}
+
+        规则：
+        - 如果 needsInject 为 false 或 workflowData.skipInject 为 "true"，说明初始化文件已存在且无需重新注入
+          → 直接输出 {"skipped": true, "reason": "初始化文件已存在，跳过注入"}
+        - 否则，需要执行注入。执行以下命令：
+          python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/promo_info_injector.py --activity-id {{input.params.activityId}}
+          并将脚本的JSON输出作为结果返回
+
+        严格输出 JSON（不输出 Markdown，不输出解释）：
+        {"skipped": true/false, "reason": "说明", "activityId": "活动ID"}
+      timeoutSeconds: 120
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+
+  # ════════════════════════════════════════════════════════════════
+  # P3: 数据预处理
+  # ════════════════════════════════════════════════════════════════
+
+  - id: data-preprocessing
+    title: 数据预处理
+    phase: P3
+    dependsOn: [inject-promo-info]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/pipeline_step.py
+      args:
+        step: preprocess
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 120000
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [step, activity_id, success]
+        properties:
+          step:
+            type: string
+          activity_id:
+            type: string
+          success:
+            type: boolean
+          parse_failed:
+            type: boolean
+          fields_count:
+            type: number
+    progressMessage: "正在预处理活动数据..."
+
+  # ════════════════════════════════════════════════════════════════
+  # P4: 特征识别（三路并行）
+  # ════════════════════════════════════════════════════════════════
+
+  - id: biz-scenario-recognition
+    title: 业务场景识别
+    phase: P4
+    dependsOn: [data-preprocessing]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/pipeline_step.py
+      args:
+        step: scenario
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 60000
+    progressMessage: "正在识别业务场景..."
+
+  - id: prize-value-recognition
+    title: 权益价值识别
+    phase: P4
+    dependsOn: [data-preprocessing]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/pipeline_step.py
+      args:
+        step: prize
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 60000
+    progressMessage: "正在提取奖品价值..."
+
+  - id: gameplay-recognition
+    title: 活动玩法识别
+    phase: P4
+    dependsOn: [data-preprocessing]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/pipeline_step.py
+      args:
+        step: gameplay
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 60000
+    progressMessage: "正在识别活动玩法..."
+
+  # ════════════════════════════════════════════════════════════════
+  # P5: 风险校验（两路并行）
+  # ════════════════════════════════════════════════════════════════
+
+  - id: config-risk-check
+    title: 配置风险校验
+    phase: P5
+    dependsOn: [biz-scenario-recognition, prize-value-recognition]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/pipeline_step.py
+      args:
+        step: config_risk
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 120000
+    progressMessage: "正在校验配置风险..."
+
+  - id: biz-risk-check
+    title: 业务风险校验
+    phase: P5
+    dependsOn: [biz-scenario-recognition, prize-value-recognition, gameplay-recognition]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/pipeline_step.py
+      args:
+        step: biz_risk
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 120000
+    progressMessage: "正在校验业务风险..."
+
+  # ════════════════════════════════════════════════════════════════
+  # P6: 风险汇总
+  # ════════════════════════════════════════════════════════════════
+
+  - id: aggregate-risk
+    title: 风险汇总
+    phase: P6
+    dependsOn: [config-risk-check, biz-risk-check]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/pipeline_step.py
+      args:
+        step: aggregate
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 60000
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [success, has_risk, risk_summary, activity_id]
+        properties:
+          success:
+            type: boolean
+          has_risk:
+            type: boolean
+          risk_summary:
+            type: string
+          activity_id:
+            type: string
+          fields_count:
+            type: number
+          gameplay_names:
+            type: array
+            items:
+              type: string
+    progressMessage: "正在汇总风险判断..."
+
+  # ════════════════════════════════════════════════════════════════
+  # P7: 结果校验与修复
+  # ════════════════════════════════════════════════════════════════
+
+  - id: validate-result
+    title: 完整性校验
+    phase: P7
+    dependsOn: [aggregate-risk]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/validate_result.py --json
+      args:
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 30000
+
+  - id: auto-repair
+    title: 自动修复
+    phase: P7
+    dependsOn: [validate-result]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/check_and_repair.py --json
+      args:
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 60000
+
+  - id: sync-result
+    title: 同步结果
+    phase: P7
+    dependsOn: [auto-repair]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/json_updater.py --merge
+      args:
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 30000
+
+  # ════════════════════════════════════════════════════════════════
+  # P8: 结果保存与通知
+  # ════════════════════════════════════════════════════════════════
+
+  - id: save-to-rone
+    title: 保存到Rone
+    phase: P8
+    dependsOn: [sync-result]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/save_data.py
+      args:
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 60000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+
+  - id: risk-free-callback
+    title: 无风险回调
+    phase: P8
+    dependsOn: [save-to-rone]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/pass_risk_free.py
+      args:
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 30000
+
+  - id: send-notification
+    title: 发送Rone通知
+    phase: P8
+    dependsOn: [risk-free-callback]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/send_rone_notification.py
+      args:
+        record-id: "{{nodeOutput.save-to-rone.record_id}}"
+        activity-id: "{{nodeOutput.save-to-rone.activity_id}}"
+        risk-level: "{{nodeOutput.save-to-rone.risk_level}}"
+        activity-name: "{{nodeOutput.save-to-rone.activity_name}}"
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+
+  - id: archive
+    title: 归档
+    phase: P8
+    dependsOn: [send-notification]
+    executor:
+      type: cli-script
+      command: python3 /home/admin/openclawExt/clawmind/packs/risk-review-pipeline/scripts/check_all_completed.py
+      args:
+        activity-id: "{{input.params.activityId}}"
+      outputMode: json
+      timeoutMs: 30000

@@ -1,0 +1,252 @@
+id: buzz-crawling-pipeline
+version: 1
+title: 外部舆情策略更新全流程
+
+input:
+  mode: params
+  requiredParams: []
+  schema:
+    time_range: { type: string }
+    monitoring_object: { type: string }
+    focus_categories: { type: string }
+    run_date: { type: string }
+    run_hour: { type: string }
+
+identity:
+  key: "{{input.digest}}"
+  label: "外部舆情策略更新 {{input.digest}}"
+  duplicatePolicy: allow
+
+outputs:
+  report_path:
+    from: "{{nodeOutput.summary-report.report_path}}"
+    public: true
+    description: 策略更新汇总报告路径
+  final_event_count:
+    from: "{{nodeOutput.signal-acquire.event_count}}"
+    public: true
+    description: 最终输出风险事件数
+
+debug:
+  summaryKeys:
+    - "{{nodeOutput.signal-acquire.event_count}}"
+    - "{{nodeOutput.keywords-update.filtered_count}}"
+    - "{{nodeOutput.summary-report.report_path}}"
+
+defaults:
+  progress:
+    enabled: true
+    sink: chat
+
+nodes:
+  - id: signal-acquire
+    title: 信号获取
+    phase: P1
+    businessStatus: 信号获取
+    dependsOn: []
+    executor:
+      type: embedded-agent
+      outputMode: json
+      timeoutSeconds: 1800
+      prompt: |
+        使用已安装的 buzz-crawling-signal Skill 完成外部舆情信号获取。
+
+        用户请求：{{input.message}}
+        结构化参数：{{input.params}}
+        reportOutputPath=workflows/runs/{{run.flowId}}/signal-acquire/report.md。
+
+        最终响应为单个 JSON 对象：
+        { "risk_events": array, "variant_table_path": string, "event_count": number, "displayMarkdown": string }
+        请先构造结果对象，并按标准 JSON 序列化为最终响应。
+        最终响应必须可被 JSON.parse 直接解析，所有字符串中的英文双引号、反斜杠和换行必须按 JSON 规范转义，禁止拼接未转义的业务文本。
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [risk_events, variant_table_path, event_count, displayMarkdown]
+        properties:
+          risk_events: { type: array }
+          variant_table_path: { type: string }
+          event_count: { type: number }
+          displayMarkdown: { type: string }
+
+  - id: data-collect
+    title: 数据圈选
+    phase: P2
+    businessStatus: 数据圈选
+    dependsOn: [signal-acquire]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      timeoutSeconds: 2700
+      prompt: |
+        使用已安装的 buzz-data-collect Skill 完成外部舆情数据圈选。
+
+        结构化参数：{{input.params}}
+        risk_events={{nodeOutput.signal-acquire.risk_events}}。
+        variant_table_path={{nodeOutput.signal-acquire.variant_table_path}}。
+        keyword_strategy=variant_expansion。
+        recordsOutputPath=workflows/runs/{{run.flowId}}/data-collect/filtered_records.json。
+
+        最终响应为单个 JSON 对象：
+        { "stats": object, "records_path": string, "displayMarkdown": string }
+        请先构造结果对象，并按标准 JSON 序列化为最终响应。
+        最终响应必须可被 JSON.parse 直接解析，所有字符串中的英文双引号、反斜杠和换行必须按 JSON 规范转义，禁止拼接未转义的业务文本。
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed, output-contract-failed]
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [stats, records_path, displayMarkdown]
+        properties:
+          stats: { type: object }
+          records_path: { type: string }
+          displayMarkdown: { type: string }
+
+  - id: risk-review
+    title: 复核入库
+    phase: P2
+    businessStatus: 复核入库
+    dependsOn: [data-collect]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      timeoutSeconds: 1800
+      prompt: |
+        使用已安装的 buzz-risk-review Skill 完成 AI 复核、追溯入库和变体沉淀。
+
+        结构化参数：{{input.params}}
+        recordsPath={{nodeOutput.data-collect.records_path}}。
+        risk_events={{nodeOutput.signal-acquire.risk_events}}。
+        variant_table_path={{nodeOutput.signal-acquire.variant_table_path}}。
+        trace_table=antprm_dev.shouzi_buzz_crawling_risk_content_for_trace_hi。
+        enable_variant_mining=true，dedup_window_days=5。
+        passedRecordsOutputPath=workflows/runs/{{run.flowId}}/risk-review/passed_records.json。
+
+        最终响应为单个 JSON 对象：
+        { "review_summary": object, "passed_records_path": string, "variant_mining_summary": object, "displayMarkdown": string }
+        请先构造结果对象，并按标准 JSON 序列化为最终响应。
+        最终响应必须可被 JSON.parse 直接解析，所有字符串中的英文双引号、反斜杠和换行必须按 JSON 规范转义，禁止拼接未转义的业务文本。
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [review_summary, passed_records_path, variant_mining_summary, displayMarkdown]
+        properties:
+          review_summary: { type: object }
+          passed_records_path: { type: string }
+          variant_mining_summary: { type: object }
+          displayMarkdown: { type: string }
+
+  - id: instruction-update
+    title: 知识指令入库
+    phase: P3
+    businessStatus: 知识指令入库
+    dependsOn: [risk-review]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      timeoutSeconds: 1800
+      prompt: |
+        使用已安装的 buzz-instruction-update Skill 完成知识指令去重入库。
+
+        结构化参数：{{input.params}}
+        risk_events={{nodeOutput.signal-acquire.risk_events}}。
+        source_type=crawling。
+        knowledge_table=antprm_dev.shouzi_buzz_crawling_signal_knowledge_raw_hi。
+        reportOutputPath=workflows/runs/{{run.flowId}}/instruction-update/report.md。
+
+        最终响应为单个 JSON 对象：
+        { "write_status": "succeeded"|"skipped", "write_count": number, "displayMarkdown": string }
+        请先构造结果对象，并按标准 JSON 序列化为最终响应。
+        最终响应必须可被 JSON.parse 直接解析，所有字符串中的英文双引号、反斜杠和换行必须按 JSON 规范转义，禁止拼接未转义的业务文本。
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [write_status, write_count, displayMarkdown]
+        properties:
+          write_status: { type: string, enum: [succeeded, skipped] }
+          write_count: { type: number }
+          displayMarkdown: { type: string }
+
+  - id: keywords-update
+    title: 关键词组合构建与入库
+    phase: P3
+    businessStatus: 关键词入库
+    dependsOn: [instruction-update]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      timeoutSeconds: 1800
+      prompt: |
+        使用已安装的 buzz-keywords-update Skill 完成目标事件筛选、关键词分层与 CCT 草稿录入。
+
+        结构化参数：{{input.params}}
+        risk_events={{nodeOutput.signal-acquire.risk_events}}。
+        reviewedRecordsPath={{nodeOutput.risk-review.passed_records_path}}。
+        source_type=crawling。
+        targetCategories=["一号人物负面","敏感事件"]。
+        keywordsOutputPath=workflows/runs/{{run.flowId}}/keywords-update/keywords.json。
+        hitsOutputPath=workflows/runs/{{run.flowId}}/keywords-update/hits.json。
+
+        最终响应为单个 JSON 对象：
+        { "filtered_count": number, "hit_categories": array, "cct_status": "succeeded"|"skipped", "stratify": object, "keywords_path": string, "hits_path": string, "displayMarkdown": string }
+        请先构造结果对象，并按标准 JSON 序列化为最终响应。
+        最终响应必须可被 JSON.parse 直接解析，所有字符串中的英文双引号、反斜杠和换行必须按 JSON 规范转义，禁止拼接未转义的业务文本。
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [filtered_count, hit_categories, cct_status, stratify, keywords_path, hits_path, displayMarkdown]
+        properties:
+          filtered_count: { type: number }
+          hit_categories: { type: array }
+          cct_status: { type: string, enum: [succeeded, skipped] }
+          stratify: { type: object }
+          keywords_path: { type: string }
+          hits_path: { type: string }
+          displayMarkdown: { type: string }
+
+  - id: summary-report
+    title: 汇总报告
+    phase: P4
+    businessStatus: 汇总报告
+    dependsOn: [instruction-update, keywords-update]
+    triggerRule: all_done
+    executor:
+      type: embedded-agent
+      outputMode: json
+      timeoutSeconds: 1800
+      prompt: |
+        使用已安装的 buzz-summary-report Skill 汇总本次外部舆情策略更新结果。
+
+        用户请求：{{input.message}}
+        结构化参数：{{input.params}}
+        signalSummary={{nodeOutput.signal-acquire}}。
+        collectSummary={{nodeOutput.data-collect}}。
+        reviewSummary={{nodeOutput.risk-review}}。
+        instructionSummary={{nodeOutput.instruction-update}}。
+        keywordsSummary={{nodeOutput.keywords-update}}。
+        reportOutputPath=workflows/runs/{{run.flowId}}/summary-report/summary.md。
+
+        最终响应为单个 JSON 对象：
+        { "report_path": string, "report_status": "complete"|"partial", "displayMarkdown": string }
+        请先构造结果对象，并按标准 JSON 序列化为最终响应。
+        最终响应必须可被 JSON.parse 直接解析，所有字符串中的英文双引号、反斜杠和换行必须按 JSON 规范转义，禁止拼接未转义的业务文本。
+    retry:
+      maxAttempts: 2
+      backoffMs: 0
+      on: [executor-failed, output-contract-failed]
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [report_path, report_status, displayMarkdown]
+        properties:
+          report_path: { type: string }
+          report_status: { type: string, enum: [complete, partial] }
+          displayMarkdown: { type: string }

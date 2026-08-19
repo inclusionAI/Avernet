@@ -1,0 +1,836 @@
+id: privacy-odps-approval-v1
+version: "2"
+title: ODPS 隐私审批流程
+configPath: /home/admin/openclawExt/clawmind/packs/privacy-odps-approval-v1/config/config.json
+nodes:
+  - id: fetch_context
+    title: 获取申请信息
+    executor:
+      type: action
+      action: odps.fetch_context
+      args:
+        config: "{{input.params.configPath}}"
+        application-id: "{{input.params.applicationId}}"
+        task-content: "{{input.params.taskContent}}"
+    phase: P1
+    dependsOn: []
+    outputContract:
+      schema:
+        type: object
+        required:
+          - applicationId
+          - skipped
+        properties:
+          applicationId:
+            type: string
+          skipped:
+            type: boolean
+          context:
+            type: object
+          reason:
+            type: string
+    progressMessage: 申请信息获取完成
+  - id: auto_check
+    title: 自动通过检查
+    executor:
+      type: action
+      action: odps.auto_check
+      args:
+        input: "{{nodeOutput.fetch_context}}"
+        config: "{{input.params.configPath}}"
+    phase: P2
+    dependsOn:
+      - fetch_context
+    outputContract:
+      schema:
+        type: object
+        required:
+          - auto_pass
+        properties:
+          auto_pass:
+            type: boolean
+          matched_rule:
+            type: string
+          matched_rule_name:
+            type: string
+          reason:
+            type: string
+          next_action:
+            type: string
+          evaluated_rules:
+            type: array
+    progressMessage: 自动通过检查完成
+  - id: recommend_authorize
+    title: 资产确权推荐
+    executor:
+      type: embedded-agent
+      skillName: odps-recommend-authorize
+      outputMode: json
+      timeoutSeconds: 300
+      prompt: |
+        执行 ODPS 审批资产确权推荐（Step 2）。
+
+        如果 {{nodeOutput.auto_check.auto_pass}} 为 true，直接输出以下 JSON 并结束，不执行任何分析：
+        {"skipped": true, "auto_pass": true, "authorize_recommendation": null}
+
+        否则，基于以下上下文执行确权资产推荐：
+        - 申请上下文：{{nodeOutput.fetch_context.context}}
+        - 配置路径：{{input.params.configPath}}
+        - MCP 数据安全服务器：mcp.ant.faas.dataphinDsmp.dataSecurity（调用 queryAuthorizeJudgment/queryAuthAsset/queryAuthorizeScene 等工具时必须使用此服务器，禁止猜测）
+
+        请使用 odps-recommend-authorize skill 执行分析，输出格式必须为 JSON。
+    phase: P3
+    dependsOn:
+      - auto_check
+    outputContract:
+      schema:
+        type: object
+        properties:
+          skipped:
+            type: boolean
+          auto_pass:
+            type: boolean
+          authorize_recommendation:
+            type: object
+            nullable: true
+            properties:
+              current_judgment:
+                type: object
+                nullable: true
+              ai_analysis:
+                type: object
+                nullable: true
+              recommended_choice:
+                type: string
+                nullable: true
+              choice_meaning:
+                type: string
+                nullable: true
+              candidate_assets:
+                type: array
+                nullable: true
+              candidate_scenes:
+                type: array
+                nullable: true
+              remark_suggestion:
+                type: string
+                nullable: true
+    progressMessage: 资产确权推荐完成
+  - id: recommend_filter
+    title: 行级过滤推荐
+    executor:
+      type: embedded-agent
+      skillName: odps-recommend-filter
+      outputMode: json
+      timeoutSeconds: 300
+      prompt: |
+        执行 ODPS 审批行级过滤推荐（Step 3）。
+
+        如果 {{nodeOutput.auto_check.auto_pass}} 为 true，直接输出以下 JSON 并结束：
+        {"skipped": true, "auto_pass": true, "filter_recommendation": null}
+
+        否则，基于以下上下文执行行级过滤推荐：
+        - 申请上下文：{{nodeOutput.fetch_context.context}}
+        - GDG审批人确认后的确权资产：{{workflowData.gdg_confirmed_asset | default: '未确认'}}
+        - 原始确权推荐（仅供参考）：{{nodeOutput.recommend_authorize.authorize_recommendation}}
+
+        请使用 odps-recommend-filter skill 执行分析，输出格式必须为 JSON。
+        输出中必须在 reason 或备注里明确说明：本次过滤推荐是基于哪项已确认资产做出的判断。
+    phase: P4
+    dependsOn:
+      - asset_confirm
+    outputContract:
+      schema:
+        type: object
+        properties:
+          skipped:
+            type: boolean
+          filter_recommendation:
+            type: object
+            nullable: true
+            properties:
+              is_multi_business_table:
+                type: boolean
+              needs_filter:
+                type: boolean
+              recommended_where:
+                type: string
+                nullable: true
+              filter_type:
+                type: string
+                nullable: true
+              reason:
+                type: string
+                nullable: true
+              confidence:
+                type: string
+                nullable: true
+    progressMessage: 行级过滤推荐完成
+  - id: check_completeness
+    title: 申请完备性校验
+    executor:
+      type: embedded-agent
+      skillName: odps-check-completeness
+      outputMode: json
+      timeoutSeconds: 300
+      prompt: |
+        执行 ODPS 审批 ABCD 完备性检查（Step 4）。
+
+        如果 {{nodeOutput.auto_check.auto_pass}} 为 true，直接输出以下 JSON 并结束：
+        {"is_complete": true, "skipped": true, "auto_pass": true, "missing_items": [], "triggered_by": "initial_check", "risk_adjustment": 0, "forced": false}
+
+        否则，基于以下上下文执行完备性检查：
+        - 申请上下文：{{nodeOutput.fetch_context.context}}
+        - 确权推荐：{{nodeOutput.recommend_authorize.authorize_recommendation}}
+        - 过滤推荐：{{nodeOutput.recommend_filter.filter_recommendation}}
+        - 触发来源：{{workflowData.triggered_by | default: "initial_check"}}
+        - 风险调整值：{{workflowData.risk_adjustment | default: 0}}
+        - 上轮核对批注：{{workflowData.review_note | default: ""}}
+        - 上轮核对人：{{workflowData.review_reviewer | default: ""}}
+
+        如果 {{workflowData.triggered_by}} 为 scenario_supplement，仅评估 D 类规则，跳过 A/B/C 静态检查。
+
+        ⚠️ 申请人拒绝核对规则：
+        如果 {{nodeOutput.applicant_review.approved}} 为 false，不再要求补充，直接输出：
+        {"is_complete": true, "triggered_by": "review_rejected", "risk_adjustment": <前一值+1>, "missing_items": [<剩余缺失项>], "forced": true}
+
+        输出 JSON 时，请额外包含一个字段 scenario_item：
+        - 如果 missing_items 中有 check_id == "biz_scenario" 的项，将该项完整对象放在 scenario_item 中。
+        - 如果没有，scenario_item 为 null。
+
+        请使用 odps-check-completeness skill 执行检查，输出格式必须为 JSON。
+      outputContract:
+        schema:
+          type: object
+          required:
+            - is_complete
+          properties:
+            is_complete:
+              type: boolean
+            missing_items:
+              type: array
+              nullable: true
+            scenario_item:
+              type: object
+              nullable: true
+            check_round:
+              type: number
+              nullable: true
+            triggered_by:
+              type: string
+              nullable: true
+            skipped:
+              type: boolean
+              nullable: true
+            risk_adjustment:
+              type: number
+              nullable: true
+            forced:
+              type: boolean
+              nullable: true
+    phase: P5
+    dependsOn:
+      - recommend_filter
+  - id: asset_confirm
+    title: 资产确权推荐GDG审批人确认
+    executor:
+      type: approval
+      skillName: odps-asset-confirm
+      approvalType: ASSET_CONFIRM
+      skipWhen:
+        nodeOutput.auto_check.auto_pass: true
+      message: |
+        ODPS 申请 {{input.params.applicationId}} 资产确权推荐待 GDG 审批人确认。
+        请从推荐候选资产中选择并确认最合适的确权方案。
+      cardTitle: 资产确权推荐确认
+      workflowUrl: "{{nodeOutput.fetch_context.context.approveUrl}}"
+      approvers:
+        - empId: "{{workflowData.config.test_dgd_staff_no | default: workflowData.config.dgd_staff_no}}"
+          name: GDG审批人
+      cardFields:
+        - label: 申请人
+          value: "{{nodeOutput.fetch_context.context.applicantStaffNo | default: '—'}}"
+        - label: AI推荐Top1
+          value: "{{nodeOutput.recommend_authorize.authorize_recommendation.candidate_assets.0.authAssetName | default: '无推荐'}}"
+        - label: 当前确权资产
+          value: "{{nodeOutput.fetch_context.context.authorizeAssetName | default: '未配置'}}"
+      cardSections:
+        - id: "assetSelection"
+          title: "资产确权推荐确认"
+          icon: "🏠"
+          description: "请核对 AI 推荐方案，默认接受 Top1 推荐，如需更换请点击「手动指定其他资产」。"
+          style: "info"
+          fields:
+            - id: "recommendDetail"
+              label: "AI推荐详情"
+              expected: |
+                推荐资产列表：
+                {{nodeOutput.recommend_authorize.authorize_recommendation.candidate_assets}}
+
+                推荐理由：{{nodeOutput.recommend_authorize.authorize_recommendation.ai_analysis.reason | default: nodeOutput.recommend_authorize.authorize_recommendation.remark_suggestion}}
+              expectedLabel: "分析"
+              # 纯展示：候选资产list自动渲染，无需审批人操作
+            - id: "authAsset"
+              label: "确认确权资产"
+              expected: "{{nodeOutput.recommend_authorize.authorize_recommendation.candidate_assets.0.authAssetName | default: '无推荐'}}"
+              expectedLabel: "AI推荐(Top1)"
+              actual: "{{nodeOutput.fetch_context.context.authorizeAssetName | default: ''}}"
+              actualLabel: "当前配置"
+              actions:
+                - { key: "accept", label: "采用Top1推荐", type: "primary" }
+                - { key: "customize", label: "手动指定其他资产", autoFill: "{{nodeOutput.fetch_context.context.authorizeAssetName | default: ''}}" }
+              customizable: true
+              placeholder: "如需指定其他资产请填写"
+      delivery:
+        private:
+          primary: card-web
+        dingtalkGroup:
+          primary: card-web
+        collaboration:
+          primary: bcs-route
+      approvalPolicy: any
+      saveAs:
+        workflowData.asset_confirmed: "{{result.approved}}"
+        workflowData.gdg_confirmed_asset: "{{result.detail.assetSelection.authAsset.value}}"
+        workflowData.gdg_asset_action: "{{result.detail.assetSelection.authAsset.action}}"
+        workflowData.gdg_reviewer: "{{result.reviewer}}"
+        workflowData.gdg_confirm_note: "{{result.comment}}"
+    phase: P3
+    dependsOn:
+      - recommend_authorize
+    outputContract:
+      schema:
+        type: object
+        properties:
+          approved:
+            type: boolean
+            nullable: true
+          reviewer:
+            type: string
+            nullable: true
+          comment:
+            type: string
+            nullable: true
+  - id: applicant_review
+    title: 申请人对信息及推荐方案核对确认
+    executor:
+      type: approval
+      skillName: odps-supplement-approval
+      approvalType: SUPPLEMENT_COMPLETE
+      skipWhen:
+        nodeOutput.check_completeness.is_complete: true
+      message: |
+        申请 {{input.params.applicationId}} 信息不完整，
+        请核对以下 AI 推荐内容，如有异议请逐项说明；如无法补充，请点击"拒绝"。
+      cardTitle: 工单申请信息补充（含推荐核对）
+      workflowUrl: "{{nodeOutput.fetch_context.context.approveUrl}}"
+      approvers:
+        # test 环境走 test_applicant_staff_no，否则走实际申请人
+        - empId: "{{workflowData.config.test_applicant_staff_no | default: nodeOutput.fetch_context.context.applicantStaffNo}}"
+          name: 申请人
+      cardFields:
+        - label: 申请ID
+          value: "{{input.params.applicationId}}"
+      cardSections:
+        - id: "assetDisplay"
+          title: "资产确权确认结果"
+          icon: "🏠"
+          description: "GDG 审批人已确认的资产确权方案如下，请知悉"
+          style: "success"
+          fields:
+            - id: "confirmedAsset"
+              label: "已确认确权资产"
+              expected: |
+                {{workflowData.gdg_confirmed_asset | default: '—'}}
+              expectedLabel: "详情"
+        - id: "scenarioReview"
+          title: "业务场景信息补充"
+          icon: "📝"
+          description: "请根据AI建议自行补充业务场景说明，确认后提交。"
+          style: "info"
+          fields:
+            - id: "scenarioSupplement"
+              label: "业务场景补充"
+              expected: "{{nodeOutput.check_completeness.scenario_item.suggestion | default: '请详细说明具体业务场景、数据如何被使用、预期产出'}}"
+              expectedLabel: "AI建议参考"
+              actions:
+                - { key: "customize", label: "自行填写", autoFill: "" }
+              customizable: true
+              placeholder: "请根据实际情况详细描述业务场景"
+        - id: "filterReview"
+          title: "行级过滤推荐核对"
+          icon: "🔍"
+          description: |
+            AI判断需过滤：{{nodeOutput.recommend_filter.filter_recommendation.needs_filter | default: 'false'}}，判定理由：{{nodeOutput.recommend_filter.filter_recommendation.reason | default: '无'}}。
+            请核对过滤条件建议。
+          style: "warning"
+          fields:
+            - id: "filterWhere"
+              label: "过滤条件"
+              expected: "{{nodeOutput.recommend_filter.filter_recommendation.recommended_where | default: '无'}}"
+              expectedLabel: "AI推荐 WHERE"
+              actual: "{{nodeOutput.fetch_context.context.whereCondition | default: '无'}}"
+              actualLabel: "当前 WHERE"
+              actions:
+                - { key: "accept", label: "接受推荐", type: "primary" }
+                - { key: "keep", label: "保持现有" }
+                - { key: "customize", label: "自定义条件", autoFill: "{{nodeOutput.fetch_context.context.whereCondition | default: ''}}" }
+              customizable: true
+              placeholder: "如需调整过滤条件请直接填写完整 WHERE 子句"
+      delivery:
+        private:
+          primary: card-web
+        dingtalkGroup:
+          primary: card-web
+        collaboration:
+          primary: bcs-route
+      approvalPolicy: any
+      onRevise:
+        target: check_completeness
+        reset: target-and-descendants
+      saveAs:
+        workflowData.risk_adjustment: "{{nodeOutput.check_completeness.risk_adjustment}}"
+        workflowData.review_approved: "{{result.approved}}"
+        workflowData.review_rejected: "{{not result.approved}}"
+        workflowData.review_note: "{{result.note}}"
+        workflowData.review_reviewer: "{{result.reviewer}}"
+        workflowData.filter_review: "{{result.detail.filterReview}}"
+        workflowData.scenario_review: "{{result.detail.scenarioReview}}"
+        workflowData.chosen_filter_action: "{{result.detail.filterReview.filterWhere.action}}"
+        workflowData.chosen_filter_value: "{{result.detail.filterReview.filterWhere.value}}"
+        workflowData.scenario_supplement_action: "{{result.detail.scenarioReview.scenarioSupplement.action}}"
+        workflowData.scenario_supplement_value: "{{result.detail.scenarioReview.scenarioSupplement.value}}"
+    phase: P5
+    dependsOn:
+      - check_completeness
+    outputContract:
+      schema:
+        type: object
+        properties:
+          approved:
+            type: boolean
+            nullable: true
+          reviewer:
+            type: string
+            nullable: true
+  - id: risk_analysis
+    title: 风险分析
+    executor:
+      type: embedded-agent
+      skillName: odps-risk-analysis
+      outputMode: json
+      timeoutSeconds: 600
+      prompt: |
+        执行 ODPS 审批风险分析（Step 5）。
+
+        如果 {{nodeOutput.auto_check.auto_pass}} 为 true，直接输出以下 JSON 并结束：
+        {"skipped": true, "auto_pass": true, "veto_triggered": false, "scenario_verdict": "continue", "base_factors": [], "scenario_factors": [], "context_summary": {"status": "auto_passed", "reason": "自动通过规则：{{nodeOutput.auto_check.matched_rule_name | default: nodeOutput.auto_check.matched_rule}}"}}
+
+        否则，基于以下上下文执行风险分析：
+        - 申请上下文：{{nodeOutput.fetch_context.context}}
+        - GDG确认资产（asset_confirm结果，非推荐值）：{{workflowData.gdg_confirmed_asset | default: '未确认'}}
+        - 申请人确认过滤条件：{{workflowData.chosen_filter_value | default: nodeOutput.recommend_filter.filter_recommendation.recommended_where | default: nodeOutput.fetch_context.context.whereCondition | default: '无'}}
+        - 申请人场景补充：{{workflowData.scenario_supplement_value | default: '未补充'}}
+        - 原始确权推荐（仅供参考，不要与上方确认资产混淆）：{{nodeOutput.recommend_authorize.authorize_recommendation}}
+        - 过滤推荐（原始）：{{nodeOutput.recommend_filter.filter_recommendation}}
+        - 完备性结果：{{nodeOutput.check_completeness}}
+        - 核对确认结果：{{nodeOutput.applicant_review}}
+        - 配置路径：{{input.params.configPath}}
+        - MCP 数据安全服务器：mcp.ant.faas.dataphinDsmp.dataSecurity（调用 queryApproveList 等工具时必须使用此服务器，禁止猜测）
+
+        请使用 odps-risk-analysis skill 执行分析，输出格式必须为 JSON。
+        必须包含 veto_triggered、scenario_verdict、base_factors、scenario_factors 字段。
+        scenario_verdict 取值：reject / pass / human / supplement / continue
+
+        输出要求：
+        - context_summary 中必须包含以下字段，以便下游审批单能清晰感知各环节确认结果：
+          - confirmed_asset: GDG确认的资产名称（取自输入中的GDG确认资产）
+          - confirmed_filter: 申请人确认的过滤条件（若无则填"无"）
+          - confirmed_scenario: 申请人补充的业务场景（若无则填"未补充"）
+      outputContract:
+        schema:
+          type: object
+          properties:
+            skipped:
+              type: boolean
+            auto_pass:
+              type: boolean
+            veto_triggered:
+              type: boolean
+            veto_factor:
+              type: object
+              nullable: true
+            scenario_verdict:
+              type: string
+            base_factors:
+              type: array
+              nullable: true
+            scenario_factors:
+              type: array
+              nullable: true
+            context_summary:
+              type: object
+              nullable: true
+            engine_version:
+              type: string
+              nullable: true
+    phase: P6
+    dependsOn:
+      - applicant_review
+    retry:
+      maxAttempts: 2
+      backoffMs: 1000
+      "true":
+        - executor-failed
+    outputContract:
+      schema:
+        type: object
+        properties:
+          skipped:
+            type: boolean
+          auto_pass:
+            type: boolean
+          veto_triggered:
+            type: boolean
+          veto_factor:
+            type: object
+            nullable: true
+          scenario_verdict:
+            type: string
+          base_factors:
+            type: array
+            nullable: true
+          scenario_factors:
+            type: array
+            nullable: true
+          context_summary:
+            type: object
+            nullable: true
+          engine_version:
+            type: string
+            nullable: true
+    onResult:
+      if:
+        scenario_verdict: supplement
+      then:
+        rerun:
+          target: check_completeness
+          reset: target-and-descendants
+        saveAs:
+          workflowData.triggered_by: scenario_supplement
+          workflowData.review_detail: "{{nodeOutput.risk_analysis.scenario_factors}}"
+        feedbackPath: workflowData.review_feedback
+        feedbackTemplate: 场景引擎要求补充信息，重新检查完备性
+    progressMessage: 风险分析完成
+  - id: approval_decision
+    title: 审批决策
+    executor:
+      type: embedded-agent
+      skillName: odps-approval-decision
+      outputMode: json
+      timeoutSeconds: 600
+      prompt: |
+        执行 ODPS 审批决策融合（Step 6）。
+
+        如果 {{nodeOutput.auto_check.auto_pass}} 为 true，直接输出以下 JSON 并结束：
+        {"decision": "agree", "auto_passed": true, "matched_rule": "{{nodeOutput.auto_check.matched_rule}}", "conditions": [], "final_risk_level": "L1", "review_report": "自动通过规则已命中（{{nodeOutput.auto_check.matched_rule_name}}），预填同意决策", "pending_writes": {}}
+
+        否则，基于以下所有前序步骤输出执行决策融合：
+        - 申请上下文：{{nodeOutput.fetch_context.context}}
+        - 自动通过检查：{{nodeOutput.auto_check}}
+        - GDG确认资产（asset_confirm审批结果，非推荐值）：{{workflowData.gdg_confirmed_asset | default: '未确认'}}
+        - 申请人确认过滤条件：{{workflowData.chosen_filter_value | default: nodeOutput.recommend_filter.filter_recommendation.recommended_where | default: nodeOutput.fetch_context.context.whereCondition | default: '无'}}
+        - 申请人场景补充：{{workflowData.scenario_supplement_value | default: '未补充'}}
+        - 原始确权推荐（仅供参考，不要与上方确认资产混淆）：{{nodeOutput.recommend_authorize.authorize_recommendation}}
+        - 过滤推荐（原始）：{{nodeOutput.recommend_filter.filter_recommendation}}
+        - 完备性结果：{{nodeOutput.check_completeness}}
+        - 核对确认：{{nodeOutput.applicant_review}}
+        - 风险分析：{{nodeOutput.risk_analysis}}
+        - 配置路径：{{input.params.configPath}}
+
+        融合规则优先级：
+        1. auto_check.auto_pass=true → agree
+        2. risk_engine.veto_triggered=true（R000）→ reject
+        3. scenario verdict=reject → reject
+        4. scenario verdict=human → assign
+        5. scenario verdict=supplement → 不应到达此节点（已前置处理）
+        6. 其他 → LLM 综合评 L1-L4
+
+        decision 合法值：agree / approve_with_conditions / reject / assign / add_sign / close
+        L4 + agree = BLOCK
+
+        请使用 odps-approval-decision skill 执行决策融合，输出格式必须为 JSON。
+        必须包含 decision、final_risk_level、conditions、review_report 字段。
+
+        review_report 书写规范（必须包含）：
+        - 【确权】明确写出GDG确认的资产名称（不是仅写编码）
+        - 【过滤】明确写出申请人确认的过滤条件结论（接受/保持/自定义及具体内容，或"无需过滤"）
+        - 【场景】明确写出申请人补充的业务场景内容（若未补充则写"未补充"）
+        - 【数据】列明核心数据特征
+        - 【风险】列明风险因子总结
+        - 【建议】给出最终建议
+      outputContract:
+        schema:
+          type: object
+          required:
+            - decision
+          properties:
+            decision:
+              type: string
+            final_risk_level:
+              type: string
+            conditions:
+              type: array
+            review_report:
+              type: string
+            auto_passed:
+              type: boolean
+            matched_rule:
+              type: string
+            pending_writes:
+              type: object
+    phase: P7
+    dependsOn:
+      - risk_analysis
+    retry:
+      maxAttempts: 2
+      backoffMs: 1000
+      "true":
+        - executor-failed
+        - output-contract-failed
+    outputContract:
+      schema:
+        type: object
+        required:
+          - decision
+        properties:
+          decision:
+            type: string
+          final_risk_level:
+            type: string
+          conditions:
+            type: array
+          review_report:
+            type: string
+          auto_passed:
+            type: boolean
+          matched_rule:
+            type: string
+          pending_writes:
+            type: object
+    progressMessage: 审批决策完成
+  - id: dgd_final_decision
+    title: dgd最终决策
+    executor:
+      type: approval
+      skillName: odps-expert-review
+      approvalType: HUMAN_CONFIRM
+      message: |
+        ODPS 申请 {{input.params.applicationId}} 已完成全流程 AI 分析与决策融合，请确认最终审批决策。
+        详细分析报告、确权结果、过滤条件及待执行操作请展开下方卡片查看。
+      cardTitle: 审批决策确认
+      workflowUrl: "{{nodeOutput.fetch_context.context.approveUrl}}"
+      approvers:
+        - empId: "{{workflowData.config.test_dgd_staff_no | default: workflowData.config.dgd_staff_no}}"
+          name: 审批专家
+      cardFields:
+        - label: 申请ID
+          value: "{{input.params.applicationId}}"
+        - label: 申请人
+          value: "{{nodeOutput.fetch_context.context.applicantStaffNo | default: '—'}}"
+        - label: 审批决策
+          value: "{{nodeOutput.approval_decision.decision}}"
+        - label: 风险等级
+          value: "{{nodeOutput.approval_decision.final_risk_level | default: '—'}}"
+
+      cardSections:
+        - id: "decisionOverview"
+          title: "审批决策概览"
+          style: "warning"
+          fields:
+            - id: "finalDecision"
+              label: "决策结论"
+              expected: |
+                决策结果：{{nodeOutput.approval_decision.decision}}
+                风险等级：{{nodeOutput.approval_decision.final_risk_level | default: '—'}}
+                匹配规则：{{nodeOutput.approval_decision.matched_rule | default: '—'}}
+                自动通过：{{nodeOutput.approval_decision.auto_passed | default: 'false'}}
+
+        - id: "assetResult"
+          title: "资产确权结果"
+          style: "success"
+          description: "GDG 审批人已确认的资产确权方案"
+          fields:
+            - id: "confirmedAsset"
+              label: "确权资产"
+              expected: |
+                GDG确认结果：{{workflowData.gdg_confirmed_asset | default: '无'}}
+
+        - id: "filterResult"
+          title: "行级过滤条件"
+          style: "info"
+          fields:
+            - id: "filterWhere"
+              label: "过滤条件"
+              expected: |
+                是否需过滤：{{nodeOutput.recommend_filter.filter_recommendation.needs_filter | default: 'false'}}
+                最终 WHERE：{{workflowData.chosen_filter_value | default: nodeOutput.recommend_filter.filter_recommendation.recommended_where | default: nodeOutput.fetch_context.context.whereCondition | default: '无'}}
+
+        - id: "scenarioSupplement"
+          title: "业务场景补充"
+          style: "info"
+          fields:
+            - id: "supplementContent"
+              label: "申请人补充"
+              expected: "{{workflowData.scenario_supplement_value | default: '未补充'}}"
+
+        - id: "riskAnalysis"
+          title: "风险分析报告"
+          style: "warning"
+          fields:
+            - id: "riskReport"
+              label: "审批报告"
+              expected: |
+                否决触发：{{nodeOutput.risk_analysis.veto_triggered | default: 'false'}}
+
+                {{nodeOutput.approval_decision.review_report | default: '无'}}
+            - id: "riskFactors"
+              label: "风险因子"
+              expected: |
+                基础因子：{{nodeOutput.risk_analysis.base_factors | default: []}}
+                场景因子：{{nodeOutput.risk_analysis.scenario_factors | default: []}}
+
+        - id: "completenessStatus"
+          title: "完备性与核对状态"
+          style: "default"
+          fields:
+            - id: "completeness"
+              label: "状态汇总"
+              expected: |
+                完备性：{{nodeOutput.check_completeness.is_complete | default: '未检查'}}
+                缺失项：{{nodeOutput.check_completeness.missing_items | default: []}}
+                申请人核对：{{workflowData.review_approved | default: '未核对'}}
+
+        - id: "pendingOperations"
+          title: "待执行操作清单"
+          style: "warning"
+          description: "确认同意后，系统将执行以下操作写入 ODPS"
+          fields:
+            - id: "operations"
+              label: "写入内容"
+              expected: |
+                审批决策：{{nodeOutput.approval_decision.decision}}
+                授权判定：{{nodeOutput.approval_decision.pending_writes.authorize_judgment | default: '无'}}
+                授权隔离：{{nodeOutput.approval_decision.pending_writes.authorize_separate | default: '无'}}
+                脱敏列：{{nodeOutput.approval_decision.pending_writes.delete_columns | default: '无'}}
+                过滤条件：{{workflowData.chosen_filter_value | default: nodeOutput.approval_decision.pending_writes.where_condition | default: nodeOutput.approval_decision.pending_writes.whereCondition | default: nodeOutput.recommend_filter.filter_recommendation.recommended_where | default: nodeOutput.fetch_context.context.whereCondition | default: '无'}}
+
+      delivery:
+        private:
+          primary: card-web
+        dingtalkGroup:
+          primary: card-web
+        collaboration:
+          primary: bcs-route
+      approvalPolicy: any
+      saveAs:
+        workflowData.dgd_final_decision: "{{result.approved}}"
+        workflowData.human_reviewer: "{{result.reviewer}}"
+        workflowData.confirmNote: "{{result.comment}}"
+    phase: P8
+    dependsOn:
+      - approval_decision
+    outputContract:
+      schema:
+        type: object
+        properties:
+          approved:
+            type: boolean
+            nullable: true
+          reviewer:
+            type: string
+            nullable: true
+          comment:
+            type: string
+            nullable: true
+  - id: execute_approval
+    title: 执行审批结论
+    executor:
+      type: action
+      action: odps.execute_approval
+      args:
+        config: "{{input.params.configPath}}"
+        application-id: "{{input.params.applicationId}}"
+        decision: "{{nodeOutput.approval_decision.decision}}"
+        operator-id: "{{user.id}}"
+        authorize-judgment: "{{nodeOutput.approval_decision.pending_writes.authorize_judgment}}"
+        authorize-separate: "{{nodeOutput.approval_decision.pending_writes.authorize_separate}}"
+        where-condition: "{{workflowData.chosen_filter_value | default: nodeOutput.recommend_filter.filter_recommendation.recommended_where | default: nodeOutput.fetch_context.context.whereCondition}}"
+        delete-columns: "{{nodeOutput.approval_decision.pending_writes.delete_columns}}"
+        reason: "{{workflowData.confirmNote}}"
+    phase: P9
+    dependsOn:
+      - dgd_final_decision
+    retry:
+      maxAttempts: 1
+    outputContract:
+      schema:
+        type: object
+        required:
+          - application_id
+          - decision
+        properties:
+          application_id:
+            type: string
+          decision:
+            type: string
+          operator_id:
+            type: string
+          aborted:
+            type: boolean
+          abort_reason:
+            type: string
+          execution_log:
+            type: array
+    progressMessage: 审批执行完成
+input:
+  mode: mixed
+  requiredParams:
+    - applicationId
+  optionalParams:
+    - configPath
+  defaults:
+    configPath: /home/admin/openclawExt/clawmind/packs/privacy-odps-approval-v1/config/config.json
+  sources:
+    params: true
+    message: true
+identity:
+  key: "{{input.params.applicationId}}"
+  label: ODPS审批 {{input.params.applicationId}}
+  duplicatePolicy: allow
+outputs:
+  finalResult:
+    from: "{{nodeOutput.execute_approval}}"
+    public: true
+    description: 审批执行结果
+debug:
+  summaryKeys:
+    - applicationId
+    - auto_pass
+    - matched_rule
+    - is_complete
+    - triggered_by
+    - veto_triggered
+    - scenario_verdict
+    - decision
+    - aborted
+defaults:
+  user:
+    source: fixed
+    id: service-user
+    name: 服务账号
+messages:
+  onCreated: ODPS审批 {{input.params.applicationId}} 流程已创建
+  onFinished: ODPS审批 {{input.params.applicationId}} 流程完成
+facade:
+  command: poa

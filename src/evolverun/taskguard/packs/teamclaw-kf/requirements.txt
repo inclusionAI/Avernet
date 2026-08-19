@@ -1,0 +1,12 @@
+# TeamClaw Support Scripts Dependencies
+# Langfuse SDK for trace query (includes httpx as dependency)
+langfuse>=4.0.0
+
+# HTTP client (required by langfuse)
+httpx>=0.25.0
+
+# HTTP requests (for general API calls)
+requests>=2.25.0
+
+# Environment variable loading from .env files
+python-dotenv>=1.0.0

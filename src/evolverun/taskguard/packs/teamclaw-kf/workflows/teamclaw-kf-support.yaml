@@ -1,0 +1,1020 @@
+id: teamclaw-kf-support
+version: 1
+title: TeamClaw 用户问题处理全流程
+
+input:
+  mode: mixed
+  requiredParams: []
+  sources:
+    params: true
+    message: true
+
+identity:
+  key: "{{input.message}}"
+  label: "客服: {{input.message}}"
+  duplicatePolicy: allow
+
+outputs:
+  problemType:
+    from: "{{nodeOutput.classify-problem.problemType}}"
+    public: true
+    description: "问题分类"
+  kbHit:
+    from: "{{nodeOutput.evaluate-kb-results.kbHit}}"
+    public: true
+    description: "知识库是否命中"
+  resolved:
+    from: "{{nodeOutput.analyze-logs.resolved}}"
+    public: true
+    description: "问题是否解决"
+
+defaults:
+  packRoot: /home/admin/openclawExt/clawmind/packs/teamclaw-kf
+  progress:
+    enabled: true
+    sink: chat
+
+messages:
+  onCreated: "正在处理您的问题，请稍候…"
+  onFinished: "问题处理完成。"
+
+nodes:
+  # ════════════════════════════════════════════════════════════════
+  # P0: 身份由引擎自动解析（__user__ 模板变量）
+  # 引擎内置 channel-detector + user-identity 模块，自动识别：
+  #   - 钉钉单聊 → channel=dingtalk, chatType=one_on_one
+  #   - 钉钉群聊 → channel=dingtalk, chatType=group
+  #   - 他人Bot Web → channel=web, chatType=others
+  #   - 自有Bot Web → channel=web, chatType=owner
+  # 使用 {{__user__.senderId}}, {{__user__.senderName}}, {{__user__.channel}},
+  # {{__user__.chatType}}, {{__user__.groupName}} 等字段
+  # ════════════════════════════════════════════════════════════════
+
+  # ════════════════════════════════════════════════════════════════
+  # P1: 关键词提取 + 知识库搜索（4路并行）
+  # ════════════════════════════════════════════════════════════════
+
+  - id: extract-keywords
+    title: 提取搜索关键词
+    phase: P1
+    dependsOn: []
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        从用户问题中提取1-2个核心搜索关键词。
+
+        规则：
+        - 去掉"如何""怎么""是否"等虚词，保留核心名词
+        - TeamClaw 专有名词对照：node=TeamClaw Node客户端，bot=TeamClaw Bot实例，skill=TeamClaw Skill能力，MCP=MCP工具协议
+        - 构造两组关键词：primaryKw（最核心1-2词）和 secondaryKw（同义词/通俗表述1-2词）
+        - 禁止一次性使用5个以上词组成长查询
+
+        用户问题：{{input.message}}
+
+        严格输出 JSON（不输出 Markdown，不输出解释）：
+        {"primaryKw": "核心关键词", "secondaryKw": "同义词或通俗表述"}
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [primaryKw, secondaryKw]
+        properties:
+          primaryKw:
+            type: string
+          secondaryKw:
+            type: string
+
+  - id: search-grt
+    title: 搜索GRT向量知识库
+    phase: P1
+    dependsOn: [extract-keywords]
+    executor:
+      type: cli-script
+      command: "{{pythonBin}}"
+      args:
+        - "{{packRoot}}/scripts/grt_search.py"
+        - --question
+        - "{{nodeOutput.extract-keywords.primaryKw}}"
+        - --top-k
+        - "3"
+        - --vector-threshold
+        - "0.6"
+        - --json
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+    progressMessage: "正在搜索GRT知识库…"
+
+  - id: search-product-kb
+    title: 搜索产品知识库
+    phase: P1
+    dependsOn: [extract-keywords]
+    executor:
+      type: mcp-call
+      server: mcp.ant.faas.skylarkmcpserver.skylarkmcpserver
+      tool: skylark_search
+      args:
+        q: "{{nodeOutput.extract-keywords.primaryKw}}"
+        book_id: "234552452"
+        pageSize: "5"
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+    progressMessage: "正在搜索产品知识库…"
+
+  - id: search-qa-kb
+    title: 搜索问答知识库
+    phase: P1
+    dependsOn: [extract-keywords]
+    executor:
+      type: mcp-call
+      server: mcp.ant.faas.skylarkmcpserver.skylarkmcpserver
+      tool: skylark_search
+      args:
+        q: "{{nodeOutput.extract-keywords.primaryKw}}"
+        book_id: "238052695"
+        pageSize: "5"
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+    progressMessage: "正在搜索问答知识库…"
+
+  - id: search-bcn-kb
+    title: 搜索BCN产品手册
+    phase: P1
+    dependsOn: [extract-keywords]
+    executor:
+      type: mcp-call
+      server: mcp.ant.faas.skylarkmcpserver.skylarkmcpserver
+      tool: skylark_search
+      args:
+        q: "{{nodeOutput.extract-keywords.primaryKw}}"
+        book_id: "239152297"
+        pageSize: "5"
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+    progressMessage: "正在搜索BCN产品手册…"
+
+  - id: search-grt-secondary
+    title: GRT备选关键词搜索
+    phase: P1
+    dependsOn: [extract-keywords]
+    executor:
+      type: cli-script
+      command: "{{pythonBin}}"
+      args:
+        - "{{packRoot}}/scripts/grt_search.py"
+        - --question
+        - "{{nodeOutput.extract-keywords.secondaryKw}}"
+        - --top-k
+        - "3"
+        - --vector-threshold
+        - "0.4"
+        - --json
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+    progressMessage: "正在搜索GRT知识库（备选关键词）…"
+
+  # ════════════════════════════════════════════════════════════════
+  # P1.5: 评估搜索结果
+  # ════════════════════════════════════════════════════════════════
+
+  - id: evaluate-kb-results
+    title: 评估知识库搜索结果
+    phase: P1.5
+    dependsOn: [search-grt, search-product-kb, search-qa-kb, search-bcn-kb, search-grt-secondary]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        评估4个知识库的搜索结果，判断是否有命中。
+
+        用户问题：{{input.message}}
+        用户身份：userId={{__user__.senderId}}, userName={{__user__.senderName}}, channel={{__user__.channel}}, chatType={{__user__.chatType}}, groupName={{__user__.groupName}}
+
+        GRT搜索结果（主关键词）：{{nodeOutput.search-grt}}
+        GRT搜索结果（备选关键词）：{{nodeOutput.search-grt-secondary}}
+        产品知识库搜索结果：{{nodeOutput.search-product-kb}}
+        问答知识库搜索结果：{{nodeOutput.search-qa-kb}}
+        BCN产品手册搜索结果：{{nodeOutput.search-bcn-kb}}
+
+        判断规则：
+        - GRT: score≥0.5 为有效匹配
+        - 语雀: 标题与问题高度相关为有效匹配
+        - 任一命中 → kbHit=true
+        - 全部未命中 → kbHit=false
+
+        命中时：整理回复内容，包含来源信息
+        未命中时：声明"已搜索知识库（GRT+产品库+问答库+BCN手册），未找到直接匹配"
+
+        严格输出 JSON（不输出 Markdown，不输出解释）：
+        {"kbHit": true或false, "hitSource": "来源名称或none", "replyContent": "完整回复内容或空字符串", "needsDocDetail": true或false, "detailDocId": 0或文档ID, "detailDocBookId": 0或知识库ID, "searchSummary": "搜索摘要"}
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [kbHit, hitSource, searchSummary]
+        properties:
+          kbHit:
+            type: boolean
+          hitSource:
+            type: string
+          replyContent:
+            type: string
+          needsDocDetail:
+            type: boolean
+          detailDocId:
+            type: number
+          detailDocBookId:
+            type: number
+          searchSummary:
+            type: string
+    onResult:
+      branches:
+        - branchId: kb-hit
+          match: { kbHit: true }
+          complete: false
+        - branchId: kb-miss
+          match: { kbHit: false }
+          complete: false
+      default:
+        complete: false
+
+  # ── KB命中分支 ──
+
+  - id: fetch-doc-detail
+    title: 获取语雀文档正文
+    phase: P1.5
+    branchId: kb-hit
+    dependsOn: [evaluate-kb-results]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        判断是否需要获取语雀文档正文。
+
+        评估结果：{{nodeOutput.evaluate-kb-results}}
+
+        规则：
+        - 如果 needsDocDetail 为 true 且 detailDocId > 0，则需要获取文档正文
+        - 如果 replyContent 已经足够完整，则不需要
+
+        如果需要获取正文，此节点仅标记需要获取（后续mcp-call节点会处理）。
+        如果不需要，直接使用现有replyContent。
+
+        严格输出 JSON：
+        {"needFetch": true或false, "docId": 文档ID或0, "bookId": 知识库ID或0, "replyContent": "从evaluate-kb-results继承的回复内容"}
+    retry:
+      maxAttempts: 1
+      backoffMs: 2000
+      on: [executor-failed]
+
+  - id: get-doc-content
+    title: 获取语雀文档正文内容
+    phase: P1.5
+    branchId: kb-hit
+    dependsOn: [fetch-doc-detail]
+    executor:
+      type: mcp-call
+      server: mcp.ant.faas.skylarkmcpserver.skylarkmcpserver
+      tool: skylark_doc_detail
+      args:
+        doc_id: "{{nodeOutput.fetch-doc-detail.docId}}"
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+
+  - id: compose-kb-reply
+    title: 组装知识库回复
+    phase: P2
+    branchId: kb-hit
+    dependsOn: [get-doc-content]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        基于知识库搜索结果和文档正文，组装完整的用户回复。
+
+        用户问题：{{input.message}}
+        用户身份：userId={{__user__.senderId}}, userName={{__user__.senderName}}, channel={{__user__.channel}}, chatType={{__user__.chatType}}, groupName={{__user__.groupName}}
+        评估结果：{{nodeOutput.evaluate-kb-results}}
+        文档正文：{{nodeOutput.get-doc-content}}
+
+        回复规范：
+        1. 结构：结论 → 原因分析 → 解决方案 → 详细说明
+        2. 末尾添加：---
+           💡 本回答由AI生成，仅供参考。如有疑问请联系本周值班同学。
+        3. 必须询问用户确认：请问以上方案是否解决了您的问题？
+           - ✅ 已解决：太好了！
+           - ❌ 未解决：我可以帮您进一步排查，或创建 DIMA 缺陷跟进
+        4. 引用来源时标注知识库名称和文档标题
+
+        严格输出 JSON：
+        {"replyType": "kb_hit", "reply": "完整回复内容", "shouldSaveToKB": true, "resolved": true}
+    progressMessage: "已找到相关知识库内容，正在组装回复…"
+
+  # ── KB未命中分支：问题分类 ──
+
+  - id: classify-problem
+    title: 判断问题类型
+    phase: P2
+    branchId: kb-miss
+    dependsOn: [evaluate-kb-results]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        知识库未命中时，判断用户问题类型。禁止凭模型内部知识直接回答。
+
+        用户问题：{{input.message}}
+        用户身份：userId={{__user__.senderId}}, userName={{__user__.senderName}}, channel={{__user__.channel}}, chatType={{__user__.chatType}}, groupName={{__user__.groupName}}
+        搜索摘要：{{nodeOutput.evaluate-kb-results.searchSummary}}
+
+        分类规则：
+        | 类型 | 特征 | problemType值 |
+        |------|------|--------------|
+        | MCP使用咨询 | "XX MCP怎么用"、"MCP接入" | mcp_consult |
+        | 新功能需求 | "希望能"、"建议增加"、"想要" | feature_request |
+        | 明确报缺陷 | "帮我创建缺陷"、"提bug" | bug_report |
+        | 产品使用咨询 | "怎么用"、"是什么"、"如何操作" | product_consult |
+        | 报错/异常/性能 | "报错"、"失败"、"慢"、"异常" | error_exception |
+
+        无法明确判断时，根据最接近的特征分类。
+
+        严格输出 JSON：
+        {"problemType": "类型值", "problemDetail": "问题详细描述", "suggestedModule": "建议模块（前端/后端/Adaptor/BCN/系统工程/安全权限与隐私/智能能力/产品建议）"}
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [problemType, problemDetail]
+        properties:
+          problemType:
+            type: string
+            enum: [mcp_consult, feature_request, bug_report, product_consult, error_exception]
+          problemDetail:
+            type: string
+          suggestedModule:
+            type: string
+    onResult:
+      branches:
+        - branchId: mcp-consult-type
+          match: { problemType: mcp_consult }
+          complete: false
+        - branchId: feature-request-type
+          match: { problemType: feature_request }
+          complete: false
+        - branchId: bug-report-type
+          match: { problemType: bug_report }
+          complete: false
+        - branchId: product-consult-type
+          match: { problemType: product_consult }
+          complete: false
+        - branchId: error-exception-type
+          match: { problemType: error_exception }
+          complete: false
+      default:
+        complete: false
+
+  # ════════════════════════════════════════════════════════════════
+  # P3: 按问题类型分支处理
+  # ════════════════════════════════════════════════════════════════
+
+  # ── MCP使用咨询 ──
+
+  - id: lookup-mcp
+    title: 查询MCP中心
+    phase: P3
+    branchId: mcp-consult-type
+    dependsOn: [classify-problem]
+    executor:
+      type: cli-script
+      command: "{{pythonBin}}"
+      args:
+        - "{{packRoot}}/scripts/mcp_center.py"
+        - --command
+        - search
+        - --keyword
+        - "{{nodeOutput.classify-problem.problemDetail}}"
+        - --json
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 3000
+      on: [executor-failed]
+    progressMessage: "正在查询MCP中心…"
+
+  - id: compose-mcp-reply
+    title: 组装MCP咨询回复
+    phase: P3
+    branchId: mcp-consult-type
+    dependsOn: [lookup-mcp]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        基于MCP中心搜索结果，组装MCP使用咨询回复。
+
+        用户问题：{{input.message}}
+        MCP搜索结果：{{nodeOutput.lookup-mcp}}
+
+        回复格式：
+        - 服务名、状态、连接地址、传输协议、权限等级、负责人
+        - 可用工具列表
+        - 末尾添加标准客服签名
+
+        严格输出 JSON：
+        {"replyType": "mcp_consult", "reply": "完整回复内容", "resolved": true}
+    progressMessage: "正在组装MCP咨询回复…"
+
+  # ── 新功能需求 ──
+
+  - id: create-issue
+    title: 创建DIMA需求
+    phase: P3
+    branchId: feature-request-type
+    dependsOn: [classify-problem]
+    executor:
+      type: mcp-call
+      server: Dima-MCP
+      tool: createIssue
+      args:
+        workspaceId: "W26001113566"
+        subject: "【线上用户】{{nodeOutput.classify-problem.problemDetail}}"
+        content: "### 【需求提出人】\n- 工号：{{__user__.senderId}}\n- 花名：{{__user__.senderName}}\n\n### 【需求描述】\n{{input.message}}\n\n### 【预期效果】\n用户期望的功能效果\n\n### 【使用场景】\n用户描述的使用场景"
+        processor: "楚生"
+        tenantId: "alipay"
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+    progressMessage: "正在创建DIMA需求…"
+
+  - id: compose-feature-reply
+    title: 组装需求创建回复
+    phase: P3
+    branchId: feature-request-type
+    dependsOn: [create-issue]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        基于DIMA需求创建结果，组装用户回复。
+
+        用户问题：{{input.message}}
+        创建结果：{{nodeOutput.create-issue}}
+
+        回复格式：
+        感谢您的反馈！我已将您的需求提交到需求管理系统：
+        📌 **需求编号**：{workItemId}
+        👤 **负责人**：{负责人}
+        🔗 **查看进度**：https://project.alipay.com/workItem?workItemId={workItemId}
+        有进展会第一时间通知您。
+        末尾添加标准客服签名
+
+        严格输出 JSON：
+        {"replyType": "feature_request", "reply": "完整回复内容", "resolved": true, "workItemId": "需求ID"}
+    progressMessage: "正在组装需求创建回复…"
+
+  # ── 明确报缺陷 ──
+
+  - id: determine-bug-module
+    title: 确定缺陷模块和负责人
+    phase: P3
+    branchId: bug-report-type
+    dependsOn: [classify-problem]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        根据用户问题描述，确定缺陷所属模块和负责人。
+
+        用户问题：{{input.message}}
+        建议模块：{{nodeOutput.classify-problem.suggestedModule}}
+
+        模块负责人映射：
+        | 模块 | 负责人 | 工号 |
+        |------|--------|------|
+        | 前端 | 与白 | 153364，敛秋 | 368653 |
+        | 后端 | 江绅 | 205357，墨馠 | 334018，安远 | 405935，斩秋 | 061256 |
+        | Adaptor/引擎 | 涔涔 | 272471，一朴 | 165137 |
+        | BCN | 卓人 | 410025，元歌 | 197262 |
+        | 系统工程 | 萧辚 | 151614，毅舒 | 354194，温悦 | 012369 |
+        | 安全权限 | 允川 | 111954 |
+        | 智能能力 | 文汐 | 260065，楚生 | 103892，山宗 | 197444，墨馠 | 334018 |
+
+        根据问题描述选择最匹配的模块，从映射表中确定负责人和工号。
+
+        严格输出 JSON：
+        {"module": "模块名", "processorName": "负责人花名", "processorId": "负责人工号（补0到6位）"}
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [module, processorName, processorId]
+        properties:
+          module:
+            type: string
+          processorName:
+            type: string
+          processorId:
+            type: string
+
+  - id: create-bug-direct
+    title: 创建DIMA缺陷
+    phase: P3
+    branchId: bug-report-type
+    dependsOn: [determine-bug-module]
+    executor:
+      type: cli-script
+      command: "{{pythonBin}}"
+      args:
+        - "{{packRoot}}/scripts/dima_create_bug.py"
+        - --command
+        - bug
+        - --subject
+        - "{{nodeOutput.classify-problem.problemDetail}}"
+        - --module
+        - "{{nodeOutput.determine-bug-module.module}}"
+        - --processor-id
+        - "{{nodeOutput.determine-bug-module.processorId}}"
+        - --staff-id
+        - "103892"
+        - --priority
+        - high
+        - --description
+        - "{{input.message}}"
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+    progressMessage: "正在创建DIMA缺陷…"
+
+  - id: compose-bug-reply
+    title: 组装缺陷创建回复
+    phase: P3
+    branchId: bug-report-type
+    dependsOn: [create-bug-direct]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        基于DIMA缺陷创建结果，组装用户回复。
+
+        用户问题：{{input.message}}
+        创建结果：{{nodeOutput.create-bug-direct}}
+        模块信息：{{nodeOutput.determine-bug-module}}
+
+        回复格式：
+        抱歉给您带来不便 🙏
+        我已经将您的问题提交到缺陷系统，正在进行处理：
+        📌 **缺陷编号**：{workItemId}
+        👤 **负责人**：{负责人姓名}
+        🔗 **查看进度**：https://project.alipay.com/workItem?workItemId={workItemId}
+        我会持续跟进此问题，有进展会第一时间通知您。
+        末尾添加标准客服签名
+
+        严格输出 JSON：
+        {"replyType": "bug_report", "reply": "完整回复内容", "resolved": true, "workItemId": "缺陷ID"}
+
+  # ── 产品使用咨询 ──
+
+  - id: compose-product-reply
+    title: 产品咨询回复
+    phase: P3
+    branchId: product-consult-type
+    dependsOn: [classify-problem]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        知识库未命中且属于产品使用咨询，生成引导回复。
+
+        用户问题：{{input.message}}
+        用户身份：userId={{__user__.senderId}}, userName={{__user__.senderName}}, channel={{__user__.channel}}, chatType={{__user__.chatType}}, groupName={{__user__.groupName}}
+
+        回复规范：
+        1. 声明：📚 已搜索知识库（GRT+产品库+问答库+BCN手册），未找到直接匹配
+        2. 根据问题内容，提供可能的指引或建议
+        3. 引导用户提供更多细节：操作步骤、错误信息截图、期望效果
+        4. 询问是否需要创建DIMA需求
+        5. 末尾添加标准客服签名
+
+        严格输出 JSON：
+        {"replyType": "product_consult", "reply": "完整回复内容", "resolved": false}
+
+  # ════════════════════════════════════════════════════════════════
+  # P3-P4: 报错/异常分支 — 日志收集
+  # ════════════════════════════════════════════════════════════════
+
+  - id: compute-time-range
+    title: 计算查询时间范围
+    phase: P3
+    branchId: error-exception-type
+    dependsOn: [classify-problem]
+    executor:
+      type: cli-script
+      command: "{{pythonBin}}"
+      args:
+        - -c
+        - |
+          import json
+          from datetime import datetime, timedelta, timezone
+          now = datetime.now(timezone(timedelta(hours=8)))
+          start = now - timedelta(minutes=30)
+          print(json.dumps({
+            "startTimeIso": start.strftime("%Y-%m-%dT%H:%M:%S+08:00"),
+            "endTimeIso": now.strftime("%Y-%m-%dT%H:%M:%S+08:00"),
+            "startTimeDisplay": start.strftime("%Y-%m-%d %H:%M:%S"),
+            "endTimeDisplay": now.strftime("%Y-%m-%d %H:%M:%S")
+          }))
+      outputMode: json
+      timeoutMs: 5000
+
+  # ── 第一批并行：前端日志 + 后端日志 + Langfuse ──
+
+  - id: collect-frontend-log
+    title: 查询前端日志
+    phase: P4
+    branchId: error-exception-type
+    dependsOn: [compute-time-range]
+    executor:
+      type: mcp-call
+      server: mcp.ant.yuyanbff.yuyanbff
+      tool: yuyan-monitor_query-monitor-log-details
+      args:
+        yuyanId: "180020010001289930"
+        expr: '[{"arg":"user_id","expr":"equal","value":"{{__user__.senderId}}"},{"arg":"loged_time","expr":"between","value":"{{nodeOutput.compute-time-range.startTimeDisplay}},{{nodeOutput.compute-time-range.endTimeDisplay}}"}]'
+        limit: "50"
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+    progressMessage: "正在查询前端日志…"
+
+  - id: collect-backend-log
+    title: 查询后端日志
+    phase: P4
+    branchId: error-exception-type
+    dependsOn: [compute-time-range]
+    executor:
+      type: mcp-call
+      server: mcp.ant.alipaybase-antlogsmcp.mcp-server
+      tool: queryAppLogContent
+      args:
+        appName: agentclaw
+        startTime: "{{nodeOutput.compute-time-range.startTimeIso}}"
+        endTime: "{{nodeOutput.compute-time-range.endTimeIso}}"
+        query: "'{{__user__.senderId}}'"
+        logPathKeyword: start.log
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+    progressMessage: "正在查询后端日志…"
+
+  - id: collect-langfuse
+    title: 查询Langfuse对话记录
+    phase: P4
+    branchId: error-exception-type
+    dependsOn: [compute-time-range]
+    executor:
+      type: cli-script
+      command: "{{pythonBin}}"
+      args:
+        - "{{packRoot}}/scripts/langfuse_query.py"
+        - --user-id
+        - "{{__user__.senderId}}"
+        - --days
+        - "0.02"
+        - --json
+      outputMode: json
+      timeoutMs: 60000
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+    progressMessage: "正在查询Langfuse对话记录…"
+
+  # ── 串行：提取 machine_name ──
+
+  - id: extract-machine-name
+    title: 从Langfuse提取machine_name
+    phase: P4.5
+    branchId: error-exception-type
+    dependsOn: [collect-langfuse]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        从Langfuse查询结果中提取 machine_name，用于查询 Adaptor 和 OpenClaw 日志。
+
+        ⛔ 只能用 machine_name，禁止使用 user_id/花名/session_id/工号查询 Adaptor/OpenClaw 日志。
+
+        Langfuse结果：{{nodeOutput.collect-langfuse}}
+
+        提取规则：
+        1. 从 session.meta 中查找 machine_name 字段
+        2. machine_name 格式示例：0000000032cee70a-mgs4oose3gfnakq2fmby6gf2xy
+        3. 如果有多个 session，优先使用最近的
+        4. 同时提取 session_id 用于后续关联
+        5. 提取关键的错误信息和对话轮次
+
+        严格输出 JSON：
+        {"machineName": "machine_name或空字符串", "sessionId": "会话ID或空", "langfuseErrors": "关键错误摘要", "hasMachineName": true或false}
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [hasMachineName]
+        properties:
+          machineName:
+            type: string
+          sessionId:
+            type: string
+          langfuseErrors:
+            type: string
+          hasMachineName:
+            type: boolean
+
+  # ── 第二批串行：Adaptor + OpenClaw 日志（依赖 machine_name）──
+
+  - id: collect-adaptor-log
+    title: 查询Adaptor日志
+    phase: P5
+    branchId: error-exception-type
+    dependsOn: [extract-machine-name]
+    executor:
+      type: mcp-call
+      server: mcp.ant.alipaybase-antlogsmcp.mcp-server
+      tool: queryAppLogContent
+      args:
+        appName: arcaagentclaw
+        startTime: "{{nodeOutput.compute-time-range.startTimeIso}}"
+        endTime: "{{nodeOutput.compute-time-range.endTimeIso}}"
+        query: "{{nodeOutput.extract-machine-name.machineName}}"
+        logPathKeyword: adaptor_err.log
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+    progressMessage: "正在查询Adaptor日志…"
+
+  - id: collect-openclaw-log
+    title: 查询OpenClaw日志
+    phase: P5
+    branchId: error-exception-type
+    dependsOn: [extract-machine-name]
+    executor:
+      type: mcp-call
+      server: mcp.ant.alipaybase-antlogsmcp.mcp-server
+      tool: queryAppLogContent
+      args:
+        appName: arcaagentclaw
+        startTime: "{{nodeOutput.compute-time-range.startTimeIso}}"
+        endTime: "{{nodeOutput.compute-time-range.endTimeIso}}"
+        query: "{{nodeOutput.extract-machine-name.machineName}}"
+        logPathKeyword: openclaw_err.log
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+    progressMessage: "正在查询OpenClaw日志…"
+
+  # ════════════════════════════════════════════════════════════════
+  # P6: 综合分析
+  # ════════════════════════════════════════════════════════════════
+
+  - id: analyze-logs
+    title: 综合分析日志
+    phase: P6
+    branchId: error-exception-type
+    dependsOn: [collect-frontend-log, collect-backend-log, collect-adaptor-log, collect-openclaw-log]
+    triggerRule: one_success
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        综合分析所有日志，定位问题根因。
+
+        用户问题：{{input.message}}
+        用户身份：userId={{__user__.senderId}}, userName={{__user__.senderName}}, channel={{__user__.channel}}, chatType={{__user__.chatType}}, groupName={{__user__.groupName}}
+        时间范围：{{nodeOutput.compute-time-range}}
+
+        【前端日志】
+        {{nodeOutput.collect-frontend-log}}
+
+        【后端日志】
+        {{nodeOutput.collect-backend-log}}
+
+        【Langfuse记录】
+        machine_name: {{nodeOutput.extract-machine-name.machineName}}
+        错误摘要: {{nodeOutput.extract-machine-name.langfuseErrors}}
+
+        【Adaptor日志】
+        {{nodeOutput.collect-adaptor-log}}
+
+        【OpenClaw日志】
+        {{nodeOutput.collect-openclaw-log}}
+
+        分析要求：
+        1. 按顺序分析：前端 → 后端 → Langfuse → Adaptor → OpenClaw
+        2. 定位根因
+        3. 组织回复：结论 → 原因分析 → 解决方案 → 详细说明
+        4. 判断是否为 TeamClaw 问题（不属于 TeamClaw 时标记 isTeamClawIssue=false）
+
+        回复模板：
+        ## 🔍 问题确认
+        **用户**：{花名}（工号：{工号}）
+        **时间**：{时间范围}  **类型**：报错/异常
+
+        ## 📊 分析结果
+        ### 日志发现
+        | 来源 | 关键发现 |
+        |------|---------|
+        | 前端 | ... |
+        | 后端 | ... |
+        | Adaptor | ... |
+        | OpenClaw | ... |
+
+        ### 根因定位
+        **根因**：...
+        **时间线**：...
+
+        ## 💡 解决方案
+        | 方案类型 | 操作 |
+        |---------|------|
+        | 立即可做 | ... |
+        | 需要修复 | ... |
+
+        末尾添加标准客服签名和确认问题
+
+        严格输出 JSON：
+        {"rootCause": "根因描述", "analysis": "详细分析", "solution": "解决方案", "isTeamClawIssue": true, "resolved": true或false, "suggestedModule": "模块名", "reply": "完整回复内容"}
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [rootCause, isTeamClawIssue, resolved]
+        properties:
+          rootCause:
+            type: string
+          analysis:
+            type: string
+          solution:
+            type: string
+          isTeamClawIssue:
+            type: boolean
+          resolved:
+            type: boolean
+          suggestedModule:
+            type: string
+          reply:
+            type: string
+    onResult:
+      branches:
+        - branchId: resolved
+          match: { resolved: true }
+          complete: false
+        - branchId: unresolved
+          match: { resolved: false }
+          complete: false
+      default:
+        complete: false
+
+  # ════════════════════════════════════════════════════════════════
+  # P7: 后续处理
+  # ════════════════════════════════════════════════════════════════
+
+  # ── 已解决：保存到问答知识库 ──
+
+  - id: save-to-qa-kb
+    title: 保存到问答知识库
+    phase: P7
+    branchId: resolved
+    dependsOn: [analyze-logs]
+    executor:
+      type: mcp-call
+      server: mcp.ant.faas.skylarkmcpserver.skylarkmcpserver
+      tool: skylark_doc_create
+      args:
+        book_id: "238052695"
+        title: "【已解决】{{input.message}}"
+        body: "## 问题现象\n{{input.message}}\n\n## 原因\n{{nodeOutput.analyze-logs.rootCause}}\n\n## 解决方案\n{{nodeOutput.analyze-logs.solution}}"
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+    progressMessage: "正在保存解决方案到问答知识库…"
+
+  # ── 未解决：创建DIMA缺陷 ──
+
+  - id: determine-unresolved-module
+    title: 确定未解决问题模块
+    phase: P7
+    branchId: unresolved
+    dependsOn: [analyze-logs]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        根据日志分析结果，确定问题所属模块和负责人。
+
+        分析结果：{{nodeOutput.analyze-logs}}
+        建议模块：{{nodeOutput.analyze-logs.suggestedModule}}
+
+        模块负责人映射：
+        | 模块 | 负责人 | 工号 |
+        |------|--------|------|
+        | 前端 | 与白 | 153364，敛秋 | 368653 |
+        | 后端 | 江绅 | 205357，墨馠 | 334018，安远 | 405935，斩秋 | 061256 |
+        | Adaptor/引擎 | 涔涔 | 272471，一朴 | 165137 |
+        | BCN | 卓人 | 410025，元歌 | 197262 |
+        | 系统工程 | 萧辚 | 151614，毅舒 | 354194，温悦 | 012369 |
+        | 安全权限 | 允川 | 111954 |
+        | 智能能力 | 文汐 | 260065，楚生 | 103892，山宗 | 197444，墨馠 | 334018 |
+
+        如果不是TeamClaw问题（isTeamClawIssue=false），标记为产品建议模块。
+
+        严格输出 JSON：
+        {"module": "模块名", "processorName": "负责人花名", "processorId": "负责人工号（补0到6位）"}
+
+  - id: create-unresolved-bug
+    title: 创建缺陷跟进
+    phase: P7
+    branchId: unresolved
+    dependsOn: [determine-unresolved-module]
+    executor:
+      type: cli-script
+      command: "{{pythonBin}}"
+      args:
+        - "{{packRoot}}/scripts/dima_create_bug.py"
+        - --command
+        - bug
+        - --subject
+        - "{{nodeOutput.analyze-logs.rootCause}}"
+        - --module
+        - "{{nodeOutput.determine-unresolved-module.module}}"
+        - --processor-id
+        - "{{nodeOutput.determine-unresolved-module.processorId}}"
+        - --staff-id
+        - "103892"
+        - --priority
+        - high
+        - --description
+        - "用户问题：{{input.message}} 根因分析：{{nodeOutput.analyze-logs.analysis}} 解决方案：{{nodeOutput.analyze-logs.solution}}"
+      outputMode: json
+      timeoutMs: 30000
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+      on: [executor-failed]
+    progressMessage: "正在创建DIMA缺陷跟进…"
+
+  # ════════════════════════════════════════════════════════════════
+  # P8: 完成
+  # ════════════════════════════════════════════════════════════════
+
+  - id: finish
+    title: 处理完成
+    phase: P8
+    dependsOn: [compose-kb-reply, compose-mcp-reply, compose-feature-reply, compose-bug-reply, compose-product-reply, save-to-qa-kb, create-unresolved-bug]
+    triggerRule: one_success
+    executor:
+      type: done

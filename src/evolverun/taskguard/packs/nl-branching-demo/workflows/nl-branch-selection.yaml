@@ -1,0 +1,139 @@
+id: nl-branch-selection
+version: 1
+title: 自然语言分支选择（L1 优先）
+
+description: |
+  isExactMatch 精确匹配演示：人工节点使用 keywordAliases 定义自然语言关键词，
+  用户输入"快速"或"深入"等自然语言即可触发分支选择，无需精确输入命令。
+  isExactMatch 要求整条消息（去除尾随语气词后）精确匹配关键词，
+  防止"好的，帮我查数据"被误匹配为"好的"。
+
+input:
+  mode: mixed
+  requiredParams: [taskTitle]
+  sources:
+    params: true
+    message: true
+
+identity:
+  key: "{{input.params.taskTitle}}"
+  label: "NL分支: {{input.params.taskTitle}}"
+  duplicatePolicy: allow
+
+outputs:
+  selectedMode:
+    from: "{{nodeOutput.select-mode.choice}}"
+    public: true
+    description: "选择的处理模式"
+  result:
+    from: "{{nodeOutput.finalize}}"
+    public: true
+    description: "处理结果"
+
+defaults:
+  progress:
+    enabled: true
+    sink: chat
+
+messages:
+  onCreated: "自然语言分支选择流程已启动：{{input.params.taskTitle}}"
+  onFinished: "流程已完成。"
+
+nodes:
+  # ──── P1: 准备 ────────────────────────────────────────────
+  - id: prepare
+    title: 准备任务上下文
+    phase: P1
+    dependsOn: []
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        根据输入整理任务上下文。
+
+        任务标题：{{input.params.taskTitle}}
+        用户描述：{{input.message}}
+
+        严格输出 JSON：
+        {
+          "title": "任务标题",
+          "description": "简要描述",
+          "suggestedMode": "fast 或 thorough",
+          "estimatedTime": "预估耗时"
+        }
+
+  # ──── P2: 自然语言分支选择（keywordAliases） ─────────────
+  # L1-First：keywordAliases 让用户用自然语言（如"快速"、"深入"）
+  # 即可触发分支，无需精确输入 `/workflow confirm choice: fast`
+  - id: select-mode
+    title: 选择处理模式
+    phase: P2
+    dependsOn: [prepare]
+    executor:
+      type: human
+      waitKind: mode-selection
+      prompt: "请选择 {{input.params.taskTitle}} 的处理模式"
+      inputSchema:
+        type: object
+        required: [choice]
+        properties:
+          choice:
+            type: string
+            enum: [fast, thorough]
+            keywordAliases:
+              fast: [快速, 简略, 快点, 赶时间, 简单处理]
+              thorough: [深入, 详细, 仔细, 完整, 全面分析, 慢慢来]
+      saveAs:
+        workflowData.selectedMode: "{{input.choice}}"
+
+  # ──── P3A: 快速模式 ────────────────────────────────────────
+  - id: fast-process
+    title: 快速处理
+    phase: P3
+    branchId: fast
+    dependsOn: [select-mode]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        按快速模式处理任务，给出简要结论。
+
+        任务上下文：{{nodeOutput.prepare}}
+
+        严格输出 JSON：
+        {
+          "mode": "fast",
+          "summary": "简要结论",
+          "confidence": 0.7
+        }
+
+  # ──── P3B: 深入模式 ────────────────────────────────────────
+  - id: thorough-process
+    title: 深入分析
+    phase: P3
+    branchId: thorough
+    dependsOn: [select-mode]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        按深入模式分析任务，给出详尽报告。
+
+        任务上下文：{{nodeOutput.prepare}}
+
+        严格输出 JSON：
+        {
+          "mode": "thorough",
+          "analysis": "详细分析",
+          "recommendations": ["建议1", "建议2"],
+          "confidence": 0.9
+        }
+
+  # ──── P4: 完成 ────────────────────────────────────────────
+  - id: finalize
+    title: 流程结束
+    phase: P4
+    dependsOn: [fast-process, thorough-process]
+    triggerRule: one_success
+    executor:
+      type: done

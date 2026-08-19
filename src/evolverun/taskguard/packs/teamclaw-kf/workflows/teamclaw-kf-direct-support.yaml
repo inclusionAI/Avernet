@@ -1,0 +1,50 @@
+id: teamclaw-kf-direct-support
+version: "1.0.0"
+title: TeamClaw 直接支持（teamclaw-support 技能）
+
+input:
+  mode: mixed
+  requiredParams: []
+  sources:
+    params: true
+    message: true
+
+identity:
+  key: "{{input.message}}"
+  label: "直接支持: {{input.message}}"
+  duplicatePolicy: allow
+
+defaults:
+  progress:
+    enabled: true
+    sink: chat
+
+messages:
+  onCreated: "正在调用 teamclaw-support 技能处理您的问题…"
+  onFinished: "问题处理完成。"
+
+nodes:
+  - id: direct-support
+    title: 调用 teamclaw-support 技能
+    phase: P1
+    dependsOn: []
+    executor:
+      type: embedded-agent
+      skillName: teamclaw-support
+      outputMode: json
+      prompt: |
+        执行 teamclaw-support SKILL，处理用户问题。
+
+        用户消息：{{input.message}}
+
+        按照技能指引完成问题分析、知识库检索、日志收集和解答，最后输出处理结果：
+        {"resolved": true, "summary": "简要处理结果"}
+        ⚠️ 输出要求：直接输出纯 JSON 对象。禁止使用 Markdown code fence 包裹。
+      timeoutSeconds: 1800
+
+  - id: done
+    title: 完成
+    phase: P1
+    dependsOn: [direct-support]
+    executor:
+      type: done
