@@ -32,6 +32,11 @@ class SpaceRepositoryProtocol(Protocol):
     def get_space(self, *, space_id: int, env: str) -> SpaceRecord | None: ...
 
     @abstractmethod
+    def get_space_summary(
+        self, *, space_id: int, user_id: str, env: str
+    ) -> SpaceSummaryRecord | None: ...
+
+    @abstractmethod
     def batch_query_personal(
         self, *, user_ids: list[str], env: str
     ) -> list[PersonalSpaceLookupRecord]: ...

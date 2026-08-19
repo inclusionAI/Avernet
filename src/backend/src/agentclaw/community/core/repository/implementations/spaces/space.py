@@ -149,6 +149,66 @@ class SpaceRepository(SpaceRepositoryProtocol):
             )
             return row.to_record() if row is not None else None
 
+    def _space_summary(self, db, *, space, user_id: str, env: str):
+        current = (
+            db.query(self._Member)
+            .filter(
+                self._Member.space_id == space.id,
+                self._Member.user_id == user_id,
+                self._Member.env == env,
+                self._Member.status == "ACTIVE",
+            )
+            .one_or_none()
+        )
+        member_count = (
+            db.query(func.count(self._Member.id))
+            .filter(
+                self._Member.space_id == space.id,
+                self._Member.env == env,
+                self._Member.status == "ACTIVE",
+            )
+            .scalar()
+            or 0
+        )
+        owner_count = (
+            db.query(func.count(self._Member.id))
+            .filter(
+                self._Member.space_id == space.id,
+                self._Member.role == self._stored_role(SpaceRole.OWNER),
+                self._Member.env == env,
+                self._Member.status == "ACTIVE",
+            )
+            .scalar()
+            or 0
+        )
+        role = current.to_record().role if current is not None else None
+        return SpaceSummaryRecord(
+            space=space.to_record(),
+            current_user_role=role,
+            join_status=(
+                SpaceJoinStatus.JOINED
+                if current is not None
+                else SpaceJoinStatus.NOT_JOINED
+            ),
+            member_count=member_count,
+            owner_count=owner_count,
+        )
+
+    def get_space_summary(self, *, space_id: int, user_id: str, env: str):
+        with self._db.orm_session() as db:
+            space = (
+                db.query(self._Space)
+                .filter(
+                    self._Space.id == space_id,
+                    self._Space.env == env,
+                    self._Space.deleted_at.is_(None),
+                )
+                .one_or_none()
+            )
+            if space is None:
+                return None
+            return self._space_summary(db, space=space, user_id=user_id, env=env)
+
     def batch_query_personal(
         self, *, user_ids: list[str], env: str
     ) -> list[PersonalSpaceLookupRecord]:
@@ -203,54 +263,10 @@ class SpaceRepository(SpaceRepositoryProtocol):
                 .limit(limit)
                 .all()
             )
-            items = []
-            for row in rows:
-                current = (
-                    db.query(self._Member)
-                    .filter(
-                        self._Member.space_id == row.id,
-                        self._Member.user_id == user_id,
-                        self._Member.env == env,
-                        self._Member.status == "ACTIVE",
-                    )
-                    .one_or_none()
-                )
-                member_count = (
-                    db.query(func.count(self._Member.id))
-                    .filter(
-                        self._Member.space_id == row.id,
-                        self._Member.env == env,
-                        self._Member.status == "ACTIVE",
-                    )
-                    .scalar()
-                    or 0
-                )
-                owner_count = (
-                    db.query(func.count(self._Member.id))
-                    .filter(
-                        self._Member.space_id == row.id,
-                        self._Member.role == self._stored_role(SpaceRole.OWNER),
-                        self._Member.env == env,
-                        self._Member.status == "ACTIVE",
-                    )
-                    .scalar()
-                    or 0
-                )
-                role = current.to_record().role if current is not None else None
-                items.append(
-                    SpaceSummaryRecord(
-                        space=row.to_record(),
-                        current_user_role=role,
-                        join_status=(
-                            SpaceJoinStatus.JOINED
-                            if current is not None
-                            else SpaceJoinStatus.NOT_JOINED
-                        ),
-                        member_count=member_count,
-                        owner_count=owner_count,
-                    )
-                )
-            return total, items
+            return total, [
+                self._space_summary(db, space=row, user_id=user_id, env=env)
+                for row in rows
+            ]
 
     def get_member(self, *, space_id: int, user_id: str, env: str):
         with self._db.orm_session() as db:

@@ -446,6 +446,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # work-order recipient checks. Space ownership initialization, team/member
     # administration, and work-order review remain human-only.
     ("GET", "/openapi/v1/spaces"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/spaces/{space_id}"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/spaces/personal/initialize"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/spaces/create"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/spaces/{space_id}/members"): AdmissionMode.USER_GATED,

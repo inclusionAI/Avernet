@@ -1,6 +1,7 @@
 """SQLite-backed unit tests for the new unified ORM repositories."""
 
 import asyncio
+from datetime import datetime
 
 import pytest
 
@@ -158,6 +159,37 @@ def test_space_repository_full_member_lifecycle(db) -> None:
         repository.delete_member(space_id=team.id, user_id="member-1", env="dev")
         is False
     )
+
+
+def test_space_summary_is_env_isolated_and_excludes_soft_deleted_spaces(db) -> None:
+    repository = SpaceRepository(db)
+    team = _team(repository)
+    repository.add_member(
+        space_id=team.id,
+        user_id="member-1",
+        role=SpaceRole.MEMBER,
+        creator_id="owner-1",
+        env="dev",
+    )
+
+    summary = repository.get_space_summary(
+        space_id=team.id, user_id="member-1", env="dev"
+    )
+
+    assert summary is not None
+    assert summary.current_user_role is SpaceRole.MEMBER
+    assert summary.member_count == 2
+    assert repository.get_space_summary(
+        space_id=team.id, user_id="member-1", env="pre"
+    ) is None
+
+    with db.orm_session() as session:
+        row = session.query(SpaceModel).filter(SpaceModel.id == team.id).one()
+        row.deleted_at = datetime(2026, 8, 19, 12, 0, 0)
+
+    assert repository.get_space_summary(
+        space_id=team.id, user_id="member-1", env="dev"
+    ) is None
 
 
 def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:

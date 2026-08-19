@@ -35,6 +35,7 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     PersonalSpaceInitialized,
     SearchFavoritesRequest,
     SpaceCreated,
+    SpaceMembershipRole,
     SpaceRole,
     SpaceType,
     SpaceItem,
@@ -87,9 +88,14 @@ def _space_item(record: SpaceSummaryRecord) -> SpaceItem:
         space_code=record.space.space_code,
         space_name=record.space.name,
         space_type=record.space.space_type,
-        current_user_role=record.current_user_role,
+        current_user_role=(
+            _membership_role(record.current_user_role)
+            if record.current_user_role is not None
+            else None
+        ),
         join_status=record.join_status,
         member_count=record.member_count,
+        administrator_count=record.owner_count,
         owner_count=record.owner_count,
         gmt_modified=record.space.gmt_modified,
     )
@@ -115,9 +121,17 @@ def _member_item(record: SpaceMemberSummaryRecord) -> SpaceMemberItem:
         user_id=record.member.user_id,
         user_name=record.user_name,
         display_name=record.display_name,
-        role=record.member.role,
+        role=_membership_role(record.member.role),
         is_creator=record.is_creator,
         gmt_modified=record.member.gmt_modified,
+    )
+
+
+def _membership_role(role: DomainSpaceRole) -> SpaceMembershipRole:
+    return (
+        SpaceMembershipRole.ADMINISTRATOR
+        if role is DomainSpaceRole.OWNER
+        else SpaceMembershipRole.MEMBER
     )
 
 
@@ -155,6 +169,22 @@ async def list_spaces(
         page_size=page_size,
     )
     return page(total, [_space_item(record) for record in records], request)
+
+
+@router.get(
+    "/{space_id}", response_model=Envelope[SpaceItem], dependencies=_REFUSES_APP_ONLY
+)
+@envelope_errors
+async def get_space(
+    space_id: SpaceIdPath,
+    request: Request,
+    caller: ActingCallerDep,
+    service: SpaceServiceProtocol = Injected(SpaceServiceProtocol),
+) -> Envelope[SpaceItem]:
+    actor_id = _require_user_delegation(caller)
+    return envelope(
+        _space_item(service.get_space(space_id=space_id, user_id=actor_id)), request
+    )
 
 
 @router.post(

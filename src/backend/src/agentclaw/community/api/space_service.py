@@ -41,6 +41,9 @@ class SpaceServiceProtocol(Protocol):
         page_size: int,
     ) -> tuple[int, list[SpaceSummaryRecord]]: ...
 
+    @abstractmethod
+    def get_space(self, *, space_id: int, user_id: str) -> SpaceSummaryRecord: ...
+
 
 @runtime_checkable
 class SpaceMemberServiceProtocol(Protocol):
