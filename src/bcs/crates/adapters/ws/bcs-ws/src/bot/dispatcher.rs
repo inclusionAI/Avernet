@@ -90,8 +90,11 @@ pub enum BotWsDispatchError {
     JsonError(#[from] serde_json::Error),
     #[error("Service error: {0}")]
     ServiceError(#[from] ServiceError),
-    #[error("bot.connect failed: {0}")]
-    BotConnectError(Box<BotWsDispatchError>),
+    #[error("bot.connect failed: {source}")]
+    BotConnectError {
+        bot_uuid: Option<String>,
+        source: Box<BotWsDispatchError>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,7 +155,10 @@ pub async fn dispatch_frame(
             };
             if let Err(error) = handle_request_frame(state, &req, tx, registered_bot_id).await {
                 if is_initial_connect {
-                    return Err(BotWsDispatchError::BotConnectError(Box::new(error)));
+                    return Err(BotWsDispatchError::BotConnectError {
+                        bot_uuid: requested_bot_uuid,
+                        source: Box::new(error),
+                    });
                 }
                 return Err(error);
             }

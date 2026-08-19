@@ -26,7 +26,9 @@ use bcs_service_api::{
 };
 use bcs_session::NoopSessionManagementService;
 use bcs_test_support::NoopBotRunContextPort;
-use bcs_ws::bot::{BotConnectionRegistry, BotDispatchOutcome, BotDispatchState, dispatch_frame};
+use bcs_ws::bot::{
+    BotConnectionRegistry, BotDispatchOutcome, BotDispatchState, BotWsDispatchError, dispatch_frame,
+};
 use bcs_ws::shared::RunChannelManager;
 use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
 use tokio::sync::{Mutex, mpsc};
@@ -419,6 +421,39 @@ async fn bot_connect_rejects_provider_delivery_before_streaming_registration() {
             .is_connected("bot-provider")
             .await
     );
+}
+
+#[tokio::test]
+async fn bot_connect_error_preserves_requested_uuid() {
+    let state = new_state();
+    let (tx, _rx) = mpsc::channel(8);
+    let mut registered_bot_id = None;
+
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-invalid",
+        "bot.connect",
+        Some(serde_json::json!({
+            "bot_id": "bot-invalid",
+            "protocol_version": "invalid"
+        })),
+    ));
+    let error = dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        BotWsDispatchError::BotConnectError {
+            bot_uuid: Some(ref bot_uuid),
+            ..
+        } if bot_uuid == "bot-invalid"
+    ));
+    assert_eq!(registered_bot_id, None);
 }
 
 #[async_trait]
