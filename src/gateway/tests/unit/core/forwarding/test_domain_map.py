@@ -78,7 +78,7 @@ def test_shipped_config_loads() -> None:
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
     assert dm.http_domain_for("/openapi/v1/bots") is not None
 
-    spaces = dm.http_domain_for("/openapi/v1/spaces/1/members")
+    spaces = dm.http_domain_for("/openapi/v1/bots/spaces/1/members")
     assert spaces is not None
     assert spaces.server.name == "backend"
     assert spaces.server.base_url == "http://backend:8080"

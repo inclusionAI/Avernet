@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.plugin_api.skill_center_client import (
+    SkillCenterMarketSearchRequest,
     SkillCenterTeamCreateError,
     SkillCenterTeamCreateRequest,
 )
@@ -50,7 +51,7 @@ def test_list_versions_raises():
 
 def test_search_market_skills_raises():
     with pytest.raises(SkillCenterUnsupportedError):
-        _client().search_market_skills(keyword="x")
+        _client().search_market_skills(SkillCenterMarketSearchRequest(keyword="x"))
 
 
 def test_get_market_tags_raises():

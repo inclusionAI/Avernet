@@ -23,10 +23,10 @@ from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
-from agentclaw.community.core.market_favorites.errors import FavoriteNotFoundError
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
+    MarketSource,
 )
 from agentclaw.community.core.spaces.models import (
     SpaceJoinStatus,
@@ -111,7 +111,7 @@ def test_endpoint_serializes_persisted_datetime_with_utc_marker(client, space_se
         ],
     )
 
-    response = client.get("/openapi/v1/spaces")
+    response = client.get("/openapi/v1/bots/spaces")
 
     assert response.status_code == 200
     assert response.json()["data"]["items"][0]["gmt_modified"] == "2026-08-17T07:50:45Z"
@@ -133,6 +133,7 @@ def test_naive_persisted_datetime_is_serialized_as_explicit_utc():
 def test_aware_datetime_is_normalized_to_utc():
     item = MarketFavoriteItem(
         favorite_id=1,
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         target_code="skill-1",
         favorite_at=datetime(
@@ -153,7 +154,7 @@ def test_aware_datetime_is_normalized_to_utc():
 def test_add_member_accepts_an_optional_role(
     client, member_service, payload, expected_role
 ):
-    response = client.post("/openapi/v1/spaces/7/members", json=payload)
+    response = client.post("/openapi/v1/bots/spaces/7/members", json=payload)
 
     assert response.status_code == 201
     body = response.json()
@@ -179,6 +180,7 @@ def test_openapi_advertises_nullable_member_profile_fields(client):
     favorite_properties = schemas["MarketFavoriteItem"]["properties"]
     assert set(favorite_properties) == {
         "favorite_id",
+        "market_source",
         "target_type",
         "target_code",
         "favorite_at",
@@ -186,21 +188,23 @@ def test_openapi_advertises_nullable_member_profile_fields(client):
     }
 
 
-def test_cancel_missing_favorite_returns_not_found(client, favorite_service):
-    favorite_service.cancel.side_effect = FavoriteNotFoundError(
-        "market favorite not found"
-    )
+def test_cancel_missing_favorite_returns_idempotent_success(client, favorite_service):
+    favorite_service.cancel.return_value = False
 
     response = client.post(
-        "/openapi/v1/spaces/7/market-favorites/cancel",
-        json={"target_type": "SKILL", "target_code": "skill-1"},
+        "/openapi/v1/bots/spaces/7/market-favorites/cancel",
+        json={
+            "market_source": "SKILLCENTER",
+            "target_type": "SKILL",
+            "target_code": "skill-1",
+        },
     )
 
-    assert response.status_code == 404
+    assert response.status_code == 200
     body = response.json()
-    assert body["code"] == 404000
-    assert body["message"] == "Not found"
-    assert body["data"] is None
+    assert body["code"] == 200000
+    assert body["data"]["is_favorited"] is False
+    assert body["data"]["changed"] is False
 
 
 def _space_record(space_type=SpaceType.TEAM):
@@ -248,6 +252,7 @@ def _favorite_record():
     return MarketFavoriteRecord(
         id=31,
         space_id=7,
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         target_code="skill-1",
         created_by="owner-1",
@@ -272,7 +277,7 @@ def test_list_spaces_forwards_filters_and_maps_page(client, space_service):
     )
 
     response = client.get(
-        "/openapi/v1/spaces",
+        "/openapi/v1/bots/spaces",
         params={"keyword": "team", "space_type": "TEAM", "page_no": 2, "page_size": 5},
     )
 
@@ -297,7 +302,7 @@ def test_initialize_personal_space_exposes_created_state(
         was_created,
     )
 
-    response = client.post("/openapi/v1/spaces/personal/initialize")
+    response = client.post("/openapi/v1/bots/spaces/personal/initialize")
 
     assert response.status_code == 200
     data = response.json()["data"]
@@ -310,7 +315,9 @@ def test_initialize_personal_space_exposes_created_state(
 def test_create_team_space_returns_owner_metadata(client, space_service):
     space_service.create_team.return_value = _space_record()
 
-    response = client.post("/openapi/v1/spaces/create", json={"space_name": "Team"})
+    response = client.post(
+        "/openapi/v1/bots/spaces/create", json={"space_name": "Team"}
+    )
 
     assert response.status_code == 201
     data = response.json()["data"]
@@ -330,12 +337,12 @@ def test_member_list_delete_and_role_update(client, member_service):
     )
 
     listed = client.get(
-        "/openapi/v1/spaces/7/members",
+        "/openapi/v1/bots/spaces/7/members",
         params={"keyword": "mem", "page_no": 2, "page_size": 10},
     )
-    deleted = client.delete("/openapi/v1/spaces/7/members/member-1")
+    deleted = client.delete("/openapi/v1/bots/spaces/7/members/member-1")
     updated = client.put(
-        "/openapi/v1/spaces/7/members/member-1/role", json={"role": "OWNER"}
+        "/openapi/v1/bots/spaces/7/members/member-1/role", json={"role": "OWNER"}
     )
 
     assert listed.status_code == deleted.status_code == updated.status_code == 200
@@ -368,20 +375,30 @@ def test_member_list_delete_and_role_update(client, member_service):
 
 
 def test_favorite_add_cancel_and_search(client, favorite_service):
-    favorite_service.add.return_value = _favorite_record()
+    favorite_service.add.return_value = (_favorite_record(), True)
+    favorite_service.cancel.return_value = True
     favorite_service.search.return_value = (1, [_favorite_record()])
 
     added = client.post(
-        "/openapi/v1/spaces/7/market-favorites",
-        json={"target_type": "SKILL", "target_code": "skill-1"},
+        "/openapi/v1/bots/spaces/7/market-favorites",
+        json={
+            "market_source": "SKILLCENTER",
+            "target_type": "SKILL",
+            "target_code": "skill-1",
+        },
     )
     canceled = client.post(
-        "/openapi/v1/spaces/7/market-favorites/cancel",
-        json={"target_type": "SKILL", "target_code": " skill-1 "},
+        "/openapi/v1/bots/spaces/7/market-favorites/cancel",
+        json={
+            "market_source": "SKILLCENTER",
+            "target_type": "SKILL",
+            "target_code": " skill-1 ",
+        },
     )
     searched = client.post(
-        "/openapi/v1/spaces/7/market-favorites/search",
+        "/openapi/v1/bots/spaces/7/market-favorites/search",
         json={
+            "market_source": "SKILLCENTER",
             "target_type": "SKILL",
             "keyword": "skill",
             "page_no": 2,
@@ -391,13 +408,17 @@ def test_favorite_add_cancel_and_search(client, favorite_service):
 
     assert added.status_code == canceled.status_code == searched.status_code == 200
     assert added.json()["data"]["is_favorited"] is True
+    assert added.json()["data"]["changed"] is True
     assert canceled.json()["data"] == {
+        "market_source": "SKILLCENTER",
         "target_type": "SKILL",
         "target_code": "skill-1",
         "is_favorited": False,
+        "changed": True,
     }
     assert searched.json()["data"]["items"][0] == {
         "favorite_id": 31,
+        "market_source": "SKILLCENTER",
         "target_type": "SKILL",
         "target_code": "skill-1",
         "favorite_at": "2026-08-18T01:02:03Z",
@@ -406,20 +427,52 @@ def test_favorite_add_cancel_and_search(client, favorite_service):
     favorite_service.add.assert_called_once_with(
         space_id=7,
         actor_id="owner-1",
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         target_code="skill-1",
     )
     favorite_service.cancel.assert_called_once_with(
         space_id=7,
         actor_id="owner-1",
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         target_code=" skill-1 ",
     )
     favorite_service.search.assert_called_once_with(
         space_id=7,
         actor_id="owner-1",
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         keyword="skill",
         page_no=2,
         page_size=5,
+    )
+
+
+def test_batch_favorite_status_forwards_space_source_and_targets(
+    client, favorite_service
+):
+    favorite_service.find_favorited_codes.return_value = ["skill-1"]
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/market-favorites/status",
+        json={
+            "market_source": "TEAMCLAW",
+            "target_type": "SKILL",
+            "target_codes": ["skill-1", "skill-2"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "market_source": "TEAMCLAW",
+        "target_type": "SKILL",
+        "favorited_target_codes": ["skill-1"],
+    }
+    favorite_service.find_favorited_codes.assert_called_once_with(
+        space_id=7,
+        actor_id="owner-1",
+        market_source=MarketSource.TEAMCLAW,
+        target_type=FavoriteTargetType.SKILL,
+        target_codes=["skill-1", "skill-2"],
     )

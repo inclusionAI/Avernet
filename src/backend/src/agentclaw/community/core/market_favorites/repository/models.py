@@ -9,9 +9,9 @@ from agentclaw.community.core.base import Base
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
+    MarketSource,
 )
 from agentclaw.community.plugin_api.models import AutoIncrementBigInteger
-from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -20,11 +20,11 @@ class MarketFavoriteModel(Base):
 
     id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
     space_id = Column(AutoIncrementBigInteger, nullable=False)
-    target_type = Column(String(32), nullable=False)
+    market_source = Column(String(32), nullable=False)
+    target_type = Column(String(64), nullable=False)
     target_code = Column(String(128), nullable=False)
-    created_by = Column(String(256), nullable=False)
-    env = Column(String(20), nullable=False, default=get_current_env)
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    created_by = Column(String(64), nullable=False)
+    env = Column(String(20), nullable=True, default=get_current_env)
     gmt_created = Column(DateTime, nullable=False, server_default=func.now())
     gmt_modified = Column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
@@ -32,18 +32,19 @@ class MarketFavoriteModel(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "avernet_tenant",
             "space_id",
+            "market_source",
             "target_type",
             "target_code",
             "env",
-            name="uk_market_favorite_target_env",
+            name="uk_space_target_env",
         ),
         Index(
-            "idx_market_favorite_space",
-            "avernet_tenant",
+            "idx_space_env_modified",
             "space_id",
             "env",
+            "market_source",
+            "target_type",
             "gmt_modified",
         ),
     )
@@ -52,6 +53,7 @@ class MarketFavoriteModel(Base):
         return MarketFavoriteRecord(
             id=self.id,
             space_id=self.space_id,
+            market_source=MarketSource(self.market_source),
             target_type=FavoriteTargetType(self.target_type),
             target_code=self.target_code,
             created_by=self.created_by,
@@ -59,6 +61,3 @@ class MarketFavoriteModel(Base):
             gmt_created=self.gmt_created,
             gmt_modified=self.gmt_modified,
         )
-
-
-register_avernet_tenant_guard(MarketFavoriteModel)

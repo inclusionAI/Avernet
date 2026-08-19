@@ -30,6 +30,8 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     CreateSpaceRequest,
     FavoriteAddedResult,
     FavoriteCanceledResult,
+    FavoriteStatusesRequest,
+    FavoriteStatusesResult,
     FavoriteTargetRequest,
     MarketFavoriteItem,
     PersonalSpaceInitialized,
@@ -52,6 +54,7 @@ from agentclaw.community.api.space_service import (
 )
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType as DomainFavoriteTargetType,
+    MarketSource as DomainMarketSource,
     MarketFavoriteRecord,
 )
 from agentclaw.community.core.spaces.models import (
@@ -63,7 +66,7 @@ from agentclaw.community.core.spaces.models import (
 from agentclaw.community.di import Injected
 
 
-router = APIRouter(prefix="/openapi/v1/spaces", tags=["spaces"])
+router = APIRouter(prefix="/openapi/v1/bots/spaces", tags=["spaces"])
 SpaceIdPath = Annotated[int, Path(ge=1, description="Space primary identifier.")]
 PageNoQuery = Annotated[int, Query(ge=1, description="One-based page number.")]
 PageSizeQuery = Annotated[
@@ -124,6 +127,7 @@ def _member_item(record: SpaceMemberSummaryRecord) -> SpaceMemberItem:
 def _favorite_item(record: MarketFavoriteRecord) -> MarketFavoriteItem:
     return MarketFavoriteItem(
         favorite_id=record.id,
+        market_source=record.market_source,
         target_type=record.target_type,
         target_code=record.target_code,
         favorite_at=record.gmt_created,
@@ -327,17 +331,20 @@ async def add_market_favorite(
     service: MarketFavoriteServiceProtocol = Injected(MarketFavoriteServiceProtocol),
 ) -> Envelope[FavoriteAddedResult]:
     actor_id = _require_user_delegation(caller)
-    record = service.add(
+    record, changed = service.add(
         space_id=space_id,
         actor_id=actor_id,
+        market_source=DomainMarketSource(body.market_source),
         target_type=DomainFavoriteTargetType(body.target_type),
         target_code=body.target_code,
     )
     return envelope(
         FavoriteAddedResult(
             favorite_id=record.id,
+            market_source=record.market_source,
             target_type=record.target_type,
             target_code=record.target_code,
+            changed=changed,
         ),
         request,
     )
@@ -356,16 +363,19 @@ async def cancel_market_favorite(
     service: MarketFavoriteServiceProtocol = Injected(MarketFavoriteServiceProtocol),
 ) -> Envelope[FavoriteCanceledResult]:
     actor_id = _require_user_delegation(caller)
-    service.cancel(
+    changed = service.cancel(
         space_id=space_id,
         actor_id=actor_id,
+        market_source=DomainMarketSource(body.market_source),
         target_type=DomainFavoriteTargetType(body.target_type),
         target_code=body.target_code,
     )
     return envelope(
         FavoriteCanceledResult(
+            market_source=body.market_source,
             target_type=body.target_type,
             target_code=body.target_code.strip(),
+            changed=changed,
         ),
         request,
     )
@@ -387,6 +397,11 @@ async def search_market_favorites(
     total, records = service.search(
         space_id=space_id,
         actor_id=actor_id,
+        market_source=(
+            DomainMarketSource(body.market_source)
+            if body.market_source is not None
+            else None
+        ),
         target_type=(
             DomainFavoriteTargetType(body.target_type)
             if body.target_type is not None
@@ -397,3 +412,33 @@ async def search_market_favorites(
         page_size=body.page_size,
     )
     return page(total, [_favorite_item(record) for record in records], request)
+
+
+@router.post(
+    "/{space_id}/market-favorites/status",
+    response_model=Envelope[FavoriteStatusesResult],
+)
+@envelope_errors
+async def find_market_favorite_statuses(
+    space_id: SpaceIdPath,
+    body: FavoriteStatusesRequest,
+    request: Request,
+    caller: ActingCallerDep,
+    service: MarketFavoriteServiceProtocol = Injected(MarketFavoriteServiceProtocol),
+) -> Envelope[FavoriteStatusesResult]:
+    actor_id = _require_user_delegation(caller)
+    target_codes = service.find_favorited_codes(
+        space_id=space_id,
+        actor_id=actor_id,
+        market_source=DomainMarketSource(body.market_source),
+        target_type=DomainFavoriteTargetType(body.target_type),
+        target_codes=body.target_codes,
+    )
+    return envelope(
+        FavoriteStatusesResult(
+            market_source=body.market_source,
+            target_type=body.target_type,
+            favorited_target_codes=target_codes,
+        ),
+        request,
+    )

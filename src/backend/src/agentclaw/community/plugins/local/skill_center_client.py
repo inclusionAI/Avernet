@@ -6,6 +6,8 @@
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
+    SkillCenterMarketSearchRequest,
+    SkillCenterMarketSearchResult,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamCreateResult,
 )
@@ -62,20 +64,15 @@ class LocalSkillCenterClient(MockSeam, SkillCenterClient):
         return []
 
     def search_market_skills(
-        self,
-        keyword: str = "",
-        tag: str = "",
-        page: int = 1,
-        page_size: int = 20,
-        team_id: str | None = None,
-    ) -> dict:
+        self, request: SkillCenterMarketSearchRequest
+    ) -> SkillCenterMarketSearchResult:
         logger.info(
-            "[LocalMock] search_market_skills: keyword=%s tag=%s team_id=%s",
-            keyword,
-            tag,
-            team_id,
+            "[LocalMock] search_market_skills: keyword=%s team_id=%s access_level=%s",
+            request.keyword,
+            request.team_id,
+            request.access_level,
         )
-        return {"success": True, "data": [], "total": 0}
+        return SkillCenterMarketSearchResult(total=0, items=())
 
     def get_market_tags(self) -> list[dict]:
         logger.info("[LocalMock] get_market_tags")

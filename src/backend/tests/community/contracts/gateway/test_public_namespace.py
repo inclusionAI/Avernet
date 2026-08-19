@@ -3,7 +3,7 @@
 The gateway forwards ``/openapi/v1/*`` transparently, so nothing internal may
 live under that prefix — every public route must sit under a prefix the
 gateway's shipped configuration routes and secures. Those prefixes are the
-bots domain plus the spaces / work-orders family (``upstreams.domains`` and
+bots domain plus the caller-identity exception (``upstreams.domains`` and
 ``route_security`` in ``src/gateway/configs/application.yaml``); a route under
 any other ``/openapi/v1`` prefix is a leak, not a new domain, until that
 configuration declares it.
@@ -21,9 +21,6 @@ _DECLARED_PREFIXES = (
     # The verified caller's own identity — the one operation whose answer is
     # the user. Declared with its gateway domain + route_security entries.
     "/openapi/v1/caller",
-    "/openapi/v1/spaces",
-    "/openapi/v1/work-orders",
-    "/openapi/v1/work-order-notifications",
 )
 
 
@@ -33,8 +30,7 @@ def _public_paths(app: FastAPI) -> list[str]:
 
 def _is_declared(path: str) -> bool:
     return any(
-        path == prefix or path.startswith(prefix + "/")
-        for prefix in _DECLARED_PREFIXES
+        path == prefix or path.startswith(prefix + "/") for prefix in _DECLARED_PREFIXES
     )
 
 

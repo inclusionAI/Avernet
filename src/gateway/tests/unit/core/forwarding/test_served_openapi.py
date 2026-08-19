@@ -73,8 +73,8 @@ def test_backend_artifact_serves_spaces_through_its_own_domain() -> None:
     )
 
     assert "/openapi/v1/bots" in document["paths"]
-    assert "/openapi/v1/spaces" in document["paths"]
-    assert document["paths"]["/openapi/v1/spaces"]["get"][
+    assert "/openapi/v1/bots/spaces" in document["paths"]
+    assert document["paths"]["/openapi/v1/bots/spaces"]["get"][
         "x-avernet-security"
     ] == {"user": "required"}
 

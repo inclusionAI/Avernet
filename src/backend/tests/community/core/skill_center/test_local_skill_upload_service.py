@@ -39,6 +39,10 @@ from agentclaw.community.core.skills_pool.types import (
 )
 
 
+def _skill_md(name: str = "upload-skill", description: str = "useful") -> bytes:
+    return f"---\nname: {name}\ndescription: {description}\n---\n".encode()
+
+
 def _zip(entries: dict[str, bytes], *, attrs: dict[str, int] | None = None) -> bytes:
     payload = io.BytesIO()
     with zipfile.ZipFile(payload, "w") as archive:
@@ -288,9 +292,7 @@ class _Cleanup:
 
     def commit_preparing(self, work_id, *, requires_runtime_restore):
         row = self.preparing[work_id - 1]
-        self.rows.append(
-            {**row, "requires_runtime_restore": requires_runtime_restore}
-        )
+        self.rows.append({**row, "requires_runtime_restore": requires_runtime_restore})
 
     def record_pending(self, **kwargs):
         self.rows.append(kwargs)
@@ -387,9 +389,7 @@ class _ReplacementRepo(_Repo):
         )
 
     def get_bot_local_skill(self, *, skill_id, **_kwargs):
-        return next(
-            (row for row in self.rows if str(row["id"]) == str(skill_id)), None
-        )
+        return next((row for row in self.rows if str(row["id"]) == str(skill_id)), None)
 
     def update(self, skill_id, values):
         self.updates.append((skill_id, values))
@@ -544,7 +544,7 @@ async def test_upload_maps_guard_failures_to_public_domain_errors(
             bot_id="bot",
             owner_id="owner",
             actor_id="owner",
-            package=_zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"}),
+            package=_zip({"SKILL.md": _skill_md()}),
         )
 
 
@@ -650,7 +650,7 @@ async def test_upload_creates_missing_bot_default_set_before_association():
         bot_id="bot",
         owner_id="owner",
         actor_id="owner",
-        package=_zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"}),
+        package=_zip({"SKILL.md": _skill_md()}),
     )
 
     assert result["operation"] == "created"
@@ -677,7 +677,7 @@ async def test_upload_creates_missing_bot_default_set_before_association():
 
 @pytest.mark.asyncio
 async def test_not_ready_and_storage_failure_leave_no_public_skill():
-    package = _zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"})
+    package = _zip({"SKILL.md": _skill_md()})
     with pytest.raises(LocalSkillNotReadyError):
         await _service(_Filesystem(), status="PENDING").upload_local_skill(
             bot_id="bot", owner_id="owner", actor_id="owner", package=package
@@ -706,7 +706,7 @@ def test_zip_accepts_root_skill_with_subdirectories_and_matching_wrapper():
     name, _, files = service._unpack(
         _zip(
             {
-                "SKILL.md": b"name: root-skill\ndescription: useful\n",
+                "SKILL.md": _skill_md("root-skill"),
                 "scripts/main.py": b"print('ok')",
             }
         )
@@ -716,7 +716,7 @@ def test_zip_accepts_root_skill_with_subdirectories_and_matching_wrapper():
     name, _, files = service._unpack(
         _zip(
             {
-                "wrapped/SKILL.md": b"name: wrapped\ndescription: useful\n",
+                "wrapped/SKILL.md": _skill_md("wrapped"),
                 "wrapped/a.txt": b"x",
             }
         )
@@ -781,9 +781,7 @@ def test_zip_rejects_missing_multiple_outside_wrapper_and_normalized_duplicates(
 @pytest.mark.parametrize("name", ["skills-center", "skills-local", "skills-repo"])
 def test_zip_rejects_reserved_content_store_names(name):
     with pytest.raises(LocalSkillInvalidPackageError):
-        _service(_Filesystem())._unpack(
-            _zip({"SKILL.md": f"name: {name}\ndescription: reserved\n".encode()})
-        )
+        _service(_Filesystem())._unpack(_zip({"SKILL.md": _skill_md(name, "reserved")}))
 
 
 @pytest.mark.parametrize("kind", [0o120000, 0o160000, 0o060000])
@@ -801,25 +799,21 @@ def test_zip_enforces_documented_file_count_and_path_and_size_limits(monkeypatch
     service = _service(_Filesystem())
     monkeypatch.setattr(upload_module, "_MAX_FILES", 1)
     with pytest.raises(upload_module.LocalSkillTooLargeError):
-        service._unpack(
-            _zip({"SKILL.md": b"name: many\ndescription: yes\n", "x": b"x"})
-        )
+        service._unpack(_zip({"SKILL.md": _skill_md("many", "yes"), "x": b"x"}))
     monkeypatch.setattr(upload_module, "_MAX_FILES", 500)
     with pytest.raises(LocalSkillInvalidPackageError):
-        service._unpack(
-            _zip({"a" * 257: b"x", "SKILL.md": b"name: long\ndescription: yes\n"})
-        )
+        service._unpack(_zip({"a" * 257: b"x", "SKILL.md": _skill_md("long", "yes")}))
     monkeypatch.setattr(upload_module, "_MAX_FILE", 2)
     with pytest.raises(upload_module.LocalSkillTooLargeError):
-        service._unpack(_zip({"SKILL.md": b"name: big\ndescription: yes\n"}))
+        service._unpack(_zip({"SKILL.md": _skill_md("big", "yes")}))
     monkeypatch.setattr(upload_module, "_MAX_FILE", 10 * 1024 * 1024)
     monkeypatch.setattr(upload_module, "_MAX_EXPANDED", 2)
     with pytest.raises(upload_module.LocalSkillTooLargeError):
-        service._unpack(_zip({"SKILL.md": b"name: expanded\ndescription: yes\n"}))
+        service._unpack(_zip({"SKILL.md": _skill_md("expanded", "yes")}))
     monkeypatch.setattr(upload_module, "_MAX_EXPANDED", 50 * 1024 * 1024)
     monkeypatch.setattr(upload_module, "_MAX_COMPRESSED", 1)
     with pytest.raises(upload_module.LocalSkillTooLargeError):
-        service._unpack(_zip({"SKILL.md": b"name: compressed\ndescription: yes\n"}))
+        service._unpack(_zip({"SKILL.md": _skill_md("compressed", "yes")}))
 
 
 class _Denied:
@@ -831,7 +825,7 @@ class _Denied:
 async def test_owner_locator_and_denied_collaborator_cannot_forge_access():
     from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 
-    package = _zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"})
+    package = _zip({"SKILL.md": _skill_md()})
     with pytest.raises(LocalSkillNotFoundError):
         await _service(_Filesystem(), collaborators=_Denied()).upload_local_skill(
             bot_id="bot", owner_id="owner", actor_id="attacker", package=package
@@ -853,7 +847,7 @@ class _FailAudit(_Audit):
     "stage", ["write", "create", "association", "exclusion", "audit"]
 )
 async def test_each_creation_failure_compensates_and_never_returns_success(stage):
-    package = _zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"})
+    package = _zip({"SKILL.md": _skill_md()})
     filesystem = _Filesystem(fail=stage == "write")
     repo = _FailRepo() if stage == "create" else _Repo()
     sets = _Sets(fail_at=stage)
@@ -868,7 +862,7 @@ async def test_each_creation_failure_compensates_and_never_returns_success(stage
 
 @pytest.mark.asyncio
 async def test_failed_rollback_step_does_not_stop_package_cleanup():
-    package = _zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"})
+    package = _zip({"SKILL.md": _skill_md()})
     repo = _Repo()
     sets = _Sets()
     sets.remove_default_skill_exclusion = lambda *args: (_ for _ in ()).throw(
@@ -887,7 +881,7 @@ async def test_failed_rollback_step_does_not_stop_package_cleanup():
 @pytest.mark.asyncio
 async def test_failed_final_cleanup_leaves_no_database_authority_or_success():
     """A residual orphan is not retried into or exposed as a Local Skill."""
-    package = _zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"})
+    package = _zip({"SKILL.md": _skill_md()})
     filesystem = _Filesystem(cleanup_results=[False, False])
     repo = _Repo()
     sets = _Sets()
@@ -914,7 +908,7 @@ async def test_existing_orphan_must_clear_before_a_retry_writes_new_files():
             bot_id="bot",
             owner_id="owner",
             actor_id="owner",
-            package=_zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"}),
+            package=_zip({"SKILL.md": _skill_md()}),
         )
     assert repo.created == []
     assert filesystem.files
@@ -948,9 +942,7 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
         bot_id="bot",
         owner_id="owner",
         actor_id="collaborator",
-        package=_zip(
-            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-        ),
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
     )
     assert result["operation"] == "updated"
     assert result["skill"]["id"] == "9"
@@ -989,9 +981,7 @@ async def test_replacement_is_blocked_while_the_same_skill_has_delete_repair_wor
             bot_id="bot",
             owner_id="owner",
             actor_id="owner",
-            package=_zip(
-                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-            ),
+            package=_zip({"SKILL.md": _skill_md(description="new description")}),
         )
 
     assert repo.atomic_replacements == []
@@ -1013,9 +1003,7 @@ async def test_replacement_reads_desired_state_from_exact_local_skill_query():
         bot_id="bot",
         owner_id="owner",
         actor_id="owner",
-        package=_zip(
-            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-        ),
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
     )
 
     assert result["operation"] == "updated"
@@ -1034,9 +1022,7 @@ async def test_active_replacement_repairs_missing_default_set_membership_before_
         bot_id="bot",
         owner_id="owner",
         actor_id="owner",
-        package=_zip(
-            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-        ),
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
     )
 
     assert sets.associations == [("4", "9")]
@@ -1059,9 +1045,7 @@ async def test_teclaw_replacement_resolves_provider_before_staging():
         bot_id="bot",
         owner_id="owner",
         actor_id="owner",
-        package=_zip(
-            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-        ),
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
     )
 
     factory = service._skill_service_factory
@@ -1082,9 +1066,7 @@ async def test_active_replacement_runtime_failure_restores_old_metadata_and_runt
             bot_id="bot",
             owner_id="owner",
             actor_id="owner",
-            package=_zip(
-                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-            ),
+            package=_zip({"SKILL.md": _skill_md(description="new description")}),
         )
     assert old["git_path"] == "local:///private/skills-local/upload-skill"
     assert old["description"] == "old description"
@@ -1107,9 +1089,7 @@ async def test_active_replacement_restore_sync_failure_keeps_original_authority_
             bot_id="bot",
             owner_id="owner",
             actor_id="owner",
-            package=_zip(
-                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-            ),
+            package=_zip({"SKILL.md": _skill_md(description="new description")}),
         )
     assert old["git_path"] == "local:///private/skills-local/upload-skill"
     staged_work = next(
@@ -1131,9 +1111,7 @@ async def test_duplicate_legacy_matches_fail_without_writing_or_selecting_a_cand
             bot_id="bot",
             owner_id="owner",
             actor_id="owner",
-            package=_zip(
-                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-            ),
+            package=_zip({"SKILL.md": _skill_md(description="new description")}),
         )
     assert filesystem.files == {}
     assert repo.updates == []
@@ -1152,9 +1130,7 @@ async def test_foreign_owner_same_name_is_excluded_from_this_owner_scope():
         bot_id="bot",
         owner_id="owner",
         actor_id="owner",
-        package=_zip(
-            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-        ),
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
     )
     assert result["operation"] == "created"
     assert repo.updates == []
@@ -1172,9 +1148,7 @@ async def test_post_switch_obsolete_cleanup_failure_is_recorded_without_undoing_
         bot_id="bot",
         owner_id="owner",
         actor_id="owner",
-        package=_zip(
-            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-        ),
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
     )
     assert result["operation"] == "updated"
     assert cleanup.rows == [
@@ -1205,9 +1179,7 @@ async def test_cleanup_registration_failure_restores_old_authority_before_runtim
             bot_id="bot",
             owner_id="owner",
             actor_id="owner",
-            package=_zip(
-                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-            ),
+            package=_zip({"SKILL.md": _skill_md(description="new description")}),
         )
     assert old["git_path"] == "local:///private/skills-local/upload-skill"
     assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == b"old"
@@ -1229,9 +1201,7 @@ async def test_later_serialized_upload_retries_durable_cleanup_work():
         bot_id="bot",
         owner_id="owner",
         actor_id="owner",
-        package=_zip(
-            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-        ),
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
     )
     assert result["operation"] == "updated"
     assert 12 in cleanup.completed
@@ -1286,9 +1256,7 @@ async def test_cleanup_progress_write_failure_blocks_the_next_replacement(
             bot_id="bot",
             owner_id="owner",
             actor_id="owner",
-            package=_zip(
-                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-            ),
+            package=_zip({"SKILL.md": _skill_md(description="new description")}),
         )
     assert repo.updates == []
 
@@ -1308,9 +1276,7 @@ async def test_runtime_restore_work_keeps_staged_bytes_until_old_mapping_is_rest
         bot_id="bot",
         owner_id="owner",
         actor_id="owner",
-        package=_zip(
-            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-        ),
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
     )
     assert runtime.calls == 2
     assert 12 in cleanup.completed
@@ -1332,9 +1298,7 @@ async def test_runtime_restore_failure_blocks_the_next_local_skill_mutation():
             bot_id="bot",
             owner_id="owner",
             actor_id="owner",
-            package=_zip(
-                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
-            ),
+            package=_zip({"SKILL.md": _skill_md(description="new description")}),
         )
 
     assert runtime.calls == 1
@@ -1385,6 +1349,7 @@ class _YieldingFilesystem(_Filesystem):
 async def test_concurrent_same_name_uploads_serialize_then_converge_on_one_skill():
     repo = _ConcurrentRepo()
     filesystem = _YieldingFilesystem()
+
     class _Participation:
         def resolve(self, *, scope):
             return SkillLayoutParticipation(
@@ -1397,7 +1362,7 @@ async def test_concurrent_same_name_uploads_serialize_then_converge_on_one_skill
         layout_repository=_PoolLayouts(),
         participation_resolver=_Participation(),
     )
-    package = _zip({"SKILL.md": b"name: upload-skill\ndescription: concurrent\n"})
+    package = _zip({"SKILL.md": _skill_md(description="concurrent")})
     first, second = await asyncio.gather(
         _replacement_service(
             filesystem, repo, _ReplacementRuntime([True]), guard=guard

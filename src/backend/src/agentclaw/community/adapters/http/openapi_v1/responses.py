@@ -198,6 +198,7 @@ from agentclaw.community.core.service_bot.errors import (
     ServicePublicationUnsupportedError,
 )
 from agentclaw.community.plugin_api.skill_center_client import (
+    SkillCenterMarketSearchError,
     SkillCenterTeamCreateError,
 )
 
@@ -279,6 +280,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         502,
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
     ),
+    SkillCenterMarketSearchError: (502, "Skill Center marketplace unavailable"),
     WorkOrderAccessDeniedError: (403, WorkOrderPublicErrorMessage.FORBIDDEN),
     WorkOrderNotFoundError: (404, WorkOrderPublicErrorMessage.NOT_FOUND),
     WorkOrderNotificationNotFoundError: (

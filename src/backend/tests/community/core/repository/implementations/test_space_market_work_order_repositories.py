@@ -4,7 +4,10 @@ import asyncio
 
 import pytest
 
-from agentclaw.community.core.market_favorites.models import FavoriteTargetType
+from agentclaw.community.core.market_favorites.models import (
+    FavoriteTargetType,
+    MarketSource,
+)
 from agentclaw.community.core.repository.implementations.market_favorites.favorite import (
     MarketFavoriteRepository,
 )
@@ -15,7 +18,7 @@ from agentclaw.community.core.repository.implementations.work_orders.work_order 
     WorkOrderRepository,
 )
 from agentclaw.community.core.spaces.errors import SpaceMemberAlreadyExistsError
-from agentclaw.community.core.spaces.models import SpaceRole, SpaceType
+from agentclaw.community.core.spaces.models import SpaceJoinStatus, SpaceRole, SpaceType
 from agentclaw.community.core.spaces.repository.models import SpaceModel
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
@@ -32,6 +35,9 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderNotificationDraft,
     WorkOrderQueryType,
     WorkOrderStatus,
+)
+from agentclaw.community.core.work_orders.repository.models import (
+    WorkOrderNotificationModel,
 )
 from agentclaw.community.plugins.local.database import SqliteDB, reset_for_tests
 
@@ -160,20 +166,69 @@ def test_space_repository_full_member_lifecycle(db) -> None:
     )
 
 
+def test_space_repository_marks_pending_join_request_as_applying(db) -> None:
+    spaces = SpaceRepository(db)
+    work_orders = WorkOrderRepository(db)
+    team = _team(spaces)
+    other_team = _team(spaces, name="Other Team", creator="owner-2")
+
+    work_orders.create_space_join_request(
+        space_id=team.id,
+        applicant_user_id="applicant-1",
+        applicant_name="Applicant",
+        apply_reason="join",
+        env="dev",
+    )
+
+    total, items = spaces.list_spaces(
+        user_id="applicant-1",
+        env="dev",
+        keyword=None,
+        space_type=SpaceType.TEAM.value,
+        offset=0,
+        limit=20,
+    )
+
+    assert total == 2
+    statuses = {item.space.id: item.join_status for item in items}
+    assert statuses[team.id] is SpaceJoinStatus.APPLYING
+    assert statuses[other_team.id] is SpaceJoinStatus.NOT_JOINED
+
+    spaces.add_member(
+        space_id=team.id,
+        user_id="applicant-1",
+        role=SpaceRole.MEMBER,
+        creator_id="owner-1",
+        env="dev",
+    )
+    _, joined_items = spaces.list_spaces(
+        user_id="applicant-1",
+        env="dev",
+        keyword=None,
+        space_type=SpaceType.TEAM.value,
+        offset=0,
+        limit=20,
+    )
+    joined = next(item for item in joined_items if item.space.id == team.id)
+    assert joined.join_status is SpaceJoinStatus.JOINED
+
+
 def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:
     spaces = SpaceRepository(db)
     space = _team(spaces)
     repository = MarketFavoriteRepository(db)
 
-    first = repository.add(
+    first, first_changed = repository.add(
         space_id=space.id,
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         target_code="skill-1",
         created_by="owner-1",
         env="dev",
     )
-    duplicate = repository.add(
+    duplicate, duplicate_changed = repository.add(
         space_id=space.id,
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         target_code="skill-1",
         created_by="owner-1",
@@ -181,15 +236,29 @@ def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:
     )
     repository.add(
         space_id=space.id,
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.MCP,
         target_code="mcp-1",
         created_by="owner-1",
         env="dev",
     )
+    tc_record, tc_changed = repository.add(
+        space_id=space.id,
+        market_source=MarketSource.TEAMCLAW,
+        target_type=FavoriteTargetType.SKILL,
+        target_code="skill-1",
+        created_by="member-1",
+        env="dev",
+    )
 
+    assert first_changed is True
+    assert duplicate_changed is False
     assert duplicate.id == first.id
+    assert tc_changed is True
+    assert tc_record.id != first.id
     total, rows = repository.search(
         space_id=space.id,
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         keyword="skill",
         env="dev",
@@ -198,9 +267,18 @@ def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:
     )
     assert total == 1
     assert rows[0].target_code == "skill-1"
+    assert rows[0].market_source is MarketSource.SKILLCENTER
+    assert repository.find_favorited_codes(
+        space_id=space.id,
+        market_source=MarketSource.TEAMCLAW,
+        target_type=FavoriteTargetType.SKILL,
+        target_codes=["skill-1", "missing"],
+        env="dev",
+    ) == {"skill-1"}
     assert (
         repository.cancel(
             space_id=space.id,
+            market_source=MarketSource.SKILLCENTER,
             target_type=FavoriteTargetType.SKILL,
             target_code="skill-1",
             env="dev",
@@ -210,6 +288,7 @@ def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:
     assert (
         repository.cancel(
             space_id=space.id,
+            market_source=MarketSource.SKILLCENTER,
             target_type=FavoriteTargetType.SKILL,
             target_code="skill-1",
             env="dev",
@@ -300,6 +379,15 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
 
     notification = pending[0].notification
     assert repository.count_unread(recipient_user_id="owner-1", env="dev") == 1
+    owner_badge = repository.get_notification_badge_summary(
+        recipient_user_id="owner-1", env="dev"
+    )
+    assert owner_badge.model_dump() == {
+        "unread_count": 1,
+        "pending_approval_count": 1,
+        "unread_notice_count": 0,
+        "badge_count": 1,
+    }
     detail = repository.get_notification(
         notification_id=notification.id,
         recipient_user_id="owner-1",
@@ -308,6 +396,14 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     )
     assert detail.notification.is_read is True
     assert detail.can_approve is True
+    assert repository.get_notification_badge_summary(
+        recipient_user_id="owner-1", env="dev"
+    ).model_dump() == {
+        "unread_count": 0,
+        "pending_approval_count": 1,
+        "unread_notice_count": 0,
+        "badge_count": 1,
+    }
     assert (
         repository.mark_notification_read(
             notification_id=999, recipient_user_id="owner-1", env="dev"
@@ -348,6 +444,24 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
         spaces.get_member(space_id=space.id, user_id="applicant-1", env="dev")
         is not None
     )
+    _, joined_spaces = spaces.list_spaces(
+        user_id="applicant-1",
+        env="dev",
+        keyword=None,
+        space_type=SpaceType.TEAM.value,
+        offset=0,
+        limit=20,
+    )
+    assert (
+        next(item for item in joined_spaces if item.space.id == space.id).join_status
+        is SpaceJoinStatus.JOINED
+    )
+    assert (
+        repository.get_notification_badge_summary(
+            recipient_user_id="owner-1", env="dev"
+        ).pending_approval_count
+        == 0
+    )
     with pytest.raises(WorkOrderAlreadyProcessedError):
         repository.review_space_join(
             work_order_id=record.id,
@@ -386,12 +500,48 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     assert applicant_notification.title == approved_notification.title
     assert applicant_notification.content == approved_notification.content
     assert (
+        repository.list_items(
+            actor_id="applicant-1",
+            env="dev",
+            query_type=WorkOrderQueryType.PROCESSED_BY_ME,
+            item_type=WorkOrderItemType.NOTICE,
+            offset=0,
+            limit=20,
+        )[0]
+        == 0
+    )
+    applicant_badge = repository.get_notification_badge_summary(
+        recipient_user_id="applicant-1", env="dev"
+    )
+    assert applicant_badge.model_dump() == {
+        "unread_count": 1,
+        "pending_approval_count": 0,
+        "unread_notice_count": 1,
+        "badge_count": 1,
+    }
+    assert (
         repository.mark_notification_read(
             notification_id=applicant_notification.id,
             recipient_user_id="applicant-1",
             env="dev",
         ).is_read
         is True
+    )
+    processed_notice_total, processed_notices = repository.list_items(
+        actor_id="applicant-1",
+        env="dev",
+        query_type=WorkOrderQueryType.PROCESSED_BY_ME,
+        item_type=WorkOrderItemType.NOTICE,
+        offset=0,
+        limit=20,
+    )
+    assert processed_notice_total == 1
+    assert processed_notices[0].notification.id == applicant_notification.id
+    assert (
+        repository.get_notification_badge_summary(
+            recipient_user_id="applicant-1", env="dev"
+        ).badge_count
+        == 0
     )
     assert (
         repository.mark_all_notifications_read(
@@ -450,6 +600,18 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
     )
     assert result.status is WorkOrderStatus.REJECTED
     assert spaces.get_member(space_id=team.id, user_id="applicant-2", env="dev") is None
+    _, rejected_spaces = spaces.list_spaces(
+        user_id="applicant-2",
+        env="dev",
+        keyword=None,
+        space_type=SpaceType.TEAM.value,
+        offset=0,
+        limit=20,
+    )
+    assert (
+        next(item for item in rejected_spaces if item.space.id == team.id).join_status
+        is SpaceJoinStatus.NOT_JOINED
+    )
     _, applicant_items = repository.list_items(
         actor_id="applicant-2",
         env="dev",
@@ -460,3 +622,38 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
     )
     assert applicant_items[0].notification.title == "custom rejected title"
     assert applicant_items[0].notification.content == "custom rejected content"
+
+
+def test_badge_counts_distinct_pending_work_orders(db) -> None:
+    spaces = SpaceRepository(db)
+    space = _team(spaces, name="Badge Team")
+    repository = WorkOrderRepository(db)
+    record = repository.create_space_join_request(
+        space_id=space.id,
+        applicant_user_id="applicant-badge",
+        applicant_name="Applicant",
+        apply_reason="join",
+        env="dev",
+    )
+    with db.orm_session() as session:
+        session.add(
+            WorkOrderNotificationModel(
+                work_order_id=record.id,
+                recipient_user_id="owner-1",
+                notification_category=NotificationCategory.APPROVAL.value,
+                event_type=WorkOrderEventType.SPACE_JOIN_APPLIED.value,
+                biz_type=WorkOrderBizType.SPACE_JOIN.value,
+                biz_id=str(space.id),
+                title="duplicate approval",
+                content="duplicate",
+                env="dev",
+            )
+        )
+        session.flush()
+
+    summary = repository.get_notification_badge_summary(
+        recipient_user_id="owner-1", env="dev"
+    )
+    assert summary.unread_count == 2
+    assert summary.pending_approval_count == 1
+    assert summary.badge_count == 1

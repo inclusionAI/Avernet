@@ -115,19 +115,27 @@ class WorkOrderService:
             raise WorkOrderNotFoundError("work order not found")
         return detail
 
-    def approve(self, *, work_order_id: int, actor_id: str, review_remark: str):
+    def approve(self, *, work_order_id: int, actor_id: str, review_remark: str | None):
+        normalized_remark = (review_remark or "").strip() or None
+        if normalized_remark is not None and len(normalized_remark) > 512:
+            raise WorkOrderInvalidRemarkError(
+                "value must contain no more than 512 characters"
+            )
         return self._review(
             work_order_id=work_order_id,
             actor_id=actor_id,
-            review_remark=review_remark,
+            review_remark=normalized_remark,
             target_status=WorkOrderStatus.APPROVED,
         )
 
-    def reject(self, *, work_order_id: int, actor_id: str, review_remark: str):
+    def reject(self, *, work_order_id: int, actor_id: str, review_remark: str | None):
+        normalized_remark = self._required_text(
+            review_remark or "", limit=512, error=WorkOrderInvalidRemarkError
+        )
         return self._review(
             work_order_id=work_order_id,
             actor_id=actor_id,
-            review_remark=review_remark,
+            review_remark=normalized_remark,
             target_status=WorkOrderStatus.REJECTED,
         )
 
@@ -136,12 +144,9 @@ class WorkOrderService:
         *,
         work_order_id: int,
         actor_id: str,
-        review_remark: str,
+        review_remark: str | None,
         target_status: WorkOrderStatus,
     ):
-        remark = self._required_text(
-            review_remark, limit=512, error=WorkOrderInvalidRemarkError
-        )
         detail = self.get_detail(work_order_id=work_order_id, actor_id=actor_id)
         try:
             self._access.require_space_owner(space_id=detail.space_id, user_id=actor_id)
@@ -150,12 +155,12 @@ class WorkOrderService:
         notification = self._notifications.build_space_join_review_result(
             detail=detail,
             target_status=target_status,
-            review_remark=remark,
+            review_remark=review_remark,
         )
         return self._repository.review_space_join(
             work_order_id=work_order_id,
             reviewer_user_id=actor_id,
-            review_remark=remark,
+            review_remark=review_remark,
             target_status=target_status,
             notification=notification,
             env=get_current_env(),
@@ -172,7 +177,7 @@ class WorkOrderNotificationService:
         *,
         detail: WorkOrderDetail,
         target_status: WorkOrderStatus,
-        review_remark: str,
+        review_remark: str | None,
     ) -> WorkOrderNotificationDraft:
         if target_status is WorkOrderStatus.APPROVED:
             title = WorkOrderMessageTitle.SPACE_JOIN_APPROVED.value
@@ -180,6 +185,8 @@ class WorkOrderNotificationService:
                 space_name=detail.space_name
             )
         elif target_status is WorkOrderStatus.REJECTED:
+            if review_remark is None:
+                raise WorkOrderInvalidRemarkError("review remark is required")
             title = WorkOrderMessageTitle.SPACE_JOIN_REJECTED.value
             content = WorkOrderMessageContent.SPACE_JOIN_REJECTED.value.format(
                 space_name=detail.space_name,
@@ -212,6 +219,11 @@ class WorkOrderNotificationService:
 
     def unread_count(self, *, actor_id: str) -> int:
         return self._repository.count_unread(
+            recipient_user_id=actor_id, env=get_current_env()
+        )
+
+    def badge_summary(self, *, actor_id: str):
+        return self._repository.get_notification_badge_summary(
             recipient_user_id=actor_id, env=get_current_env()
         )
 

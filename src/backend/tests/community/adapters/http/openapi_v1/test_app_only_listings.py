@@ -627,67 +627,88 @@ _UNGRANTED_APP_CASES = {
         # a stranger app cannot read a person's quota by naming them.
         "assert_starved": lambda response: response.status_code == 404,
     },
-    ("GET", "/openapi/v1/spaces"): {
-        "request": lambda client: client.get("/openapi/v1/spaces"),
+    ("GET", "/openapi/v1/bots/spaces"): {
+        "request": lambda client: client.get("/openapi/v1/bots/spaces"),
         "assert_starved": lambda response: response.status_code == 404,
     },
-    ("GET", "/openapi/v1/spaces/{space_id}/members"): {
-        "request": lambda client: client.get("/openapi/v1/spaces/1/members"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/members"): {
+        "request": lambda client: client.get("/openapi/v1/bots/spaces/1/members"),
         "assert_starved": lambda response: response.status_code == 404,
     },
-    ("POST", "/openapi/v1/spaces/{space_id}/market-favorites"): {
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites"): {
         "request": lambda client: client.post(
-            "/openapi/v1/spaces/1/market-favorites",
-            json={"target_type": "SKILL", "target_code": "skill-1"},
+            "/openapi/v1/bots/spaces/1/market-favorites",
+            json={
+                "market_source": "SKILLCENTER",
+                "target_type": "SKILL",
+                "target_code": "skill-1",
+            },
         ),
         "assert_starved": lambda response: response.status_code == 404,
     },
-    ("POST", "/openapi/v1/spaces/{space_id}/market-favorites/cancel"): {
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites/cancel"): {
         "request": lambda client: client.post(
-            "/openapi/v1/spaces/1/market-favorites/cancel",
-            json={"target_type": "SKILL", "target_code": "skill-1"},
+            "/openapi/v1/bots/spaces/1/market-favorites/cancel",
+            json={
+                "market_source": "SKILLCENTER",
+                "target_type": "SKILL",
+                "target_code": "skill-1",
+            },
         ),
         "assert_starved": lambda response: response.status_code == 404,
     },
-    ("POST", "/openapi/v1/spaces/{space_id}/market-favorites/search"): {
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites/search"): {
         "request": lambda client: client.post(
-            "/openapi/v1/spaces/1/market-favorites/search", json={}
+            "/openapi/v1/bots/spaces/1/market-favorites/search", json={}
         ),
         "assert_starved": lambda response: response.status_code == 404,
     },
-    ("POST", "/openapi/v1/spaces/{space_id}/join-requests"): {
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites/status"): {
         "request": lambda client: client.post(
-            "/openapi/v1/spaces/1/join-requests", json={"reason": "join"}
+            "/openapi/v1/bots/spaces/1/market-favorites/status",
+            json={
+                "market_source": "SKILLCENTER",
+                "target_type": "SKILL",
+                "target_codes": ["skill-1"],
+            },
         ),
         "assert_starved": lambda response: response.status_code == 404,
     },
-    ("GET", "/openapi/v1/work-orders"): {
-        "request": lambda client: client.get("/openapi/v1/work-orders"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/join-requests"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/spaces/1/join-requests", json={"reason": "join"}
+        ),
         "assert_starved": lambda response: response.status_code == 404,
     },
-    ("GET", "/openapi/v1/work-orders/{work_order_id}"): {
-        "request": lambda client: client.get("/openapi/v1/work-orders/1"),
+    ("GET", "/openapi/v1/bots/work-orders"): {
+        "request": lambda client: client.get("/openapi/v1/bots/work-orders"),
         "assert_starved": lambda response: response.status_code == 404,
     },
-    ("GET", "/openapi/v1/work-order-notifications/unread-count"): {
+    ("GET", "/openapi/v1/bots/work-orders/{work_order_id}"): {
+        "request": lambda client: client.get("/openapi/v1/bots/work-orders/1"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/work-order-notifications/unread-count"): {
         "request": lambda client: client.get(
-            "/openapi/v1/work-order-notifications/unread-count"
+            "/openapi/v1/bots/work-order-notifications/unread-count"
         ),
         "assert_starved": lambda response: response.status_code == 404,
     },
-    ("GET", "/openapi/v1/work-order-notifications/{notification_id}"): {
-        "request": lambda client: client.get("/openapi/v1/work-order-notifications/1"),
-        "assert_starved": lambda response: response.status_code == 404,
-    },
-    ("POST", "/openapi/v1/work-order-notifications/read-all"): {
-        "request": lambda client: client.post(
-            "/openapi/v1/work-order-notifications/read-all"
+    ("GET", "/openapi/v1/bots/work-order-notifications/{notification_id}"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/work-order-notifications/1"
         ),
         "assert_starved": lambda response: response.status_code == 404,
     },
-    ("POST", "/openapi/v1/work-order-notifications/{notification_id}/read"): {
+    ("POST", "/openapi/v1/bots/work-order-notifications/read-all"): {
         "request": lambda client: client.post(
-            "/openapi/v1/work-order-notifications/1/read"
+            "/openapi/v1/bots/work-order-notifications/read-all"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/work-order-notifications/{notification_id}/read"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/work-order-notifications/1/read"
         ),
         "assert_starved": lambda response: response.status_code == 404,
     },

@@ -26,6 +26,11 @@ from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
     SpaceModel,
 )
+from agentclaw.community.core.work_orders.models import (
+    WorkOrderBizType,
+    WorkOrderStatus,
+)
+from agentclaw.community.core.work_orders.repository.models import WorkOrderModel
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
@@ -35,6 +40,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
         self._db = db
         self._Space = SpaceModel
         self._Member = SpaceMemberModel
+        self._WorkOrder = WorkOrderModel
 
     @staticmethod
     def _new_code() -> str:
@@ -74,7 +80,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member(
                         space_id=space.id,
                         user_id=user_id,
-                    role=self._stored_role(SpaceRole.OWNER),
+                        role=self._stored_role(SpaceRole.OWNER),
                         env=env,
                         created_by=user_id,
                     )
@@ -117,7 +123,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member(
                         space_id=space.id,
                         user_id=creator_id,
-                    role=self._stored_role(SpaceRole.OWNER),
+                        role=self._stored_role(SpaceRole.OWNER),
                         env=env,
                         created_by=creator_id,
                     )
@@ -203,6 +209,25 @@ class SpaceRepository(SpaceRepositoryProtocol):
                 .limit(limit)
                 .all()
             )
+            page_space_ids = [row.id for row in rows]
+            applying_space_ids = (
+                {
+                    int(biz_id)
+                    for (biz_id,) in db.query(self._WorkOrder.biz_id)
+                    .filter(
+                        self._WorkOrder.biz_type == WorkOrderBizType.SPACE_JOIN.value,
+                        self._WorkOrder.biz_id.in_(
+                            [str(value) for value in page_space_ids]
+                        ),
+                        self._WorkOrder.applicant_user_id == user_id,
+                        self._WorkOrder.status == WorkOrderStatus.PENDING.value,
+                        self._WorkOrder.env == env,
+                    )
+                    .all()
+                }
+                if page_space_ids
+                else set()
+            )
             items = []
             for row in rows:
                 current = (
@@ -244,7 +269,11 @@ class SpaceRepository(SpaceRepositoryProtocol):
                         join_status=(
                             SpaceJoinStatus.JOINED
                             if current is not None
-                            else SpaceJoinStatus.NOT_JOINED
+                            else (
+                                SpaceJoinStatus.APPLYING
+                                if row.id in applying_space_ids
+                                else SpaceJoinStatus.NOT_JOINED
+                            )
                         ),
                         member_count=member_count,
                         owner_count=owner_count,

@@ -137,6 +137,13 @@ class WorkOrderNotificationDetail(BaseModel):
     can_approve: bool
 
 
+class WorkOrderNotificationBadgeSummary(BaseModel):
+    unread_count: int
+    pending_approval_count: int
+    unread_notice_count: int
+    badge_count: int
+
+
 class WorkOrderListItem(BaseModel):
     work_order: WorkOrderRecord
     notification: WorkOrderNotificationRecord | None
@@ -157,5 +164,5 @@ class WorkOrderReviewResult(BaseModel):
     work_order_id: int
     status: WorkOrderStatus
     reviewer_user_id: str
-    review_remark: str
+    review_remark: str | None
     reviewed_at: datetime
