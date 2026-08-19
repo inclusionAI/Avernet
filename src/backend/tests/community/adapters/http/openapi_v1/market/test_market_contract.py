@@ -93,7 +93,7 @@ def _client():
     sc = _SkillCenter()
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[require_principal] = lambda: object()
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "user-1"}
     attach_injector(app, Injector([_Bindings(skill, mcp, sc)]))
     return TestClient(app), skill, mcp, sc
 
@@ -103,6 +103,7 @@ def test_builtin_skill_market_maps_body_and_envelopes_page():
 
     response = client.post(
         "/openapi/v1/bots/market/skills",
+        params={"user_id": "user-1"},
         json={"keyword": "calendar", "page_num": 2, "page_size": 5},
     )
 
@@ -131,6 +132,7 @@ def test_mcp_market_reuses_market_service_mapping():
 
     response = client.post(
         "/openapi/v1/bots/market/mcp-servers",
+        params={"user_id": "user-1"},
         json={"keyword": "calendar", "page_num": 3, "page_size": 10},
     )
 
@@ -146,6 +148,7 @@ def test_skill_center_market_forces_public_scope_and_hides_team_id():
 
     response = client.post(
         "/openapi/v1/bots/market/skill-center/skills",
+        params={"user_id": "user-1"},
         json={
             "keyword": "calendar",
             "pageNum": 2,
@@ -178,6 +181,7 @@ def test_skill_center_market_rejects_caller_supplied_team_id():
 
     response = client.post(
         "/openapi/v1/bots/market/skill-center/skills",
+        params={"user_id": "user-1"},
         json={"teamId": 123},
     )
 

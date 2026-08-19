@@ -528,7 +528,7 @@ class SkillService:
 
             try:
                 text = SkillParser.decode_content(content)
-                skill_info = SkillParser.parse_content(text)
+                skill_info = SkillParser.parse_installed_content(text)
             except SkillManifestError:
                 logger.warning("[get_active_skills_from_device] Invalid SKILL.md: %s", skill_file)
                 continue
@@ -1477,10 +1477,11 @@ class SkillService:
                     # 非 teclaw: identity（主机路径原样）。
                     skill_base = self._local_skill_path_adapter(str(local_path))
 
-                    content = await device_fs.read_file(f"{skill_base}/SKILL.md")
-                    if content:
-                        return SkillParser.decode_content(content)
-                    logger.warning(f"[get_skill_readme] SKILL.md not found: {skill_base}")
+                    for filename in ("SKILL.md", "README.md"):
+                        content = await device_fs.read_file(f"{skill_base}/{filename}")
+                        if content:
+                            return SkillParser.decode_content_for_display(content)
+                    logger.warning(f"[get_skill_readme] SKILL.md/README.md not found: {skill_base}")
                     # Local skill 没找到，继续尝试 repo（兜底）
                 elif git_path.startswith('git://'):
                     # Git skill，从 repo 查找
@@ -1488,10 +1489,10 @@ class SkillService:
                     skill_path = self._get_market_repo_dir() / relative_path
                     logger.info(f"[get_skill_readme] git:// path: {skill_path}, exists={skill_path.exists()}")
                     if skill_path.exists():
-                        skill_file = SkillParser.find_skill_file(skill_path)
+                        skill_file = SkillParser.find_display_file(skill_path)
                         if skill_file:
                             try:
-                                return SkillParser.decode_content(skill_file.read_bytes())
+                                return SkillParser.decode_content_for_display(skill_file.read_bytes())
                             except Exception as e:
                                 logger.error(f"[SkillService] Error reading SKILL.md: {e}")
                     logger.info("[get_skill_readme] Falling through to _get_readme_from_repo")
@@ -1524,10 +1525,10 @@ class SkillService:
         if not skill_path:
             return None
 
-        skill_file = SkillParser.find_skill_file(skill_path)
+        skill_file = SkillParser.find_display_file(skill_path)
         if skill_file:
             try:
-                return SkillParser.decode_content(skill_file.read_bytes())
+                return SkillParser.decode_content_for_display(skill_file.read_bytes())
             except Exception as e:
                 logger.error("[SkillService] Error reading SKILL.md: %s", e)
 
@@ -1827,9 +1828,17 @@ class SkillService:
             content_str = SkillParser.decode_content(raw_bytes)
         except SkillManifestError as exc:
             raise ValueError("SKILL.md must be encoded as UTF-8 or GBK.") from exc
-        skill_info = SkillParser.parse_content(content_str) if content_str else None
+        try:
+            skill_info = SkillParser.parse_content(content_str) if content_str else None
+        except SkillManifestError as exc:
+            if exc.code != "MISSING_FRONTMATTER":
+                raise
+            # Compatibility for packages accepted by the retiring upload API:
+            # plain YAML metadata at the root of SKILL.md. New manifests remain
+            # governed by the strict frontmatter parser above.
+            skill_info = SkillParser.parse_legacy_upload_content(content_str)
         if not skill_info:
-            raise ValueError("SKILL.md must contain valid frontmatter.")
+            raise ValueError("SKILL.md must contain valid frontmatter or legacy metadata.")
         skill_name = skill_info["name"]
         if skill_root:
             folder_name = os.path.basename(skill_root)
@@ -1839,10 +1848,6 @@ class SkillService:
                     f"Folder name: '{folder_name}', SKILL.md name: '{skill_name}'."
                 )
 
-        if not re.match(r'^[a-zA-Z0-9-]+$', skill_name):
-            raise ValueError(
-                f"Skill name '{skill_name}' is invalid. Only English letters, numbers, and '-' are allowed"
-            )
         if skill_name in self.RESERVED_SKILL_NAMES:
             raise ValueError(f"Skill name '{skill_name}' is reserved and cannot be used")
         skill_info["name"] = skill_name

@@ -544,6 +544,25 @@ def market_favorite_status_happy():
     """The framework owns invocation."""
 
 
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/market-favorites/status",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        path_params={"space_id": 1},
+        json_body={
+            "market_source": "SKILLCENTER",
+            "target_type": "SKILL",
+            "target_codes": ["skill-endpoint-1"],
+        },
+    ),
+    expect=ExpectError(status=403),
+)
+def market_favorite_status_wrong_user():
+    """The framework owns invocation."""
+
+
 # ── POST /api/internal/spaces/personal/batch-query ───────────────────────────
 
 

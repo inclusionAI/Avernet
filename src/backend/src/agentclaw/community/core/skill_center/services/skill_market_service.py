@@ -1,11 +1,11 @@
-"""Read-only query service for the built-in OCB Skill marketplace."""
+"""Read-only query service for the built-in Skill marketplace."""
 from __future__ import annotations
 
 from typing import Any
 
 from injector import inject
 
-from agentclaw.community.api.skill_market_service import (
+from agentclaw.community.core.skill_center.market_contracts import (
     SkillMarketSearchQuery,
     SkillMarketSearchResult,
 )

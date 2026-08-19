@@ -819,7 +819,14 @@ class LocalSkillUploadService:
             raise LocalSkillInvalidPackageError()
         try:
             text = SkillParser.decode_content(markdown)
-            metadata = SkillParser.parse_content(text) or {}
+            try:
+                metadata = SkillParser.parse_content(text) or {}
+            except SkillManifestError as exc:
+                if exc.code != "MISSING_FRONTMATTER":
+                    raise
+                # Keep packages accepted by the historical upload endpoints
+                # working while new frontmatter manifests remain strict.
+                metadata = SkillParser.parse_legacy_upload_content(text) or {}
         except SkillManifestError as exc:
             raise LocalSkillInvalidPackageError() from exc
         name = metadata.get("name")

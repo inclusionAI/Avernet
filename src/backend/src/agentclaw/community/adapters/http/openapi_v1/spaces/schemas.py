@@ -213,7 +213,7 @@ class FavoriteTargetRequest(BaseModel):
     """Marketplace target to add to or remove from favorites."""
 
     market_source: MarketSource = Field(
-        description="Marketplace system that owns the target identifier."
+        description="Source marketplace for this target identifier."
     )
     target_type: FavoriteTargetType = Field(
         description="Marketplace category of the target."
@@ -250,7 +250,7 @@ class FavoriteAddedResult(BaseModel):
 
     favorite_id: int = Field(description="Identifier of the favorite record.")
     market_source: MarketSource = Field(
-        description="Marketplace system that owns the target identifier."
+        description="Source marketplace for this target identifier."
     )
     target_type: FavoriteTargetType = Field(
         description="Marketplace category of the target."
@@ -268,7 +268,7 @@ class FavoriteCanceledResult(BaseModel):
     """Favorite state returned after a target is removed."""
 
     market_source: MarketSource = Field(
-        description="Marketplace system that owns the target identifier."
+        description="Source marketplace for this target identifier."
     )
     target_type: FavoriteTargetType = Field(
         description="Marketplace category of the target."
@@ -287,7 +287,7 @@ class MarketFavoriteItem(_UtcResponseModel):
 
     favorite_id: int = Field(description="Identifier of the favorite record.")
     market_source: MarketSource = Field(
-        description="Marketplace system that owns the target identifier."
+        description="Source marketplace for this target identifier."
     )
     target_type: FavoriteTargetType = Field(
         description="Marketplace category of the target."
@@ -306,7 +306,7 @@ class FavoriteStatusesRequest(BaseModel):
     """Batch query for favorite state of marketplace targets in one Space."""
 
     market_source: MarketSource = Field(
-        description="Marketplace system that owns every requested target identifier."
+        description="Source marketplace shared by all requested targets."
     )
     target_type: FavoriteTargetType = Field(
         description="Marketplace category shared by every requested target."
@@ -322,7 +322,7 @@ class FavoriteStatusesResult(BaseModel):
     """Targets currently favorited by any member of the selected Space."""
 
     market_source: MarketSource = Field(
-        description="Marketplace system that owns the target identifiers."
+        description="Source marketplace of the returned target identifiers."
     )
     target_type: FavoriteTargetType = Field(
         description="Marketplace category of the target identifiers."

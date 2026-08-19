@@ -203,10 +203,35 @@ class SkillParser:
                 ) from exc
 
     @staticmethod
+    def decode_content_for_display(content: bytes) -> str:
+        """Decode legacy display content without making reads unavailable.
+
+        Upload and manifest validation use :meth:`decode_content` and remain
+        strict. Existing installed content may predate that contract, so the
+        read-only display path preserves the historical replacement fallback.
+        """
+        try:
+            return content.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                return content.decode("gbk")
+            except UnicodeDecodeError:
+                return content.decode("utf-8", errors="replace")
+
+    @staticmethod
     def find_skill_file(skill_path: Path) -> Path | None:
-        """Return only the target directory's ``SKILL.md``."""
+        """Return only the target directory's authoritative ``SKILL.md``."""
         skill_file = skill_path / "SKILL.md"
         return skill_file if skill_file.is_file() else None
+
+    @staticmethod
+    def find_display_file(skill_path: Path) -> Path | None:
+        """Return the historical display document, preferring ``SKILL.md``."""
+        for filename in ("SKILL.md", "README.md"):
+            candidate = skill_path / filename
+            if candidate.is_file():
+                return candidate
+        return None
 
     @staticmethod
     def has_skill_file(skill_path: Path) -> bool:
@@ -251,3 +276,48 @@ class SkillParser:
             return None
         frontmatter, _body = _extract_frontmatter(content)
         return _to_skill_info(_validate_manifest(frontmatter))
+
+    @staticmethod
+    def parse_installed_content(content: str) -> dict[str, Any] | None:
+        """Project metadata from a legacy installed Skill for read-only lists.
+
+        Historical active Skills can have only ``name`` in frontmatter. They
+        remain visible, with an empty description, while new uploads continue
+        to use the strict :meth:`parse_content` contract.
+        """
+        if not content:
+            return None
+        frontmatter, _body = _extract_frontmatter(content)
+        name = frontmatter.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise SkillManifestError(
+                "MISSING_NAME", "SKILL.md must contain a non-empty name.", "name"
+            )
+        normalized = dict(frontmatter)
+        normalized["name"] = name.strip()
+        description = normalized.get("description", "")
+        if description is None:
+            description = ""
+        if not isinstance(description, str):
+            raise SkillManifestError(
+                "INVALID_DESCRIPTION_TYPE",
+                "SKILL.md field 'description' must be a string.",
+                "description",
+            )
+        normalized["description"] = description.strip()
+        return _to_skill_info(normalized)
+
+    @staticmethod
+    def parse_legacy_upload_content(content: str) -> dict[str, Any] | None:
+        """Parse the pre-frontmatter upload shape for endpoint compatibility."""
+        if not content:
+            return None
+        try:
+            data = yaml.safe_load(content)
+        except yaml.YAMLError as exc:
+            raise SkillManifestError(
+                "INVALID_FRONTMATTER", f"Legacy SKILL.md metadata is invalid: {exc}"
+            ) from exc
+        if not isinstance(data, dict):
+            return None
+        return _to_skill_info(_validate_manifest(data))
