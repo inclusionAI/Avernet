@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from asyncio.exceptions import CancelledError
 from typing import Any
 
 import aiohttp
@@ -247,7 +248,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                         resp.status,
                     )
                 return self._check_response_envelope(data)
-            except (TimeoutError, aiohttp.ClientError) as exc:
+            except (TimeoutError, CancelledError, aiohttp.ClientError) as exc:
                 retryable = isinstance(
                     exc, (TimeoutError, aiohttp.ClientConnectionError)
                 )
