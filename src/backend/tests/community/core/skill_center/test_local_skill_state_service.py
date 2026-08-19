@@ -488,10 +488,12 @@ def _repo_service(
         _RepoBots(bot_type=bot_type, engine=engine),
         _Collaborators(),
         factory,
+        _MutationGuard(),
         guard,
         runtime,
         skills,
         _Layouts(),
+        factory.set_service,
     )
     return service, skills, installations, runtime
 
@@ -509,6 +511,7 @@ async def test_repo_direct_accepts_shared_scanner_sentinel_and_reconciles():
     assert installations.events == ["install:pre:bot:9"]
     assert runtime.calls == 0
     assert len(runtime.publish_calls) == len(runtime.verify_calls) == 1
+    assert service._mutation_guard.releases == 1
 
 
 @pytest.mark.asyncio

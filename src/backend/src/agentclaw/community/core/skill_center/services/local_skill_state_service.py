@@ -197,75 +197,85 @@ class LocalSkillStateService:
         self._require_supported_repo_runtime(bot)
         scope = self._scope_for(bot, bot_id)
         try:
-            lease = self._edit_guard.acquire_for_edit(scope=scope)
-        except SkillsPoolEditBusyError as exc:
+            mutation_lease = self._mutation_guard.acquire(scope=scope)
+        except BotCapabilityMutationBusyError as exc:
             raise LocalSkillEditBusyError() from exc
-        except SkillsPoolEditRollbackError as exc:
-            raise LocalSkillLayoutRollbackError() from exc
-        except SkillsPoolEditLockUnavailableError as exc:
+        except BotCapabilityMutationLockUnavailableError as exc:
             raise LocalSkillEditLockUnavailableError() from exc
-        except SkillsPoolEditPausedError as exc:
-            raise LocalSkillEditPausedError() from exc
         try:
-            # Both facts are guarded by the same Bot layout lease.  Rechecking
-            # here avoids accepting a stale Direct command while a SkillSet or
-            # another activation changes the Resolver input concurrently.
-            self._require_no_normal_skill_set_membership(
-                skill_id=skill_id,
-                bot=bot,
-                owner_id=owner_id,
-                bot_id=bot_id,
-            )
-            if active:
-                self._require_no_runtime_name_conflict(
-                    skill=raw, bot=bot, owner_id=owner_id, bot_id=bot_id
-                )
             try:
-                changed = self._write_desired_state(
-                    active=active,
-                    env=str(bot["env"]),
-                    bot_id=bot_id,
+                lease = self._edit_guard.acquire_for_edit(scope=scope)
+            except SkillsPoolEditBusyError as exc:
+                raise LocalSkillEditBusyError() from exc
+            except SkillsPoolEditRollbackError as exc:
+                raise LocalSkillLayoutRollbackError() from exc
+            except SkillsPoolEditLockUnavailableError as exc:
+                raise LocalSkillEditLockUnavailableError() from exc
+            except SkillsPoolEditPausedError as exc:
+                raise LocalSkillEditPausedError() from exc
+            try:
+                # Membership and Installation are guarded by the same Bot
+                # mutation lease.  Rechecking below avoids accepting stale
+                # Direct state while a SkillSet command changes the Resolver
+                # input for this Bot.
+                self._require_no_normal_skill_set_membership(
                     skill_id=skill_id,
-                )
-            except Exception as exc:
-                raise LocalSkillStorageError() from exc
-            if active:
-                synced = await self._publish_current_mappings(
-                    scope=scope, bot=bot, owner_id=owner_id, bot_id=bot_id
-                )
-            else:
-                synced = await self._reconcile_deactivation(
-                    scope=scope,
                     bot=bot,
-                    skill=raw,
                     owner_id=owner_id,
                     bot_id=bot_id,
                 )
-            if synced:
-                return {
-                    **raw,
-                    "bolt_id": bot_id,
-                    "user_id": owner_id,
-                    "active": active,
-                    "changed": changed,
-                }
-            if changed:
+                if active:
+                    self._require_no_runtime_name_conflict(
+                        skill=raw, bot=bot, owner_id=owner_id, bot_id=bot_id
+                    )
                 try:
-                    self._write_desired_state(
-                        active=not active,
+                    changed = self._write_desired_state(
+                        active=active,
                         env=str(bot["env"]),
                         bot_id=bot_id,
                         skill_id=skill_id,
                     )
                 except Exception as exc:
                     raise LocalSkillStorageError() from exc
-                if not await self._publish_current_mappings(
-                    scope=scope, bot=bot, owner_id=owner_id, bot_id=bot_id
-                ):
-                    raise LocalSkillRuntimeSyncError()
-            raise LocalSkillRuntimeSyncError()
+                if active:
+                    synced = await self._publish_current_mappings(
+                        scope=scope, bot=bot, owner_id=owner_id, bot_id=bot_id
+                    )
+                else:
+                    synced = await self._reconcile_deactivation(
+                        scope=scope,
+                        bot=bot,
+                        skill=raw,
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                    )
+                if synced:
+                    return {
+                        **raw,
+                        "bolt_id": bot_id,
+                        "user_id": owner_id,
+                        "active": active,
+                        "changed": changed,
+                    }
+                if changed:
+                    try:
+                        self._write_desired_state(
+                            active=not active,
+                            env=str(bot["env"]),
+                            bot_id=bot_id,
+                            skill_id=skill_id,
+                        )
+                    except Exception as exc:
+                        raise LocalSkillStorageError() from exc
+                    if not await self._publish_current_mappings(
+                        scope=scope, bot=bot, owner_id=owner_id, bot_id=bot_id
+                    ):
+                        raise LocalSkillRuntimeSyncError()
+                raise LocalSkillRuntimeSyncError()
+            finally:
+                self._edit_guard.release(lease)
         finally:
-            self._edit_guard.release(lease)
+            self._mutation_guard.release(mutation_lease)
 
     def _discover_scope(self, skill_id: str) -> BotSkillLayoutScope:
         """Find only the lock identity before serializing the authoritative read."""

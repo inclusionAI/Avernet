@@ -42,15 +42,6 @@ from agentclaw.community.api.skill_market_service import SkillMarketServiceProto
 from agentclaw.community.api.repository_catalog_service import (
     RepositoryCatalogServiceProtocol,
 )
-from agentclaw.community.api.skill_set_activator_factory import (
-    SkillSetActivatorFactoryProtocol,
-)
-from agentclaw.community.api.skill_set_service_factory import (
-    SkillSetServiceFactoryProtocol,
-)
-from agentclaw.community.api.skill_set_switcher_factory import (
-    SkillSetSwitcherFactoryProtocol,
-)
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
