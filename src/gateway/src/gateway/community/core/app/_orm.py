@@ -54,21 +54,21 @@ class AppRow(Base):  # type: ignore[misc]
     __tablename__ = "avernet_application"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    app_name: Mapped[str] = mapped_column(index=True)
-    app_type: Mapped[str] = mapped_column()
+    app_name: Mapped[str] = mapped_column(String(256), index=True)
+    app_type: Mapped[str] = mapped_column(String(64))
     api_key_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
     api_key_prefix: Mapped[str | None] = mapped_column(
         String(API_KEY_PREFIX_LEN), unique=True, nullable=True
     )
     # DEPRECATED — legacy plaintext JWT credential; see the module docstring.
-    token: Mapped[str | None] = mapped_column(unique=True, nullable=True)
-    owners: Mapped[str] = mapped_column()
-    tenant: Mapped[str] = mapped_column()
-    status: Mapped[str] = mapped_column(default="ACTIVE")
-    env: Mapped[str] = mapped_column(default="")
+    token: Mapped[str | None] = mapped_column(String(700), unique=True, nullable=True)
+    owners: Mapped[str] = mapped_column(String(1024))
+    tenant: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="ACTIVE")
+    env: Mapped[str] = mapped_column(String(64), default="")
     config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    creator: Mapped[str] = mapped_column(default="")
-    modifier: Mapped[str] = mapped_column(default="")
+    creator: Mapped[str] = mapped_column(String(128), default="")
+    modifier: Mapped[str] = mapped_column(String(128), default="")
     gmt_create: Mapped[datetime] = mapped_column(
         server_default=text("CURRENT_TIMESTAMP")
     )

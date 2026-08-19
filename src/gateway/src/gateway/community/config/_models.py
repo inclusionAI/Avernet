@@ -36,9 +36,25 @@ class AuthnPluginConfig(BaseSettings):
 
 
 class DatabasePluginConfig(BaseSettings):
+    """Database plugin selection — SQLITE_ORM by default (community-safe).
+
+    ``MARIADB_ORM`` requires the ``mariadb_*`` connection fields (host, port,
+    database, user, password) or a ``database_url``. Credentials may be supplied
+    via environment variables (``DATABASE_URL`` or ``MARIADB_HOST`` /
+    ``MARIADB_PORT`` / ``MARIADB_DATABASE`` / ``MARIADB_USER`` /
+    ``MARIADB_PASSWORD``).
+    """
+
     model_config = SettingsConfigDict(extra="allow")
     plugin_database: str = Field(default="SQLITE_ORM")
     database_url: str = ""
+    create_schema: bool = Field(default=False)
+    seed_data: bool = Field(default=False)
+    mariadb_host: str = "127.0.0.1"
+    mariadb_port: int = Field(default=3306)
+    mariadb_database: str = ""
+    mariadb_user: str = ""
+    mariadb_password: str = ""
 
 
 class SecretConfig(BaseModel):

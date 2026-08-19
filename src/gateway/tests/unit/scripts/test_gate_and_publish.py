@@ -95,8 +95,7 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
         for path in public_document["paths"]
     )
     assert all(
-        path.startswith("/api/v1/collaboration/")
-        for path in internal_document["paths"]
+        path.startswith("/api/v1/collaboration/") for path in internal_document["paths"]
     )
 
     assert (
@@ -114,9 +113,7 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
             "user": "required",
             "app": "required",
         }
-    websocket = public_document["paths"][
-        "/openapi/v1/collaboration/messages/ws"
-    ]["get"]
+    websocket = public_document["paths"]["/openapi/v1/collaboration/messages/ws"]["get"]
     assert websocket["x-avernet-protocol"] == "websocket"
     assert websocket["x-avernet-security"] == {}
     assert (

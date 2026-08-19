@@ -22,6 +22,7 @@ from gateway.community.config._config_loader import (
     _merge,
     _parse_config,
     _resolve_base_path,
+    _resolve_named_overlay_path,
     _resolve_overlay_path,
 )
 
@@ -235,6 +236,34 @@ class TestResolvePaths:
         assert _resolve_overlay_path("dev") == configs / "application-dev.yaml"
 
 
+# ── _resolve_named_overlay_path ────────────────────────────────────────────
+
+
+class TestResolveNamedOverlayPath:
+    def test_with_base_path_returns_co_located_overlay(self, tmp_path: Path) -> None:
+        base = tmp_path / "configs" / "application.yaml"
+        assert _resolve_named_overlay_path("prod", base) == (
+            tmp_path / "configs" / "overlays" / "prod.yaml"
+        )
+
+    def test_without_base_path_returns_cwd_fallback(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        expected = tmp_path / "configs" / "overlays" / "prod.yaml"
+        assert _resolve_named_overlay_path("prod", None) == expected
+
+    def test_without_base_path_uses_existing_cwd_overlay(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        overlays = tmp_path / "configs" / "overlays"
+        overlays.mkdir(parents=True)
+        target = overlays / "prod.yaml"
+        target.touch()
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_named_overlay_path("prod", None) == target
+
+
 # ── ConfigLoader.load / load_raw ─────────────────────────────────────────────
 
 
@@ -305,6 +334,32 @@ class TestConfigLoader:
         monkeypatch.setenv("SERVER_ENV", "nonexistent")
         config = ConfigLoader.load()
         assert config.app_name == "base"
+
+    def test_load_named_overlay_applied(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        base = tmp_path / "application.yaml"
+        base.write_text("app_name: base\nworkers: 1\n")
+        overlays = tmp_path / "overlays"
+        overlays.mkdir()
+        (overlays / "prod.yaml").write_text("workers: 4\n")
+        monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(base))
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_OVERLAY", "prod")
+        config = ConfigLoader.load()
+        assert config.app_name == "base"
+        assert config.workers == 4
+
+    def test_load_named_overlay_missing_raises(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        base = tmp_path / "application.yaml"
+        base.write_text("app_name: base\n")
+        monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(base))
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_OVERLAY", "nonexistent")
+        with pytest.raises(FileNotFoundError, match="Overlay config not found"):
+            ConfigLoader.load()
 
 
 # ── get_config / reset_config (singleton) ────────────────────────────────────
