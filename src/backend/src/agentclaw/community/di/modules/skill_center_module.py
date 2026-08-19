@@ -129,6 +129,10 @@ from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
     SkillSetServiceFactory,
 )
+from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
+from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
+    LegacySkillSetCompatibilityFactoryProtocol,
+)
 from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetActivatorFactory,
     SkillSetSwitcherFactory,
@@ -736,6 +740,24 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             ext_info_provider=_build__ext_info_provider(injector),
             installations=installations,
         )
+
+    @singleton
+    @provider
+    @inject
+    def skill_set_service_factory_protocol(
+        self, factory: SkillSetServiceFactory
+    ) -> SkillSetServiceFactoryProtocol:
+        """Expose the factory through the control-plane Service API."""
+        return factory
+
+    @singleton
+    @provider
+    @inject
+    def legacy_skill_set_compatibility_factory(
+        self, factory: SkillSetServiceFactory
+    ) -> LegacySkillSetCompatibilityFactoryProtocol:
+        """Bind the legacy batch adapter's narrow compatibility contract."""
+        return factory
 
     @singleton
     @provider

@@ -25,9 +25,13 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
+    SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
 )
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
+from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
+    LegacySkillSetCompatibilityFactoryProtocol,
+)
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationBusyError,
@@ -85,7 +89,7 @@ class SkillSetControlPlaneService:
         repository: SkillSetControlPlaneRepositoryProtocol,
         bot_repo: BotRepository,
         runtime: SkillSetRuntimeReconcilerProtocol,
-        legacy_factory: SkillSetServiceFactory,
+        legacy_factory: LegacySkillSetCompatibilityFactoryProtocol,
         passport: PassportPlugin,
         collaborators: CollaboratorServiceProtocol,
         mutation_guard: BotCapabilityMutationGuard,
@@ -201,7 +205,9 @@ class SkillSetControlPlaneService:
         bot = self._bot_repo.get_by_id(bot_id)
         if bot is not None:
             return self.get_set(bot_id=bot_id, actor_id=actor_id, set_id=set_id)
-        return self._repository.get_set(bot_id=bot_id, set_id=set_id, engine_type="openclaw")
+        return self._repository.get_set(
+            bot_id=bot_id, set_id=set_id, engine_type="openclaw"
+        )
 
     def update_set(
         self,
@@ -249,10 +255,37 @@ class SkillSetControlPlaneService:
     def resolve_legacy_skill_id(
         self, *, bot_id: str, actor_id: str, identifier: str
     ) -> str:
-        self._bot(bot_id, actor_id)
-        return self._repository.resolve_legacy_skill_id(
-            bot_id=bot_id, identifier=identifier
+        """Resolve the published batch wire to a durable ``ac_skill.id``.
+
+        The legacy ``POST /api/skillsets/{id}/skills`` endpoint accepted a
+        database ID, name, or Git path.  For a market identifier not yet
+        persisted it also materialised the Repo Skill before adding the
+        membership.  Preserve that adapter-only behaviour here, then hand the
+        stable identity to the normal atomic membership command.  Canonical
+        requests never call this method and therefore never create assets from
+        a name/path.
+        """
+        bot = self._bot(bot_id, actor_id)
+        try:
+            return self._repository.resolve_legacy_skill_id(
+                bot_id=bot_id, identifier=identifier
+            )
+        except SkillSetControlPlaneNotFoundError:
+            pass
+
+        owner_id = str(bot["owner_id"])
+        legacy = self._legacy_factory.create(
+            entity_id=str(bot.get("entity_id") or owner_id),
+            bot_id=bot_id,
+            engine_type=self._engine(bot),
+            entity_type=bot.get("entity_type") or "staff",
         )
+        try:
+            return legacy.resolve_or_create_legacy_market_skill(
+                identifier=identifier, owner_id=owner_id, bot_id=bot_id
+            )
+        except ValueError as exc:
+            raise SkillSetControlPlaneNotFoundError() from exc
 
     async def add_skill(
         self, *, bot_id: str, actor_id: str, set_id: str, skill_id: str
@@ -351,7 +384,7 @@ class SkillSetControlPlaneService:
             engine_type=bot.get("active_engine"),
             entity_type=bot.get("entity_type") or "staff",
         )
-        # Resource reads preserve the legacy graceful degradation: an AgentPass
+        # Resource reads preserve the legacy graceful degradation: a passport-provider
         # outage hides Default CLI entries but must not hide SkillSet/MCP data.
         try:
             default_clis = self._passport.query_passport_clis(
@@ -408,10 +441,10 @@ class SkillSetControlPlaneService:
                 # to apply.  Reconcile only becomes a required side effect
                 # when that membership is active (or for all lifecycle/sync
                 # commands), preserving the legacy inactive draft contract.
-                if (
-                    action in {"skill_set_add_skill", "skill_set_remove_skill"}
-                    and not mutation_result.item.get("is_active")
-                ):
+                if action in {
+                    "skill_set_add_skill",
+                    "skill_set_remove_skill",
+                } and not mutation_result.item.get("is_active"):
                     result = {
                         **mutation_result.item,
                         "changed": mutation_result.changed,

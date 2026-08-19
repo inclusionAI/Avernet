@@ -853,6 +853,23 @@ class SkillSetService:
         }
         return self.skill_repo.create(skill_data)
 
+    def resolve_or_create_legacy_market_skill(
+        self, *, identifier: str, owner_id: str, bot_id: str
+    ) -> str:
+        """Resolve the legacy name/path wire and materialize a Repo Skill if absent."""
+        market_skill = next(
+            (
+                item
+                for item in self.skill_service.get_skills_in_path("")
+                if item.get("id") == identifier
+                or str(item.get("path") or "").endswith(identifier)
+            ),
+            None,
+        )
+        if market_skill is None:
+            raise ValueError("Skill not found")
+        return str(self._create_skill_from_market(market_skill, owner_id, bot_id)["id"])
+
     async def remove_skill_from_set(
         self,
         skill_set_id: str,
