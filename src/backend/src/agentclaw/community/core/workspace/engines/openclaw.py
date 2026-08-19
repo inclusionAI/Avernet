@@ -95,7 +95,7 @@ class OpenClawSandboxProvider:
     def get_build_plan(
         self,
         build_rsync_excludes_append: list[str] | None = None,
-        bot: Any = None,
+        bot: dict[str, Any] | None = None,
     ) -> EngineBuildPlan:
         # 合并模式：默认值 + 自定义项（去重）
         excludes = list(_OPENCLAW_RSYNC_EXCLUDES)

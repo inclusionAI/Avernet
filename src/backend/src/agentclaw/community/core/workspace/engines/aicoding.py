@@ -119,7 +119,66 @@ def _repo_dirname_from_url(url: Any) -> str:
     return name
 
 
-def _repo_workspace_excludes_for_bot(bot: Any) -> list[str]:
+# --- repo URL extraction (self-contained) -----------------------------------
+# Mirrored from ``bot_management.utils._extract_code_repo_urls`` so this engine
+# does NOT reach into another sub-domain's private symbol (arch Rule 15: no
+# hidden coupling via private internals). If the platform helper's repo
+# keys/markers evolve, keep this local copy in sync.
+_REPO_URL_KEYS: tuple[str, ...] = ("repo_url", "url", "git_url", "ssh_url")
+_REPO_DECL_KEYS: tuple[str, ...] = ("backend_repo", "frontend_repo", "lib_repo")
+_REPO_DECL_FACTORY_KEYS: tuple[str, ...] = (
+    "repos",
+    "init_repos",
+    "application_repo_urls",
+)
+_TEMPLATE_FACTORY_MARKER_KEYS: frozenset[str] = frozenset({
+    "template_key",
+    "template_uid",
+    "template_version_id",
+    "template_version",
+})
+
+
+def _extract_code_repo_urls(template_config: Any) -> list[str]:
+    """Return the code-repo URLs declared in ``template_config``.
+
+    Self-contained mirror of ``bot_management.utils._extract_code_repo_urls``;
+    kept local so this engine depends on no other module's private internals.
+    Reads ``backend_repo`` / ``frontend_repo`` / ``lib_repo`` (legacy, dict
+    items only) plus the template-factory aliases ``repos`` / ``init_repos`` /
+    ``application_repo_urls`` (string or dict items) exactly as the platform
+    helper does.
+    """
+    if not isinstance(template_config, dict):
+        return []
+    keys = _REPO_DECL_KEYS
+    if any(marker in template_config for marker in _TEMPLATE_FACTORY_MARKER_KEYS):
+        keys = keys + _REPO_DECL_FACTORY_KEYS
+    urls: list[str] = []
+    for key in keys:
+        value = template_config.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            # Legacy repo keys accept only dict items; template-factory alias
+            # keys may also use direct string items.
+            if isinstance(item, str) and key in _REPO_DECL_KEYS:
+                continue
+            url = ""
+            if isinstance(item, str):
+                url = item.strip()
+            elif isinstance(item, dict):
+                for url_key in _REPO_URL_KEYS:
+                    v = item.get(url_key)
+                    if isinstance(v, str) and v.strip():
+                        url = v.strip()
+                        break
+            if url:
+                urls.append(url)
+    return urls
+
+
+def _repo_workspace_excludes_for_bot(bot: dict[str, Any] | None) -> list[str]:
     """Derive ``workspace/<repo>`` rsync excludes from a bot's template_config.
 
     aicoding clones the repos declared in the bot's template config
@@ -128,9 +187,8 @@ def _repo_workspace_excludes_for_bot(bot: Any) -> list[str]:
     working trees are re-cloned/mounted by the runtime, so the build rsync must
     NOT bake them into the published artifact (the static
     ``workspace/*/.git/`` exclude only skips ``.git``, not the whole tree).
-    This reads the same repo URLs the rest of the platform uses (via
-    ``bot_management.utils._extract_code_repo_urls``) and maps each to its clone
-    directory name.
+    This reads the repo URLs via the self-contained ``_extract_code_repo_urls``
+    helper above and maps each to its clone directory name.
 
     The repo source is ``bot["template_config"]`` — i.e. the ``ac_templates.ext``
     column attached by ``BotService.get_bot``. It is deliberately NOT read from
@@ -149,10 +207,6 @@ def _repo_workspace_excludes_for_bot(bot: Any) -> list[str]:
     template_config = bot.get("template_config")
     if not isinstance(template_config, dict) or not template_config:
         return []
-
-    # Lazy import: bot_management.utils pulls in requests/capabilities; keep it
-    # out of this module's import path.
-    from agentclaw.community.core.bot_management.utils import _extract_code_repo_urls
 
     excludes: list[str] = []
     seen: set[str] = set()

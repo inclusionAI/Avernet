@@ -1,16 +1,19 @@
 """Unit tests for repo-derived workspace rsync excludes.
 
 Covers ``parse_repo_workspace_excludes`` / ``_repo_dirname_from_url`` in
-``agentclaw.community.core.workspace.engines``: code repositories declared in a
-bot's ``template_config`` (``backend_repo`` / ``frontend_repo`` / ``lib_repo``,
-plus template-factory aliases) must produce ``workspace/<repo>`` excludes so the
-build rsync does not bake cloned repo working copies into the artifact.
+``agentclaw.community.core.workspace.engines.aicoding``: code repositories
+declared in a bot's ``template_config`` (``backend_repo`` / ``frontend_repo`` /
+``lib_repo``, plus template-factory aliases) must produce ``workspace/<repo>``
+excludes so the build rsync does not bake cloned repo working copies into the
+artifact. URL extraction is mirrored locally (self-contained, no cross-module
+dependency on bot_management).
 """
 from __future__ import annotations
 
 import pytest
 
 from agentclaw.community.core.workspace.engines.aicoding import (
+    _extract_code_repo_urls,
     _repo_dirname_from_url,
     _repo_workspace_excludes_for_bot as parse_repo_workspace_excludes,
 )
@@ -151,7 +154,7 @@ class TestAixcoreEndToEnd:
 
     def test_extract_repo_url_to_aixcore_dirname(self):
         # repo_url 形如 [{"repo_url": "..."}] -> URL -> 仓库名 aixcore
-        from agentclaw.community.core.bot_management.utils import _extract_code_repo_urls
+        # 用 aicoding 自包含的 _extract_code_repo_urls（不依赖 bot_management）
         urls = _extract_code_repo_urls(self.SAMPLE)
         assert urls == ["https://code.alipay.com/ASF-Service-Platform/aixcore"]
         assert _repo_dirname_from_url(urls[0]) == "aixcore"
