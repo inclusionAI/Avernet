@@ -23,7 +23,6 @@ from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
-from agentclaw.community.core.market_favorites.errors import FavoriteNotFoundError
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
@@ -186,23 +185,6 @@ def test_openapi_advertises_nullable_member_profile_fields(client):
     }
 
 
-def test_cancel_missing_favorite_returns_not_found(client, favorite_service):
-    favorite_service.cancel.side_effect = FavoriteNotFoundError(
-        "market favorite not found"
-    )
-
-    response = client.post(
-        "/openapi/v1/spaces/7/market-favorites/cancel",
-        json={"target_type": "SKILL", "target_code": "skill-1"},
-    )
-
-    assert response.status_code == 404
-    body = response.json()
-    assert body["code"] == 404000
-    assert body["message"] == "Not found"
-    assert body["data"] is None
-
-
 def _space_record(space_type=SpaceType.TEAM):
     timestamp = datetime(2026, 8, 18, 1, 2, 3)
     return SpaceRecord(
@@ -248,6 +230,7 @@ def _favorite_record():
     return MarketFavoriteRecord(
         id=31,
         space_id=7,
+        user_id="owner-1",
         target_type=FavoriteTargetType.SKILL,
         target_code="skill-1",
         created_by="owner-1",

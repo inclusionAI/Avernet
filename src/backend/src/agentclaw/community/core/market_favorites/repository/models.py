@@ -20,6 +20,7 @@ class MarketFavoriteModel(Base):
 
     id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
     space_id = Column(AutoIncrementBigInteger, nullable=False)
+    user_id = Column(String(256), nullable=False)
     target_type = Column(String(32), nullable=False)
     target_code = Column(String(128), nullable=False)
     created_by = Column(String(256), nullable=False)
@@ -33,17 +34,18 @@ class MarketFavoriteModel(Base):
     __table_args__ = (
         UniqueConstraint(
             "avernet_tenant",
-            "space_id",
+            "env",
+            "user_id",
             "target_type",
             "target_code",
-            "env",
-            name="uk_market_favorite_target_env",
+            name="uk_market_favorite_user_target_env",
         ),
         Index(
-            "idx_market_favorite_space",
+            "idx_market_favorite_user_space",
             "avernet_tenant",
-            "space_id",
             "env",
+            "user_id",
+            "space_id",
             "gmt_modified",
         ),
     )
@@ -52,6 +54,7 @@ class MarketFavoriteModel(Base):
         return MarketFavoriteRecord(
             id=self.id,
             space_id=self.space_id,
+            user_id=self.user_id,
             target_type=FavoriteTargetType(self.target_type),
             target_code=self.target_code,
             created_by=self.created_by,

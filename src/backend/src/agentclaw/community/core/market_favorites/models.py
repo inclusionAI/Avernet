@@ -16,6 +16,7 @@ class FavoriteTargetType(StrEnum):
 class MarketFavoriteRecord(BaseModel):
     id: int
     space_id: int
+    user_id: str
     target_type: FavoriteTargetType
     target_code: str
     created_by: str

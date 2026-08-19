@@ -1,4 +1,4 @@
-"""Space-scoped market favorite service.
+"""User-scoped market favorite service.
 
 This phase stores only stable target references. Market metadata enrichment is
 intentionally deferred with the Skill/MCP catalogue integration.
@@ -8,10 +8,7 @@ from __future__ import annotations
 
 from injector import inject
 
-from agentclaw.community.core.market_favorites.errors import (
-    FavoriteNotFoundError,
-    FavoriteTargetInvalidError,
-)
+from agentclaw.community.core.market_favorites.errors import FavoriteTargetInvalidError
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
@@ -57,7 +54,7 @@ class MarketFavoriteService:
             space_id=space_id,
             target_type=target_type,
             target_code=self._target_code(target_code),
-            created_by=actor_id,
+            user_id=actor_id,
             env=get_current_env(),
         )
 
@@ -70,14 +67,13 @@ class MarketFavoriteService:
         target_code: str,
     ) -> bool:
         self._access.require_space_member(space_id=space_id, user_id=actor_id)
-        deleted = self._repository.cancel(
+        self._repository.cancel(
             space_id=space_id,
             target_type=target_type,
             target_code=self._target_code(target_code),
+            user_id=actor_id,
             env=get_current_env(),
         )
-        if not deleted:
-            raise FavoriteNotFoundError("market favorite not found")
         return True
 
     def search(
@@ -95,6 +91,7 @@ class MarketFavoriteService:
             space_id=space_id,
             target_type=target_type,
             keyword=keyword.strip() if keyword and keyword.strip() else None,
+            user_id=actor_id,
             env=get_current_env(),
             offset=(page_no - 1) * page_size,
             limit=page_size,

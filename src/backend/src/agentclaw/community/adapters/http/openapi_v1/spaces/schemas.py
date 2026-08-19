@@ -198,7 +198,7 @@ class SpaceMemberDeletedResult(BaseModel):
 
 
 class FavoriteTargetRequest(BaseModel):
-    """Marketplace target to add to or remove from favorites."""
+    """Marketplace target saved in the current user's favorites."""
 
     target_type: FavoriteTargetType = Field(
         description="Marketplace category of the target."
@@ -211,7 +211,7 @@ class FavoriteTargetRequest(BaseModel):
 
 
 class SearchFavoritesRequest(BaseModel):
-    """Filters and pagination for searching Space favorites."""
+    """Filters and pagination for the current user's favorites."""
 
     target_type: FavoriteTargetType | None = Field(
         default=None, description="Target category filter, or null for all categories."
@@ -253,7 +253,7 @@ class FavoriteCanceledResult(BaseModel):
 
 
 class MarketFavoriteItem(_UtcResponseModel):
-    """One marketplace favorite saved in a Space."""
+    """One marketplace favorite saved by the current user."""
 
     favorite_id: int = Field(description="Identifier of the favorite record.")
     target_type: FavoriteTargetType = Field(

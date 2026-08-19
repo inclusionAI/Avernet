@@ -7,10 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.core.market_favorites.errors import (
-    FavoriteNotFoundError,
-    FavoriteTargetInvalidError,
-)
+from agentclaw.community.core.market_favorites.errors import FavoriteTargetInvalidError
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
@@ -25,6 +22,7 @@ def _record(*, target_code: str = "skill-1") -> MarketFavoriteRecord:
     return MarketFavoriteRecord(
         id=1,
         space_id=7,
+        user_id="member-1",
         target_type=FavoriteTargetType.SKILL,
         target_code=target_code,
         created_by="member-1",
@@ -58,7 +56,7 @@ def test_add_requires_membership_and_normalizes_target_code() -> None:
         space_id=7,
         target_type=FavoriteTargetType.SKILL,
         target_code="skill-1",
-        created_by="member-1",
+        user_id="member-1",
         env="dev",
     )
 
@@ -78,17 +76,16 @@ def test_add_rejects_invalid_target_code(target_code: str) -> None:
     repository.add.assert_not_called()
 
 
-def test_cancel_missing_favorite_is_not_reported_as_success() -> None:
+def test_cancel_missing_favorite_is_idempotently_reported_as_success() -> None:
     service, repository, access = _service()
     repository.cancel.return_value = False
 
-    with pytest.raises(FavoriteNotFoundError, match="not found"):
-        service.cancel(
-            space_id=7,
-            actor_id="member-1",
-            target_type=FavoriteTargetType.SKILL,
-            target_code=" skill-1 ",
-        )
+    assert service.cancel(
+        space_id=7,
+        actor_id="member-1",
+        target_type=FavoriteTargetType.SKILL,
+        target_code=" skill-1 ",
+    ) is True
 
     access.require_space_member.assert_called_once_with(
         space_id=7, user_id="member-1"
@@ -129,6 +126,7 @@ def test_search_requires_membership_and_normalizes_filters() -> None:
         space_id=7,
         target_type=FavoriteTargetType.SKILL,
         keyword="skill",
+        user_id="member-1",
         env="dev",
         offset=10,
         limit=10,
