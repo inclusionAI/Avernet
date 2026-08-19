@@ -78,6 +78,9 @@ from agentclaw.community.api.local_skill_delete_service import (
 from agentclaw.community.api.bot_skill_asset_service import (
     BotSkillAssetServiceProtocol,
 )
+from agentclaw.community.api.local_skill_state_service import (
+    LocalSkillStateServiceProtocol,
+)
 from agentclaw.community.di import config as cfg
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -165,9 +168,6 @@ from agentclaw.community.core.skill_center.services.local_skill_delete_service i
 )
 from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
     BotSkillAssetService,
-)
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 from agentclaw.community.core.bot_collaborator.protocols import (
@@ -438,6 +438,7 @@ class SkillCenterModule(Module):
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
         parameter_service_factory: SkillParameterServiceFactoryProtocol,
+        local_state_service: LocalSkillStateServiceProtocol,
         injector: Injector,
     ) -> BotSkillAssetServiceProtocol:
         return BotSkillAssetService(
@@ -447,6 +448,7 @@ class SkillCenterModule(Module):
             skill_service_factory,
             parameter_service_factory,
             lambda: injector.get(DeviceContextResolver),
+            local_state_service,
         )
 
     @singleton

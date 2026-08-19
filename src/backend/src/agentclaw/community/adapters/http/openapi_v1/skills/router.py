@@ -22,25 +22,17 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     PageParamsDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
-from agentclaw.community.adapters.http.openapi_v1.principal import (
-    ActingCallerDep,
-    UserIdDep,
-    refuse_app_only_caller,
-    require_granted_addressed_bot,
-)
+from agentclaw.community.adapters.http.openapi_v1.principal import ActingCallerDep, UserIdDep, require_granted_addressed_bot
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
     page as page_envelope,
 )
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
-)
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
+from agentclaw.community.api.local_skill_query_service import (
+    LocalSkillQueryServiceProtocol,
 )
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
@@ -238,14 +230,10 @@ async def get_skill(
     actor_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    query_service: LocalSkillQueryServiceProtocol = Injected(
-        LocalSkillQueryServiceProtocol
-    ),
+    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
 ) -> Envelope[Skill]:
     """Get public metadata for one Local Skill; the Skill ID selects its Bot."""
-    record = query_service.get_local_skill(
-        skill_id=skill_id, actor_id=actor_id
-    )
+    record = asset_service.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
     _require_addressed_bot(record, bot_id)
     # The record is already in hand, so this one checks the grant directly
     # rather than through the helper — one read, not two.
@@ -256,16 +244,19 @@ async def get_skill(
 @router.get(
     "/{skill_id}/content",
     response_model=Envelope[SkillContent],
-    dependencies=[Depends(refuse_app_only_caller)],
 )
 @envelope_errors
 async def get_skill_content(
     bot_id: BotIdPath,
     skill_id: SkillIdPath,
     actor_id: UserIdDep,
+    caller: ActingCallerDep,
     request: Request,
     asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
 ) -> Envelope[SkillContent]:
+    record = asset_service.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
     content = await asset_service.get_content(
         skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
     )
@@ -275,16 +266,19 @@ async def get_skill_content(
 @router.get(
     "/{skill_id}/parameters",
     response_model=Envelope[SkillParameters],
-    dependencies=[Depends(refuse_app_only_caller)],
 )
 @envelope_errors
 async def get_skill_parameters(
     bot_id: BotIdPath,
     skill_id: SkillIdPath,
     actor_id: UserIdDep,
+    caller: ActingCallerDep,
     request: Request,
     asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
 ) -> Envelope[SkillParameters]:
+    record = asset_service.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
     parameters = await asset_service.get_parameters(
         skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
     )
@@ -294,7 +288,6 @@ async def get_skill_parameters(
 @router.put(
     "/{skill_id}/parameters",
     response_model=Envelope[SkillParameters],
-    dependencies=[Depends(refuse_app_only_caller)],
 )
 @envelope_errors
 async def replace_skill_parameters(
@@ -302,9 +295,13 @@ async def replace_skill_parameters(
     skill_id: SkillIdPath,
     payload: SkillParameters,
     actor_id: UserIdDep,
+    caller: ActingCallerDep,
     request: Request,
     asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
 ) -> Envelope[SkillParameters]:
+    record = asset_service.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
     parameters = await asset_service.replace_parameters(
         skill_id=skill_id,
         bot_id=bot_id,
@@ -396,24 +393,17 @@ async def activate_skill(
     actor_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    query_service: LocalSkillQueryServiceProtocol = Injected(
-        LocalSkillQueryServiceProtocol
-    ),
-    state_service: LocalSkillStateServiceProtocol = Injected(
-        LocalSkillStateServiceProtocol
-    ),
+    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
 ) -> Envelope[SkillState]:
     """Activate a skill so its bot can use it.
 
     Idempotent — activating an already-active skill succeeds with changed
     false. The bot's runtime is reconciled synchronously either way.
     """
-    _authorize_skills_bot(
-        caller, query_service, skill_id=skill_id, actor_id=actor_id, bot_id=bot_id
-    )
-    result = await state_service.set_local_skill_active(
-        skill_id=skill_id, actor_id=actor_id, active=True
-    )
+    record = asset_service.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
+    result = await asset_service.set_active(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id, active=True)
     return envelope(
         SkillState(skill=_to_skill(result), changed=bool(result["changed"])),
         request,
@@ -431,24 +421,17 @@ async def deactivate_skill(
     actor_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
-    query_service: LocalSkillQueryServiceProtocol = Injected(
-        LocalSkillQueryServiceProtocol
-    ),
-    state_service: LocalSkillStateServiceProtocol = Injected(
-        LocalSkillStateServiceProtocol
-    ),
+    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
 ) -> Envelope[SkillState]:
     """Deactivate a skill so its bot stops using it.
 
     Idempotent — deactivating an already-inactive skill succeeds with changed
     false. The bot's runtime is reconciled synchronously either way.
     """
-    _authorize_skills_bot(
-        caller, query_service, skill_id=skill_id, actor_id=actor_id, bot_id=bot_id
-    )
-    result = await state_service.set_local_skill_active(
-        skill_id=skill_id, actor_id=actor_id, active=False
-    )
+    record = asset_service.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
+    result = await asset_service.set_active(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id, active=False)
     return envelope(
         SkillState(skill=_to_skill(result), changed=bool(result["changed"])),
         request,

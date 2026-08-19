@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from injector import inject
+from sqlalchemy import insert, select
+from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.models.skill import BotSkillInstallation
 from agentclaw.community.core.repository.protocols.skill_installation import (
@@ -22,35 +24,35 @@ class SkillInstallationRepository(SkillInstallationRepositoryProtocol):
     def install(self, *, env: str, bot_id: str, skill_id: str | int) -> bool:
         skill_id = int(skill_id)
         tenant = get_current_avernet_tenant()
-        with self._db.orm_session() as db:
-            table = BotSkillInstallation.__table__
-            values = {
-                "avernet_tenant": tenant,
-                "env": env,
-                "bot_id": bot_id,
-                "skill_id": skill_id,
-            }
-            if db.get_bind().dialect.name == "sqlite":
-                from sqlalchemy.dialects.sqlite import insert
-
-                result = db.execute(
-                    insert(table)
-                    .values(**values)
-                    .on_conflict_do_nothing(
-                        index_elements=[
-                            "avernet_tenant", "env", "bot_id", "skill_id"
-                        ]
+        values = {
+            "avernet_tenant": tenant,
+            "env": env,
+            "bot_id": bot_id,
+            "skill_id": skill_id,
+        }
+        try:
+            # Do not infer insertion from MySQL/OceanBase ``rowcount``: with
+            # CLIENT_FOUND_ROWS a no-op duplicate update can report one row.
+            # A plain insert makes "changed" unambiguous on every dialect.
+            with self._db.orm_session() as db:
+                db.execute(insert(BotSkillInstallation).values(**values))
+            return True
+        except IntegrityError:
+            # A concurrent winner is the only recoverable constraint outcome.
+            # Re-read the exact unique identity in a fresh transaction; any
+            # other integrity failure still propagates to the caller.
+            with self._db.orm_session() as db:
+                installed = db.execute(
+                    select(BotSkillInstallation.id).where(
+                        BotSkillInstallation.avernet_tenant == tenant,
+                        BotSkillInstallation.env == env,
+                        BotSkillInstallation.bot_id == bot_id,
+                        BotSkillInstallation.skill_id == skill_id,
                     )
-                )
-            else:
-                from sqlalchemy.dialects.mysql import insert
-
-                result = db.execute(
-                    insert(table)
-                    .values(**values)
-                    .on_duplicate_key_update(skill_id=table.c.skill_id)
-                )
-            return result.rowcount == 1
+                ).first()
+            if installed is not None:
+                return False
+            raise
 
     def uninstall(self, *, env: str, bot_id: str, skill_id: str | int) -> bool:
         with self._db.orm_session() as db:

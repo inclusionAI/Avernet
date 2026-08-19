@@ -20,7 +20,6 @@ Task 3 of `docs/superpowers/plans/2026-06-15-device-sync-supplier-for-bot-cleanu
 """
 from __future__ import annotations
 
-import json
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
 
@@ -35,6 +34,7 @@ from agentclaw.community.adapters.http.dependencies import (
     get_request_context,
 )
 from agentclaw.community.core.devices.services.device_context import DeviceContext
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
@@ -89,7 +89,6 @@ def _skills_router_app(mock_ctx, tmp_path):
     from agentclaw.community.adapters.http.skill_center.skills import (
         router as skills_router,
     )
-    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
@@ -102,6 +101,8 @@ def _skills_router_app(mock_ctx, tmp_path):
     from agentclaw.community.api.skill_set_service_factory import (
         SkillSetServiceFactoryProtocol,
     )
+    from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+    from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 
     ctx = _make_ctx()
     resolver = _make_mock_resolver(ctx)
@@ -157,6 +158,11 @@ def _skills_router_app(mock_ctx, tmp_path):
             binder.bind(SkillSetServiceFactory, to=skill_set_service_factory)
             binder.bind(DeviceContextResolver, to=resolver)
             binder.bind(DeviceSyncDispatcher, to=dispatcher)
+            class _UnavailableAsset:
+                def get_skill(self, **_kwargs):
+                    raise LocalSkillNotFoundError()
+
+            binder.bind(BotSkillAssetServiceProtocol, to=_UnavailableAsset())
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
@@ -277,7 +283,7 @@ class TestSkillsEndpointsUseResolver:
             dispatcher,
             _sync_plugin,
         ):
-            resp = client.post(
+            client.post(
                 "/api/skills/market/activate-batch",
                 json={"skill_paths": ["sk-x"]},
                 params={
@@ -304,7 +310,7 @@ class TestSkillsetsEndpointUsesResolver:
             dispatcher,
             _sync_plugin,
         ):
-            resp = client.post(
+            client.post(
                 "/api/skillsets/sync-skills",
                 params={
                     "entity_id": "user-1",
@@ -404,7 +410,7 @@ class TestIdentityRouterUsesResolver:
             # Hit the bot-level write endpoint (uses _write_file_safely
             # with bot_id+owner_id, which triggers the Arca branch).
             # PUT /api/identity/{entity_type}/{entity_id}/bot/{bot_id}/{file_type}
-            resp = client.put(
+            client.put(
                 "/api/identity/staff/user-1/bot/bot-1/RULES.md",
                 json={"content": "hello"},
             )
@@ -425,9 +431,6 @@ class TestIdentityRouterUsesResolver:
 @contextmanager
 def _resources_router_app(mock_ctx, tmp_path):
     from agentclaw.community.adapters.http.resources.router import router as resources_router
-    from agentclaw.community.adapters.http.resources.file_router import (
-        router as file_router,
-    )
     from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
@@ -523,7 +526,7 @@ class TestResourcesRouterUsesResolver:
             # a get_legacy_resource_service patch is overkill; instead the
             # test gives up reaching final status and just verifies the
             # resolver call happened during the request lifecycle.
-            resp = client.delete(
+            client.delete(
                 "/api/resources/some-resource-id",
                 params={
                     "entity_id": "user-1",
@@ -549,7 +552,7 @@ class TestResourcesRouterUsesResolver:
             resource_repo,
             fake_resource,
         ):
-            resp = client.post(
+            client.post(
                 "/api/resources/file",
                 files=[("files", ("test.txt", b"hello", "text/plain"))],
                 params={
@@ -651,7 +654,7 @@ class TestFileRouterUsesResolver:
             dispatcher,
             device_fs,
         ):
-            resp = client.get(
+            client.get(
                 "/files",
                 params={
                     "path": "",
@@ -673,7 +676,7 @@ class TestFileRouterUsesResolver:
             dispatcher,
             device_fs,
         ):
-            resp = client.post(
+            client.post(
                 "/files/upload",
                 files=[("files", ("test.txt", b"hello", "text/plain"))],
                 params={

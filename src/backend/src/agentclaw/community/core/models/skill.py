@@ -70,7 +70,10 @@ class Skill(Base):
     """Skill metadata model."""
     __tablename__ = "ac_skill"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    # Verified with production OceanBase ``SHOW CREATE TABLE ac_skill``:
+    # ``id bigint(20) unsigned NOT NULL AUTO_INCREMENT``.  Every new FK must
+    # use the same MySQL type; SQLite receives its portable INTEGER variant.
+    id = Column(_UNSIGNED_BIGINT, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     git_path = Column(String(500), nullable=True)
@@ -190,7 +193,7 @@ class SkillSetSkill(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     skill_set_id = Column(Integer, ForeignKey("ac_skill_set.id"), nullable=False, index=True)
-    skill_id = Column(Integer, ForeignKey("ac_skill.id"), nullable=False, index=True)
+    skill_id = Column(_UNSIGNED_BIGINT, ForeignKey("ac_skill.id"), nullable=False, index=True)
     skill_uuid = Column(String(128), nullable=True, index=True, comment="技能唯一标识(跨版本不变)")
     user_id = Column(String(128), nullable=True, index=True)
     gmt_created = Column(DateTime, default=func.now(), nullable=False)

@@ -46,6 +46,12 @@ class _AssetAdapter(Protocol):
     ) -> tuple[dict[str, Any], dict[str, Any], str]: ...
 
 
+class _LocalSkillStatePort(Protocol):
+    async def set_local_skill_active(
+        self, *, skill_id: str, actor_id: str, active: bool
+    ) -> dict[str, Any]: ...
+
+
 class BotSkillAssetService:
     """Resolve one public ``skill_id`` before invoking its registered reader."""
 
@@ -58,6 +64,7 @@ class BotSkillAssetService:
         skill_service_factory: SkillServiceFactory,
         parameter_service_factory: SkillParameterServiceFactory,
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
+        local_state_service: _LocalSkillStatePort,
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo
@@ -65,11 +72,29 @@ class BotSkillAssetService:
         self._skill_service_factory = skill_service_factory
         self._parameter_service_factory = parameter_service_factory
         self._device_context_resolver_provider = device_context_resolver_provider
+        self._local_state_service = local_state_service
         self._adapters: dict[SkillAssetKind, _AssetAdapter] = {
             SkillAssetKind.LOCAL: _LocalAssetAdapter(self),
             SkillAssetKind.REPO: _UnavailableAssetAdapter(),
             SkillAssetKind.SPACE: _UnavailableAssetAdapter(),
         }
+
+    def get_skill(
+        self, *, skill_id: str, bot_id: str, actor_id: str
+    ) -> dict[str, Any]:
+        """Resolve the item once at the Bot-facing control-plane boundary."""
+        skill, _bot, _owner_id = self._resolve(
+            skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
+        )
+        return skill
+
+    async def set_active(
+        self, *, skill_id: str, bot_id: str, actor_id: str, active: bool
+    ) -> dict[str, Any]:
+        self.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+        return await self._local_state_service.set_local_skill_active(
+            skill_id=skill_id, actor_id=actor_id, active=active
+        )
 
     async def get_content(self, *, skill_id: str, bot_id: str, actor_id: str) -> str:
         skill, bot, owner_id = self._resolve(
@@ -189,7 +214,7 @@ class BotSkillAssetService:
         for item in schema:
             if not isinstance(item, dict) or not isinstance(item.get("name"), str):
                 raise SkillParameterValidationError()
-            if item.get("required") and not parameters.get(item["name"]):
+            if item.get("required") and item["name"] not in parameters:
                 raise SkillParameterValidationError()
 
 

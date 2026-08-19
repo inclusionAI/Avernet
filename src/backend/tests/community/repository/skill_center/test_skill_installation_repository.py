@@ -3,6 +3,8 @@
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine
+from sqlalchemy.dialects import mysql
+from sqlalchemy.schema import CreateTable
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.models.skill import (
@@ -83,3 +85,15 @@ def test_direct_installation_is_included_in_the_existing_runtime_mapping_query(t
     assert [(asset.skill_id, asset.git_path) for asset in projected] == [
         (int(skill["id"]), "local://local-one")
     ]
+
+
+def test_skill_installation_fk_matches_production_unsigned_skill_identity() -> None:
+    """OceanBase production reports ``ac_skill.id bigint unsigned``."""
+    skill_ddl = str(CreateTable(Skill.__table__).compile(dialect=mysql.dialect()))
+    installation_ddl = str(
+        CreateTable(BotSkillInstallation.__table__).compile(dialect=mysql.dialect())
+    )
+
+    assert "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT" in skill_ddl
+    assert "skill_id BIGINT UNSIGNED NOT NULL" in installation_ddl
+    assert "FOREIGN KEY(skill_id) REFERENCES ac_skill (id)" in installation_ddl

@@ -141,6 +141,20 @@ class _Delete:
 
 
 class _Asset:
+    def __init__(self) -> None:
+        self.query = None
+        self.state = None
+
+    def get_skill(self, **kwargs):
+        return self.query.get_local_skill(
+            skill_id=kwargs["skill_id"], actor_id=kwargs["actor_id"]
+        )
+
+    async def set_active(self, **kwargs):
+        return await self.state.set_local_skill_active(
+            skill_id=kwargs["skill_id"], actor_id=kwargs["actor_id"], active=kwargs["active"]
+        )
+
     async def get_content(self, **kwargs):
         self.content_args = kwargs
         return "---\nname: weather\ndescription: Forecast\n---\n# Weather"
@@ -160,13 +174,18 @@ def _client(
     delete: _Delete | None = None,
     asset: _Asset | None = None,
 ) -> TestClient:
+    state_service = state or _State()
+    asset_service = asset or _Asset()
+    asset_service.query = query
+    asset_service.state = state_service
+
     class Bindings(Module):
         def configure(self, binder):
             binder.bind(LocalSkillQueryServiceProtocol, to=query)
             binder.bind(LocalSkillUploadServiceProtocol, to=_Upload())
-            binder.bind(LocalSkillStateServiceProtocol, to=state or _State())
+            binder.bind(LocalSkillStateServiceProtocol, to=state_service)
             binder.bind(LocalSkillDeleteServiceProtocol, to=delete or _Delete())
-            binder.bind(BotSkillAssetServiceProtocol, to=asset or _Asset())
+            binder.bind(BotSkillAssetServiceProtocol, to=asset_service)
 
     app = FastAPI()
     app.include_router(router)
@@ -506,12 +525,19 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
             }
         )
 
-    class Bindings(Module):
-        def configure(self, binder):
-            binder.bind(
-                LocalSkillQueryServiceProtocol,
-                to=LocalSkillQueryService(skills, bots, object()),
-            )
+        class Bindings(Module):
+            def configure(self, binder):
+                local_query = LocalSkillQueryService(skills, bots, object())
+                binder.bind(
+                    LocalSkillQueryServiceProtocol,
+                    to=local_query,
+                )
+                class Assets:
+                    def get_skill(self, *, skill_id, bot_id, actor_id):
+                        return local_query.get_local_skill(
+                            skill_id=skill_id, actor_id=actor_id
+                        )
+                binder.bind(BotSkillAssetServiceProtocol, to=Assets())
 
     now = int(time.time())
 

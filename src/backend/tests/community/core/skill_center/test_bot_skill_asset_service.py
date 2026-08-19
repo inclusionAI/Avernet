@@ -82,6 +82,7 @@ def _service(*, save_result: bool = True):
         _Factory(),
         parameters,
         lambda: _Resolver(),
+        object(),
     ), parameters
 
 
@@ -115,3 +116,21 @@ async def test_parameter_persistence_failure_is_not_reported_as_success() -> Non
             actor_id="owner",
             parameters={"region": "cn"},
         )
+
+
+def test_required_parameter_accepts_false_and_zero_values() -> None:
+    """Required config means the complete object contains the key, not truthiness."""
+    BotSkillAssetService._validate_parameters(
+        """---
+name: weekly-report
+description: weekly
+config:
+  - name: enabled
+    required: true
+  - name: retries
+    required: true
+---
+# Report
+""",
+        {"enabled": False, "retries": 0},
+    )

@@ -7,6 +7,12 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class BotSkillAssetServiceProtocol(Protocol):
+    def get_skill(self, *, skill_id: str, bot_id: str, actor_id: str) -> dict[str, Any]: ...
+
+    async def set_active(
+        self, *, skill_id: str, bot_id: str, actor_id: str, active: bool
+    ) -> dict[str, Any]: ...
+
     async def get_content(
         self, *, skill_id: str, bot_id: str, actor_id: str
     ) -> str: ...

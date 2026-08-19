@@ -72,6 +72,7 @@ class _Sets:
         self.events: list[str] = []
         self.associated = associated
         self.remove_all_calls = 0
+        self.install_calls = 0
 
     def get_default(self, **kwargs):
         return {"id": "4"}
@@ -103,6 +104,7 @@ class _Sets:
     # Compatibility fake for the new Installation Repository seam.  The event
     # labels intentionally retain the pre-migration assertions below.
     def install(self, **_kwargs):
+        self.install_calls += 1
         if self.skills.active:
             return False
         self.events.append("remove")
@@ -337,6 +339,21 @@ async def test_activate_leaves_legacy_exclusions_for_the_migration_adapter():
 
     assert sets.remove_all_calls == 0
     assert sets.events == ["remove"]
+    assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_idempotent_activate_runtime_failure_never_uninstalls_existing_desired_state():
+    service, skills, installations, _guard, runtime, _factory = _service(
+        active=True, sync_success=False
+    )
+
+    with pytest.raises(LocalSkillRuntimeSyncError):
+        await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
+
+    assert skills.active is True
+    assert installations.install_calls == 1
+    assert installations.events == []
     assert runtime.calls == 1
 
 
