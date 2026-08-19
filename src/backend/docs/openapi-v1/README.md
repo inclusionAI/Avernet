@@ -2078,9 +2078,53 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   `_SENSITIVE_NAME_PARTS`.** No status code, response body, or envelope shape
   changed.
 
-
 ## Changelog
 
 - **2026-08-20** — Added authenticated Bot catalog reads at
   `GET /openapi/v1/bots/catalog/search` and `/discover`. User and App
   principals see the same allowlisted public projection.
+
+- **2026-08-19 — Bot Editors CRUD.** The public surface now exposes
+  `GET/POST /openapi/v1/bots/{bot_id}/editors`,
+  `PATCH/DELETE /openapi/v1/bots/{bot_id}/editors/{editor_id}`, and
+  `DELETE /openapi/v1/bots/{bot_id}/editors/me`. All five operations require a
+  human caller; an application grant authorizes use of a Bot, not enumeration
+  or mutation of its human editor set. The acting user remains the required
+  `user_id` query parameter, while a create body names its target as
+  `editor_user_id`. Roles are the closed `admin | member` enum. Reads require
+  Member access; mutations require Owner/Admin, and a non-owner Admin leaves
+  through `/me` rather than deleting their own record through the admin route.
+  Every `{editor_id}` mutation rebinds the record to the addressed Bot primary
+  key, Bot id, Owner and environment before writing; mismatches are the same
+  fixed 404 as absence. When a Bot carries a Team Space reference, adding or
+  promoting an editor requires that user to remain a live member of the Space;
+  unknown Space references fail closed. The Owner remains outside the editor
+  table, so this contract intentionally permits zero or multiple collaborator
+  Admins and does not couple membership changes to the draft edit lock.
+
+- **2026-08-19 — Bot Workshop adopts the canonical Spaces contract.** Bot
+  creation, local-workflow operations and `GET /openapi/v1/bots/all` now use a
+  numeric Space primary key for `space_id` / `X-Space-Id`; `space_code` remains
+  a separate stable external code. Inventory cards expose the same
+  `space_id`, `space_code`, `space_name`, `space_type` shape as the Spaces API,
+  replacing the provisional string `space_id`, `name`, `kind` shape. This is a
+  coordinated breaking schema correction and the Gateway artifact is published
+  through the compatibility gate with `--allow-breaking`. A Team Space view
+  includes every supported cloud Bot assigned to that Space across Bot Owners;
+  Space membership grants visibility only. Bot Owner/Editor relations still
+  decide actions, Team Editors must remain live Space members, Personal Spaces
+  allow Editors, and Bot Owners retain their Bot permissions after leaving a
+  Team Space.
+
+- **2026-08-19 — Render-screen configuration CRUD.** Added
+  `GET/POST /openapi/v1/bots/{bot_id}/render-screens` and
+  `PATCH/DELETE /openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}`.
+  The collection read returns the non-sensitive component-library name → UMD
+  CDN URL mappings needed to render a Bot's side panels. An authenticated human
+  may read an explicitly addressed Bot without being its Editor; an application
+  may read only while a live grant covers that Bot. Mutations require a human
+  caller and the Bot's live effective Editor permission at `MEMBER` or above,
+  including the Team Space membership recheck. Every public record id is bound
+  back to the addressed Bot id, Owner and environment before update or delete;
+  mismatches use the same fixed 404 as absence. Request bodies are strict and
+  accept only HTTP(S) CDN URLs.

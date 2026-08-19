@@ -70,6 +70,32 @@ def test_require_space_rejects_missing_space() -> None:
         SpaceAccessService(repository).require_space(space_id=7)
 
 
+def test_require_space_reference_accepts_numeric_team_prefix_and_space_code() -> None:
+    repository = MagicMock()
+    repository.get_space.side_effect = [_space(), _space()]
+    repository.get_space_by_code.return_value = _space()
+    service = SpaceAccessService(repository)
+
+    assert service.require_space_reference(space_ref="7").id == 7
+    assert service.require_space_reference(space_ref="team:7").id == 7
+    assert service.require_space_reference(space_ref="spc-7").id == 7
+    repository.get_space_by_code.assert_called_once_with(space_code="spc-7", env="dev")
+
+
+def test_require_space_reference_rejects_team_prefix_for_personal_space() -> None:
+    repository = MagicMock()
+    repository.get_space.return_value = _space().model_copy(
+        update={
+            "space_type": SpaceType.PERSONAL,
+            "personal_owner_id": "owner-1",
+        }
+    )
+    service = SpaceAccessService(repository)
+
+    with pytest.raises(SpaceNotFoundError, match="space not found"):
+        service.require_space_reference(space_ref="team:7")
+
+
 def test_get_space_role_returns_role_or_none() -> None:
     repository = MagicMock()
     repository.get_member.side_effect = [_member(role=SpaceRole.OWNER), None]

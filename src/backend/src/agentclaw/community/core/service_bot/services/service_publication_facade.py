@@ -15,6 +15,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.bot_collaborator.protocols import (
+    resolve_operable_permission_level,
+)
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
     CollaboratorLockService,
 )
@@ -128,10 +131,11 @@ class ServicePublicationFacade:
         if not bot:
             raise ServicePublicationNotFoundError("bot not found")
 
-        level = self._collaborator_service.get_permission_level(
-            bot_pk=bot["id"],
+        level = resolve_operable_permission_level(
+            self._collaborator_service,
+            bot=bot,
             user_id=actor_id,
-            owner_id=bot["owner_id"],
+            owner_id=owner_id,
             env=get_current_env(),
         )
         if level < required_level:

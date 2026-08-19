@@ -28,9 +28,11 @@ from agentclaw.community.core.bot_inventory.services.lifecycle_view import BotLi
 from agentclaw.community.core.bot_inventory.adapters.noop_service_lifecycle import (
     NoopServiceLifecyclePort,
 )
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
 
 CLOUD = {
+    "id": 1,
     "bot_id": "c1",
     "bot_name": "Cloud",
     "bot_desc": "cloud bot",
@@ -40,6 +42,7 @@ CLOUD = {
     "owner_id": "u1",
 }
 LOCAL = {
+    "id": 2,
     "bot_id": "l1",
     "bot_name": "Local",
     "bot_desc": "local bot",
@@ -71,9 +74,14 @@ def client(bot_service, desktop_service):
     class _M(Module):
         def configure(self, binder):
             space = NoopBusinessSpaceContext()
+            access = MagicMock()
+            access.get_operable_permission_levels.side_effect = lambda **kwargs: {
+                int(bot["id"]): PermissionLevel.OWNER for bot in kwargs["bots"]
+            }
             inventory = BotInventoryService(
                 bot_service=bot_service,
                 desktop_service=desktop_service,
+                access_service=access,
                 business_space=space,
                 lifecycle_view=BotLifecycleView(NoopServiceLifecyclePort()),
             )

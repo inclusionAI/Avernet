@@ -9,7 +9,7 @@ from agentclaw.community.core.spaces.errors import (
     SpaceAccessDeniedError,
     SpaceNotFoundError,
 )
-from agentclaw.community.core.spaces.models import SpaceRole
+from agentclaw.community.core.spaces.models import SpaceRole, SpaceType
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -21,6 +21,27 @@ class SpaceAccessService:
     def require_space(self, *, space_id: int):
         space = self._repository.get_space(space_id=space_id, env=get_current_env())
         if space is None:
+            raise SpaceNotFoundError("space not found")
+        return space
+
+    def require_space_reference(self, *, space_ref: str):
+        """Resolve the structured Bot ``space_id`` by numeric id or Space code."""
+        normalized = space_ref.strip()
+        team_reference = normalized.startswith("team:")
+        if team_reference:
+            normalized = normalized.removeprefix("team:")
+        if normalized.isdigit():
+            space = self.require_space(space_id=int(normalized))
+        else:
+            space = self._repository.get_space_by_code(
+                space_code=normalized, env=get_current_env()
+            )
+        if space is None:
+            raise SpaceNotFoundError("space not found")
+        # COSEC: the legacy ``team:`` prefix is a type assertion, not decoration.
+        # Refuse a mismatched Personal Space instead of weakening Team membership
+        # enforcement through a malformed persisted reference.
+        if team_reference and space.space_type is not SpaceType.TEAM:
             raise SpaceNotFoundError("space not found")
         return space
 

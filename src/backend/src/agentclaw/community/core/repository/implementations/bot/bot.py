@@ -354,6 +354,7 @@ class BotRepository(
         owner_id: Optional[str] = None,
         engine: Optional[str] = None,
         status: Optional[str] = None,
+        space_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
         bot_ids: Optional[List[str]] = None,
@@ -381,6 +382,8 @@ class BotRepository(
                 query = query.filter(self.Model.bot_id.in_(bot_ids))
             if owner_id:
                 query = query.filter(self.Model.owner_id == owner_id)
+            if space_id is not None:
+                query = query.filter(self.Model.space_id == space_id)
             if engine:
                 query = query.filter(self.Model.active_engine == engine)
             if status:

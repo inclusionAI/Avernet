@@ -139,7 +139,7 @@ class EngineRuntimeRelay:
         facts = BotFacts.from_record(bot, bot_id=bot_id, owner_id=owner_id)
         require_bot_operator(
             self._collaborators,
-            bot_pk=int(bot.get("id") or 0),
+            bot=bot,
             bot_id=facts.bot_id,
             caller_id=caller_id,
             owner_id=facts.owner_id,

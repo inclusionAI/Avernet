@@ -339,9 +339,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: 83/1/45. Channels adds six Bot-addressed operations, and the Bot Space
 #: reassignment endpoint adds one more, yielding 90/1/45. Session Favorites then
 #: adds three Bot-addressed operations, Caller preparation adds one more, and the
-#: account-level IAM-token read adds one operation with no ``bot_id``. The Bot
-#: catalog contributes two more account-level reads, yielding 94/1/48.
-_BOT_ID_PLACEMENT = {"path": 94, "query": 1, "none": 48}
+#: account-level IAM-token read adds one operation with no ``bot_id``, yielding
+#: 94/1/46. Editors and render screens add another nine Bot-addressed
+#: operations, while the Bot catalog contributes two account-level reads,
+#: yielding 103/1/48.
+_BOT_ID_PLACEMENT = {"path": 103, "query": 1, "none": 48}
 
 
 def _schema() -> dict:
@@ -414,6 +416,8 @@ def test_the_pinned_number_of_operations_take_it():
 
     61 → 77 with the service-Bot lifecycle surface: conversion, approval config,
     version reads/actions and edit-lock operations all act for an explicit user.
+    The five bot-first Editors operations bring the total to 119, and the four
+    render-screen operations bring the current total to 123.
     """
     taking = [
         1
@@ -428,8 +432,9 @@ def test_the_pinned_number_of_operations_take_it():
     # further net 32 user-scoped operations (27 bot-addressed and five
     # account-level operations), then +6 for Bot-scoped Channels CRUD/status,
     # then +1 for Bot Space reassignment, +3 for Session Favorites, and +2 for
-    # IAM-token retrieval and Caller preparation.
-    assert len(taking) == 130
+    # IAM-token retrieval and Caller preparation, then +5 for Editors and +4
+    # for render screens.
+    assert len(taking) == 139
 
 
 def test_the_exempt_operations_take_none():

@@ -181,6 +181,7 @@ from .caller import router as caller_router
 from .channels import router as channels_router
 from .containers import router as containers_router
 from .diagnostics import router as diagnostics_router
+from .editors import router as editors_router
 from .deprecated import (
     ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
     GRANT_CHECKED_GROUPS as _LEGACY_GRANT_CHECKED,
@@ -208,6 +209,7 @@ from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
 from .bot_public import router as bot_public_router
 from .resources import router as resources_router
+from .render_screens import router as render_screens_router
 from .routines import router as routines_router
 from .skills import router as skills_router
 from .service_publications import (
@@ -295,6 +297,8 @@ _ADDRESSED_BOT_SUBGROUPS = [
     containers_router,
     diagnostics_router,
     channels_router,
+    editors_router,
+    render_screens_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it

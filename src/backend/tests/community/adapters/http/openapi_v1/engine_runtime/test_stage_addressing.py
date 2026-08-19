@@ -123,6 +123,21 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("patch", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
     ("delete", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
     ("put", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"),
+    ("get", "/openapi/v1/bots/{bot_id}/editors"),
+    ("post", "/openapi/v1/bots/{bot_id}/editors"),
+    ("patch", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/editors/me"),
+    ("get", "/openapi/v1/bots/{bot_id}/render-screens"),
+    ("post", "/openapi/v1/bots/{bot_id}/render-screens"),
+    (
+        "patch",
+        "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}",
+    ),
+    (
+        "delete",
+        "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}",
+    ),
 }
 
 

@@ -49,9 +49,12 @@ with no live runtime.
 
 from __future__ import annotations
 
+from typing import Any, Mapping
+
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
+    resolve_operable_permission_level,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
@@ -82,34 +85,32 @@ OPERATOR_LEVEL = PermissionLevel.MEMBER
 def resolve_operator_level(
     collaborators: CollaboratorServiceProtocol,
     *,
-    bot_pk: int,
+    bot: Mapping[str, Any],
     caller_id: str,
     owner_id: str,
 ) -> PermissionLevel:
     """The caller's level on this bot: OWNER, their collaborator level, or NONE.
 
-    Delegates to ``CollaboratorService.get_permission_level`` — the platform's
-    one role policy (owner short-circuit, role→level mapping) — rather than
-    keeping a second copy of it here; this wrapper adds only the fail-closed
-    direction. ``owner_id`` must be the *resolved* owner — the record's, not
-    the request's — and ``bot_pk`` the primary key ownership was proven
-    against; ``bot_id`` alone is not unique across owners. A lookup failure
-    returns ``NONE`` (fail closed) and logs: this feeds a refusal, so the
-    direction of the guess decides what a database blip does.
+    Delegates to the platform's effective Bot permission policy: owner
+    short-circuit, collaborator role mapping, and live Team Space membership
+    for non-owner editors. A lookup failure returns ``NONE`` (fail closed).
 
     Synchronous — one indexed read, and only when the caller is not the
     owner. Callers on an event loop run it in a worker thread with the rest
     of their resolution.
     """
     try:
-        return PermissionLevel(
-            collaborators.get_permission_level(bot_pk, caller_id, owner_id)
+        return resolve_operable_permission_level(
+            collaborators,
+            bot=bot,
+            user_id=caller_id,
+            owner_id=owner_id,
         )
     except Exception:
         logger.exception(
             "[engine_runtime] collaborator lookup failed for bot_pk=%s; "
             "refusing the caller",
-            bot_pk,
+            bot.get("id"),
         )
         return PermissionLevel.NONE
 
@@ -117,7 +118,7 @@ def resolve_operator_level(
 def require_bot_operator(
     collaborators: CollaboratorServiceProtocol,
     *,
-    bot_pk: int,
+    bot: Mapping[str, Any],
     bot_id: str,
     caller_id: str,
     owner_id: str,
@@ -130,7 +131,7 @@ def require_bot_operator(
     cannot carry them.
     """
     level = resolve_operator_level(
-        collaborators, bot_pk=bot_pk, caller_id=caller_id, owner_id=owner_id
+        collaborators, bot=bot, caller_id=caller_id, owner_id=owner_id
     )
     if level < OPERATOR_LEVEL:
         # ``%r`` on the caller id deliberately: this branch runs only for a

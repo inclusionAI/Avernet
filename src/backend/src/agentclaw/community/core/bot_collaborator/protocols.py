@@ -12,7 +12,10 @@
 """
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from inspect import signature
+from typing import Any, Mapping, Protocol, runtime_checkable
+
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
 
 @runtime_checkable
@@ -39,3 +42,32 @@ class CollaboratorServiceProtocol(Protocol):
     def get_permission_level(self, *args: Any, **kwargs: Any) -> Any:
         """获取用户在 Bot 中的权限级别（bot_pk 定位，无额外 Bot 查询）."""
         ...
+
+    def get_operable_permission_level(self, *args: Any, **kwargs: Any) -> Any:
+        """获取叠加实时 Space 成员关系后的有效 Bot 权限."""
+        ...
+
+
+def resolve_operable_permission_level(
+    collaborators: CollaboratorServiceProtocol,
+    *,
+    bot: Mapping[str, Any],
+    user_id: str,
+    owner_id: str,
+    env: str | None = None,
+) -> PermissionLevel:
+    """Call the effective policy while legacy test doubles migrate in-place."""
+    if user_id == owner_id:
+        return PermissionLevel.OWNER
+    method = getattr(type(collaborators), "get_operable_permission_level", None)
+    if callable(method):
+        return PermissionLevel(
+            method(collaborators, bot=bot, user_id=user_id, env=env)
+        )
+    legacy_method = collaborators.get_permission_level
+    legacy_args = (int(bot.get("id") or 0), user_id, owner_id)
+    try:
+        signature(legacy_method).bind(*legacy_args, env)
+    except TypeError:
+        return PermissionLevel(legacy_method(*legacy_args))
+    return PermissionLevel(legacy_method(*legacy_args, env))

@@ -12,20 +12,31 @@ Bindings:
 Tests construct services directly with mocks (no fake services); the
 bindings exist so production routes can use ``Injected(...)``.
 """
+
 from __future__ import annotations
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
-from agentclaw.community.api.collaborator_lock_service import CollaboratorLockServiceProtocol
+from agentclaw.community.api.collaborator_lock_service import (
+    CollaboratorLockServiceProtocol,
+)
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.bot_collaborator.protocols import (
     BotServiceProtocol,
     CollaboratorServiceProtocol as CoreCollaboratorServiceProtocol,
 )
-from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
-from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
-from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
-from agentclaw.community.core.bot_collaborator.services.collaborator_service import CollaboratorService
+from agentclaw.community.core.repository.protocols.bot import (
+    CollaboratorRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    BotCollabLogRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    BotCollabLockRepositoryProtocol,
+)
+from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
+    CollaboratorService,
+)
 from agentclaw.community.core.bot_collaborator.services.credentials_admins_writer import (
     DeviceCredentialsAdminsWriter,
 )
@@ -38,15 +49,30 @@ from agentclaw.community.core.bot_collaborator.services.aicoding.member_manageme
 from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
     MemberManagementCapabilityService,
 )
-from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import CollaboratorLockService
+from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
+    CollaboratorLockService,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.bot_management.services.template_service import TemplateService
-from agentclaw.community.core.devices.services.device_context_resolver import DeviceContextResolver
-from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
+from agentclaw.community.core.bot_management.services.template_service import (
+    TemplateService,
+)
+from agentclaw.community.core.devices.services.device_context_resolver import (
+    DeviceContextResolver,
+)
+from agentclaw.community.di.modules.skill_center_module import (
+    DeviceFilesystemDispatcher,
+)
 from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.core.repository.implementations.bot.collaborator import CollaboratorRepository
-from agentclaw.community.core.repository.implementations.bot.collab_log import BotCollabLogRepository
-from agentclaw.community.core.repository.implementations.bot.collab_lock import BotCollabLockRepository
+from agentclaw.community.core.repository.implementations.bot.collaborator import (
+    CollaboratorRepository,
+)
+from agentclaw.community.core.repository.implementations.bot.collab_log import (
+    BotCollabLogRepository,
+)
+from agentclaw.community.core.repository.implementations.bot.collab_lock import (
+    BotCollabLockRepository,
+)
+from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 
 
 class BotCollaboratorModule(Module):
@@ -118,7 +144,9 @@ class BotCollaboratorModule(Module):
             collaborator_repo=collaborator_repo,
             bot_publish_repo=bot_publish_repo,
             resolver_provider=lambda: injector.get(DeviceContextResolver),
-            device_fs_dispatcher_provider=lambda: injector.get(DeviceFilesystemDispatcher),
+            device_fs_dispatcher_provider=lambda: injector.get(
+                DeviceFilesystemDispatcher
+            ),
         )
 
     @singleton
@@ -130,6 +158,7 @@ class BotCollaboratorModule(Module):
         bot_repo: BotRepository,
         passport_plugin: PassportPlugin,
         credentials_admins_writer: DeviceCredentialsAdminsWriter,
+        space_access_service: SpaceAccessServiceProtocol,
         member_management_capability_service: MemberManagementCapabilityService,
     ) -> CollaboratorService:
         """Construct ``CollaboratorService``.
@@ -143,6 +172,7 @@ class BotCollaboratorModule(Module):
             bot_repo=bot_repo,
             passport_plugin=passport_plugin,
             credentials_admins_writer=credentials_admins_writer,
+            space_access_service=space_access_service,
             member_management_capability_service=member_management_capability_service,
         )
 
