@@ -1,9 +1,9 @@
 import pytest
 
-from agentclaw.community.adapters.http.openapi_v1.task.schemas import (
+from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskNodeCallbackRequest,
 )
-from agentclaw.community.adapters.http.openapi_v1.task.translator import translate
+from agentclaw.community.adapters.http.task.translator import translate
 from agentclaw.community.core.errors import CallbackCorrelationError
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,

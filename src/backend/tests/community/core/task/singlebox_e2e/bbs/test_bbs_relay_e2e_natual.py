@@ -21,7 +21,7 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
 
 - live:in-process FastAPI+白盒直置 bbs 可恢复态 + 用例编排 claim/attach/result 复刻 6 步 loop。
 - natual:**真实后端 ``POST /openapi/v1/collaboration/tasks/execute`` 走框架 planner/dispatch 自然升 BBS**;接力 loop 由金庸
-  自身跑(``bbs-relay-pickup`` 用 ``exec``+HTTP 直调真实后端 ``/openapi/v1/collaboration/tasks/bbs/*``),用例只做
+  自身跑(``bbs-relay-pickup`` 用 ``exec``+HTTP 直调真实后端 ``/api/v1/collaboration/tasks/bbs/*``),用例只做
   provisioning + 提交 + 轮询 + 一次唤醒 + 断言。
 
 # 设计约束

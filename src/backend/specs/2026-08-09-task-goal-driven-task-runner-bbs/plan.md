@@ -4,7 +4,7 @@
 
 **Goal:** 在 6 态 `ExecutionEngine` 任务框架上叠加 BBS 自主接力——内容 skill `bbs-relay-pickup` + 三条 `bbs/*` 路由 + drain/harness bbs 守卫,让任意引擎 bot 自驱接 BBS 升级任务续做。
 
-**Architecture:** bot 经 `GET /openapi/v1/collaboration/tasks/list`(筛 `bbs_mode`)+ `/dashboard` 取整图 → `POST /openapi/v1/collaboration/tasks/bbs/claim` CAS 独占任务根(`bbs_owner`)→ 自判 → `POST /openapi/v1/collaboration/tasks/bbs/attach` 挂一个 `run_mode="bbs"` scoped 子节点并 start → 执行 → `POST /openapi/v1/collaboration/tasks/bbs/result` 落终态 + 清根 `bbs_owner` 释放 → 下个 bot 读 `goal`+DONE 叶子接力。lease 复用 `TaskHarness` SLA;崩溃到期 harness 清 `bbs_owner`+标终态(不重派)。全程经 `TaskGraphService` SSOT 写口,不改 `Status`/转移表/`TaskNodePatch`/`PlanResult`/`on_*` 签名。
+**Architecture:** bot 经 `GET /openapi/v1/collaboration/tasks/list`(筛 `bbs_mode`)+ `/dashboard` 取整图 → `POST /api/v1/collaboration/tasks/bbs/claim` CAS 独占任务根(`bbs_owner`)→ 自判 → `POST /api/v1/collaboration/tasks/bbs/attach` 挂一个 `run_mode="bbs"` scoped 子节点并 start → 执行 → `POST /api/v1/collaboration/tasks/bbs/result` 落终态 + 清根 `bbs_owner` 释放 → 下个 bot 读 `goal`+DONE 叶子接力。lease 复用 `TaskHarness` SLA;崩溃到期 harness 清 `bbs_owner`+标终态(不重派)。全程经 `TaskGraphService` SSOT 写口,不改 `Status`/转移表/`TaskNodePatch`/`PlanResult`/`on_*` 签名。
 
 **Tech Stack:** Python 3.12 / FastAPI + fastapi-injector(`Injected(...)` DI)/ Pydantic v2 / `@dataclass` + `StrEnum` 领域模型 / `threading.RLock` per-task 串行 / stdlib `logging` / pytest。
 
@@ -41,7 +41,7 @@
 | `core/task/openapi/v1/task_service.py` | `TaskServiceProtocol` 加三方法签名 | Modify |
 | `adapters/http/task/schemas.py` | `TaskSummaryDTO.bbs_mode` + `BbsClaimDTO`/`BbsAttachDTO`/`BbsResultDTO` | Modify |
 | `adapters/http/task/translator.py` | `TaskSummary→DTO` 透传 `bbs_mode` | Modify |
-| `adapters/http/task/router.py` | 三路由 `POST /openapi/v1/collaboration/tasks/bbs/{claim,attach,result}` | Modify |
+| `adapters/http/task/router.py` | 三路由 `POST /api/v1/collaboration/tasks/bbs/{claim,attach,result}` | Modify |
 | `tests/community/core/task/test_bbs_*.py` | 单测/契约测 | Create |
 | `tests/community/core/task/singlebox_e2e/test_bbs_relay_e2e.py` | E2E | Create |
 | `bbs-relay-pickup/SKILL.md` + `references/*` | 内容 skill | Create |
@@ -316,7 +316,7 @@ git commit -m "feat(task): add task-level CAS claim_bbs_owner for BBS relay"
 
 ---
 
-### Task 4: `POST /openapi/v1/collaboration/tasks/bbs/claim` 路由
+### Task 4: `POST /api/v1/collaboration/tasks/bbs/claim` 路由
 
 **Files:**
 - Modify: `adapters/http/task/schemas.py`(加 `BbsClaimDTO`)
@@ -325,7 +325,7 @@ git commit -m "feat(task): add task-level CAS claim_bbs_owner for BBS relay"
 
 **Interfaces:**
 - Consumes: `TaskService.claim_bbs_task`(Task 3);`Injected(TaskServiceProtocol)`;`HTTPException`(已 import `:43`)
-- Produces: `POST /openapi/v1/collaboration/tasks/bbs/claim` → `ApiResponse[dict]`(含 `root_node_id`);`TaskStateError→409`
+- Produces: `POST /api/v1/collaboration/tasks/bbs/claim` → `ApiResponse[dict]`(含 `root_node_id`);`TaskStateError→409`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -347,9 +347,9 @@ def _bbs_task(task_graph_service, task_service_protocol):
     task_graph_service.update_task_graph_info("r1", TaskGraphPatch(extend_props_patch={"bbs_mode": True}))
 
 def test_claim_route_200_then_409(client):
-    r1 = client.post("/openapi/v1/collaboration/tasks/bbs/claim", json={"task_id": "r1", "bot_id": "botA"})
+    r1 = client.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": "r1", "bot_id": "botA"})
     assert r1.status_code == 200 and r1.json()["data"]["root_node_id"] == "r1"
-    r2 = client.post("/openapi/v1/collaboration/tasks/bbs/claim", json={"task_id": "r1", "bot_id": "botB"})
+    r2 = client.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": "r1", "bot_id": "botB"})
     assert r2.status_code == 409
 ```
 > 注:测试 fixture 复用现有 singlebox/conftest 的 `client`/`task_graph_service`/`task_service_protocol`(见 `tests/community/core/task/singlebox_e2e/conftest.py`);若该层无 `client` fixture,改用 `TestClient(app)` + 手动注入 graph,实现者据 conftest 适配。
@@ -364,7 +364,7 @@ Expected: FAIL(404 / 路由不存在)
 `schemas.py` 加:
 ```python
 class BbsClaimDTO(BaseModel):
-    """POST /openapi/v1/collaboration/tasks/bbs/claim 请求体。"""
+    """POST /api/v1/collaboration/tasks/bbs/claim 请求体。"""
     task_id: str
     bot_id: str
 ```
@@ -394,7 +394,7 @@ Expected: PASS
 
 ```bash
 git add src/backend/src/agentclaw/community/adapters/http/task/{schemas.py,router.py} tests/community/core/task/test_bbs_claim_route.py
-git commit -m "feat(task): POST /openapi/v1/collaboration/tasks/bbs/claim route (task-level CAS, 409 on lose)"
+git commit -m "feat(task): POST /api/v1/collaboration/tasks/bbs/claim route (task-level CAS, 409 on lose)"
 ```
 
 ---
@@ -535,7 +535,7 @@ git commit -m "feat(task): attach_bbs_node (scoped bbs child + start, depth gate
 
 ---
 
-### Task 6: `POST /openapi/v1/collaboration/tasks/bbs/attach` 路由
+### Task 6: `POST /api/v1/collaboration/tasks/bbs/attach` 路由
 
 **Files:**
 - Modify: `adapters/http/task/schemas.py`(`BbsAttachDTO` + 复用 `TaskSpecDTO`)
@@ -545,7 +545,7 @@ git commit -m "feat(task): attach_bbs_node (scoped bbs child + start, depth gate
 
 **Interfaces:**
 - Consumes: `TaskService.attach_bbs_node`(Task 5);`task_spec_from_dto`(`schemas.py` 现有,`execute_task` 用)
-- Produces: `POST /openapi/v1/collaboration/tasks/bbs/attach` → `ApiResponse[dict]`(含 `node_id`);`TaskStateError`/`GraphIntegrityError`→409
+- Produces: `POST /api/v1/collaboration/tasks/bbs/attach` → `ApiResponse[dict]`(含 `node_id`);`TaskStateError`/`GraphIntegrityError`→409
 
 - [ ] **Step 1: 写失败测试**
 
@@ -554,7 +554,7 @@ git commit -m "feat(task): attach_bbs_node (scoped bbs child + start, depth gate
 def test_attach_route_creates_node(client, task_graph_service, task_service_protocol):
     # 复用 Task 4 的 _bbs_task 式构造 + 根 PLANNING + claim
     ...  # 实现者照 test_bbs_claim_route 的 fixture 模式:initialize_graph→bbs_mode→根 PLANNING→claim botA
-    r = client.post("/openapi/v1/collaboration/tasks/bbs/attach", json={
+    r = client.post("/api/v1/collaboration/tasks/bbs/attach", json={
         "task_id": "x1", "parent_node_id": "x1", "bot_id": "botA",
         "task_spec": {"metadata": {"task_id": "bbs-scoped", "title": "s", "instruction": "do"},
                       "context": {"background": "", "extend_props": {}},
@@ -563,7 +563,7 @@ def test_attach_route_creates_node(client, task_graph_service, task_service_prot
     assert r.json()["data"]["node_id"].startswith("bbs-")
 
 def test_attach_route_non_owner_409(client, ...):
-    r = client.post("/openapi/v1/collaboration/tasks/bbs/attach", json={"task_id": "x2", "parent_node_id": "x2", "bot_id": "botB", "task_spec": {...}})
+    r = client.post("/api/v1/collaboration/tasks/bbs/attach", json={"task_id": "x2", "parent_node_id": "x2", "bot_id": "botB", "task_spec": {...}})
     assert r.status_code == 409
 ```
 > 实现者:照 `test_bbs_claim_route.py` 的 fixture(构造 bbs_mode + 根 PLANNING + claim)。`task_spec` JSON 结构对齐 `TaskSpecDTO`(`schemas.py` 现有)。
@@ -578,7 +578,7 @@ Expected: FAIL(路由不存在)
 `schemas.py` 加:
 ```python
 class BbsAttachDTO(BaseModel):
-    """POST /openapi/v1/collaboration/tasks/bbs/attach 请求体。"""
+    """POST /api/v1/collaboration/tasks/bbs/attach 请求体。"""
     task_id: str
     parent_node_id: str
     task_spec: TaskSpecDTO
@@ -612,7 +612,7 @@ Expected: PASS
 
 ```bash
 git add src/backend/src/agentclaw/community/adapters/http/task/{schemas.py,router.py,translator.py} tests/community/core/task/test_bbs_attach_route.py
-git commit -m "feat(task): POST /openapi/v1/collaboration/tasks/bbs/attach route (scoped bbs node + start)"
+git commit -m "feat(task): POST /api/v1/collaboration/tasks/bbs/attach route (scoped bbs node + start)"
 ```
 
 ---
@@ -735,7 +735,7 @@ git commit -m "feat(task): on_bbs_report collector-free result path + claim rele
 
 ---
 
-### Task 8: `POST /openapi/v1/collaboration/tasks/bbs/result` 路由
+### Task 8: `POST /api/v1/collaboration/tasks/bbs/result` 路由
 
 **Files:**
 - Modify: `adapters/http/task/schemas.py`(`BbsResultDTO` + `AcceptanceResultDTO` 若无)
@@ -745,7 +745,7 @@ git commit -m "feat(task): on_bbs_report collector-free result path + claim rele
 
 **Interfaces:**
 - Consumes: `TaskService.report_bbs_result`(Task 7)
-- Produces: `POST /openapi/v1/collaboration/tasks/bbs/result` → `ApiResponse[dict]`;`TaskStateError→409`
+- Produces: `POST /api/v1/collaboration/tasks/bbs/result` → `ApiResponse[dict]`;`TaskStateError→409`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -753,7 +753,7 @@ git commit -m "feat(task): on_bbs_report collector-free result path + claim rele
 # tests/community/core/task/test_bbs_result_route.py
 def test_result_route_root_verified_done(client, bbs_task_with_claimed_node):
     task_id, node_id, bot = bbs_task_with_claimed_node
-    r = client.post("/openapi/v1/collaboration/tasks/bbs/result", json={
+    r = client.post("/api/v1/collaboration/tasks/bbs/result", json={
         "task_id": task_id, "node_id": node_id, "bot_id": bot,
         "acceptance_result": {"verdict": "PASS", "acceptances_metric": [], "gaps": []},
         "root_verified": True})
@@ -764,7 +764,7 @@ def test_result_route_root_verified_done(client, bbs_task_with_claimed_node):
 
 def test_result_route_non_owner_409(client, bbs_task_with_claimed_node):
     task_id, node_id, bot = bbs_task_with_claimed_node
-    r = client.post("/openapi/v1/collaboration/tasks/bbs/result", json={"task_id": task_id, "node_id": node_id, "bot_id": "botOTHER",
+    r = client.post("/api/v1/collaboration/tasks/bbs/result", json={"task_id": task_id, "node_id": node_id, "bot_id": "botOTHER",
         "acceptance_result": {"verdict": "PASS", "acceptances_metric": [], "gaps": []}})
     assert r.status_code == 409
 ```
@@ -785,7 +785,7 @@ class AcceptanceResultDTO(BaseModel):
     gaps: list[str] = Field(default_factory=list)
 
 class BbsResultDTO(BaseModel):
-    """POST /openapi/v1/collaboration/tasks/bbs/result 请求体。"""
+    """POST /api/v1/collaboration/tasks/bbs/result 请求体。"""
     task_id: str
     node_id: str
     bot_id: str
@@ -829,7 +829,7 @@ Expected: PASS
 
 ```bash
 git add src/backend/src/agentclaw/community/adapters/http/task/{schemas.py,router.py,translator.py} tests/community/core/task/test_bbs_result_route.py
-git commit -m "feat(task): POST /openapi/v1/collaboration/tasks/bbs/result route (collector-free report + claim release)"
+git commit -m "feat(task): POST /api/v1/collaboration/tasks/bbs/result route (collector-free report + claim release)"
 ```
 
 ---
@@ -992,10 +992,10 @@ allowed_tools: [exec]
 被唤醒后按序执行(一次唤醒 = 一个 scoped 节点):
 
 1. **发现**:`GET /openapi/v1/collaboration/tasks/list` → 取 `bbs_mode==true` 的任务;`GET /openapi/v1/collaboration/tasks/dashboard?task_id=` 取整图。
-2. **占根**:`POST /openapi/v1/collaboration/tasks/bbs/claim {task_id, bot_id: <自己>}`。**409 = 别的 bot 已占 → 换任务**。
+2. **占根**:`POST /api/v1/collaboration/tasks/bbs/claim {task_id, bot_id: <自己>}`。**409 = 别的 bot 已占 → 换任务**。
 3. **自判**:读根 `goal`+`acceptances` + 已成 DONE 叶子 + 前序 scoped 节点 `run_info.output`(checkpoint),判"剩余里我能做哪部分"(full/partial/skip)。判据见 `references/judge-rubric.md`。
-4. **挂节点 + 干**:`POST /openapi/v1/collaboration/tasks/bbs/attach {task_id, parent_node_id: <根>, task_spec: <你能做的那部分>, bot_id: <自己>}` → 拿 `node_id`。**claim 成功才允许 attach**。用原生能力执行这一个节点。长活周期性 `POST /openapi/v1/collaboration/tasks/bbs/result` 带 `output_patch` 作 checkpoint。
-5. **写回**:`POST /openapi/v1/collaboration/tasks/bbs/result {task_id, node_id, bot_id, acceptance_result, root_verified}`:
+4. **挂节点 + 干**:`POST /api/v1/collaboration/tasks/bbs/attach {task_id, parent_node_id: <根>, task_spec: <你能做的那部分>, bot_id: <自己>}` → 拿 `node_id`。**claim 成功才允许 attach**。用原生能力执行这一个节点。长活周期性 `POST /api/v1/collaboration/tasks/bbs/result` 带 `output_patch` 作 checkpoint。
+5. **写回**:`POST /api/v1/collaboration/tasks/bbs/result {task_id, node_id, bot_id, acceptance_result, root_verified}`:
    - 全做完且根目标满足 → `acceptance_result.verdict=PASS, root_verified=true` → 图 DONE。
    - 仅完成部分 → `verdict=FAIL, gaps=[...], output_patch={...checkpoint...}, root_verified=false` → 释放 claim 供下个 bot 接力。
 6. **边界**:无可做/pass 完 → 结束本次唤醒,等下次。
@@ -1039,8 +1039,8 @@ pytestmark = pytest.mark.skipif(os.environ.get("SINGLEBOX_TASK_E2E") != "1",
 def test_two_bots_claim_same_bbs_task_exactly_one_wins(client, two_provisioned_bots):
     """场景 C:两 bot 同时 bbs/claim 同一 bbs 任务 → 恰一 200、一 409。"""
     task_id = _submit_bbs_task(client)  # 经 /openapi/v1/collaboration/tasks/execute 提交 + 触发升 BBS(或直接置 bbs_mode+根PLANNING)
-    r1 = client.post("/openapi/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botA"})
-    r2 = client.post("/openapi/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botB"})
+    r1 = client.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botA"})
+    r2 = client.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botB"})
     assert {r1.status_code, r2.status_code} == {200, 409}
 ```
 

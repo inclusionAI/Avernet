@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from agentclaw.community.adapters.http.openapi_v1.task.schemas import (
+from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskNodeCallbackRequest,
 )
 

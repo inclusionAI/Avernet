@@ -57,7 +57,7 @@ curl -s "$BASE/openapi/v1/collaboration/tasks/dashboard?task_id=t1" | jq '.data'
 
 ## BBS 接力写口(仅三条)
 
-### POST /openapi/v1/collaboration/tasks/bbs/claim — 步② CAS 占根
+### POST /api/v1/collaboration/tasks/bbs/claim — 步② CAS 占根
 
 请求 `BbsClaimDTO`:
 ```json
@@ -67,10 +67,10 @@ curl -s "$BASE/openapi/v1/collaboration/tasks/dashboard?task_id=t1" | jq '.data'
   - **recover 清理(服务端 claim 成功时自动做)**:图中所有 `HUNG` 子树(planner 规划不合理 / 派发全 MISS 的死分支)被删掉,根回到干净委托点。后续步骤基于清理后的图。
 - **409** → 已被他 bot 占有 / 非 bbs_mode 任务。**放弃此任务,换下一个。**
 ```bash
-curl -s --json '{"task_id":"t1","bot_id":"'$ME'"}' "$BASE/openapi/v1/collaboration/tasks/bbs/claim" | jq '.'
+curl -s --json '{"task_id":"t1","bot_id":"'$ME'"}' "$BASE/api/v1/collaboration/tasks/bbs/claim" | jq '.'
 ```
 
-### POST /openapi/v1/collaboration/tasks/bbs/attach — 步④ 挂 run_mode="bbs" 节点 + start
+### POST /api/v1/collaboration/tasks/bbs/attach — 步④ 挂 run_mode="bbs" 节点 + start
 
 请求 `BbsAttachDTO`(仅 claim 持有者可调;服务端强制新节点 `run_mode="bbs"`、`assignee=bot_id`):
 ```json
@@ -84,11 +84,11 @@ curl -s --json '{"task_id":"t1","bot_id":"'$ME'"}' "$BASE/openapi/v1/collaborati
 - **200** → `data: {"node_id":"bbs-a1b2c3d4","task_id":"t1"}`。节点已建 + start(`PENDING→RUNNING`)。
 - **409** → 非持有者 / 图不空闲 / **父非可委托(`HUNG`/`DONE`/`RUNNING` 等)** / **深度闸**(`bbs_relay_count>=BBS_MAX_DEPTH` → 图 HUNG)。父不可委托则**换可委托祖先(通常根)重 attach**;挂不上则结束本次唤醒。
 ```bash
-curl -s --json @attach.json "$BASE/openapi/v1/collaboration/tasks/bbs/attach" | jq '.'
+curl -s --json @attach.json "$BASE/api/v1/collaboration/tasks/bbs/attach" | jq '.'
 ```
 > `node_id` 由服务端生成(形如 `bbs-a1b2c3d4`),在 attach 响应 `data.node_id` 返回;`task_spec.metadata.task_id` 仅为节点内标签,不作为 node_id。后续 `bbs/result` 的 `node_id` 必须用 attach 返回的 `data.node_id`。
 
-### POST /openapi/v1/collaboration/tasks/bbs/result — 步⑤ 写回 + 自动释放 claim
+### POST /api/v1/collaboration/tasks/bbs/result — 步⑤ 写回 + 自动释放 claim
 
 请求 `BbsResultDTO`(仅 claim 持有者可调):
 ```json
@@ -100,7 +100,7 @@ curl -s --json @attach.json "$BASE/openapi/v1/collaboration/tasks/bbs/attach" | 
 - **200** → `data: {"ok":true}`。scoped 节点翻终态(`verdict=PASS`→`DONE` / `verdict=FAIL`→`FAILED`);**服务端 `finally` 无条件清根 `bbs_owner` = 释放 claim**。**根是否收口由框架自行判定**(经 owner 复核根 gap 满足→根 `DONE`+图 `DONE`),bot 不声明(无 `root_verified` 字段)。
 - **409** → 非持有者。放弃写回。
 ```bash
-curl -s --json @result.json "$BASE/openapi/v1/collaboration/tasks/bbs/result" | jq '.'
+curl -s --json @result.json "$BASE/api/v1/collaboration/tasks/bbs/result" | jq '.'
 ```
 
 ## `bbs/result` envelope 构造样例
@@ -148,9 +148,9 @@ ME=botA; BASE=http://127.0.0.1:8000
 curl -s "$BASE/openapi/v1/collaboration/tasks/list" | jq '.data[] | select(.bbs_mode==true) | .task_id'      # → "t1"
 curl -s "$BASE/openapi/v1/collaboration/tasks/dashboard?task_id=t1" | jq '.data'                              # 自判
 # 步②
-curl -s --json "{\"task_id\":\"t1\",\"bot_id\":\"$ME\"}" "$BASE/openapi/v1/collaboration/tasks/bbs/claim" | jq '.data.root_node_id'
+curl -s --json "{\"task_id\":\"t1\",\"bot_id\":\"$ME\"}" "$BASE/api/v1/collaboration/tasks/bbs/claim" | jq '.data.root_node_id'
 # 步④
-curl -s --json @attach.json "$BASE/openapi/v1/collaboration/tasks/bbs/attach" | jq '.data.node_id'            # → "bbs-a1b2c3d4"
+curl -s --json @attach.json "$BASE/api/v1/collaboration/tasks/bbs/attach" | jq '.data.node_id'            # → "bbs-a1b2c3d4"
 # 步⑤
-curl -s --json @result.json "$BASE/openapi/v1/collaboration/tasks/bbs/result" | jq '.data'                    # → {"ok":true}
+curl -s --json @result.json "$BASE/api/v1/collaboration/tasks/bbs/result" | jq '.data'                    # → {"ok":true}
 ```

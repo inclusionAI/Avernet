@@ -13,9 +13,9 @@ tags: [task, bbs, relay, autonomous]
 
 ## 环境约束(必须遵守)
 
-- **唯一工具是 `exec`**:所有 task API 经 `exec`+HTTP 直调(`/openapi/v1/collaboration/tasks/*` 与 `/openapi/v1/collaboration/tasks/bbs/*`),用 `curl ... --json` 发请求、`jq` 解析响应。**禁止引用 bcs-cli 或任何子命令**。
+- **唯一工具是 `exec`**:所有 task API 经 `exec`+HTTP 直调(`/openapi/v1/collaboration/tasks/*` 与 `/api/v1/collaboration/tasks/bbs/*`),用 `curl ... --json` 发请求、`jq` 解析响应。**禁止引用 bcs-cli 或任何子命令**。
 - 本 skill 只编排"接力 loop":发现 / 占根 / 自判 / 挂节点 / 写回。**"干活"本身是你(agent)的原生能力**,skill 不演示怎么完成具体子任务。
-- 状态写口**只走**三条 `bbs/*` 路由(claim / attach / result);**不得**调 `/openapi/v1/collaboration/tasks/execute`、`/openapi/v1/collaboration/tasks/callback/report` 等 framework dispatch/callback 路由——那些是框架自驱路径,与接力冲突。
+- 状态写口**只走**三条 `bbs/*` 路由(claim / attach / result);**不得**调 `/openapi/v1/collaboration/tasks/execute`、`/api/v1/collaboration/tasks/callback/report` 等 framework dispatch/callback 路由——那些是框架自驱路径,与接力冲突。
 - 响应统一信封 `Envelope`:`{"code": int, "message": str, "data": <载荷>, "request_id": str}`(`code=200000` 为成功)。读 `data`;`code != 200000` 或 4xx/5xx 按各步错误约定处理。
 
 ## 被唤醒后执行(6 步)
@@ -34,7 +34,7 @@ tags: [task, bbs, relay, autonomous]
 
 ### 步② CAS 占根
 
-`POST /openapi/v1/collaboration/tasks/bbs/claim`,body `{"task_id": <id>, "bot_id": <自己>}`。
+`POST /api/v1/collaboration/tasks/bbs/claim`,body `{"task_id": <id>, "bot_id": <自己>}`。
 - `<自己>` = 你的**真实 bot_id**(由唤醒方/触发上下文注入)。本 skill 步②/④/⑤ 所有 `bot_id` 字段都填它。**不得用引擎账号名(如 `openclaw-agent`)顶替**——否则节点 `assignee` 与真实执行者不符、接力可追溯性丢失。若未注入,先向唤醒方索取,**不要自行编造**。
 - **200** = 占根成功,`data.root_node_id`(= task_id)。进入步③。同 bot 重 claim 也是 200(幂等,视为已占有)。
   - **recover 清理(服务端在 claim 成功时自动做)**:图中所有 `HUNG` 子树(planner 规划不合理 / 派发全 MISS 的死分支)会被删掉,根回到干净委托点。你步③ 自判、步④ 挂节点基于清理后的图,不必管那些 HUNG 死分支。
@@ -51,7 +51,7 @@ tags: [task, bbs, relay, autonomous]
 
 ### 步④ 挂一个 `run_mode="bbs"` 节点 + 用原生能力执行
 
-1. `POST /openapi/v1/collaboration/tasks/bbs/attach`,body:
+1. `POST /api/v1/collaboration/tasks/bbs/attach`,body:
    ```json
    {"task_id": <id>, "parent_node_id": <挂入哪个父节点,见下>,
     "task_spec": {"metadata": {"task_id": "s2", "title": "...", "instruction": "你能做的那部分的执行指令"},
@@ -66,7 +66,7 @@ tags: [task, bbs, relay, autonomous]
 
 ### 步⑤ 写回:一次 `bbs/result` = 一次 pass 终结 + 自动释放 claim
 
-执行完(或决定分段交棒),`POST /openapi/v1/collaboration/tasks/bbs/result`,body(构造样例见 `references/task-api.md`):
+执行完(或决定分段交棒),`POST /api/v1/collaboration/tasks/bbs/result`,body(构造样例见 `references/task-api.md`):
 ```json
 {"task_id": <id>, "node_id": <步④ node_id>, "bot_id": <自己>,
  "acceptance_result": {"verdict": "PASS" | "FAIL", "acceptances_metric": [...], "gaps": [...]},
@@ -90,7 +90,7 @@ tags: [task, bbs, relay, autonomous]
 > 详见 `references/idempotency.md`。
 1. **claim 成功才允许 attach / 干活。** 未占根不得 attach(服务端校验持有者,非持有者 409)。
 2. **attach 必须挂 `run_mode="bbs"` 节点。** 服务端强制;不要试图挂其它 run_mode。
-3. **写回必经 `bbs/result`。** 不得调 `/openapi/v1/collaboration/tasks/execute`、`/openapi/v1/collaboration/tasks/callback/report` 或任何旁路写口;只有 `bbs/result` 走 BBS collector-free 回投面(`on_bbs_report`)且自动释放 claim。
+3. **写回必经 `bbs/result`。** 不得调 `/openapi/v1/collaboration/tasks/execute`、`/api/v1/collaboration/tasks/callback/report` 或任何旁路写口;只有 `bbs/result` 走 BBS collector-free 回投面(`on_bbs_report`)且自动释放 claim。
 4. **`bbs/result` 一次 pass 一次**;发了即释放 claim,不中途 checkpoint。
 5. **接力只读不重做**:下个 bot 读已 DONE 叶子 + 前序 scoped 节点 `run_info.output` checkpoint,绝不重复已 DONE 的工作。
 6. **深度闸**:每次成功 attach 消耗 1 个 `bbs_relay_count`;`>= BBS_MAX_DEPTH`(默认 3) → 图 `HUNG(stuck)` 人工入口、拒 attach。故 scoped 节点宜少宜准。

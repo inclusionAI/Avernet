@@ -8,9 +8,9 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地起后端 singlebox 时设置:
 完整流程覆盖:
   1) 准备 mock 数据: 将内联测试数据写入 scripts/.dependencies/data/discovered_tasks.db
   2) provisioning: 建一个 test agent bot(获取真实 agent_id)
-  3) POST /openapi/v1/collaboration/tasks/discovery/discover   → 读取 mock 任务 + 创建 engine session + 投递通知
+  3) POST /api/v1/collaboration/tasks/discovery/discover   → 读取 mock 任务 + 创建 engine session + 投递通知
   4) 验证响应: code=200000 / discovered count / task_id / session_id / notification_sent
-  5) GET /openapi/v1/collaboration/tasks/discovery/status      → 验证任务状态可查询
+  5) GET /api/v1/collaboration/tasks/discovery/status      → 验证任务状态可查询
   6) 验证 engine session 实际存在(GET /api/sessions/{id} 可达)
   7) WebSocket 连接 engine,将发现的任务内容发送给大模型,验证回复
 
@@ -64,7 +64,7 @@ _EXPECTED_PROJECT_NAMES = {t["project_name"] for t in _MOCK_TASKS}
 
 # 默认 db 文件路径:上溯到项目根 → scripts/.dependencies/data/discovered_tasks.db
 # 测试文件在 src/backend/tests/community/core/task/singlebox_e2e/ → 距项目根 8 级
-# router.py 在 src/backend/src/agentclaw/community/adapters/http/task_discovery/ → 距项目根 9 级
+# router.py 在 src/backend/src/agentclaw/community/adapters/http/task/ → 距项目根 9 级
 _DATA_FILE = Path(__file__).resolve()
 for _ in range(8):
     _DATA_FILE = _DATA_FILE.parent
@@ -115,10 +115,10 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
 
     async def _run(self, loop: asyncio.AbstractEventLoop, bot_id: str, owner_id: str) -> None:
         async with httpx.AsyncClient(timeout=60.0, headers=_HDRS) as cli:
-            # POST /openapi/v1/collaboration/tasks/discovery/discover
+            # POST /api/v1/collaboration/tasks/discovery/discover
             #    传 bot_id + owner_id: 定位到 per-bot engine 直连创建 session
             r = await cli.post(
-                f"{_BACKEND}/openapi/v1/collaboration/tasks/discovery/discover",
+                f"{_BACKEND}/api/v1/collaboration/tasks/discovery/discover",
                 params={
                     "user_id": _USER_ID,
                     "agent_id": bot_id,
@@ -171,8 +171,8 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
                 f"发现 task_id 集合不匹配: {discovered_ids} vs {_EXPECTED_TASK_IDS}",
             )
 
-            # 5) GET /openapi/v1/collaboration/tasks/discovery/status → 验证任务状态可查
-            r = await cli.get(f"{_BACKEND}/openapi/v1/collaboration/tasks/discovery/status")
+            # 5) GET /api/v1/collaboration/tasks/discovery/status → 验证任务状态可查
+            r = await cli.get(f"{_BACKEND}/api/v1/collaboration/tasks/discovery/status")
             r.raise_for_status()
             status_body = r.json()
             status_data = status_body.get("data") or {}

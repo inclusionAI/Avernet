@@ -1,8 +1,11 @@
 """Endpoint-framework coverage for the task API surface.
 
-Covers the 11 routes mounted under ``/openapi/v1/collaboration/tasks(...)`` (task router,
-task-callback router) with a happy + error case each,
-so the coverage gate sees every route as covered.
+Covers the task routes, split across two prefixes:
+- public (``/openapi/v1/collaboration/tasks``): execute / dashboard / list (frontend-facing, gateway spanner).
+- internal (``/api/v1/collaboration/tasks``): execute / dashboard / list 公开面镜像(供内部调用方 bot / 服务间
+  免 spanner;同一 TaskServiceProtocol 委托)+ callback/report, bbs/{claim,attach,result},
+  callback/workflow_{start,result}, callback/node_{start,result} (service-to-service, no spanner).
+Each route has a happy (+ error) case so the coverage gate sees every registered route as covered.
 
 Why the shared framework app is enough (no per-case mocking): the community
 ``TEST`` profile wires ``TaskModule`` with degraded transport ports
@@ -190,11 +193,103 @@ def list_invalid_status_filter():
     """Non-enum status → router rejects with 400 (not an uncaught ValueError 500)."""
 
 
-# ===== POST /openapi/v1/collaboration/tasks/callback/report =====
+# ===== internal mirror: POST/GET /api/v1/collaboration/tasks/{execute,dashboard,list} =====
+# 公开面(execute/dashboard/list)在 /openapi/v1 上的内部副本:同一 TaskServiceProtocol 委托,
+# 供内部调用方(bot / 服务间)免 gateway spanner。happy 覆盖即可——逻辑/错误分支与公开面一致,
+# 已由上面 /openapi/v1 用例覆盖;此处仅让 coverage gate 见到内部副本路由被驱动。
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/callback/report",
+    path="/api/v1/collaboration/tasks/execute",
+    scenario="ok",
+    input=CaseInput(json_body={
+        "task_spec": {
+            "metadata": {"task_id": "t_exec_int_ok", "title": "存储尽调", "instruction": "produce DD"},
+            "context": {"background": "存储行业", "extend_props": {}},
+            "goal": {"objective": "产出尽调报告",
+                     "acceptances": [{"id": "ac1", "description": "d1"}]},
+        },
+        "source_channel_type": "bot",
+        "source_channel_id": "owner_bot",
+        "execution_config": {"MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3},
+    }),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
+)
+def execute_internal_ok():
+    """Internal-mirror execute → 200 (same delegate as the /openapi/v1 face)."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/collaboration/tasks/dashboard",
+    scenario="ok",
+    input=CaseInput(query_params={"task_id": "t_dash_int_ok"}),
+    seed=lambda w: _seed_graph(w, "t_dash_int_ok"),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
+)
+def dashboard_internal_ok():
+    """Internal-mirror dashboard → 200 graph snapshot (seeded graph)."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/collaboration/tasks/list",
+    scenario="ok",
+    seed=lambda w: _seed_graph(w, "t_list_int_ok"),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
+)
+def list_internal_ok():
+    """Internal-mirror list → 200 summaries (seeded graph present)."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/execute",
+    scenario="conflict_on_reexecute",
+    input=CaseInput(json_body={
+        "task_spec": {
+            "metadata": {"task_id": "t_exec_int_conflict", "title": "x", "instruction": "y"},
+            "context": {"background": "", "extend_props": {}},
+            "goal": {"objective": "", "acceptances": []},
+        },
+        "source_channel_type": "bot",
+        "source_channel_id": "owner_bot",
+        "execution_config": {},
+    }),
+    seed=lambda w: _seed_graph(w, "t_exec_int_conflict"),
+    expect=ExpectError(status=409),
+)
+def execute_internal_conflict_on_reexecute():
+    """Internal-mirror execute: same task_id already initialized → 409."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/collaboration/tasks/dashboard",
+    scenario="task_not_found",
+    input=CaseInput(query_params={"task_id": "t_dash_int_ghost"}),
+    expect=ExpectError(status=404),
+)
+def dashboard_internal_task_not_found():
+    """Internal-mirror dashboard: unknown task_id → 404."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/collaboration/tasks/list",
+    scenario="invalid_status_filter",
+    input=CaseInput(query_params={"status": "INVALID_STATUS"}),
+    expect=ExpectError(status=400),
+)
+def list_internal_invalid_status_filter():
+    """Internal-mirror list: non-enum status → 400 (not an uncaught 500)."""
+
+
+# ===== POST /api/v1/collaboration/tasks/callback/report =====
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/callback/report",
     scenario="ok",
     input=CaseInput(json_body={
         "loop_task_id": "t_cb_report_ok::t_cb_report_ok",
@@ -210,7 +305,7 @@ def callback_report_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/callback/report",
+    path="/api/v1/collaboration/tasks/callback/report",
     scenario="invalid_body",
     input=CaseInput(json_body={"workflow_type": "single_bot"}),
     expect=ExpectError(status=422),
@@ -219,11 +314,11 @@ def callback_report_invalid_body():
     """Missing required loop_task_id → RequestValidationError → 422."""
 
 
-# ===== POST /openapi/v1/collaboration/tasks/bbs/claim =====
+# ===== POST /api/v1/collaboration/tasks/bbs/claim =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/bbs/claim",
+    path="/api/v1/collaboration/tasks/bbs/claim",
     scenario="ok",
     input=CaseInput(json_body={"task_id": "t_bbs_claim_ok", "bot_id": "bot1"}),
     seed=lambda w: _seed_graph_bbs(w, "t_bbs_claim_ok"),
@@ -235,7 +330,7 @@ def bbs_claim_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/bbs/claim",
+    path="/api/v1/collaboration/tasks/bbs/claim",
     scenario="non_bbs_task",
     input=CaseInput(json_body={"task_id": "t_bbs_claim_err", "bot_id": "bot1"}),
     seed=lambda w: _seed_graph(w, "t_bbs_claim_err"),
@@ -245,11 +340,11 @@ def bbs_claim_non_bbs_task():
     """Claim on a plain (non-bbs_mode) task → TaskStateError → 409."""
 
 
-# ===== POST /openapi/v1/collaboration/tasks/bbs/attach =====
+# ===== POST /api/v1/collaboration/tasks/bbs/attach =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/bbs/attach",
+    path="/api/v1/collaboration/tasks/bbs/attach",
     scenario="ok",
     input=CaseInput(json_body={
         "task_id": "t_bbs_attach_ok",
@@ -266,7 +361,7 @@ def bbs_attach_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/bbs/attach",
+    path="/api/v1/collaboration/tasks/bbs/attach",
     scenario="not_holder",
     input=CaseInput(json_body={
         "task_id": "t_bbs_attach_err",
@@ -281,11 +376,11 @@ def bbs_attach_not_holder():
     """Attach without holding the claim → TaskStateError → 409."""
 
 
-# ===== POST /openapi/v1/collaboration/tasks/bbs/result =====
+# ===== POST /api/v1/collaboration/tasks/bbs/result =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/bbs/result",
+    path="/api/v1/collaboration/tasks/bbs/result",
     scenario="ok",
     input=CaseInput(json_body={
         "task_id": "t_bbs_result_ok",
@@ -302,7 +397,7 @@ def bbs_result_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/bbs/result",
+    path="/api/v1/collaboration/tasks/bbs/result",
     scenario="not_holder",
     input=CaseInput(json_body={
         "task_id": "t_bbs_result_err",
@@ -317,11 +412,11 @@ def bbs_result_not_holder():
     """Report without holding the claim → TaskStateError → 409."""
 
 
-# ===== POST /openapi/v1/collaboration/tasks/callback/workflow_start =====
+# ===== POST /api/v1/collaboration/tasks/callback/workflow_start =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/callback/workflow_start",
+    path="/api/v1/collaboration/tasks/callback/workflow_start",
     scenario="ok",
     input=CaseInput(json_body={
         "task_id": "t_wf_start_ok",
@@ -341,7 +436,7 @@ def workflow_start_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/callback/workflow_start",
+    path="/api/v1/collaboration/tasks/callback/workflow_start",
     scenario="invalid_body",
     input=CaseInput(raw_body=b"not-json"),
     expect=ExpectError(status=422),
@@ -350,11 +445,11 @@ def workflow_start_invalid_body():
     """Malformed raw body → model_validate_json fails → 422."""
 
 
-# ===== POST /openapi/v1/collaboration/tasks/callback/workflow_result =====
+# ===== POST /api/v1/collaboration/tasks/callback/workflow_result =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/callback/workflow_result",
+    path="/api/v1/collaboration/tasks/callback/workflow_result",
     scenario="ok",
     input=CaseInput(json_body={
         "task_id": "t_wf_result_ok",
@@ -375,7 +470,7 @@ def workflow_result_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/callback/workflow_result",
+    path="/api/v1/collaboration/tasks/callback/workflow_result",
     scenario="unregistered_no_loop_task_id",
     input=CaseInput(json_body={
         "task_id": "t_wf_result_err",
@@ -391,11 +486,11 @@ def workflow_result_unregistered():
     """Task-level result with no loop_task_id and unregistered instance → 400."""
 
 
-# ===== POST /openapi/v1/collaboration/tasks/callback/node_start =====
+# ===== POST /api/v1/collaboration/tasks/callback/node_start =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/callback/node_start",
+    path="/api/v1/collaboration/tasks/callback/node_start",
     scenario="ok",
     input=CaseInput(json_body={
         "task_id": "t_node_start_ok",
@@ -415,7 +510,7 @@ def node_start_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/callback/node_start",
+    path="/api/v1/collaboration/tasks/callback/node_start",
     scenario="node_not_found",
     input=CaseInput(json_body={
         "task_id": "t_node_start_err",
@@ -433,11 +528,11 @@ def node_start_node_not_found():
     """Node-level start on a non-existent node → NodeNotFoundError → 404."""
 
 
-# ===== POST /openapi/v1/collaboration/tasks/callback/node_result =====
+# ===== POST /api/v1/collaboration/tasks/callback/node_result =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/callback/node_result",
+    path="/api/v1/collaboration/tasks/callback/node_result",
     scenario="ok",
     input=CaseInput(json_body={
         "task_id": "t_node_result_ok",
@@ -458,7 +553,7 @@ def node_result_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/callback/node_result",
+    path="/api/v1/collaboration/tasks/callback/node_result",
     scenario="node_not_found",
     input=CaseInput(json_body={
         "task_id": "t_node_result_err",

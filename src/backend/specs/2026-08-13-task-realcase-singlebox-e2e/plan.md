@@ -33,7 +33,7 @@
 │   │ adapters/http/task/router.py  (thin)                    │     │
 │   │   POST /openapi/v1/collaboration/tasks/execute                                 │     │
 │   │   GET  /openapi/v1/collaboration/tasks/dashboard                               │     │
-│   │   POST /openapi/v1/collaboration/tasks/callback/report   ← 真实回投HTTP入口    │     │
+│   │   POST /api/v1/collaboration/tasks/callback/report   ← 真实回投HTTP入口    │     │
 │   └──────────────┬──────────────────────────────────────────┘     │
 │      di/modules/task_module.py (composition root)                  │
 │      TaskService(graph, harness) → ExecutionEngine(注入 skill-backed 策略/投递) │
@@ -44,7 +44,7 @@
 │   │   (send_and_wait_async 同步收结果)         │   (integration/) │
 │   │  runner._execution_backend = TaskExecutor   │                  │     │
 │   │   └─ dispatch(三模态): send_message→poller→report_result     │     │
-│   │       └─► POST /openapi/v1/collaboration/tasks/callback/report (回投闭环)          │
+│   │       └─► POST /api/v1/collaboration/tasks/callback/report (回投闭环)          │
 │   └────────────────────────────────────────────────────┘         │
 │        ▲ bot/skill 真实资源（经 /api 创建+安装）：                  │
 │        │  owner bot（规划/搜推/验收 skill 激活）                    │

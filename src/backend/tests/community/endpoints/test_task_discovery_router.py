@@ -1,8 +1,8 @@
 """Endpoint tests for task-discovery public routes.
 
 Covers:
-- POST /openapi/v1/collaboration/tasks/discovery/discover (happy + error)
-- GET  /openapi/v1/collaboration/tasks/discovery/status  (happy + error)
+- POST /api/v1/collaboration/tasks/discovery/discover (happy + error)
+- GET  /api/v1/collaboration/tasks/discovery/status  (happy + error)
 
 Happy cases assert only ``{"code": 200000}`` — the handler returns the
 unified success ``Envelope`` when the discovery flow runs end-to-end,
@@ -28,11 +28,11 @@ from tests.community.framework import (
     endpoint_test,
 )
 
-# ---- POST /openapi/v1/collaboration/tasks/discovery/discover ----
+# ---- POST /api/v1/collaboration/tasks/discovery/discover ----
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/discovery/discover",
+    path="/api/v1/collaboration/tasks/discovery/discover",
     scenario="happy_ok",
     input=CaseInput(query_params={"bot_id": "td-bot-1", "owner_id": "td-owner-1"}),
     expect=ExpectSuccess(
@@ -46,7 +46,7 @@ def discover_tasks_happy_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/collaboration/tasks/discovery/discover",
+    path="/api/v1/collaboration/tasks/discovery/discover",
     scenario="err_missing_bot_id",
     input=CaseInput(query_params={"owner_id": "td-owner-1"}),
     expect=ExpectError(status=422),
@@ -55,11 +55,11 @@ def discover_tasks_err_missing_bot_id():
     """Error path: missing required bot_id -> FastAPI 422."""
 
 
-# ---- GET /openapi/v1/collaboration/tasks/discovery/status ----
+# ---- GET /api/v1/collaboration/tasks/discovery/status ----
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/collaboration/tasks/discovery/status",
+    path="/api/v1/collaboration/tasks/discovery/status",
     scenario="happy_ok",
     expect=ExpectSuccess(
         status=200,
@@ -99,7 +99,7 @@ def _cleanup_status_error_env(response, world) -> None:
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/collaboration/tasks/discovery/status",
+    path="/api/v1/collaboration/tasks/discovery/status",
     scenario="err_db_path_is_directory",
     seed=_seed_status_error_dir,
     extra_assertions=(_cleanup_status_error_env,),

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-_BASE = Path("src/agentclaw/community/adapters/http/openapi_v1/task")
+_BASE = Path("src/agentclaw/community/adapters/http/task")
 _FILES = ["schemas.py", "translator.py", "auth.py", "router.py", "__init__.py"]
 _FORBIDDEN = ["N_overview", "N_market", "N_aggregate", "N_verify", "N_report", "N_practice", "n_root", "dim_"]
 

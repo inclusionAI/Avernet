@@ -10,6 +10,6 @@ session_url 不在 discover 阶段构建 — 用户 bot 没有单独的 session_
 
 触发方式:
 A. 自动 — backend 的 TaskDiscoveryLifecycle 在 startup 后启动定时调度
-B. 手动 — HTTP POST /openapi/v1/collaboration/tasks/discovery/discover
+B. 手动 — HTTP POST /api/v1/collaboration/tasks/discovery/discover
 C. CLI  — scripts/task_discovery.sh discover → curl backend API
 """

@@ -4,7 +4,7 @@
 不拉起 singlebox 全栈。验证:
 - POST /openapi/v1/collaboration/tasks/execute 返 TaskOpResultDTO(success/run_id)
 - GET  /openapi/v1/collaboration/tasks/dashboard 返 TaskExecutionGraphDTO(含节点/状态)
-- POST /openapi/v1/collaboration/tasks/callback/report 返 {ok:true} 且翻态(N_overview PASS → DONE)
+- POST /api/v1/collaboration/tasks/callback/report 返 {ok:true} 且翻态(N_overview PASS → DONE)
 
 不验真实 plan/dispatch body(已在 test_executor_e2e 覆盖);此测聚焦 HTTP 边界协议正确。
 """
@@ -19,6 +19,7 @@ from injector import Injector, Module, provider, singleton
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
+from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, Status, TaskInfo, TaskSpec,
 )
@@ -55,6 +56,7 @@ def client():
     injector = Injector([TaskModule(), _StubDiscoverModule()])
     app = FastAPI()
     app.include_router(task_router)
+    app.include_router(task_internal_router)
     attach_injector(app, injector)
     return TestClient(app), injector
 
@@ -143,7 +145,7 @@ class TestTaskCallbackReport:
         )
         graph_svc.add_task_nodes([child], "t_http")  # 子节点以 RUNNING 入图(add 保留状态)
         # 回投 PASS(acceptance 驱动 RUNNING→DONE)
-        r = c.post("/openapi/v1/collaboration/tasks/callback/report", json={
+        r = c.post("/api/v1/collaboration/tasks/callback/report", json={
             "loop_task_id": "t_http::N_http",
             "workflow_type": "single_bot",
             "result": {"success": True, "data": "ok"},

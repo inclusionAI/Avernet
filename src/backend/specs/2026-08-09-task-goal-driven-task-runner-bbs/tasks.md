@@ -23,11 +23,11 @@ T1..T10 ── T11(bbs-relay-pickup skill) ── T12(E2E singlebox)
 | T1 | `TaskSummary`/`TaskSummaryDTO` 暴露 `bbs_mode`;`list_task_summaries` 填充 | — | summary `bbs_mode` 为 True/False | ☐ |
 | T2 | `_execution_config` 加 `BBS_MAX_DEPTH` 默认 3 | — | `cfg["BBS_MAX_DEPTH"]==3`,可被 `execution_config` 覆盖 | ☐ |
 | T3 | `TaskGraphService.claim_bbs_owner`(任务根级 CAS,`bbs_owner`)+ `TaskService.claim_bbs_task` + Protocol | — | 两 bot claim 恰一赢输者 `TaskStateError`;同 bot 幂等;非 bbs 任务拒 | ☐ |
-| T4 | `POST /openapi/v1/collaboration/tasks/bbs/claim` 路由 + `BbsClaimDTO` | T3 | 路由 200,第二 claim 409 | ☐ |
+| T4 | `POST /api/v1/collaboration/tasks/bbs/claim` 路由 + `BbsClaimDTO` | T3 | 路由 200,第二 claim 409 | ☐ |
 | T5 | `TaskGraphService.attach_bbs_node`(`add_task_nodes`+create+start+`bbs_relay_count`/深度闸)+ facade + Protocol | T2,T3 | attach 产 `run_mode=bbs` RUNNING 节点;非 owner 拒;深度达上限→图 HUNG+拒 | ☐ |
-| T6 | `POST /openapi/v1/collaboration/tasks/bbs/attach` 路由 + `BbsAttachDTO` | T5 | 路由返回 `node_id`;非 owner/前提不满足 409 | ☐ |
+| T6 | `POST /api/v1/collaboration/tasks/bbs/attach` 路由 + `BbsAttachDTO` | T5 | 路由返回 `node_id`;非 owner/前提不满足 409 | ☐ |
 | T7 | `ExecutionEngine.on_bbs_report`(collector-free 翻态+`root_verified` 收口+清 `bbs_owner`)+ `TaskService.report_bbs_result` + Protocol | T3 | PASS+root_verified→图 DONE+owner 清;FAIL+gaps→ FAILED+owner 清+checkpoint 保留;非 owner 拒 | ☐ |
-| T8 | `POST /openapi/v1/collaboration/tasks/bbs/result` 路由 + `BbsResultDTO`/`AcceptanceResultDTO` | T7 | root_verified DONE;非 owner 409 | ☐ |
+| T8 | `POST /api/v1/collaboration/tasks/bbs/result` 路由 + `BbsResultDTO`/`AcceptanceResultDTO` | T7 | root_verified DONE;非 owner 409 | ☐ |
 | T9 | `_prepare_into` 跳过 `run_mode=="bbs"`(drain 守卫,FR-EXT-06) | — | PENDING bbs 叶不被自动翻 RUNNING/改 assignee | ☐ |
 | T10 | `_poll_once` RUNNING 扫:`run_mode=="bbs"` SLA 到期→清 `bbs_owner`+scoped 节点 `FAILED`(gaps=`bbs_lease_expired`),不重派 | T3 | 到期后 owner 清+节点 FAILED(非 PENDING 重派) | ☐ |
 | T11 | 内容 skill `bbs-relay-pickup`(`SKILL.md`+`references/{task-api,judge-rubric,idempotency}`) | T1,T4,T6,T8 | skill 流程门:claim 成功才 attach;写回经 bbs/result | ☐ |

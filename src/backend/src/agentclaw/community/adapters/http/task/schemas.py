@@ -53,14 +53,14 @@ class TaskInfoDTO(BaseModel):
 
 
 class BbsClaimDTO(BaseModel):
-    """POST /openapi/v1/collaboration/tasks/bbs/claim 请求体。"""
+    """POST /api/v1/collaboration/tasks/bbs/claim 请求体。"""
 
     task_id: str = Field(..., description="任务ID(BBS 接力根级 CAS 占有目标)")
     bot_id: str = Field(..., description="发起占有的 bot id")
 
 
 class BbsAttachDTO(BaseModel):
-    """POST /openapi/v1/collaboration/tasks/bbs/attach 请求体(BBS 接力步④:挂 scoped bbs 子节点 + start)。"""
+    """POST /api/v1/collaboration/tasks/bbs/attach 请求体(BBS 接力步④:挂 scoped bbs 子节点 + start)。"""
 
     task_id: str = Field(..., description="任务ID")
     parent_node_id: str = Field(..., description="父节点ID(挂入分解树的 parent)")
@@ -69,7 +69,7 @@ class BbsAttachDTO(BaseModel):
 
 
 class BbsResultDTO(BaseModel):
-    """POST /openapi/v1/collaboration/tasks/bbs/result 请求体(BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim)。
+    """POST /api/v1/collaboration/tasks/bbs/result 请求体(BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim)。
 
     收口不由 bot 声明:框架经 owner 复核根 gap 满足后自行收口(``on_bbs_report``→``_on_pass_collect``→
     ``_maybe_finish_graph``),故无 ``root_verified`` 字段。
@@ -84,7 +84,7 @@ class BbsResultDTO(BaseModel):
 
 
 class TaskCallbackDataDTO(BaseModel):
-    """POST /openapi/v1/collaboration/tasks/callback/report 请求体(执行实体回投)。"""
+    """POST /api/v1/collaboration/tasks/callback/report 请求体(执行实体回投)。"""
     loop_task_id: str = Field(..., description="回投标识 f'{task_id}::{node_id}'")
     workflow_type: str = Field("single_bot", description="执行模态 single_bot / bcn_coop_group")
     workflow_id: int = Field(0, description="workflow id(占位)")
