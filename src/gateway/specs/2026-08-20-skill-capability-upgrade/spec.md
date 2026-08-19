@@ -101,6 +101,12 @@ Phase 1/Phase 2 实现 PR 必须分别通过标准 OpenAPI dump 和向前兼容 
 通过后，生成 artifact 才随实现提交。这样可保证 Gateway 文档描述的每个接口都由
 Backend 真实提供，同时避免在 Review 阶段暴露返回 `501` 的占位接口。
 
+Phase 1 实现前先交付独立的 Contract-first Review PR：接口的 Router 合同、Pydantic
+DTO、Envelope、分页、Header、Principal、状态码、稳定 error_code 和幂等约束均由
+代码表达，并由代码生成可供 Swagger/Redoc Review 的候选文档。候选文档不等于正式
+Gateway artifact；尚未实现且未注册到生产 Backend 的路由不能写入
+`src/gateway/configs/schemas/bots.openapi.json`，也不能用 `501` 或 stub 冒充可用接口。
+
 ### 2. 交付阶段
 
 #### Phase 1：存量能力全量 Gateway 化
@@ -587,13 +593,15 @@ PREPARING → SC_SUBMITTING → WAITING_SC → MATERIALIZING
 Phase 1 是 Phase 2 的控制面基础，但允许 Phase 2 的纯内部模块在接口稳定后并行开发。
 功能启用必须遵循以下 Gate：
 
-1. **Phase 1 Schema/Consumer first**：先部署 Additive DDL、Installation Repository、
+1. **Phase 1 Contract first**：先由代码定义完整 Phase 1 Interface，生成 Review Preview，
+   经涔涔 Review 定稿；不提前修改正式 Gateway artifact。
+2. **Phase 1 Schema/Consumer first**：再部署 Additive DDL、Installation Repository、
    Runtime Resolver、兼容 Adapter 和 OpenAPI 兼容测试，不改变产品流量。
-2. **Phase 1 Enable**：切换 Local active 的内部事实源，开放 Repo/SkillSet/MCP
+3. **Phase 1 Enable**：切换 Local active 的内部事实源，开放 Repo/SkillSet/MCP
    canonical OpenAPI，产品显式使用统一 Gateway；通过 Phase 1 全量门禁。
-3. **Phase 2 Consumer first**：先部署 Mapping v3、pool_center、Teclaw skill-center
+4. **Phase 2 Consumer first**：先部署 Mapping v3、pool_center、Teclaw skill-center
    Store 和 Service Artifact 精确版本读取能力。
-4. **Phase 2 Enable**：再开放 Space Skill 创建、编辑、发布、Track Latest 和退役。
+5. **Phase 2 Enable**：再开放 Space Skill 创建、编辑、发布、Track Latest 和退役。
 
 Phase 1 回滚可以恢复旧 Adapter/Resolver，但不得丢失已经写入的 Installation；
 回滚版本必须继续理解新表或先停止新写并验证等价投影。Phase 2 一旦生成 Space Skill、
@@ -688,15 +696,19 @@ Phase 2 完成定义：产品主流程 E2E、SC pre 联调、多引擎矩阵、S
 ### Ticket 治理
 
 - 本 Spec 发布后重新执行 to-tickets，按 Phase 1/Phase 2 建立 blocking edges。
-- Phase 1 采用五个纵向实现 Ticket 加一个 Backend Gate，顺序如下：
-  1. `P1-01 Installation 深模块与 Local 兼容` 无业务实现 blocker，先建立 Skill/MCP
+- Phase 1 采用一个 Contract-first Ticket、五个纵向实现 Ticket和一个 Backend Gate，
+  顺序如下：
+  1. `P1-00 Skill OpenAPI Contract First 与生成文档` 无 blocker。它用代码定义完整
+     Interface、生成 Swagger/Redoc Review Preview 并由涔涔 Review；未实现接口不进入
+     正式 `bots.openapi.json`。所有后续 Phase 1 Ticket 都被 P1-00 阻塞。
+  2. `P1-01 Installation 深模块与 Local 兼容` 被 P1-00 阻塞，先建立 Skill/MCP
      Installation 事实源、统一 Service 边界和已发布 Local wire 兼容。
-  2. `P1-02 Repo Catalog 与 Direct API`、`P1-03 SkillSet Skill 原子语义` 均被
+  3. `P1-02 Repo Catalog 与 Direct API`、`P1-03 SkillSet Skill 原子语义` 均被
      P1-01 阻塞，P1-01 完成后可以并行。
-  3. `P1-04 MCP Direct 与 SkillSet 语义` 被 P1-03 阻塞，复用同一套 SkillSet
+  4. `P1-04 MCP Direct 与 SkillSet 语义` 被 P1-03 阻塞，复用同一套 SkillSet
      原子命令和 Installation 语义。
-  4. `P1-05 统一 Resolver 与 Runtime 全量投影` 被 P1-02、P1-03、P1-04 阻塞。
-  5. `P1-GATE Backend 全量兼容与矩阵验收` 被 P1-05 阻塞，并复用已经落地的
+  5. `P1-05 统一 Resolver 与 Runtime 全量投影` 被 P1-02、P1-03、P1-04 阻塞。
+  6. `P1-GATE Backend 全量兼容与矩阵验收` 被 P1-05 阻塞，并复用已经落地的
      Legacy 回归基线。
 - 不创建 Phase 1 前端实现 Ticket；前端切流只作为独立产品发布验收项，由前端团队
   依据生成 OpenAPI/Swagger 执行。
