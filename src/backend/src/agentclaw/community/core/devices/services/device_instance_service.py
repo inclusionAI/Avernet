@@ -20,6 +20,7 @@ from agentclaw.community.core.devices.errors import (
 from agentclaw.community.core.devices.models import DeviceBindingStatus, OperatorContext
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.plugin_api.eval_env import DYNAMIC_ENV_TAG_KEY
 from agentclaw.community.core.devices.services.device_service import (
     BAAS_DEVICE_PROVIDER,
     DeviceService,
@@ -154,7 +155,7 @@ class DeviceInstanceService:
         Raises:
             EvalBindingNotFoundError: 找不到匹配的评测沙箱 binding
         """
-        _DEFAULT_ENV_TAG_KEY = "AGENTCLAW_DEFAULT_TAG"
+        _DEFAULT_ENV_TAG_KEY = DYNAMIC_ENV_TAG_KEY
         env = env_utils.get_current_env()
 
         # 步骤 1：获取 bot 信息以拿到 entity_id / owner_id

@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from secbaas.community.api.eval_env._protocols import EvalConsistencyCheckProtocol
+from secbaas.community.core.service.eval_binding import DYNAMIC_ENV_TAG_KEY
 from secbaas.community.logger import get_logger
 
 logger = get_logger("core-bot-run")
@@ -33,7 +34,7 @@ class RealEvalConsistencyCheck(EvalConsistencyCheckProtocol):
         if binding_info is not None:
             device_props = getattr(binding_info, "device_props", None)
             if device_props:
-                binding_tag = device_props.get("AGENTCLAW_DEFAULT_TAG")
+                binding_tag = device_props.get(DYNAMIC_ENV_TAG_KEY)
 
         if not metadata_tag:
             # 无 metadata tag 时不需要一致性检查

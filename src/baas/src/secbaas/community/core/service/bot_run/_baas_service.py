@@ -43,6 +43,7 @@ from secbaas.community.core.service.bot_runtime.dispatcher import (
     DefaultBotWssDispatcher,
 )
 from secbaas.community.core.service.bot_session import DefaultSessionService
+from secbaas.community.core.service.eval_binding import DYNAMIC_ENV_TAG_KEY
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
 
@@ -416,7 +417,7 @@ class BaasBotService(BotService):
             else:
                 # 降级：内联一致性检查（兼容旧路径）
                 binding_default_tag = (binding_info.device_props or {}).get(
-                    "AGENTCLAW_DEFAULT_TAG", ""
+                    DYNAMIC_ENV_TAG_KEY, ""
                 )
                 request_default_tag = chat_metadata.get("default_tag", "")
                 if binding_default_tag and request_default_tag and binding_default_tag != request_default_tag:
@@ -510,7 +511,7 @@ class BaasBotService(BotService):
             else:
                 # 降级：内联一致性检查（兼容旧路径）
                 binding_default_tag = (binding_info.device_props or {}).get(
-                    "AGENTCLAW_DEFAULT_TAG", ""
+                    DYNAMIC_ENV_TAG_KEY, ""
                 )
                 request_default_tag = chat_metadata.get("default_tag", "")
                 if binding_default_tag and request_default_tag and binding_default_tag != request_default_tag:
