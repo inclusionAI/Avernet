@@ -140,6 +140,7 @@ provides:
   - SkillMemberRepository
   - SkillPropagationLogRepository
   - SkillRepository
+  - SpaceSkillRepository
   - SkillSetRepository
   # skills_pool
   - QuarantineRepositoryProtocol
@@ -184,6 +185,7 @@ provides:
   - BotPublishRepository
   - OrmPublishOperationRepository
   # skill_center
+  - SpaceSkillRepository
   - SqlLocalSkillCleanupRepository
   # skills_pool
   - SkillsPoolLayoutRepository
@@ -216,6 +218,7 @@ internal_dependencies:
   - agentclaw.community.core.session_resources
   - agentclaw.community.core.spaces
   - agentclaw.community.core.market_favorites
+  - agentclaw.community.core.work_orders
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.system_config

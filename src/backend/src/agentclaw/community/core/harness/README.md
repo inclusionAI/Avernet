@@ -16,11 +16,14 @@ consumes:
   - "WorkspacePathFactory"
   - "MCPCenterPlugin"
 internal_dependencies:
+  - agentclaw.community.api.content_scanner_service
+  - agentclaw.community.api.health_diagnosis_service
   - agentclaw.community.core.repository.protocols.harness    # repository contracts consumed by this module
   - agentclaw.community.core.services
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.workspace
   - agentclaw.community.di.config
+  - agentclaw.community.log
   - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.mcp_center
   - agentclaw.community.plugin_api.models

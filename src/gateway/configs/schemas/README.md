@@ -17,9 +17,9 @@ of a surface the upstream does not serve, and nothing downstream would catch it.
 - `bcsfuse-fusion.openapi.json` — bcsfuse group-fusion endpoint served under `/openapi/v1/bcsfuse/groups/**`
 - `bcsfuse-workers.openapi.json` — bcsfuse worker-config + fusable-query endpoints served under `/openapi/v1/bcsfuse/workers/**`
 - `bots.openapi.json` — Backend public OpenAPI spec (currently the
-  `/openapi/v1/bots`, `/openapi/v1/spaces`, `/openapi/v1/work-orders`, and
-  `/openapi/v1/work-order-notifications` surfaces, narrowed to public paths and
-  the components they reference)
+  `/openapi/v1/bots`, `/openapi/v1/caller`, `/openapi/v1/spaces`,
+  `/openapi/v1/work-orders`, and `/openapi/v1/work-order-notifications`
+  surfaces, narrowed to public paths and the components they reference)
 
 ## Future: build-time generation
 

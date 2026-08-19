@@ -3,9 +3,11 @@ name: Architecture Checks
 on:
   pull_request:
     branches:
+      - dev_refactory_collaboration
       - main
   push:
     branches:
+      - dev_refactory_collaboration
       - main
   workflow_dispatch:
 

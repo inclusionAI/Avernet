@@ -277,6 +277,34 @@ def test_add_session_participant_accepts_only_bot_uuid() -> None:
     }
 
 
+def test_update_session_participant_accepts_bot_and_human_modes() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"
+    ]["patch"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+
+    assert schema["properties"]["mode"] == {
+        "oneOf": [
+            {"type": "string", "enum": ["auto", "muted"]},
+            {"type": "string", "enum": ["present", "absent"]},
+        ]
+    }
+    participant = next(
+        parameter
+        for parameter in operation["parameters"]
+        if parameter["name"] == "bot_uuid"
+    )
+    assert "Bot or Human Actor identifier" in participant["description"]
+    assert set(operation["responses"]["400"]["x-error-codes"]) == {
+        "invalid_request",
+        "invalid_participant_mode",
+    }
+    forbidden = operation["responses"]["403"]["description"]
+    assert "only update its own present/absent mode" in forbidden
+    assert "Bot participant modes require Session management authority" in forbidden
+
+
 def test_delete_session_accepts_optional_acting_bot_id_query() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"][

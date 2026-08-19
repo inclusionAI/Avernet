@@ -161,6 +161,16 @@ class TestParseConfig:
         assert config.module_config.web is not None
         assert config.module_config.web.port == 7000
 
+    def test_gateway_port_env_overrides_web_config(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GATEWAY_PORT", "8899")
+
+        config = _parse_config({"module_config": {"web": {"port": 7000}}})
+
+        assert config.module_config.web is not None
+        assert config.module_config.web.port == 8899
+
 
 # ── _resolve_base_path / _resolve_overlay_path ───────────────────────────────
 

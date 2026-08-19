@@ -13,9 +13,9 @@ description rather than a hand-kept list, so an operation added later is covered
 without editing this file.
 
 The refusal is the load-bearing part. Making the user explicit must not make it
-*forgeable*: until delegation lands the only user a caller may name is itself,
-so a parameter naming anyone else is a 403 and nothing about who may call what
-has changed.
+*forgeable*: a human caller may name only themselves, while an application may
+name only the end user carried by its verified delegation context. A mismatch is
+a 403, so making the parameter explicit does not widen who may act for whom.
 """
 
 from __future__ import annotations
@@ -263,11 +263,17 @@ def _without_request_id(response) -> dict:
 
 #: The operations that take no ``user_id``, and why each one cannot.
 #:
-#: Pinned by address rather than counted, so adding a fifth is a deliberate edit
+#: Pinned by address rather than counted, so adding another is a deliberate edit
 #: to this list with a reason attached — which is the only thing standing
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
+    # The caller-identity read is how a client LEARNS the id it must thread
+    # everywhere else — requiring the parameter here would make the id a
+    # precondition of discovering it. The answer is read off the verified
+    # principal, so there is no caller-supplied user to compare against and no
+    # 403 to answer.
+    ("get", f"{PUBLIC_API_PREFIX}/caller"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
     # The marketplace catalogue is identical for every caller in the tenant.
@@ -319,7 +325,17 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: ``none`` then moved 16 → 35 when the 19 collaboration operations for Spaces,
 #: work orders and recipient notifications were added. None of those operations
 #: addresses a bot, so the path and query counts remain unchanged.
-_BOT_ID_PLACEMENT = {"path": 54, "query": 1, "none": 35}
+#:
+#: ``path`` then moved 54 → 56 when the two Bot Chats operations were added.
+#:
+#: ``none`` then moved 35 → 36 with the caller-identity read: it answers who
+#: the caller is and addresses no bot.
+#:
+#: The combined Bot Workshop surface then adds a net 27 bot-addressed operations
+#: and five account-level operations. The trace filter remains the sole query
+#: placement. Together with the caller-identity read, the combined contract is
+#: 83/1/41.
+_BOT_ID_PLACEMENT = {"path": 83, "query": 1, "none": 41}
 
 
 def _schema() -> dict:
@@ -389,6 +405,9 @@ def test_the_pinned_number_of_operations_take_it():
     this pin exists to catch, so it is worth saying plainly that this one is
     intended — the five went away with the link resources they served, not by
     losing the dependency.
+
+    61 → 77 with the service-Bot lifecycle surface: conversion, approval config,
+    version reads/actions and edit-lock operations all act for an explicit user.
     """
     taking = [
         1
@@ -398,12 +417,15 @@ def test_the_pinned_number_of_operations_take_it():
     # 60 on the merge base, +3 for the startup-script operations, +2 for the
     # resources file endpoints re-addressed by workspace path (#1000), then -4
     # for the files-only resources group, then +19 for Spaces, work orders and
-    # recipient-notification operations added by the collaboration API.
-    assert len(taking) == 80
+    # recipient-notification operations added by the collaboration API, then +2
+    # for the Bot Chats operations. The combined Bot Workshop surface adds a
+    # further net 32 user-scoped operations (27 bot-addressed and five
+    # account-level operations).
+    assert len(taking) == 114
 
 
 def test_the_exempt_operations_take_none():
-    """The four with no user dimension ask for nothing they cannot use."""
+    """The exempt operations ask for nothing they cannot use."""
     schema = _schema()
     for method, path in _NO_USER_DIMENSION:
         operation = schema["paths"][path][method]

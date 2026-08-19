@@ -144,7 +144,7 @@ def _concrete(path: str) -> str:
     ("method", "path"), _refused_operations(), ids=lambda v: str(v)
 )
 def test_every_refused_operation_refuses_an_app_only_caller(client, method, path):
-    """All fourteen, by behaviour rather than by wiring.
+    """All fifteen, by behaviour rather than by wiring.
 
     ``401`` specifically: the surface's answer for "no caller we can act for",
     the same one an unauthenticated request gets. Not ``403`` — that would say

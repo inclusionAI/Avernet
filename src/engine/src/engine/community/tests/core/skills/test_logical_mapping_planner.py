@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from engine.community.core.skills.layout_planner import (
     LAYOUT_CONTRACT_VERSION,
     LayoutIdentity,
@@ -197,6 +196,32 @@ def test_logical_mapping_rejects_unknown_corpus() -> None:
                     "writer",
                 )
             ],
+        )
+
+
+@pytest.mark.parametrize(
+    "mapping,error",
+    [
+        (LogicalSkillMapping(SkillCorpus.LOCAL, None, "writer"), "local mapping"),
+        (LogicalSkillMapping(SkillCorpus.REPO, None, "writer"), "repo mapping"),
+        (LogicalSkillMapping(SkillCorpus.CENTER, None, "writer"), "pool_center"),
+        (LogicalSkillMapping(SkillCorpus.CENTER, "unexpected", "writer"), "relative_path"),
+        (LogicalSkillMapping(SkillCorpus.CENTER, None, "writer", skill_uuid="not-a-uuid", sc_version_number="1"), "UUID"),
+        (LogicalSkillMapping(SkillCorpus.CENTER, None, "writer", skill_uuid="00000000-0000-1000-8000-000000000000", sc_version_number="1"), "UUIDv4"),
+    ],
+)
+def test_logical_mapping_rejects_incomplete_or_untrusted_center_identity(
+    mapping: LogicalSkillMapping,
+    error: str,
+) -> None:
+    plan = _plan()
+    with pytest.raises(SkillLayoutResolutionError, match=error):
+        resolve_skill_mappings(
+            active_root=plan.active_root,
+            local_root=plan.pool_local,
+            repo_root=plan.pool_repo,
+            center_root=(None if error == "pool_center" else plan.pool_center),
+            mappings=[mapping],
         )
 
 

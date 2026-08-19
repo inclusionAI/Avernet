@@ -33,6 +33,17 @@ class PoolSkillMappingIntent(BaseModel):
     link_name: str
 
 
+class PoolCenterMappingIntent(BaseModel):
+    """Mapping-v3 Center identity; Runtime owns its physical projection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    corpus: Literal["center"]
+    skill_uuid: str
+    sc_version_number: str
+    link_name: str
+
+
 class SyncSymlinkRequest(BaseModel):
     symlinks: list[SymlinkItem] | None = None
 
@@ -93,7 +104,9 @@ class PoolLayoutActivateRequest(BaseModel):
     preparation_id: str
     registered_local_names: list[str]
     mapping_contract_version: str | None = None
-    mappings: list[PoolSkillMappingIntent | PoolPhysicalMapping]
+    mappings: list[
+        PoolSkillMappingIntent | PoolCenterMappingIntent | PoolPhysicalMapping
+    ]
 
 
 class PoolLayoutRollbackRequest(BaseModel):
@@ -127,8 +140,12 @@ class PoolLayoutActivateApiResponse(ApiResponse):
 
 class PoolMappingVerifyRequest(BaseModel):
     mapping_contract_version: str | None = None
-    mappings: list[PoolSkillMappingIntent | PoolPhysicalMapping]
-    retired_mappings: list[PoolSkillMappingIntent | PoolPhysicalMapping] = Field(
+    mappings: list[
+        PoolSkillMappingIntent | PoolCenterMappingIntent | PoolPhysicalMapping
+    ]
+    retired_mappings: list[
+        PoolSkillMappingIntent | PoolCenterMappingIntent | PoolPhysicalMapping
+    ] = Field(
         default_factory=list
     )
     source_layout: Literal["pool", "legacy"] = "pool"
@@ -142,6 +159,7 @@ __all__ = [
     "CenterEnsureRequestSchema",
     "CenterEnsureResponseSchema",
     "CleanSymlinkRequest",
+    "PoolCenterMappingIntent",
     "PoolLayoutActivateApiResponse",
     "PoolLayoutActivateRequest",
     "PoolLayoutActivateResponse",

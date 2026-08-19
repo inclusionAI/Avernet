@@ -77,6 +77,14 @@ class BotModel(Base):
     ext = Column(Text, nullable=True)
     env = Column(String(20), default=get_current_env, nullable=False)
     bot_type = Column(String(128), default="personal", nullable=True)
+    # Business-space ownership (PRD §0.1 / 系分 §3-K). Single structured column —
+    # NOT a JSON ext field — so space filtering reads a real column, not
+    # ``ext.space_id``. Nullable because existing rows and any non-ORM insert
+    # predating the column have NULL here; the public surface falls back to the
+    # personal space ``personal:{owner_id}`` when NULL (matches the inventory
+    # ``NoopBusinessSpaceContext`` fallback). Name/kind live on the space owner,
+    # not duplicated on ac_bots.
+    space_id = Column(String(128), nullable=True)
     template_type = Column(String(64), nullable=True)  # 模板类型，如 applicationCoding
     call_type = Column(String(16), default="owner", nullable=False)
     caller_config_revision = Column(BigInteger, default=0, nullable=False)
@@ -152,6 +160,7 @@ class BotModel(Base):
             "ext": json.loads(self.ext) if self.ext else None,
             "env": self.env,
             "bot_type": self.bot_type,
+            "space_id": self.space_id,
             "template_type": self.template_type,
             "call_type": self.call_type,
             "caller_config_revision": self.caller_config_revision,

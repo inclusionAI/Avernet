@@ -100,6 +100,11 @@ class PluginContainer(containers.DeclarativeContainer):
         ),
     )
 
+    # The dev auth mock (plugins/authn/dev_header) is deliberately NOT in this
+    # pool: this container is the production DI graph — enterprise merges its
+    # strategies into this same dict — and the mock must not exist in it. The
+    # bootstrap constructs it directly, only under GATEWAY_AUTH_MOCK=1
+    # (bootstrap/_authn.py), so without the env var it is never even imported.
     authn_strategies = providers.Dict(
         google=google_strategy,
         bot_token=bot_token_strategy,

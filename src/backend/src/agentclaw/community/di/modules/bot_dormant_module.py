@@ -20,6 +20,7 @@ from typing import Any
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_service import BotServiceProtocol as _ApiBotServiceProtocol
+from agentclaw.community.api.bot_dormant_service import BotDormantActivateServiceProtocol
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
 from agentclaw.community.core.bot_dormant.baas_client import BaasDormantClient
 from agentclaw.community.core.bot_dormant.internal_service import DormantInternalService
@@ -114,6 +115,15 @@ class BotDormantModule(Module):
             bot_service=bot_service,
             passport_plugin=passport_plugin,
         )
+
+    @singleton
+    @provider
+    @inject
+    def _activate_bot_service_protocol(
+        self, service: ActivateBotService
+    ) -> BotDormantActivateServiceProtocol:
+        """Bind the public activate Protocol to the concrete service."""
+        return service
 
     @singleton
     @provider

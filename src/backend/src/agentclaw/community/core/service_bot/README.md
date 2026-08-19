@@ -22,11 +22,14 @@ consumes:
   - "SystemConfig"
   - "PassportPlugin"
 internal_dependencies:
+  - agentclaw.community.api.device_service    # device instance list and restart Service API used by the public lifecycle facade
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skills_pool    # repository contracts consumed by this module
   - agentclaw.community.core.common_config
+  - agentclaw.community.core.bot_collaborator    # collaborator permission and edit-lock enforcement for public lifecycle operations
+  - agentclaw.community.core.bot_inventory.policies    # shared engine/deploy-mode combination policy for service upgrades
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_startup_script.protocols  # StartupScriptReaderProtocol — the read side of the per-bot startup script, consumed while composing the container start command
   - agentclaw.community.core.channel    # per-stage engine_overrides (DingTalk channels) reader at verify/online promotion

@@ -130,6 +130,7 @@ class BotRepository(
                 ext=ext,
                 bot_type=bot_data.get("bot_type", "personal"),
                 template_type=bot_data.get("template_type"),
+                space_id=bot_data.get("space_id"),
             )
             db.add(bot)
             db.flush()

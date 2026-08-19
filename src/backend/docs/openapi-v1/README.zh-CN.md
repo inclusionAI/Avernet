@@ -144,7 +144,7 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 | 组 | 端点数 | 负责人 | 优先级 | 路由 | 状态 |
 |---|---|---|---|---|---|
 | sessions | 7 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **已实现 —— PR #630**；运维者 + 阶段 2026-08-09 |
-| engine（只读） | 3 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **已实现 —— PR #630** |
+| engine（读写） | 4 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **已实现 —— PR #630**；2026-08-17 新增进程级重启 |
 | connection | 1 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **已实现 —— PR #630** |
 | approvals | 3 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **已实现 —— PR #630** |
 | models | 2 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/models/` | ✅ **已实现 —— PR #630** |
@@ -157,10 +157,12 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 > **WebSocket 不包装**：新的 `…/connection` 端点返回一条完整的 socket URL（凭据在其中），
 > 由调用方自己建连。
 >
-> `engine/switch` 与 `engine/restart` 刻意排除 —— 包装 `switch` 等于给 #494 在
-> `PUT /openapi/v1/bots/{bot_id}` 上的 `engine` 不可变裁定开后门，包装 `restart`
-> 会让同一个 bot 有两个重启动词。`session-favorites` 与 `/api/openclaw` HTTP
-> 三件套是**延后，不是取消**（两者以后再加都是增量）。理由见 `engine-surface.zh-CN.md`。
+> `engine/switch` 仍刻意排除：包装它等于给 #494 在
+> `PUT /openapi/v1/bots/{bot_id}` 上的 `engine` 不可变裁定开后门。进程级重启现在通过
+> `POST /openapi/v1/bots/{bot_id}/engine/restart` 暴露，它转发 engine daemon 的重启，
+> 与重新制备整个容器的 Bot 级 `/restart` 语义不同。该操作在 bot-first 寻址之后才新增，
+> 因而没有 component-first 的退役别名。`session-favorites` 与 `/api/openclaw` HTTP
+> 三件套仍是**延后，不是取消**。
 >
 > **routines 是 Track C 的样板，而不是 Track B 的。** 后端 `/api/cron` →
 > `CronRelayService` → `DeviceAdapterTransport` → engine 一直就是生产上的形状，
@@ -171,13 +173,13 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 | 事项 | 状态 | 备注 |
 |---|---|---|
 | 真实的调用方身份验证器（认证工作线） | ✅ **两半均已完成** —— 后端 PR [#634](https://github.com/inclusionAI/Avernet/pull/634)、网关 PR [#599](https://github.com/inclusionAI/Avernet/pull/599) **已合并** | `require_principal` 与 `resolve_avernet_tenant` 会校验网关签发的 `X-Avernet-Principal`（HS256、`aud=backend`），并从中读出租户与 owner。线上契约已通过把**真实**网关签名器接进**真实**后端验证器做往返验证（2026-08-02）：user/bot/app/access_key 四种形状、机密不外投、`aud`/`iss` 不符即拒。**`user` 调用方已可端到端跑通。** 剩下的是*哪些*调用方被接纳 —— 见下一行 |
-| **身份接纳：仅 `user`** | ✅ **2026-08-02 完成** | `verify_principal_token` 拒绝任何不指向终端用户的身份集合，因此 `bot` / `app` / `access_key` 调用方是**按设计**返回 `401`，而不是取决于某个 handler 是否去取 owner。放宽它靠委托（认证设计 §15），不是改配置。SDD：`specs/2026-08-02-public-api-user-only-principal/` |
+| **身份接纳：`user`，以及持有授权的 `app`** | ✅ **2026-08-10 完成** | 已从仅 user 放宽。应用以自己的凭证调用时，只能访问授权用户明确委托给它的 Bot，并在每次请求重新判定授权；`bot` / `access_key` 调用方仍被拒绝。未进入 `adapters/http/openapi_v1/admission.py` 分组的 operation 默认拒绝机器调用方。SDD：`specs/2026-08-10-openapi-v1-app-only-caller/`（前置设计：`specs/2026-08-02-public-api-user-only-principal/`）。 |
 | **没有跨仓测试钉住 principal 线上形状** | ⬜ TODO | 两侧各自对着自己手写的 payload 认知做测试（`test_verifier.py` 拼 dict；网关测自己的 model）。任一侧改个字段名，两边测试都还是绿的，线上却全 401 |
 | 租户前导索引（F2，**强制**策略） | ⬜ TODO | 多租户上线前必须完成 |
 | 后台/定时任务的复查 | ⬜ TODO | 在第二个租户持有真实数据之前完成 |
 | **Agent 身份标识在租户之间会撞车**（[#556](https://github.com/inclusionAI/Avernet/issues/556)） | ⬜ TODO（totalfrank） | Passport、授权关系、BCN、策略行都只用 `bot_id`/`owner_id` 作键，没有租户维度，而每个 owner 的第一个 bot 的 id 就是字符串 `"default"`。**应当成为开启多租户的前置闸口。** #494 里以公共更新路径上的 `sync_to_bcn=False` 做了临时止血 |
 | 异步创建出的 bot 可能不是被授权的那个（[#559](https://github.com/inclusionAI/Avernet/issues/559)） | ⬜ TODO（totalfrank） | pending 状态的创建规格从未被持久化，完成时是用轮询请求重建的。`dev` 上既有问题；当前潜伏（社区版 Passport 总是直接签发） |
-| 外部身份写入失败被吞掉（[#560](https://github.com/inclusionAI/Avernet/issues/560)） | ⬜ TODO（totalfrank） | 创建时的 owner 授权写入、更新时的 Passport 元数据写入都是"记日志然后继续"，违反 `AGENTS.md:203-204`。一次决策同时覆盖两处；建议做法是*报告部分成功* |
+| 外部身份写入失败被吞掉（[#560](https://github.com/inclusionAI/Avernet/issues/560)） | 🔧 部分完成 | 云端 Bot 创建/授权完成和 Local Bot 授权完成的 owner 授权写入均已改为失败传播，Passport 已签发但缺少 `agent_code` 时也会 fail-closed；公开 OpenAPI 更新 Bot 时的 Passport 元数据同步失败会规范化为 502 Envelope，不再返回成功。遗留内部更新路由仍会记日志后继续，且尚无持久化的跨系统 repair/reconciliation 工作流。 |
 | resources/routines/identity principal/tenant 真正接入 | ⬜ TODO | 三组 handler 已接通但仍依赖 gateway principal verifier 与 `resolve_avernet_tenant` 真正落地；对外开放前必须统一从 `require_principal`/`caller_owner_id` 消费调用者身份 |
 | 资源所有权/权限边界 403/404 | ⬜ TODO | 当前跨租户靠 ORM guard（Phase 0） + bot_id 必填；ownership/permission mismatch 显式 403/404 待对外开放前补 |
 | 上游/storage/provider 错误统一映射 | ⬜ TODO | handler 现按点抛 HTTPException（400/404/409/500）；对外开放前统一错误码映射 |
@@ -204,13 +206,25 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 按既定决策，租户隔离相关的库表变更一律在平台侧带外执行，因此**下列语句就是权威记录**。
 请把它们连同顺序约束一并交给执行 DDL 的同学。
 
-**阶段 1 —— `ac_bots`**（已执行）：
+**阶段 1 —— `ac_bots`**（租户列已执行；Bot 工坊空间列待平台执行）：
 
 ```sql
 ALTER TABLE ac_bots
   ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
     COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+
+-- Bot 工坊 Business Space 归属。必须在包含 BotModel.space_id 的代码发布前执行：
+-- ORM 的 SELECT 会读取该列，缺列会让 Bot 查询和创建整体失败。
+-- NULL 表示历史记录尚未显式归属空间；公开 Inventory 按 personal:{owner_id}
+-- 解释该状态，因此无需一次性回填历史行。回滚代码前可保留此兼容列；确认没有
+-- 旧版本/新版本代码再使用后，才可由平台单独评估 DROP COLUMN。
+ALTER TABLE ac_bots
+  ADD COLUMN space_id VARCHAR(128) NULL
+    COMMENT 'business-space ownership; NULL uses the owner personal-space fallback';
 ```
+
+`space_id` 的平台执行记录必须随交付补充环境、变更单/版本、执行时间和回滚负责人；
+在这些证据齐全之前，团队空间能力不得标记为可上线。
 
 **阶段 5 —— MCP 配置**（PR #564）。三条语句，**两个不同的时间点**：
 
@@ -317,11 +331,14 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
 - `utils/gateway_principal_config.py` —— 通过 `SecretResolver` 按
   `SecretNamesConfig.gateway_principal_signing_key` 解析共享密钥。该密钥名**自带默认
   值**，因此部署只需配置「值」：公司密钥库（corp，overlay 同时覆盖密钥名）、
-  `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE`（community）。单盒**不解析任何值** ——
-  既没有密钥库，也不提供本地替代品，因此单盒的 `/openapi/v1` 一律拒绝。
-  单盒没有任何配置项可以改变这一点；要让单盒拿到密钥属于一次刻意的改动，而不是加一行配置。
-  这一侧故意**不带** dev 兜底密钥（提交进仓库的共享密钥就是提交进仓库的凭据）。密钥只在启动
-  时解析一次，因此轮换密钥需要两侧都重启。
+  `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE`（community）。**后端自身在单盒里
+  不解析任何值** —— 既没有密钥库，也不提供本地替代品，后端配置里也没有任何开关能改变这一点。
+  那次「刻意的改动」发生在启动器里：`scripts/modules/backend.sh` 会用与网关签名侧
+  （`scripts/modules/gateway.sh`）、BCS 验证侧（`scripts/modules/bcs.sh`）相同的
+  NOT-FOR-PROD dev 密钥填入该 community 环境变量，使本地经网关转发的 `/openapi/v1`
+  请求得以验签而非一律 401；自行导出该变量（例如写入 `.env.local`）即可覆盖。
+  应用本身依旧故意**不带** dev 兜底密钥（提交进仓库的共享密钥就是提交进仓库的凭据），
+  启动器默认值在开发机之外不为任何身份背书。密钥只在启动时解析一次，因此轮换密钥需要两侧都重启。
 
   **拿不到密钥时的行为按环境区分**，这个区别正是要点：
 
@@ -644,8 +661,9 @@ id 恰好等于该段上的某个字面量，它在该地址上就不可达。�
 
 <!-- reserved-component-names -->
 ```text
-approvals  authorized  ceiling  check-name  connection  engine  identity
-loadtest  logs  mcp  models  resources  routines  sessions  skills
+approvals  authorized  all  ceiling  check-name  connection  engine  identity
+loadtest  local  logs  mcp  models  resources  routines  sessions
+skills
 ```
 
 其中九个 —— `approvals`、`connection`、`engine`、`identity`、`models`、`resources`、
@@ -1009,6 +1027,28 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
+- **2026-08-19** —— **Bot 工作台应用准入按操作形状收敛。** `/bots/all` 与
+  `/bots/local` 改为 `GRANT_FILTERED`，只把授权给调用应用、且由委托用户拥有的 Bot
+  交给 Service，并在分页前完成过滤；本地设备与目录读取改为 `USER_GATED`，要求调用
+  应用持有该用户至少一个实时 delegation；本地 Bot 详情、重启、删除和打开目录改为
+  `GRANT_CHECKED_OWN_BOT`。本地创建和创建授权轮询仍为 human-only，因为请求发生时没有
+  既存 Bot 可供 grant 覆盖。Gateway 仅为这两个创建事务保留 user-required 覆盖，其余路径
+  允许应用身份到达 Backend 后接受实时 grant 校验。
+
+- **2026-08-18** —— **data-init 触发/状态契约闭环。** 公开触发接口现在在 HTTP
+  边界读取 `IAM_TOKEN` Cookie，并传入 typed `DataInitServiceProtocol`；Service 只在本次
+  初始化确实需要执行时暂存凭证。新增 `GET /openapi/v1/bots/{bot_id}/data-init`，供前端
+  轮询受控公开状态（`not_started`、`pending_init`、`in_progress`、`completed`、`failed`），
+  不暴露 Bot `ext`、凭证或下游同步细节。Gateway `bots.openapi.json` 已重新生成；独立
+  OCB/Sofapy 副本及真实 IAM/Engine/下游 E2E 仍属于部署验证项。
+
+- **2026-08-17** —— **TC Bot 工作台与本地工作流。** 新增聚合的 `/bots/all`
+  清单、个人本地设备/创建/读取/重启/删除/打开目录工作流、休眠 Bot 激活、冷启动数据初始化，
+  以及 engine 进程级重启。该日初始版本把 local 与聚合清单保持 human-only；此结论已由
+  2026-08-19 的按操作形状准入规则取代。engine restart 只发布 bot-first
+  地址，因为此前没有可供退役的公共路径。本次生成的 Gateway `bots.openapi.json` 是该公共面的
+  发布产物，必须原样同步到独立 OCB Gateway。
+
 - **2026-08-15** —— **Agent 在前的寻址。** 每个带 Agent 作用域的操作都迁到
   `/openapi/v1/bots/{bot_id}/<component>/…`，推翻了 2026-08-03 的组件在前规则。原先九个
   在查询串里取 `bot_id`、一个在请求体里取的操作，现在都从路径上取 —— 它们的地址上本来就
@@ -1236,7 +1276,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   之前 —— 这让那些路由文件无法自述地址，也让共享 base 之下再容纳第二个 owner 变得不可能
   （BCS 从另一侧撞上同一冲突，并以同样方式解决）。`skills` 另外获得一段字面的 `catalog`，
   否则它的两类资源都会去争 `/openapi/v1/bots/{bot_id}/skills/{…}`。`channels` 是删除而非搁置。
-  已发布路径 41 条（此前 43 条）。handler、schema、状态码、鉴权规则与租户隔离规则均未改变
+  当时已发布路径 41 条（此前 43 条）。handler、schema、状态码、鉴权规则与租户隔离规则均未改变
   —— 只改地址，且**不提供兼容别名**：该界面尚无可达的外部调用方，因此没有需要保留的契约。
   网关钉住的 `bots.openapi.json` 经真实兼容性闸门（`--allow-breaking`）重新生成；它自
   Track C 起就已过期，只有 32 条路径，而后端发布的是 43 条。新增测试

@@ -750,6 +750,75 @@ def test_a_nested_rewrite_still_relays_its_own_paths() -> None:
     assert forwarder.opened[0].request.url == "wss://proxy.internal/proxypass/T%40x/ws"
 
 
+def _param_socket_app(forwarder: _StubForwarder) -> FastAPI:
+    """A socket domain whose claim varies by one segment: per-bot shells."""
+    domain_map = DomainMap.from_config(
+        {
+            "domains": {
+                "bot-shell-ws": {
+                    "match": "/openapi/v1/bots/{bot_id}/shell/**",
+                    "server": "p",
+                    "protocols": ["websocket"],
+                }
+            },
+            "servers": {"p": {"base_url": "wss://proxy.internal"}},
+        },
+        variables={},
+    )
+    app = FastAPI()
+    app.state.authenticator = _FakeAuth()
+    app.state.principal_signer = _FixedSigner()
+    app.state.ws_forwarder = forwarder
+    app.state.domain_map = domain_map
+    for socket_domain in domain_map.websocket_domains():
+        for route in relay_routes(socket_domain.mount_prefix):
+            app.add_api_websocket_route(route, forward_websocket)
+    return app
+
+
+def test_a_parameterised_socket_claim_relays_the_parameter_verbatim() -> None:
+    """The parameter's value is the tail-like part: it travels as written."""
+    forwarder = _StubForwarder()
+    with TestClient(_param_socket_app(forwarder)) as client:
+        with client.websocket_connect("/openapi/v1/bots/b%401/shell/tty") as ws:
+            ws.send_text("ping")
+            ws.receive_text()
+            ws.close(1000)
+            _settled(forwarder)
+    assert forwarder.opened[0].request.url == (
+        "wss://proxy.internal/openapi/v1/bots/b%401/shell/tty"
+    )
+
+
+def test_a_literal_after_the_parameter_must_be_literal_in_the_raw_path() -> None:
+    """`shell` decided the route exactly as the prefix did, so it is pinned.
+
+    `%73hell` decodes to `shell`, so the handshake resolves and authenticates
+    as this domain — and the mount-wide prefix check alone would let it
+    through, dialling the upstream on a path routing never described.
+    """
+    forwarder = _StubForwarder()
+    with TestClient(_param_socket_app(forwarder)) as client:
+        with pytest.raises(WebSocketDisconnect) as caught:
+            with client.websocket_connect("/openapi/v1/bots/b-1/%73hell/tty"):
+                pass
+    assert caught.value.code == 4400
+    assert forwarder.opened == []  # never dialled
+
+
+def test_the_mount_is_wider_than_the_parameterised_claim_but_the_claim_governs() -> (
+    None
+):
+    """Mounted at the literal run, refused outside the pattern it serves."""
+    forwarder = _StubForwarder()
+    with TestClient(_param_socket_app(forwarder)) as client:
+        with pytest.raises(WebSocketDisconnect) as caught:
+            with client.websocket_connect("/openapi/v1/bots/b-1/other"):
+                pass
+    assert caught.value.code == 4404
+    assert forwarder.opened == []
+
+
 def test_an_encoded_tail_still_relays_verbatim() -> None:
     """Only the routing prefix is constrained — the tail may encode freely.
 

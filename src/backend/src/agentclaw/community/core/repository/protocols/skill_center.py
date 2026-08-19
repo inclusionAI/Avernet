@@ -11,6 +11,39 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import List, Optional, Protocol, runtime_checkable
 
+from .skill_center_types import (
+    SpaceCreateData,
+    SpaceRecord,
+    SpaceSkillCreateData,
+    SpaceSkillCreationRecord,
+    SpaceSkillOwnerGrantData,
+    SpaceSkillOwnershipData,
+)
+
+
+@runtime_checkable
+class SpaceSkillRepository(Protocol):
+    """Tenant-scoped persistence seam for additive Space Skill facts."""
+
+    @abstractmethod
+    def create_space(self, data: SpaceCreateData) -> SpaceRecord:
+        ...
+
+    @abstractmethod
+    def get_space(self, space_id: int, *, env: str) -> SpaceRecord | None:
+        ...
+
+    @abstractmethod
+    def create_space_skill(
+        self,
+        *,
+        skill_data: SpaceSkillCreateData,
+        ownership_data: SpaceSkillOwnershipData,
+        owner_grant_data: SpaceSkillOwnerGrantData,
+    ) -> SpaceSkillCreationRecord:
+        """Atomically persist the initial identity, ownership and owner grant."""
+        ...
+
 
 @runtime_checkable
 class SkillRepository(Protocol):

@@ -47,6 +47,7 @@ async def converge_post_cutover_mappings(
     engine: str,
     cutover_mappings: list[PoolSkillMapping],
     durable_retired_mappings: list[PoolSkillMapping],
+    mapping_contract_version: str,
 ) -> MappingConvergenceResult:
     """Publish until Engine state matches one stable product-state snapshot."""
 
@@ -99,6 +100,7 @@ async def converge_post_cutover_mappings(
             user_id=user_id,
             mappings=mappings,
             retired_mappings=retired_mappings,
+            mapping_contract_version=mapping_contract_version,
         ):
             return MappingConvergenceResult(
                 MappingConvergenceStatus.PUBLISH_FAILED,
@@ -109,6 +111,7 @@ async def converge_post_cutover_mappings(
             user_id=user_id,
             mappings=mappings,
             retired_mappings=retired_mappings,
+            mapping_contract_version=mapping_contract_version,
         ):
             return MappingConvergenceResult(
                 MappingConvergenceStatus.VERIFY_FAILED,

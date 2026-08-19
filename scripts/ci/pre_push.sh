@@ -135,6 +135,10 @@ if matches_any '^src/backend/'; then
   run_singlebox_coverage_once
 fi
 
+if matches_any '^(src/backend/tests/community/(compatibility|acceptance/legacy_skills)/|scripts/ci/legacy_skill_compatibility\.sh)$'; then
+  run_heavy "$repo_root/scripts/ci/legacy_skill_compatibility.sh"
+fi
+
 if matches_any '^src/baas/'; then
   # BaaS 默认强卡点:
   # 1) 跑 BaaS 自己的 ci_test.sh

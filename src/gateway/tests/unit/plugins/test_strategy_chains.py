@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from gateway.community.bootstrap._authn import (
+    _append_dev_mock,
     _load_route_security,
     _strategy_chains,
 )
@@ -133,3 +134,46 @@ def test_load_route_security_with_none_user_config_uses_fail_closed_default(
     route_security = _load_route_security(user_config=None)
     req = route_security.resolve("GET", "/anything")
     assert req is not None
+
+
+# ── dev auth mock gating (_append_dev_mock) ─────────────────────────────────
+
+
+def _declared_config(tmp_path, monkeypatch):
+    (tmp_path / "application.yaml").write_text(
+        "user_config:\n  identity_strategies:\n    user: [google]\n    bot: [bot_token]\n    app: [app_token]\n    access_key: [access_key_token]\n"
+    )
+    monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
+    return _user_config()
+
+
+def _user_chain_names(chains) -> list[str]:
+    return [s.name for s in chains[PrincipalType.USER]._strategies]
+
+
+def test_dev_mock_absent_without_env(tmp_path, monkeypatch):
+    """Without the env var the user chain is exactly what config declared."""
+    monkeypatch.delenv("GATEWAY_AUTH_MOCK", raising=False)
+    cfg = _declared_config(tmp_path, monkeypatch)
+    chains = _strategy_chains(_pool(), user_config=cfg)
+    _append_dev_mock(chains)
+    assert _user_chain_names(chains) == ["google"]
+
+
+def test_dev_mock_appended_last_with_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("GATEWAY_AUTH_MOCK", "1")
+    cfg = _declared_config(tmp_path, monkeypatch)
+    chains = _strategy_chains(_pool(), user_config=cfg)
+    _append_dev_mock(chains)
+    assert _user_chain_names(chains) == ["google", "dev_header"]
+
+
+def test_dev_mock_cannot_be_declared_in_config(tmp_path, monkeypatch):
+    """The mock is env-only: it is not in the DI pool, so a config overlay
+    that names it is refused at boot rather than silently honoured."""
+    (tmp_path / "application.yaml").write_text(
+        "user_config:\n  identity_strategies:\n    user: [google, dev_header]\n"
+    )
+    monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
+    with pytest.raises(KeyError, match="unknown strategy 'dev_header'"):
+        _strategy_chains(_pool(), user_config=_user_config())
