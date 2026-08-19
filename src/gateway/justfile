@@ -12,6 +12,7 @@ import 'justfiles/test-ut.just'
 import 'justfiles/test-it.just'
 import 'justfiles/test-arch.just'
 import 'justfiles/test-e2e.just'
+import 'justfiles/test-mariadb.just'
 
 _default:
     @just --list --list-prefix '==> '

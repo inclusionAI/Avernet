@@ -10,6 +10,7 @@ from gateway.community.plugins.authn.bot_token import BotTokenStrategy
 from gateway.community.plugins.authn.dev_cookie import DevCookieUserStrategy
 from gateway.community.plugins.authn.google_token import GoogleUserStrategy
 from gateway.community.plugins.cache.in_memory import InMemoryCachePlugin
+from gateway.community.plugins.database.mariadb import MariaDbOrmPlugin
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.plugins.forwarder.httpx import HttpxForwarder
 from gateway.community.plugins.schema_catalog.file import FileSchemaCatalog
@@ -27,6 +28,7 @@ class PluginContainer(containers.DeclarativeContainer):
     database = providers.Selector(
         config.plugins.database.plugin_database,
         SQLITE_ORM=providers.Singleton(SqliteDatabasePlugin),
+        MARIADB_ORM=providers.Singleton(MariaDbOrmPlugin),
     )
 
     forwarder = providers.Selector(
