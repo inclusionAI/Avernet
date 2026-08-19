@@ -1,4 +1,4 @@
-"""Public /openapi/v1/harness/bots/{bot_id} router."""
+"""Public /openapi/v1/bots/{bot_id}/harness router."""
 from __future__ import annotations
 
 import json
@@ -65,7 +65,7 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/harness", tags=["harness"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/harness", tags=["harness"])
 
 
 async def require_harness_bot_access(
@@ -119,7 +119,7 @@ HarnessBotAccessDep = Annotated[str, Depends(require_harness_bot_access)]
 
 
 @router.post(
-    "/bots/{bot_id}/diagnose",
+    "/diagnose",
     response_model=Envelope[DiagnoseStartResponse],
     responses=ERROR_RESPONSES,
 )
@@ -208,7 +208,7 @@ async def harness_diagnose(
 
 
 @router.post(
-    "/bots/{bot_id}/preview",
+    "/preview",
     response_model=Envelope[PreviewResponse],
     responses=ERROR_RESPONSES,
 )
@@ -295,7 +295,7 @@ async def harness_preview(
 
 
 @router.post(
-    "/bots/{bot_id}/apply",
+    "/apply",
     response_model=Envelope[ApplyResponse],
     responses=ERROR_RESPONSES,
 )
@@ -383,7 +383,7 @@ async def harness_apply(
 
 
 @router.post(
-    "/bots/{bot_id}/rollback",
+    "/rollback",
     response_model=Envelope[ApplyResponse],
     responses=ERROR_RESPONSES,
 )
@@ -527,7 +527,7 @@ def _build_patches_for_history_row(
 
 
 @router.get(
-    "/bots/{bot_id}/dim-report",
+    "/dim-report",
     response_model=Envelope[DimReportResponse],
     responses=ERROR_RESPONSES,
 )
@@ -608,7 +608,7 @@ async def harness_dim_report(
 
 
 @router.get(
-    "/bots/{bot_id}/dim-history",
+    "/dim-history",
     response_model=Envelope[DimHistoryResponse],
     responses=ERROR_RESPONSES,
 )

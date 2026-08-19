@@ -266,7 +266,11 @@ user_config:
     "/openapi/v1/bcsfuse/**":
       user: required
 
-    "/openapi/v1/harness/**":
+    # The harness operations sit beneath the addressed bot, so the wide
+    # "/openapi/v1/bots/**" rule above would otherwise admit them with no user
+    # on the wire. They diagnose and patch a bot's live config files — a human
+    # stays on the boundary, and the extra literal segment outranks the prefix.
+    "/openapi/v1/bots/{bot_id}/harness/**":
       user: required
 
     # BCN verifies the short-lived session credential carried by this exact
@@ -384,14 +388,10 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
-      harness:
-        match: /openapi/v1/harness/bots/**
-        server: backend
-        protocols: [http]
-        schema:
-          source: file
-          path: schemas/harness.openapi.json
-          refresh_seconds: 300
+      # The harness operations moved under /openapi/v1/bots/{bot_id}/harness/**:
+      # the bots domain routes them to the same backend verbatim, and a domain
+      # match cannot pin a path behind a path parameter, so no separate domain
+      # can claim them. Their published description rides in bots.openapi.json.
       collaboration:
         server: bcs
         protocols: [http, websocket]

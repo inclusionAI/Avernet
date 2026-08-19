@@ -320,7 +320,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: The public harness group moved ``path`` 54 → 60: its six operations
 #: (diagnose/preview/apply/rollback/dim-report/dim-history) all address a bot
-#: under ``/openapi/v1/harness/bots/{bot_id}/…`` and name it in the path.
+#: under ``/openapi/v1/bots/{bot_id}/harness/…`` and name it in the path.
 _BOT_ID_PLACEMENT = {"path": 60, "query": 1, "none": 16}
 
 

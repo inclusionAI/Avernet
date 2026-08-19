@@ -258,7 +258,7 @@ _SUBGROUPS = [
     # the owner. See `skills/router.py` and `admission.SKILL_SCOPED_OPERATIONS`.
     skills_router,
     # Harness public surface: every route is `{bot_id}`-first under
-    # `/harness/bots/{bot_id}/...` and performs its own owner/collaborator
+    # `/bots/{bot_id}/harness/...` and performs its own owner/collaborator
     # check via `HarnessBotAccessDep`, so it joins the plain subgroups with
     # only `_PUBLIC_AUTH` + the user-scoped error table.
     harness_router,

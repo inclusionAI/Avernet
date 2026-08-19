@@ -29,13 +29,6 @@ from agentclaw.community.adapters.http.openapi_v1 import (
 
 _BASE = f"{PUBLIC_API_PREFIX}/bots"
 
-#: The harness group is a deliberate second base: its operations are bot-scoped
-#: but live under ``/openapi/v1/harness/bots/{bot_id}/…`` so the gateway can
-#: route them as their own domain. The addressing rule below applies to the
-#: ``/openapi/v1/bots`` base; harness paths are excluded from it and pinned by
-#: ``test_harness_paths_keep_their_own_base`` instead.
-_HARNESS_BASE = f"{PUBLIC_API_PREFIX}/harness"
-
 #: The docs' copy of the reserved names, fenced under this anchor. Parsed rather
 #: than duplicated here: the point of the check is that the docs and the routes
 #: cannot drift, which a second hardcoded list would not give.
@@ -130,37 +123,16 @@ def test_every_path_lives_under_the_bots_base():
     """The gateway resolves by the segment after the version base.
 
     A path outside ``/openapi/v1/bots`` would route to a different upstream —
-    or to none — and the mistake is invisible until deploy.
-
-    The harness group is the one deliberate exception: it lives under
-    ``/openapi/v1/harness`` so the gateway can route it as its own domain, and
-    is pinned by ``test_harness_paths_keep_their_own_base`` below.
+    or to none — and the mistake is invisible until deploy. The harness group
+    used to be the one exception under its own ``/openapi/v1/harness`` base;
+    it moved beneath the addressed bot, so the rule is now absolute.
     """
     offenders = [
         p
         for p in _paths()
-        if p != _BASE
-        and not p.startswith(f"{_BASE}/")
-        and not p.startswith(f"{_HARNESS_BASE}/")
+        if p != _BASE and not p.startswith(f"{_BASE}/")
     ]
     assert not offenders, f"paths outside {_BASE}: {offenders}"
-
-
-def test_harness_paths_keep_their_own_base():
-    """The harness group is bot-scoped but addressed under its own base.
-
-    ``/openapi/v1/harness/bots/{bot_id}/…`` keeps the bot first within the
-    group, so the gateway's ``harness`` domain can claim the whole prefix
-    without colliding with the ``bots`` domain.
-    """
-    harness_paths = [p for p in _paths() if p.startswith(f"{_HARNESS_BASE}/")]
-    assert harness_paths, "no harness paths published"
-    offenders = [
-        p
-        for p in harness_paths
-        if not p.startswith(f"{_HARNESS_BASE}/bots/{{bot_id}}/")
-    ]
-    assert not offenders, f"harness paths not bot-first under their base: {offenders}"
 
 
 def test_no_path_repeats_bot_before_the_id():

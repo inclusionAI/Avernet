@@ -315,24 +315,29 @@ def test_bcsfuse_paths_served_with_user_security() -> None:
                 )
 
 
-_HARNESS_ARTIFACT = (
+_BOTS_ARTIFACT = (
     Path(__file__).resolve().parents[4]
     / "configs"
     / "schemas"
-    / "harness.openapi.json"
+    / "bots.openapi.json"
 )
 
 
-def _harness_served() -> dict[str, Any]:
-    # The harness domain mounts at /openapi/v1/harness/bots/**, not
-    # /openapi/v1/harness; pass the real mount prefix so its paths survive the
-    # served-doc namespace filter.
+def test_harness_paths_served_with_user_security() -> None:
+    """The harness operations publish beneath the addressed bot.
+
+    They live under ``/openapi/v1/bots/{bot_id}/harness/…`` now, so the bots
+    domain routes and documents them: no separate domain can pin a match behind
+    the ``{bot_id}`` parameter, and the bots artifact carries their description.
+    Their rule is the one thing that stays their own — a user on the wire,
+    outranking the wide optional rule the rest of the bots surface admits.
+    """
     dm = DomainMap.from_yaml(_SHIPPED_CONFIG, variables=_BCSFUSE_VARS)
     mount_prefixes = {name: domain.mount_prefix for name, domain in dm.domains.items()}
     rewrites = {name: domain.rewrite for name, domain in dm.domains.items()}
-    describe = {"harness": json.loads(_HARNESS_ARTIFACT.read_text())}
-    return build_served_openapi(
-        ["harness"],
+    describe = {"bots": json.loads(_BOTS_ARTIFACT.read_text())}
+    document = build_served_openapi(
+        ["bots"],
         describe.__getitem__,
         _SHIPPED_RULES,
         title="gateway",
@@ -342,19 +347,19 @@ def _harness_served() -> dict[str, Any]:
         mount_prefixes=mount_prefixes,
     )
 
-
-def test_harness_paths_served_with_user_security() -> None:
-    paths = _harness_served()["paths"]
-    assert set(paths) == {
-        "/openapi/v1/harness/bots/{bot_id}/diagnose",
-        "/openapi/v1/harness/bots/{bot_id}/preview",
-        "/openapi/v1/harness/bots/{bot_id}/apply",
-        "/openapi/v1/harness/bots/{bot_id}/rollback",
-        "/openapi/v1/harness/bots/{bot_id}/dim-report",
-        "/openapi/v1/harness/bots/{bot_id}/dim-history",
+    harness_paths = {
+        "/openapi/v1/bots/{bot_id}/harness/diagnose",
+        "/openapi/v1/bots/{bot_id}/harness/preview",
+        "/openapi/v1/bots/{bot_id}/harness/apply",
+        "/openapi/v1/bots/{bot_id}/harness/rollback",
+        "/openapi/v1/bots/{bot_id}/harness/dim-report",
+        "/openapi/v1/bots/{bot_id}/harness/dim-history",
     }
-    for path, item in paths.items():
-        for method, operation in item.items():
+    assert harness_paths <= set(document["paths"])
+    # The retired shape is published nowhere.
+    assert not any(p.startswith("/openapi/v1/harness") for p in document["paths"])
+    for path in harness_paths:
+        for method, operation in document["paths"][path].items():
             if method in _METHODS:
                 assert operation["x-avernet-security"] == {"user": "required"}, (
                     f"{method} {path}"

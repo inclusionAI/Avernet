@@ -1,4 +1,4 @@
-"""Smoke tests for the public ``/openapi/v1/harness`` router.
+"""Smoke tests for the public ``/openapi/v1/bots/{bot_id}/harness`` router.
 
 A minimal FastAPI app hosts the harness router with the caller principal
 overridden and the harness services bound to mocks via the injector — the same
@@ -138,7 +138,7 @@ def client(bot_repo, collaborator, scan_repo, patch_repo, record_repo, engine, l
 
 def test_missing_principal_is_401(client):
     client.app.dependency_overrides[require_principal] = lambda: None
-    resp = client.get("/openapi/v1/harness/bots/b1/dim-report?entity_id=u1")
+    resp = client.get("/openapi/v1/bots/b1/harness/dim-report?entity_id=u1")
     assert resp.status_code == 401
     assert resp.json()["code"] == 401000
 
@@ -147,7 +147,7 @@ def test_dim_report_happy_path_for_owner(client, scan_repo):
     scan_repo.get_latest_dim_records.return_value = [
         {"scan_dim": "skill", "health_score": 90, "grade": "A", "status": "completed"}
     ]
-    resp = client.get("/openapi/v1/harness/bots/b1/dim-report?entity_id=u1")
+    resp = client.get("/openapi/v1/bots/b1/harness/dim-report?entity_id=u1")
     assert resp.status_code == 200
     body = resp.json()
     assert body["code"] == 200000
@@ -156,7 +156,7 @@ def test_dim_report_happy_path_for_owner(client, scan_repo):
 
 
 def test_dim_history_happy_path_for_owner(client, scan_repo):
-    resp = client.get("/openapi/v1/harness/bots/b1/dim-history?entity_id=u1")
+    resp = client.get("/openapi/v1/bots/b1/harness/dim-history?entity_id=u1")
     assert resp.status_code == 200
     body = resp.json()
     assert body["code"] == 200000
@@ -165,20 +165,20 @@ def test_dim_history_happy_path_for_owner(client, scan_repo):
 
 def test_non_owner_without_grant_is_404(client, collaborator):
     client.app.dependency_overrides[require_principal] = lambda: {"user_id": "u2"}
-    resp = client.get("/openapi/v1/harness/bots/b1/dim-report?entity_id=u2", params={"user_id": "u2"})
+    resp = client.get("/openapi/v1/bots/b1/harness/dim-report?entity_id=u2", params={"user_id": "u2"})
     assert resp.status_code == 404
 
 
 def test_unknown_bot_is_404(client, bot_repo):
     bot_repo.get_by_id.return_value = None
-    resp = client.get("/openapi/v1/harness/bots/nope/dim-report?entity_id=u1")
+    resp = client.get("/openapi/v1/bots/nope/harness/dim-report?entity_id=u1")
     assert resp.status_code == 404
 
 
 def test_collaborator_with_grant_passes(client, collaborator):
     collaborator.check_collaborator_permission.return_value = {"has_permission": True}
     client.app.dependency_overrides[require_principal] = lambda: {"user_id": "u2"}
-    resp = client.get("/openapi/v1/harness/bots/b1/dim-report?entity_id=u2", params={"user_id": "u2"})
+    resp = client.get("/openapi/v1/bots/b1/harness/dim-report?entity_id=u2", params={"user_id": "u2"})
     assert resp.status_code == 200
 
 
@@ -190,21 +190,21 @@ def test_build_harness_router_returns_the_module_router():
 
 
 def test_default_bot_short_circuits_the_lookup(client, bot_repo):
-    resp = client.get("/openapi/v1/harness/bots/default/dim-report?entity_id=u1")
+    resp = client.get("/openapi/v1/bots/default/harness/dim-report?entity_id=u1")
     assert resp.status_code == 200
     bot_repo.get_by_id.assert_not_called()
 
 
 def test_bot_without_owner_is_404(client, bot_repo):
     bot_repo.get_by_id.return_value = {"id": 78, "bot_id": "b1"}
-    resp = client.get("/openapi/v1/harness/bots/b1/dim-report?entity_id=u1")
+    resp = client.get("/openapi/v1/bots/b1/harness/dim-report?entity_id=u1")
     assert resp.status_code == 404
 
 
 def test_collaborator_check_error_is_404(client, collaborator):
     collaborator.check_collaborator_permission.side_effect = RuntimeError("service down")
     client.app.dependency_overrides[require_principal] = lambda: {"user_id": "u2"}
-    resp = client.get("/openapi/v1/harness/bots/b1/dim-report?entity_id=u2", params={"user_id": "u2"})
+    resp = client.get("/openapi/v1/bots/b1/harness/dim-report?entity_id=u2", params={"user_id": "u2"})
     assert resp.status_code == 404
 
 
@@ -220,7 +220,7 @@ def test_diagnose_falls_back_to_progress_store_id(client, scan_repo, monkeypatch
     scan_repo.create.return_value = None
     monkeypatch.setattr(harness_router_module, "_run_scan", _noop_scan)
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/diagnose",
+        "/openapi/v1/bots/b1/harness/diagnose",
         json={"entity_type": "staff", "entity_id": "u1"},
     )
     assert resp.status_code == 200
@@ -234,7 +234,7 @@ def test_diagnose_falls_back_to_progress_store_id(client, scan_repo, monkeypatch
 
 def test_preview_requires_patch_ids(client):
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/preview",
+        "/openapi/v1/bots/b1/harness/preview",
         json={"entity_type": "staff", "entity_id": "u1", "patch_id_list": []},
     )
     assert resp.status_code == 400
@@ -242,7 +242,7 @@ def test_preview_requires_patch_ids(client):
 
 def test_preview_unknown_scan_is_404(client):
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/preview",
+        "/openapi/v1/bots/b1/harness/preview",
         json={"entity_type": "staff", "entity_id": "u1", "patch_id_list": [1], "scan_id": 424242},
     )
     assert resp.status_code == 404
@@ -253,7 +253,7 @@ def test_preview_unparseable_patch_content_is_400(client, patch_repo):
         template_id=0, name="p", layer=Layer.L1, id=1, content="not-json"
     )
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/preview",
+        "/openapi/v1/bots/b1/harness/preview",
         json={"entity_type": "staff", "entity_id": "u1", "patch_id_list": [1]},
     )
     assert resp.status_code == 400
@@ -265,7 +265,7 @@ def test_preview_engine_failure_is_400(client, patch_repo, engine):
     )
     engine.preview = AsyncMock(side_effect=PatchEngineError("preview", "boom"))
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/preview",
+        "/openapi/v1/bots/b1/harness/preview",
         json={"entity_type": "staff", "entity_id": "u1", "patch_id_list": [1]},
     )
     assert resp.status_code == 400
@@ -291,7 +291,7 @@ def test_apply_by_record_id(client, record_repo, patch_repo, engine):
     record_repo.get_by_id.return_value = record
     engine.apply = AsyncMock(return_value=record)
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/apply",
+        "/openapi/v1/bots/b1/harness/apply",
         json={"entity_type": "staff", "entity_id": "u1", "record_id": 9},
     )
     assert resp.status_code == 200
@@ -304,7 +304,7 @@ def test_apply_by_record_id(client, record_repo, patch_repo, engine):
 def test_apply_missing_record_is_404(client, record_repo):
     record_repo.get_by_id.return_value = None
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/apply",
+        "/openapi/v1/bots/b1/harness/apply",
         json={"entity_type": "staff", "entity_id": "u1", "record_id": 99},
     )
     assert resp.status_code == 404
@@ -315,7 +315,7 @@ def test_apply_record_not_appliable_is_400(client, record_repo):
     record.status = PatchStatus.APPLIED
     record_repo.get_by_id.return_value = record
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/apply",
+        "/openapi/v1/bots/b1/harness/apply",
         json={"entity_type": "staff", "entity_id": "u1", "record_id": 9},
     )
     assert resp.status_code == 400
@@ -324,7 +324,7 @@ def test_apply_record_not_appliable_is_400(client, record_repo):
 def test_apply_unknown_patch_is_404(client, patch_repo):
     patch_repo.get_by_id.return_value = None
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/apply",
+        "/openapi/v1/bots/b1/harness/apply",
         json={"entity_type": "staff", "entity_id": "u1", "patch_id_list": [999]},
     )
     assert resp.status_code == 404
@@ -339,7 +339,7 @@ def test_apply_tolerates_unparseable_content_and_record_repo_errors(client, patc
     record_repo.create.side_effect = RuntimeError("insert down")
     engine.apply = AsyncMock(side_effect=lambda **kwargs: kwargs["record"])
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/apply",
+        "/openapi/v1/bots/b1/harness/apply",
         json={"entity_type": "staff", "entity_id": "u1", "patch_id_list": [1]},
     )
     assert resp.status_code == 200
@@ -355,7 +355,7 @@ def test_rollback_success(client, patch_repo, engine):
     )
     engine.rollback_by_patch = AsyncMock(return_value=(True, "rolled back"))
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/rollback",
+        "/openapi/v1/bots/b1/harness/rollback",
         json={"entity_type": "staff", "entity_id": "u1", "patch_id": 1},
     )
     assert resp.status_code == 200
@@ -368,7 +368,7 @@ def test_rollback_success(client, patch_repo, engine):
 def test_rollback_unknown_patch_is_404(client, patch_repo):
     patch_repo.get_by_id.return_value = None
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/rollback",
+        "/openapi/v1/bots/b1/harness/rollback",
         json={"entity_type": "staff", "entity_id": "u1", "patch_id": 999},
     )
     assert resp.status_code == 404
@@ -379,7 +379,7 @@ def test_rollback_unparseable_content_is_400(client, patch_repo):
         template_id=0, name="p", layer=Layer.L1, id=1, content="not-json"
     )
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/rollback",
+        "/openapi/v1/bots/b1/harness/rollback",
         json={"entity_type": "staff", "entity_id": "u1", "patch_id": 1},
     )
     assert resp.status_code == 400
@@ -390,7 +390,7 @@ def test_rollback_without_operations_is_400(client, patch_repo):
         template_id=0, name="p", layer=Layer.L1, id=1, content="[]"
     )
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/rollback",
+        "/openapi/v1/bots/b1/harness/rollback",
         json={"entity_type": "staff", "entity_id": "u1", "patch_id": 1},
     )
     assert resp.status_code == 400
@@ -402,7 +402,7 @@ def test_rollback_engine_failure_is_400(client, patch_repo, engine):
     )
     engine.rollback_by_patch = AsyncMock(return_value=(False, "engine said no"))
     resp = client.post(
-        "/openapi/v1/harness/bots/b1/rollback",
+        "/openapi/v1/bots/b1/harness/rollback",
         json={"entity_type": "staff", "entity_id": "u1", "patch_id": 1},
     )
     assert resp.status_code == 400
@@ -426,7 +426,7 @@ def test_dim_report_rows_with_patches(client, scan_repo, patch_repo):
         _patch(1, _ONE_OP_CONTENT, advise=json.dumps({"advise_content": "review manually"})),
         _patch(2, "not-json"),
     ]
-    resp = client.get("/openapi/v1/harness/bots/b1/dim-report?entity_id=u1")
+    resp = client.get("/openapi/v1/bots/b1/harness/dim-report?entity_id=u1")
     assert resp.status_code == 200
     items = resp.json()["data"]["items"]
     assert len(items) == 2
@@ -442,7 +442,7 @@ def test_dim_report_tolerates_patch_fetch_failure(client, scan_repo, patch_repo)
         {"scan_dim": "skill", "scan_type": "full", "patch_ids": "[1]"},
     ]
     patch_repo.list_by_ids.side_effect = RuntimeError("db down")
-    resp = client.get("/openapi/v1/harness/bots/b1/dim-report?entity_id=u1")
+    resp = client.get("/openapi/v1/bots/b1/harness/dim-report?entity_id=u1")
     assert resp.status_code == 200
     assert resp.json()["data"]["items"][0]["patches"] == []
 
@@ -458,7 +458,7 @@ def test_dim_history_rows_with_patches(client, scan_repo, patch_repo):
     ]
     scan_repo.list_dim_history.return_value = (rows, 4)
     patch_repo.list_by_ids.return_value = [_patch(5, _ONE_OP_CONTENT), _patch(6, "not-json")]
-    resp = client.get("/openapi/v1/harness/bots/b1/dim-history?entity_id=u1")
+    resp = client.get("/openapi/v1/bots/b1/harness/dim-history?entity_id=u1")
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["total"] == 4
@@ -475,6 +475,6 @@ def test_dim_history_tolerates_patch_fetch_failure(client, scan_repo, patch_repo
         1,
     )
     patch_repo.list_by_ids.side_effect = RuntimeError("db down")
-    resp = client.get("/openapi/v1/harness/bots/b1/dim-history?entity_id=u1")
+    resp = client.get("/openapi/v1/bots/b1/harness/dim-history?entity_id=u1")
     assert resp.status_code == 200
     assert resp.json()["data"]["items"][0]["patches"] == []

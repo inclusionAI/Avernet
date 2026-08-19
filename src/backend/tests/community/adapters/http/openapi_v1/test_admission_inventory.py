@@ -182,17 +182,21 @@ def test_every_grant_checked_operation_declares_its_modes_dependency(mode):
     valid grant on a shared bot. Neither is a smaller mistake than a missing
     check.
 
-    Two named sets are excluded, for the same underlying reason and with
+    Three named sets are excluded, for the same underlying reason and with
     different lifetimes. ``SKILL_SCOPED_OPERATIONS`` — the four current
     ``{skill_id}`` operations — resolve the bot's owner from the skill record,
     so there is nothing for a dependency to look a grant up against until the
-    handler has read it. The retiring addresses in ``SELF_CHECKED_ROUTES`` are
-    the same problem in the old contract's shape: their bot is in a request body
-    or behind a skill id, and mounting them under a dependency would refuse an
-    application outright rather than defer, turning a working legacy call into a
-    404. Both check it themselves, first, before acting; the second set is empty
-    the day the deprecated package goes. ``test_only_the_named_operations_
-    check_their_own_grant`` is what stops either from growing quietly.
+    handler has read it. ``HARNESS_SCOPED_OPERATIONS`` — the six harness
+    operations — resolve it from the bot record in ``HarnessBotAccessDep``:
+    a collaborator legitimately operates on a *shared* bot whose owner is not
+    the caller, so the delegating user is the wrong thing to check against.
+    The retiring addresses in ``SELF_CHECKED_ROUTES`` are the same problem in
+    the old contract's shape: their bot is in a request body or behind a skill
+    id, and mounting them under a dependency would refuse an application
+    outright rather than defer, turning a working legacy call into a 404. All
+    three check it themselves, first, before acting; the third set is empty the
+    day the deprecated package goes. ``test_only_the_named_operations_
+    check_their_own_grant`` is what stops any of them from growing quietly.
     """
     dependency = _GRANT_DEPENDENCY_BY_MODE[mode]
     expected = {

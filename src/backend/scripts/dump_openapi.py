@@ -19,8 +19,8 @@ def build_public_openapi(path_prefix: str = _PUBLIC_BASE) -> dict[str, Any]:
     """The backend's OpenAPI narrowed to the public ``path_prefix`` surface.
 
     ``path_prefix`` is typically ``/openapi/v1`` (legacy single-domain dump) or
-    a more specific prefix such as ``/openapi/v1/bots`` / ``/openapi/v1/harness``
-    when the gateway wants per-domain schema artifacts.
+    a more specific prefix such as ``/openapi/v1/bots`` when the gateway wants
+    per-domain schema artifacts.
 
     Both ``paths`` and ``components`` are narrowed: paths to the prefix and
     components to only those transitively referenced by those paths. Keeping the

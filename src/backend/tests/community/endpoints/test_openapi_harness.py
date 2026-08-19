@@ -1,6 +1,6 @@
 """Endpoint-framework coverage for the public harness operations (#1129).
 
-Six routes under ``/openapi/v1/harness/bots/{bot_id}/…``, exercised through
+Six routes under ``/openapi/v1/bots/{bot_id}/harness/…``, exercised through
 the assembled public app: the real gateway-principal verification, the
 owner/collaborator guard (``HarnessBotAccessDep``), the SQLite-backed harness
 repositories, and the public error envelope.
@@ -189,7 +189,7 @@ def _seed_scan_record(world) -> None:
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/harness/bots/{bot_id}/diagnose",
+    path="/openapi/v1/bots/{bot_id}/harness/diagnose",
     scenario="starts_a_scan_for_the_owner",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
@@ -213,7 +213,7 @@ def diagnose_starts_a_scan():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/harness/bots/{bot_id}/diagnose",
+    path="/openapi/v1/bots/{bot_id}/harness/diagnose",
     scenario="unknown_bot",
     input=CaseInput(
         path_params={"bot_id": "no-such-bot"},
@@ -236,7 +236,7 @@ def diagnose_unknown_bot_is_indistinguishable():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/harness/bots/{bot_id}/preview",
+    path="/openapi/v1/bots/{bot_id}/harness/preview",
     scenario="renders_the_stored_patch",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
@@ -263,7 +263,7 @@ def preview_renders_the_stored_patch():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/harness/bots/{bot_id}/preview",
+    path="/openapi/v1/bots/{bot_id}/harness/preview",
     scenario="missing_patch",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
@@ -286,7 +286,7 @@ def preview_missing_patch_is_404():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/harness/bots/{bot_id}/apply",
+    path="/openapi/v1/bots/{bot_id}/harness/apply",
     scenario="applies_the_stored_patch",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
@@ -306,7 +306,7 @@ def apply_marks_the_patch_applied():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/harness/bots/{bot_id}/apply",
+    path="/openapi/v1/bots/{bot_id}/harness/apply",
     scenario="nothing_to_apply",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
@@ -333,7 +333,7 @@ def apply_without_record_or_patches_is_400():
 # the public surface gets real coverage rather than a baseline line.
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/harness/bots/{bot_id}/rollback",
+    path="/openapi/v1/bots/{bot_id}/harness/rollback",
     scenario="restores_the_stored_patch",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
@@ -353,7 +353,7 @@ def rollback_clears_the_applied_flag():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/harness/bots/{bot_id}/rollback",
+    path="/openapi/v1/bots/{bot_id}/harness/rollback",
     scenario="patch_not_found",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
@@ -376,7 +376,7 @@ def rollback_missing_patch_is_404():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/harness/bots/{bot_id}/dim-report",
+    path="/openapi/v1/bots/{bot_id}/harness/dim-report",
     scenario="returns_the_latest_scan_per_dimension",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
@@ -404,7 +404,7 @@ def dim_report_returns_the_seeded_scan():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/harness/bots/{bot_id}/dim-report",
+    path="/openapi/v1/bots/{bot_id}/harness/dim-report",
     scenario="unknown_bot",
     input=CaseInput(
         path_params={"bot_id": "no-such-bot"},
@@ -426,7 +426,7 @@ def dim_report_unknown_bot_is_indistinguishable():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/harness/bots/{bot_id}/dim-history",
+    path="/openapi/v1/bots/{bot_id}/harness/dim-history",
     scenario="returns_the_scan_history_page",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
@@ -452,7 +452,7 @@ def dim_history_returns_the_seeded_scan():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/harness/bots/{bot_id}/dim-history",
+    path="/openapi/v1/bots/{bot_id}/harness/dim-history",
     scenario="unknown_bot",
     input=CaseInput(
         path_params={"bot_id": "no-such-bot"},
