@@ -35,7 +35,6 @@ from agentclaw.community.adapters.http.openapi_v1.deprecated import (
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
     ADMITTING_MODES,
-    HARNESS_SCOPED_OPERATIONS,
     SKILL_SCOPED_OPERATIONS,
     AdmissionMode,
 )
@@ -182,21 +181,17 @@ def test_every_grant_checked_operation_declares_its_modes_dependency(mode):
     valid grant on a shared bot. Neither is a smaller mistake than a missing
     check.
 
-    Three named sets are excluded, for the same underlying reason and with
+    Two named sets are excluded, for the same underlying reason and with
     different lifetimes. ``SKILL_SCOPED_OPERATIONS`` — the four current
     ``{skill_id}`` operations — resolve the bot's owner from the skill record,
     so there is nothing for a dependency to look a grant up against until the
-    handler has read it. ``HARNESS_SCOPED_OPERATIONS`` — the six harness
-    operations — resolve it from the bot record in ``HarnessBotAccessDep``:
-    a collaborator legitimately operates on a *shared* bot whose owner is not
-    the caller, so the delegating user is the wrong thing to check against.
-    The retiring addresses in ``SELF_CHECKED_ROUTES`` are the same problem in
-    the old contract's shape: their bot is in a request body or behind a skill
-    id, and mounting them under a dependency would refuse an application
-    outright rather than defer, turning a working legacy call into a 404. All
-    three check it themselves, first, before acting; the third set is empty the
-    day the deprecated package goes. ``test_only_the_named_operations_
-    check_their_own_grant`` is what stops any of them from growing quietly.
+    handler has read it. The retiring addresses in ``SELF_CHECKED_ROUTES`` are
+    the same problem in the old contract's shape: their bot is in a request body
+    or behind a skill id, and mounting them under a dependency would refuse an
+    application outright rather than defer, turning a working legacy call into a
+    404. Both check it themselves, first, before acting; the second set is empty
+    the day the deprecated package goes. ``test_only_the_named_operations_
+    check_their_own_grant`` is what stops either from growing quietly.
     """
     dependency = _GRANT_DEPENDENCY_BY_MODE[mode]
     expected = {
@@ -205,7 +200,6 @@ def test_every_grant_checked_operation_declares_its_modes_dependency(mode):
         if table_mode is mode
         and key not in SELF_CHECKED_ROUTES
         and key not in SKILL_SCOPED_OPERATIONS
-        and key not in HARNESS_SCOPED_OPERATIONS
     }
     actual = {
         key
@@ -250,12 +244,6 @@ def test_only_the_named_operations_check_their_own_grant():
     What is asserted here is that the set is exactly those four: still in a
     grant-checked mode, still absent from the shared dependency, and not grown
     by one more operation that merely found the check inconvenient.
-
-    The harness operations are a second, deliberate self-checking set: they
-    resolve the addressed bot's owner from the bot record in
-    ``HarnessBotAccessDep`` and apply the owner/collaborator rule there, so
-    they also cannot use the shared ``require_granted_bot`` dependency. They
-    are named in ``HARNESS_SCOPED_OPERATIONS`` and pinned beside the four.
     """
     self_checking = {
         key
@@ -265,12 +253,12 @@ def test_only_the_named_operations_check_their_own_grant():
         and not _depends_on(_dependant_of(ctx), require_granted_addressed_bot)
         and key not in LEGACY_ROUTES
     }
-    named = SKILL_SCOPED_OPERATIONS | HARNESS_SCOPED_OPERATIONS
+    named = SKILL_SCOPED_OPERATIONS
     assert self_checking == named, (
         "the set of operations checking their grant in a handler has changed. "
-        "Adding one is an edit to admission.SKILL_SCOPED_OPERATIONS or "
-        "admission.HARNESS_SCOPED_OPERATIONS and needs the same justification "
-        "the named ones have — that the addressed bot's owner cannot be known "
+        "Adding one is an edit to admission.SKILL_SCOPED_OPERATIONS and "
+        "needs the same justification the named ones have — that the addressed "
+        "bot's owner cannot be known "
         "before the handler runs.\n"
         f"  unexpected: {sorted(self_checking - named)}\n"
         f"  no longer:  {sorted(named - self_checking)}"

@@ -225,34 +225,33 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/connection"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # harness — bot-scoped diagnostics and patching under the addressed bot.
-    # The addressed bot's owner is resolved from the bot record by
-    # ``HarnessBotAccessDep`` (owner or collaborator), which is the own-bot
-    # shape: the request cannot name another owner, so an application acting as
-    # the delegating user can only reach the same bots.
+    # These operations are intentionally user-only for now: harness access is
+    # checked against the verified user's owner/collaborator relationship, and
+    # app-only delegation is not part of this public contract.
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/harness/diagnose",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.REFUSED,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/harness/preview",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.REFUSED,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/harness/apply",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.REFUSED,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/harness/rollback",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.REFUSED,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/harness/dim-report",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.REFUSED,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/harness/dim-history",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.REFUSED,
     # ── B: returns a set of bots, narrowed to the granted ones ───────────────
     ("GET", "/openapi/v1/bots"): AdmissionMode.GRANT_FILTERED,
     # The application's own view, and the **complete** one: a granted bot the
@@ -337,23 +336,10 @@ SKILL_SCOPED_OPERATIONS = frozenset(
     }
 )
 
-#: The harness operations check access in their own dependency, not the shared
-#: ``require_granted_bot``. ``HarnessBotAccessDep`` resolves the addressed bot's
-#: owner from the bot record and then applies the owner/collaborator rule —
-#: which is the own-bot shape, but performed against the *record* rather than
-#: the delegating user, because harness operations may legitimately act on a
-#: shared bot whose owner is not the caller. They stay in a grant-checked mode;
-#: the check is the same one, run one layer down.
-HARNESS_SCOPED_OPERATIONS = frozenset(
-    {
-        ("POST", "/openapi/v1/bots/{bot_id}/harness/diagnose"),
-        ("POST", "/openapi/v1/bots/{bot_id}/harness/preview"),
-        ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"),
-        ("POST", "/openapi/v1/bots/{bot_id}/harness/rollback"),
-        ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-report"),
-        ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-history"),
-    }
-)
+#: No current harness operation self-checks an app-only grant. Harness is a
+#: user-only surface for now, so app-only callers are refused before the
+#: harness owner/collaborator access dependency runs.
+HARNESS_SCOPED_OPERATIONS = frozenset()
 
 #: The modes that admit a caller naming no end user. Everything else refuses at
 #: ``require_principal``, which is what a route inherits by saying nothing.

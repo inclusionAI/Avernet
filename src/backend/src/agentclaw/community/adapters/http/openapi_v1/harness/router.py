@@ -7,7 +7,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, ERROR_RESPONSES
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    UserIdDep,
+    refuse_app_only_caller,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -63,7 +66,11 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/harness", tags=["harness"])
+router = APIRouter(
+    prefix="/openapi/v1/bots/{bot_id}/harness",
+    tags=["harness"],
+    dependencies=[Depends(refuse_app_only_caller)],
+)
 
 
 async def require_harness_bot_access(
