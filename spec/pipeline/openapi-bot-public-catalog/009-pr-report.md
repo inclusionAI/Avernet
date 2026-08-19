@@ -32,7 +32,7 @@
 
 | 轮次 | 来源 | 链接 | 决定 | 理由 | 修改/提交 | 验证 |
 |---|---|---|---|---|---|---|
-| 1 | GitHub | [#1238](https://github.com/inclusionAI/Avernet/pull/1238) | clear at creation | The initial PR query returned no reviews, comments, or review decision. | — | Remote checks have not appeared yet. |
+| 1 | GitHub | [#1238](https://github.com/inclusionAI/Avernet/pull/1238) | clear | After the first report-update push, head `abda387a8` had no reviews, inline comments, issue comments, or review decision. | — | No check run had appeared yet. |
 
 ## ACI/CI
 
@@ -41,19 +41,19 @@
 | Avernet local bounded regression | PASS | OpenAPI catalog/admission/schema/repository suite | — | — | 155 passed, 18 existing deprecation warnings, 39.11s. |
 | Avernet local gateway regression | PASS | route-security resolver suite | — | — | 43 passed. |
 | OCB local gateway regression | PASS | route-security resolver suite | — | — | 32 passed, 0.40s. |
-| GitHub ACI/CI | PENDING | [#1238](https://github.com/inclusionAI/Avernet/pull/1238) | The initial PR query returned no check runs yet. | — | Must be revisited after the report-update push. |
+| GitHub ACI/CI | PENDING | [#1238](https://github.com/inclusionAI/Avernet/pull/1238) | The refreshed query for head `abda387a8` returned no check runs. | — | Re-query after this status-record push; no pending job is treated as passed. |
 | OCB remote ACI/CI | BLOCKED | no remote topic branch | Push authorization failed before a PR or pipeline could exist. | No bypass attempted. | Local route-security regression passed (32). |
 
 ## 人工意见
 
 | 轮次 | 作者 | 链接 | 决定 | 理由 | 修改/提交 | 验证 |
 |---|---|---|---|---|---|---|
-| 1 | GitHub | [#1238](https://github.com/inclusionAI/Avernet/pull/1238) | clear at creation | No human review or comment was present in the initial query. | — | — |
+| 1 | GitHub | [#1238](https://github.com/inclusionAI/Avernet/pull/1238) | clear | No human review or comment was present in the refreshed query for head `abda387a8`. | — | — |
 
 ## 当前结论
 
 - PR: OPEN — Avernet #1238; OCB mirror BLOCKED by repository authorization
-- 自动意见: CLEAR at creation
+- 自动意见: CLEAR at last query
 - ACI/CI: PENDING
-- 人工意见: CLEAR at creation
-- 下一步: commit and push this report update, then refresh GitHub reviews and checks for the resulting head.
+- 人工意见: CLEAR at last query
+- 下一步: push this status-record update, then refresh GitHub reviews and checks for the resulting head.
