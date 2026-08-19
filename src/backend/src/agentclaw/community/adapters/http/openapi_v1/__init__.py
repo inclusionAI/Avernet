@@ -194,6 +194,7 @@ from .engine_runtime.connection import router as engine_connection_router
 from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
 from .engine_runtime.sessions import router as engine_sessions_router
+from .harness import harness_router
 from .identity import router as identity_router
 from .loadtest import router as loadtest_router
 from .mcp import router as mcp_router
@@ -256,6 +257,11 @@ _SUBGROUPS = [
     # because it would look the grant up against the delegating user rather than
     # the owner. See `skills/router.py` and `admission.SKILL_SCOPED_OPERATIONS`.
     skills_router,
+    # Harness public surface: every route is `{bot_id}`-first under
+    # `/bots/{bot_id}/harness/...` and performs its own owner/collaborator
+    # check via `HarnessBotAccessDep`, so it joins the plain subgroups with
+    # only `_PUBLIC_AUTH` + the user-scoped error table.
+    harness_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
