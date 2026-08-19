@@ -15,8 +15,8 @@ use crate::v1::common::{
 };
 use crate::v1::openapi::dto::session::{
     AddSessionParticipantRequest, CollectSessionRequest, CreateSessionRequest, DeleteSessionQuery,
-    ListSessionMessagesQuery, ListSessionsQuery, UncollectSessionQuery, UpdateSessionRequest,
-    UpdateSessionParticipantRequest,
+    ListSessionMessagesQuery, ListSessionsQuery, UncollectSessionQuery,
+    UpdateSessionParticipantRequest, UpdateSessionRequest,
 };
 
 pub fn router() -> Router<ApiState> {
@@ -58,19 +58,22 @@ async fn create_session(
 ) -> Result<Response, ErrorResponse> {
     let Path(group_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let command = body
+        .into_command(&caller, group_id)
+        .map_err(|error| application_error_response(&request_id, error))?;
     let result = state
         .session_service
-        .create(body.into_command(caller, group_id))
+        .create(command)
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
-    let (status, code, message) = if result.created {
-        (StatusCode::CREATED, 20_100, "Created")
-    } else {
-        (StatusCode::OK, 20_000, "OK")
-    };
     Ok((
-        status,
-        Json(Envelope::success(code, message, result.session, request_id.0)),
+        StatusCode::CREATED,
+        Json(Envelope::success(
+            20_100,
+            "Created",
+            result.session,
+            request_id.0,
+        )),
     )
         .into_response())
 }
@@ -112,10 +115,7 @@ async fn get_session(
     let Path(session_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .session_service
-        .get(GetSession {
-            caller,
-            session_id,
-        })
+        .get(GetSession { caller, session_id })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((

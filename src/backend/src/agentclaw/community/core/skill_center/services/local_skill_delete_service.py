@@ -24,10 +24,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillStorageError,
 )
-from agentclaw.community.core.skill_center.factories import (
-    LocalSkillQuarantineRepairError,
-    SkillServiceFactory,
-)
+from agentclaw.community.core.skill_center.factories import SkillServiceFactory
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
@@ -39,7 +36,6 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
-from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -59,7 +55,6 @@ class LocalSkillDeleteService:
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
         edit_guard: SkillsPoolEditGuard,
-        cleanup_repo: LocalSkillCleanupRepository,
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
     ) -> None:
         self._skill_repo = skill_repo
@@ -68,7 +63,6 @@ class LocalSkillDeleteService:
         self._collaborators = collaborator_service
         self._skill_service_factory = skill_service_factory
         self._edit_guard = edit_guard
-        self._cleanup_repo = cleanup_repo
         self._device_context_resolver_provider = device_context_resolver_provider
 
     async def delete_local_skill(self, *, skill_id: str, actor_id: str) -> None:
@@ -129,15 +123,7 @@ class LocalSkillDeleteService:
                 is_teclaw=is_teclaw,
                 locator=locator,
             )
-            await self._recover_repair_required(
-                bot=bot,
-                owner_id=owner_id,
-                bot_id=bot_id,
-                skill_id=skill_id,
-                is_teclaw=is_teclaw,
-                package=package,
-            )
-            quarantine_locator, quarantine = (
+            _, quarantine = (
                 self._skill_service_factory.local_skill_package_storage(
                     entity_id=str(bot["entity_id"]),
                     owner_id=owner_id,
@@ -151,210 +137,31 @@ class LocalSkillDeleteService:
                 )
             )
             try:
-                cleanup_work_id = self._cleanup_repo.record_preparing(
-                    env=str(bot["env"]),
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    skill_id=skill_id,
-                    package_locator=quarantine_locator,
-                )
-            except Exception as exc:
-                raise LocalSkillStorageError() from exc
-            if cleanup_work_id is None:
-                raise LocalSkillStorageError()
-            # A process can stop at any point while the portable quarantine
-            # operation is copying or removing source bytes. Mark the row as
-            # retained for repair before that operation begins, so the only
-            # complete copy is never left behind as ignored preparation work.
-            self._record_repair_required(
-                bot=bot,
-                owner_id=owner_id,
-                bot_id=bot_id,
-                skill_id=skill_id,
-                quarantine_locator=quarantine_locator,
-            )
-            try:
                 await package.quarantine_to(quarantine)
-            except LocalSkillQuarantineRepairError as exc:
-                # Quarantine is the sole complete copy until an operator can
-                # repair the partially deleted authoritative package. Never
-                # purge it in this fail-closed state.
-                self._record_repair_required(
-                    bot=bot,
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    skill_id=skill_id,
-                    quarantine_locator=quarantine_locator,
-                )
-                raise LocalSkillStorageError() from exc
             except Exception as exc:
-                await self._discard_or_record_precommit_quarantine(
-                    bot=bot,
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    skill_id=skill_id,
-                    quarantine=quarantine,
-                    quarantine_locator=quarantine_locator,
-                    cleanup_work_id=cleanup_work_id,
-                )
+                await self._discard(quarantine)
                 raise LocalSkillStorageError() from exc
             try:
-                work_id = self._skill_repo.delete_bot_local_skill(
+                deleted = self._skill_repo.delete_bot_local_skill(
                     skill_id=skill_id,
                     owner_id=owner_id,
                     bot_id=bot_id,
-                    quarantine_locator=quarantine_locator,
-                    cleanup_work_id=cleanup_work_id,
                 )
-                if work_id is None:
+                if deleted is None:
                     raise RuntimeError("Local Skill record disappeared during deletion")
             except Exception as exc:
                 try:
-                    restored, quarantine_purged = await package.restore_from(quarantine)
+                    restored, _ = await package.restore_from(quarantine)
                 except Exception as restore_exc:
-                    self._record_repair_required(
-                        bot=bot,
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        skill_id=skill_id,
-                        quarantine_locator=quarantine_locator,
-                    )
                     raise LocalSkillStorageError() from restore_exc
                 if not restored:
-                    self._record_repair_required(
-                        bot=bot,
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        skill_id=skill_id,
-                        quarantine_locator=quarantine_locator,
-                    )
                     raise LocalSkillStorageError() from exc
-                if not quarantine_purged:
-                    try:
-                        work_id = self._cleanup_repo.record_pending(
-                            env=str(bot["env"]),
-                            owner_id=owner_id,
-                            bot_id=bot_id,
-                            skill_id=skill_id,
-                            package_locator=quarantine_locator,
-                            requires_runtime_restore=False,
-                        )
-                    except Exception as record_exc:
-                        raise LocalSkillStorageError() from record_exc
-                    if work_id is None:
-                        raise LocalSkillStorageError()
-                else:
-                    self._cancel_cleanup(
-                        work_id=cleanup_work_id,
-                        bot=bot,
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                    )
                 if isinstance(exc, ActiveSkillSetReferenceError):
                     raise LocalSkillActiveError() from exc
                 raise LocalSkillStorageError() from exc
-            try:
-                purged = await quarantine.cleanup()
-            except Exception:
-                purged = False
-            if not purged:
-                return
-            try:
-                marked = self._cleanup_repo.mark_cleaned(
-                    work_id=work_id,
-                    env=str(bot["env"]),
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                )
-            except Exception as exc:
-                raise LocalSkillStorageError() from exc
-            if not marked:
-                raise LocalSkillStorageError()
+            await self._discard(quarantine)
         finally:
             self._edit_guard.release(lease)
-
-    def _record_repair_required(
-        self,
-        *,
-        bot: dict[str, Any],
-        owner_id: str,
-        bot_id: str,
-        skill_id: str,
-        quarantine_locator: str,
-    ) -> None:
-        try:
-            work_id = self._cleanup_repo.record_repair_required(
-                env=str(bot["env"]),
-                owner_id=owner_id,
-                bot_id=bot_id,
-                skill_id=skill_id,
-                package_locator=quarantine_locator,
-            )
-        except Exception as exc:
-            raise LocalSkillStorageError() from exc
-        if work_id is None:
-            raise LocalSkillStorageError()
-
-    async def _recover_repair_required(
-        self,
-        *,
-        bot: dict[str, Any],
-        owner_id: str,
-        bot_id: str,
-        skill_id: str,
-        is_teclaw: bool,
-        package,
-    ) -> None:
-        """Restore a crash-retained quarantine before starting a new delete."""
-        try:
-            work_items = self._cleanup_repo.list_repair_required(
-                env=str(bot["env"]),
-                owner_id=owner_id,
-                bot_id=bot_id,
-                skill_id=skill_id,
-            )
-        except Exception as exc:
-            raise LocalSkillStorageError() from exc
-        for work in work_items:
-            work_id = int(work["id"])
-            quarantine_locator = str(work["package_locator"])
-            quarantine = self._package_for_locator(
-                bot=bot,
-                owner_id=owner_id,
-                bot_id=bot_id,
-                is_teclaw=is_teclaw,
-                locator=quarantine_locator,
-            )
-            try:
-                if not await quarantine.exists():
-                    await package.verify()
-                    self._cancel_cleanup(
-                        work_id=work_id,
-                        bot=bot,
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                    )
-                    continue
-                restored, quarantine_purged = await package.restore_from(quarantine)
-            except Exception as exc:
-                raise LocalSkillStorageError() from exc
-            if not restored:
-                raise LocalSkillStorageError()
-            if quarantine_purged:
-                self._cancel_cleanup(
-                    work_id=work_id,
-                    bot=bot,
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                )
-                continue
-            self._record_pending(
-                bot=bot,
-                owner_id=owner_id,
-                bot_id=bot_id,
-                skill_id=skill_id,
-                quarantine_locator=quarantine_locator,
-            )
 
     def _package_for_locator(
         self,
@@ -376,79 +183,12 @@ class LocalSkillDeleteService:
             locator=locator,
         )
 
-    def _record_pending(
-        self,
-        *,
-        bot: dict[str, Any],
-        owner_id: str,
-        bot_id: str,
-        skill_id: str,
-        quarantine_locator: str,
-    ) -> int:
+    async def _discard(self, storage) -> None:
         try:
-            work_id = self._cleanup_repo.record_pending(
-                env=str(bot["env"]),
-                owner_id=owner_id,
-                bot_id=bot_id,
-                skill_id=skill_id,
-                package_locator=quarantine_locator,
-                requires_runtime_restore=False,
-            )
+            cleaned = await storage.cleanup()
         except Exception as exc:
             raise LocalSkillStorageError() from exc
-        if work_id is None:
-            raise LocalSkillStorageError()
-        return work_id
-
-    async def _discard_or_record_precommit_quarantine(
-        self,
-        *,
-        bot: dict[str, Any],
-        owner_id: str,
-        bot_id: str,
-        skill_id: str,
-        quarantine,
-        quarantine_locator: str,
-        cleanup_work_id: int,
-    ) -> None:
-        """Remove a failed pre-commit copy, or leave it durably retryable."""
-        try:
-            if await quarantine.cleanup():
-                self._cancel_cleanup(
-                    work_id=cleanup_work_id,
-                    bot=bot,
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                )
-                return
-        except Exception:
-            pass
-        self._record_pending(
-            bot=bot,
-            owner_id=owner_id,
-            bot_id=bot_id,
-            skill_id=skill_id,
-            quarantine_locator=quarantine_locator,
-        )
-
-    def _cancel_cleanup(
-        self,
-        *,
-        work_id: int,
-        bot: dict[str, Any],
-        owner_id: str,
-        bot_id: str,
-    ) -> None:
-        try:
-            cancelled = self._cleanup_repo.cancel_pending(
-                work_id=work_id,
-                env=str(bot["env"]),
-                owner_id=owner_id,
-                bot_id=bot_id,
-            )
-        except Exception as exc:
-            raise LocalSkillStorageError() from exc
-        if not cancelled:
+        if not cleaned:
             raise LocalSkillStorageError()
 
     def _is_teclaw(self, *, bot_id: str, owner_id: str) -> bool:

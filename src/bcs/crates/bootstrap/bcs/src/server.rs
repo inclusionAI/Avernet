@@ -138,7 +138,9 @@ use bcs_service_api::{
     },
 };
 use bcs_services_container::{Services, ServicesBuilder};
-use bcs_session::{SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup};
+use bcs_session::{
+    SessionLaunchApplication, SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup,
+};
 use bcs_session_store::{MemorySessionRepo, MySqlSessionStore};
 use bcs_system_message::{
     SystemMessageDispatcherImpl, SystemMessageServiceImpl,
@@ -505,6 +507,18 @@ impl ChannelBindingCleanupPort for DeferredChannelBindingCleanupPort {
             )
         })?;
         service.delete_bindings_for_group(group_id).await
+    }
+
+    async fn delete_bindings_for_bot(
+        &self,
+        bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<u64> {
+        let service = self.service.get().ok_or_else(|| {
+            bcs_service_api::ServiceError::InternalError(
+                "channel binding cleanup port is not initialized".to_string(),
+            )
+        })?;
+        service.delete_bindings_for_bot(bot_id).await
     }
 }
 
@@ -1157,6 +1171,7 @@ fn build_provider_services_with_webhook_url_guard(
     relation: Arc<dyn bcs_service_api::RelationCoreService>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     webhook_url_guard: OutboundUrlGuard,
+    channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
 ) -> (
     Arc<dyn ProviderCoreService>,
     Arc<dyn ProviderBotCoreService>,
@@ -1176,7 +1191,8 @@ fn build_provider_services_with_webhook_url_guard(
         provider_bot_core.clone(),
         registry,
         relation,
-    );
+    )
+    .with_channel_binding_cleanup(channel_binding_cleanup);
     if let Some(user_directory) = user_directory {
         provider_management = provider_management.with_user_directory(user_directory);
     }
@@ -1404,6 +1420,7 @@ fn build_openapi_v1_state(
     friend_requests: Arc<dyn FriendRequestCoreService>,
     relation: Arc<dyn RelationCoreService>,
     sessions: Arc<dyn SessionManagementService>,
+    session_launch: Arc<dyn bcs_service_api::SessionLaunchService>,
     group_management: Arc<dyn GroupManagementService>,
     collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
     session_repo: Arc<dyn SessionRepoPort>,
@@ -1442,6 +1459,7 @@ fn build_openapi_v1_state(
         .with_collaboration_runtime(collaboration_runtime.clone()),
     );
     let session_service = Arc::new(SessionServiceImpl::new(
+        session_launch,
         sessions.clone(),
         groups.clone(),
         registry.clone(),
@@ -1693,6 +1711,7 @@ impl Default for BcsServerState {
         let relation_store: Arc<RelationCore> = Arc::new(RelationCore::memory());
         let user_directory =
             create_user_directory_plugin(&config).expect("default user directory config is valid");
+        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -1700,6 +1719,7 @@ impl Default for BcsServerState {
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
                 user_directory.clone(),
                 outbound_url_guard.clone(),
+                channel_binding_cleanup.clone(),
             );
         let (organization_core, organization_management) = memory_organization_services(
             &provider_repos,
@@ -1877,7 +1897,6 @@ impl Default for BcsServerState {
             provider_stream_gray_list.clone(),
             state_machine_terminal_observer.clone(),
         );
-        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let group_management_impl = Arc::new(GroupManagement::new(
             sessions.clone(),
             bot_registry.clone(),
@@ -1952,10 +1971,24 @@ impl Default for BcsServerState {
             session_management.clone(),
             collaboration_runtime.clone(),
         ));
+        let session_launch = Arc::new(SessionLaunchApplication::new(
+            bot_registry.clone(),
+            sessions.clone(),
+            session_management.clone(),
+            collaboration_runtime.clone(),
+            system_message.clone(),
+        ));
         let group_management = maybe_wrap_group_management(
             &config,
             Arc::new(GroupManagementWithRuntimeCleanup::new(
                 group_management_impl.clone(),
+                collaboration_runtime.clone(),
+            )),
+        );
+        let group_management_v1 = maybe_wrap_group_management(
+            &config,
+            Arc::new(GroupManagementWithRuntimeCleanup::new(
+                Arc::new((*group_management_impl).clone().for_v1_openapi()),
                 collaboration_runtime.clone(),
             )),
         );
@@ -1986,7 +2019,8 @@ impl Default for BcsServerState {
             friend_request_store,
             relation_store.clone(),
             session_management.clone(),
-            group_management.clone(),
+            session_launch.clone(),
+            group_management_v1.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
             group_message_history.clone(),
@@ -2009,6 +2043,17 @@ impl Default for BcsServerState {
         )
         .expect("default channel runtime must initialize");
         let channel_service = channel_runtime.service.clone();
+        // Only mount the OpenAPI channel surface when the bridge is enabled.
+        // When disabled, `channel_runtime.service` is `DisabledChannelService`
+        // whose set_binding_status/update_binding_config/delete_binding all
+        // return Ok(()) without persisting — mounting it would make PATCH/DELETE
+        // falsely 200 for any binding id. Leaving the slot unset makes the
+        // handlers fail-closed as 500 internal_error instead.
+        let openapi_v1 = if channel_bridge_enabled(&config) {
+            openapi_v1.with_channel_service(channel_service.clone())
+        } else {
+            openapi_v1
+        };
         let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
                 provider_bot_core.clone(),
@@ -2056,6 +2101,7 @@ impl Default for BcsServerState {
             .group_fusion(group_fusion)
             .system_message(system_message)
             .session_management(session_management.clone())
+            .session_launch(session_launch)
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
             .session_files(session_file_service)
@@ -2310,6 +2356,10 @@ struct UseCaseBundle {
     bot_runtime: Arc<dyn bcs_service_api::BotRuntimeConnectionService>,
     bot_discovery: Arc<dyn bcs_service_api::BotDiscoveryService>,
     group_management: Arc<dyn bcs_service_api::GroupManagementService>,
+    /// Dedicated `for_v1_openapi` twin of `group_management`, wired only into
+    /// the OpenAPI V1 facade so V1 create-group runs the driver-anchored
+    /// core branch while legacy HTTP keeps the legacy branch.
+    group_management_v1: Arc<dyn bcs_service_api::GroupManagementService>,
     group_query: Arc<dyn bcs_service_api::GroupQueryService>,
     workbench_sessions: Arc<dyn bcs_service_api::WorkbenchSessionService>,
     interaction_authorization: Arc<dyn CanResolveInteraction>,
@@ -2407,6 +2457,8 @@ fn build_use_case_bundle(
     .with_channel_binding_cleanup(channel_binding_cleanup)
     .with_outbound_url_guard(callback_url_guard.clone())
     .with_bot_runtime(bot_use_cases.clone()));
+    let group_management_v1: Arc<dyn bcs_service_api::GroupManagementService> =
+        Arc::new((*group_management).clone().for_v1_openapi());
     let proposal_base_url = config
         .bcs_endpoint
         .clone()
@@ -2451,6 +2503,7 @@ fn build_use_case_bundle(
         bot_runtime: bot_use_cases.clone(),
         bot_discovery: bot_use_cases,
         group_management: group_management.clone(),
+        group_management_v1,
         group_query: group_management.clone(),
         workbench_sessions: group_management.clone(),
         interaction_authorization: group_management,
@@ -3124,6 +3177,7 @@ impl BcsServer {
         let relation_store: Arc<RelationCore> = Arc::new(RelationCore::memory());
         let user_directory = create_user_directory_plugin(&config)
             .expect("user directory config is valid for in-memory server");
+        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -3131,6 +3185,7 @@ impl BcsServer {
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
                 user_directory.clone(),
                 provider_webhook_url_guard,
+                channel_binding_cleanup.clone(),
             );
         let (organization_core, organization_management) = memory_organization_services(
             &provider_repos,
@@ -3260,7 +3315,6 @@ impl BcsServer {
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
-        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let use_cases = build_use_case_bundle(
             &config,
             bot_registry.clone(),
@@ -3354,10 +3408,24 @@ impl BcsServer {
             session_management.clone(),
             collaboration_runtime.clone(),
         ));
+        let session_launch = Arc::new(SessionLaunchApplication::new(
+            bot_registry.clone(),
+            sessions.clone(),
+            session_management.clone(),
+            collaboration_runtime.clone(),
+            use_cases.system_message.clone(),
+        ));
         let group_management = maybe_wrap_group_management(
             &config,
             Arc::new(GroupManagementWithRuntimeCleanup::new(
                 use_cases.group_management,
+                collaboration_runtime.clone(),
+            )),
+        );
+        let group_management_v1 = maybe_wrap_group_management(
+            &config,
+            Arc::new(GroupManagementWithRuntimeCleanup::new(
+                use_cases.group_management_v1,
                 collaboration_runtime.clone(),
             )),
         );
@@ -3373,7 +3441,8 @@ impl BcsServer {
             friend_request_store,
             relation_store.clone(),
             session_management.clone(),
-            group_management.clone(),
+            session_launch.clone(),
+            group_management_v1.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
             group_message_history.clone(),
@@ -3406,6 +3475,17 @@ impl BcsServer {
         )
         .expect("in-memory channel runtime must initialize");
         let channel_service = channel_runtime.service.clone();
+        // Only mount the OpenAPI channel surface when the bridge is enabled.
+        // When disabled, `channel_runtime.service` is `DisabledChannelService`
+        // whose set_binding_status/update_binding_config/delete_binding all
+        // return Ok(()) without persisting — mounting it would make PATCH/DELETE
+        // falsely 200 for any binding id. Leaving the slot unset makes the
+        // handlers fail-closed as 500 internal_error instead.
+        let openapi_v1 = if channel_bridge_enabled(&config) {
+            openapi_v1.with_channel_service(channel_service.clone())
+        } else {
+            openapi_v1
+        };
         let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
                 provider_bot_core.clone(),
@@ -3456,6 +3536,7 @@ impl BcsServer {
             .group_fusion(use_cases.group_fusion)
             .system_message(use_cases.system_message)
             .session_management(session_management.clone())
+            .session_launch(session_launch)
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
             .session_files(session_file_service)
@@ -3671,6 +3752,7 @@ impl BcsServer {
         let relation_svc: Arc<dyn bcs_service_api::RelationCoreService> =
             Arc::new(RelationCore::with_repo(relation_repo));
 
+        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -3678,6 +3760,7 @@ impl BcsServer {
                 relation_svc.clone(),
                 user_directory.clone(),
                 outbound_url_guard.clone(),
+                channel_binding_cleanup.clone(),
             );
         let (organization_core, organization_management) = db_organization_services(
             db_plugin.clone(),
@@ -3861,7 +3944,6 @@ impl BcsServer {
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
-        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let use_cases = build_use_case_bundle(
             &config,
             bot_registry.clone(),
@@ -3967,10 +4049,24 @@ impl BcsServer {
             session_management.clone(),
             collaboration_runtime.clone(),
         ));
+        let session_launch = Arc::new(SessionLaunchApplication::new(
+            bot_registry.clone(),
+            sessions.clone(),
+            session_management.clone(),
+            collaboration_runtime.clone(),
+            use_cases.system_message.clone(),
+        ));
         let group_management = maybe_wrap_group_management(
             &config,
             Arc::new(GroupManagementWithRuntimeCleanup::new(
                 use_cases.group_management,
+                collaboration_runtime.clone(),
+            )),
+        );
+        let group_management_v1 = maybe_wrap_group_management(
+            &config,
+            Arc::new(GroupManagementWithRuntimeCleanup::new(
+                use_cases.group_management_v1,
                 collaboration_runtime.clone(),
             )),
         );
@@ -3986,7 +4082,8 @@ impl BcsServer {
             friend_request_svc,
             relation_svc.clone(),
             session_management.clone(),
-            group_management.clone(),
+            session_launch.clone(),
+            group_management_v1.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
             group_message_history.clone(),
@@ -4023,6 +4120,17 @@ impl BcsServer {
             bot_registry.clone(),
         )?;
         let channel_service = channel_runtime.service.clone();
+        // Only mount the OpenAPI channel surface when the bridge is enabled.
+        // When disabled, `channel_runtime.service` is `DisabledChannelService`
+        // whose set_binding_status/update_binding_config/delete_binding all
+        // return Ok(()) without persisting — mounting it would make PATCH/DELETE
+        // falsely 200 for any binding id. Leaving the slot unset makes the
+        // handlers fail-closed as 500 internal_error instead.
+        let openapi_v1 = if channel_bridge_enabled(&config) {
+            openapi_v1.with_channel_service(channel_service.clone())
+        } else {
+            openapi_v1
+        };
         register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
         let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
@@ -4078,6 +4186,7 @@ impl BcsServer {
             .group_fusion(use_cases.group_fusion)
             .system_message(use_cases.system_message)
             .session_management(session_management.clone())
+            .session_launch(session_launch)
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
             .session_files(session_file_service)
@@ -4721,6 +4830,99 @@ mod tests {
     #[derive(Default)]
     struct RecordingSessionChannelOutbound {
         events: tokio::sync::Mutex<Vec<HumanInputReadyEvent>>,
+    }
+
+    #[derive(Default)]
+    struct RecordingChannelBindingCleanup {
+        deleted_bot_ids: tokio::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl ChannelBindingCleanupPort for RecordingChannelBindingCleanup {
+        async fn delete_bindings_for_group(
+            &self,
+            _group_id: &str,
+        ) -> bcs_service_api::ServiceResult<u64> {
+            Ok(0)
+        }
+
+        async fn delete_bindings_for_bot(
+            &self,
+            bot_id: &str,
+        ) -> bcs_service_api::ServiceResult<u64> {
+            self.deleted_bot_ids.lock().await.push(bot_id.to_string());
+            Ok(1)
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_management_deletes_channel_bindings_when_provider_bot_is_deleted() {
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let provider_repos = memory_provider_repos();
+        let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+        let bot_registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_provider_repos(
+            bot_repo,
+            provider_repos.provider_repo.clone(),
+            provider_repos.provider_credentials.clone(),
+            provider_repos.provider_bindings.clone(),
+        ));
+        let relation: Arc<dyn bcs_service_api::RelationCoreService> =
+            Arc::new(RelationCore::memory());
+        let cleanup = Arc::new(RecordingChannelBindingCleanup::default());
+        let (_provider_core, _provider_bot_core, provider_management) =
+            build_provider_services_with_webhook_url_guard(
+                &provider_repos,
+                bot_registry,
+                relation,
+                None,
+                OutboundUrlGuard::allowing_private_networks_for_tests(),
+                cleanup.clone(),
+            );
+
+        let registered = provider_management
+            .register_provider(RegisterProviderCommand {
+                name: "Provider".to_string(),
+                webhook_url: "https://provider.example.com/bcs/webhook".to_string(),
+                admin_callback_url: None,
+                auth_mode: bcs_domain::ProviderAuthMode::StaticBearer,
+                created_by: "11111111".to_string(),
+                protocol_version: None,
+                coordination: None,
+            })
+            .await
+            .expect("register provider");
+        let bot = provider_management
+            .register_provider_bot(bcs_service_api::RegisterProviderBotCommand {
+                provider_id: registered.provider_id.clone(),
+                provider_admin_token: registered.provider_admin_token.clone(),
+                name: "Bot".to_string(),
+                summary: None,
+                owners: vec!["11111111".to_string()],
+                provider_bot_ref: "bot-ref-1".to_string(),
+                domains: Vec::new(),
+                skills: Vec::new(),
+                scopes: Vec::new(),
+                bot_uuid: None,
+                reject_existing_bot_uuid: false,
+            })
+            .await
+            .expect("register provider bot");
+
+        let outcome = provider_management
+            .delete_provider_bot(bcs_service_api::DeleteProviderBotCommand {
+                provider_id: registered.provider_id,
+                provider_admin_token: registered.provider_admin_token,
+                provider_bot_ref: "bot-ref-1".to_string(),
+                allow_unbound_owner_suffixed_bot: false,
+            })
+            .await
+            .expect("delete provider bot");
+
+        assert!(outcome.deleted);
+        assert_eq!(
+            cleanup.deleted_bot_ids.lock().await.as_slice(),
+            &[bot.bot_uuid]
+        );
     }
 
     #[tokio::test]

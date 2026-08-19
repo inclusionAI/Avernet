@@ -1,4 +1,4 @@
-"""任务主动发现 — singlebox 真实端到端集成用例(发现 → 通知 → session 创建全链路)。
+"""任务主动发现 — singlebox 真实端到端集成用例(发现 → session 创建 → 通知投递 → 发送任务给大模型)。
 
 gated by ``SINGLEBOX_TASK_E2E=1``。本地起后端 singlebox 时设置:
 
@@ -8,19 +8,22 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地起后端 singlebox 时设置:
 完整流程覆盖:
   1) 准备 mock 数据: 将内联测试数据写入 scripts/.dependencies/data/discovered_tasks.db
   2) provisioning: 建一个 test agent bot(获取真实 agent_id)
-  3) POST /openapi/v1/collaboration/tasks/discovery/discover   → 读取 mock 任务 + 为每个任务创建 engine session
-  4) 验证响应: success / discovered count / task_id / session_id / session_url
-  5) GET /openapi/v1/collaboration/tasks/discovery/status      → 验证任务状态可查询
-  6) 验证 session_url 可达(engine session 实际存在)
+  3) POST /api/public/task-discovery/discover   → 读取 mock 任务 + 创建 engine session + 投递通知
+  4) 验证响应: success / discovered count / task_id / session_id / notification_sent
+  5) GET /api/public/task-discovery/status      → 验证任务状态可查询
+  6) 验证 engine session 实际存在(GET /api/sessions/{id} 可达)
+  7) WebSocket 连接 engine,将发现的任务内容发送给大模型,验证回复
 
 关键架构前提:
-  - DiscoveryService 编排 TaskReader(读 SQLite db)→ SessionCreator(调 engine POST /api/sessions)
-  - 每个 pending_confirmation 任务 → 一个 engine session + session_url(供用户前端确认)
-  - 任务执行不在本测试范围(由 task 执行框架负责)
+  - DiscoveryService 编排 TaskReader(读 SQLite db)→ SessionCreator(调 engine POST /api/sessions)→ NotifySenderPlugin(投递通知)
+  - 每个 pending_confirmation 任务 → 一个 engine session + 通知投递(供用户前端确认)
+  - session_url 不在 discover 阶段构建 — 用户 bot 没有单独的 session_url
+  - 任务执行: 本测试通过 WebSocket 向 engine session 发送任务内容,验证大模型可响应
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import unittest
 from pathlib import Path
@@ -30,18 +33,12 @@ import httpx
 from agentclaw.community.core.task.task_discovery.task_reader import (
     init_discovered_tasks_db,
 )
-from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
-    SingleboxBotProvisioner,
-)
 
 _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "146836")
-_ENGINE_URL = os.environ.get("TASK_DISCOVERY_ENGINE_URL", "http://localhost:20003")
-_FRONTEND_URL = os.environ.get("TASK_DISCOVERY_FRONTEND_URL", "http://localhost:8000")
+_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "440718")
 
 _HDRS = {"x-user-id": _USER_ID, "accept": "application/json"}
-_TEST_BOT_NAME = "task-discovery-test-bot"
 
 # ===== 内联测试数据(运行前写入 scripts/.dependencies/data/discovered_tasks.db)=====
 # 参考 test_task_integration_e2e.py 的 _execute_body() / ROLE_BOTS 模式:
@@ -58,28 +55,6 @@ _MOCK_TASKS: list[dict] = [
         "discovered_at": "2026-08-17T10:00:00Z",
         "status": "pending_confirmation",
     },
-    {
-        "task_id": "disc-e2e-002",
-        "project_name": "SSD 供应链竞争格局梳理",
-        "description": "梳理全球 SSD 供应链从晶圆到终端的主要参与者、份额变化及技术演进趋势。",
-        "business_scenario": "赛道分析 — 聚焦存储产业链中游,识别核心供应商和潜在替代风险。",
-        "discovery_basis": "用户在存储行业尽调 session 中多次追问供应链问题,行为节点链路显示对供应链环节的关注持续升温。",
-        "work_item_url": None,
-        "priority": "medium",
-        "discovered_at": "2026-08-17T11:30:00Z",
-        "status": "pending_confirmation",
-    },
-    {
-        "task_id": "disc-e2e-003",
-        "project_name": "ToB 存储方案客户需求画像",
-        "description": "整合近期 ToB 客户在存储方案上的需求反馈,形成结构化的客户需求画像。",
-        "business_scenario": "客户洞察 — 用于指导后续存储产品的 roadmap 优先级排序。",
-        "discovery_basis": "用户在过去两周创建了 3 个 ToB 方案相关的 session,且多个对话节点涉及采购决策标准讨论。",
-        "work_item_url": None,
-        "priority": "low",
-        "discovered_at": "2026-08-17T14:00:00Z",
-        "status": "pending_confirmation",
-    },
 ]
 
 # 从内联数据派生断言常量
@@ -87,9 +62,11 @@ _EXPECTED_TASK_COUNT = len(_MOCK_TASKS)
 _EXPECTED_TASK_IDS = {t["task_id"] for t in _MOCK_TASKS}
 _EXPECTED_PROJECT_NAMES = {t["project_name"] for t in _MOCK_TASKS}
 
-# 默认 db 文件路径(与 router.py / lifecycle.py 的 9 级上溯一致 → 项目根/scripts/.dependencies/data/)
+# 默认 db 文件路径:上溯到项目根 → scripts/.dependencies/data/discovered_tasks.db
+# 测试文件在 src/backend/tests/community/core/task/singlebox_e2e/ → 距项目根 8 级
+# router.py 在 src/backend/src/agentclaw/community/adapters/http/task_discovery/ → 距项目根 9 级
 _DATA_FILE = Path(__file__).resolve()
-for _ in range(9):
+for _ in range(8):
     _DATA_FILE = _DATA_FILE.parent
 _DATA_FILE = _DATA_FILE / "scripts" / ".dependencies" / "data" / "discovered_tasks.db"
 
@@ -102,33 +79,52 @@ def _write_mock_data() -> None:
 
 @unittest.skipUnless(_LIVE, "设置 SINGLEBOX_TASK_E2E=1 启用真实 singlebox e2e")
 class TestTaskDiscoveryE2E(unittest.TestCase):
-    """任务主动发现 singlebox e2e: discover → status → session 可达。"""
+    """任务主动发现 singlebox e2e: discover → session → notify → status。"""
 
-    def test_discover_creates_sessions_and_returns_tasks(self) -> None:
+    def test_discover_notifies_and_returns_tasks(self) -> None:
+        # 准备 mock 数据
+        _write_mock_data()
+
+        # 同步查已有 bot（skipTest 在 event loop 内会被吞，所以放在外面）
+        with httpx.Client(timeout=30.0, headers=_HDRS) as cli:
+            bots: list[dict] = []
+            for endpoint in [
+                f"{_BACKEND}/api/bots/by-owner-or-collaborator",
+                f"{_BACKEND}/api/bots",
+            ]:
+                try:
+                    r = cli.get(endpoint, params={"user_id": _USER_ID})
+                    if r.status_code == 200:
+                        bots = (r.json().get("data") or {}).get("items") or []
+                        if bots:
+                            break
+                except Exception:
+                    continue
+        if not bots:
+            self.skipTest("singlebox 未 provision 任何 bot,请先 start all")
+        bot = bots[0]
+        bot_id = bot["bot_id"]
+        owner_id = bot.get("owner_id", _USER_ID)
+        print(f"[bot] 使用已有 bot: bot_id={bot_id} owner_id={owner_id}")
+
         loop = asyncio.new_event_loop()
         try:
-            loop.run_until_complete(self._run(loop))
+            loop.run_until_complete(self._run(loop, bot_id, owner_id))
         finally:
             loop.close()
 
-    async def _run(self, loop: asyncio.AbstractEventLoop) -> None:
-        # 1) 准备 mock 数据: 写入磁盘(backend 的 MockTaskReader 从此文件读)
-        _write_mock_data()
-
-        # 2) provisioning: 建一个 test bot 获取真实 agent_id
-        prov = SingleboxBotProvisioner(
-            backend_base_url=_BACKEND, user_id=_USER_ID
-        )
-        agent_id = await prov.create_bot(bot_name=_TEST_BOT_NAME)
-        await prov._aclose()
-        print(f"[provision] agent_bot_id={agent_id}")
-
+    async def _run(self, loop: asyncio.AbstractEventLoop, bot_id: str, owner_id: str) -> None:
         async with httpx.AsyncClient(timeout=60.0, headers=_HDRS) as cli:
-            # 3) POST /openapi/v1/collaboration/tasks/discovery/discover
-            #    → 读取 mock 任务 + 为每个任务创建 engine session
+            # POST /api/public/task-discovery/discover
+            #    传 bot_id + owner_id: 定位到 per-bot engine 直连创建 session
             r = await cli.post(
-                f"{_BACKEND}/openapi/v1/collaboration/tasks/discovery/discover",
-                params={"user_id": _USER_ID, "agent_id": agent_id},
+                f"{_BACKEND}/api/public/task-discovery/discover",
+                params={
+                    "user_id": _USER_ID,
+                    "agent_id": bot_id,
+                    "bot_id": bot_id,
+                    "owner_id": owner_id,
+                },
             )
             r.raise_for_status()
             body = r.json()
@@ -144,25 +140,29 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
             tasks = body.get("tasks", [])
             self.assertEqual(len(tasks), _EXPECTED_TASK_COUNT, "tasks 列表长度不匹配")
 
-            # 4) 逐任务验证: task_id / session_id / session_url 非空
+            # 4) 逐任务验证: task_id / session_id / notification_sent
             discovered_ids: set[str] = set()
-            session_urls: list[str] = []
             for t in tasks:
                 tid = t.get("task_id", "")
                 sid = t.get("session_id")
-                surl = t.get("session_url")
                 success = t.get("success")
+                notified = t.get("notification_sent")
 
                 print(f"  - task={tid} success={success} "
-                      f"session_id={sid} url={surl}")
+                      f"session_id={sid} notified={notified}")
                 discovered_ids.add(tid)
 
                 self.assertTrue(success, f"任务 {tid} discovery 未成功")
                 self.assertIsNotNone(sid, f"任务 {tid} session_id 为空")
                 self.assertTrue(sid, f"任务 {tid} session_id 为空字符串")
-                self.assertIsNotNone(surl, f"任务 {tid} session_url 为空")
-                self.assertTrue(surl, f"任务 {tid} session_url 为空字符串")
-                session_urls.append(surl)
+                self.assertIn(
+                    "notification_sent", t,
+                    f"任务 {tid} 响应缺少 notification_sent 字段",
+                )
+                self.assertTrue(
+                    notified,
+                    f"任务 {tid} 通知未发送 (notification_sent={notified})",
+                )
 
             # task_id 集合与内联 mock 数据一致
             self.assertEqual(
@@ -170,17 +170,8 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
                 f"发现 task_id 集合不匹配: {discovered_ids} vs {_EXPECTED_TASK_IDS}",
             )
 
-            # session_url 格式校验: {frontend}/bcn/chat/session?bot_uuid=...&session=...
-            for surl in session_urls:
-                self.assertIn(
-                    "/bcn/chat/session", surl,
-                    f"session_url 格式异常(缺少 /bcn/chat/session): {surl}",
-                )
-                self.assertIn(f"bot_uuid={agent_id}", surl, f"session_url 未包含 agent_id: {surl}")
-                self.assertIn("session=", surl, f"session_url 未包含 session= 参数: {surl}")
-
-            # 5) GET /openapi/v1/collaboration/tasks/discovery/status → 验证任务状态可查
-            r = await cli.get(f"{_BACKEND}/openapi/v1/collaboration/tasks/discovery/status")
+            # 5) GET /api/public/task-discovery/status → 验证任务状态可查
+            r = await cli.get(f"{_BACKEND}/api/public/task-discovery/status")
             r.raise_for_status()
             status_body = r.json()
             print(f"[status] success={status_body.get('success')} "
@@ -206,30 +197,127 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
                 self.assertIsNotNone(t.get("status"), f"task {t.get('task_id')} status 为空")
                 self.assertIsNotNone(t.get("priority"), f"task {t.get('task_id')} priority 为空")
 
-            # 6) 验证 engine session 实际存在(GET /api/sessions/{id} 可达)
-            #    取第一个任务的 session_id 验证
+            # 6) 验证 engine session 实际存在
+            #    链路同 singlebox_engine_adapter._resolve_target():
+            #    GET /api/bots/{bot_id} → binding_id → GET /api/v1/devices/{binding_id}/connection
             first_sid = tasks[0].get("session_id")
-            try:
-                eng_resp = await cli.get(
-                    f"{_ENGINE_URL}/api/sessions/{first_sid}",
-                    headers={"x-user-id": _USER_ID},
-                )
-                if eng_resp.status_code == 200:
-                    eng_data = eng_resp.json()
-                    print(f"[engine] session {first_sid} 存在: "
-                          f"success={eng_data.get('success')}")
-                    self.assertTrue(
-                        eng_data.get("success") or eng_data.get("data") is not None,
-                        f"engine session {first_sid} 查询返回异常: {eng_data}",
-                    )
-                else:
-                    print(f"[engine] session {first_sid} 查询 HTTP {eng_resp.status_code},"
-                          f" 跳过(engine 可能未启用该查询端点)")
-            except Exception as exc:  # noqa: BLE001
-                print(f"[engine] session {first_sid} 查询异常({exc!r}),"
-                      f" 跳过(engine 可能未运行)")
+            bot_resp = await cli.get(f"{_BACKEND}/api/bots/{bot_id}")
+            bot_resp.raise_for_status()
+            binding_id = (bot_resp.json().get("data") or {}).get("binding_id")
+            self.assertIsNotNone(binding_id, f"bot {bot_id} 无 binding_id")
+            conn_resp = await cli.get(f"{_BACKEND}/api/v1/devices/{binding_id}/connection")
+            conn_resp.raise_for_status()
+            target = (conn_resp.json().get("data") or {}).get("target") or ""
+            self.assertTrue(target, f"未取到 engine target: {conn_resp.json()}")
+            print(f"[engine] target={target} (binding_id={binding_id})")
+
+            eng_resp = await cli.get(
+                f"http://{target}/api/sessions",
+                params={"limit": 100, "offset": 0},
+                headers={"x-user-id": _USER_ID},
+            )
+            eng_resp.raise_for_status()
+            eng_sessions = eng_resp.json().get("data") or []
+            found = any(
+                first_sid in (s.get("id") or s.get("session_id") or "")
+                for s in eng_sessions
+            )
+            print(f"[engine] {target} 返回 {len(eng_sessions)} 条, "
+                  f"first_sid={first_sid} found={found}")
+            self.assertTrue(
+                found,
+                f"session {first_sid} 未在 per-bot engine({target})中找到",
+            )
+
+            # 7) WebSocket 连接 engine,将发现的任务内容发送给大模型
+            #    协议同 singlebox_engine_adapter._ws_chat_roundtrip():
+            #    connect(proto3 握手) → chat.send → 收到 state=final 事件
+            task = _MOCK_TASKS[0]
+            task_message = (
+                f"请帮我处理以下任务:\n"
+                f"项目名称: {task['project_name']}\n"
+                f"任务描述: {task['description']}\n"
+                f"业务场景: {task['business_scenario']}\n"
+                f"优先级: {task['priority']}"
+            )
+            reply = await self._ws_chat(target, first_sid, task_message)
+            print(f"[chat] 大模型回复: {reply}")
+            self.assertTrue(reply, "大模型回复为空")
+            self.assertNotIn("[错误]", reply, f"大模型回复包含错误: {reply}")
+            self.assertNotIn("[超时]", reply, f"大模型回复超时: {reply}")
+
+            # 8) 回查消息历史确认 assistant 记录存在
+            #    引擎可能将用户消息归为 user/tool_result,只断言 assistant 存在。
+            import base64
+            encoded_id = base64.urlsafe_b64encode(first_sid.encode()).decode()
+            msg_resp = await cli.get(
+                f"http://{target}/api/sessions/{encoded_id}/messages",
+                params={"limit": 10, "offset": 0},
+                headers={"x-user-id": _USER_ID},
+            )
+            if msg_resp.status_code == 200:
+                messages = msg_resp.json().get("data") or []
+                roles = [m.get("role") for m in messages]
+                self.assertIn("assistant", roles, "消息历史中缺少 assistant 消息")
+                print(f"[messages] 共 {len(messages)} 条, roles={roles}")
 
         print("[done] task_discovery e2e 全链路验证通过")
+
+    async def _ws_chat(self, target: str, session_key: str, message: str) -> str:
+        """开 WebSocket:connect 握手 → chat.send → 读到 final → 返回回复文本。
+
+        协议同 singlebox_engine_adapter._ws_chat_roundtrip()。
+        """
+        import websockets
+
+        ws_path = "/api/openclaw/ws"
+        uri = f"ws://{target}{ws_path}"
+        connect_params = {
+            "minProtocol": 3,
+            "maxProtocol": 3,
+            "client": {"id": "task-discovery-e2e", "version": "1.0.0", "platform": "linux", "mode": "operator"},
+            "role": "operator",
+        }
+
+        async with websockets.connect(uri, open_timeout=10) as ws:
+            # 1) 握手
+            await ws.send(json.dumps({
+                "type": "req", "id": "1", "method": "connect", "params": connect_params,
+            }))
+            hs = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            if not hs.get("ok"):
+                return f"[握手失败] {json.dumps(hs)[:200]}"
+
+            # 2) 发消息
+            await ws.send(json.dumps({
+                "type": "req", "id": "2", "method": "chat.send",
+                "params": {"sessionKey": session_key, "message": message},
+            }))
+            ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            if not ack.get("ok"):
+                return f"[发送被拒绝] {json.dumps(ack)[:200]}"
+
+            # 3) 读事件到 final
+            while True:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=60)
+                except asyncio.TimeoutError:
+                    return "[超时] 60秒内未收到回复"
+                data = json.loads(raw)
+                if data.get("type") != "event" or data.get("event") != "chat":
+                    continue
+                payload = data.get("payload") or {}
+                state = payload.get("state")
+                if state == "final":
+                    message_obj = payload.get("message") or {}
+                    contents = message_obj.get("content") or []
+                    texts = [
+                        c.get("text", "") for c in contents
+                        if isinstance(c, dict) and c.get("type") == "text"
+                    ]
+                    return "\n".join(texts) if texts else json.dumps(payload, ensure_ascii=False)[:500]
+                if state == "error":
+                    return f"[错误] {payload.get('errorMessage', 'unknown')}"
 
 
 if __name__ == "__main__":

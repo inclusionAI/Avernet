@@ -127,7 +127,6 @@ provides:
   - BotPublishRepositoryProtocol
   - PublishOperationRepository    # an ABC, not a Protocol — same role, same surface
   # skill_center
-  - LocalSkillCleanupRepository
   - SkillCategoryRepository
   - SkillCenterSyncLogRepository
   - SkillMemberRepository
@@ -173,7 +172,6 @@ provides:
   - BotPublishRepository
   - OrmPublishOperationRepository
   # skill_center
-  - SqlLocalSkillCleanupRepository
   # skills_pool
   - SkillsPoolLayoutRepository
   - SkillsPoolRolloutRepository

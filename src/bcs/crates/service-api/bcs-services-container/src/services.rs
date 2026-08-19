@@ -16,8 +16,8 @@ use bcs_service_api::{
     MessageFlowService, OrganizationManagementService,
     ProposalCoreService, ProviderBotCoreService, ProviderCoreService,
     ProviderBotEventService, ProviderManagementService, RelationCoreService, RoutingCoreService,
-    SecretService, SessionFileService, SessionManagementService, SystemMessageService, WorkbenchSessionService,
-    backfill_bot_names,
+    SecretService, SessionFileService, SessionLaunchService, SessionManagementService,
+    SystemMessageService, WorkbenchSessionService, backfill_bot_names,
 };
 use bcs_service_api::InteractionService;
 use thiserror::Error;
@@ -105,6 +105,8 @@ pub struct Services {
     pub group_fusion: Arc<dyn GroupFusionService>,
     /// Session management application service.
     pub session_management: Arc<dyn SessionManagementService>,
+    /// Shared Session creation and legacy reactivation application service.
+    pub session_launch: Arc<dyn SessionLaunchService>,
     /// Channel(IM bridge) application service.
     pub channel: Arc<dyn ChannelService>,
     /// Secret access application service.
@@ -165,6 +167,7 @@ pub struct ServicesBuilder {
     system_message: Option<Arc<dyn SystemMessageService>>,
     group_fusion: Option<Arc<dyn GroupFusionService>>,
     session_management: Option<Arc<dyn SessionManagementService>>,
+    session_launch: Option<Arc<dyn SessionLaunchService>>,
     channel: Option<Arc<dyn ChannelService>>,
     secret: Option<Arc<dyn SecretService>>,
     session_files: Option<Arc<dyn SessionFileService>>,
@@ -404,6 +407,12 @@ impl ServicesBuilder {
         self
     }
 
+    /// Set the shared Session launch application service.
+    pub fn session_launch(mut self, service: Arc<dyn SessionLaunchService>) -> Self {
+        self.session_launch = Some(service);
+        self
+    }
+
     /// Set the channel application service.
     pub fn channel(mut self, service: Arc<dyn ChannelService>) -> Self {
         self.channel = Some(service);
@@ -468,6 +477,7 @@ impl ServicesBuilder {
             system_message: required(self.system_message, "system_message")?,
             group_fusion: required(self.group_fusion, "group_fusion")?,
             session_management: required(self.session_management, "session_management")?,
+            session_launch: required(self.session_launch, "session_launch")?,
             channel: required(self.channel, "channel")?,
             secret: required(self.secret, "secret")?,
             session_files: required(self.session_files, "session_files")?,
@@ -491,8 +501,8 @@ impl ServicesBuilder {
             NoopProposalCoreService, NoopProviderBotCoreService, NoopProviderBotEventService,
             NoopProviderCoreService,
             NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
-            NoopSecretService, NoopSessionFileService, NoopSessionManagementService,
-            NoopSystemMessageService, NoopWorkbenchSessionService,
+            NoopSecretService, NoopSessionFileService, NoopSessionLaunchService,
+            NoopSessionManagementService, NoopSystemMessageService, NoopWorkbenchSessionService,
         };
 
         Services {
@@ -605,6 +615,9 @@ impl ServicesBuilder {
             session_management: self
                 .session_management
                 .unwrap_or_else(|| Arc::new(NoopSessionManagementService)),
+            session_launch: self
+                .session_launch
+                .unwrap_or_else(|| Arc::new(NoopSessionLaunchService)),
             channel: self.channel.unwrap_or_else(|| Arc::new(NoopChannelService)),
             secret: self.secret.unwrap_or_else(|| Arc::new(NoopSecretService)),
             session_files: self

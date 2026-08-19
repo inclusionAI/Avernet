@@ -296,8 +296,26 @@ class TestSessionsList:
         result = await impl.sessions_list(token="tok", session_key="s20", limit=1)
 
         assert [session["key"] for session in result] == ["s20"]
+        sessions_list_calls = [call for call in client.calls if call[0] == "sessions.list"]
+        assert sessions_list_calls == [("sessions.list", {"search": "s20"}, None)]
         history_calls = [call for call in client.calls if call[0] == "chat.history"]
         assert [call[1]["sessionKey"] for call in history_calls] == ["s20"]
+
+    async def test_session_key_filter_keeps_exact_match_from_gateway_search(self):
+        impl, client = _make_impl({
+            "sessions.list": self._sessions_payload([
+                {"key": "target-copy", "label": "Fuzzy match", "model": None},
+                {"key": "target", "label": "Exact match", "model": None},
+            ]),
+            "chat.history": self._history_payload([]),
+            "providers.available": self._providers_payload(),
+        })
+
+        result = await impl.sessions_list(token="tok", session_key="target")
+
+        assert [session["key"] for session in result] == ["target"]
+        sessions_list_calls = [call for call in client.calls if call[0] == "sessions.list"]
+        assert sessions_list_calls == [("sessions.list", {"search": "target"}, None)]
 
     async def test_session_key_filter_returns_empty_list_for_no_match(self):
         impl, client = _make_impl({
@@ -317,7 +335,7 @@ class TestSessionsList:
             {"key": "s0", "label": "Session 0", "model": None},
             {"key": "s1", "label": "Session 1", "model": None},
         ]
-        impl, _ = _make_impl({
+        impl, client = _make_impl({
             "sessions.list": self._sessions_payload(sessions),
             "chat.history": self._history_payload([
                 {"id": "m1", "role": "user", "content": "hi"},
@@ -328,6 +346,8 @@ class TestSessionsList:
         result = await impl.sessions_list(token="tok", session_key="   ", offset=1, limit=1)
 
         assert [session["key"] for session in result] == ["s1"]
+        sessions_list_calls = [call for call in client.calls if call[0] == "sessions.list"]
+        assert sessions_list_calls == [("sessions.list", {}, None)]
 
     async def test_model_normalization_present(self):
         """_normalized_model is set for each returned session dict."""

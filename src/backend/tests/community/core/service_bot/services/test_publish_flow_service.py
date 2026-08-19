@@ -272,7 +272,7 @@ def test_bot_build_service_upgrade_raises_for_other_errors():
 
 
 @pytest.mark.asyncio
-async def test_verify_first_release_injects_engine_extra_envs_for_service_coding_bot():
+async def test_verify_first_release_injects_engine_extra_envs_without_bot_type_for_service_coding_bot():
     publish_service = Mock()
     publish_service.create_device_binding.return_value = 55
     build_service = Mock()
@@ -307,7 +307,6 @@ async def test_verify_first_release_injects_engine_extra_envs_for_service_coding
 
     assert build_service.release_async.await_args.kwargs["extra_envs"] == {
         "AGENTCLAW_SKILLS_LAYOUT": "legacy",
-        "BOT_TYPE": "application",
         "AIX_DEVFLOW_INFO": "devflow/app.yaml",
         "GIT_ADDRESSES": '["git@x/y.git"]',
         "RELAY_DEFAULT_MODEL": "antchat/Ling-2.6-1T",
@@ -316,7 +315,7 @@ async def test_verify_first_release_injects_engine_extra_envs_for_service_coding
 
 
 @pytest.mark.asyncio
-async def test_verify_upgrade_preserves_skills_env_and_injects_engine_extra_envs():
+async def test_verify_upgrade_preserves_skills_env_and_injects_engine_extra_envs_without_bot_type():
     publish_service = Mock()
     build_service = Mock()
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
@@ -365,7 +364,6 @@ async def test_verify_upgrade_preserves_skills_env_and_injects_engine_extra_envs
     assert build_service.upgrade_async.await_args.kwargs["extra_envs"] == {
         "AGENTCLAW_SKILLS_LAYOUT": "pool",
         "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
-        "BOT_TYPE": "application",
         "RELAY_DEFAULT_MODEL": "m1",
     }
 

@@ -1003,6 +1003,7 @@ SessionDetail:
     - version
     - group_id
     - status
+    - kind
     - participants
     - created_at
     - updated_at
@@ -1015,10 +1016,14 @@ SessionDetail:
       type: string
     status:
       $ref: "#/SessionStatus"
+    kind:
+      $ref: "#/SessionKind"
     title:
       type: string
     input:
-      $ref: "#/SessionInput"
+      $ref: "#/PersistedSessionInput"
+    meta:
+      $ref: "#/PersistedSessionMetadata"
     participants:
       type: array
       items:
@@ -1029,16 +1034,291 @@ SessionDetail:
     updated_at:
       type: integer
       minimum: 0
+    state_machine_run_id:
+      type: string
+    state_machine_run:
+      $ref: "#/StateMachineRunView"
 
 SessionInput:
+  description: >-
+    Optional raw task input for a Session. A string is forwarded unchanged;
+    an object may use the conventional query field while retaining arbitrary
+    collaboration-specific fields. If omitted, the parent Group context may
+    be used as the task description.
+  oneOf:
+    - type: string
+    - type: object
+      additionalProperties: true
+
+PersistedSessionInput:
+  description: >-
+    Raw persisted Session input. Existing Sessions created through the legacy
+    API may contain any JSON value, so V1 reads preserve that value unchanged.
+
+PersistedSessionMetadata:
+  description: >-
+    Raw persisted Session metadata. Existing Sessions created through the
+    legacy API may contain any JSON value, so V1 reads preserve that value
+    unchanged.
+
+SessionKind:
+  type: string
+  enum:
+    - chat
+    - service_invocation
+
+ContextDelivery:
+  type: string
+  enum:
+    - send
+    - inject
+
+CallbackTargetMetadata:
+  type: object
+  description: Dynamic callback routing values consumed by configured legacy callback channels.
+  additionalProperties: true
+  properties:
+    baas_session_id:
+      type: string
+    user_id:
+      type: string
+    open_conversation_id:
+      type: string
+
+ChannelMetadata:
+  type: object
+  description: Original external-channel conversation routing values.
+  additionalProperties: true
+  properties:
+    source:
+      type: string
+    binding_id:
+      type: string
+    conversation_id:
+      type: string
+    conversation_type:
+      type: string
+    session_scope:
+      type: string
+      enum:
+        - conversation
+        - per_sender
+    im_user_id:
+      type: string
+    context_projection:
+      type: string
+      enum:
+        - group
+        - direct_bot
+
+SessionMetadata:
+  type: object
+  description: >-
+    Session metadata forwarded and persisted without rewriting. Known fields
+    describe current callback and channel consumers; other legacy-compatible
+    fields are retained.
+  additionalProperties: true
+  properties:
+    callback_target:
+      $ref: "#/CallbackTargetMetadata"
+    channel:
+      $ref: "#/ChannelMetadata"
+    context_projection:
+      type: string
+      enum:
+        - group
+        - direct_bot
+
+StateMachineRunStatus:
+  type: string
+  enum:
+    - pending
+    - running
+    - completed
+    - failed
+    - aborted
+
+StateMachineNodeStatus:
+  type: string
+  enum:
+    - pending
+    - ready
+    - running
+    - completed
+    - failed
+    - retry_scheduled
+    - skipped
+
+StateMachineRun:
   type: object
   additionalProperties: false
-  description: >-
-    Optional task input for a session. If omitted on creation, the session
-    reuses the parent group's context as its task.
+  required:
+    - run_id
+    - definition_id
+    - definition_version
+    - group_id
+    - group_version
+    - session_id
+    - status
+    - input
+    - created_at
+    - updated_at
   properties:
-    query:
+    run_id:
       type: string
+    definition_id:
+      type: string
+    definition_version:
+      type: integer
+    group_id:
+      type: string
+    group_version:
+      type: integer
+    session_id:
+      type: string
+    created_by:
+      type: string
+    status:
+      $ref: "#/StateMachineRunStatus"
+    input:
+      description: Raw StateMachine invocation input.
+    output:
+      type: string
+    error:
+      type: string
+    created_at:
+      type: integer
+      minimum: 0
+    updated_at:
+      type: integer
+      minimum: 0
+    completed_at:
+      type: integer
+      minimum: 0
+
+StateMachineNodeRun:
+  type: object
+  additionalProperties: false
+  required:
+    - run_id
+    - node_id
+    - status
+    - attempt
+    - max_attempts
+  properties:
+    run_id:
+      type: string
+    node_id:
+      type: string
+    status:
+      $ref: "#/StateMachineNodeStatus"
+    attempt:
+      type: integer
+    node_timeout_ms:
+      type: integer
+      minimum: 0
+    timeout_deadline_ms:
+      type: integer
+      minimum: 0
+    max_attempts:
+      type: integer
+    assignee_bot_id:
+      type: string
+    outcome:
+      type: string
+    responded_by:
+      type: string
+    delivery_request_id:
+      type: string
+    bot_delivery_run_id:
+      type: string
+    artifact_text:
+      type: string
+    error:
+      type: string
+    started_at:
+      type: integer
+      minimum: 0
+    completed_at:
+      type: integer
+      minimum: 0
+
+JudgeCheckedCriterion:
+  type: object
+  additionalProperties: false
+  required:
+    - criterion
+    - satisfied
+    - evidence
+  properties:
+    criterion:
+      type: string
+    satisfied:
+      type: boolean
+    evidence:
+      type: string
+
+JudgeDecision:
+  type: object
+  additionalProperties: false
+  required:
+    - outcome
+    - reason
+    - confidence
+    - checked_criteria
+    - retry_instruction
+  properties:
+    outcome:
+      type: string
+    reason:
+      type: string
+    confidence:
+      type: number
+    checked_criteria:
+      type: array
+      items:
+        $ref: "#/JudgeCheckedCriterion"
+    retry_instruction:
+      type: string
+    raw_response:
+      description: Raw judge response retained for diagnostics.
+
+StateMachineJudgeOutput:
+  type: object
+  additionalProperties: false
+  required:
+    - node_id
+    - attempt
+    - created_at
+    - decision
+  properties:
+    node_id:
+      type: string
+    attempt:
+      type: integer
+    created_at:
+      type: integer
+      minimum: 0
+    decision:
+      $ref: "#/JudgeDecision"
+
+StateMachineRunView:
+  type: object
+  additionalProperties: false
+  required:
+    - run
+    - nodes
+  properties:
+    run:
+      $ref: "#/StateMachineRun"
+    nodes:
+      type: array
+      items:
+        $ref: "#/StateMachineNodeRun"
+    judge_outputs:
+      type: array
+      items:
+        $ref: "#/StateMachineJudgeOutput"
 
 SessionPage:
   type: object

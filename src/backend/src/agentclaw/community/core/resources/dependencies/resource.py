@@ -27,8 +27,8 @@ def get_bot_workspace_dir(
 ) -> Path:
     """Return the workspace root directory for a given bot context.
 
-    Callers should resolve engine_type via resolve_engine_for_bot() so the
-    bot's active_engine is respected; when omitted here, falls back to
+    Callers should resolve engine_type via resolve_runtime_engine_for_bot() so the
+    bot's runtime layout routing is respected; when omitted here, falls back to
     DEFAULT_ENGINE_TYPE.
     """
     from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE

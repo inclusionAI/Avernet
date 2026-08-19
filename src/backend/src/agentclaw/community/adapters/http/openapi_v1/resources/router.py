@@ -64,7 +64,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.core.bot_management.services.engine_resolver import (
-    resolve_engine_for_bot,
+    resolve_runtime_engine_for_bot,
 )
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError as DeviceFileTooLargeError,
@@ -195,7 +195,7 @@ def _file_coords(
     ``active_engine``. ``entity_type`` is ``"staff"``, matching
     ``ResourceFileService``'s own default.
     """
-    engine_type = resolve_engine_for_bot(
+    engine_type = resolve_runtime_engine_for_bot(
         bot_id=bot_id, owner_id=owner_id, override=None, bot_repo=bot_repo
     )
     return ("staff", owner_id, engine_type)

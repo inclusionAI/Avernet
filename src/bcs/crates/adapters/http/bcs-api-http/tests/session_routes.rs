@@ -15,17 +15,17 @@ use bcs_service_api::application::v1::{
 use bcs_service_api::application::v1::{
     AddGroupParticipant, AddSessionParticipant, ApplicationError, AuthenticatedAppIdentity,
     AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, CollectSession,
-    CompleteSession, CreateGroup, CreateSession, CreateSessionOutcome,
-    DeleteGroup, DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
-    GetGroup, GetSession, GroupDetail, GroupService, GroupSummary, ListGroups,
-    ListSessionMessages, ListSessions, Page, SessionCollectionResult, SessionCompletionResult,
-    SessionDetail, SessionMessageService, SessionParticipant, SessionService, SessionStatus,
-    SessionSummary, UncollectSession, UpdateGroup, UpdateGroupParticipant, UpdateSession,
-    UpdateSessionParticipant,
+    CompleteSession, CreateGroup, CreateSession, CreateSessionOutcome, DeleteGroup,
+    DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, GetGroup,
+    GetSession, GroupDetail, GroupService, GroupSummary, ListGroups, ListSessionMessages,
+    ListSessions, Page, SessionCollectionResult, SessionCompletionResult, SessionDetail,
+    SessionMessageService, SessionParticipant, SessionService, SessionStatus, SessionSummary,
+    UncollectSession, UpdateGroup, UpdateGroupParticipant, UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};
 use bcs_service_api::{
-    ActorKind, GroupMessage, GroupMessageType, MessageRole, ParticipantMode, ParticipantRole,
+    ActorKind, DeliveryType, GroupMessage, GroupMessageType, MessageRole, ParticipantMode,
+    ParticipantRole, SessionCaller, SessionKind,
 };
 use bcs_storage_api::byte_stream_from_bytes;
 use bytes::Bytes;
@@ -128,8 +128,8 @@ impl bcs_service_api::application::v1::SessionFileApplicationService for FakeSes
     ) -> Result<bcs_service_api::application::v1::SessionFileContent, ApplicationError> {
         Ok(
             bcs_service_api::application::v1::SessionFileContent::Redirect {
-            download_url: "https://storage.example.com/file-1".into(),
-            expires_at: 3600,
+                download_url: "https://storage.example.com/file-1".into(),
+                expires_at: 3600,
             },
         )
     }
@@ -152,9 +152,9 @@ impl bcs_service_api::application::v1::SessionFileApplicationService for FakeSes
             "good-token" => {
                 return Ok(
                     bcs_service_api::application::v1::SessionFileContent::Stream {
-                    file: session_file_view(),
-                    body: byte_stream_from_bytes(Bytes::from_static(b"abc")),
-                    inline: command.show,
+                        file: session_file_view(),
+                        body: byte_stream_from_bytes(Bytes::from_static(b"abc")),
+                        inline: command.show,
                     },
                 );
             }
@@ -578,11 +578,15 @@ fn session_detail() -> SessionDetail {
         version: 1,
         group_id: "group-1".into(),
         status: SessionStatus::Running,
+        kind: SessionKind::Chat,
         title: Some("Planning".into()),
         input: None,
+        meta: None,
         participants: vec![session_participant()],
         created_at: 1,
         updated_at: 2,
+        state_machine_run_id: None,
+        state_machine_run: None,
     }
 }
 
@@ -625,21 +629,19 @@ fn test_session_router_for_caller(
 ) -> axum::Router {
     router(
         ApiState::new(
-        Arc::new(NoopGroupService),
-        session,
-        message,
-        Arc::new(NoopInvitationService),
-        Arc::new(NoopFriendshipService),
-        Arc::new(HeaderVerifier {
-            caller: authenticated_caller,
-        }),
-    )
-    .with_session_file_service(
-        Arc::new(FakeSessionFileService),
-        SessionFileUrlProjector::new(
-            "https://gateway.example.com/api/v1/collaboration".into(),
+            Arc::new(NoopGroupService),
+            session,
+            message,
+            Arc::new(NoopInvitationService),
+            Arc::new(NoopFriendshipService),
+            Arc::new(HeaderVerifier {
+                caller: authenticated_caller,
+            }),
         )
-        .expect("valid base"),
+        .with_session_file_service(
+            Arc::new(FakeSessionFileService),
+            SessionFileUrlProjector::new("https://gateway.example.com/api/v1/collaboration".into())
+                .expect("valid base"),
         ),
     )
 }
@@ -805,7 +807,9 @@ async fn shared_file_content_is_public_and_token_failures_are_uniform_not_found(
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/api/v1/collaboration/sessions/shared-file/content?token=good-token&show=true")
+                .uri(
+                    "/api/v1/collaboration/sessions/shared-file/content?token=good-token&show=true",
+                )
                 .body(Body::empty())
                 .expect("public success request"),
         )
@@ -955,7 +959,15 @@ async fn create_session_returns_created_and_forwards_principal() {
             "/openapi/v1/collaboration/groups/group-1/sessions",
             json!({
                 "title": "Planning",
-                "input": {"query": "how to coordinate?"}
+                "kind": "service_invocation",
+                "acting_bot_id": "bot-owned",
+                "creator_role": "manager",
+                "input": {"query": "how to coordinate?", "custom": {"n": 1}},
+                "meta": {
+                    "callback_target": {"baas_session_id": "baas-1"},
+                    "channel": {"source": "dingtalk", "binding_id": "binding-1"}
+                },
+                "context_delivery": "inject"
             }),
         ))
         .await
@@ -970,35 +982,128 @@ async fn create_session_returns_created_and_forwards_principal() {
     {
         let created = session.created.lock().expect("create lock");
         let created = created.as_ref().expect("create command");
-        assert_eq!(caller_user_id(&created.caller), "staff-1");
+        assert_eq!(
+            created.caller,
+            SessionCaller::Human {
+                actor_id: "human_staff-1".into(),
+                owner_id: "staff-1".into(),
+                display_name: None,
+            }
+        );
         assert_eq!(created.group_id, "group-1");
         assert_eq!(created.title.as_deref(), Some("Planning"));
         assert_eq!(
-            created.input.as_ref().unwrap().query.as_deref(),
-            Some("how to coordinate?")
+            created.input,
+            Some(json!({"query": "how to coordinate?", "custom": {"n": 1}}))
+        );
+        assert_eq!(created.kind, Some(SessionKind::ServiceInvocation));
+        assert_eq!(created.acting_bot_id.as_deref(), Some("bot-owned"));
+        assert_eq!(created.creator_role, Some(ParticipantRole::Manager));
+        assert_eq!(created.context_delivery, Some(DeliveryType::Inject));
+        assert_eq!(
+            created.meta,
+            Some(json!({
+                "callback_target": {"baas_session_id": "baas-1"},
+                "channel": {"source": "dingtalk", "binding_id": "binding-1"}
+            }))
         );
     }
 }
 
 #[tokio::test]
-async fn create_session_reused_returns_ok() {
+async fn create_session_accepts_explicit_authenticated_human_actor() {
     let session = Arc::new(FakeSessionService::default());
-    session.reuse_create.store(true, Ordering::Relaxed);
     let message = Arc::new(FakeSessionMessageService::default());
-    let app = test_session_router(session, message);
+    let app = test_session_router(session.clone(), message);
 
     let response = app
         .oneshot(authenticated_request(
             "POST",
             "/openapi/v1/collaboration/groups/group-1/sessions",
-            json!({}),
+            json!({
+                "acting_bot_id": "human_staff-1",
+                "creator_role": "observer"
+            }),
         ))
         .await
-        .expect("reused create response");
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response_json(response).await;
-    assert_eq!(body["code"], 20_000);
-    assert_eq!(body["message"], "OK");
+        .expect("explicit Human create response");
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let created = session.created.lock().expect("create lock");
+    let created = created.as_ref().expect("create command");
+    assert_eq!(
+        created.caller,
+        SessionCaller::Human {
+            actor_id: "human_staff-1".into(),
+            owner_id: "staff-1".into(),
+            display_name: None,
+        }
+    );
+    assert_eq!(created.acting_bot_id.as_deref(), Some("human_staff-1"));
+    assert_eq!(created.creator_role, Some(ParticipantRole::Observer));
+}
+
+#[tokio::test]
+async fn create_session_accepts_bot_identity_and_raw_string_input() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let app = test_session_router_for_caller(
+        session.clone(),
+        message,
+        AuthenticatedCaller {
+            tenant: Some("tenant-a".into()),
+            user: None,
+            bot: Some(AuthenticatedBotIdentity {
+                bot_uuid: "bot-1".into(),
+                owner_id: "staff-1".into(),
+                app_id: 1,
+                agent_code: "agent-1".into(),
+            }),
+            app: None,
+            access_key: None,
+        },
+    );
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/groups/group-1/sessions",
+            json!({"input": "run this task"}),
+        ))
+        .await
+        .expect("Bot create response");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = session.created.lock().expect("create lock");
+    let created = created.as_ref().expect("create command");
+    assert_eq!(
+        created.caller,
+        SessionCaller::Bot {
+            bot_uuid: "bot-1".into()
+        }
+    );
+    assert_eq!(created.input, Some(json!("run this task")));
+}
+
+#[tokio::test]
+async fn create_session_accepts_any_json_object_input() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let app = test_session_router(session.clone(), message);
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/groups/group-1/sessions",
+            json!({"input": {"query": 42, "custom": [true, null]}}),
+        ))
+        .await
+        .expect("open object create response");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = session.created.lock().expect("create lock");
+    assert_eq!(
+        created.as_ref().expect("create command").input,
+        Some(json!({"query": 42, "custom": [true, null]}))
+    );
 }
 
 #[tokio::test]
@@ -1237,7 +1342,13 @@ async fn collection_requests_reject_invalid_participant_input_before_service_cal
         let response_body = response_json(response).await;
         assert_eq!(response_body["data"]["error_code"], "invalid_request");
         assert!(session.collected.lock().expect("collect lock").is_none());
-        assert!(session.uncollected.lock().expect("uncollect lock").is_none());
+        assert!(
+            session
+                .uncollected
+                .lock()
+                .expect("uncollect lock")
+                .is_none()
+        );
     }
 }
 
@@ -1254,10 +1365,7 @@ async fn collection_application_errors_use_declared_v1_envelopes() {
         session
             .collection_not_found
             .store(!forbidden, Ordering::Relaxed);
-        let app = test_session_router(
-            session,
-            Arc::new(FakeSessionMessageService::default()),
-        );
+        let app = test_session_router(session, Arc::new(FakeSessionMessageService::default()));
         let response = app
             .oneshot(authenticated_request(
                 "POST",
@@ -1523,6 +1631,20 @@ async fn unknown_fields_rejected_with_invalid_request() {
     assert_eq!(body["data"]["error_code"], "invalid_request");
     assert!(session.created.lock().expect("create lock").is_none());
 
+    let reactivation_response = app
+        .clone()
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/groups/group-1/sessions",
+            json!({"session_id": "legacy-session"}),
+        ))
+        .await
+        .expect("V1 reactivation field response");
+    assert_eq!(reactivation_response.status(), StatusCode::BAD_REQUEST);
+    let reactivation_body = response_json(reactivation_response).await;
+    assert_eq!(reactivation_body["data"]["error_code"], "invalid_request");
+    assert!(session.created.lock().expect("create lock").is_none());
+
     let patch_response = app
         .oneshot(authenticated_request(
             "PATCH",
@@ -1534,6 +1656,70 @@ async fn unknown_fields_rejected_with_invalid_request() {
     assert_eq!(patch_response.status(), StatusCode::BAD_REQUEST);
     let patch_body = response_json(patch_response).await;
     assert_eq!(patch_body["data"]["error_code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn create_session_rejects_null_optional_fields() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let app = test_session_router(session.clone(), message);
+
+    for field in [
+        "title",
+        "kind",
+        "acting_bot_id",
+        "creator_role",
+        "input",
+        "meta",
+        "context_delivery",
+    ] {
+        let mut body = serde_json::Map::new();
+        body.insert(field.into(), Value::Null);
+        let response = app
+            .clone()
+            .oneshot(authenticated_request(
+                "POST",
+                "/openapi/v1/collaboration/groups/group-1/sessions",
+                Value::Object(body),
+            ))
+            .await
+            .expect("null field response");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "field={field}");
+        let body = response_json(response).await;
+        assert_eq!(body["data"]["error_code"], "invalid_request");
+    }
+    assert!(session.created.lock().expect("create lock").is_none());
+}
+
+#[tokio::test]
+async fn create_session_rejects_contract_invalid_identity_and_metadata() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let app = test_session_router(session.clone(), message);
+    let invalid_bodies = [
+        json!({"acting_bot_id": ""}),
+        json!({"meta": {"callback_target": null}}),
+        json!({"meta": {"callback_target": {"user_id": 1}}}),
+        json!({"meta": {"channel": "chat"}}),
+        json!({"meta": {"channel": {"session_scope": "global"}}}),
+        json!({"meta": {"context_projection": "private"}}),
+    ];
+
+    for body in invalid_bodies {
+        let response = app
+            .clone()
+            .oneshot(authenticated_request(
+                "POST",
+                "/openapi/v1/collaboration/groups/group-1/sessions",
+                body,
+            ))
+            .await
+            .expect("invalid request response");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(response).await;
+        assert_eq!(body["data"]["error_code"], "invalid_request");
+    }
+    assert!(session.created.lock().expect("create lock").is_none());
 }
 
 #[tokio::test]

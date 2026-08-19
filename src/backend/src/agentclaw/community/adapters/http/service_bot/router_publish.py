@@ -43,7 +43,7 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError as BotManagementNotFoundError,
 )
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
+from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
@@ -306,7 +306,7 @@ async def get_publish_engine_config(
             )
 
         # 2. 解析引擎类型（路由层负责，传给 provider-blind 的服务）
-        engine_type = resolve_engine_for_bot(
+        engine_type = resolve_runtime_engine_for_bot(
             bot_id=record.source_bot_id,
             owner_id=record.owner_id,
             bot_repo=bot_repo,

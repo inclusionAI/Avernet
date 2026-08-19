@@ -7,7 +7,8 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from secbaas.community.api import ApiResponse, DomainError
+from secbaas.community.adapters.web.dependencies import get_op_ctx
+from secbaas.community.api import ApiResponse, DomainError, OperationContext
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.spi.cache import CachePlugin
 
@@ -51,9 +52,10 @@ class CacheKeyNotFoundError(DomainError):
 async def set_cache(
     key: str,
     body: CacheSetRequest,
+    op_ctx: OperationContext = Depends(get_op_ctx),
     cache: CachePlugin = Depends(Provide[ApplicationContainer.plugins.cache_plugin]),
 ) -> ApiResponse[CacheSetResponse]:
-    """将 ``value`` 写入缓存，超过 ``ttl_seconds`` 后自动过期。"""
+    """将 ``value`` 写入缓存，超过 ``ttl_seconds`` 后自动过期。需登录鉴权。"""
     cache.set(key, body.value, ttl_seconds=body.ttl_seconds)
     return ApiResponse(data=CacheSetResponse(key=key, ttl_seconds=body.ttl_seconds))
 

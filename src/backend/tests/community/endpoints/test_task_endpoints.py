@@ -1,7 +1,7 @@
 """Endpoint-framework coverage for the task API surface.
 
-Covers the 13 routes mounted under ``/openapi/v1/collaboration/tasks(...)`` (task router,
-task-callback router, task-discovery router) with a happy + error case each,
+Covers the 11 routes mounted under ``/openapi/v1/collaboration/tasks(...)`` (task router,
+task-callback router) with a happy + error case each,
 so the coverage gate sees every route as covered.
 
 Why the shared framework app is enough (no per-case mocking): the community
@@ -16,19 +16,8 @@ The root ``node_id`` is deterministic (``initialize_graph`` sets it to the
 Error cases use *real input-driven* branches wherever the contract exposes one
 (re-execute → 409, missing task → 404, malformed body → 422, unregistered
 task-level callback → 400, non-holder BBS op → 409, invalid status → 400).
-
-The two discovery routes (``/discover``, ``/status``) build their service from
-env (not DI-wired), so no request input produces a failure. Their error case
-substitutes the module-level builder the handler calls — a forced raise that the
-handler catches and converts to ``InternalError`` → ``ErrorEnvelope``. This
-is direct attribute assignment on the router module (not a mock library, not
-``setattr``); the ``test_no_mock_in_endpoint_tests`` scanner permits it, and each
-happy case restores the originals so nothing leaks.
 """
 from __future__ import annotations
-
-import os
-import tempfile
 
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.models import (
@@ -106,78 +95,6 @@ def _run_root(world, task_id: str) -> None:
     world.get(TaskGraphService).update_task_node_info(
         TaskNodePatch(task_id=task_id, node_id=task_id, status=Status.RUNNING)
     )
-
-
-# --------------------------------------------------------------------------
-# task-discovery seam substitution
-# --------------------------------------------------------------------------
-# The discovery router self-builds its service from env (not DI-wired). Its
-# handlers catch build/read failures and raise ``InternalError``. The error
-# cases below force the builder the handler calls to raise, exercising that
-# ``except → InternalError`` end-to-end. The happy cases restore the
-# originals (and point the reader at an absent db so ``discover()`` makes no
-# engine call), so the seam never leaks past this file.
-import agentclaw.community.adapters.http.openapi_v1.task.discovery.router as _disc_router  # noqa: E402
-
-_orig_build_service = _disc_router._build_service
-_orig_resolve_db_path = _disc_router._resolve_db_path
-_orig_task_reader = _disc_router.SqliteTaskReader
-
-
-class _ForcedDiscoveryFailure(RuntimeError):
-    """Raised by the stand-in builders to drive the handler's ``except``."""
-
-
-def _build_service_failure(*_args, **_kwargs):
-    raise _ForcedDiscoveryFailure("forced discovery build failure")
-
-
-class _FailingTaskReader:
-    """Stand-in for ``SqliteTaskReader`` whose read raises inside the handler's try.
-
-    ``/status`` calls ``SqliteTaskReader(db_path).read_discovered_tasks()`` *inside*
-    its ``try/except`` (unlike ``_resolve_db_path``, which sits outside). Substituting
-    the reader — not the path resolver — is what keeps the forced raise caught by the
-    handler and converted to ``InternalError`` rather than escaping.
-    """
-
-    def __init__(self, *_args, **_kwargs) -> None:
-        pass
-
-    def read_discovered_tasks(self):
-        raise _ForcedDiscoveryFailure("forced status read failure")
-
-    def read_pending_tasks(self):
-        raise _ForcedDiscoveryFailure("forced status read failure")
-
-
-def _disc_clean_env(_world) -> None:
-    """Point discovery at a guaranteed-absent db so the reader returns ``[]``."""
-    os.environ["TASK_DISCOVERY_DATA_FILE"] = os.path.join(
-        tempfile.gettempdir(), "avernet_task_disc_absent.db"
-    )
-
-
-def _seed_discover_ok(_world) -> None:
-    _disc_router._build_service = _orig_build_service
-    _disc_clean_env(_world)
-
-
-def _seed_discover_err(_world) -> None:
-    _disc_router._build_service = _build_service_failure
-
-
-def _seed_status_ok(_world) -> None:
-    # Restore every seam (earlier error cases may have patched them) so the final
-    # discovery case leaves the router module pristine.
-    _disc_router._build_service = _orig_build_service
-    _disc_router._resolve_db_path = _orig_resolve_db_path
-    _disc_router.SqliteTaskReader = _orig_task_reader
-    _disc_clean_env(_world)
-
-
-def _seed_status_err(_world) -> None:
-    _disc_router.SqliteTaskReader = _FailingTaskReader
 
 
 # ===== POST /openapi/v1/collaboration/tasks/execute =====
@@ -557,53 +474,3 @@ def node_result_ok():
 )
 def node_result_node_not_found():
     """Node-level result on a non-existent node → NodeNotFoundError → 404."""
-
-
-# ===== POST /openapi/v1/collaboration/tasks/discovery/discover =====
-
-@endpoint_test(
-    method="POST",
-    path="/openapi/v1/collaboration/tasks/discovery/discover",
-    scenario="ok",
-    input=CaseInput(query_params={"user_id": "u1", "agent_id": "bot_001"}),
-    seed=_seed_discover_ok,
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
-)
-def discovery_discover_ok():
-    """Manual discovery trigger over an absent db → {success: true, discovered: 0}."""
-
-
-@endpoint_test(
-    method="POST",
-    path="/openapi/v1/collaboration/tasks/discovery/discover",
-    scenario="build_failure",
-    input=CaseInput(query_params={"user_id": "u1", "agent_id": "bot_001"}),
-    seed=_seed_discover_err,
-    expect=ExpectError(status=500),
-)
-def discovery_discover_build_failure():
-    """Forced ``_build_service`` raise → handler catches → ``InternalError`` → app ``DomainError`` handler → 500 ``ErrorEnvelope``."""
-
-
-# ===== GET /openapi/v1/collaboration/tasks/discovery/status =====
-
-@endpoint_test(
-    method="GET",
-    path="/openapi/v1/collaboration/tasks/discovery/status",
-    scenario="build_failure",
-    seed=_seed_status_err,
-    expect=ExpectError(status=500),
-)
-def discovery_status_build_failure():
-    """Forced ``SqliteTaskReader.read`` raise (inside the try) → ``InternalError`` → app ``DomainError`` handler → 500 ``ErrorEnvelope``."""
-
-
-@endpoint_test(
-    method="GET",
-    path="/openapi/v1/collaboration/tasks/discovery/status",
-    scenario="ok",
-    seed=_seed_status_ok,
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
-)
-def discovery_status_ok():
-    """Status read over an absent db → {success: true, total: 0}."""
