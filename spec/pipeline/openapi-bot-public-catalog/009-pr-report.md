@@ -63,3 +63,21 @@
 - ACI/CI: PENDING
 - 人工意见: CLEAR at last query
 - 下一步: push merge and report update, then refresh GitHub reviews and checks for the resulting head.
+
+## Backend CI 修复（2026-08-19）
+
+PR head `e595d27ef` 的首次 Backend unit tests 失败已收敛为三个测试基础设施问题：
+
+1. 新增 `/openapi/v1/bots/public/search` 与 `/discover` 未登记到 declarative endpoint runner，coverage gate 报两条新路由缺少 happy/error case。
+2. `test_user_id_mismatch_handler.py` 仍断言旧通用错误码 `403000`，与运行时及 OpenAPI 已统一的显式身份 mismatch 错误码 `403001` 不一致。
+3. 新增测试文件使用通用名 `test_router.py`，与无 package 隔离的 `common_config/test_router.py` 在全量 pytest collection 中发生模块名冲突。
+
+修复保持生产代码和对外契约不变：补充两条接口各自的 signed-principal happy/error endpoint case，将旧断言同步到 `403001`，并把 Bot Public adapter 测试文件改为唯一名称 `test_bot_public_router.py`。
+
+本地验证：
+
+- 相关回归：44 passed。
+- Backend 全量 pytest：12332 passed，1 skipped。
+- 报告门禁：case pass rate 100.00%（12333/12333），line coverage 86.34%，change-line coverage 90.24%（111/123）。
+- 本机 `scripts/ci_test.sh` 末段因系统 `python` 指向 Python 2.7 解析 `report_check.py` 失败；使用同一 Backend `.venv/bin/python` 执行同一报告参数通过。GitHub runner 使用 Python 3.12，不受该本地解释器差异影响。
+- 远端 Backend CI：等待本次修复提交推送后重新触发。

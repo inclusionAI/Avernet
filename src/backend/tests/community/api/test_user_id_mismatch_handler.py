@@ -141,7 +141,7 @@ async def test_the_public_surface_keeps_its_envelope():
 
     assert isinstance(response, JSONResponse)
     assert response.status_code == 403
-    assert b'"code":403000' in response.body
+    assert b'"code":403001' in response.body
     assert b'"message":"Forbidden"' in response.body
     assert b'"data":null' in response.body
 
