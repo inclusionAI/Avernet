@@ -37,6 +37,4 @@ def test_internal_openapi_document_and_docs_are_served_separately() -> None:
 
     public_paths = client.get("/openapi.json").json()["paths"]
     assert "/openapi/v1/collaboration/bots/mine" in public_paths
-    assert not any(
-        path.startswith("/api/v1/collaboration") for path in public_paths
-    )
+    assert not any(path.startswith("/api/v1/collaboration") for path in public_paths)

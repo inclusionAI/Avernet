@@ -7,7 +7,9 @@ import 'justfiles/ctrl-baas.just'
 
 import 'justfiles/lint.just'
 import 'justfiles/test-common.just'
+import 'justfiles/test-self.just'
 import 'justfiles/tests.just'
+import 'justfiles/test-mariadb.just'
 
 _default:
     @just --list --list-prefix '==> '

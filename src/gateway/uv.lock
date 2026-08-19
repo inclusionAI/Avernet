@@ -7,6 +7,18 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "aiomysql"
+version = "0.3.2"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+dependencies = [
+    { name = "pymysql" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/29/e0/302aeffe8d90853556f47f3106b89c16cc2ec2a4d269bdfd82e3f4ae12cc/aiomysql-0.3.2.tar.gz", hash = "sha256:72d15ef5cfc34c03468eb41e1b90adb9fd9347b0b589114bd23ead569a02ac1a" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/4c/af/aae0153c3e28712adaf462328f6c7a3c196a1c1c27b491de4377dd3e6b52/aiomysql-0.3.2-py3-none-any.whl", hash = "sha256:c82c5ba04137d7afd5c693a258bea8ead2aad77101668044143a991e04632eb2" },
+]
+
+[[package]]
 name = "aiosqlite"
 version = "0.22.1"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
@@ -355,10 +367,12 @@ name = "gateway-community"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiomysql" },
     { name = "aiosqlite" },
     { name = "dependency-injector" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "mysql-connector-python" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-instrumentation-asgi" },
     { name = "opentelemetry-sdk" },
@@ -395,10 +409,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiomysql", specifier = ">=0.2.0" },
     { name = "aiosqlite", specifier = ">=0.19.0" },
     { name = "dependency-injector", specifier = ">=4.49.1" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "httpx", specifier = ">=0.27.0" },
+    { name = "mysql-connector-python", specifier = ">=26.7.0" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otlp'", specifier = ">=1.42.1" },
     { name = "opentelemetry-instrumentation-asgi", specifier = ">=0.63b1" },
@@ -716,6 +732,29 @@ source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/a2/6e/371856a3fb9d31ca8dac321cda606860fa4548858c0cc45d9d1d4ca2628b/mypy_extensions-1.1.0.tar.gz", hash = "sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl", hash = "sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505" },
+]
+
+[[package]]
+name = "mysql-connector-python"
+version = "26.7.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/f2/ce/a53b169388f8c6a595cfa9a653138381f3afef1d2af60f5c1972d015f52f/mysql_connector_python-26.7.0.tar.gz", hash = "sha256:d8ff5ee236ea46661ee639336323e124ed868e37f3ea991bdc5de5a146f39fd5" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/e3/24/8c3516ee9edc3d740059253410bcb30a0dd7686bfd876eb905af6b92b4e6/mysql_connector_python-26.7.0-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:9b63672cc381f097966faecd6940beb2a91f9efdf674a5807dc45f4efdb42e62" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/ad/9c/d2f705d2caaf2c91d05bdea0d67dde7cc243a62245ee91fba4e201e24ea1/mysql_connector_python-26.7.0-cp312-cp312-macosx_14_0_x86_64.whl", hash = "sha256:375f9a042398e515a670003f26ab07e9b2ecaecba6eaf678f66fb5c2d36bd305" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/4f/1c/73b9f540fbbcf78949e00d673db576f61ab93e7824e31dfb568295e58f2c/mysql_connector_python-26.7.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:227063e73c3d7b0326bc6ce9af47b8aa081e53a4e97e8683bba658569cb57271" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/2d/0c/7dc1c1367a6a7881f20b0ed8bf92133d4710ea0dce22657972f56bf2a365/mysql_connector_python-26.7.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:e118030bdd6a9882f5aa80a0c0c88d684d0e82d78747e5baf3c3e54a5a2d1348" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/59/d1/1988f561be35527ab8a8906d97f52b60160ef50578cbe13096c66ef9d41a/mysql_connector_python-26.7.0-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:2be2f5b8ffc66bac305afee970256e74b2bc1d072cd0d21a277af3c9ff5fcb1d" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/2e/78/d13a243bcc7299dfc74265f4896a1bf3c09d230b81f505c9da99593a4246/mysql_connector_python-26.7.0-cp313-cp313-macosx_14_0_x86_64.whl", hash = "sha256:6e2d06c653c7f18ae91c5899e62210565660c871941769b1725c8dfa98da66b8" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/40/cc/93c38d25b0c1b0b784b7cf7a94699b5d6379ce315329f9e789e827cd50d0/mysql_connector_python-26.7.0-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:9f8fde7f909891bc5093f63e3b78a8f80b637591d8f77591a758cf78541325b8" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/33/5a/ffc4663fb061f612b6efe2afc3b1c94cec4de86af8b4736935010c159263/mysql_connector_python-26.7.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:ec8fe2f5af701d3146a6e31ef2fce293f2418c148a99df7c9917f87cfcdaea93" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/78/68/1ee48a7c2c1104e6fe6cf8a98d6fbdba547d72331a3d1352fe2443e3cf95/mysql_connector_python-26.7.0-cp313-cp313-win_amd64.whl", hash = "sha256:fd10764bd6dadb0ad44475126a87d184dac519712874459ab5f3976c23314f22" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/eb/46/a2383cebea1cf22e07a0bc7b6e5035baac04de18415df188d257b68abab2/mysql_connector_python-26.7.0-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:c02cc3d5e4763ddc960fce521bd353b242cfec4c6a936234916f2597bfd656cd" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/62/4b/200023b5628ac075c1182c62999195dc096aeaf24787f0697f0830a886c4/mysql_connector_python-26.7.0-cp314-cp314-macosx_14_0_x86_64.whl", hash = "sha256:32f63bbf069b242921c13de05e56857625e167d64fc7fa4f15e05478d78c56fe" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/74/7c/e57f2dada0a371c37715b2e402bf7b403718a265aa8afd341c91a7674d97/mysql_connector_python-26.7.0-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:a86c988f033d3e116c5d326931aabae340ebef0425399bcd5f076af877ae0fbc" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/02/be/c57e60d49e481cd8a7e5ab0ed874bf18dc90f32aed6d3953213ddbb7d86a/mysql_connector_python-26.7.0-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:76cffea9fc0cd9d4d5c79935a18342d9680f2c0dc0d5675b966b3df06229f238" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/34/a6/946645e3c7e8feb159c97b2e8f612075e4ec08c0fb7d26d310d7e1b0e22c/mysql_connector_python-26.7.0-cp314-cp314-win_amd64.whl", hash = "sha256:a4eac2b4bcbf18fbaab736b5c3996425728472fea7b3d71a8c7056aa6349471f" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/ff/01/07efeb3e3fc730f945af40ddf1f4c879c13945b193a94eba8e642c0d4176/mysql_connector_python-26.7.0-py2.py3-none-any.whl", hash = "sha256:43ee453b53556f690e4f4b795d3f17a1c6d4b45f729657bb0d999c8dfc9261d5" },
 ]
 
 [[package]]
@@ -1060,6 +1099,15 @@ source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/3b/81/58d0ac84e1ef3a3843791d6954d94c0b33d526c75eeb1efbce9d0a4c4077/pyjwt-2.13.0.tar.gz", hash = "sha256:41571c89ca91598c79e8ef18a2d07367d4810fbbd6f637794879baf1b7703423" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/a3/5e/ecf12fdb62546d64385c158514e9b2b671f7832108ef2ecd2020ce0af2d1/pyjwt-2.13.0-py3-none-any.whl", hash = "sha256:66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728" },
+]
+
+[[package]]
+name = "pymysql"
+version = "1.2.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/c9/bc/1c6a92f385940f727daeecf3bacaf186e03875dff57197801046c583bcf0/pymysql-1.2.0.tar.gz", hash = "sha256:6c7b17ca686988104d7426c27895b455cdeea3e9d3ceb1270f0c3704fead8c33" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/c4/bd/2534e130295c8cfd4f0a2e31623baab7502278f1e97bcfe61db75656a77f/pymysql-1.2.0-py3-none-any.whl", hash = "sha256:62169ce6d5510f08e140c5e7990ee884a9764024e4a9a27b2cc11f1099322ae0" },
 ]
 
 [[package]]

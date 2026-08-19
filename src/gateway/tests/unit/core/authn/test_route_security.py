@@ -152,7 +152,9 @@ def test_the_socket_exemption_does_not_reach_the_http_plane() -> None:
     for path in (_SOCKET_PATH, "/openapi/v1/bots/messages/../../admin/keys"):
         req = rs.resolve("GET", path)
         assert req is not None, path
-        assert req != {}, f"the HTTP plane must not inherit the socket exemption: {path}"
+        assert req != {}, (
+            f"the HTTP plane must not inherit the socket exemption: {path}"
+        )
 
 
 def test_shipped_config_exempts_the_collaboration_socket_handshake() -> None:
@@ -169,7 +171,9 @@ def test_collaboration_socket_exemption_does_not_reach_the_http_plane() -> None:
     assert req[PrincipalType.USER] is Presence.REQUIRED
 
 
-def test_shipped_config_collects_all_optional_file_identities_and_keeps_share_public() -> None:
+def test_shipped_config_collects_all_optional_file_identities_and_keeps_share_public() -> (
+    None
+):
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
 

@@ -44,10 +44,19 @@ def app_no_lifespan() -> Generator[FastAPI, None, None]:
 
     Old overlay / SERVER_ENV values are restored after the test so stale
     state doesn't leak between test modules.
+
+    An explicitly-requested ``SOFAPY_CONFIG_OVERLAY`` (e.g.
+    ``SOFAPY_CONFIG_OVERLAY=e2e-mariadb``) is preserved so the suite can run
+    against a specific backend; only a *stale* overlay is cleared.
     """
+    env_overlay = os.getenv("SOFAPY_CONFIG_OVERLAY")
     old_overlay = os.environ.pop("SOFAPY_CONFIG_OVERLAY", None)
     old_server_env = os.environ.pop("SERVER_ENV", None)
     old_gateway_mode = os.environ.pop("GATEWAY_RUN_MODE", None)
+    if env_overlay:
+        os.environ["SOFAPY_CONFIG_OVERLAY"] = env_overlay
+    else:
+        os.environ.pop("SOFAPY_CONFIG_OVERLAY", None)
     os.environ["GATEWAY_RUN_MODE"] = "bare"
 
     from gateway.community.adapters.web.app import create_app
