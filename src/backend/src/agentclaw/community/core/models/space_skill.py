@@ -23,6 +23,10 @@ from sqlalchemy import (
 from sqlalchemy.dialects import mysql
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.spaces.repository.models import (
+    SpaceMemberModel as SpaceMember,
+    SpaceModel as Space,
+)
 from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
 
 
@@ -55,59 +59,6 @@ class _ScopedDomainFact:
     gmt_modified = Column(
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
     )
-
-
-class Space(_ScopedDomainFact, Base):
-    __tablename__ = "ac_space"
-    __table_args__ = _scoped_table_args(
-        UniqueConstraint("avernet_tenant", "env", "space_code", name="uk_space_code"),
-        UniqueConstraint(
-            "avernet_tenant", "env", "personal_owner_id", name="uk_personal_space"
-        ),
-        Index("idx_space_sc_team", "avernet_tenant", "env", "sc_team_id"),
-        CheckConstraint("space_type IN ('PERSONAL', 'TEAM')", name="ck_space_type"),
-        CheckConstraint(
-            "sc_mapping_status IN ('PENDING', 'ACTIVE', 'INACTIVE', 'CLEANUP_FAILED')",
-            name="ck_space_mapping_status",
-        ),
-    )
-
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
-    space_code = Column(String(128), nullable=False)
-    space_type = Column(String(16), nullable=False)
-    name = Column(String(256), nullable=False)
-    description = Column(Text, nullable=True)
-    personal_owner_id = Column(String(128), nullable=True)
-    sc_team_id = Column(BigInteger, nullable=True)
-    sc_mapping_status = Column(String(24), nullable=False, server_default="PENDING")
-    created_by = Column(String(128), nullable=False)
-    deleted_at = Column(DateTime, nullable=True)
-    deleted_by = Column(String(128), nullable=True)
-
-
-class SpaceMember(_ScopedDomainFact, Base):
-    __tablename__ = "ac_space_member"
-    __table_args__ = _scoped_table_args(
-        UniqueConstraint(
-            "avernet_tenant", "env", "space_id", "user_id", name="uk_space_member"
-        ),
-        Index("idx_space_member_user", "avernet_tenant", "env", "user_id", "status"),
-        CheckConstraint(
-            "role IN ('ADMINISTRATOR', 'MEMBER')", name="ck_space_member_role"
-        ),
-        CheckConstraint(
-            "status IN ('ACTIVE', 'INACTIVE')", name="ck_space_member_status"
-        ),
-    )
-
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
-    space_id = Column(UnsignedBigInteger, nullable=False)
-    user_id = Column(String(128), nullable=False)
-    role = Column(String(24), nullable=False)
-    status = Column(String(16), nullable=False, server_default="ACTIVE")
-    created_by = Column(String(128), nullable=False)
-    removed_at = Column(DateTime, nullable=True)
-    removed_by = Column(String(128), nullable=True)
 
 
 class SkillSpaceBinding(_ScopedDomainFact, Base):
@@ -269,8 +220,6 @@ class SkillPublicationAttempt(_ScopedDomainFact, Base):
 
 
 for _model in (
-    Space,
-    SpaceMember,
     SkillSpaceBinding,
     SkillGrant,
     SkillDraftEditLease,

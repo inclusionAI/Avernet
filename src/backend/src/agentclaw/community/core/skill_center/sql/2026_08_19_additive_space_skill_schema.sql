@@ -23,51 +23,8 @@ ALTER TABLE ac_skill
 CREATE UNIQUE INDEX IF NOT EXISTS uk_skill_uuid
   ON ac_skill (avernet_tenant, env, skill_uuid);
 
-CREATE TABLE IF NOT EXISTS ac_space (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  space_code VARCHAR(128) NOT NULL,
-  space_type VARCHAR(16) NOT NULL COMMENT 'PERSONAL/TEAM',
-  name VARCHAR(256) NOT NULL,
-  description TEXT NULL,
-  personal_owner_id VARCHAR(128) NULL,
-  sc_team_id BIGINT NULL,
-  sc_mapping_status VARCHAR(24) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/ACTIVE/INACTIVE/CLEANUP_FAILED',
-  created_by VARCHAR(128) NOT NULL,
-  deleted_at TIMESTAMP NULL,
-  deleted_by VARCHAR(128) NULL,
-  avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw',
-  env VARCHAR(20) NOT NULL,
-  gmt_created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_space_code (avernet_tenant, env, space_code),
-  UNIQUE KEY uk_personal_space (avernet_tenant, env, personal_owner_id),
-  KEY idx_space_sc_team (avernet_tenant, env, sc_team_id),
-  CONSTRAINT ck_space_type CHECK (space_type IN ('PERSONAL', 'TEAM')),
-  CONSTRAINT ck_space_mapping_status CHECK (sc_mapping_status IN ('PENDING', 'ACTIVE', 'INACTIVE', 'CLEANUP_FAILED')),
-  CONSTRAINT ck_space_env_not_empty CHECK (env <> '')
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS ac_space_member (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  space_id BIGINT UNSIGNED NOT NULL,
-  user_id VARCHAR(128) NOT NULL,
-  role VARCHAR(24) NOT NULL COMMENT 'ADMINISTRATOR/MEMBER',
-  status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/INACTIVE',
-  created_by VARCHAR(128) NOT NULL,
-  removed_at TIMESTAMP NULL,
-  removed_by VARCHAR(128) NULL,
-  avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw',
-  env VARCHAR(20) NOT NULL,
-  gmt_created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_space_member (avernet_tenant, env, space_id, user_id),
-  KEY idx_space_member_user (avernet_tenant, env, user_id, status),
-  CONSTRAINT ck_space_member_role CHECK (role IN ('ADMINISTRATOR', 'MEMBER')),
-  CONSTRAINT ck_space_member_status CHECK (status IN ('ACTIVE', 'INACTIVE')),
-  CONSTRAINT ck_space_member_env_not_empty CHECK (env <> '')
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- ac_space and ac_space_member are owned by the unified Space migration:
+-- core/spaces/sql/2026_08_17_spaces.sql. Apply that file before this F01 DDL.
 
 CREATE TABLE IF NOT EXISTS ac_skill_space_binding (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

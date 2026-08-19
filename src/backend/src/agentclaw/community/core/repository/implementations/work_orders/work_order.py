@@ -47,6 +47,9 @@ from agentclaw.community.core.work_orders.repository.models import (
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
+_ADMINISTRATOR_ROLE = "ADMINISTRATOR"
+
+
 class WorkOrderRepository(WorkOrderRepositoryProtocol):
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
@@ -100,8 +103,9 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 db.query(self._Member.user_id)
                 .filter(
                     self._Member.space_id == space_id,
-                    self._Member.role == SpaceRole.OWNER.value,
+                    self._Member.role == _ADMINISTRATOR_ROLE,
                     self._Member.env == env,
+                    self._Member.status == "ACTIVE",
                 )
                 .all()
             )
@@ -157,8 +161,9 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 for (space_id,) in db.query(self._Member.space_id)
                 .filter(
                     self._Member.user_id == actor_id,
-                    self._Member.role == SpaceRole.OWNER.value,
+                    self._Member.role == _ADMINISTRATOR_ROLE,
                     self._Member.env == env,
+                    self._Member.status == "ACTIVE",
                 )
                 .all()
             }
@@ -297,8 +302,9 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 .filter(
                     self._Member.space_id == space.id,
                     self._Member.user_id == actor_id,
-                    self._Member.role == SpaceRole.OWNER.value,
+                    self._Member.role == _ADMINISTRATOR_ROLE,
                     self._Member.env == env,
+                    self._Member.status == "ACTIVE",
                 )
                 .first()
                 is not None
@@ -354,8 +360,9 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 .filter(
                     self._Member.space_id == int(work_order.biz_id),
                     self._Member.user_id == reviewer_user_id,
-                    self._Member.role == SpaceRole.OWNER.value,
+                    self._Member.role == _ADMINISTRATOR_ROLE,
                     self._Member.env == env,
+                    self._Member.status == "ACTIVE",
                 )
                 .first()
             )
@@ -498,8 +505,9 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                         .filter(
                             self._Member.space_id == int(work_order.biz_id),
                             self._Member.user_id == recipient_user_id,
-                            self._Member.role == SpaceRole.OWNER.value,
+                            self._Member.role == _ADMINISTRATOR_ROLE,
                             self._Member.env == env,
+                            self._Member.status == "ACTIVE",
                         )
                         .first()
                         is not None
