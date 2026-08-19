@@ -700,6 +700,11 @@ Phase 2 完成定义：产品主流程 E2E、SC pre 联调、多引擎矩阵、S
      `src/gateway/configs/schemas/bots.openapi.json`，供涔涔通过 Swagger/Redoc Review。
 - 不创建 Phase 1 前端实现 Ticket；前端切流只作为独立产品发布验收项，由前端团队
   依据生成 OpenAPI/Swagger 执行。
+- Phase 2 的核心纵向顺序为：P2-01 Identity/Initial Draft → P2-02
+  Owner/Manager/Edit Lease → P2-03 Draft 文件编辑；随后 P2-04 Git 导入和 P2-05
+  Publication Attempt 可并行。P2-06 文件型 Store、P2-07 Teclaw Store、P2-08
+  真实 SC 映射在 P2-05 后按真实依赖并行，汇合到 P2-09 PUBLISHED/升级/版本读取；
+  再执行 P2-10 Track Latest、P2-11 Service Artifact、P2-12 退役和最终 Gate/Rollback。
 - 旧 #1165～#1187 必须逐条归类为“已完成并关闭”“修订复用”或“被新 Ticket
   取代并关闭”；禁止保留两套同时可领取的 ready-for-agent 工作。
 - 每个实现 Ticket 使用独立上下文和 `implement` 流程，以小 PR 合入
