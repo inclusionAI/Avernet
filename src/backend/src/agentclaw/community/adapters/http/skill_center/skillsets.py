@@ -274,7 +274,10 @@ async def list_skill_sets_with_mcps(
         id=str(item["id"]), name=item.get("name", ""),
         description=item.get("description"), is_default=bool(item.get("is_default")),
         user_id=item.get("user_id"), bot_id=item.get("bolt_id") or effective_bot_id,
-        mcps=[MCPServerInSetResponse(**m) for m in item.get("mcps", [])],
+        mcps=[
+            MCPServerInSetResponse(**{**m, "id": str(m["id"])})
+            for m in item.get("mcps", [])
+        ],
     ) for item in control_plane.resources(
         bot_id=effective_bot_id, actor_id=_legacy_actor(ctx, user_id or entity_id)
     )]
@@ -306,7 +309,10 @@ async def list_skill_set_resources(
         id=str(item["id"]), name=item.get("name", ""),
         description=item.get("description"), is_default=bool(item.get("is_default")),
         user_id=item.get("user_id"), bot_id=item.get("bolt_id") or effective_bot_id,
-        mcps=[MCPServerInSetResponse(**m) for m in item.get("mcps", [])],
+        mcps=[
+            MCPServerInSetResponse(**{**m, "id": str(m["id"])})
+            for m in item.get("mcps", [])
+        ],
         clis=[CLIInSetResponse(**cli) for cli in item.get("clis", [])],
     ) for item in control_plane.resources(
         bot_id=effective_bot_id, actor_id=_legacy_actor(ctx, user_id or entity_id)

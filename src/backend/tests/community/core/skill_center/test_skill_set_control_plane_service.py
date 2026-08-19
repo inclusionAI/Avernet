@@ -8,7 +8,10 @@ from agentclaw.community.core.repository.implementations.skill_center.skill_set_
     SkillSetDesiredState,
     SkillSetMutation,
 )
-from agentclaw.community.core.skill_center.errors import SkillSetRuntimeReconcileError
+from agentclaw.community.core.skill_center.errors import (
+    SkillSetControlPlaneNotFoundError,
+    SkillSetRuntimeReconcileError,
+)
 from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
     SkillSetControlPlaneService,
 )
@@ -138,6 +141,38 @@ class _FailingReleaseGuard(_Guard):
         raise RuntimeError("pool release failed")
 
 
+class _LegacyResolutionRepository(_Repository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.identifiers: list[str] = []
+
+    def resolve_legacy_skill_id(self, *, bot_id: str, identifier: str) -> str:
+        assert bot_id == "bot-1"
+        self.identifiers.append(identifier)
+        raise SkillSetControlPlaneNotFoundError()
+
+
+class _LegacySkillSetService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+
+    def resolve_or_create_legacy_market_skill(
+        self, *, identifier: str, owner_id: str, bot_id: str
+    ) -> str:
+        self.calls.append((identifier, owner_id, bot_id))
+        return "stable-skill-id"
+
+
+class _LegacyFactory:
+    def __init__(self) -> None:
+        self.service = _LegacySkillSetService()
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.service
+
+
 @pytest.mark.asyncio
 async def test_collaborator_command_keeps_one_guard_through_restore_and_uses_true_owner():
     guard = _Guard()
@@ -229,3 +264,36 @@ async def test_skill_set_releases_mutation_lease_when_pool_release_fails():
     with pytest.raises(RuntimeError, match="pool release failed"):
         await service.activate(bot_id="bot-1", actor_id="true-owner", set_id="set-1")
     assert cache.held == {}
+
+
+def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membership():
+    """The legacy batch adapter keeps its historical implicit Repo creation."""
+    repository = _LegacyResolutionRepository()
+    factory = _LegacyFactory()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=factory,
+        passport=object(),
+        collaborators=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+    )
+
+    stable_id = service.resolve_legacy_skill_id(
+        bot_id="bot-1", actor_id="true-owner", identifier="market/example"
+    )
+
+    assert stable_id == "stable-skill-id"
+    assert repository.identifiers == ["market/example"]
+    assert factory.calls == [
+        {
+            "entity_id": "entity-1",
+            "bot_id": "bot-1",
+            "engine_type": "openclaw",
+            "entity_type": "staff",
+        }
+    ]
+    assert factory.service.calls == [("market/example", "true-owner", "bot-1")]

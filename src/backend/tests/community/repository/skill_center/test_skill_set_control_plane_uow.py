@@ -138,11 +138,17 @@ def test_legacy_switch_replaces_all_ordinary_active_sets_in_one_uow():
         target_skill = Skill(name="target-skill", git_path="git://target", env="dev")
         session.add_all([old_set, target_set, old_skill, target_skill])
         session.flush()
-        session.add_all([
-            SkillSetSkill(skill_set_id=old_set.id, skill_id=old_skill.id, env="dev"),
-            SkillSetSkill(skill_set_id=target_set.id, skill_id=target_skill.id, env="dev"),
-            BotSkillInstallation(bot_id="bot", skill_id=old_skill.id, env="dev"),
-        ])
+        session.add_all(
+            [
+                SkillSetSkill(
+                    skill_set_id=old_set.id, skill_id=old_skill.id, env="dev"
+                ),
+                SkillSetSkill(
+                    skill_set_id=target_set.id, skill_id=target_skill.id, env="dev"
+                ),
+                BotSkillInstallation(bot_id="bot", skill_id=old_skill.id, env="dev"),
+            ]
+        )
 
     result = SkillSetControlPlaneRepository(db).replace_active_set(
         bot_id="bot", set_id="2"
@@ -153,8 +159,35 @@ def test_legacy_switch_replaces_all_ordinary_active_sets_in_one_uow():
     assert result.details == {"activated": ["2"], "deactivated": ["1"]}
     with db.orm_session() as session:
         sets = {row.name: row.is_active for row in session.query(SkillSet).all()}
-        installed = {
-            row.skill_id for row in session.query(BotSkillInstallation).all()
-        }
+        installed = {row.skill_id for row in session.query(BotSkillInstallation).all()}
     assert sets == {"old": False, "target": True}
     assert installed == {2}
+
+
+def test_legacy_resolver_keeps_bot_scope_and_suffix_matching_for_existing_repo_skills():
+    """Historical name/path references must not select another Bot's asset."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        target = Skill(
+            name="same-name",
+            git_path="git://market/example",
+            bolt_id="bot-a",
+            env="dev",
+        )
+        other = Skill(
+            name="same-name",
+            git_path="git://other/example",
+            bolt_id="bot-b",
+            env="dev",
+        )
+        session.add_all([target, other])
+        session.flush()
+
+    repository = SkillSetControlPlaneRepository(db)
+
+    assert repository.resolve_legacy_skill_id(
+        bot_id="bot-a", identifier="same-name"
+    ) == str(target.id)
+    assert repository.resolve_legacy_skill_id(
+        bot_id="bot-a", identifier="market/example"
+    ) == str(target.id)

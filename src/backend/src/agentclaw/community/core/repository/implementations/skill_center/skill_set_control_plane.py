@@ -235,6 +235,16 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
             self._scope(session.query(SkillSetSkill), SkillSetSkill).filter(
                 SkillSetSkill.skill_set_id == row.id
             ).delete(synchronize_session=False)
+            # Create idempotency records intentionally retain the original
+            # response only while their SkillSet exists.  Delete them in the
+            # same UoW before removing the parent row; otherwise SQLite and
+            # production FK enforcement reject a perfectly valid inactive-set
+            # delete.
+            self._scope(
+                session.query(SkillSetCreateIdempotency), SkillSetCreateIdempotency
+            ).filter(SkillSetCreateIdempotency.skill_set_id == row.id).delete(
+                synchronize_session=False
+            )
             session.delete(row)
 
     def list_skills(
@@ -274,8 +284,15 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
             if identifier.isdigit():
                 query = query.filter(Skill.id == int(identifier))
             else:
-                query = query.filter(or_(Skill.name == identifier, Skill.git_path == identifier))
-            skill = query.one_or_none()
+                query = query.filter(
+                    or_(Skill.bolt_id == bot_id, Skill.bolt_id.is_(None)),
+                    or_(
+                        Skill.name == identifier,
+                        Skill.git_path == identifier,
+                        Skill.git_path.endswith(identifier),
+                    ),
+                )
+            skill = query.order_by(Skill.gmt_created.desc(), Skill.id.desc()).first()
             if skill is None or (
                 str(skill.git_path or "").startswith("local://")
                 and skill.bolt_id != bot_id
@@ -504,7 +521,11 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                     )
                 )
             session.flush()
-            activated = [str(target.id)] if not old.set_active.get(int(target.id), False) else []
+            activated = (
+                [str(target.id)]
+                if not old.set_active.get(int(target.id), False)
+                else []
+            )
             deactivated = [
                 str(row.id)
                 for row in sets
