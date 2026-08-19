@@ -627,6 +627,65 @@ class BcnService:
         except Exception as e:
             raise BcnServiceError(f"BCS attributes patch error: {e}")
 
+    def check_admission(
+        self,
+        bot_uuid: str,
+        actor: str,
+        originator: str | None = None,
+    ) -> Dict[str, Any]:
+        """Check BCS admission: is ``actor`` allowed to access ``bot_uuid``?
+
+        Calls ``GET /bots/{bot_uuid}/admission`` on BCS (edge-permission SoR).
+        Returns the BCS ``AdmissionResult`` dict:
+        ``{allowed, grants, reason_code, public_default}``.
+
+        Used at Phase 4 cutover to replace the old ``BotFriendRepository``
+        friend-check in ``SessionResourceService._resolve_upload_context``.
+
+        Args:
+            bot_uuid: BCS composite bot id (``{backend_bot_id}:{owner_workno}``).
+            actor: requesting actor id (``human_<staff_no>`` or bot_uuid).
+            originator: optional originator (BCS defaults to ``actor``).
+
+        Returns:
+            AdmissionResult dict from BCS.
+
+        Raises:
+            BcnServiceError: on HTTP error or timeout.
+        """
+        params: Dict[str, str] = {"actor": actor}
+        if originator is not None:
+            params["originator"] = originator
+
+        try:
+            response = self._http.get(
+                f"/bots/{bot_uuid}/admission",
+                params=params,
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else "No response"
+            status = e.response.status_code if e.response else "N/A"
+            logger.error(
+                f"[BcnService.check_admission] HTTP error: "
+                f"status={status} body={error_body} bot_uuid={bot_uuid}"
+            )
+            raise BcnServiceError(
+                f"BCS admission HTTP error: {status} - {error_body}"
+            )
+        except httpx.TimeoutException as e:
+            logger.error(
+                f"[BcnService.check_admission] Timeout: {e} bot_uuid={bot_uuid}"
+            )
+            raise BcnServiceError(f"BCS admission timeout: {e}")
+        except Exception as e:
+            logger.error(
+                f"[BcnService.check_admission] Unexpected error: {e} bot_uuid={bot_uuid}"
+            )
+            raise BcnServiceError(f"BCS admission error: {e}")
+
 
 # ``BcnService`` is wired as a @singleton via the injector
 # (BotManagementModule binds it; BotService receives it by ctor).
