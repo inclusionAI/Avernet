@@ -22,7 +22,6 @@ consumes:
   - "SystemConfig"
   - "PassportPlugin"
 internal_dependencies:
-  - agentclaw.community.api.device_service    # device instance list and restart Service API used by the public lifecycle facade
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module

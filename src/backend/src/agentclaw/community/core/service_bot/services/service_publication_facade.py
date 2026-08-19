@@ -14,7 +14,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
     CollaboratorLockService,
@@ -44,6 +43,7 @@ from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
     PublishStatus,
 )
+from agentclaw.community.core.service_bot.protocols import ServiceRuntimeDevicePort
 from agentclaw.community.core.service_bot.errors import (
     ServiceContainerConflictError,
     ServiceContainerNotFoundError,
@@ -103,7 +103,7 @@ class ServicePublicationFacade:
         collaborator_service: CollaboratorService,
         lock_service: CollaboratorLockService,
         bot_service: BotService,
-        device_service: DeviceServiceProtocol,
+        device_service: ServiceRuntimeDevicePort,
     ) -> None:
         self._bot_repo = bot_repo
         self._publish_repo = publish_repo
