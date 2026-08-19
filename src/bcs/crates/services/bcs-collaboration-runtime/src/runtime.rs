@@ -82,6 +82,7 @@ pub struct CollaborationRuntime {
     bot_delivery: Arc<dyn BotDeliveryPort>,
     bot_registry: Option<Arc<dyn BotRegistryCoreService>>,
     bot_run_context: Option<Arc<dyn BotRunContextPort>>,
+    provider_chat_run_timeout_ms: u64,
     frontend_delivery: Option<Arc<dyn FrontendDeliveryPort>>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     session_channel_outbound: Option<Arc<dyn SessionChannelOutboundPort>>,
@@ -122,6 +123,7 @@ impl CollaborationRuntime {
             bot_delivery,
             bot_registry: None,
             bot_run_context: None,
+            provider_chat_run_timeout_ms: bcs_service_api::DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
             judge,
             frontend_delivery: None,
             message_repo: None,
@@ -138,6 +140,11 @@ impl CollaborationRuntime {
 
     pub fn with_bot_run_context(mut self, bot_run_context: Arc<dyn BotRunContextPort>) -> Self {
         self.bot_run_context = Some(bot_run_context);
+        self
+    }
+
+    pub fn with_provider_chat_run_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.provider_chat_run_timeout_ms = timeout_ms;
         self
     }
 
@@ -591,7 +598,7 @@ impl CollaborationRuntime {
                 .and_then(|node| node.timeout_deadline_ms)
                 .unwrap_or_else(|| {
                     bcs_protocol::now_ms()
-                        .saturating_add(bcs_service_api::DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+                        .saturating_add(self.provider_chat_run_timeout_ms)
                 });
             bot_run_context
                 .put_context(BotRunContext {
@@ -628,7 +635,7 @@ impl CollaborationRuntime {
             delivery_request_id = %delivery_request_id,
             "state_machine: node dispatch started"
         );
-        let frame = build_chat_send_frame(
+        let mut frame = build_chat_send_frame(
             &delivery_request_id,
             &group.id,
             &group_context,
@@ -645,6 +652,13 @@ impl CollaborationRuntime {
             Some("state_machine".to_string()),
             Some(&run.session_id),
         );
+        if let Some(timeout_ms) = node_run.node_timeout_ms {
+            if let BcsFrame::Request(request) = &mut frame {
+                if let Some(params) = request.params.as_mut().and_then(Value::as_object_mut) {
+                    params.insert("timeout_ms".to_string(), Value::from(timeout_ms));
+                }
+            }
+        }
         let target = if let Some(registry) = self.bot_registry.as_ref() {
             registry.resolve_delivery_target(&assignee_bot_id).await?
         } else {
