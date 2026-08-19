@@ -179,14 +179,14 @@ def test_only_the_bots_component_owns_the_bare_wildcard():
     assert wildcards <= {"{bot_id}"}, f"unexpected top-level parameters: {wildcards}"
 
 
-def test_channels_is_gone():
-    """Deleted rather than left as a stub — it was *published*.
-
-    An unimplemented component a caller cannot distinguish from an implemented
-    one is worse than an absent one: it 500s on every call.
-    """
-    offenders = [p for p in _paths() if "channels" in p]
-    assert not offenders, f"channels was removed: {offenders}"
+def test_channels_uses_only_bot_first_addresses():
+    """The restored Channels contract is real and follows Bot-first addressing."""
+    channel_paths = {p for p in _paths() if "channels" in p}
+    assert channel_paths == {
+        "/openapi/v1/bots/{bot_id}/channels",
+        "/openapi/v1/bots/{bot_id}/channels/{channel_id}",
+        "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status",
+    }
 
 
 def _fenced_names(anchor: str) -> set[str]:

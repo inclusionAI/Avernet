@@ -1,0 +1,81 @@
+"""Bot ownership-Space mutation policy and orchestration."""
+
+from __future__ import annotations
+
+from injector import inject
+
+from agentclaw.community.core.bot_management.bot_space import (
+    BotSpaceAssignmentResult,
+)
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotNotFoundError,
+    BotOperationNotAllowedError,
+)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
+from agentclaw.community.core.spaces.models import SpaceType
+from agentclaw.community.api.space_service import SpaceAccessServiceProtocol
+
+
+class BotSpaceService:
+    """Change a Bot's structured ``ac_bots.space_id`` assignment.
+
+    Bot ownership and target-Space membership are both checked in core.  The
+    HTTP adapter only translates the typed result to the public contract.
+    """
+
+    @inject
+    def __init__(
+        self,
+        repository: BotRepository,
+        space_access: SpaceAccessServiceProtocol,
+    ) -> None:
+        self._repository = repository
+        self._space_access = space_access
+
+    def change_space(
+        self, *, bot_id: str, owner_id: str, space_id: int
+    ) -> BotSpaceAssignmentResult:
+        bot = self._repository.get_by_id_and_owner(bot_id, owner_id)
+        if bot is None:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+
+        space, _member = self._space_access.require_space_member(
+            space_id=space_id,
+            user_id=owner_id,
+        )
+        if (
+            space.space_type is SpaceType.PERSONAL
+            and space.personal_owner_id != owner_id
+        ):
+            # Personal Spaces are not transferable destinations even if a bad
+            # membership row exists. Preserve the owner invariant here rather
+            # than relying on persistence data being perfect.
+            raise SpaceAccessDeniedError("personal space belongs to another user")
+
+        if (
+            bot.get("bot_type") == "desktop"
+            and space.space_type is not SpaceType.PERSONAL
+        ):
+            # Local Bots have no shared runtime that a team Space can own. This
+            # is the same P0 product constraint enforced by the inventory combo
+            # policy; moving one would create a record the runtime cannot honor.
+            raise BotOperationNotAllowedError(
+                "local bots can only belong to their owner's personal space"
+            )
+
+        persisted_space_id = str(space.id)
+        changed = str(bot.get("space_id") or "") != persisted_space_id
+        if not changed:
+            return BotSpaceAssignmentResult(bot=bot, space=space, changed=False)
+
+        updated = self._repository.update_space_by_owner(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            space_id=persisted_space_id,
+        )
+        if updated is None:
+            # The Bot may have been deleted between the read and write. Mask it
+            # exactly like the initial owner-scoped lookup.
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+        return BotSpaceAssignmentResult(bot=updated, space=space, changed=True)

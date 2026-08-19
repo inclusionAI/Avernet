@@ -178,6 +178,7 @@ from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
 from .bots.engine_config import router as engine_config_router
 from .caller import router as caller_router
+from .channels import router as channels_router
 from .containers import router as containers_router
 from .diagnostics import router as diagnostics_router
 from .deprecated import (
@@ -285,6 +286,7 @@ _SUBGROUPS = [
     service_edit_lock_router,
     containers_router,
     diagnostics_router,
+    channels_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it

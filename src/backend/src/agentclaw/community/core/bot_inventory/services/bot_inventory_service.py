@@ -61,7 +61,7 @@ class BotInventoryService:
                 row for row in cloud_rows if row.get("bot_type") == "service"
             ]
             cards.extend(
-                self._to_item(row, owner_id)
+                self._to_item(row, owner_id, space)
                 for row in cloud_rows
                 if row.get("bot_type") != "service"
             )
@@ -69,12 +69,12 @@ class BotInventoryService:
             for row in service_rows:
                 bot_id = str(row.get("bot_id") or "")
                 cards.extend(
-                    self._to_service_item(row, owner_id, lifecycle_card)
+                    self._to_service_item(row, owner_id, lifecycle_card, space)
                     for lifecycle_card in service_cards.get(bot_id, ())
                 )
         if deploy_mode in (None, DeployMode.LOCAL):
             cards.extend(
-                self._to_local_item(row, owner_id)
+                self._to_local_item(row, owner_id, space)
                 for row in self._list_local_rows(
                     owner_id=owner_id,
                     keyword=keyword,
@@ -163,26 +163,43 @@ class BotInventoryService:
             ]
         return rows
 
-    def _to_item(self, row: Mapping[str, Any], owner_id: str) -> BotInventoryItem:
+    def _to_item(
+        self,
+        row: Mapping[str, Any],
+        owner_id: str,
+        current_space: BusinessSpaceRef | None,
+    ) -> BotInventoryItem:
         bot_type = str(row.get("bot_type") or "personal")
         if bot_type == "desktop":
-            return self._to_local_item(row, owner_id)
-        return self._to_cloud_item(row, owner_id)
+            return self._to_local_item(row, owner_id, current_space)
+        return self._to_cloud_item(row, owner_id, current_space)
 
-    def _to_cloud_item(self, row: Mapping[str, Any], owner_id: str) -> BotInventoryItem:
+    def _to_cloud_item(
+        self,
+        row: Mapping[str, Any],
+        owner_id: str,
+        current_space: BusinessSpaceRef | None,
+    ) -> BotInventoryItem:
         return self._build_item(
             row=row,
             owner_id=owner_id,
             kind=BotInventoryKind.PERSONAL_CLOUD,
             deploy_mode=DeployMode.CLOUD,
+            current_space=current_space,
         )
 
-    def _to_local_item(self, row: Mapping[str, Any], owner_id: str) -> BotInventoryItem:
+    def _to_local_item(
+        self,
+        row: Mapping[str, Any],
+        owner_id: str,
+        current_space: BusinessSpaceRef | None,
+    ) -> BotInventoryItem:
         return self._build_item(
             row=row,
             owner_id=owner_id,
             kind=BotInventoryKind.LOCAL,
             deploy_mode=DeployMode.LOCAL,
+            current_space=current_space,
         )
 
     def _to_service_item(
@@ -190,6 +207,7 @@ class BotInventoryService:
         row: Mapping[str, Any],
         owner_id: str,
         lifecycle_card: ServiceLifecycleCard,
+        current_space: BusinessSpaceRef | None,
     ) -> BotInventoryItem:
         return self._build_item(
             row=row,
@@ -197,6 +215,7 @@ class BotInventoryService:
             kind=BotInventoryKind.SERVICE,
             deploy_mode=DeployMode.CLOUD,
             lifecycle_card=lifecycle_card,
+            current_space=current_space,
         )
 
     def _build_item(
@@ -207,6 +226,7 @@ class BotInventoryService:
         kind: BotInventoryKind,
         deploy_mode: DeployMode,
         lifecycle_card: ServiceLifecycleCard | None = None,
+        current_space: BusinessSpaceRef | None = None,
     ) -> BotInventoryItem:
         ext = _as_mapping(row.get("ext"))
         normalized = {**dict(row), "ext": ext}
@@ -242,7 +262,9 @@ class BotInventoryService:
                 row.get("owner_id") or row.get("entity_id") or owner_id
             ),
             space=self._business_space.bot_space(
-                bot={**dict(row), "ext": ext}, owner_id=owner_id
+                bot={**dict(row), "ext": ext},
+                owner_id=owner_id,
+                current_space=current_space,
             ),
             avatar_url=_optional_str(ext.get("avatar_url") or row.get("avatar_url")),
             machine_id=_optional_str(ext.get("machine_id") or row.get("machine_id")),

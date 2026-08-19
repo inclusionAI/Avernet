@@ -77,6 +77,11 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     DeviceLimitError,
 )
+from agentclaw.community.core.channel.errors import (
+    ChannelEditLockedError,
+    ChannelNotFoundError,
+    ChannelSyncError,
+)
 from agentclaw.community.core.bot_chat.errors import (
     InvalidBotLogQueryError,
     SessionNotFoundError,
@@ -318,6 +323,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     InvalidBotLogQueryError: (400, "Invalid log query"),
     SessionNotFoundError: (404, "Not found"),
     BotNotFoundError: (404, "Not found"),
+    ChannelNotFoundError: (404, "Not found"),
+    ChannelSyncError: (502, "Channel synchronization failed"),
     # Byte-identical to the line above, deliberately. An application that could
     # tell "I hold no grant for this bot" from "no such bot" would have an
     # enumeration oracle for every bot id in the tenant, so the refusal must be
@@ -379,6 +386,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Operation not supported for this bot",
     ),
     ServicePublicationLockedError: (423, "Edit lock required"),
+    ChannelEditLockedError: (423, "Edit lock required"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
     PassportError: (502, "Authorization service error"),
@@ -421,7 +429,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
     LocalSkillEditBusyError: (409, "Another Skill update is in progress"),
     LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
-    LocalSkillEditLockUnavailableError: (503, "Skill update service is temporarily unavailable"),
+    LocalSkillEditLockUnavailableError: (
+        503,
+        "Skill update service is temporarily unavailable",
+    ),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
@@ -439,7 +450,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ),
     # ... and refused outright for a bot whose container cannot run one,
     # rather than stored where it would silently never execute.
-    StartupScriptUnsupportedError: (409, "Startup script is not supported for this bot"),
+    StartupScriptUnsupportedError: (
+        409,
+        "Startup script is not supported for this bot",
+    ),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
@@ -718,9 +732,7 @@ def envelope_errors(
             response = mapped_error_response(exc, request)
             if response is None:
                 raise
-            log_public_error(
-                request, exc, status=response.status_code, params=params
-            )
+            log_public_error(request, exc, status=response.status_code, params=params)
             return response
 
     return wrapper

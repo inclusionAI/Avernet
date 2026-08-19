@@ -140,6 +140,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # acting as them can only reach the same ones.
     ("GET", "/openapi/v1/bots/{bot_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("PUT", "/openapi/v1/bots/{bot_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
+        "PUT",
+        "/openapi/v1/bots/{bot_id}/space",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("DELETE", "/openapi/v1/bots/{bot_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/restart"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     (
@@ -277,6 +281,33 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    # channels — collaborators may address a shared Bot, while every write
+    # additionally requires ADMIN permission in the handler. The application
+    # grant is still checked against the addressed owner at the shared seam.
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/channels",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/channels",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/channels/{channel_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PATCH",
+        "/openapi/v1/bots/{bot_id}/channels/{channel_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/channels/{channel_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PUT",
+        "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/sessions",
