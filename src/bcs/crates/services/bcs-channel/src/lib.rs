@@ -1,5 +1,6 @@
 //! Channel(IM bridge) application service implementation.
 
+mod commands;
 pub mod visibility;
 
 use std::collections::{HashSet, VecDeque};
@@ -68,6 +69,8 @@ pub struct BcsChannelService {
     inbound_dedup: InboundDedupGuard,
     binding_admin_lock: Mutex<()>,
     state_machine_session_resolution_lock: Mutex<()>,
+    chat_session_resolution_lock: Mutex<()>,
+    session_reset_tracker: commands::SessionResetTracker,
 }
 
 struct ResolvedInboundContext {
@@ -117,6 +120,8 @@ impl BcsChannelService {
             inbound_dedup: InboundDedupGuard::new(DEFAULT_INBOUND_DEDUP_LIMIT),
             binding_admin_lock: Mutex::new(()),
             state_machine_session_resolution_lock: Mutex::new(()),
+            chat_session_resolution_lock: Mutex::new(()),
+            session_reset_tracker: commands::SessionResetTracker::new(DEFAULT_INBOUND_DEDUP_LIMIT),
         }
     }
 
@@ -1029,6 +1034,16 @@ impl ChannelService for BcsChannelService {
                 "channel inbound: actor resolved"
             );
             if self
+                .try_execute_channel_command(&binding, &msg, &actor_id)
+                .await
+                .map_err(|error| {
+                    inbound_failure(ChannelInboundFailureKind::DispatchFailed, true, error)
+                })?
+                .is_some()
+            {
+                return Ok(());
+            }
+            if self
                 .try_consume_human_input(&binding, &msg, &actor_id)
                 .await
                 .map_err(|error| {
@@ -1066,6 +1081,7 @@ impl ChannelService for BcsChannelService {
                 state_machine_trigger = ctx.state_machine_trigger,
                 "channel inbound: context resolved"
             );
+            self.maybe_execute_stale_reset(&ctx, &msg).await;
 
             if ctx.state_machine_trigger {
                 return self
@@ -1076,16 +1092,40 @@ impl ChannelService for BcsChannelService {
                     });
             }
 
-            let (session_id, reused_session) = self
-                .resolve_or_create_chat_session(&ctx, &msg)
-                .await
-                .map_err(|error| {
-                    inbound_failure(
-                        ChannelInboundFailureKind::SessionResolutionFailed,
-                        true,
-                        error,
-                    )
-                })?;
+            // /new 归档旧会话后，并发消息可能同时看到 Completed 状态；
+            // 锁内完成"解析或创建 + 映射重指"，保证只建一个新会话。
+            let (session_id, reused_session) = {
+                let _guard = self.chat_session_resolution_lock.lock().await;
+                let resolved = self
+                    .resolve_or_create_chat_session(&ctx, &msg)
+                    .await
+                    .map_err(|error| {
+                        inbound_failure(
+                            ChannelInboundFailureKind::SessionResolutionFailed,
+                            true,
+                            error,
+                        )
+                    })?;
+                self.conversations
+                    .upsert(ConversationSessionMap {
+                        binding_id: binding.id.clone(),
+                        im_conversation_id: msg.im_conversation_id.clone(),
+                        im_conversation_type: msg.conversation_type.clone(),
+                        session_scope: ctx.session_scope,
+                        im_user_id: ctx.im_user_id.clone(),
+                        bcs_session_id: resolved.0.clone(),
+                        last_active_at: (self.now_ms)(),
+                    })
+                    .await
+                    .map_err(|error| {
+                        inbound_failure(
+                            ChannelInboundFailureKind::SessionResolutionFailed,
+                            true,
+                            error,
+                        )
+                    })?;
+                resolved
+            };
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %account_ref,
@@ -1097,24 +1137,6 @@ impl ChannelService for BcsChannelService {
                 session_scope = session_scope_label(ctx.session_scope),
                 "channel inbound: session resolved"
             );
-            self.conversations
-                .upsert(ConversationSessionMap {
-                    binding_id: binding.id,
-                    im_conversation_id: msg.im_conversation_id.clone(),
-                    im_conversation_type: msg.conversation_type.clone(),
-                    session_scope: ctx.session_scope,
-                    im_user_id: ctx.im_user_id.clone(),
-                    bcs_session_id: session_id.clone(),
-                    last_active_at: (self.now_ms)(),
-                })
-                .await
-                .map_err(|error| {
-                    inbound_failure(
-                        ChannelInboundFailureKind::SessionResolutionFailed,
-                        true,
-                        error,
-                    )
-                })?;
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %account_ref,
@@ -1185,6 +1207,9 @@ impl ChannelService for BcsChannelService {
                     ),
                 ));
             }
+            self.session_reset_tracker
+                .seed_runs(&dispatch_session_id, &outcome.active_run_ids)
+                .await;
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %account_ref,
@@ -1210,6 +1235,7 @@ impl ChannelService for BcsChannelService {
         if msg.source_is_channel {
             return Ok(());
         }
+        self.observe_outbound_terminal(&msg).await;
         let require_confirmed_delivery = msg
             .raw_payload
             .get("type")
@@ -1929,6 +1955,7 @@ impl SessionChannelOutboundPort for BcsChannelService {
         &self,
         event: StateMachineTerminalEvent,
     ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+        self.observe_state_machine_terminal(&event).await;
         let requests = self.human_input_requests.list_by_run(&event.run_id).await?;
         let reply_scopes = requests
             .iter()
@@ -2584,6 +2611,25 @@ mod tests {
             env: &str,
             new_id: Arc<dyn Fn() -> String + Send + Sync>,
         ) -> ServiceResult<Self> {
+            Self::new_with_env_id_clock(group, env, new_id, Arc::new(AtomicU64::new(42))).await
+        }
+
+        async fn new_with_clock(group: Group, clock: Arc<AtomicU64>) -> ServiceResult<Self> {
+            Self::new_with_env_id_clock(
+                group,
+                "pre",
+                Arc::new(|| "generated_id".to_string()),
+                clock,
+            )
+            .await
+        }
+
+        async fn new_with_env_id_clock(
+            group: Group,
+            env: &str,
+            new_id: Arc<dyn Fn() -> String + Send + Sync>,
+            clock: Arc<AtomicU64>,
+        ) -> ServiceResult<Self> {
             let binding_repo = Arc::new(MemoryChannelBindingRepo::new(env));
             let conversation_repo = Arc::new(MemoryConversationSessionRepo::new());
             let participant_repo = Arc::new(MemoryImParticipantRepo::new());
@@ -2614,7 +2660,7 @@ mod tests {
                 registry.clone(),
                 providers,
                 env,
-                Arc::new(|| 42),
+                Arc::new(move || clock.load(Ordering::SeqCst)),
                 new_id,
             );
 
@@ -6237,6 +6283,7 @@ mod tests {
     struct RecordingMessageFlow {
         web_sends: Mutex<Vec<WebSendCommand>>,
         failed_dispatch_count: Mutex<usize>,
+        active_run_ids: Mutex<Vec<String>>,
     }
 
     #[async_trait]
@@ -6244,10 +6291,11 @@ mod tests {
         async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
             self.web_sends.lock().await.push(cmd);
             let failed_count = *self.failed_dispatch_count.lock().await;
+            let active_run_ids = self.active_run_ids.lock().await.clone();
             Ok(WebSendOutcome {
                 primary_run_id: "run_1".to_string(),
                 status: "accepted".to_string(),
-                active_run_ids: Vec::new(),
+                active_run_ids,
                 bot_deliveries: Vec::new(),
                 frontend_deliveries: Vec::new(),
                 mentions: Vec::new(),
@@ -6806,5 +6854,754 @@ mod tests {
             message: format!("{name} is not configured"),
             request_id: None,
         }
+    }
+
+    // ── /new slash 命令 ─────────────────────────────────────────
+
+    fn new_command(conversation_id: &str, user_id: &str, msg_id: &str) -> InboundMessage {
+        let mut msg = inbound(conversation_id, user_id, Some("张三"), msg_id);
+        msg.text = "/new".to_string();
+        msg
+    }
+
+    fn group_new_command(conversation_id: &str, user_id: &str, msg_id: &str) -> InboundMessage {
+        let mut msg = group_inbound(conversation_id, user_id, Some("张三"), msg_id, true);
+        msg.text = "/new".to_string();
+        msg
+    }
+
+    async fn create_group_binding(
+        harness: &TestHarness,
+        group_id: &str,
+        scope: GroupChatScope,
+    ) -> TestResult {
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: group_id.to_string(),
+                },
+                group_chat_scope: Some(scope),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+        Ok(())
+    }
+
+    async fn delivered_texts(harness: &TestHarness) -> Vec<String> {
+        harness
+            .delivery
+            .events
+            .lock()
+            .await
+            .iter()
+            .filter_map(|event| event.text.clone())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn new_command_without_session_replies_nothing_to_reset() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        create_group_binding(&harness, "group_1", GroupChatScope::ConversationShared).await?;
+
+        harness
+            .service
+            .handle_inbound(new_command("conv_1", "u1", "msg_new"))
+            .await?;
+
+        let events = harness.delivery.events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].text.as_deref(),
+            Some(crate::commands::NOTHING_TO_RESET_TEXT)
+        );
+        assert_eq!(events[0].kind, ChannelOutboundEventKind::System);
+        assert_eq!(events[0].source_im_message_id.as_deref(), Some("msg_new"));
+        assert!(events[0].bcs_session_id.is_empty());
+        assert!(harness.message_flow.web_sends.lock().await.is_empty());
+        assert!(harness.session_repo.sessions.lock().await.is_empty());
+        assert!(
+            harness
+                .conversation_repo
+                .get(
+                    "generated_id",
+                    "conv_1",
+                    SessionScope::Conversation,
+                    Some("u1"),
+                )
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn new_command_completes_idle_session_and_next_message_rolls_over() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        create_group_binding(&harness, "group_1", GroupChatScope::ConversationShared).await?;
+        harness
+            .service
+            .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_1"))
+            .await?;
+        let mapping = harness
+            .conversation_repo
+            .get(
+                "generated_id",
+                "conv_1",
+                SessionScope::Conversation,
+                Some("u1"),
+            )
+            .await?
+            .expect("mapping after first message");
+        let old_session_id = mapping.bcs_session_id.clone();
+
+        harness
+            .service
+            .handle_inbound(new_command("conv_1", "u1", "msg_new"))
+            .await?;
+
+        let old_session = harness
+            .session_repo
+            .get(&old_session_id)
+            .await
+            .expect("old session");
+        assert_eq!(old_session.status, SessionStatus::Completed);
+        assert!(
+            old_session
+                .output
+                .as_ref()
+                .is_some_and(|output| output.to_string().contains("channel_command_new"))
+        );
+        // 映射原地保留，作为下一条消息 rollover 的触发器。
+        let mapping_after = harness
+            .conversation_repo
+            .get(
+                "generated_id",
+                "conv_1",
+                SessionScope::Conversation,
+                Some("u1"),
+            )
+            .await?
+            .expect("mapping kept");
+        assert_eq!(mapping_after.bcs_session_id, old_session_id);
+        assert_eq!(
+            delivered_texts(&harness).await,
+            vec![crate::commands::RESET_DONE_TEXT.to_string()]
+        );
+        assert_eq!(harness.message_flow.web_sends.lock().await.len(), 1);
+
+        // 相同 msg_id 的 webhook 重放被 dedup，不重复回复。
+        harness
+            .service
+            .handle_inbound(new_command("conv_1", "u1", "msg_new"))
+            .await?;
+        assert_eq!(delivered_texts(&harness).await.len(), 1);
+
+        // 下一条普通消息恰好创建一个新会话并重指映射。
+        harness
+            .service
+            .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_2"))
+            .await?;
+        let mapping_new = harness
+            .conversation_repo
+            .get(
+                "generated_id",
+                "conv_1",
+                SessionScope::Conversation,
+                Some("u1"),
+            )
+            .await?
+            .expect("mapping rolled over");
+        assert_ne!(mapping_new.bcs_session_id, old_session_id);
+        let new_session = harness
+            .session_repo
+            .get(&mapping_new.bcs_session_id)
+            .await
+            .expect("new session");
+        assert_eq!(new_session.status, SessionStatus::Running);
+        assert_eq!(harness.session_repo.sessions.lock().await.len(), 2);
+        let web_sends = harness.message_flow.web_sends.lock().await;
+        assert_eq!(web_sends.len(), 2);
+        assert_eq!(
+            web_sends[1].session_id.as_deref(),
+            Some(mapping_new.bcs_session_id.as_str())
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn new_command_queues_behind_active_run_and_executes_on_chat_final() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        create_group_binding(&harness, "group_1", GroupChatScope::ConversationShared).await?;
+        *harness.message_flow.active_run_ids.lock().await = vec!["run_1".to_string()];
+        harness
+            .service
+            .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_1"))
+            .await?;
+        let old_session_id = harness
+            .conversation_repo
+            .get(
+                "generated_id",
+                "conv_1",
+                SessionScope::Conversation,
+                Some("u1"),
+            )
+            .await?
+            .expect("mapping")
+            .bcs_session_id;
+
+        harness
+            .service
+            .handle_inbound(new_command("conv_1", "u1", "msg_new"))
+            .await?;
+
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&old_session_id)
+                .await
+                .expect("session")
+                .status,
+            SessionStatus::Running
+        );
+        assert_eq!(
+            delivered_texts(&harness).await,
+            vec![crate::commands::RESET_QUEUED_TEXT.to_string()]
+        );
+
+        // run 终态（ChatFinal）经过 try_outbound → 自动执行排队的重置。
+        harness
+            .service
+            .try_outbound(outbound(&old_session_id, ParticipantRole::Worker, false))
+            .await?;
+
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&old_session_id)
+                .await
+                .expect("session")
+                .status,
+            SessionStatus::Completed
+        );
+        let events = harness.delivery.events.lock().await;
+        let done = events
+            .iter()
+            .find(|event| event.text.as_deref() == Some(crate::commands::RESET_DONE_TEXT))
+            .expect("deferred reset confirmation");
+        assert_eq!(done.source_im_message_id.as_deref(), Some("msg_new"));
+        assert_eq!(done.bcs_session_id, old_session_id);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn new_command_queued_reset_executes_on_error_terminal() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        create_group_binding(&harness, "group_1", GroupChatScope::ConversationShared).await?;
+        *harness.message_flow.active_run_ids.lock().await = vec!["run_1".to_string()];
+        harness
+            .service
+            .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_1"))
+            .await?;
+        let old_session_id = harness
+            .conversation_repo
+            .get(
+                "generated_id",
+                "conv_1",
+                SessionScope::Conversation,
+                Some("u1"),
+            )
+            .await?
+            .expect("mapping")
+            .bcs_session_id;
+        harness
+            .service
+            .handle_inbound(new_command("conv_1", "u1", "msg_new"))
+            .await?;
+
+        let mut terminal = outbound(&old_session_id, ParticipantRole::Worker, false);
+        terminal.kind = ChannelOutboundEventKind::System;
+        terminal.raw_payload = serde_json::json!({"state": "error"});
+        terminal.text = Some("机器人连接或执行失败，请稍后重试。".to_string());
+        harness.service.try_outbound(terminal).await?;
+
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&old_session_id)
+                .await
+                .expect("session")
+                .status,
+            SessionStatus::Completed
+        );
+        assert!(
+            delivered_texts(&harness)
+                .await
+                .contains(&crate::commands::RESET_DONE_TEXT.to_string())
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn new_command_per_sender_group_resets_only_sender_session() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        create_group_binding(&harness, "group_1", GroupChatScope::PerSender).await?;
+        harness
+            .service
+            .handle_inbound(group_inbound("conv_1", "u1", Some("张三"), "msg_1", true))
+            .await?;
+        harness
+            .service
+            .handle_inbound(group_inbound("conv_1", "u2", Some("李四"), "msg_2", true))
+            .await?;
+        let session_u1 = harness
+            .conversation_repo
+            .get("generated_id", "conv_1", SessionScope::PerSender, Some("u1"))
+            .await?
+            .expect("u1 mapping")
+            .bcs_session_id;
+        let session_u2 = harness
+            .conversation_repo
+            .get("generated_id", "conv_1", SessionScope::PerSender, Some("u2"))
+            .await?
+            .expect("u2 mapping")
+            .bcs_session_id;
+        assert_ne!(session_u1, session_u2);
+
+        harness
+            .service
+            .handle_inbound(group_new_command("conv_1", "u1", "msg_new"))
+            .await?;
+
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&session_u1)
+                .await
+                .expect("u1 session")
+                .status,
+            SessionStatus::Completed
+        );
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&session_u2)
+                .await
+                .expect("u2 session")
+                .status,
+            SessionStatus::Running
+        );
+        let events = harness.delivery.events.lock().await;
+        let done = events
+            .iter()
+            .find(|event| event.text.as_deref() == Some(crate::commands::RESET_DONE_TEXT))
+            .expect("reset confirmation");
+        assert_eq!(done.im_user_id.as_deref(), Some("u1"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn new_command_shared_group_resets_shared_session() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        create_group_binding(&harness, "group_1", GroupChatScope::ConversationShared).await?;
+        harness
+            .service
+            .handle_inbound(group_inbound("conv_1", "u1", Some("张三"), "msg_1", true))
+            .await?;
+        harness
+            .service
+            .handle_inbound(group_inbound("conv_1", "u2", Some("李四"), "msg_2", true))
+            .await?;
+        let shared = harness
+            .conversation_repo
+            .get("generated_id", "conv_1", SessionScope::Conversation, None)
+            .await?
+            .expect("shared mapping")
+            .bcs_session_id;
+
+        harness
+            .service
+            .handle_inbound(group_new_command("conv_1", "u2", "msg_new"))
+            .await?;
+
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&shared)
+                .await
+                .expect("shared session")
+                .status,
+            SessionStatus::Completed
+        );
+        let events = harness.delivery.events.lock().await;
+        let done = events
+            .iter()
+            .find(|event| event.text.as_deref() == Some(crate::commands::RESET_DONE_TEXT))
+            .expect("reset confirmation");
+        assert_eq!(done.im_user_id, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn new_command_state_machine_idle_resets_immediately() -> TestResult {
+        let clock = Arc::new(AtomicU64::new(100_000));
+        let harness = TestHarness::new_with_clock(state_machine_group("group_sm"), clock).await?;
+        create_group_binding(&harness, "group_sm", GroupChatScope::ConversationShared).await?;
+        let session = harness
+            .session_repo
+            .create("group_sm", NewSessionParams::default())
+            .await?;
+        harness
+            .conversation_repo
+            .upsert(bcs_domain::ConversationSessionMap {
+                binding_id: "generated_id".to_string(),
+                im_conversation_id: "conv_sm".to_string(),
+                im_conversation_type: "2".to_string(),
+                session_scope: SessionScope::Conversation,
+                im_user_id: None,
+                bcs_session_id: session.id.clone(),
+                last_active_at: 0,
+            })
+            .await?;
+
+        harness
+            .service
+            .handle_inbound(group_new_command("conv_sm", "u1", "msg_new"))
+            .await?;
+
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&session.id)
+                .await
+                .expect("session")
+                .status,
+            SessionStatus::Completed
+        );
+        assert!(
+            delivered_texts(&harness)
+                .await
+                .contains(&crate::commands::RESET_DONE_TEXT.to_string())
+        );
+        assert!(harness.collaboration_runtime.starts.lock().await.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn new_command_state_machine_running_run_queues_then_terminal_executes() -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        create_group_binding(&harness, "group_sm", GroupChatScope::ConversationShared).await?;
+        harness
+            .service
+            .handle_inbound(group_inbound("conv_sm", "u1", Some("张三"), "msg_start", true))
+            .await?;
+        let session_id = harness.collaboration_runtime.starts.lock().await[0]
+            .session_id
+            .clone()
+            .expect("state-machine session");
+
+        harness
+            .service
+            .handle_inbound(group_new_command("conv_sm", "u1", "msg_new"))
+            .await?;
+
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&session_id)
+                .await
+                .expect("session")
+                .status,
+            SessionStatus::Running
+        );
+        assert!(
+            delivered_texts(&harness)
+                .await
+                .contains(&crate::commands::RESET_QUEUED_TEXT.to_string())
+        );
+
+        SessionChannelOutboundPort::publish_state_machine_terminal(
+            &harness.service,
+            bcs_service_api::StateMachineTerminalEvent {
+                group_id: "group_sm".to_string(),
+                session_id: session_id.clone(),
+                run_id: "state_run_1".to_string(),
+                workflow_name: "wf".to_string(),
+                status: bcs_service_api::StateMachineTerminalStatus::Completed,
+                output: None,
+            },
+        )
+        .await?;
+
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&session_id)
+                .await
+                .expect("session")
+                .status,
+            SessionStatus::Completed
+        );
+        let events = harness.delivery.events.lock().await;
+        let done = events
+            .iter()
+            .find(|event| event.text.as_deref() == Some(crate::commands::RESET_DONE_TEXT))
+            .expect("deferred reset confirmation");
+        assert_eq!(done.source_im_message_id.as_deref(), Some("msg_new"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn new_command_state_machine_starting_window_replies_wait() -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        create_group_binding(&harness, "group_sm", GroupChatScope::ConversationShared).await?;
+        let session = harness
+            .session_repo
+            .create("group_sm", NewSessionParams::default())
+            .await?;
+        harness
+            .conversation_repo
+            .upsert(bcs_domain::ConversationSessionMap {
+                binding_id: "generated_id".to_string(),
+                im_conversation_id: "conv_sm".to_string(),
+                im_conversation_type: "2".to_string(),
+                session_scope: SessionScope::Conversation,
+                im_user_id: None,
+                bcs_session_id: session.id.clone(),
+                last_active_at: 42,
+            })
+            .await?;
+
+        harness
+            .service
+            .handle_inbound(group_new_command("conv_sm", "u1", "msg_new"))
+            .await?;
+
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&session.id)
+                .await
+                .expect("session")
+                .status,
+            SessionStatus::Running
+        );
+        let texts = delivered_texts(&harness).await;
+        assert_eq!(texts.len(), 1);
+        assert!(texts[0].contains("流程正在启动"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn new_command_is_not_consumed_by_active_human_input() -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        create_group_binding(&harness, "group_sm", GroupChatScope::ConversationShared).await?;
+        harness
+            .service
+            .handle_inbound(group_inbound("conv_sm", "u1", Some("张三"), "msg_start", true))
+            .await?;
+        let session_id = harness.collaboration_runtime.starts.lock().await[0]
+            .session_id
+            .clone()
+            .expect("state-machine session");
+        SessionChannelOutboundPort::publish_human_input_ready(
+            &harness.service,
+            HumanInputReadyEvent {
+                event_id: "human-ready-state-run-1-human-review".to_string(),
+                group_id: "group_sm".to_string(),
+                session_id,
+                run_id: "state_run_1".to_string(),
+                node_id: "human_review".to_string(),
+                display_name: "Human review".to_string(),
+                instruction: "Review the draft".to_string(),
+                assignee_actor_id: "human_u1".to_string(),
+                channel_type: channel_type(),
+                notification_mode: HumanInputNotificationMode::FixedGroup,
+                fixed_group_conversation_id: Some("conv_sm".to_string()),
+                response_ref: "state_run_1:human_review".to_string(),
+                judge_outcomes: vec!["approve".to_string(), "reject".to_string()],
+                timeout_deadline_ms: Some(60_000),
+                upstream_artifacts: Vec::new(),
+            },
+        )
+        .await?;
+
+        harness
+            .service
+            .handle_inbound(group_new_command("conv_sm", "u1", "msg_new"))
+            .await?;
+
+        // /new 不得被 HumanInput 卡片吞作回复；run 在途 → 重置排队。
+        assert!(
+            harness
+                .collaboration_runtime
+                .human_responses
+                .lock()
+                .await
+                .is_empty()
+        );
+        assert!(
+            delivered_texts(&harness)
+                .await
+                .contains(&crate::commands::RESET_QUEUED_TEXT.to_string())
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn concurrent_new_commands_complete_session_once() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        create_group_binding(&harness, "group_1", GroupChatScope::ConversationShared).await?;
+        harness
+            .service
+            .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_1"))
+            .await?;
+        let old_session_id = harness
+            .conversation_repo
+            .get(
+                "generated_id",
+                "conv_1",
+                SessionScope::Conversation,
+                Some("u1"),
+            )
+            .await?
+            .expect("mapping")
+            .bcs_session_id;
+
+        let (first, second) = tokio::join!(
+            harness
+                .service
+                .handle_inbound(new_command("conv_1", "u1", "msg_new_a")),
+            harness
+                .service
+                .handle_inbound(new_command("conv_1", "u1", "msg_new_b")),
+        );
+        first?;
+        second?;
+
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&old_session_id)
+                .await
+                .expect("session")
+                .status,
+            SessionStatus::Completed
+        );
+        assert_eq!(harness.session_repo.sessions.lock().await.len(), 1);
+        // 竞态下回复组合不确定（赢家 DONE；输家看到 Completed 会答 NOTHING_TO_RESET），
+        // 不变量：恰好各答一条、至少一条 DONE、只归档一次。
+        let texts = delivered_texts(&harness).await;
+        assert_eq!(texts.len(), 2);
+        assert!(
+            texts
+                .iter()
+                .all(|text| text.as_str() == crate::commands::RESET_DONE_TEXT
+                    || text.as_str() == crate::commands::NOTHING_TO_RESET_TEXT)
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.as_str() == crate::commands::RESET_DONE_TEXT)
+        );
+
+        // 归档后并发普通消息：恰好创建一个新会话。
+        let (msg_a, msg_b) = tokio::join!(
+            harness
+                .service
+                .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_a")),
+            harness
+                .service
+                .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_b")),
+        );
+        msg_a?;
+        msg_b?;
+        assert_eq!(harness.session_repo.sessions.lock().await.len(), 2);
+        let web_sends = harness.message_flow.web_sends.lock().await;
+        assert_eq!(web_sends.len(), 3);
+        assert_eq!(web_sends[1].session_id, web_sends[2].session_id);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn stale_pending_reset_executes_on_next_inbound() -> TestResult {
+        let clock = Arc::new(AtomicU64::new(42));
+        let harness = TestHarness::new_with_clock(manager_group("group_1"), clock.clone()).await?;
+        create_group_binding(&harness, "group_1", GroupChatScope::ConversationShared).await?;
+        *harness.message_flow.active_run_ids.lock().await = vec!["run_1".to_string()];
+        harness
+            .service
+            .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_1"))
+            .await?;
+        let old_session_id = harness
+            .conversation_repo
+            .get(
+                "generated_id",
+                "conv_1",
+                SessionScope::Conversation,
+                Some("u1"),
+            )
+            .await?
+            .expect("mapping")
+            .bcs_session_id;
+        harness
+            .service
+            .handle_inbound(new_command("conv_1", "u1", "msg_new"))
+            .await?;
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&old_session_id)
+                .await
+                .expect("session")
+                .status,
+            SessionStatus::Running
+        );
+
+        // bot 假死、终态事件不到达：超过兜底阈值后由下一条消息顺带执行。
+        clock.store(42 + crate::commands::PENDING_RESET_STALE_MS + 1, Ordering::SeqCst);
+        harness
+            .service
+            .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_2"))
+            .await?;
+
+        assert_eq!(
+            harness
+                .session_repo
+                .get(&old_session_id)
+                .await
+                .expect("old session")
+                .status,
+            SessionStatus::Completed
+        );
+        assert!(
+            delivered_texts(&harness)
+                .await
+                .contains(&crate::commands::RESET_DONE_TEXT.to_string())
+        );
+        // 该消息进入 rollover 后的新会话。
+        let mapping = harness
+            .conversation_repo
+            .get(
+                "generated_id",
+                "conv_1",
+                SessionScope::Conversation,
+                Some("u1"),
+            )
+            .await?
+            .expect("mapping rolled over");
+        assert_ne!(mapping.bcs_session_id, old_session_id);
+        let web_sends = harness.message_flow.web_sends.lock().await;
+        assert_eq!(web_sends.len(), 2);
+        assert_eq!(
+            web_sends[1].session_id.as_deref(),
+            Some(mapping.bcs_session_id.as_str())
+        );
+        Ok(())
     }
 }
