@@ -20,7 +20,7 @@ from .schemas import (
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/skill-sets", tags=["skill-sets"])
 SetIdPath = Annotated[str, Path(description="Decimal SkillSet identifier.")]
 SkillIdPath = Annotated[str, Path(description="Decimal Skill identifier.")]
-IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=1)]
+IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=1, description="Client key for idempotent SkillSet creation.")]
 
 
 def _set(item: dict[str, Any]) -> SkillSetItem:

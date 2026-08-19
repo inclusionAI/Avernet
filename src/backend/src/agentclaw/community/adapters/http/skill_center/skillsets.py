@@ -4,6 +4,7 @@ Migrated from: services/openclawserver/server/routers/skillsets.py
 SkillSet router for managing capability sets and their skills.
 """
 from pathlib import Path
+from uuid import uuid4
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 
@@ -38,6 +39,16 @@ from agentclaw.community.core.mcp.services.passport_scope import filter_passport
 from agentclaw.community.di import Injected
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
 from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
+from agentclaw.community.api.skill_set_control_plane import (
+    SkillSetControlPlaneServiceProtocol,
+)
+from agentclaw.community.core.skill_center.errors import (
+    LocalSkillNotFoundError,
+    SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneNotFoundError,
+    SkillSetControlPlaneLockUnavailableError,
+    SkillSetRuntimeReconcileError,
+)
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -51,6 +62,40 @@ router = APIRouter(prefix="/api/skillsets", tags=["skillsets"])
 
 
 # ==================== Helper Functions ====================
+
+def _legacy_actor(ctx: RequestContext, requested_user_id: str | None) -> str:
+    """Use the authenticated subject, retaining the pre-auth test fallback.
+
+    Legacy wire bodies contain ``user_id`` for historical routing.  It is not
+    an authority grant: normal requests always use the request principal and
+    the control plane checks the addressed Bot ACL.
+    """
+    return str(ctx.user_id or requested_user_id or "")
+
+
+def _legacy_skill_set(item: dict) -> SkillSetResponse:
+    """Project the canonical item back to the published legacy response."""
+    return SkillSetResponse(
+        **{
+            **item,
+            "bot_id": item.get("bolt_id") or item.get("bot_id") or "default",
+            "skills": item.get("skills", []),
+            "type": item.get("type", "custom"),
+        }
+    )
+
+
+def _legacy_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, (LocalSkillNotFoundError, SkillSetControlPlaneNotFoundError)):
+        return HTTPException(status_code=404, detail="Skill set not found")
+    if isinstance(exc, SkillSetControlPlaneConflictError):
+        return HTTPException(status_code=400, detail=str(exc))
+    if isinstance(exc, SkillSetControlPlaneLockUnavailableError):
+        return HTTPException(status_code=503, detail="Skill set mutation unavailable")
+    if isinstance(exc, SkillSetRuntimeReconcileError):
+        return HTTPException(status_code=500, detail="Skill set runtime sync failed")
+    logger.exception("[skillsets] compatibility adapter failed", exc_info=exc)
+    return HTTPException(status_code=500, detail="Skill set operation failed")
 
 def _get_path_params(
     ctx: RequestContext,
@@ -130,53 +175,42 @@ async def list_skill_sets(
     engine_type: Optional[str] = Query(None, description="Engine type (default: moltis)"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> SkillSetListResponse:
     """List all skill sets with their skills. Default skill set is listed first."""
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, user_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
-    )
-    skill_sets = service.list_skill_sets(user_id=user_id)
-
-    # Sort: default skill set first, then by creation time desc
-    skill_sets = sorted(skill_sets, key=lambda s: (not s.get('is_default'), s.get('gmt_created')), reverse=False)
-
-    # Build response with skills
-    data = []
-
-    for s in skill_sets:
-        skill_set_dict = dict(s)  # Copy to avoid modifying original
-
-        # 默认技能集逻辑：ac_user_default_skill_set 已下线，始终视为启用
-        if skill_set_dict.get('is_default'):
-            skill_set_dict['is_active'] = True
-
-        # Map bolt_id to bot_id for frontend
-        skill_set_dict["bot_id"] = skill_set_dict.get('bolt_id') or "default"
-        # Remove original bolt_id from response
-        skill_set_dict.pop('bolt_id', None)
-        # Get skills for this skill set
-        skills = service.get_set_skills(s.get('id'), user_id=user_id)
-        skill_set_dict["skills"] = [
+    actor_id = _legacy_actor(ctx, user_id or entity_id)
+    try:
+        skill_sets = control_plane.list_sets(
+            bot_id=effective_bot_id, actor_id=actor_id
+        )
+        data = []
+        for item in skill_sets:
+            skills = control_plane.list_skills(
+                bot_id=effective_bot_id, actor_id=actor_id, set_id=item["id"]
+            )
+            skill_set_dict = {
+                **item,
+                "is_active": True if item.get("is_default") else item.get("is_active"),
+                "skills": [
             SkillInSetSummary(
                 id=str(skill.get('id')) if skill.get('id') is not None else "",
                 name=skill.get('name'),
                 description=skill.get('description'),
                 path=skill.get('git_path')  # git_path stores both git:// and local:// paths
             ) for skill in skills
-        ]
-        data.append(SkillSetResponse(**skill_set_dict))
+                ],
+            }
+            data.append(_legacy_skill_set(skill_set_dict))
+    except Exception as exc:
+        raise _legacy_error(exc) from exc
 
     return SkillSetListResponse(
         success=True,
         data=data,
-        count=len(skill_sets)
+        count=len(data)
     )
 
 
@@ -193,7 +227,7 @@ async def create_skill_set(
     engine_type: Optional[str] = Query(None, description="Engine type (default: moltis)"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> SkillSetDetailResponse:
     """Create a new skill set."""
     # Priority: query param bot_id > request body bot_id > ctx.bot_id > default
@@ -201,39 +235,18 @@ async def create_skill_set(
     # Get effective path parameters (pass effective_bot_id directly)
     effective_entity_id, _, effective_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, request.user_id, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
 
-    service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
-    )
     try:
-        # Priority: request body user_id > ctx.user_id (from query/cookie/header)
-        effective_user_id = request.user_id or ctx.user_id
-        logger.info(f"[create_skill_set] name={request.name}, user_id={effective_user_id}, bot_id={effective_bot_id}")
-        skill_set = service.create_skill_set(
+        skill_set = control_plane.create_legacy_set(
+            bot_id=effective_bot_id,
+            actor_id=_legacy_actor(ctx, request.user_id),
             name=request.name,
             description=request.description,
-            user_id=effective_user_id,
-            bolt_id=effective_bot_id
+            # The historical wire has no idempotency field.
+            idempotency_key=f"legacy-{uuid4()}",
         )
-        logger.info(f"[create_skill_set] Success: id={skill_set.get('id')}")
-        # Map bolt_id to bot_id for frontend
-        skill_set['bot_id'] = skill_set.get('bolt_id') or "default"
-        # Remove original bolt_id from response
-        skill_set.pop('bolt_id', None)
-        return SkillSetDetailResponse(success=True, data=SkillSetResponse(**skill_set))
-    except ValueError as e:
-        logger.warning(f"[create_skill_set] Validation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return SkillSetDetailResponse(success=True, data=_legacy_skill_set(skill_set))
     except Exception as e:
-        error_msg = str(e)
-        # 处理重复名称错误（MySQL: 1062/Duplicate entry, SQLite: UNIQUE constraint failed）
-        if "1062" in error_msg or "Duplicate entry" in error_msg or "UNIQUE constraint failed" in error_msg:
-            logger.warning(f"[create_skill_set] Duplicate name: {request.name}")
-            raise HTTPException(status_code=400, detail=f"该 Bot 下已存在名为 '{request.name}' 的技能集，请使用其他名称")
-        logger.error(f"[create_skill_set] Unexpected error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _legacy_error(e) from e
 
 
 @router.get("/with-mcps", response_model=SkillSetsWithMCPsResponse, deprecated=True)
@@ -250,41 +263,21 @@ async def list_skill_sets_with_mcps(
     engine_type: Optional[str] = Query(None, description="Engine type (default: moltis)"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> SkillSetsWithMCPsResponse:
     """获取用户所有 skillset 及其关联的 MCP 列表。"""
     # entity_id 优先使用 user_id，否则使用传入的 entity_id
     effective_entity_id_param = user_id or entity_id
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
-    )
-    effective_user_id = user_id or ctx.user_id
-    skill_sets = service.list_skill_sets(user_id=effective_user_id)
-    skill_sets = sorted(skill_sets, key=lambda s: (not s.get('is_default'), s.get('gmt_created')))
-
-    data = []
-    for s in skill_sets:
-        mcps = service.get_set_mcp_servers(s.get('id'), user_id=effective_user_id)
-        data.append(SkillSetWithMCPsItem(
-            id=str(s.get('id')),
-            name=s.get('name', ''),
-            description=s.get('description'),
-            is_default=bool(s.get('is_default')),
-            user_id=s.get('user_id'),
-            bot_id=s.get('bolt_id') or s.get('bot_id') or 'default',
-            mcps=[MCPServerInSetResponse(
-                id=str(m.get('id')),
-                server_code=m.get('server_code', ''),
-                name=m.get('name', ''),
-                description=m.get('description'),
-                icon=m.get('icon'),
-            ) for m in mcps],
-        ))
+    data = [SkillSetWithMCPsItem(
+        id=str(item["id"]), name=item.get("name", ""),
+        description=item.get("description"), is_default=bool(item.get("is_default")),
+        user_id=item.get("user_id"), bot_id=item.get("bolt_id") or effective_bot_id,
+        mcps=[MCPServerInSetResponse(**m) for m in item.get("mcps", [])],
+    ) for item in control_plane.resources(
+        bot_id=effective_bot_id, actor_id=_legacy_actor(ctx, user_id or entity_id)
+    )]
 
     return SkillSetsWithMCPsResponse(success=True, data=data, count=len(data))
 
@@ -303,55 +296,21 @@ async def list_skill_set_resources(
     engine_type: Optional[str] = Query(None, description="Engine type (default: moltis)"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
-    passport_plugin: PassportPlugin = Injected(PassportPlugin),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> SkillSetResourcesResponse:
     """获取能力集资源聚合视图（MCP + 默认能力集 CLI）。"""
     effective_entity_id_param = user_id or entity_id
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
-    )
-    effective_user_id = user_id or ctx.user_id
-    skill_sets = service.list_skill_sets(user_id=effective_user_id)
-    skill_sets = sorted(skill_sets, key=lambda s: (not s.get('is_default'), s.get('gmt_created')))
-
-    # CLI 展示依赖 AgentPass 查询，失败时只降级隐藏 CLI，不影响 MCP/Skill 能力集返回。
-    try:
-        default_clis = passport_plugin.query_passport_clis(effective_bot_id, effective_entity_id)
-    except Exception as e:
-        logger.warning(
-            "[list_skill_set_resources] query CLI resources failed: bot_id=%s, owner=%s, error=%s",
-            effective_bot_id,
-            effective_entity_id,
-            e,
-        )
-        default_clis = []
-
-    data = []
-    for s in skill_sets:
-        mcps = service.get_set_mcp_servers(s.get('id'), user_id=effective_user_id)
-        is_default = bool(s.get('is_default'))
-        data.append(SkillSetResourceItem(
-            id=str(s.get('id')),
-            name=s.get('name', ''),
-            description=s.get('description'),
-            is_default=is_default,
-            user_id=s.get('user_id'),
-            bot_id=s.get('bolt_id') or s.get('bot_id') or 'default',
-            mcps=[MCPServerInSetResponse(
-                id=str(m.get('id')),
-                server_code=m.get('server_code', ''),
-                name=m.get('name', ''),
-                description=m.get('description'),
-                icon=m.get('icon'),
-            ) for m in mcps],
-            clis=[CLIInSetResponse(**cli) for cli in default_clis] if is_default else [],
-        ))
+    data = [SkillSetResourceItem(
+        id=str(item["id"]), name=item.get("name", ""),
+        description=item.get("description"), is_default=bool(item.get("is_default")),
+        user_id=item.get("user_id"), bot_id=item.get("bolt_id") or effective_bot_id,
+        mcps=[MCPServerInSetResponse(**m) for m in item.get("mcps", [])],
+        clis=[CLIInSetResponse(**cli) for cli in item.get("clis", [])],
+    ) for item in control_plane.resources(
+        bot_id=effective_bot_id, actor_id=_legacy_actor(ctx, user_id or entity_id)
+    )]
 
     return SkillSetResourcesResponse(success=True, data=data, count=len(data))
 
@@ -366,28 +325,22 @@ async def get_skill_set(
     engine_type: Optional[str] = Query(None, description="Engine type (default: moltis)"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> SkillSetDetailResponse:
     """Get a skill set by ID."""
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
-    )
-    skill_set = service.get_skill_set(skill_set_id, user_id=ctx.user_id)
-    if not skill_set:
-        raise HTTPException(status_code=404, detail="Skill set not found")
-    # Remove 'skills' key if present to avoid Pydantic validation error
-    skill_set_clean = {k: v for k, v in skill_set.items() if k != 'skills'}
-    # Map bolt_id to bot_id for frontend
-    skill_set_clean['bot_id'] = skill_set_clean.get('bolt_id') or "default"
-    # Remove original bolt_id from response
-    skill_set_clean.pop('bolt_id', None)
-    return SkillSetDetailResponse(success=True, data=SkillSetResponse(**skill_set_clean))
+    try:
+        return SkillSetDetailResponse(success=True, data=_legacy_skill_set(
+            control_plane.get_legacy_set(
+                bot_id=effective_bot_id,
+                actor_id=_legacy_actor(ctx, user_id or entity_id),
+                set_id=skill_set_id,
+            )
+        ))
+    except Exception as exc:
+        raise _legacy_error(exc) from exc
 
 
 @router.put("/{skill_set_id}", response_model=SkillSetDetailResponse)
@@ -400,7 +353,7 @@ async def update_skill_set(
     engine_type: Optional[str] = Query(None, description="Engine type (default: moltis)"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> SkillSetDetailResponse:
     """Update a skill set."""
     # Priority: query param bot_id > request body bot_id > ctx.bot_id > default
@@ -408,32 +361,20 @@ async def update_skill_set(
     # Get effective path parameters (pass effective_bot_id directly)
     effective_entity_id, _, effective_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, entity_id, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
 
-    service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
-    )
     try:
-        # Priority: request body user_id > ctx.user_id (from query/cookie/header)
-        effective_user_id = request.user_id or ctx.user_id
-        # Exclude bot_id from update data (it's used for routing only, not for update)
-        update_data = request.dict(exclude_unset=True, exclude={"user_id", "bot_id"})
-        skill_set = service.update_skill_set(
-            skill_set_id,
-            user_id=effective_user_id,
-            bolt_id=effective_bot_id,
-            **update_data
+        # ``is_default`` was accepted by the old schema but is not a mutable
+        # domain field.  Preserve the wire by ignoring it as the old handler
+        # did for immutable system sets.
+        skill_set = control_plane.update_set(
+            bot_id=effective_bot_id,
+            actor_id=_legacy_actor(ctx, request.user_id or entity_id),
+            set_id=skill_set_id,
+            name=request.name,
+            description=request.description,
         )
-        if not skill_set:
-            raise HTTPException(status_code=404, detail="Skill set not found")
-        # Remove 'skills' key if present to avoid Pydantic validation error
-        skill_set_clean = {k: v for k, v in skill_set.items() if k != 'skills'}
-        # Map bolt_id to bot_id for frontend
-        skill_set_clean['bot_id'] = skill_set_clean.get('bolt_id') or "default"
-        return SkillSetDetailResponse(success=True, data=SkillSetResponse(**skill_set_clean))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return SkillSetDetailResponse(success=True, data=_legacy_skill_set(skill_set))
+    except Exception as exc:
+        raise _legacy_error(exc) from exc
 
 
 @router.delete("/{skill_set_id}", response_model=MessageResponse)
@@ -450,7 +391,7 @@ async def delete_skill_set(
     engine_type: Optional[str] = Query(None, description="Engine type (default: moltis)"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> MessageResponse:
     """Delete a skill set."""
     # Get effective path parameters
@@ -458,19 +399,15 @@ async def delete_skill_set(
     effective_entity_id_param = user_id or entity_id
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
-    )
     try:
-        success = service.delete_skill_set(skill_set_id, user_id=effective_entity_id)
-        if not success:
-            raise HTTPException(status_code=404, detail="Skill set not found")
+        control_plane.delete_set(
+            bot_id=effective_bot_id,
+            actor_id=_legacy_actor(ctx, user_id or entity_id),
+            set_id=skill_set_id,
+        )
         return MessageResponse(success=True, message="Skill set deleted successfully")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as exc:
+        raise _legacy_error(exc) from exc
 
 
 # ==================== SkillSet-Skill Association APIs ====================
@@ -485,19 +422,20 @@ async def get_skill_set_skills(
     engine_type: Optional[str] = Query(None, description="Engine type (default: moltis)"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> SkillSetSkillsResponse:
     """Get all skills in a skill set."""
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
-    )
-    skills = service.get_set_skills(skill_set_id, user_id=ctx.user_id)
+    try:
+        skills = control_plane.list_skills(
+            bot_id=effective_bot_id,
+            actor_id=_legacy_actor(ctx, user_id or entity_id),
+            set_id=skill_set_id,
+        )
+    except Exception as exc:
+        raise _legacy_error(exc) from exc
     return SkillSetSkillsResponse(
         success=True,
         data=[SkillInSetResponse(
@@ -526,7 +464,7 @@ async def add_skills_to_set(
     engine_type: Optional[str] = Query(None, description="Engine type (default: moltis)"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> AddSkillsResponse:
     """Add skills to a skill set."""
     # Get effective path parameters
@@ -536,21 +474,27 @@ async def add_skills_to_set(
     effective_entity_id_param = request.user_id or entity_id
     effective_entity_id, _, effective_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, effective_bot_id, engine_type, bot_repo=bot_repo)
 
-    skill_set_service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
-    )
-
-    effective_user_id = request.user_id or ctx.user_id
-
     try:
-        results = await skill_set_service.add_skills_to_set(
-            skill_set_id,
-            request.skill_ids,
-            user_id=effective_user_id
-        )
+        # Historical batch wire permits partial success.  Each member remains
+        # an atomic control-plane command; the adapter only serializes results.
+        results: dict[str, list] = {"success": [], "failed": [], "activation_failed": []}
+        actor_id = _legacy_actor(ctx, request.user_id or entity_id)
+        for skill_id in request.skill_ids:
+            try:
+                stable_skill_id = control_plane.resolve_legacy_skill_id(
+                    bot_id=effective_bot_id,
+                    actor_id=actor_id,
+                    identifier=skill_id,
+                )
+                await control_plane.add_skill(
+                    bot_id=effective_bot_id,
+                    actor_id=actor_id,
+                    set_id=skill_set_id,
+                    skill_id=stable_skill_id,
+                )
+                results["success"].append({"skill_id": str(stable_skill_id), "name": str(skill_id)})
+            except Exception as exc:
+                results["failed"].append({"skill_id": skill_id, "error": str(exc)})
         success_count = len(results["success"])
         failed_count = len(results["failed"])
         return AddSkillsResponse(
@@ -558,8 +502,8 @@ async def add_skills_to_set(
             data=results,
             message=f"成功添加 {success_count} 个技能，失败 {failed_count} 个"
         )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as exc:
+        raise _legacy_error(exc) from exc
 
 
 @router.delete("/{skill_set_id}/skills/{skill_id}", response_model=MessageResponse)
@@ -577,7 +521,7 @@ async def remove_skill_from_set(
     engine_type: Optional[str] = Query(None, description="Engine type (default: moltis)"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> MessageResponse:
     """Remove a skill from a skill set."""
     # Get effective path parameters
@@ -585,16 +529,20 @@ async def remove_skill_from_set(
     effective_entity_id_param = user_id or entity_id
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
-    )
-    success = await service.remove_skill_from_set(skill_set_id, skill_id, user_id=effective_entity_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Skill not found in skill set")
-    return MessageResponse(success=True, message="Skill removed from skill set")
+    try:
+        result = await control_plane.remove_skill(
+            bot_id=effective_bot_id,
+            actor_id=_legacy_actor(ctx, user_id or entity_id),
+            set_id=skill_set_id,
+            skill_id=skill_id,
+        )
+        if not result.get("changed"):
+            raise HTTPException(status_code=404, detail="Skill not found in skill set")
+        return MessageResponse(success=True, message="Skill removed from skill set")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _legacy_error(exc) from exc
 
 
 # ==================== Default SkillSet APIs ====================

@@ -155,11 +155,53 @@ class SkillSetControlPlaneService:
         )
         return item
 
+    def create_legacy_set(
+        self,
+        *,
+        bot_id: str,
+        actor_id: str,
+        name: str,
+        description: str | None,
+        idempotency_key: str,
+    ) -> dict:
+        """Preserve pre-Bot-record legacy creation without weakening canonical ACL."""
+        bot = self._bot_repo.get_by_id(bot_id)
+        if bot is not None:
+            return self.create_set(
+                bot_id=bot_id,
+                actor_id=actor_id,
+                name=name,
+                description=description,
+                idempotency_key=idempotency_key,
+            )
+        item = self._repository.create_set(
+            bot_id=bot_id,
+            owner_id=actor_id,
+            name=name,
+            description=description,
+            idempotency_key=idempotency_key,
+            engine_type="openclaw",
+        )
+        self._audit(
+            bot_id=bot_id,
+            owner_id=actor_id,
+            actor_id=actor_id,
+            action="skill_set_create_legacy",
+        )
+        return item
+
     def get_set(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
         bot = self._bot(bot_id, actor_id)
         return self._repository.get_set(
             bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
         )
+
+    def get_legacy_set(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
+        """Read a pre-Bot-record legacy set; canonical reads remain strict."""
+        bot = self._bot_repo.get_by_id(bot_id)
+        if bot is not None:
+            return self.get_set(bot_id=bot_id, actor_id=actor_id, set_id=set_id)
+        return self._repository.get_set(bot_id=bot_id, set_id=set_id, engine_type="openclaw")
 
     def update_set(
         self,
@@ -202,6 +244,14 @@ class SkillSetControlPlaneService:
         bot = self._bot(bot_id, actor_id)
         return self._repository.list_skills(
             bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+        )
+
+    def resolve_legacy_skill_id(
+        self, *, bot_id: str, actor_id: str, identifier: str
+    ) -> str:
+        self._bot(bot_id, actor_id)
+        return self._repository.resolve_legacy_skill_id(
+            bot_id=bot_id, identifier=identifier
         )
 
     async def add_skill(
@@ -265,6 +315,32 @@ class SkillSetControlPlaneService:
             ),
         )
 
+    async def switch(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
+        """Compatibility command for the deprecated single-select switch API."""
+        bot = self._bot(bot_id, actor_id)
+        return await self._mutate(
+            bot=bot,
+            bot_id=bot_id,
+            actor_id=actor_id,
+            action="skill_set_switch",
+            mutation=lambda: self._repository.replace_active_set(
+                bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+            ),
+        )
+
+    async def sync(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
+        """Compatibility command for legacy sync's single-select semantics."""
+        bot = self._bot(bot_id, actor_id)
+        return await self._mutate(
+            bot=bot,
+            bot_id=bot_id,
+            actor_id=actor_id,
+            action="skill_set_sync",
+            mutation=lambda: self._repository.replace_active_set(
+                bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+            ),
+        )
+
     def resources(self, *, bot_id: str, actor_id: str) -> list[dict]:
         bot = self._bot(bot_id, actor_id)
         owner_id = str(bot["owner_id"])
@@ -275,9 +351,14 @@ class SkillSetControlPlaneService:
             engine_type=bot.get("active_engine"),
             entity_type=bot.get("entity_type") or "staff",
         )
-        default_clis = self._passport.query_passport_clis(
-            bot_id, str(bot.get("entity_id") or owner_id)
-        )
+        # Resource reads preserve the legacy graceful degradation: an AgentPass
+        # outage hides Default CLI entries but must not hide SkillSet/MCP data.
+        try:
+            default_clis = self._passport.query_passport_clis(
+                bot_id, str(bot.get("entity_id") or owner_id)
+            )
+        except Exception:
+            default_clis = []
         return [
             {
                 **item,
@@ -322,9 +403,27 @@ class SkillSetControlPlaneService:
             try:
                 if not is_bot_ready(bot):
                     raise LocalSkillNotReadyError()
-                result = await self._reconcile(
-                    bot=bot, bot_id=bot_id, actor_id=actor_id, mutation=mutation()
-                )
+                mutation_result = mutation()
+                # An inactive-set membership change has no runtime projection
+                # to apply.  Reconcile only becomes a required side effect
+                # when that membership is active (or for all lifecycle/sync
+                # commands), preserving the legacy inactive draft contract.
+                if (
+                    action in {"skill_set_add_skill", "skill_set_remove_skill"}
+                    and not mutation_result.item.get("is_active")
+                ):
+                    result = {
+                        **mutation_result.item,
+                        "changed": mutation_result.changed,
+                        **mutation_result.details,
+                    }
+                else:
+                    result = await self._reconcile(
+                        bot=bot,
+                        bot_id=bot_id,
+                        actor_id=actor_id,
+                        mutation=mutation_result,
+                    )
                 self._audit(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -354,7 +453,7 @@ class SkillSetControlPlaneService:
             except Exception as restore_error:
                 raise SkillSetRuntimeReconcileError() from restore_error
             raise SkillSetRuntimeReconcileError() from exc
-        return {**mutation.item, "changed": mutation.changed}
+        return {**mutation.item, "changed": mutation.changed, **mutation.details}
 
     def _audit(self, *, bot_id: str, owner_id: str, actor_id: str, action: str) -> None:
         self._audit_log_repo.insert(
