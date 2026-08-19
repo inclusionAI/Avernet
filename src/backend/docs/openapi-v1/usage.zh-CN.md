@@ -36,14 +36,16 @@ https://<你的-avernet-域名>/openapi/v1/...
 
 这套接口认两种调用者，一次请求可以同时带上两个。
 
-| 调用者 | 凭证 | Header |
+| 调用者 | 凭证 | 怎么传 |
 | --- | --- | --- |
-| **一个真人** | Google OAuth access token | `x-google-token: <token>` |
-| **一个应用** | 签发给你的应用 API Key | `x-avernet-app-token: <api key>` |
+| **一个真人** | 他的 SSO 会话，由 BUService 解析 | `x-one-id: <token>` header，**或** `IAM_TOKEN` cookie |
+| **一个应用** | 签发给你的应用 API Key | `Authorization: Bearer <api key>` |
 
-应用 Key 也可以放在 `Authorization: Bearer <api key>` 里。但 `Authorization` 只有
-一个，所以**只要一次请求同时带两个凭证，就一律用专用 header** —— 第三方集成的常态
-正是这种形态。
+**API Key 只放在 `Authorization` 里，别无他处。** 它没有备用 header；放在别的地方等于
+没有携带任何应用身份。
+
+两个凭证不会抢同一个位置——真人的身份走它自己的 header 或 cookie——所以需要同时带两个
+的请求直接都带上即可。第三方集成的常态正是这种形态。
 
 > 平台其他地方还存在别的凭证类型（Bot session token、租户 access key）。这套接口
 > **不接受**它们，带了等于没带。
@@ -56,7 +58,7 @@ https://<你的-avernet-域名>/openapi/v1/...
 
 ```bash
 curl 'https://<域名>/openapi/v1/bots?user_id=<用户id>&page=1&page_size=20' \
-  -H 'x-google-token: <google access token>'
+  -H 'x-one-id: <sso token>'
 ```
 
 `user_id` 必须是调用者自己的 id。填别人是 `403`。
@@ -67,8 +69,8 @@ curl 'https://<域名>/openapi/v1/bots?user_id=<用户id>&page=1&page_size=20' \
 
 ```bash
 curl -X POST 'https://<域名>/openapi/v1/bots/20260813_a7k2m9p1/authorized-apps?user_id=<用户id>' \
-  -H 'x-google-token: <google access token>' \
-  -H 'x-avernet-app-token: <api key>'
+  -H 'x-one-id: <sso token>' \
+  -H 'Authorization: Bearer <api key>'
 ```
 
 `user_id` 仍然必须是你所带 token 那个人的 id。
@@ -81,7 +83,7 @@ curl -X POST 'https://<域名>/openapi/v1/bots/20260813_a7k2m9p1/authorized-apps
 
 ```bash
 curl 'https://<域名>/openapi/v1/bots/20260813_a7k2m9p1/sessions?user_id=<授权给你的用户>' \
-  -H 'x-avernet-app-token: <api key>'
+  -H 'Authorization: Bearer <api key>'
 ```
 
 这种形态下你能触达的，恰好等于那个用户**此刻**能触达的范围——不会更多，并且他自己的
@@ -137,12 +139,18 @@ curl -X POST https://<域名>/admin/apps \
 
 ### 3.2 用户凭证
 
-`user` 身份是一个 **Google OAuth access token**。你的用户走完 Google 自己的登录与授权
-流程，你的客户端持有拿到的 access token，每次调用时带上。没有 cookie，也没有会话方式。
+真人由平台 **SSO** 认证，经 BUService 解析。你的客户端自己不做任何校验——它只是把 SSO
+会话已经给它的东西带上，有两种被接受的形式：
 
-token 的 `sub` 就是这套接口据以收敛的用户 id —— 也就是你要填进 `?user_id=` 的值。
+- **`x-one-id: <token>`** —— 显式转发的 subject token。这是服务端到服务端的形式，也是
+  第三方集成用的那种。
+- **`IAM_TOKEN` cookie** —— 已经有会话的浏览器会自动带上。适合第一方或浏览器端客户端；
+  服务端集成不应该持有它。
 
-> 接入了企业身份提供方的部署，用户 token 由该提供方签发。header 和下文其余内容不变。
+两种形式解析出的是同一个人，而这个人的 id 就是你要填进 `?user_id=` 的值。
+
+> 自建部署可能接的是另一个身份提供方，那时用户 token 由该提供方签发。下文其余内容不变，
+> API Key 的携带方式也完全一样。
 
 ---
 
@@ -239,8 +247,8 @@ owner 名下，所以 `(bot_id, owner_id)` 才是真正的地址。
 ```bash
 curl -X POST \
  'https://<域名>/openapi/v1/bots/20260813_a7k2m9p1/authorized-apps?user_id=<用户>&owner_id=<bot的owner>' \
-  -H 'x-google-token: <该用户的 google access token>' \
-  -H 'x-avernet-app-token: <你的 api key>'
+  -H 'x-one-id: <该用户的 sso token>' \
+  -H 'Authorization: Bearer <你的 api key>'
 ```
 
 ```json
@@ -277,7 +285,7 @@ curl -X POST \
 
 ```bash
 curl 'https://<域名>/openapi/v1/bots/authorized?user_id=<用户>' \
-  -H 'x-avernet-app-token: <你的 api key>'
+  -H 'Authorization: Bearer <你的 api key>'
 ```
 
 不需要真人在线——这是集成方用来查清自己能触达什么的唯一一个调用。它也是**唯一完整**的
@@ -289,11 +297,11 @@ curl 'https://<域名>/openapi/v1/bots/authorized?user_id=<用户>' \
 ```bash
 # 哪些应用能触达这个 bot，分别是谁放进来的
 curl 'https://<域名>/openapi/v1/bots/{bot_id}/authorized-apps?user_id=<用户>' \
-  -H 'x-google-token: <token>'
+  -H 'x-one-id: <sso token>'
 
 # 撤销其中一个
 curl -X DELETE 'https://<域名>/openapi/v1/bots/{bot_id}/authorized-apps/4711?user_id=<用户>' \
-  -H 'x-google-token: <token>'
+  -H 'x-one-id: <sso token>'
 ```
 
 这两个只需要用户凭证，是刻意如此：一个需要你配合才能完成的撤销根本不算撤销——而恰恰
@@ -397,9 +405,9 @@ curl -X DELETE 'https://<域名>/openapi/v1/bots/{bot_id}/authorized-apps/4711?u
 看 `code`：
 
 - **`401001` —— 你的凭证没被接受。** 要么是某个必需身份缺凭证（对照 §2 和 §6：最常见
-  的失误是对一个还需要真人的操作只发了 API Key），要么是凭证在但无效——用户 token
-  过期、Key 不是 `ACTIVE`、用了别的环境的 Key。还有第三种：两个凭证挤在一个
-  `Authorization` 里，请改用专用 header。
+  的失误是对一个还需要真人的操作只发了 API Key），要么是凭证在但无效——SSO 会话过期、
+  Key 不是 `ACTIVE`、用了别的环境的 Key。另外确认 API Key 确实放在
+  `Authorization: Bearer` 里：放在别的 header 里等于没有携带任何应用身份。
 - **`401000` —— 凭证没问题，但这个操作不接受没有真人的调用者。** 对照 §6，改成形态 B
   重发。对集成方来说这是最常见的 `401`。
 
@@ -408,7 +416,8 @@ curl -X DELETE 'https://<域名>/openapi/v1/bots/{bot_id}/authorized-apps/4711?u
 
 ### `403`
 
-只有一种原因：`?user_id=` 不是你所认证的那个人的 id。它必须等于那个 token 的 `sub`。
+只有一种原因：`?user_id=` 不是你所认证的那个人的 id。它必须等于你所带的 SSO 凭证解析
+出来的那个人。
 
 单独调用的应用**不会**因此拿到 `403` —— 它的 `user_id` 是拿去比对授权的，填错了是
 `404`。
@@ -505,8 +514,8 @@ curl -X DELETE 'https://<域名>/openapi/v1/bots/{bot_id}/authorized-apps/4711?u
 ## 10. 集成检查清单
 
 1. 拿到 API Key，记下 `app_id` 和租户（§3.1）。确认状态是 `ACTIVE`。
-2. 逐个调用确认自己处在哪种形态（§2）。一旦要发两个凭证，就改用专用 header，而不是
-   `Authorization`。
+2. 逐个调用确认自己处在哪种形态（§2）。真人的身份放 `x-one-id` 或 `IAM_TOKEN` cookie，
+   API Key 只放 `Authorization: Bearer`。
 3. 让每个用户就他的 bot 授权你（§5），两个凭证同时在线。
 4. 用 `GET /openapi/v1/bots/authorized` 确认自己的权限范围。
 5. 对每一个你打算单独调用的操作先查 §6。凡是标着**必须有真人**的，都需要把人设计进你

@@ -42,15 +42,17 @@ call:
 
 The API recognises two kinds of caller, and a single request may present both.
 
-| Caller | Credential | Header |
+| Caller | Credential | How it is presented |
 | --- | --- | --- |
-| **A person** | Google OAuth access token | `x-google-token: <token>` |
-| **An application** | API key issued to your application | `x-avernet-app-token: <api key>` |
+| **A person** | their SSO session, resolved through BUService | `x-one-id: <token>` header, **or** the `IAM_TOKEN` cookie |
+| **An application** | the API key issued to your application | `Authorization: Bearer <api key>` |
 
-The application key is also accepted as `Authorization: Bearer <api key>`. Since
-there is only one `Authorization` header to go around, **use the dedicated
-headers whenever a request carries both credentials** — which is the normal
-shape for a third-party integration.
+**The API key goes in `Authorization` and nowhere else.** There is no alternative
+header for it; presented anywhere else it authenticates as no application at all.
+
+The two credentials never compete for the same slot — the person's identity
+travels in its own header or in a cookie — so a request that needs both simply
+carries both. That is the normal shape for a third-party integration.
 
 > Other credential types exist elsewhere on the platform (bot session tokens,
 > tenant access keys). They are **not** accepted here; presenting one is the
@@ -66,7 +68,7 @@ someone's own token.
 
 ```bash
 curl 'https://<host>/openapi/v1/bots?user_id=<user-id>&page=1&page_size=20' \
-  -H 'x-google-token: <google access token>'
+  -H 'x-one-id: <sso token>'
 ```
 
 `user_id` must be the caller's own id. Naming anyone else is `403`.
@@ -78,8 +80,8 @@ decision or read across an organisation (§5, §6).
 
 ```bash
 curl -X POST 'https://<host>/openapi/v1/bots/20260813_a7k2m9p1/authorized-apps?user_id=<user-id>' \
-  -H 'x-google-token: <google access token>' \
-  -H 'x-avernet-app-token: <api key>'
+  -H 'x-one-id: <sso token>' \
+  -H 'Authorization: Bearer <api key>'
 ```
 
 `user_id` must still be the id of the person whose token you are presenting.
@@ -93,7 +95,7 @@ only on the operations that accept a caller with no human (§6).
 
 ```bash
 curl 'https://<host>/openapi/v1/bots/20260813_a7k2m9p1/sessions?user_id=<the authorizing user>' \
-  -H 'x-avernet-app-token: <api key>'
+  -H 'Authorization: Bearer <api key>'
 ```
 
 What you can reach in this shape is exactly what that user can reach right
@@ -154,15 +156,22 @@ transition window, but it cannot be converted — plan to rotate onto an API key
 
 ### 3.2 A user's credential
 
-The `user` identity is a **Google OAuth access token**. Your users complete
-Google's own login and consent flow; your client holds the resulting access
-token and presents it per call. There is no cookie or session alternative.
+A person is authenticated by the platform's **SSO**, resolved through BUService.
+Your client verifies nothing itself — it presents what the SSO session already
+gave it, in one of two accepted forms:
 
-The token's `sub` is the user id this API scopes by — the same value you put in
-`?user_id=`.
+- **`x-one-id: <token>`** — the subject token, forwarded explicitly. This is the
+  server-to-server form, and the one a third-party integration uses.
+- **the `IAM_TOKEN` cookie** — carried automatically by a browser that already
+  holds a session. Natural for a first-party or browser-based client; a server
+  integration should not be holding one.
 
-> A deployment integrated with a corporate identity provider issues user tokens
-> through that provider instead. The header and everything below are unchanged.
+Either form resolves to the same person, and that person's id is the value you
+put in `?user_id=`.
+
+> A self-hosted install may be wired to a different identity provider, in which
+> case user tokens come from that provider instead. Nothing else below changes,
+> and the API key is presented the same way regardless.
 
 ---
 
@@ -274,8 +283,8 @@ access to one bot.
 ```bash
 curl -X POST \
  'https://<host>/openapi/v1/bots/20260813_a7k2m9p1/authorized-apps?user_id=<user>&owner_id=<bot owner>' \
-  -H 'x-google-token: <the user’s google access token>' \
-  -H 'x-avernet-app-token: <your api key>'
+  -H 'x-one-id: <the user’s sso token>' \
+  -H 'Authorization: Bearer <your api key>'
 ```
 
 ```json
@@ -318,7 +327,7 @@ Five properties of this call, each of which someone eventually trips over:
 
 ```bash
 curl 'https://<host>/openapi/v1/bots/authorized?user_id=<user>' \
-  -H 'x-avernet-app-token: <your api key>'
+  -H 'Authorization: Bearer <your api key>'
 ```
 
 Works with no human on the wire — it is the one call an integration makes to
@@ -331,11 +340,11 @@ bots, so without this you could not discover it.
 ```bash
 # which applications can reach this bot, and who let each one in
 curl 'https://<host>/openapi/v1/bots/{bot_id}/authorized-apps?user_id=<user>' \
-  -H 'x-google-token: <token>'
+  -H 'x-one-id: <sso token>'
 
 # withdraw one
 curl -X DELETE 'https://<host>/openapi/v1/bots/{bot_id}/authorized-apps/4711?user_id=<user>' \
-  -H 'x-google-token: <token>'
+  -H 'x-one-id: <sso token>'
 ```
 
 Both need only the user's credential, deliberately: a withdrawal that required
@@ -457,9 +466,9 @@ Read `code`:
 - **`401001` — your credential was not accepted.** Either it is missing for a
   required identity (check §2 and §6: the commonest miss is sending only an API
   key to an operation that needs a person too), or it is present and invalid —
-  an expired user token, a key that is not `ACTIVE`, a key from another
-  environment. A third cause: two credentials competing for one
-  `Authorization` header. Use the dedicated headers.
+  an expired SSO session, a key that is not `ACTIVE`, a key from another
+  environment. Also check the API key is in `Authorization: Bearer` and nowhere
+  else: under any other header it authenticates as no application.
 - **`401000` — your credential is fine, but this operation does not accept a
   caller with no human.** Check §6 and re-issue the call in shape B. For an
   integration this is by far the most common `401`.
@@ -471,7 +480,7 @@ Read `code`:
 ### `403`
 
 Exactly one cause: `?user_id=` is not the id of the person you authenticated as.
-It must be that token's `sub`.
+It must be the id the SSO credential you presented resolves to.
 
 An application calling alone cannot get a `403` this way — its `user_id` is
 checked against the authorization instead, and a wrong one is a `404`.
@@ -586,8 +595,9 @@ and write nothing.
 
 1. Get your API key and note your `app_id` and tenant (§3.1). Confirm it is
    `ACTIVE`.
-2. Decide, per call, which shape you are in (§2). Once you send two credentials,
-   use the dedicated headers rather than `Authorization`.
+2. Decide, per call, which shape you are in (§2). The person's identity goes in
+   `x-one-id` or the `IAM_TOKEN` cookie; the API key goes in
+   `Authorization: Bearer` and nowhere else.
 3. Have each user authorize you on their bot (§5), with both credentials on the
    wire.
 4. Confirm your scope with `GET /openapi/v1/bots/authorized`.
