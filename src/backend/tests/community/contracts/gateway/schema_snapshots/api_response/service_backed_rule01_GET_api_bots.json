@@ -34,6 +34,12 @@
               "bot_type": {
                 "type": "string"
               },
+              "call_type": {
+                "type": "string"
+              },
+              "caller_config_revision": {
+                "type": "integer"
+              },
               "creator_id": {
                 "type": "string"
               },
@@ -207,17 +213,14 @@
                 ],
                 "additionalProperties": false
               },
+              "space_id": {
+                "type": "null"
+              },
               "status": {
                 "type": "string"
               },
               "template_type": {
                 "type": "string"
-              },
-              "call_type": {
-                "type": "string"
-              },
-              "caller_config_revision": {
-                "type": "integer"
               }
             },
             "required": [
@@ -227,6 +230,8 @@
               "bot_id",
               "bot_name",
               "bot_type",
+              "call_type",
+              "caller_config_revision",
               "creator_id",
               "device_id",
               "engine_types",
@@ -243,10 +248,9 @@
               "owner_name",
               "public",
               "share_policy",
+              "space_id",
               "status",
-              "template_type",
-              "call_type",
-              "caller_config_revision"
+              "template_type"
             ],
             "additionalProperties": false
           }

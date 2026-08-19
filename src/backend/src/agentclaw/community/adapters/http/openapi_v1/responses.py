@@ -85,10 +85,20 @@ from agentclaw.community.core.bot_chat.errors import (
 from agentclaw.community.core.bot_management.create_flow import (
     AuthStatusUnavailableError,
 )
+from agentclaw.community.core.bot_inventory.errors import (
+    BotInventoryOperationNotAllowedError,
+    BotInventoryPermissionError,
+    BotInventoryUpstreamError,
+)
+from agentclaw.community.core.bot_dormant.activate_service import InvalidBotStateError
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
     DeviceNotBoundError,
     UnknownProviderError,
+)
+from agentclaw.community.core.cron.errors import (
+    CronApiTimeoutError,
+    CronRelayError,
 )
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
@@ -102,9 +112,25 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineUpstreamError,
 )
 from agentclaw.community.core.gateway_principal import PrincipalVerificationError
+from agentclaw.community.core.harness.errors import (
+    HealthDiagnosisConflictError,
+    HealthDiagnosisNotFoundError,
+    HealthDiagnosisUnavailableError,
+)
 from agentclaw.community.core.market_favorites.errors import (
     FavoriteNotFoundError,
     FavoriteTargetInvalidError,
+)
+from agentclaw.community.core.spaces.errors import (
+    PersonalSpaceInvariantError,
+    SpaceAccessDeniedError,
+    SpaceAlreadyExistsError,
+    SpaceCreatorInvariantError,
+    SpaceMemberAlreadyExistsError,
+    SpaceMemberInvalidError,
+    SpaceMemberNotFoundError,
+    SpaceNameInvalidError,
+    SpaceNotFoundError,
 )
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
@@ -117,17 +143,6 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderNoReviewerError,
     WorkOrderNotFoundError,
     WorkOrderNotificationNotFoundError,
-)
-from agentclaw.community.core.spaces.errors import (
-    PersonalSpaceInvariantError,
-    SpaceAccessDeniedError,
-    SpaceAlreadyExistsError,
-    SpaceCreatorInvariantError,
-    SpaceMemberAlreadyExistsError,
-    SpaceMemberInvalidError,
-    SpaceMemberNotFoundError,
-    SpaceNameInvalidError,
-    SpaceNotFoundError,
 )
 from agentclaw.community.core.mcp.errors import (
     McpConfigValueError,
@@ -166,7 +181,23 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterHTTPStatusError,
     DeviceAdapterTimeoutError,
 )
+from agentclaw.community.plugin_api.auth_relationship import (
+    AuthRelationshipError,
+)
 from agentclaw.community.plugin_api.passport import PassportError
+from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
+    LockNotHeldError,
+    LockReleaseDeniedError,
+)
+from agentclaw.community.core.service_bot.errors import (
+    ServiceContainerConflictError,
+    ServiceContainerNotFoundError,
+    ServiceContainerUpstreamError,
+    ServicePublicationConflictError,
+    ServicePublicationLockedError,
+    ServicePublicationNotFoundError,
+    ServicePublicationUnsupportedError,
+)
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterTeamCreateError,
 )
@@ -313,6 +344,18 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Another authorization for this bot id is already live",
     ),
     BotPermissionError: (404, "Not found"),
+    ServiceContainerNotFoundError: (404, "Not found"),
+    ServiceContainerConflictError: (
+        409,
+        "Container is not in a valid state for this operation",
+    ),
+    ServiceContainerUpstreamError: (502, "Container service error"),
+    HealthDiagnosisNotFoundError: (404, "Not found"),
+    HealthDiagnosisConflictError: (409, "A health diagnosis is already running"),
+    HealthDiagnosisUnavailableError: (502, "Health diagnosis service error"),
+    ServicePublicationNotFoundError: (404, "Not found"),
+    LockNotHeldError: (404, "Not found"),
+    LockReleaseDeniedError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
     BotNameInvalidError: (400, "Invalid bot name"),
     BotLimitExceededError: (409, "Bot creation limit reached"),
@@ -322,9 +365,24 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Bot is not in a valid state for this operation",
     ),
     BotOperationNotAllowedError: (409, "Operation not supported for this bot"),
+    BotInventoryOperationNotAllowedError: (409, "Operation not supported for this bot"),
+    # Dormant activate: a bot that is not RECYCLED cannot be reactivated.
+    InvalidBotStateError: (409, "Operation not supported for this bot"),
+    BotInventoryPermissionError: (404, "Not found"),
+    BotInventoryUpstreamError: (502, "Desktop service error"),
+    ServicePublicationConflictError: (
+        409,
+        "Publication is not in a valid state for this operation",
+    ),
+    ServicePublicationUnsupportedError: (
+        409,
+        "Operation not supported for this bot",
+    ),
+    ServicePublicationLockedError: (423, "Edit lock required"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
     PassportError: (502, "Authorization service error"),
+    AuthRelationshipError: (502, "Authorization relationship service error"),
     # Engine-config failures. None of these is a BotServiceError, so the base
     # mapping below does not cover them and they would otherwise escape the
     # envelope. They are also plain RuntimeError *siblings*, not a hierarchy, so
@@ -447,6 +505,13 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     EngineUpstreamError: (502, "Engine service error"),
     # Base of the Engine* errors above — LAST of its group.
     EngineRuntimeError: (502, "Engine service error"),
+    # Cron relay category (routines) — a backstop for engine adapter failures
+    # that escape the handler. The delete/other handlers already wrap the explicit
+    # error_code-bearing CronRelayError into HTTPException themselves; these
+    # entries catch anything the handler does not, so it does not fall through to
+    # the app-level 500 with a vague message. Subclass listed before its base.
+    CronApiTimeoutError: (504, "Cron relay timed out"),
+    CronRelayError: (502, "Cron relay service error"),
     # Transport errors that reach a handler without the relay translating them
     # (e.g. a future caller using the transport directly). The relay already
     # converts the first two; these are the backstop.

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import StrEnum
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -29,6 +27,7 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
     logical_skill_mappings_from_evidence,
     local_locators_from_evidence,
     local_skill_name,
+    mapping_contract_for,
 )
 from agentclaw.community.core.skills_pool.mapping_convergence import (
     MappingConvergenceStatus,
@@ -48,39 +47,15 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayoutPhase,
 )
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
+from agentclaw.community.core.skills_pool.reconcile_models import (
+    SkillsPoolReconcileOutcome,
+    SkillsPoolReconcileResult,
+)
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
 from agentclaw.community.log import get_logger
 
 
 logger = get_logger()
-
-
-class SkillsPoolReconcileOutcome(StrEnum):
-    POOL_ACTIVE = "pool_active"
-    ALREADY_ACTIVE = "already_active"
-    NOT_CLAIMED = "not_claimed"
-    LEASE_NOT_HELD = "lease_not_held"
-    BOT_NOT_FOUND = "bot_not_found"
-    BOT_CHANGED = "bot_changed"
-    NOT_CAPABLE = "not_capable"
-    TRANSIENT_ERROR = "transient_error"
-    INVALID = "invalid"
-    STATE_RACE_LOST = "state_race_lost"
-    DATA_INCONSISTENT = "data_inconsistent"
-    ACTIVE_ENTRY_CONFLICT = "active_entry_conflict"
-    CUTOVER_FAILED = "cutover_failed"
-    MAPPING_FAILED = "mapping_failed"
-    MAPPING_VERIFY_FAILED = "mapping_verify_failed"
-    DATABASE_COMMIT_FAILED = "database_commit_failed"
-    MANUAL_REPAIR_REQUIRED = "manual_repair_required"
-
-
-@dataclass(frozen=True, slots=True)
-class SkillsPoolReconcileResult:
-    outcome: SkillsPoolReconcileOutcome
-    preparation_id: str | None = None
-    evidence: dict[str, object] | None = None
-    retryable: bool | None = None
 
 
 class SkillsPoolReconcileService:
@@ -340,6 +315,10 @@ class SkillsPoolReconcileService:
         try:
             local_names = [local_skill_name(asset) for asset in local_assets]
             mappings = build_logical_skill_mappings(active_assets)
+            mapping_contract_version = mapping_contract_for(
+                mappings,
+                probe.evidence.get("supported_mapping_contract_versions"),
+            )
             durable_retired_mappings = logical_skill_mappings_from_evidence(
                 state.last_failure_evidence
             )
@@ -420,6 +399,7 @@ class SkillsPoolReconcileService:
                 preparation_id=probe.preparation_id,
                 registered_local_names=local_names,
                 mappings=mappings,
+                mapping_contract_version=mapping_contract_version,
             )
             if not cutover.committed:
                 evidence = cutover.to_dict()
@@ -652,6 +632,7 @@ class SkillsPoolReconcileService:
             engine=engine,
             cutover_mappings=mappings,
             durable_retired_mappings=durable_retired_mappings,
+            mapping_contract_version=mapping_contract_version,
         )
         if convergence.status is MappingConvergenceStatus.LEASE_NOT_HELD:
             return SkillsPoolReconcileResult(
@@ -859,6 +840,10 @@ class SkillsPoolReconcileService:
                         engine=engine,
                     )
                 )
+                mapping_contract_version = mapping_contract_for(
+                    mappings,
+                    probe.evidence.get("supported_mapping_contract_versions"),
+                )
             except ValueError as error:
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.INVALID,
@@ -870,6 +855,7 @@ class SkillsPoolReconcileService:
                 user_id=str(owner_id),
                 mappings=mappings,
                 retired_mappings=[],
+                mapping_contract_version=mapping_contract_version,
             ):
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.MAPPING_FAILED,
@@ -881,6 +867,7 @@ class SkillsPoolReconcileService:
                 user_id=str(owner_id),
                 mappings=mappings,
                 retired_mappings=[],
+                mapping_contract_version=mapping_contract_version,
             ):
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,

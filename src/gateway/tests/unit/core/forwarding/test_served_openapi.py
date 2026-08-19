@@ -151,20 +151,14 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     # the shipped baas artifact now serves the sessions path under chat.
     assert "/openapi/v1/chat/sessions/{session_id}" in paths
     assert "/openapi/v1/collaboration/bots/mine" in paths
-    assert not any(
-        path.startswith("/api/v1/collaboration") for path in paths
-    )
+    assert not any(path.startswith("/api/v1/collaboration") for path in paths)
     assert "post" in paths["/openapi/v1/collaboration/sessions/{session_id}/token"]
-    collection = paths[
-        "/openapi/v1/collaboration/sessions/{session_id}/collect"
-    ]
+    collection = paths["/openapi/v1/collaboration/sessions/{session_id}/collect"]
     assert set(collection) == {"delete", "post"}
     assert "get" in paths["/openapi/v1/collaboration/messages/ws"]
-    message_data = paths[
-        "/openapi/v1/collaboration/sessions/{session_id}/messages"
-    ]["get"]["responses"]["200"]["content"]["application/json"]["schema"][
-        "properties"
-    ]["data"]
+    message_data = paths["/openapi/v1/collaboration/sessions/{session_id}/messages"][
+        "get"
+    ]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["data"]
     assert message_data["type"] == "array"
     assert {
         "historyMeta",
@@ -178,18 +172,23 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     collaboration_http_security = {"user": "required", "app": "required"}
     assert collection["post"]["x-avernet-security"] == collaboration_http_security
     assert collection["delete"]["x-avernet-security"] == collaboration_http_security
-    assert paths["/openapi/v1/collaboration/bots/mine"]["get"][
-        "x-avernet-security"
-    ] == collaboration_http_security
-    assert paths["/openapi/v1/collaboration/sessions/{session_id}/token"]["post"][
-        "x-avernet-security"
-    ] == collaboration_http_security
+    assert (
+        paths["/openapi/v1/collaboration/bots/mine"]["get"]["x-avernet-security"]
+        == collaboration_http_security
+    )
+    assert (
+        paths["/openapi/v1/collaboration/sessions/{session_id}/token"]["post"][
+            "x-avernet-security"
+        ]
+        == collaboration_http_security
+    )
     # REL qualified the collaboration messages/ws exemption by plane: only the
     # WEBSOCKET handshake is exempt (BCN verifies its session credential); the
     # HTTP GET operation on the same path keeps the collaboration HTTP security.
-    assert paths["/openapi/v1/collaboration/messages/ws"]["get"][
-        "x-avernet-security"
-    ] == collaboration_http_security
+    assert (
+        paths["/openapi/v1/collaboration/messages/ws"]["get"]["x-avernet-security"]
+        == collaboration_http_security
+    )
     assert paths["/openapi/v1/collaboration/sessions/{session_id}/token"]["post"][
         "tags"
     ] == ["Collaboration / Sessions"]
@@ -219,12 +218,8 @@ def test_shipped_internal_openapi_serves_bcn_internal_paths_only() -> None:
 
     paths = document["paths"]
     assert "/api/v1/collaboration/sessions/{session_id}/files" in paths
-    assert (
-        "/api/v1/collaboration/bots/{bot_id}/candidates/search" in paths
-    )
-    assert not any(
-        path.startswith("/openapi/v1/collaboration") for path in paths
-    )
+    assert "/api/v1/collaboration/bots/{bot_id}/candidates/search" in paths
+    assert not any(path.startswith("/openapi/v1/collaboration") for path in paths)
 
 
 def test_served_internal_openapi_combines_only_internal_schema_paths() -> None:
@@ -269,9 +264,7 @@ def test_served_internal_openapi_combines_only_internal_schema_paths() -> None:
     )
 
     assert document["info"]["title"] == "gateway internal"
-    assert (
-        "/api/v1/collaboration/sessions/{session_id}/files" in document["paths"]
-    )
+    assert "/api/v1/collaboration/sessions/{session_id}/files" in document["paths"]
     assert "/openapi/v1/collaboration/groups" not in document["paths"]
     assert document["components"]["schemas"]["InternalFile"] == {"type": "object"}
     assert document["tags"] == [{"name": "Internal / Session Files"}]

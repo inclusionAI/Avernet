@@ -140,6 +140,7 @@ provides:
   - SkillMemberRepository
   - SkillPropagationLogRepository
   - SkillRepository
+  - SpaceSkillRepository
   - SkillSetRepository
   # skills_pool
   - QuarantineRepositoryProtocol
@@ -184,6 +185,7 @@ provides:
   - BotPublishRepository
   - OrmPublishOperationRepository
   # skill_center
+  - SpaceSkillRepository
   - SqlLocalSkillCleanupRepository
   # skills_pool
   - SkillsPoolLayoutRepository

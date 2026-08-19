@@ -1,7 +1,6 @@
 """Tests for plugin_api/models.py BotModel."""
 import json
 from contextlib import contextmanager
-from datetime import datetime
 
 import pytest
 from sqlalchemy import create_engine
@@ -168,9 +167,8 @@ class TestBotModelToDict:
         """The avernet_tenant column must NOT surface in to_dict().
 
         Isolation adds a column but must not change any current internal API
-        response body — so to_dict()'s exact key set stays what it was before
-        this feature. Pinning the full set here fails loudly if avernet_tenant
-        (or anything else) ever leaks in.
+        response body. Pinning the full set here fails loudly if avernet_tenant
+        leaks in while allowing intentional public fields such as space_id.
         """
         expected_keys = {
             "id",
@@ -199,6 +197,7 @@ class TestBotModelToDict:
             "template_type",
             "call_type",
             "caller_config_revision",
+            "space_id",
         }
 
         bot = BotModel(

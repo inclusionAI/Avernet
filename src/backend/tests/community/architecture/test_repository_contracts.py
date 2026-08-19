@@ -139,7 +139,7 @@ def test_protocols_hold_no_implementations() -> None:
         f"{_rel(p)}:{c.lineno} {c.name}"
         for p in _py_files(_PROTOCOLS) for c in _classes(p)
         if not _is_protocol(c) and not c.name.endswith(("Error", "Exception"))
-        and not any(isinstance(b, ast.Name) and b.id in {"ABC", "StrEnum", "Enum"}
+        and not any(isinstance(b, ast.Name) and b.id in {"ABC", "StrEnum", "Enum", "TypedDict"}
                     for b in c.bases)
     ]
     assert not offenders, (

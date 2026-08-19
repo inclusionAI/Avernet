@@ -17,3 +17,12 @@ from agentclaw.community.core.models.mcp import (  # noqa: F401
 )
 from agentclaw.community.core.models.skill_propagation_log import SkillPropagationLog  # noqa: F401
 from agentclaw.community.core.models.skill_center_sync_log import SkillCenterSyncLog  # noqa: F401
+from agentclaw.community.core.models.space_skill import (  # noqa: F401
+    SkillDraftEditLease,
+    SkillGrant,
+    SkillPublicationAttempt,
+    SkillSpaceBinding,
+    SkillVersion,
+    Space,
+    SpaceMember,
+)

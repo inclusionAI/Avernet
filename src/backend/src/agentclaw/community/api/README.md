@@ -54,6 +54,7 @@ internal_dependencies:
   - agentclaw.community.core.access.models            # UserInfoRecord — typed in user_service.py
   - agentclaw.community.core.bot_app_grant.models    # BotAppGrantRecord — typed in bot_app_grant_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.bot_chat.schemas        # ConversationDetail, HealthCheckData — typed in bot_chat_service.py
+  - agentclaw.community.core.bot_inventory.types   # Bot inventory/local workflow DTOs — typed in bot_inventory_service.py and local_bot_workflow_service.py
   - agentclaw.community.core.bot_startup_script.repository.models  # BotStartupScriptRecord — typed in bot_startup_script_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.caller_identity.contracts  # Caller identity API DTOs and stable errors
   - agentclaw.community.core.caller_identity.credential  # CallerToken — typed in caller_credential.py

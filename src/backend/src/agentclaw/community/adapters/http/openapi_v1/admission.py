@@ -168,6 +168,12 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "DELETE",
         "/openapi/v1/bots/{bot_id}/startup-script",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/activate"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/data-init"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/data-init",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/identity"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     (
         "GET",
@@ -177,11 +183,9 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "PUT",
         "/openapi/v1/bots/{bot_id}/identity/{file_type}",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    # resources — ``bot_id`` is a required query parameter on all seven, and
-    # every one of them is addressed by workspace path. There are no record-id
-    # routes left: a record id cannot address a file the bot created itself, and
-    # links are no longer part of this group. Each resolves its workspace from
-    # the caller-supplied ``bot_id``, so each carries the own-bot grant check.
+    # resources — every operation is bot-first and addressed by workspace path.
+    # There are no record-id routes left: a record id cannot address a file the
+    # bot created itself, and links are no longer part of this group.
     ("GET", "/openapi/v1/bots/{bot_id}/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     (
         "DELETE",
@@ -314,6 +318,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/engine/status",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/engine/restart",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
         "GET",
         "/openapi/v1/bots/{bot_id}/approvals/mode",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
@@ -344,6 +352,78 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/chats/{trace_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/lifecycle/upgrade",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/lifecycle",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/lifecycle",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/lifecycle/approval",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PUT",
+        "/openapi/v1/bots/{bot_id}/lifecycle/approval",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/lifecycle/advance",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/lifecycle/restart",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/lifecycle/offline",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/lifecycle/retry",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/edit-lock",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/edit-lock",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/edit-lock",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/edit-lock/steal",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/containers",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/diagnostics/health",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/diagnostics/health-check",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # ── B: returns a set of bots, narrowed to the granted ones ───────────────
     ("GET", "/openapi/v1/bots"): AdmissionMode.GRANT_FILTERED,
@@ -408,11 +488,43 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/work-order-notifications/{notification_id}/read",
     ): AdmissionMode.USER_GATED,
     ("POST", "/openapi/v1/work-order-notifications/read-all"): AdmissionMode.USER_GATED,
+    # ── Workshop/local admission follows the operation's shape ───────────────
+    # Both listings are owner-scoped, so an application sees only the named
+    # user's own bots that user delegated to it. The restriction is applied by
+    # the services before pagination; an application granted nothing gets an
+    # empty page.
+    ("GET", "/openapi/v1/bots/all"): AdmissionMode.GRANT_FILTERED,
+    ("GET", "/openapi/v1/bots/local"): AdmissionMode.GRANT_FILTERED,
+    # Device discovery names no bot but does expose the named user's account.
+    # A live delegation from that user proves the relationship; no delegation
+    # is masked as not-found before the desktop service is called.
+    ("GET", "/openapi/v1/bots/local/devices"): AdmissionMode.USER_GATED,
+    (
+        "GET",
+        "/openapi/v1/bots/local/devices/{machine_id}/files",
+    ): AdmissionMode.USER_GATED,
+    # Existing local-bot operations resolve the bot as the delegating user's
+    # own, exactly like the ordinary bot lifecycle routes above.
+    ("GET", "/openapi/v1/bots/{bot_id}/local"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/local/restart",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("DELETE", "/openapi/v1/bots/{bot_id}/local"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/local/open-folder",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     # ── REFUSED — each for its own reason ────────────────────────────────────
     # The caller's own identity. An app-only caller names no end user, so there
     # is nothing to return — its scope question is answered by
     # ``GET /openapi/v1/bots/authorized`` instead.
     ("GET", "/openapi/v1/caller"): AdmissionMode.REFUSED,
+    # Local creation has no existing bot for a grant to cover and may initiate
+    # Passport consent. Polling completes that same creation transaction, so
+    # both require a human on the wire.
+    ("POST", "/openapi/v1/bots/local"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/{bot_id}/local/auth-status"): AdmissionMode.REFUSED,
     # No bot exists yet for a grant to cover, and creation spends the user's
     # quota. Auto-granting the new bot would invent consent nobody gave.
     ("POST", "/openapi/v1/bots"): AdmissionMode.REFUSED,

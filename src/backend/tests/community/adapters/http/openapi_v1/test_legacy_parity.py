@@ -110,6 +110,7 @@ def test_the_expected_number_of_addresses_are_retiring() -> None:
 
     Pinned so that adding a legacy address, or losing one, is a number somebody
     has to look at rather than a silent change to what this API still answers.
+    A newly introduced operation must not acquire a made-up retiring address.
     """
     assert len(LEGACY_ROUTES) == 41
 

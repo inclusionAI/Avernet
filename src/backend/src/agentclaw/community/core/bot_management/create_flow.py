@@ -149,6 +149,7 @@ class BotCreateSpec:
     share_policy: dict[str, Any] | None = None
     template_type: str | None = None
     template_config: dict[str, Any] | None = None
+    space_id: str | None = None
     # Engine/vendor-specific inputs belong here, NOT as new named fields. The
     # spec is the contract shared by every surface, so it stays engine-agnostic
     # rather than growing an attribute per engine; anything meaningful to only
@@ -249,18 +250,33 @@ def _build_ext(
     return ext or None
 
 
+def _require_agent_code(agent_code: object, *, bot_id: str) -> str:
+    """Return the issued Passport agent code or reject an incomplete identity."""
+    if not isinstance(agent_code, str) or not agent_code.strip():
+        raise PassportError(
+            f"Passport returned no agent_code for issued bot {bot_id}"
+        )
+    return agent_code
+
+
 def _query_agent_code(
     passport_plugin: PassportPlugin, *, bot_id: str, user_id: str
-) -> str | None:
-    """Best-effort ``agent_code`` lookup — ``query_auth_status`` does not carry it."""
+) -> str:
+    """Read the agent code required to complete an issued authorization."""
     try:
         info = passport_plugin.query_agent_passport(
             bot_id=bot_id, owner_workno=user_id
         )
-    except Exception as e:  # noqa: BLE001 — agent_code lookup is best-effort
-        logger.warning("[create_flow] query_agent_passport failed: %s", e)
-        return None
-    return info.get("agent_code") if info else None
+    except PassportError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — normalize plugin implementations
+        raise PassportError(
+            f"Passport identity query failed for bot {bot_id}: {exc}"
+        ) from exc
+    return _require_agent_code(
+        info.get("agent_code") if info else None,
+        bot_id=bot_id,
+    )
 
 
 def _record_owner_relationship(
@@ -271,7 +287,7 @@ def _record_owner_relationship(
     nick_name: str,
     bot_id: str,
 ) -> None:
-    """Create the owner→bot auth relationship. Best-effort: failures are logged."""
+    """Create the owner→bot relationship or fail the completed-create contract."""
     try:
         auth_result = auth_rel_plugin.create_relationship(
             work_no=user_id,
@@ -280,28 +296,21 @@ def _record_owner_relationship(
             operator_work_no=user_id,
             operator_name=nick_name,
         )
-        if auth_result:
-            logger.info(
-                "[create_flow] Created owner auth relationship: bot_id=%s owner=%s "
-                "agent_code=%s auth_id=%s",
-                bot_id, user_id, agent_code, auth_result.get("auth_id"),
-            )
-        else:
-            logger.warning(
-                "[create_flow] authorization-relationship service returned failure "
-                "for create_relationship: "
-                "bot_id=%s owner=%s agent_code=%s", bot_id, user_id, agent_code,
-            )
-    except AuthRelationshipError as e:
-        logger.warning(
-            "[create_flow] Failed to create owner auth relationship: bot_id=%s error=%s",
-            bot_id, e,
+    except AuthRelationshipError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — normalize plugin implementations
+        raise AuthRelationshipError(
+            f"authorization relationship write failed for bot {bot_id}: {exc}"
+        ) from exc
+    if auth_result is None:
+        raise AuthRelationshipError(
+            f"authorization relationship write failed for bot {bot_id}"
         )
-    except Exception as e:  # noqa: BLE001 — owner relationship is best-effort
-        logger.warning(
-            "[create_flow] Unexpected error creating owner auth relationship: "
-            "bot_id=%s error=%s", bot_id, e,
-        )
+    logger.info(
+        "[create_flow] Created owner auth relationship: bot_id=%s owner=%s "
+        "agent_code=%s auth_id=%s",
+        bot_id, user_id, agent_code, auth_result.get("auth_id"),
+    )
 
 
 def create_bot_with_authorization(
@@ -365,13 +374,16 @@ def create_bot_with_authorization(
             engine_type=spec.engine_type,
         ),
         cli_items=get_default_cli_items(
-            spec.engine_type, spec.template_type
+            spec.engine_type,
+            spec.template_type,
+            ext_info={"template_config": spec.template_config}
+            if spec.template_config
+            else None,
         ),
         use_first_passport=use_first_passport,
     )
 
     passport_token = passport_result.get("token") if passport_result else None
-    agent_code = passport_result.get("agent_code") if passport_result else None
 
     # No token yet → authorization pending; nothing is created.
     if not passport_token:
@@ -392,6 +404,14 @@ def create_bot_with_authorization(
             redirect_url=redirect_url,
         )
 
+    # A completed Passport identity must include the identifier needed for the
+    # owner relationship. Fail before creating the bot rather than silently
+    # acknowledging a bot that its owner cannot reach through that relationship.
+    agent_code = _require_agent_code(
+        passport_result.get("agent_code") if passport_result else None,
+        bot_id=bot_id,
+    )
+
     # Token present → create the bot inline.
     result = bot_service.create_bot(
         user_id=user_id,
@@ -408,13 +428,13 @@ def create_bot_with_authorization(
         template_type=spec.template_type,
         template_config=spec.template_config,
         cookie=cookie,
+        space_id=spec.space_id,
     )
 
-    if agent_code:
-        _record_owner_relationship(
-            auth_rel_plugin, user_id=user_id, agent_code=agent_code,
-            nick_name=nick_name, bot_id=bot_id,
-        )
+    _record_owner_relationship(
+        auth_rel_plugin, user_id=user_id, agent_code=agent_code,
+        nick_name=nick_name, bot_id=bot_id,
+    )
 
     return Created(
         bot=result,
@@ -476,12 +496,12 @@ def complete_bot_authorization(
         template_type=spec.template_type,
         template_config=spec.template_config,
         cookie=cookie,
+        space_id=spec.space_id,
     )
 
-    if agent_code:
-        _record_owner_relationship(
-            auth_rel_plugin, user_id=user_id, agent_code=agent_code,
-            nick_name=nick_name, bot_id=bot_id,
-        )
+    _record_owner_relationship(
+        auth_rel_plugin, user_id=user_id, agent_code=agent_code,
+        nick_name=nick_name, bot_id=bot_id,
+    )
 
     return AuthStatusResult(status=AuthStatus.ISSUED, bot=result)

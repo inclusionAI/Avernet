@@ -515,6 +515,8 @@ class SkillRepository(
                     skill_id=row.id,
                     name=row.name,
                     git_path=row.git_path,
+                    skill_uuid=getattr(row, "skill_uuid", None),
+                    sc_version_number=getattr(row, "sc_version_number", None),
                 )
                 for row in rows
             ]
@@ -570,6 +572,16 @@ class SkillRepository(
                         skill_id=int(row["id"]),
                         name=str(row["name"]),
                         git_path=git_path,
+                        skill_uuid=(
+                            str(row["skill_uuid"])
+                            if row.get("skill_uuid") is not None
+                            else None
+                        ),
+                        sc_version_number=(
+                            str(row["sc_version_number"])
+                            if row.get("sc_version_number") is not None
+                            else None
+                        ),
                     )
                 )
         return assets
@@ -1438,6 +1450,21 @@ class SkillSetRepository(
             )
             if skill_set is None or skill is None:
                 return False
+            # The F01 uniqueness migration makes an existing relation the
+            # successful, idempotent result required by the new control-plane
+            # contract.  Checking after both tenant-guarded parent lookups
+            # preserves the old cross-tenant false result.
+            if (
+                db.query(self.SkillSetSkill)
+                .filter(
+                    self.SkillSetSkill.skill_set_id == int(skill_set_id),
+                    self.SkillSetSkill.skill_id == int(skill_id),
+                    self.SkillSetSkill.env == get_current_env(),
+                )
+                .first()
+                is not None
+            ):
+                return True
             db.add(
                 self.SkillSetSkill(
                     skill_set_id=int(skill_set_id),

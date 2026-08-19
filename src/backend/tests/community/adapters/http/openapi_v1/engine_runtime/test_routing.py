@@ -11,8 +11,8 @@ from agentclaw.community.adapters.http.openapi_v1 import (
     build_public_router,
 )
 
-#: sessions 7 + engine 3 + models 2 + approvals 3 + connection 1
-_EXPECTED_ROUTE_COUNT = 16
+#: sessions 7 + engine 4 (status, capabilities, available, restart) + models 2 + approvals 3 + connection 1
+_EXPECTED_ROUTE_COUNT = 17
 
 _BOTS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/"
 

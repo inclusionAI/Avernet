@@ -14,6 +14,7 @@ from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import create_engine, event
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.models import Skill, SkillSet, SkillSetSkill
@@ -419,20 +420,19 @@ def test_public_local_delete_rechecks_active_custom_set_in_delete_transaction(
             assert session.query(LocalSkillCleanupWorkModel).one().status == "preparing"
 
 
-def test_skill_create_is_plain_insert_not_upsert(skills):
-    # Distinct versions → two independent rows (plain INSERT, not an
-    # upsert that would update-in-place).
-    a = skills.create({"name": "dup", "skill_uuid": "x", "version": 1})
-    b = skills.create({"name": "dup", "skill_uuid": "x", "version": 2})
-    assert a["id"] != b["id"]
-    assert len(skills.list_skills()) == 2
+def test_skill_identity_rejects_a_second_row_for_the_same_uuid(skills):
+    skills.create({"name": "dup", "skill_uuid": "x", "version": 1})
+    with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):
+        skills.create({"name": "dup", "skill_uuid": "x", "version": 2})
 
 
-def test_skill_create_matches_prod_without_a_source_only_unique_constraint(skills):
-    """Prod accepts duplicate legacy skill identity fields; SQLite must too."""
-    first = skills.create({"name": "d", "skill_uuid": "x", "version": 1})
-    duplicate = skills.create({"name": "d", "skill_uuid": "x", "version": 1})
-    assert duplicate["id"] != first["id"]
+def test_skill_uuid_constraint_is_scoped_by_tenant_and_env(skills):
+    skills.create({"name": "d", "skill_uuid": "x", "version": 1})
+    with avernet_tenant_scope("tenant-b"):
+        other_tenant = skills.create(
+            {"name": "d", "skill_uuid": "x", "version": 1}
+        )
+    assert other_tenant["skill_uuid"] == "x"
 
 
 def test_skill_user_id_anonymous_coercion(skills):
@@ -700,22 +700,17 @@ def test_add_remove_skill_to_set(skills, sets):
     assert sets.get_skills_in_set(ss["id"]) == []
 
 
-def test_get_skills_in_set_center_max_version(skills, sets):
-    ss = sets.create({"name": "cset"})
+def test_legacy_center_version_rows_are_rejected_by_stable_uuid_constraint(skills, sets):
+    sets.create({"name": "cset"})
     skills.create(
         {"name": "cv1", "git_path": "center://c", "skill_uuid": "cu",
          "status": "PUBLISHED", "version": 1}
     )
-    skills.create(
-        {"name": "cv2", "git_path": "center://c", "skill_uuid": "cu",
-         "status": "PUBLISHED", "version": 2}
-    )
-    with skills._db.orm_session() as s:
-        s.add(SkillSetSkill(skill_set_id=int(ss["id"]),
-                            skill_id=0, skill_uuid="cu"))
-    res = sets.get_skills_in_set(ss["id"])
-    assert len(res) == 1
-    assert res[0]["version"] == 2  # MAX(version) PUBLISHED
+    with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):
+        skills.create(
+            {"name": "cv2", "git_path": "center://c", "skill_uuid": "cu",
+             "status": "PUBLISHED", "version": 2}
+        )
 
 
 def test_get_all_active_skill_sets_preserves_global_and_bot_scoped_defaults(sets):
