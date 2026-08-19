@@ -941,17 +941,17 @@ literals the routes actually publish:
 <!-- reserved-component-names -->
 ```text
 approvals  authorized  ceiling  check-name  connection  engine  identity
-loadtest  logs  mcp  models  resources  routines  sessions  skills
+loadtest  logs  mcp  models  public  resources  routines  sessions  skills
 ```
 
-Nine of those fifteen — `approvals`, `connection`, `engine`, `identity`,
+Nine of those sixteen — `approvals`, `connection`, `engine`, `identity`,
 `models`, `resources`, `routines`, `sessions`, `skills` — are held **only by the
 retiring addresses**. Bot-first addressing moved every bot-scoped component out
 of that segment, so once the deprecated addresses are removed the list is the
-six that remain:
+seven that remain:
 
 ```text
-authorized  ceiling  check-name  loadtest  logs  mcp
+authorized  ceiling  check-name  loadtest  logs  mcp  public
 ```
 
 They are still reserved today, and the list above is the accurate one: a bot

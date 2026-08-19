@@ -157,6 +157,13 @@ user_config:
       user: optional
       app: optional
 
+    "GET /openapi/v1/bots/public/search":
+      user: required
+      app: optional
+    "GET /openapi/v1/bots/public/discover":
+      user: required
+      app: optional
+
     # ── The refusals: operations that still require a human on the wire ──────
 
     # The caller-identity read: its answer IS the end user, so a caller with no

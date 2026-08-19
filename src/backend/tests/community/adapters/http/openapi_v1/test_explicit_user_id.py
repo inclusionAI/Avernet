@@ -118,7 +118,7 @@ def test_naming_another_user_is_refused(client):
 
     assert response.status_code == 403
     body = response.json()
-    assert body["code"] == 403000
+    assert body["code"] == 403001
     assert body["message"] == "Forbidden"
     assert body["data"] is None
 
@@ -328,9 +328,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: ``path`` then moved 54 → 56 when the two Bot Chats operations were added.
 #:
-#: ``none`` then moved 35 → 36 with the caller-identity read: it answers who
-#: the caller is and addresses no bot.
-_BOT_ID_PLACEMENT = {"path": 56, "query": 1, "none": 36}
+#: ``none`` then moved 35 → 36 with the caller-identity read, and 36 → 38 with
+#: the public catalog reads: they answer who the caller is and address no bot.
+_BOT_ID_PLACEMENT = {"path": 56, "query": 1, "none": 38}
 
 
 def _schema() -> dict:
@@ -410,8 +410,8 @@ def test_the_pinned_number_of_operations_take_it():
     # resources file endpoints re-addressed by workspace path (#1000), then -4
     # for the files-only resources group, then +19 for Spaces, work orders and
     # recipient-notification operations added by the collaboration API, then +2
-    # for the Bot Chats operations.
-    assert len(taking) == 82
+    # for the Bot Chats operations, then +2 for the public Bot catalog reads.
+    assert len(taking) == 84
 
 
 def test_the_exempt_operations_take_none():
@@ -482,6 +482,20 @@ def test_the_403_is_documented_on_exactly_the_user_scoped_operations():
     for path, method, operation in _operations(_schema()):
         documented = "403" in operation["responses"]
         assert documented is _user_scoped(path, method), f"{method.upper()} {path}"
+
+
+def test_user_id_mismatch_openapi_examples_use_the_runtime_subcode():
+    """Generated clients must see the same 403001 that the dependency emits."""
+    description = "The user_id names a user the authenticated caller may not act for"
+    documented = 0
+    for path, method, operation in _operations(_schema()):
+        response = operation["responses"].get("403")
+        if not response or response["description"] != description:
+            continue
+        documented += 1
+        example = response["content"]["application/json"]["example"]
+        assert example["code"] == 403001, f"{method.upper()} {path}"
+    assert documented
 
 
 def _request_body_models(schema: dict) -> set[str]:

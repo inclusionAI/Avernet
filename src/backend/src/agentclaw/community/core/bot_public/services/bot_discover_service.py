@@ -298,6 +298,7 @@ class BotDiscoverService:
                 bot_detail = {
                     "id": bot["id"],
                     "bot_id": bot["bot_id"],
+                    "bot_type": bot["bot_type"],
                     "bot_name": bot["bot_name"],
                     "bot_desc": bot["bot_desc"],
                     "entity_id": bot["entity_id"],

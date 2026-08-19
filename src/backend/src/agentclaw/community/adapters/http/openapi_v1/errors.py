@@ -32,6 +32,15 @@ class MissingPrincipalError(Exception):
     """
 
 
+class AppOnlyCallerError(MissingPrincipalError):
+    """A verified application-only caller reached a refused operation (→ 401001).
+
+    This stays a ``MissingPrincipalError`` subclass so the one app-level identity
+    handler continues to cover dependency failures, while the response mapper
+    can preserve the actionable code for a verified caller of the wrong shape.
+    """
+
+
 class GrantNotResolvableError(Exception):
     """Raised when an application caller holds no grant for what it addressed (→ 404).
 
@@ -92,4 +101,3 @@ class StartupScriptUnsupportedError(Exception):
     "my provisioning is in place". The *reason* is served by GET rather than in
     this refusal, because the surface's messages are fixed by contract.
     """
-

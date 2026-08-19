@@ -136,6 +136,11 @@ _按优先级分层排序。_
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS（PARTIAL）— 3 handler 全接通但 NOT PUBLIC-READY | bots 隔离（Stage 1 ✅）；Track B 3 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | 🔧 **实现 + CI 完成；发布待定**——六个已定案 Local Skill 操作 | #725 cleanup-work DDL 必须先于代码部署；[预发验收 runbook](skills-track-b-preprod-acceptance.md) 仍为 **PRE-PROD PENDING** |
 
+**Bot 公开目录前端接入。** 新增的公开目录读接口
+`GET /openapi/v1/bots/public/search` 与
+`GET /openapi/v1/bots/public/discover` 的参数、错误码、数据模型、connection 跳转约定与前端检查清单见
+[`bot-public-catalog-api.zh-CN.md`](bot-public-catalog-api.zh-CN.md)。
+
 ### Track C —— Engine（运行时）面（5 组已全部实现 —— PR #630）
 _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶段，没有 DDL。
 完整裁定与逐端点映射见
@@ -1011,6 +1016,12 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 ---
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
+
+- **2026-08-19** —— **Bot 公开目录已提供前端接入文档。** 文档由已发布的
+  `bots.openapi.json` 契约整理，覆盖 `search` / `discover` 两个公开目录读接口的显式
+  `user_id`、`401000`/`401001`/`403001` 错误分流、白名单响应模型以及无 `binding_id` 的
+  connection 跳转方式。权威机器可读定义仍是 Gateway served schema；文档不改变任何接口或
+  runtime 行为。
 
 - **2026-08-15** —— **Agent 在前的寻址。** 每个带 Agent 作用域的操作都迁到
   `/openapi/v1/bots/{bot_id}/<component>/…`，推翻了 2026-08-03 的组件在前规则。原先九个

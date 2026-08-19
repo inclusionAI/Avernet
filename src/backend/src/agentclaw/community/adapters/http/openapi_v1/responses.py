@@ -45,6 +45,7 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    AppOnlyCallerError,
     GrantNotResolvableError,
     ClusterMismatchError,
     StartupScriptUnsupportedError,
@@ -218,6 +219,7 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # (b) the two 404-mapped errors are byte-for-byte identical — a caller cannot
 # tell "exists but not yours/other tenant" from "does not exist".
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
+    AppOnlyCallerError: (401, "Unauthorized"),
     MissingPrincipalError: (401, "Unauthorized"),
     # Byte-identical to the line above, deliberately. "You sent no principal" and
     # "your principal did not verify" must be indistinguishable, or the response
@@ -481,6 +483,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 # small, explicit override table lets a category expose a stable actionable
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
+    AppOnlyCallerError: 401001,
+    UserIdMismatchError: 403001,
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
     WorkOrderInvalidReasonError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidRemarkError: WorkOrderErrorCode.INVALID_REMARK,

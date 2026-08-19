@@ -40,6 +40,10 @@ KEY = "refusal-test-shared-secret-at-least-32-bytes"
 TENANT = "acme-tenant"
 USER = "u-1"
 APP_ID = 42
+_CATALOG_OPERATIONS = {
+    ("GET", "/openapi/v1/bots/public/search"),
+    ("GET", "/openapi/v1/bots/public/discover"),
+}
 
 
 class _Secret:
@@ -159,6 +163,8 @@ def test_every_refused_operation_refuses_an_app_only_caller(client, method, path
     )
 
     assert response.status_code == 401, response.text
+    expected_code = 401001 if (method, path) in _CATALOG_OPERATIONS else 401000
+    assert response.json()["code"] == expected_code
 
 
 def test_the_socket_plane_refuses_an_app_only_caller_too(client):
@@ -182,8 +188,8 @@ def test_the_socket_plane_refuses_an_app_only_caller_too(client):
     assert refused.value.code == 1008
 
 
-def test_the_refusal_is_identical_to_having_no_credential_at_all(client):
-    """Byte for byte, so the caller cannot tell which half it failed."""
+def test_existing_refused_operations_remain_identical_to_no_credential(client):
+    """Catalog subcodes must not weaken older routes' anti-enumeration contract."""
     refused = client.get(
         "/openapi/v1/bots/logs/traces",
         headers={PRINCIPAL_HEADER: _token(with_user=False)},

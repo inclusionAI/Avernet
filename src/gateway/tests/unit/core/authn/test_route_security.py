@@ -33,6 +33,25 @@ def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
     assert req[PrincipalType.APP] is Presence.OPTIONAL
 
 
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/openapi/v1/bots/public/search",
+        "/openapi/v1/bots/public/discover",
+    ),
+)
+def test_shipped_config_requires_a_user_for_public_catalog_reads(path: str) -> None:
+    """Catalog reads reject app-only callers instead of inheriting ``bots/**``."""
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    req = rs.resolve("GET", path)
+
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.REQUIRED
+    assert req[PrincipalType.APP] is Presence.OPTIONAL
+
+
 #: The operations that still require a human on the wire. Mirrors Mode REFUSED
 #: in the backend's ``adapters/http/openapi_v1/admission.py`` — that table is
 #: the authority, and this list is the edge's expression of it. They are two

@@ -90,6 +90,22 @@ def test_error_envelope_pins_data_to_null():
     assert model["properties"]["data"].get("type") == "null"
 
 
+def test_catalog_401_documents_both_credential_and_app_only_outcomes():
+    """Catalog clients need both fixed 401 codes, not a generic-only sample."""
+    schema = _schema()
+    for path in (
+        "/openapi/v1/bots/public/search",
+        "/openapi/v1/bots/public/discover",
+    ):
+        media = schema["paths"][path]["get"]["responses"]["401"]["content"][
+            "application/json"
+        ]
+        examples = media["examples"]
+        values = [example["value"] for example in examples.values()]
+        assert {value["code"] for value in values} == {401000, 401001}, path
+        assert all(value["message"] == "Unauthorized" for value in values), path
+
+
 # ----- R9/F38: the one documented exception to ErrorEnvelope ----------------
 
 

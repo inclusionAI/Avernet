@@ -56,8 +56,12 @@ from starlette.status import WS_1008_POLICY_VIOLATION
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
     ADMITTING_MODES,
+    APP_ONLY_SUBCODE_REFUSED,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
+from agentclaw.community.adapters.http.openapi_v1.errors import (
+    AppOnlyCallerError,
+    MissingPrincipalError,
+)
 from agentclaw.community.core.gateway_principal import (
     PrincipalType,
     PrincipalVerificationError,
@@ -172,7 +176,11 @@ def _verify_from_headers(connection: HTTPConnection) -> VerifiedCaller | None:
         return None
 
 
-def _refuse(connection: HTTPConnection, reason: str) -> None:
+def _refuse(
+    connection: HTTPConnection,
+    reason: str,
+    error_type: type[MissingPrincipalError] = MissingPrincipalError,
+) -> None:
     """Refuse this connection in the shape its plane can carry.
 
     One refusal for both planes and for both dependencies below, so "no caller
@@ -182,7 +190,7 @@ def _refuse(connection: HTTPConnection, reason: str) -> None:
     """
     if connection.scope["type"] == "websocket":
         raise WebSocketException(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
-    raise MissingPrincipalError(reason)
+    raise error_type(reason)
 
 
 async def require_principal(connection: HTTPConnection) -> Principal:
@@ -226,6 +234,18 @@ async def require_principal(connection: HTTPConnection) -> Principal:
         # Verified, but names only an application, on an operation that does not
         # admit one. Refused here rather than at the handler's owner lookup, and
         # with the same ``401`` an unverified caller gets.
+        method = _verb(connection)
+        route = connection.scope.get("route")
+        route_path = getattr(route, "path", None)
+        if (method, route_path) in APP_ONLY_SUBCODE_REFUSED:
+            # COSEC: A verified app-only caller is classified separately from a
+            # missing or forged credential only on the catalog's published
+            # exception, without exposing route or payload data.
+            _refuse(
+                connection,
+                "this operation requires a caller naming an end user",
+                AppOnlyCallerError,
+            )
         _refuse(connection, "this operation requires a caller naming an end user")
     return caller
 

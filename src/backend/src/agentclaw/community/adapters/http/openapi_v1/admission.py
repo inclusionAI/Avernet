@@ -416,6 +416,8 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # No bot exists yet for a grant to cover, and creation spends the user's
     # quota. Auto-granting the new bot would invent consent nobody gave.
     ("POST", "/openapi/v1/bots"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/public/search"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/public/discover"): AdmissionMode.REFUSED,
     # Delegation is a human act. An application must not be able to widen its
     # own access, withdraw a competitor's, or enumerate what else reaches a bot.
     ("POST", "/openapi/v1/bots/{bot_id}/authorized-apps"): AdmissionMode.REFUSED,
@@ -452,6 +454,15 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/loadtest/hello"): AdmissionMode.REFUSED,
     ("WEBSOCKET", "/openapi/v1/bots/loadtest/ws/echo"): AdmissionMode.REFUSED,
 }
+
+# A verified app-only caller normally shares the same fixed 401000 response as
+# a missing or invalid credential.  The catalog is the sole published exception:
+# its contract exposes a distinct actionable subcode, so this closed set keeps
+# that compatibility boundary explicit and reviewable.
+APP_ONLY_SUBCODE_REFUSED = frozenset({
+    ("GET", "/openapi/v1/bots/public/search"),
+    ("GET", "/openapi/v1/bots/public/discover"),
+})
 
 #: The operations whose grant check runs in their **handler**, and the only ones.
 #:
@@ -639,6 +650,7 @@ class ActingCaller:
 __all__ = [
     "ADMISSION",
     "ADMITTING_MODES",
+    "APP_ONLY_SUBCODE_REFUSED",
     "SKILL_SCOPED_OPERATIONS",
     "ActingCaller",
     "AdmissionMode",
