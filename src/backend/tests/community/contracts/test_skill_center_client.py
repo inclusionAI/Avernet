@@ -26,6 +26,7 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterGatewayError,
     SkillCenterGatewayErrorCode,
     SkillCenterTeamCreateRequest,
+    SkillCenterTeamCreateResult,
 )
 
 
@@ -62,6 +63,18 @@ def test_local_skill_center_client_create_team_records_plugin_hit(world) -> None
     assert len(calls) == 1
     assert calls[0].args == (request,)
     assert calls[0].kwargs == {}
+
+
+def test_team_mapping_dtos_preserve_legacy_minimal_construction() -> None:
+    request = SkillCenterTeamCreateRequest(
+        team_code="legacy-space",
+        team_name="Legacy Space",
+        ref_source_id="7",
+    )
+    result = SkillCenterTeamCreateResult(team_id=1)
+
+    assert request.ref_source_platform == ""
+    assert result.team_code == ""
 
 
 def test_local_skill_center_gateway_records_explicit_team_per_request(world) -> None:

@@ -18,7 +18,7 @@ class SkillCenterTeamCreateRequest:
     team_code: str
     team_name: str
     ref_source_id: str
-    ref_source_platform: str
+    ref_source_platform: str = ""
     description: str | None = None
     icon: str | None = None
 
@@ -28,10 +28,10 @@ class SkillCenterTeamCreateResult:
     """Confirmed SC team identity returned after a successful creation."""
 
     team_id: int
-    team_code: str
-    team_name: str
-    ref_source_platform: str
-    ref_source_id: str
+    team_code: str = ""
+    team_name: str = ""
+    ref_source_platform: str = ""
+    ref_source_id: str = ""
 
 
 @dataclass(frozen=True)
