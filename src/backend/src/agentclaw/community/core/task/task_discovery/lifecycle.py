@@ -24,10 +24,10 @@ import asyncio
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
+from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     create_default_service,
 )
@@ -37,9 +37,6 @@ from agentclaw.community.core.task.task_discovery.session_creator import (
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
-
-if TYPE_CHECKING:
-    from agentclaw.community.core.bot_management.services.bot_service import BotService
 
 logger = get_logger()
 
@@ -65,10 +62,10 @@ class TaskDiscoveryLifecycle(LifecycleBase):
     @inject
     def __init__(
         self,
-        bot_service: "BotService",
+        bot_service: BotServiceProtocol,
         notify_sender: NotifySenderPlugin,
     ) -> None:
-        self._bot_service: Any = bot_service
+        self._bot_service: BotServiceProtocol = bot_service
         self._notify_sender = notify_sender
         self._task: asyncio.Task | None = None
 

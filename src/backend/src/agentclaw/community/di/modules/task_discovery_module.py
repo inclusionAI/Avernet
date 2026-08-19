@@ -3,9 +3,9 @@
 参考 ``CronModule`` 的模式：
 - 绑定 ``TaskDiscoveryLifecycle`` 为 singleton
 - Lifecycle 参与者由 ``discover_lifecycle_participants`` 自动发现
-- ``TaskDiscoveryLifecycle.__init__`` 通过 @inject 注入 BotService、
-  NotifySenderPlugin 和 EngineRuntimeRelayProtocol
-- relay 自动路由到 per-bot engine adapter，无需硬编码 engine 地址
+- ``TaskDiscoveryLifecycle.__init__`` 通过 @inject 注入 BotService 和
+  NotifySenderPlugin（BotService 由 BotManagementModule 绑定，
+  NotifySenderPlugin 由 CommunityNotifyModule 绑定）
 - 在 backend startup 后自动触发定时调度，为所有用户 bot 执行任务发现
 
 配置项 (通过环境变量):
