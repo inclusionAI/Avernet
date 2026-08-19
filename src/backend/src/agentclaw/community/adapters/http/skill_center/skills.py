@@ -85,6 +85,7 @@ from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousErr
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.skill_center.constants import LOCK_HELD_ERRORS
 from agentclaw.community.core.skill_center.errors import (
+    LocalSkillNotFoundError,
     SkillDeleteConsistencyError,
     SkillReferencedBySkillSetError,
 )
@@ -109,6 +110,7 @@ from agentclaw.community.api.skill_service_factory import SkillServiceFactoryPro
 from agentclaw.community.api.skill_set_activator_factory import SkillSetActivatorFactoryProtocol
 from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
 from agentclaw.community.api.skill_set_switcher_factory import SkillSetSwitcherFactoryProtocol
+from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
 from agentclaw.community.core.config_compose.teclaw_paths import to_local_skill_engine_path
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
@@ -1030,12 +1032,36 @@ async def activate_skill(
     skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_sync_dispatcher: DeviceSyncDispatcher = Injected(DeviceSyncDispatcher),
+    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
 ) -> ActivateResponse:
     """Activate a skill by creating symlink."""
     logger.info(f"[skills.activate_skill] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, skill_id={skill_id}, entity_id={entity_id}")
 
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+
+    # Keep the published BFF response shape, but hand numeric Local Skill IDs
+    # to the same desired-state control plane as canonical OpenAPI.  Repo/Space
+    # fall through to their still-legacy Catalog implementation until P1-02.
+    if skill_id.isdecimal():
+        try:
+            item = asset_service.get_skill(
+                skill_id=skill_id, bot_id=effective_bot_id, actor_id=ctx.user_id
+            )
+        except LocalSkillNotFoundError:
+            item = None
+        if item is not None:
+            result = await asset_service.set_active(
+                skill_id=skill_id,
+                bot_id=effective_bot_id,
+                actor_id=ctx.user_id,
+                active=True,
+            )
+            return ActivateResponse(
+                success=True,
+                message="Skill activated successfully",
+                link_name=str(result["name"]),
+            )
 
     # Get user-specific paths using new directory structure
     skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
@@ -1122,12 +1148,33 @@ async def deactivate_skill(
     skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_sync_dispatcher: DeviceSyncDispatcher = Injected(DeviceSyncDispatcher),
+    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
 ) -> DeactivateResponse:
     """Deactivate a skill by removing symlink."""
     logger.info(f"[skills.deactivate_skill] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, skill_id={skill_id}, entity_id={entity_id}")
 
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+
+    # See ``activate_skill``: Local IDs share canonical Installation desired
+    # state; unsupported asset adapters retain their published BFF behavior.
+    if skill_id.isdecimal():
+        try:
+            item = asset_service.get_skill(
+                skill_id=skill_id, bot_id=effective_bot_id, actor_id=ctx.user_id
+            )
+        except LocalSkillNotFoundError:
+            item = None
+        if item is not None:
+            await asset_service.set_active(
+                skill_id=skill_id,
+                bot_id=effective_bot_id,
+                actor_id=ctx.user_id,
+                active=False,
+            )
+            return DeactivateResponse(
+                success=True, message="Skill deactivated successfully"
+            )
 
     # Get user-specific paths using new directory structure
     skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)

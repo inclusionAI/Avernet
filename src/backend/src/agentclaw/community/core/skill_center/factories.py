@@ -26,6 +26,9 @@ from agentclaw.community.core.skill_center.services.git_sync import GitSyncServi
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
+)
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.core.skill_center.path_resolution import (
     build_pool_local_path_adapter,
@@ -102,6 +105,18 @@ class LocalSkillPackageStorage:
     async def exists(self) -> bool:
         """Whether this storage currently has an authoritative package."""
         return await self._filesystem.exists(self._device_directory)
+
+    async def read_file(self, relative_path: str) -> bytes | None:
+        """Read one validated package-relative file without exposing its locator."""
+        if (
+            not relative_path
+            or relative_path.startswith("/")
+            or ".." in relative_path.split("/")
+        ):
+            raise ValueError("Local Skill package path is invalid")
+        return await self._filesystem.read_file(
+            f"{self._device_directory}/{relative_path}"
+        )
 
     async def verify(self) -> bool:
         """Read and validate every package file without changing storage."""
@@ -432,6 +447,7 @@ class SkillSetServiceFactory:
             tuple[str, str, str] | None,
         ],
         ext_info_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
+        installations: SkillInstallationRepositoryProtocol | None = None,
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -446,6 +462,7 @@ class SkillSetServiceFactory:
         self._path_factory = path_factory
         self._pool_layout_paths = pool_layout_paths
         self._ext_info_provider = ext_info_provider
+        self._installations = installations
 
     def create(
         self,
@@ -549,6 +566,7 @@ class SkillSetServiceFactory:
             ext_info_provider=self._ext_info_provider,
             path_factory=self._path_factory,
             pool_layout_paths=self._pool_layout_paths,
+            installations=self._installations,
         )
 
 

@@ -278,6 +278,23 @@ class SkillParser:
         return _to_skill_info(_validate_manifest(frontmatter))
 
     @staticmethod
+    def parse_config(content: str) -> list[dict[str, Any]]:
+        """Return the optional, raw ``config`` declaration from SKILL.md.
+
+        Config is an execution-time parameter contract, not catalog metadata;
+        it intentionally remains outside the #1221 catalog projection.
+        """
+        frontmatter, _body = _extract_frontmatter(content)
+        config = frontmatter.get("config", [])
+        if not isinstance(config, list) or not all(
+            isinstance(item, dict) for item in config
+        ):
+            raise SkillManifestError(
+                "INVALID_CONFIG", "SKILL.md config must be a list.", "config"
+            )
+        return config
+
+    @staticmethod
     def parse_installed_content(content: str) -> dict[str, Any] | None:
         """Project metadata from a legacy installed Skill for read-only lists.
 

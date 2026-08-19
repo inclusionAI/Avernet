@@ -45,6 +45,10 @@ class LocalSkillStorageError(Exception):
     """A package persistence or compensating cleanup operation failed."""
 
 
+class SkillParameterValidationError(Exception):
+    """The full Bot-level parameter object violates SKILL.md config."""
+
+
 class LocalSkillRuntimeSyncError(Exception):
     """The runtime projection could not match Local Skill desired state."""
 

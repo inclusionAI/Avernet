@@ -23,10 +23,10 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillStorageError,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.core.repository.protocols.skill_center import (
-    SkillSetRepository,
-)
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
     SkillsPoolSkillRepositoryProtocol,
@@ -61,7 +61,7 @@ class LocalSkillStateService:
     def __init__(
         self,
         skill_repo: SkillRepository,
-        skill_set_repo: SkillSetRepository,
+        installations: SkillInstallationRepositoryProtocol,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_set_service_factory: SkillSetServiceFactory,
@@ -71,7 +71,7 @@ class LocalSkillStateService:
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
     ) -> None:
         self._skill_repo = skill_repo
-        self._skill_set_repo = skill_set_repo
+        self._installations = installations
         self._bot_repo = bot_repo
         self._collaborators = collaborator_service
         self._skill_set_service_factory = skill_set_service_factory
@@ -100,40 +100,12 @@ class LocalSkillStateService:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
-            default_set = self._skill_set_repo.get_default(
-                user_id=owner_id,
-                bolt_id=bot_id,
-                engine_type=bot.get("active_engine"),
+            changed = self._write_desired_state(
+                active=active,
+                env=str(bot["env"]),
+                bot_id=bot_id,
+                skill_id=skill_id,
             )
-            if default_set is None:
-                raise LocalSkillNotFoundError()
-            if active:
-                self._ensure_default_set_membership(
-                    default_set=default_set,
-                    skill_id=skill_id,
-                    owner_id=owner_id,
-                )
-            changed = bool(skill["active"]) != active
-            if changed:
-                self._write_desired_state(
-                    active=active,
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    skill_set_id=int(default_set["id"]),
-                    skill_id=int(skill_id),
-                )
-            elif not active:
-                # ``get_bot_local_skill`` treats an exclusion from any former
-                # default set as inactive, while runtime mapping filters the
-                # current default set. Mirror that inactive desired state into
-                # the current set before publishing an idempotent deactivate.
-                self._write_desired_state(
-                    active=False,
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    skill_set_id=int(default_set["id"]),
-                    skill_id=int(skill_id),
-                )
 
             if active:
                 synced = self._sync_runtime(bot=bot, owner_id=owner_id, bot_id=bot_id)
@@ -150,10 +122,9 @@ class LocalSkillStateService:
                     try:
                         self._write_desired_state(
                             active=not active,
-                            owner_id=owner_id,
+                            env=str(bot["env"]),
                             bot_id=bot_id,
-                            skill_set_id=int(default_set["id"]),
-                            skill_id=int(skill_id),
+                            skill_id=skill_id,
                         )
                     except Exception as exc:
                         raise LocalSkillStorageError() from exc
@@ -231,38 +202,17 @@ class LocalSkillStateService:
         self,
         *,
         active: bool,
-        owner_id: str,
+        env: str,
         bot_id: str,
-        skill_set_id: int,
-        skill_id: int,
-    ) -> None:
-        if active:
-            changed = self._skill_set_repo.remove_all_default_skill_exclusions(
-                owner_id, bot_id, skill_id
-            )
-        else:
-            changed = self._skill_set_repo.add_default_skill_exclusion(
-                owner_id, bot_id, skill_set_id, skill_id
-            )
-        if not changed:
-            raise LocalSkillStorageError()
-
-    def _ensure_default_set_membership(
-        self,
-        *,
-        default_set: dict[str, Any],
         skill_id: str,
-        owner_id: str,
-    ) -> None:
-        """Repair legacy Local Skills before making an active state visible."""
-        default_set_id = str(default_set["id"])
-        members = self._skill_set_repo.get_skills_in_set(default_set_id)
-        if any(str(member.get("id")) == skill_id for member in members):
-            return
-        if not self._skill_set_repo.add_skill_to_set(
-            default_set_id, skill_id, user_id=owner_id
-        ):
-            raise LocalSkillStorageError()
+    ) -> bool:
+        if active:
+            return self._installations.install(
+                env=env, bot_id=bot_id, skill_id=skill_id
+            )
+        return self._installations.uninstall(
+            env=env, bot_id=bot_id, skill_id=skill_id
+        )
 
     def _sync_runtime(self, *, bot: dict[str, Any], owner_id: str, bot_id: str) -> bool:
         try:

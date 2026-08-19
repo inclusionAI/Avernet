@@ -135,6 +135,11 @@ class AdmissionMode(StrEnum):
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    # The item routes resolve the addressed owner from the asset and perform
+    # the grant check against that exact Bot/owner pair in their handler.
+    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     # ── own bot: names a bot, resolved as the delegating user's ──────────────
     # The caller can only ever reach their own bots here, so an application
     # acting as them can only reach the same ones.
@@ -612,6 +617,9 @@ SKILL_SCOPED_OPERATIONS = frozenset(
         ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
         ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"),
         ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"),
+        ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content"),
+        ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"),
     }
 )
 

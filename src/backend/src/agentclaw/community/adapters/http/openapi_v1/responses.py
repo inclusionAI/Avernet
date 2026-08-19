@@ -169,6 +169,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillOwnerAmbiguousError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
+    SkillParameterValidationError,
     LocalSkillTooLargeError,
 )
 from agentclaw.community.core.services.identity import (
@@ -418,6 +419,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillDuplicateError: (409, "Local Skill already exists"),
     LocalSkillTooLargeError: (413, "Skill package is too large"),
     LocalSkillStorageError: (502, "Skill storage operation failed"),
+    SkillParameterValidationError: (422, "Skill parameters are invalid"),
     LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
     LocalSkillEditBusyError: (409, "Another Skill update is in progress"),
     LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
@@ -566,6 +568,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillDuplicateError: 409103,
     LocalSkillTooLargeError: 413101,
     LocalSkillStorageError: 502101,
+    SkillParameterValidationError: 422101,
     LocalSkillRuntimeSyncError: 502102,
 }
 
