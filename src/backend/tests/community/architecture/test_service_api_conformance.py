@@ -53,6 +53,9 @@ from agentclaw.community.api.bot_app_grant_service import (
     BotAppGrantServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.health_diagnosis_service import (
+    HealthDiagnosisServiceProtocol,
+)
 from agentclaw.community.api.local_bot_workflow_service import LocalBotWorkflowServiceProtocol
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
@@ -96,6 +99,9 @@ from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
 )
 from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
+from agentclaw.community.core.harness.services.health_diagnosis_service import (
+    HealthDiagnosisService,
+)
 from agentclaw.community.core.services.engine_config import EngineConfigService
 from agentclaw.community.core.skill_center.services.local_skill_query_service import (
     LocalSkillQueryService,
@@ -129,6 +135,7 @@ _PAIRS = [
     (EngineConfigServiceProtocol, EngineConfigService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),
+    (HealthDiagnosisServiceProtocol, HealthDiagnosisService),
     (LocalSkillQueryServiceProtocol, LocalSkillQueryService),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
     (LocalSkillStateServiceProtocol, LocalSkillStateService),

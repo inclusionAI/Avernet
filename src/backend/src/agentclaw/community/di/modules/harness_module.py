@@ -189,6 +189,17 @@ class HarnessModule(Module):
             scan_record_repo=scan_record_repo,
         )
 
+    @singleton
+    @provider
+    @inject
+    def health_diagnosis_service(
+        self,
+        scanner: ContentScannerProtocol,
+        scan_repo: HarnessScanRecordRepository,
+    ) -> HealthDiagnosisService:
+        """Construct the Core service without making Core depend on api/."""
+        return HealthDiagnosisService(scanner=scanner, scan_repo=scan_repo)
+
     # ── Service API Protocol aliases ────────────────────────────────────
     # Each @provider below resolves the concrete singleton and returns it
     # under the Protocol type, so ``Injected(<X>Protocol)`` in adapters/
