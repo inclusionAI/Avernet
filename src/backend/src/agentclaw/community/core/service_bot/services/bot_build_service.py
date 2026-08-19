@@ -238,7 +238,10 @@ class BotBuildService:
         rsync_append = parse_build_rsync_excludes_from_ext(ext)
 
         # 传递 Bot 级别追加项（合并模式）
-        build_plan = provider.get_build_plan(build_rsync_excludes_append=rsync_append)
+        build_plan = provider.get_build_plan(
+            build_rsync_excludes_append=rsync_append,
+            bot=bot,
+        )
         engine_type = build_plan.engine_type
         logger.info(
             f"[BotBuildService.build] Starting build: "
@@ -1273,7 +1276,10 @@ class BotBuildService:
         rsync_append = parse_build_rsync_excludes_from_ext(ext)
 
         # 传递 Bot 级别追加项（合并模式）
-        build_plan = provider.get_build_plan(build_rsync_excludes_append=rsync_append)
+        build_plan = provider.get_build_plan(
+            build_rsync_excludes_append=rsync_append,
+            bot=bot,
+        )
         deadline = time.monotonic() + _DRAFT_RESTORE_TIMEOUT_SECONDS
 
         def remaining_timeout() -> float:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
+from typing import Any
+from urllib.parse import urlparse
 
 from agentclaw.community.core.workspace.engine_sandbox import DirectoryItem, EngineBuildPlan, ReadOnlyRule
 from agentclaw.community.di import config as cfg
@@ -85,6 +87,84 @@ def _make_aicoding_build_plan(rsync_excludes: list[str]) -> EngineBuildPlan:
 _AICODING_BUILD_PLAN = _make_aicoding_build_plan(list(_AICODING_RSYNC_EXCLUDES))
 
 
+def _repo_dirname_from_url(url: Any) -> str:
+    """Return the directory name git would use when cloning ``url``.
+
+    aicoding bots clone their code repos directly into ``.aicoding/workspace/``
+    under the repo's last path segment (``.git`` stripped). Handles https and
+    scp-like ssh forms, trailing slashes, query strings. Returns "" for unusable
+    input so callers can skip it.
+    """
+    if not isinstance(url, str):
+        return ""
+    value = url.strip()
+    if not value:
+        return ""
+
+    if "://" in value:
+        path = urlparse(value).path
+    elif ":" in value:
+        # git@host:owner/repo(.git)
+        path = value.split(":", 1)[1]
+    else:
+        path = value
+
+    path = path.split("?", 1)[0].split("#", 1)[0].strip().rstrip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
+
+    name = path.rsplit("/", 1)[-1].strip()
+    if name in ("", ".", "..") or "/" in name:
+        return ""
+    return name
+
+
+def _repo_workspace_excludes_for_bot(bot: Any) -> list[str]:
+    """Derive ``workspace/<repo>`` rsync excludes from a bot's template_config.
+
+    aicoding clones the repos declared in the bot's template config
+    (``ac_templates.ext``: ``backend_repo`` / ``frontend_repo`` / ``lib_repo``
+    plus template-factory aliases) into ``.aicoding/workspace/<repo>``. Those
+    working trees are re-cloned/mounted by the runtime, so the build rsync must
+    NOT bake them into the published artifact (the static
+    ``workspace/*/.git/`` exclude only skips ``.git``, not the whole tree).
+    This reads the same repo URLs the rest of the platform uses (via
+    ``bot_management.utils._extract_code_repo_urls``) and maps each to its clone
+    directory name.
+
+    The repo source is ``bot["template_config"]`` — i.e. the ``ac_templates.ext``
+    column attached by ``BotService.get_bot``. It is deliberately NOT read from
+    ``bot["ext"]`` (``ac_bots.ext``), which is a different row carrying
+    operator/bot-level config, not the template's repo declarations.
+
+    This is aicoding-only knowledge: it is intentionally kept inside this module
+    rather than leaked into the shared engine registry or build service.
+    """
+    if not isinstance(bot, dict):
+        return []
+
+    # bot["template_config"] == ac_templates.ext (attached by BotService.get_bot
+    # via _template_service.get_template(...).get("ext")). This is the canonical
+    # source for repo declarations; do not fall back to ac_bots.ext.
+    template_config = bot.get("template_config")
+    if not isinstance(template_config, dict) or not template_config:
+        return []
+
+    # Lazy import: bot_management.utils pulls in requests/capabilities; keep it
+    # out of this module's import path.
+    from agentclaw.community.core.bot_management.utils import _extract_code_repo_urls
+
+    excludes: list[str] = []
+    seen: set[str] = set()
+    for url in _extract_code_repo_urls(template_config):
+        name = _repo_dirname_from_url(url)
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        excludes.append(f"workspace/{name}")
+    return excludes
+
+
 class AICodingSandboxProvider:
     """Workspace provider for the AICoding engine.
 
@@ -113,6 +193,7 @@ class AICodingSandboxProvider:
     def get_build_plan(
         self,
         build_rsync_excludes_append: list[str] | None = None,
+        bot: Any = None,
     ) -> EngineBuildPlan:
         # 合并模式：默认值 + 自定义项（去重）
         excludes = list(_AICODING_RSYNC_EXCLUDES)
@@ -121,6 +202,21 @@ class AICodingSandboxProvider:
             for item in build_rsync_excludes_append:
                 if item not in excludes:
                     excludes.append(item)
+        # aicoding 特有：bot 的 template_config 里声明的代码仓库被 clone
+        # 进 .aicoding/workspace/<repo>，其工作副本不应进入发布物。
+        # 这段是额外保护，任何异常都必须降级为"不追加仓库排除"，绝不能
+        # 让 get_build_plan 抛错而影响 build()/restore_draft() 主链路。
+        try:
+            for item in _repo_workspace_excludes_for_bot(bot):
+                if item not in excludes:
+                    excludes.append(item)
+        except Exception as e:  # noqa: BLE001 - 兜底，绝不影响构建主链路
+            logger.warning(
+                "[AICodingSandboxProvider.get_build_plan] derive repo workspace "
+                "excludes failed, falling back to excludes without them: %s",
+                e,
+                exc_info=True,
+            )
         return _make_aicoding_build_plan(excludes)
 
     def _normalize_sub_path(self, sub_path: str) -> str:

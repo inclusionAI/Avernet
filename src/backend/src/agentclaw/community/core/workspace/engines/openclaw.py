@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from agentclaw.community.core.workspace.engine_sandbox import DirectoryItem, EngineBuildPlan, ReadOnlyRule
 from agentclaw.community.di import config as cfg
@@ -94,6 +95,7 @@ class OpenClawSandboxProvider:
     def get_build_plan(
         self,
         build_rsync_excludes_append: list[str] | None = None,
+        bot: Any = None,
     ) -> EngineBuildPlan:
         # 合并模式：默认值 + 自定义项（去重）
         excludes = list(_OPENCLAW_RSYNC_EXCLUDES)
