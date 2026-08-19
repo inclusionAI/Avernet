@@ -147,6 +147,8 @@ provides:
   - "SkillsPoolRolloutGate"
   - "SkillsPoolMigrationClaimService"
   - "SkillsPoolReconcileService"
+  - "SkillsPoolReconcileOutcome"
+  - "SkillsPoolReconcileResult"
   - "SkillsPoolReconcileTaskHandler"
   - "SkillsPoolReconcileWakeupListener"
   - "SkillsPoolRecoveryService"

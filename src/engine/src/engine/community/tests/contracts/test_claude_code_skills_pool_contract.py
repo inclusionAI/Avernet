@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from engine.community.core.adapters.claude_code.skills import (
     ClaudeCodeSkillsAdapter,
+    _serialize_pool_mapping,
 )
 from engine.community.core.skills.models import (
     PoolLayoutActivateRequest,
@@ -290,3 +291,18 @@ async def test_claude_code_adapter_unknown_rollback_fails_closed() -> None:
         "source": "newer-plugin",
         "raw_status": "FUTURE_STATUS",
     }
+
+
+@pytest.mark.parametrize(
+    "mapping,message",
+    [
+        (PoolSkillMappingIntent(corpus="center", relative_path=None, link_name="a"), "structured identity"),
+        (PoolSkillMappingIntent(corpus="repo", relative_path=None, link_name="a"), "relative_path"),
+    ],
+)
+def test_claude_mapping_serializer_rejects_incomplete_intent(
+    mapping: PoolSkillMappingIntent,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _serialize_pool_mapping(mapping)

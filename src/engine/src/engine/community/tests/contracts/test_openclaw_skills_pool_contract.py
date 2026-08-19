@@ -5,7 +5,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from engine.community.core.adapters.openclaw.skills import OpenClawSkillsAdapter
+from engine.community.core.adapters.openclaw.skills import (
+    OpenClawSkillsAdapter,
+    _serialize_pool_mapping,
+)
 from engine.community.core.skills.exceptions import (
     InvalidPoolMappingRequestError,
 )
@@ -272,6 +275,21 @@ async def test_openclaw_adapter_serializes_center_v3_for_full_lifecycle() -> Non
     assert port.publish_pool_mappings.await_args.args[0]["mappings"] == [expected]
     assert port.publish_pool_mappings.await_args.args[0]["retired_mappings"] == [expected]
     assert port.verify_pool_mappings.await_args.args[0]["mappings"] == [expected]
+
+
+@pytest.mark.parametrize(
+    "mapping,message",
+    [
+        (PoolSkillMappingIntent(corpus="center", relative_path=None, link_name="a"), "structured identity"),
+        (PoolSkillMappingIntent(corpus="repo", relative_path=None, link_name="a"), "relative_path"),
+    ],
+)
+def test_openclaw_mapping_serializer_rejects_incomplete_intent(
+    mapping: PoolSkillMappingIntent,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _serialize_pool_mapping(mapping)
 
 
 @pytest.mark.asyncio
