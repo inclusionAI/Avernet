@@ -440,6 +440,29 @@ class BotRunner:
             context=context,
         )
 
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        context: BotChatContext,
+        metadata: dict[str, Any],
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[Any]:
+        """查询指定 bot 下的会话列表（只读）
+
+        返回 adapter 层 SessionInfo 对象（含 title/message_count 等字段），
+        由 router 直接映射为对外响应项。
+        """
+        route = await self._resolve_bot_route(bot_id, metadata)
+        return await route.bot_service.list_sessions(
+            binding_info=route.binding_info,
+            agent_id=route.route_bot_id,
+            limit=limit,
+            offset=offset,
+            context=context,
+        )
+
     def get_result(self, run_id: str) -> Any:
         """获取执行结果
 

@@ -404,6 +404,34 @@ class BotRunner(Protocol):
         """
         ...
 
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        context: "BotChatContext",
+        metadata: dict[str, Any],
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[Any]:
+        """查询指定 bot 下的会话列表（只读）
+
+        通过 BotService 从 adapter 侧查询会话列表，不创建新会话。
+        返回 adapter 层 SessionInfo 对象（含 id/title/message_count/created_at/
+        updated_at 等字段），由 router 直接映射为对外响应项。类型标注为 ``Any``
+        以避免 api 层对 core 层私有 adapter 模块的跨层依赖。
+
+        Args:
+            bot_id: Bot 唯一标识，格式为 <real_bot_id>:<entity_id>
+            context: 请求上下文
+            metadata: 元数据，支持 bot_options.lifecycle_stage 指定生命周期阶段
+            limit: 每页数量（默认 20）
+            offset: 偏移量（默认 0）
+
+        Returns:
+            adapter 层 SessionInfo 列表
+        """
+        ...
+
     def get_result(self, run_id: str) -> Any:
         """获取执行结果
 

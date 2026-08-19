@@ -22,6 +22,8 @@ from secbaas.community.api.bot_runtime import (
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.bot_run_queue import BotRunQueueRecord
 
+from ._async_session_client import SessionInfo as AdapterSessionInfo
+
 
 @runtime_checkable
 class PostRunCallback(Protocol):
@@ -180,6 +182,36 @@ class BotService(Protocol):
 
         Returns:
             消息信息列表
+        """
+        ...
+
+    async def list_sessions(
+        self,
+        *,
+        binding_info: BotBindingInfo,
+        agent_id: str,
+        limit: int = 20,
+        offset: int = 0,
+        context: BotChatContext | None = None,
+    ) -> list[AdapterSessionInfo]:
+        """查询 bot 下的会话列表（只读）
+
+        通过 AsyncSessionClient 从 adapter 侧查询会话列表，不创建新会话。
+        返回 adapter 层 ``SessionInfo``（含 ``title`` / ``message_count`` 等字段），
+        由上层 router 直接映射为对外响应项。
+
+        引擎不支持 list capability 时，由实现决定返回空列表或抛
+        ``BotServiceError``；router 层负责兜底为 200 空列表 + warning。
+
+        Args:
+            binding_info: 已解析的 binding 信息（用于创建底层连接）
+            agent_id: 解析后的 route_bot_id，固定透传给 adapter，避免越权查询其它 bot
+            limit: 每页数量
+            offset: 偏移量
+            context: 可选的请求上下文（身份认证、调用者信息等，用于提取 tenant）
+
+        Returns:
+            adapter 层 SessionInfo 列表
         """
         ...
 

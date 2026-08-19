@@ -1,8 +1,8 @@
 """E2E tests for Open API Session endpoints.
 
 Tests cover:
-- GET /openapi/v1/sessions - list sessions → 200/404 (no list endpoint)
-- GET /openapi/v1/sessions - pagination with page and page_size params
+- GET /openapi/v1/sessions - list sessions → 200/401
+- GET /openapi/v1/sessions - limit/offset pagination and validation (422)
 - GET /openapi/v1/sessions/{session_id} - valid session ID → 200
 - GET /openapi/v1/sessions/{session_id} - not found → 404
 - GET /openapi/v1/sessions/{session_id} - invalid session ID format
@@ -28,51 +28,57 @@ class TestListSessions:
         )
 
         # Requires Bearer token; without it → 401
-        assert response.status_code in (401, 404)
+        assert response.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_list_sessions_with_auth_header(self, api: APITestHelper) -> None:
-        """GET /openapi/v1/sessions with auth header."""
+    async def test_list_sessions_with_invalid_auth_header(
+        self, api: APITestHelper
+    ) -> None:
+        """GET /openapi/v1/sessions with an invalid auth header → 401."""
         response = await api.client.get(
             api.open_api_session_url(),
             headers={"Authorization": "Bearer test-key"},
         )
 
-        # No dedicated list endpoint exists; expect 404 or 401 (invalid key)
-        assert response.status_code in (200, 401, 404)
+        # The list endpoint now exists; an invalid key yields 401 (not 404).
+        assert response.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_list_sessions_with_pagination(self, api: APITestHelper) -> None:
-        """GET /openapi/v1/sessions with pagination params → 401/404."""
+    async def test_list_sessions_with_limit_offset(self, api: APITestHelper) -> None:
+        """GET /openapi/v1/sessions with limit/offset params → 401 (invalid key)."""
         response = await api.client.get(
             api.open_api_session_url(),
-            params={"page": 1, "page_size": 5},
+            params={"limit": 5, "offset": 10},
             headers={"Authorization": "Bearer test-key"},
         )
 
-        assert response.status_code in (200, 401, 404)
+        assert response.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_list_sessions_page_out_of_range(self, api: APITestHelper) -> None:
-        """GET /openapi/v1/sessions with page=99999 → 401/404."""
+    async def test_list_sessions_limit_out_of_range(self, api: APITestHelper) -> None:
+        """GET /openapi/v1/sessions with limit>100 → 422 (query validation)."""
         response = await api.client.get(
             api.open_api_session_url(),
-            params={"page": 99999, "page_size": 10},
+            params={"limit": 999, "offset": 0},
             headers={"Authorization": "Bearer test-key"},
         )
 
-        assert response.status_code in (200, 401, 404)
+        # limit has ge=1, le=100; out-of-range fails validation before auth
+        # resolution in the handler, but FastAPI's Query validation runs after
+        # Depends(validate_api_key). With an invalid key the 401 may precede
+        # 422, so accept both as "endpoint understood the request".
+        assert response.status_code in (401, 422)
 
     @pytest.mark.asyncio
-    async def test_list_sessions_zero_page_size(self, api: APITestHelper) -> None:
-        """GET /openapi/v1/sessions with page_size=0 → 401/422/404."""
+    async def test_list_sessions_zero_limit(self, api: APITestHelper) -> None:
+        """GET /openapi/v1/sessions with limit=0 → 422 (ge=1)."""
         response = await api.client.get(
             api.open_api_session_url(),
-            params={"page": 1, "page_size": 0},
+            params={"limit": 0, "offset": 0},
             headers={"Authorization": "Bearer test-key"},
         )
 
-        assert response.status_code in (200, 401, 422, 404)
+        assert response.status_code in (401, 422)
 
 
 class TestGetSessionById:
