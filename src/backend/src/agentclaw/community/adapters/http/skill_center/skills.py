@@ -96,7 +96,6 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditPausedError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import Injected
@@ -997,7 +996,7 @@ async def get_active_skill_sets(
     engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    repo: SkillSetRepository = Injected(SkillSetRepository),
+    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
 ) -> ActiveSkillSetsResponse:
     """获取当前 bot 的所有激活能力集列表
 
@@ -1006,12 +1005,20 @@ async def get_active_skill_sets(
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    # 使用 repository 直接获取所有激活的能力集
-    # 注意：使用 effective_entity_id 而不是 ctx.user_id，以保持一致性
-    # ctx.user_id 可能带有前缀（如 staff_xxx），而数据库存储的是纯 ID
-    active_sets = repo.get_all_active_skill_sets(
+    # 使用 service 获取所有激活的能力集，默认能力集兼容查询策略统一收口在 core service。
+    # 注意：使用 effective_entity_id 而不是 ctx.user_id，以保持一致性；
+    # ctx.user_id 可能带有前缀（如 staff_xxx），而数据库存储的是纯 ID。
+    skill_set_service = skill_set_service_factory.create(
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
+        runtime_engine_type=runtime_engine,
+        entity_type=effective_entity_type,
+    )
+    active_sets = skill_set_service.list_active_skill_sets(
         user_id=effective_entity_id,
-        bolt_id=effective_bot_id
+        bolt_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # 处理返回数据，移除 skills 字段

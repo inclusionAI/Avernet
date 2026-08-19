@@ -42,6 +42,7 @@ from agentclaw.community.core.skill_center.services.skill_set_service import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
+from agentclaw.community.core.bot_management.engines.registry import get_default_skill_set_selection_policy
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
@@ -584,6 +585,7 @@ class SkillSetServiceFactory:
             mcp_sync_service=self._mcp_sync_service,
             device_plugin=self._device_plugin,
             ext_info_provider=self._ext_info_provider,
+            default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
             path_factory=self._path_factory,
             pool_layout_paths=self._pool_layout_paths,
         )
