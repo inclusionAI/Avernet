@@ -1,16 +1,18 @@
-"""SessionCreator — 调用 engine API 为发现的任务创建 session。
+"""SessionCreator — 通过 backend connection API 定位 per-bot engine 后直连创建 session。
 
-调用 engine 的 ``POST /api/sessions`` 创建一个待确认的 session，
-session 标题为任务项目名称，``extInfo`` 携带完整任务详情。
+singlebox 模式下 ``DeviceAdapterTransport`` 绑的是 ``InMemoryDeviceAdapterTransport``
+(mock)，relay 的 ``call()`` 不会做真实 HTTP 转发。因此 session_creator 需要自己：
+  1. 调 backend ``GET /api/bots/{bot_id}/connection`` 拿到 per-bot engine 的 target
+  2. 直连 ``http://{target}/api/sessions`` 创建 session
+
+这样 session 会落在 bot 对应的 per-bot OpenClaw Gateway 上，前端可见。
+
 创建后构建 ``session_url`` 供用户在浏览器中打开确认。
-
-与 cron ``run-single`` 的区别：
-  - ``run-single`` 直接创建 session 并开始执行
-  - 本模块只创建 session（不触发执行），等用户确认后再由 executor 执行
 """
 from __future__ import annotations
 
-from typing import Protocol
+import os
+from typing import Any, Protocol
 
 import httpx
 
@@ -22,11 +24,8 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-#: Engine session API 路径
-_SESSIONS_PATH = "/api/sessions"
-
-#: 默认 engine 端口（singlebox local, engine.sh:20003）
-_DEFAULT_ENGINE_PORT = "20003"
+#: 默认 backend 地址（singlebox local）
+_DEFAULT_BACKEND_URL = "http://localhost:8888"
 
 #: 默认前端 workbench 端口（singlebox local, frontend.sh:8000）
 _DEFAULT_FRONTEND_PORT = "8000"
@@ -41,44 +40,89 @@ class SessionCreator(Protocol):
         *,
         user_id: str,
         agent_id: str,
+        bot_id: str,
+        owner_id: str,
         model: str | None = None,
     ) -> DiscoverySession:
         """为任务创建 engine session，返回 session_id 和 session_url。"""
         ...
 
 
-class EngineSessionCreator:
-    """通过 engine HTTP API 创建 session 的实现。
+class HttpSessionCreator:
+    """通过 backend connection API 定位 per-bot engine 后直连创建 session。
 
-    调用 ``POST {engine_base_url}/api/sessions`` 创建 session，
-    然后用 engine 前端路由构建 ``session_url``。
+    1. ``GET {backend_url}/api/bots/{bot_id}/connection`` → 拿到 ``target`` (如 ``127.0.0.1:20010``)
+    2. ``POST http://{target}/api/sessions`` → 在 per-bot engine 上创建 session
     """
 
     def __init__(
         self,
-        engine_base_url: str | None = None,
-        engine_frontend_url: str | None = None,
+        *,
+        backend_url: str | None = None,
+        frontend_url: str | None = None,
     ):
         """初始化。
 
         Args:
-            engine_base_url: Engine API 地址（如 ``http://localhost:20003``）。
-                若为 ``None`` 则从环境变量 ``ENGINE_BASE_URL`` 读取，
-                默认 ``http://localhost:20003``。
-            engine_frontend_url: 前端 workbench 地址（用于构建 session_url）。
+            backend_url: Backend API 地址（用于查 bot connection）。
+                若为 ``None`` 则从环境变量 ``BACKEND_URL`` 读取，
+                默认 ``http://localhost:8888``。
+            frontend_url: 前端 workbench 地址（用于构建 session_url）。
                 若为 ``None`` 则从环境变量 ``FRONTEND_URL`` 读取，
                 默认 ``http://localhost:8000``。
         """
-        import os
-
-        self._engine_base_url = engine_base_url or os.environ.get(
-            "ENGINE_BASE_URL",
-            f"http://localhost:{_DEFAULT_ENGINE_PORT}",
+        self._backend_url = backend_url or os.environ.get(
+            "BACKEND_URL", _DEFAULT_BACKEND_URL,
         )
-        self._engine_frontend_url = engine_frontend_url or os.environ.get(
+        self._frontend_url = frontend_url or os.environ.get(
             "FRONTEND_URL",
             f"http://localhost:{_DEFAULT_FRONTEND_PORT}",
         )
+
+    async def _resolve_engine_target(
+        self, bot_id: str, owner_id: str, user_id: str,
+    ) -> str:
+        """通过 backend API 查 per-bot engine 的 target 地址。
+
+        个人 bot 没有 publish record，``/api/bots/{bot_id}/connection`` 会 404，
+        所以先查 bot detail 拿 ``binding_id``，再用
+        ``/api/v1/devices/{binding_id}/connection`` 查 target。
+
+        Returns:
+            如 ``localhost:20010``
+        """
+        async with httpx.AsyncClient(timeout=30.0) as cli:
+            # Step 1: 查 bot detail 拿 binding_id
+            bot_resp = await cli.get(
+                f"{self._backend_url}/api/bots/{bot_id}",
+                params={"owner_id": owner_id},
+                headers={"x-user-id": user_id},
+            )
+            bot_resp.raise_for_status()
+            bot_data = (bot_resp.json().get("data") or {})
+            binding_id = bot_data.get("binding_id")
+            if not binding_id:
+                raise RuntimeError(
+                    f"bot {bot_id} has no binding_id (owner={owner_id})"
+                )
+
+            # Step 2: 用 binding_id 查 device connection
+            conn_resp = await cli.get(
+                f"{self._backend_url}/api/v1/devices/{binding_id}/connection",
+                headers={"x-user-id": user_id},
+            )
+            conn_resp.raise_for_status()
+            data = (conn_resp.json().get("data") or {})
+            target = data.get("target") or ""
+            if not target:
+                raise RuntimeError(
+                    f"backend connection API returned no target for bot={bot_id}"
+                )
+            logger.info(
+                "[task_discovery] resolved engine target for bot=%s → %s",
+                bot_id, target,
+            )
+            return target
 
     async def create_session(
         self,
@@ -86,23 +130,29 @@ class EngineSessionCreator:
         *,
         user_id: str,
         agent_id: str,
+        bot_id: str,
+        owner_id: str,
         model: str | None = None,
     ) -> DiscoverySession:
         """为任务创建 engine session。
 
         Args:
             task: 已发现的待确认任务。
-            user_id: 用户 ID。
+            user_id: 用户 ID（调用者 + 通知接收者）。
             agent_id: Bot/Agent ID。
+            bot_id: Bot ID（用于查 per-bot engine 地址）。
+            owner_id: Bot 所有者 ID。
             model: 可选模型覆盖。
 
         Returns:
             包含 session_id 和 session_url 的 :class:`DiscoverySession`
 
         Raises:
-            httpx.HTTPError: engine API 请求失败时抛出。
+            httpx.HTTPError: 请求失败时抛出。
         """
-        body: dict = {
+        target = await self._resolve_engine_target(bot_id, owner_id, user_id)
+
+        body: dict[str, Any] = {
             "title": task.project_name,
             "user_id": user_id,
             "agent_id": agent_id,
@@ -111,15 +161,16 @@ class EngineSessionCreator:
         if model:
             body["model"] = model
 
-        url = f"{self._engine_base_url}{_SESSIONS_PATH}"
+        url = f"http://{target}/api/sessions"
         logger.info(
-            "[task_discovery] creating engine session for task %s → %s",
-            task.task_id,
-            url,
+            "[task_discovery] creating session for task %s → %s",
+            task.task_id, url,
         )
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, json=body)
+        async with httpx.AsyncClient(timeout=30.0) as cli:
+            resp = await cli.post(
+                url, json=body, headers={"x-user-id": user_id},
+            )
             resp.raise_for_status()
 
         data = resp.json()
@@ -136,8 +187,7 @@ class EngineSessionCreator:
         session_url = self._build_session_url(session_id, agent_id)
         logger.info(
             "[task_discovery] session created: id=%s url=%s",
-            session_id,
-            session_url,
+            session_id, session_url,
         )
 
         return DiscoverySession(
@@ -149,16 +199,13 @@ class EngineSessionCreator:
     def _build_session_url(self, session_id: str, agent_id: str) -> str:
         """构建用户可访问的前端 workbench session URL。
 
-        前端通过 bot 的对话页面访问 engine session：
-        ``{frontend_url}/bcn/chat/session?bot_uuid={agent_id}&session={session_id}``
-
-        用户点击后会跳到该 bot 的对话界面，看到任务发现的通知消息。
+        格式: ``{frontend_url}/bcn/chat/session?bot_uuid={agent_id}&id={agent_id}&session={session_id}``
         """
-        base = self._engine_frontend_url.rstrip("/")
+        base = self._frontend_url.rstrip("/")
         return (
             f"{base}/bcn/chat/session"
-            f"?bot_uuid={agent_id}&session={session_id}"
+            f"?bot_uuid={agent_id}&id={agent_id}&session={session_id}"
         )
 
 
-__all__ = ["SessionCreator", "EngineSessionCreator"]
+__all__ = ["SessionCreator", "HttpSessionCreator"]

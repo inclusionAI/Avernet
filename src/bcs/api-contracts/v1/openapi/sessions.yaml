@@ -672,14 +672,21 @@ AddSessionParticipantPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          Principal cannot manage the session. A Human Principal may manage
-          when it can act as the Session creator or at least one parent Group
-          management actor: the driver, originator, or ManagerWorker manager participant.
+          The Principal may not manage the Session, or the added Bot is not
+          collaboration-eligible. A Human Principal may manage when it can act
+          as the Session creator or at least one parent Group management actor:
+          the driver, originator, or ManagerWorker manager participant.
           Human-to-actor authority is checked only against these target actors:
           direct human_{user.id}, a Bot whose created_by equals the Human user
           id, or a creator relation edge from human_{user.id} to that Bot. The
           server does not enumerate every Bot created by the Human for this
-          authorization decision.
+          authorization decision. Separately, the added Bot must be
+          collaboration-eligible from at least one of the following anchor
+          actors: the calling Principal, the parent Group driver, or the parent
+          Group originator. A Bot is eligible when it is public, equals an
+          anchor, or (for a Human anchor) is owned by that Human via created_by
+          or a creator relation edge, or is a friend of an anchor. A Hidden Bot
+          is rejected outright regardless of any anchor.
         x-error-codes:
           - forbidden
         content:
@@ -687,7 +694,7 @@ AddSessionParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "404":
-        description: Session or referenced Bot is missing or hidden.
+        description: Session or referenced Bot is missing.
         x-error-codes:
           - session_not_found
           - bot_not_found

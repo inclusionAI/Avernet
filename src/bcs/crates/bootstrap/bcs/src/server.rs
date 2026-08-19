@@ -1468,6 +1468,7 @@ fn build_openapi_v1_state(
         session_repo,
         group_message_history,
         collaboration_runtime,
+        system_message.clone(),
         SessionServiceConfig { relation_env },
     ));
     let session_file_service = Arc::new(SessionFileApplicationServiceImpl::new(
@@ -1985,6 +1986,13 @@ impl Default for BcsServerState {
                 collaboration_runtime.clone(),
             )),
         );
+        let group_management_v1 = maybe_wrap_group_management(
+            &config,
+            Arc::new(GroupManagementWithRuntimeCleanup::new(
+                Arc::new((*group_management_impl).clone().for_v1_openapi()),
+                collaboration_runtime.clone(),
+            )),
+        );
         let candidate_search = build_candidate_search_bindings(
             &config,
             bot_registry.clone(),
@@ -2013,7 +2021,7 @@ impl Default for BcsServerState {
             relation_store.clone(),
             session_management.clone(),
             session_launch.clone(),
-            group_management.clone(),
+            group_management_v1.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
             group_message_history.clone(),
@@ -2349,6 +2357,10 @@ struct UseCaseBundle {
     bot_runtime: Arc<dyn bcs_service_api::BotRuntimeConnectionService>,
     bot_discovery: Arc<dyn bcs_service_api::BotDiscoveryService>,
     group_management: Arc<dyn bcs_service_api::GroupManagementService>,
+    /// Dedicated `for_v1_openapi` twin of `group_management`, wired only into
+    /// the OpenAPI V1 facade so V1 create-group runs the driver-anchored
+    /// core branch while legacy HTTP keeps the legacy branch.
+    group_management_v1: Arc<dyn bcs_service_api::GroupManagementService>,
     group_query: Arc<dyn bcs_service_api::GroupQueryService>,
     workbench_sessions: Arc<dyn bcs_service_api::WorkbenchSessionService>,
     interaction_authorization: Arc<dyn CanResolveInteraction>,
@@ -2446,6 +2458,8 @@ fn build_use_case_bundle(
     .with_channel_binding_cleanup(channel_binding_cleanup)
     .with_outbound_url_guard(callback_url_guard.clone())
     .with_bot_runtime(bot_use_cases.clone()));
+    let group_management_v1: Arc<dyn bcs_service_api::GroupManagementService> =
+        Arc::new((*group_management).clone().for_v1_openapi());
     let proposal_base_url = config
         .bcs_endpoint
         .clone()
@@ -2490,6 +2504,7 @@ fn build_use_case_bundle(
         bot_runtime: bot_use_cases.clone(),
         bot_discovery: bot_use_cases,
         group_management: group_management.clone(),
+        group_management_v1,
         group_query: group_management.clone(),
         workbench_sessions: group_management.clone(),
         interaction_authorization: group_management,
@@ -3408,6 +3423,13 @@ impl BcsServer {
                 collaboration_runtime.clone(),
             )),
         );
+        let group_management_v1 = maybe_wrap_group_management(
+            &config,
+            Arc::new(GroupManagementWithRuntimeCleanup::new(
+                use_cases.group_management_v1,
+                collaboration_runtime.clone(),
+            )),
+        );
         let openapi_v1 = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -3421,7 +3443,7 @@ impl BcsServer {
             relation_store.clone(),
             session_management.clone(),
             session_launch.clone(),
-            group_management.clone(),
+            group_management_v1.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
             group_message_history.clone(),
@@ -4042,6 +4064,13 @@ impl BcsServer {
                 collaboration_runtime.clone(),
             )),
         );
+        let group_management_v1 = maybe_wrap_group_management(
+            &config,
+            Arc::new(GroupManagementWithRuntimeCleanup::new(
+                use_cases.group_management_v1,
+                collaboration_runtime.clone(),
+            )),
+        );
         let openapi_v1 = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -4055,7 +4084,7 @@ impl BcsServer {
             relation_svc.clone(),
             session_management.clone(),
             session_launch.clone(),
-            group_management.clone(),
+            group_management_v1.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
             group_message_history.clone(),

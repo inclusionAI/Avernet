@@ -940,3 +940,151 @@ def test_skillset_delete_by_bot_id_cascade(sets, db):
         assert s.query(SkillSet).count() == 0
         assert s.query(SkillSetSkill).count() == 0
         assert s.query(SkillSetMCPServer).count() == 0
+
+
+def test_list_all_default_constraint_only_includes_requested_default_bot(sets):
+    bot_default = sets.create(
+        {
+            "name": "bot defaults",
+            "user_id": "owner-x",
+            "bolt_id": "bot-x",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    global_default = sets.create(
+        {
+            "name": "global defaults",
+            "bolt_id": "default",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    custom = sets.create(
+        {
+            "name": "custom",
+            "user_id": "owner-x",
+            "bolt_id": "bot-x",
+            "engine_type": "claude_code",
+            "is_default": False,
+            "is_active": True,
+        }
+    )
+
+    rows = sets.list_all(
+        user_id="owner-x",
+        bolt_id="bot-x",
+        engine_type="claude_code",
+        default_skill_set_bolt_id="default",
+    )
+
+    ids = {row["id"] for row in rows}
+    assert global_default["id"] in ids
+    assert custom["id"] in ids
+    assert bot_default["id"] not in ids
+
+
+def test_get_all_active_skill_sets_default_constraint_skips_bot_scoped_default(sets):
+    bot_default = sets.create(
+        {
+            "name": "bot defaults",
+            "user_id": "owner-x",
+            "bolt_id": "bot-x",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    global_default = sets.create(
+        {
+            "name": "global defaults",
+            "bolt_id": "default",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+
+    active = sets.get_all_active_skill_sets(
+        user_id="owner-x",
+        bolt_id="bot-x",
+        engine_type="claude_code",
+        default_skill_set_bolt_id="default",
+    )
+
+    assert [row["id"] for row in active] == [global_default["id"]]
+    assert bot_default["id"] not in {row["id"] for row in active}
+
+
+def test_list_all_preserves_bot_scoped_defaults_without_constraint(sets):
+    bot_default = sets.create(
+        {
+            "name": "bot defaults compat",
+            "user_id": "owner-y",
+            "bolt_id": "bot-y",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    global_default = sets.create(
+        {
+            "name": "global defaults compat",
+            "bolt_id": "default",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+
+    rows = sets.list_all(
+        user_id="owner-y", bolt_id="bot-y", engine_type="claude_code"
+    )
+
+    ids = {row["id"] for row in rows}
+    assert bot_default["id"] in ids
+    assert global_default["id"] in ids
+
+
+def test_list_all_can_use_runtime_default_engine_for_global_default(sets):
+    sets.create(
+        {
+            "name": "claude bot defaults",
+            "user_id": "owner-z",
+            "bolt_id": "bot-z",
+            "engine_type": "claude_code",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    aicoding_global = sets.create(
+        {
+            "name": "aicoding global defaults",
+            "bolt_id": "default",
+            "engine_type": "aicoding",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    custom = sets.create(
+        {
+            "name": "claude custom",
+            "user_id": "owner-z",
+            "bolt_id": "bot-z",
+            "engine_type": "claude_code",
+            "is_default": False,
+            "is_active": True,
+        }
+    )
+
+    rows = sets.list_all(
+        user_id="owner-z",
+        bolt_id="bot-z",
+        engine_type="claude_code",
+        default_skill_set_bolt_id="default",
+        default_skill_set_engine_type="aicoding",
+    )
+
+    assert {row["id"] for row in rows} == {aicoding_global["id"], custom["id"]}

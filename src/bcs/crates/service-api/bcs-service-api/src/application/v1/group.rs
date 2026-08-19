@@ -270,6 +270,9 @@ pub struct CreateCollaborationGroup {
     pub driver_bot_uuid: String,
     pub participants: Vec<CreateParticipant>,
     pub collaboration: CollaborationConfiguration,
+    /// Caller-designated originator. `None` ⇒ resolve to the authenticated
+    /// caller principal at the facade (current behavior).
+    pub originator: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
