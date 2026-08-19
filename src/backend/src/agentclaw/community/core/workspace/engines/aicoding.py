@@ -119,11 +119,20 @@ def _repo_dirname_from_url(url: Any) -> str:
     return name
 
 
-# --- repo URL extraction (self-contained) -----------------------------------
-# Mirrored from ``bot_management.utils._extract_code_repo_urls`` so this engine
-# does NOT reach into another sub-domain's private symbol (arch Rule 15: no
-# hidden coupling via private internals). If the platform helper's repo
-# keys/markers evolve, keep this local copy in sync.
+# --- repo workspace-exclude derivation (aicoding-owned) ---------------------
+# aicoding clones the repos declared in a bot's template_config directly into
+# ``.aicoding/workspace/<repo>`` under git's clone-dirname. Those working trees
+# are re-cloned/mounted by the runtime, so the publish rsync must NOT bake them
+# into the artifact (the static ``workspace/*/.git/`` exclude only skips .git,
+# not the whole tree). This section derives ``workspace/<repo>`` excludes from
+# the repo declarations a aicoding bot's template_config carries.
+#
+# The template_config key set below is the aicoding-cloned repo declaration
+# vocabulary (legacy backend_repo/frontend_repo/lib_repo plus the
+# template-factory aliases). It is local knowledge this engine needs to read
+# its own bot config; aicoding owns the workspace-exclude behavior, including
+# the git clone-dirname mapping that the bot-management domain does not model.
+
 _REPO_URL_KEYS: tuple[str, ...] = ("repo_url", "url", "git_url", "ssh_url")
 _REPO_DECL_KEYS: tuple[str, ...] = ("backend_repo", "frontend_repo", "lib_repo")
 _REPO_DECL_FACTORY_KEYS: tuple[str, ...] = (
@@ -139,22 +148,32 @@ _TEMPLATE_FACTORY_MARKER_KEYS: frozenset[str] = frozenset({
 })
 
 
-def _extract_code_repo_urls(template_config: Any) -> list[str]:
-    """Return the code-repo URLs declared in ``template_config``.
+def _repo_workspace_excludes_from_template_config(
+    template_config: Any,
+) -> list[str]:
+    """Derive ``workspace/<repo>`` rsync excludes from a template_config.
 
-    Self-contained mirror of ``bot_management.utils._extract_code_repo_urls``;
-    kept local so this engine depends on no other module's private internals.
-    Reads ``backend_repo`` / ``frontend_repo`` / ``lib_repo`` (legacy, dict
-    items only) plus the template-factory aliases ``repos`` / ``init_repos`` /
-    ``application_repo_urls`` (string or dict items) exactly as the platform
-    helper does.
+    Reads the code-repo declarations a aicoding bot's ``template_config``
+    (``ac_templates.ext``) carries — ``backend_repo`` / ``frontend_repo`` /
+    ``lib_repo`` (legacy, dict items only) plus the template-factory aliases
+    ``repos`` / ``init_repos`` / ``application_repo_urls`` (string or dict
+    items) — maps each repo URL to the directory name git would clone it under,
+    and returns the de-duplicated ``workspace/<repo>`` exclude list.
+
+    The git-clone-dirname mapping is aicoding-only: aicoding is the engine that
+    clones these repos into ``.aicoding/workspace/<repo>`` and therefore the one
+    that must exclude their working trees from the published artifact. This is
+    owned here, not borrowed from another domain.
     """
     if not isinstance(template_config, dict):
         return []
+
     keys = _REPO_DECL_KEYS
     if any(marker in template_config for marker in _TEMPLATE_FACTORY_MARKER_KEYS):
         keys = keys + _REPO_DECL_FACTORY_KEYS
-    urls: list[str] = []
+
+    excludes: list[str] = []
+    seen: set[str] = set()
     for key in keys:
         value = template_config.get(key)
         if not isinstance(value, list):
@@ -173,22 +192,19 @@ def _extract_code_repo_urls(template_config: Any) -> list[str]:
                     if isinstance(v, str) and v.strip():
                         url = v.strip()
                         break
-            if url:
-                urls.append(url)
-    return urls
+            name = _repo_dirname_from_url(url)
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            excludes.append(f"workspace/{name}")
+    return excludes
 
 
 def _repo_workspace_excludes_for_bot(bot: dict[str, Any] | None) -> list[str]:
     """Derive ``workspace/<repo>`` rsync excludes from a bot's template_config.
 
-    aicoding clones the repos declared in the bot's template config
-    (``ac_templates.ext``: ``backend_repo`` / ``frontend_repo`` / ``lib_repo``
-    plus template-factory aliases) into ``.aicoding/workspace/<repo>``. Those
-    working trees are re-cloned/mounted by the runtime, so the build rsync must
-    NOT bake them into the published artifact (the static
-    ``workspace/*/.git/`` exclude only skips ``.git``, not the whole tree).
-    This reads the repo URLs via the self-contained ``_extract_code_repo_urls``
-    helper above and maps each to its clone directory name.
+    Thin wrapper over :func:`_repo_workspace_excludes_from_template_config`
+    that pulls ``template_config`` off the bot record.
 
     The repo source is ``bot["template_config"]`` — i.e. the ``ac_templates.ext``
     column attached by ``BotService.get_bot``. It is deliberately NOT read from
@@ -208,15 +224,7 @@ def _repo_workspace_excludes_for_bot(bot: dict[str, Any] | None) -> list[str]:
     if not isinstance(template_config, dict) or not template_config:
         return []
 
-    excludes: list[str] = []
-    seen: set[str] = set()
-    for url in _extract_code_repo_urls(template_config):
-        name = _repo_dirname_from_url(url)
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        excludes.append(f"workspace/{name}")
-    return excludes
+    return _repo_workspace_excludes_from_template_config(template_config)
 
 
 class AICodingSandboxProvider:
@@ -247,7 +255,7 @@ class AICodingSandboxProvider:
     def get_build_plan(
         self,
         build_rsync_excludes_append: list[str] | None = None,
-        bot: Any = None,
+        bot: dict[str, Any] | None = None,
     ) -> EngineBuildPlan:
         # 合并模式：默认值 + 自定义项（去重）
         excludes = list(_AICODING_RSYNC_EXCLUDES)
