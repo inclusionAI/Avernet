@@ -437,8 +437,7 @@ URL 中 `{version}` 是业务序号 `1/2/3`，不是 `ac_skill_version.id`。Pub
 
 - 当前 Owner 可以转移 Owner；Space Administrator 也可从详情页执行转移，但必须记录
   原因。接收人必须是当前 Space Member。
-- Owner 转移与旧 Lease 失效在同一事务完成；原 Owner 默认降为 Manager，管理员代为
-  转移时可按请求决定是否保留。
+- Owner 转移与旧 Lease 失效在同一事务完成；原 Owner 不自动保留 Manager 权限。
 - 本期只有 Owner/Manager 两种 Skill Grant，不新增 Editor 或普通 Skill Member。
 - 删除升级 Draft 只放弃本次升级；首次从未发布的 Draft 只有在没有 Attempt、Version、
   Binding、Artifact 或其他历史事实时才可连同 Identity 物理取消。
