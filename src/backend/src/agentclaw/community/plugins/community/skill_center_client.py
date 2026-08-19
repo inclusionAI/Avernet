@@ -12,9 +12,13 @@ from __future__ import annotations
 
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
-    SkillCenterTeamCreateError,
+    SkillCenterGateway,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamCreateResult,
+    SkillCenterTeamSkillPage,
+    SkillCenterGatewayError,
+    SkillCenterGatewayErrorCode,
+    SkillCenterTeamCreateError,
 )
 
 
@@ -69,3 +73,43 @@ class CommunitySkillCenterClient(SkillCenterClient):
 
     def delete_skill(self, skill_code: str) -> dict:
         raise SkillCenterUnsupportedError(_MSG)
+
+
+class CommunitySkillCenterGateway(SkillCenterGateway):
+    """Public-build Q5 seam; the Corp adapter owns SC HTTP/config/auth wiring."""
+
+    @staticmethod
+    def _unsupported() -> None:
+        raise SkillCenterGatewayError(SkillCenterGatewayErrorCode.UNAVAILABLE, _MSG)
+
+    def create_team(self, request: SkillCenterTeamCreateRequest) -> SkillCenterTeamCreateResult:
+        self._unsupported()
+
+    def get_team_by_ref_source(self, *, ref_source_platform: str, ref_source_id: str) -> SkillCenterTeamCreateResult:
+        self._unsupported()
+
+    def list_team_skills(self, *, team_id: int, keyword: str = "", page_num: int = 1, page_size: int = 20) -> SkillCenterTeamSkillPage:
+        self._unsupported()
+
+    def upload_and_publish(self, payload: dict, *, team_id: str) -> dict:
+        self._unsupported()
+
+    def query_publish_status(self, skill_code: str, *, team_id: str) -> dict:
+        self._unsupported()
+
+    def get_skill_detail(self, skill_code: str, *, team_id: str) -> dict:
+        self._unsupported()
+
+    def list_versions(self, skill_code: str, *, team_id: str) -> list[dict]:
+        self._unsupported()
+
+    def get_download_url(self, skill_code: str, version_number: str, *, team_id: str) -> dict:
+        self._unsupported()
+
+    def search_market_skills(
+        self, keyword: str = "", tag: str = "", page: int = 1, page_size: int = 20
+    ) -> dict:
+        self._unsupported()
+
+    def get_market_tags(self) -> list[dict]:
+        self._unsupported()

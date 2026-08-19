@@ -19,6 +19,7 @@ provides:
   - "LocalSkillStateService"
   - "LocalSkillDeleteService"
   - "LocalSkillCleanupWorkModel"
+  - "SkillCenterGatewayService"
 consumes:
   - "BotRepository"
   - "BotCollabLogRepositoryProtocol"
@@ -33,6 +34,7 @@ consumes:
   - "ObjectStoragePlugin"
   - "SecretResolver"
   - "SkillCenterClient"
+  - "SkillCenterGateway"
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
@@ -75,6 +77,11 @@ internal_dependencies:
 ### Change impact
 
 Skill-set switching is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
+
+`SkillCenterGatewayService` is the Q5 consumer seam for already-resolved SC
+requests. It must remain free of Space mapping, Publication Attempt, Version,
+retry, and Runtime materialization policy; those domain owners only consume its
+team-scoped Plugin API.
 
 Local Skill replacement stages a complete package before switching the existing
 Skill metadata. Its old-package cleanup work is persisted before an Active

@@ -7,7 +7,7 @@ Local-mode plugin implementations — in-memory / fixture-backed / noop variants
 ```yaml
 purpose: "Local-mode plugin implementations — in-memory / fixture-backed / noop variants for offline dev and tests."
 provides:
-  - "19 Local* and Noop* classes implementing the 23 plugin Protocols"
+  - "Local* and Noop* classes implementing plugin Protocols, including the Q5 SkillCenterGateway Fake"
   - "Shared SQLite ORM models for local persistence"
 consumes:
   - "Every plugin Protocol (agentclaw.community.plugin_api.*)"
@@ -93,4 +93,4 @@ internal_dependencies:
 
 ### Change impact
 
-Local-mode breakage shows up only when running ./scripts/local_setup.sh --local. Adding a new plugin Protocol requires a paired local impl here per Rule 20. Removing the local impl breaks offline dev for the entire feature.
+Local-mode breakage shows up only when running ./scripts/local_setup.sh --local. Adding a new plugin Protocol requires a paired local impl here per Rule 20. The Q5 SkillCenterGateway Fake records one outbound call and exposes normalized failure seams; it must not add retries or a default Team. Removing a local impl breaks offline dev for the entire feature.

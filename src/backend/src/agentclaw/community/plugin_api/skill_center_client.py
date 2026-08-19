@@ -1,15 +1,7 @@
-"""SkillCenter 开放 API 客户端协议。
-
-对接 SkillCenter 的核心接口：
-- POST /api/v1/skills/upload/publish   （上传发布）
-- GET  /api/v1/skills/upload/status/{skillCode} （查询状态）
-- GET  /api/v1/skills/{skillCode}/versions      （版本列表）
-- GET  /api/v1/skills/market/search             （市场搜索）
-- GET  /api/v1/skills/market/tags               （市场标签）
-- GET  /api/v1/skills/{skillCode}/versions/{ver}/download （版本下载）
-"""
+"""Legacy SkillCenter Client and the Q5 SkillCenter Gateway Plugin APIs."""
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.plugin_api.base import Plugin
@@ -26,16 +18,28 @@ class SkillCenterTeamCreateRequest:
     team_code: str
     team_name: str
     ref_source_id: str
+    ref_source_platform: str = ""
     description: str | None = None
     icon: str | None = None
-    ref_source_platform: str | None = None
 
 
 @dataclass(frozen=True)
 class SkillCenterTeamCreateResult:
     """Confirmed SC team identity returned after a successful creation."""
 
-    team_id: str
+    team_id: int
+    team_code: str = ""
+    team_name: str = ""
+    ref_source_platform: str = ""
+    ref_source_id: str = ""
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamSkillPage:
+    """One page of the official SC Team Skill listing."""
+
+    items: list[dict]
+    total: int
 
 
 @runtime_checkable
@@ -134,4 +138,85 @@ class SkillCenterClient(Plugin, Protocol):
         Returns:
             SkillCenter 响应 dict，含 data.path / data.content 等。
         """
+        ...
+
+
+class SkillCenterGatewayErrorCode(str, Enum):
+    """Stable errors a Q5 gateway exposes without leaking an SC SDK or HTTP."""
+
+    BUSINESS = "business_error"
+    TIMEOUT = "timeout"
+    UNKNOWN_RESPONSE = "unknown_response"
+    PROTOCOL = "protocol_error"
+    UNAVAILABLE = "unavailable"
+
+
+class SkillCenterGatewayError(RuntimeError):
+    """Normalized Q5 gateway error; retry and Attempt decisions stay upstream."""
+
+    def __init__(self, code: SkillCenterGatewayErrorCode, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@runtime_checkable
+class SkillCenterGateway(Plugin, Protocol):
+    """Team-scoped Q5 API for the new Space/Center lifecycle.
+
+    Each operation carrying a Skill identity requires its resolved SC ``team_id``
+    as a request argument. This Protocol never selects a default Team and never
+    retries a POST; its caller owns Attempt and ``RESULT_UNKNOWN`` handling.
+    """
+
+    def create_team(self, request: SkillCenterTeamCreateRequest) -> SkillCenterTeamCreateResult:
+        """Create a Team using the official SC Team-create request DTO."""
+        ...
+
+    def get_team_by_ref_source(
+        self, *, ref_source_platform: str, ref_source_id: str
+    ) -> SkillCenterTeamCreateResult:
+        """Confirm a TC→SC Team mapping after an unknown create outcome."""
+        ...
+
+    def list_team_skills(
+        self,
+        *,
+        team_id: int,
+        keyword: str = "",
+        page_num: int = 1,
+        page_size: int = 20,
+    ) -> SkillCenterTeamSkillPage:
+        """List one Team's Skills; callers must provide the explicit SC teamId."""
+        ...
+
+    def upload_and_publish(self, payload: dict, *, team_id: str) -> dict:
+        """Submit exactly one publish POST; this method never retries it."""
+        ...
+
+    def query_publish_status(self, skill_code: str, *, team_id: str) -> dict:
+        """Read the status for one immutable SC skill identity."""
+        ...
+
+    def get_skill_detail(self, skill_code: str, *, team_id: str) -> dict:
+        """Read metadata by immutable ``skillCode``."""
+        ...
+
+    def list_versions(self, skill_code: str, *, team_id: str) -> list[dict]:
+        """List versions for one immutable SC skill identity."""
+        ...
+
+    def get_download_url(
+        self, skill_code: str, version_number: str, *, team_id: str
+    ) -> dict:
+        """Resolve one exact ``skillCode + versionNumber`` download."""
+        ...
+
+    def search_market_skills(
+        self, keyword: str = "", tag: str = "", page: int = 1, page_size: int = 20
+    ) -> dict:
+        """Search the public market; it is not Space-Team scoped."""
+        ...
+
+    def get_market_tags(self) -> list[dict]:
+        """List public-market tags."""
         ...

@@ -6,8 +6,12 @@
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
+    SkillCenterGateway,
+    SkillCenterGatewayError,
+    SkillCenterGatewayErrorCode,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamCreateResult,
+    SkillCenterTeamSkillPage,
 )
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
 from agentclaw.community.plugins.local._mock_seam import MockSeam
@@ -27,7 +31,13 @@ class LocalSkillCenterClient(MockSeam, SkillCenterClient):
         self, request: SkillCenterTeamCreateRequest
     ) -> SkillCenterTeamCreateResult:
         logger.info("[LocalMock] create_team: %s", request.team_code)
-        return SkillCenterTeamCreateResult(team_id=f"mock-{request.team_code}")
+        return SkillCenterTeamCreateResult(
+            team_id=1,
+            team_code=request.team_code,
+            team_name=request.team_name,
+            ref_source_platform=request.ref_source_platform,
+            ref_source_id=request.ref_source_id,
+        )
 
     def upload_and_publish(self, payload: dict) -> dict:
         skill_code = payload.get("skillCode", "local-mock")
@@ -140,3 +150,91 @@ class LocalSkillCenterClient(MockSeam, SkillCenterClient):
                 "description": "",
             },
         }
+
+
+@plugin_impl(
+    mode=Mode.LOCAL,
+    flavor=Flavor.FAKE,
+    rationale="no I/O; records one request and can raise normalized gateway errors",
+)
+class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
+    """Q5 Fake gateway with deterministic success and per-operation failure seams."""
+
+    def __init__(self) -> None:
+        self._next_errors: dict[str, SkillCenterGatewayError] = {}
+
+    def fail_next(
+        self, operation: str, code: SkillCenterGatewayErrorCode, message: str
+    ) -> None:
+        """Cause one gateway call to fail with the given stable error code."""
+        self._next_errors[operation] = SkillCenterGatewayError(code, message)
+
+    def _consume_error(self, operation: str) -> None:
+        if error := self._next_errors.pop(operation, None):
+            raise error
+
+    def create_team(self, request: SkillCenterTeamCreateRequest) -> SkillCenterTeamCreateResult:
+        self._consume_error("create_team")
+        return SkillCenterTeamCreateResult(
+            team_id=1,
+            team_code=request.team_code,
+            team_name=request.team_name,
+            ref_source_platform=request.ref_source_platform,
+            ref_source_id=request.ref_source_id,
+        )
+
+    def get_team_by_ref_source(self, *, ref_source_platform: str, ref_source_id: str) -> SkillCenterTeamCreateResult:
+        self._consume_error("get_team_by_ref_source")
+        return SkillCenterTeamCreateResult(1, "team-1", "Local Team", ref_source_platform, ref_source_id)
+
+    def list_team_skills(self, *, team_id: int, keyword: str = "", page_num: int = 1, page_size: int = 20) -> SkillCenterTeamSkillPage:
+        self._consume_error("list_team_skills")
+        if page_size > 100:
+            raise SkillCenterGatewayError(SkillCenterGatewayErrorCode.PROTOCOL, "page_size must be <= 100")
+        return SkillCenterTeamSkillPage([{"skillId": 1, "userProvidedSkillId": "skill-uuid", "name": "Local Skill", "description": "", "releaseVersionNumber": "1.0.0", "belongTo": team_id}], 1)
+
+    def upload_and_publish(self, payload: dict, *, team_id: str) -> dict:
+        self._consume_error("upload_and_publish")
+        return {
+            "success": True,
+            "data": {
+                "skillCode": payload["skillCode"],
+                "versionNumber": payload["versionNumber"],
+                "teamId": team_id,
+                "status": "ACCEPTED",
+            },
+        }
+
+    def query_publish_status(self, skill_code: str, *, team_id: str) -> dict:
+        self._consume_error("query_publish_status")
+        return {"success": True, "data": {"skillCode": skill_code, "teamId": team_id, "status": "PUBLISHED"}}
+
+    def get_skill_detail(self, skill_code: str, *, team_id: str) -> dict:
+        self._consume_error("get_skill_detail")
+        return {"success": True, "data": {"skillCode": skill_code, "teamId": team_id}}
+
+    def list_versions(self, skill_code: str, *, team_id: str) -> list[dict]:
+        self._consume_error("list_versions")
+        return [{"skillCode": skill_code, "teamId": team_id, "versionNumber": "1.0.0"}]
+
+    def get_download_url(self, skill_code: str, version_number: str, *, team_id: str) -> dict:
+        self._consume_error("get_download_url")
+        return {
+            "success": True,
+            "data": {
+                "skillCode": skill_code,
+                "versionNumber": version_number,
+                "teamId": team_id,
+                "downloadUrl": "file:///local-skill-center/skill.zip",
+            },
+        }
+
+    def search_market_skills(
+        self, keyword: str = "", tag: str = "", page: int = 1, page_size: int = 20
+    ) -> dict:
+        self._consume_error("search_market_skills")
+        return {"success": True, "data": [], "total": 0}
+
+    def get_market_tags(self) -> list[dict]:
+        self._consume_error("get_market_tags")
+        return []
