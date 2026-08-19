@@ -6,9 +6,8 @@ from typing import Protocol
 
 from injector import inject
 
-from agentclaw.community.core.bot_collaborator.models import PermissionLevel
-from agentclaw.community.core.bot_collaborator.protocols import (
-    CollaboratorServiceProtocol,
+from agentclaw.community.core.skill_center.authorization_hook import (
+    BotCapabilityAuthorizationHookProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
@@ -94,7 +93,7 @@ class SkillSetControlPlaneService:
         runtime: SkillSetRuntimeReconcilerProtocol,
         legacy_factory: LegacySkillSetCompatibilityFactoryProtocol,
         passport: PassportPlugin,
-        collaborators: CollaboratorServiceProtocol,
+        authorization: BotCapabilityAuthorizationHookProtocol,
         mutation_guard: BotCapabilityMutationGuard,
         edit_guard: SkillsPoolEditGuard,
         audit_log_repo: BotCollabLogRepositoryProtocol,
@@ -104,11 +103,7 @@ class SkillSetControlPlaneService:
         self._runtime = runtime
         self._legacy_factory = legacy_factory
         self._passport = passport
-        # Architecture Rule 12 boundary: authorization is delegated to the
-        # DI-registered CollaboratorServiceProtocol.  This module never imports
-        # a concrete RBAC implementation or reimplements membership policy; it
-        # only interprets the hook result as this domain's 403 outcome.
-        self._collaborators = collaborators
+        self._authorization = authorization
         self._mutation_guard = mutation_guard
         self._edit_guard = edit_guard
         self._audit_log_repo = audit_log_repo
@@ -118,16 +113,14 @@ class SkillSetControlPlaneService:
         # ACL subject, never a substitute for the Bot's durable owner: a
         # collaborator (or an app delegated by one) must reconcile using the
         # true owner and its runtime layout.
-        bot = self._bot_repo.get_by_id(bot_id)
+        bot = self._bot_repo.get_unique_by_id(bot_id)
         if bot is None:
             raise LocalSkillNotFoundError()
         owner_id = str(bot["owner_id"])
-        if actor_id != owner_id:
-            permission = self._collaborators.check_collaborator_permission(
-                bot_id, owner_id, actor_id, PermissionLevel.MEMBER
-            )
-            if not permission.get("has_permission"):
-                raise SkillSetAccessDeniedError()
+        if not self._authorization.can_manage_bot(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        ):
+            raise SkillSetAccessDeniedError()
         return bot
 
     @staticmethod
@@ -194,7 +187,7 @@ class SkillSetControlPlaneService:
         Keep that one owner-scoped case without restoring arbitrary orphan
         SkillSet creation for caller-supplied Bot ids.
         """
-        if self._bot_repo.get_by_id(bot_id) is not None or bot_id != "default":
+        if self._bot_repo.get_unique_by_id(bot_id) is not None or bot_id != "default":
             return self.create_set(
                 bot_id=bot_id,
                 actor_id=actor_id,
@@ -240,7 +233,7 @@ class SkillSetControlPlaneService:
 
     def get_legacy_set(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
         """Read a pre-Bot-record legacy set; canonical reads remain strict."""
-        bot = self._bot_repo.get_by_id(bot_id)
+        bot = self._bot_repo.get_unique_by_id(bot_id)
         if bot is not None:
             return self.get_set(bot_id=bot_id, actor_id=actor_id, set_id=set_id)
         if bot_id != "default":

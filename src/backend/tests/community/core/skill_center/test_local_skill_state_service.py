@@ -436,7 +436,7 @@ class _RepoBots(_Bots):
         self.bot_type = bot_type
         self.engine = engine
 
-    def get_by_id(self, bot_id: str):
+    def get_unique_by_id(self, bot_id: str):
         assert bot_id == "bot"
         return {
             "status": "ACTIVE",

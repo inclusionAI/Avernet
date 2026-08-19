@@ -11,7 +11,15 @@ in its in-memory fallback and the test would still pass.
 """
 from __future__ import annotations
 
+import pytest
+
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
+from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
+    BotCapabilityMutationBusyError,
+    BotCapabilityMutationGuard,
+    BotCapabilityMutationLockUnavailableError,
+)
+from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
@@ -70,17 +78,31 @@ def test_marketcache_partitions_persisted_skill_data_by_current_tenant(world) ->
         assert mc.get("market_skills_list_default") == {"skills": ["tenant-a"]}
 
 
-def _assert_strict_lock_renewal_contract(cache: CachePlugin) -> None:
-    token = cache.acquire_lock_strict("contract:renew", ttl=30)
-    assert token is not None
-    assert cache.renew_lock_strict("contract:renew", token, ttl=60) is True
-    assert cache.renew_lock_strict("contract:renew", "stale-token", ttl=60) is False
-    assert cache.release_lock("contract:renew", token) is True
+def _scope() -> BotSkillLayoutScope:
+    return BotSkillLayoutScope(env="test", entity_id="entity-1", bot_id="bot-1")
 
 
-def test_local_cache_strict_lock_renewal_conforms(world) -> None:
-    _assert_strict_lock_renewal_contract(world.get(CachePlugin))
+def test_mutation_guard_renews_owned_lease_through_cache_plugin(world) -> None:
+    guard = world.get(BotCapabilityMutationGuard)
+    cache = world.get(CachePlugin)
+    lease = guard.acquire(scope=_scope())
+    try:
+        assert cache.get(f"lock:{lease.key}") == lease.token
+        guard.ensure_valid(lease)
+        assert cache.get(f"lock:{lease.key}") == lease.token
+        with pytest.raises(BotCapabilityMutationBusyError):
+            guard.acquire(scope=_scope())
+    finally:
+        assert guard.release(lease) is True
 
 
-def test_community_cache_strict_lock_renewal_conforms(community_world) -> None:
-    _assert_strict_lock_renewal_contract(community_world.get(CachePlugin))
+def test_mutation_guard_fails_closed_after_cache_lease_is_lost(world) -> None:
+    guard = world.get(BotCapabilityMutationGuard)
+    cache = world.get(CachePlugin)
+    lease = guard.acquire(scope=_scope())
+    assert cache.release_lock(lease.key, lease.token) is True
+
+    with pytest.raises(BotCapabilityMutationLockUnavailableError):
+        guard.ensure_valid(lease)
+
+    assert guard.release(lease) is False

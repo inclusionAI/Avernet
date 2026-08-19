@@ -111,7 +111,7 @@ class _LegacyReadRepository(_Repository):
 
 
 class _Bots:
-    def get_by_id(self, bot_id: str) -> dict:
+    def get_unique_by_id(self, bot_id: str) -> dict:
         assert bot_id == "bot-1"
         return {
             "owner_id": "true-owner",
@@ -127,19 +127,19 @@ class _Collaborators:
     def __init__(self) -> None:
         self.calls = []
 
-    def check_collaborator_permission(self, *args):
-        self.calls.append(args)
-        return {"has_permission": True}
+    def can_manage_bot(self, **kwargs):
+        self.calls.append(kwargs)
+        return True
 
 
 class _DeniedCollaborators(_Collaborators):
-    def check_collaborator_permission(self, *args):
-        self.calls.append(args)
-        return {"has_permission": False}
+    def can_manage_bot(self, **kwargs):
+        self.calls.append(kwargs)
+        return False
 
 
 class _MissingBots:
-    def get_by_id(self, _bot_id: str):
+    def get_unique_by_id(self, _bot_id: str):
         return None
 
 
@@ -246,7 +246,7 @@ async def test_collaborator_command_keeps_one_guard_through_restore_and_uses_tru
         runtime=runtime,
         legacy_factory=object(),
         passport=object(),
-        collaborators=collaborators,
+        authorization=collaborators,
         mutation_guard=_MutationGuard(),
         edit_guard=guard,
         audit_log_repo=_Audit(),
@@ -255,7 +255,13 @@ async def test_collaborator_command_keeps_one_guard_through_restore_and_uses_tru
     with pytest.raises(SkillSetRuntimeReconcileError):
         await service.activate(bot_id="bot-1", actor_id="collaborator", set_id="set-1")
 
-    assert collaborators.calls == [("bot-1", "true-owner", "collaborator", 1)]
+    assert collaborators.calls == [
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "actor_id": "collaborator",
+        }
+    ]
     assert runtime.owners == ["true-owner", "true-owner"]
     assert len(repository.restore_calls) == 1
     assert guard.held is False
@@ -274,7 +280,7 @@ async def test_legacy_bot_uses_layout_neutral_fence_for_the_full_runtime_window(
         runtime=_BlockingRuntime(started, unblock),
         legacy_factory=object(),
         passport=object(),
-        collaborators=_Collaborators(),
+        authorization=_Collaborators(),
         mutation_guard=BotCapabilityMutationGuard(cache),
         # This stand-in deliberately has no Pool participation behaviour.  The
         # capability guard, not the Pool guard, is the assertion under test.
@@ -314,7 +320,7 @@ def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        collaborators=_Collaborators(),
+        authorization=_Collaborators(),
         mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
@@ -339,7 +345,7 @@ def test_legacy_create_retains_only_virtual_default_bot_compatibility():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        collaborators=_Collaborators(),
+        authorization=_Collaborators(),
         mutation_guard=mutation_guard,
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
@@ -365,7 +371,7 @@ def test_legacy_virtual_default_read_is_owner_scoped():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        collaborators=_Collaborators(),
+        authorization=_Collaborators(),
         mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
@@ -389,7 +395,7 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        collaborators=_Collaborators(),
+        authorization=_Collaborators(),
         mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
@@ -414,7 +420,7 @@ def test_skill_set_acl_denial_is_forbidden_not_not_found():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        collaborators=_DeniedCollaborators(),
+        authorization=_DeniedCollaborators(),
         mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
@@ -453,7 +459,7 @@ async def test_skill_set_releases_mutation_lease_when_pool_release_fails():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        collaborators=_Collaborators(),
+        authorization=_Collaborators(),
         mutation_guard=BotCapabilityMutationGuard(cache),
         edit_guard=_FailingReleaseGuard(),
         audit_log_repo=_Audit(),
@@ -474,7 +480,7 @@ def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membershi
         runtime=_SuccessfulRuntime(),
         legacy_factory=factory,
         passport=object(),
-        collaborators=_Collaborators(),
+        authorization=_Collaborators(),
         mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),

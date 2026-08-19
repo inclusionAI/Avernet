@@ -15,8 +15,8 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_
 from agentclaw.community.api.skill_set_control_plane import (
     SkillSetControlPlaneServiceProtocol,
 )
-from agentclaw.community.core.bot_collaborator.protocols import (
-    CollaboratorServiceProtocol,
+from agentclaw.community.core.skill_center.authorization_hook import (
+    BotCapabilityAuthorizationHookProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
@@ -156,7 +156,7 @@ def _seed(world, *, member: bool = False) -> None:
         runtime=runtime,
         legacy_factory=world.get(SkillSetServiceFactory),
         passport=world.get(PassportPlugin),
-        collaborators=world.get(CollaboratorServiceProtocol),
+        authorization=world.get(BotCapabilityAuthorizationHookProtocol),
         mutation_guard=world.get(BotCapabilityMutationGuard),
         edit_guard=world.get(SkillsPoolEditGuard),
         audit_log_repo=world.get(BotCollabLogRepositoryProtocol),

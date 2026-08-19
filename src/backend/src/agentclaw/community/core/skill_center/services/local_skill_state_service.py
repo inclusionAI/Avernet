@@ -187,7 +187,7 @@ class LocalSkillStateService:
             or not str(raw.get("git_path") or "").startswith("git://")
         ):
             raise LocalSkillNotFoundError()
-        bot = self._bot_repo.get_by_id(bot_id)
+        bot = self._bot_repo.get_unique_by_id(bot_id)
         owner_id = str((bot or {}).get("user_id") or (bot or {}).get("owner_id") or "")
         if not bot or not owner_id:
             raise LocalSkillNotFoundError()

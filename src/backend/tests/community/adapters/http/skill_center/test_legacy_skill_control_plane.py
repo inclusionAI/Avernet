@@ -29,6 +29,7 @@ from agentclaw.community.adapters.http.dependencies import get_request_context
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneNotFoundError,
 )
 
 
@@ -279,6 +280,9 @@ def test_legacy_repo_catalog_routes_retain_request_context_auth_dependency() -> 
 @pytest.mark.asyncio
 async def test_legacy_skill_set_batch_keeps_domain_partial_success() -> None:
     class _ControlPlane:
+        def get_set(self, **_kwargs):
+            return {"id": "set-1", "is_default": False}
+
         def resolve_legacy_skill_id(self, **kwargs):
             return kwargs["identifier"]
 
@@ -305,8 +309,41 @@ async def test_legacy_skill_set_batch_keeps_domain_partial_success() -> None:
 
 
 @pytest.mark.asyncio
+async def test_legacy_skill_set_batch_validates_target_before_materialising_asset() -> None:
+    class _ControlPlane:
+        resolved = False
+
+        def get_set(self, **_kwargs):
+            raise SkillSetControlPlaneNotFoundError()
+
+        def resolve_legacy_skill_id(self, **_kwargs):
+            self.resolved = True
+            return "7"
+
+    control_plane = _ControlPlane()
+    with pytest.raises(HTTPException) as failure:
+        await add_skills_to_set(
+            "missing-set",
+            AddSkillsRequest(skill_ids=["7"], user_id="owner", bot_id="bot"),
+            entity_id=None,
+            entity_type=None,
+            bot_id=None,
+            engine_type=None,
+            ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+            bot_repo=_Bots(),
+            control_plane=control_plane,
+        )
+
+    assert failure.value.status_code == 404
+    assert control_plane.resolved is False
+
+
+@pytest.mark.asyncio
 async def test_legacy_skill_set_batch_propagates_infrastructure_failure() -> None:
     class _ControlPlane:
+        def get_set(self, **_kwargs):
+            return {"id": "set-1", "is_default": False}
+
         def resolve_legacy_skill_id(self, **kwargs):
             return kwargs["identifier"]
 
@@ -333,6 +370,9 @@ async def test_legacy_skill_set_batch_propagates_infrastructure_failure() -> Non
 @pytest.mark.asyncio
 async def test_legacy_skill_set_batch_does_not_hide_mutation_busy() -> None:
     class _ControlPlane:
+        def get_set(self, **_kwargs):
+            return {"id": "set-1", "is_default": False}
+
         def resolve_legacy_skill_id(self, **kwargs):
             return kwargs["identifier"]
 

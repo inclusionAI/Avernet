@@ -185,6 +185,10 @@ from agentclaw.community.core.skill_center.services.skill_set_control_plane impo
     SkillSetRuntimeReconciler,
     SkillSetRuntimeReconcilerProtocol,
 )
+from agentclaw.community.core.skill_center.authorization_hook import (
+    BotCapabilityAuthorizationHookProtocol,
+    CollaboratorBotCapabilityAuthorizationHook,
+)
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationGuard,
 )
@@ -334,6 +338,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         )
         binder.bind(
             BotCapabilityMutationGuard, to=BotCapabilityMutationGuard, scope=singleton
+        )
+        binder.bind(
+            BotCapabilityAuthorizationHookProtocol,
+            to=CollaboratorBotCapabilityAuthorizationHook,
+            scope=singleton,
         )
         binder.bind(
             SkillSetRuntimeReconcilerProtocol,

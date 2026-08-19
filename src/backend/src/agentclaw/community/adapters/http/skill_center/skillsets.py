@@ -488,6 +488,16 @@ async def add_skills_to_set(
         # an atomic control-plane command; the adapter only serializes results.
         results: dict[str, list] = {"success": [], "failed": [], "activation_failed": []}
         actor_id = _legacy_actor(ctx, request.user_id or entity_id)
+        # Validate the target before the legacy resolver may materialise a
+        # missing Repo asset.  A missing or immutable Set must not leave an
+        # orphan ac_skill row behind.
+        target_set = control_plane.get_set(
+            bot_id=effective_bot_id,
+            actor_id=actor_id,
+            set_id=skill_set_id,
+        )
+        if target_set.get("is_default"):
+            raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
         for skill_id in request.skill_ids:
             try:
                 stable_skill_id = control_plane.resolve_legacy_skill_id(

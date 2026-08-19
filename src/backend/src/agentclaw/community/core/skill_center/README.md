@@ -20,6 +20,7 @@ provides:
   - "LocalSkillStateService"
   - "LocalSkillDeleteService"
   - "BotCapabilityMutationGuard"
+  - "BotCapabilityAuthorizationHookProtocol"
   - "SkillSetControlPlaneService"
   - "SkillInstallationRepositoryProtocol"
   - "BotSkillAssetService"
