@@ -4002,11 +4002,6 @@ impl BcsServer {
 
             (friend_store, friend_request_store)
         };
-        // Keep `legacy_friend_core` reachable so the legacy friend-request WRITE
-        // path (FriendRequestCore) keeps its backing store; the READ gate is
-        // reassigned to the edge-permission adapter below. Silence the
-        // dead-code warning until the legacy path is retired (TODO above).
-        let _ = &legacy_friend_core;
 
         // Edge-permission stores + services (T16): real DB-backed impls back
         // the `connect`/`admission` `HttpAppState` fields. Stores follow the
@@ -4081,25 +4076,11 @@ impl BcsServer {
             (edge_grant_repo, profile_repo, request_repo, bot_config_repo)
         };
         let edge_permission_env = crate::env::resolve_env();
-        // B3: rewire the friend READ gate to the edge-permission store. The
-        // legacy `friend_svc` (built above on the `friendships` table) is kept
-        // only to back the legacy `FriendRequestCore` WRITE path; all READ
-        // consumers (group/proposal/a2a/discovery candidate search) now read
-        // friend state from `edge_grants` via `EdgeAuthzFriendAdapter`. This
-        // eliminates the dual-source-of-truth for friend visibility: the
-        // edge-permission model is the single source for "are these actors
-        // friends?" while the legacy friend-request flow is sunset.
-        //
-        // TODO(installment-5): retire `FriendRequestCore` + the legacy
-        // `friendships` table entirely once connect/revoke fully replaces the
-        // friend-request workflow. At that point the legacy `friend_svc` below
-        // (still threaded into `FriendRequestCore`) can be deleted.
+        // friend_svc = legacy FriendCore (reads bcs_friendships/old tables).
+        // Gates (group/proposal/a2a) use this until edge_grants data is migrated.
+        // See docs/superpowers/plans/2026-08-19-v2-friends-parallel-interface.md.
         let friend_svc: Arc<dyn bcs_service_api::FriendCoreService> =
-            Arc::new(bcs_edge_permission::EdgeAuthzFriendAdapter::new(
-                edge_grant_store.clone(),
-                Some(bot_config_store.clone()),
-                edge_permission_env.clone(),
-            ));
+            legacy_friend_core.clone();
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
             Arc::new(bcs_edge_permission::DbConnectService::new(
                 edge_grant_store.clone(),

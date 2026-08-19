@@ -1,215 +1,512 @@
-//! Edge-permission `/friends/*` route handlers.
-//!
-//! These handlers call the Task-2 application traits (`ConnectService`) on
-//! `HttpAppState.connect`. Caller resolution reuses `routes::caller`
-//! (`caller_actor_id_from_headers`): Bearer bot token first, then human
-//! identity (`human_<staff_no>`), then `from_bot` body fallback. The
-//! edge-permission service layer (wired in Installment 3) owns the authz.
-//!
-//! Transitional: `state.connect` is `NoopConnectService` until Installment 3.
-//!
-//! # Wire-shape note
-//! Responses are wrapped in the legacy `{success,data}` envelope
-//! ([`FriendApiResponse`]) so the existing `bcs-cli` client
-//! (`crates/tools/bcs-cli/src/client.rs`, deserializing `FriendApiResponse`)
-//! keeps working. The envelope is retired in Phase 5 alongside the old friend
-//! graph.
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, Uri},
+    http::{HeaderMap, StatusCode, Uri},
+    response::{IntoResponse, Response},
 };
-use bcs_protocol::http::friends::{
-    AcceptFriendRequestResponse, CreateFriendRequestBody, CreateFriendRequestResponse,
-    DecisionBody, FriendApiResponse, FriendListByActorQuery, FriendListResponse, ListRequestsQuery,
-    RevokeFriendResponse, StatusResponse, envelope,
+use bcs_protocol::http::friends::{CreateFriendRequestBody, ListRequestsQuery};
+use bcs_service_api::{
+    BotDetailCommand, BotUseCaseError, CreateFriendRequestCommand, FriendRequest,
+    FriendRequestDecisionCommand, FriendRequestDirection, FriendRequestStatus, FriendUseCaseError,
+    ListFriendRequestsCommand, ListFriendsCommand, ServiceError,
 };
-use bcs_service_api::application::{ConnectStatus, RequestDirection};
+use serde_json::Value;
 
-use crate::error::HttpAdapterError;
 use crate::state::HttpAppState;
 
-use super::caller::caller_actor_id_from_headers;
 
-/// `POST /friends/request` — create a friend (connect) request.
 pub async fn create_friend_request(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
-    Json(body): Json<CreateFriendRequestBody>,
-) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let from = resolve_caller(&state, &headers, &uri, body.from_bot.as_deref()).await?;
-    let res = state
-        .connect
-        .create_connect(&from, &body.to_bot, body.message.clone())
-        .await?;
-    let status = match res.status {
-        ConnectStatus::Pending => "pending",
-        ConnectStatus::Approved => "approved",
-        ConnectStatus::PublicNoEdge => "public_no_edge",
-    };
-    Ok(Json(envelope(&CreateFriendRequestResponse {
-        request_ids: res.request_ids,
-        status: status.into(),
-        edge_ids: res.edge_ids,
-        auto_accepted: res.auto_accepted,
-    })))
+    Json(req): Json<CreateFriendRequestBody>,
+) -> Response {
+    let caller_actor_id =
+        match resolve_caller(&state, &headers, &uri, req.from_bot.as_deref()).await {
+            Ok(caller) => caller,
+            Err(ResolveCallerError::NoCaller) => {
+                return error_response(
+                    StatusCode::UNAUTHORIZED,
+                    "Unauthorized: no valid token or from_bot provided",
+                );
+            }
+            Err(ResolveCallerError::NoUserIdentity) => {
+                return error_response(
+                    StatusCode::UNAUTHORIZED,
+                    "Unauthorized: no valid token or login session",
+                );
+            }
+            Err(ResolveCallerError::BotNotFound(actor_id)) => {
+                return error_response(
+                    StatusCode::NOT_FOUND,
+                    format!("Bot '{}' not found", actor_id),
+                );
+            }
+            Err(ResolveCallerError::OwnershipDenied(actor_id)) => {
+                return error_response(
+                    StatusCode::FORBIDDEN,
+                    format!("Forbidden: not authorized to act as bot '{}'", actor_id),
+                );
+            }
+        };
+
+    match state
+        .services
+        .friend_use_cases
+        .create_friend_request(CreateFriendRequestCommand {
+            caller_actor_id,
+            to_bot: req.to_bot,
+        })
+        .await
+    {
+        Ok(request) => friend_request_created_response(request),
+        Err(FriendUseCaseError::Service(ServiceError::PendingRequestExists {
+            request_id,
+            from_bot,
+            to_bot,
+        })) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true,
+                "data": {
+                    "id": request_id,
+                    "from_bot": from_bot,
+                    "to_bot": to_bot,
+                    "status": "pending",
+                    "message": "Friend request already pending"
+                }
+            })),
+        )
+            .into_response(),
+        Err(error) => friend_use_case_error_response(error),
+    }
 }
 
-/// `POST /friends/requests/{id}/accept` — approve a pending request.
-pub async fn accept_friend_request(
-    State(state): State<HttpAppState>,
-    headers: HeaderMap,
-    uri: Uri,
-    Path(id): Path<String>,
-) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let caller = resolve_caller(&state, &headers, &uri, None).await?;
-    let edge_ids = state.connect.approve(&id, &caller).await?;
-    Ok(Json(envelope(&AcceptFriendRequestResponse { edge_ids })))
-}
-
-/// `POST /friends/requests/{id}/reject` — reject a pending request.
-pub async fn reject_friend_request(
-    State(state): State<HttpAppState>,
-    headers: HeaderMap,
-    uri: Uri,
-    Path(id): Path<String>,
-    body: Option<Json<DecisionBody>>,
-) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let caller = resolve_caller(&state, &headers, &uri, None).await?;
-    // Body is optional: bcs-cli POSTs reject with no body / no content-type.
-    let reason = body.and_then(|Json(b)| b.reason);
-    state.connect.reject(&id, &caller, reason).await?;
-    Ok(Json(envelope(&StatusResponse {
-        status: "rejected".into(),
-    })))
-}
-
-/// `POST /friends/requests/{id}/cancel` — caller withdraws a pending request.
-pub async fn cancel_friend_request(
-    State(state): State<HttpAppState>,
-    headers: HeaderMap,
-    uri: Uri,
-    Path(id): Path<String>,
-) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    // Caller identity is resolved for auth-area consistency; `cancel` acts on
-    // the request id and the service layer verifies the caller is the sender.
-    let _caller = resolve_caller(&state, &headers, &uri, None).await?;
-    state.connect.cancel(&id).await?;
-    Ok(Json(envelope(&StatusResponse {
-        status: "cancelled".into(),
-    })))
-}
-
-/// `GET /friends/requests` — paginated inbox/sent list.
 pub async fn list_friend_requests(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
-    Query(q): Query<ListRequestsQuery>,
-) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let caller = resolve_caller(&state, &headers, &uri, None).await?;
-    let direction = match q.direction.as_str() {
-        "sent" => RequestDirection::Sent,
-        "all" => RequestDirection::All,
-        _ => RequestDirection::Received,
+    Query(query): Query<ListRequestsQuery>,
+) -> Response {
+    let direction = match query.direction.as_str() {
+        "sent" => FriendRequestDirection::Sent,
+        "all" => FriendRequestDirection::All,
+        _ => FriendRequestDirection::Received,
     };
-    let status = q.status.as_deref().and_then(parse_status_filter);
-    let page = state
-        .connect
-        .list_requests(&caller, direction, status, q.page, q.page_size)
-        .await?;
-    let payload = serde_json::json!({
-        "items": page.items,
-        "total": page.total,
-        "page": page.page,
-        "page_size": page.page_size,
-    });
-    Ok(Json(envelope(&payload)))
+    let status_filter = match query.status.as_deref() {
+        Some("pending") => Some(FriendRequestStatus::Pending),
+        Some("accepted") => Some(FriendRequestStatus::Accepted),
+        Some("rejected") => Some(FriendRequestStatus::Rejected),
+        _ => None,
+    };
+
+    let caller_actor_id =
+        match resolve_caller(&state, &headers, &uri, query.bot_uuid.as_deref()).await {
+            Ok(caller) => caller,
+            Err(ResolveCallerError::NoCaller) => {
+                return error_response(
+                    StatusCode::UNAUTHORIZED,
+                    "Unauthorized: no valid token or bot_uuid provided",
+                );
+            }
+            Err(ResolveCallerError::NoUserIdentity) => {
+                return error_response(
+                    StatusCode::UNAUTHORIZED,
+                    "Unauthorized: no valid token or login session",
+                );
+            }
+            Err(ResolveCallerError::BotNotFound(actor_id)) => {
+                return error_response(
+                    StatusCode::NOT_FOUND,
+                    format!("Bot '{}' not found", actor_id),
+                );
+            }
+            Err(ResolveCallerError::OwnershipDenied(actor_id)) => {
+                return error_response(
+                    StatusCode::FORBIDDEN,
+                    format!("Forbidden: not authorized to act as bot '{}'", actor_id),
+                );
+            }
+        };
+
+    let requests = match state
+        .services
+        .friend_use_cases
+        .list_friend_requests(ListFriendRequestsCommand {
+            caller_actor_id,
+            direction,
+            status_filter,
+        })
+        .await
+    {
+        Ok(requests) => requests,
+        Err(error) => {
+            return friend_use_case_error_response(error);
+        }
+    };
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "success": true,
+            "data": requests.into_iter().map(friend_request_to_json).collect::<Vec<_>>()
+        })),
+    )
+        .into_response()
 }
 
-/// `POST /friends/{actor}/revoke` — unfriend (revoke friend edges only).
-pub async fn revoke_friend(
+pub async fn accept_friend_request(
     State(state): State<HttpAppState>,
+    Path(request_id): Path<String>,
     headers: HeaderMap,
     uri: Uri,
-    Path(actor): Path<String>,
-    _body: Option<Json<DecisionBody>>,
-) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let caller = resolve_caller(&state, &headers, &uri, None).await?;
-    // Body optional (bcs-cli sends empty POSTs). The service now returns the
-    // actual revoked edge_ids (B4c) rather than a count.
-    let revoked_edges = state.connect.revoke_friend(&caller, &actor).await?;
-    Ok(Json(envelope(&RevokeFriendResponse { revoked_edges })))
+) -> Response {
+    let caller = match resolve_request_receiver_caller(
+        &state,
+        &headers,
+        &uri,
+        &request_id,
+        "accept",
+    )
+    .await
+    {
+        Ok(caller) => caller,
+        Err(response) => return response,
+    };
+
+    match state
+        .services
+        .friend_use_cases
+        .accept_friend_request(FriendRequestDecisionCommand {
+            caller_actor_id: caller.actor_id,
+            request_id,
+            request_to_bot: caller.request_to_bot,
+        })
+        .await
+    {
+        Ok(()) => success_empty_response(),
+        Err(error) => friend_use_case_error_response(error),
+    }
 }
 
-/// `GET /bots/{id}/friends` — friend list for a bot.
+pub async fn reject_friend_request(
+    State(state): State<HttpAppState>,
+    Path(request_id): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let caller = match resolve_request_receiver_caller(
+        &state,
+        &headers,
+        &uri,
+        &request_id,
+        "reject",
+    )
+    .await
+    {
+        Ok(caller) => caller,
+        Err(response) => return response,
+    };
+
+    match state
+        .services
+        .friend_use_cases
+        .reject_friend_request(FriendRequestDecisionCommand {
+            caller_actor_id: caller.actor_id,
+            request_id,
+            request_to_bot: caller.request_to_bot,
+        })
+        .await
+    {
+        Ok(()) => success_empty_response(),
+        Err(error) => friend_use_case_error_response(error),
+    }
+}
+
 pub async fn list_friends(
     State(state): State<HttpAppState>,
-    headers: HeaderMap,
-    uri: Uri,
     Path(bot_id): Path<String>,
-) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    // Caller identity is resolved for auth-area consistency; the service layer
-    // enforces any visibility/ownership rules on listing.
-    let _caller = resolve_caller(&state, &headers, &uri, None).await?;
-    let items = state.connect.list_friends(&bot_id).await?;
-    let total = items.len() as u32;
-    Ok(Json(envelope(&FriendListResponse { items, total })))
-}
-
-/// `GET /friends?actor=` — friend list for any actor, human or bot (api-contract ⑦).
-pub async fn list_friends_by_actor(
-    State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
-    Query(q): Query<FriendListByActorQuery>,
-) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    // Caller identity resolved for auth-area consistency; the service layer
-    // enforces visibility/ownership on listing.
-    let _caller = resolve_caller(&state, &headers, &uri, None).await?;
-    let items = state.connect.list_friends(&q.actor).await?;
-    let total = items.len() as u32;
-    Ok(Json(envelope(&FriendListResponse { items, total })))
+) -> Response {
+    let caller_actor_id = match resolve_friends_list_caller(&state, &headers, &uri, &bot_id).await {
+        Ok(caller) => caller,
+        Err(response) => return response,
+    };
+
+    let friends = match state
+        .services
+        .friend_use_cases
+        .list_friends(ListFriendsCommand {
+            caller_actor_id,
+            target_actor_id: bot_id,
+        })
+        .await
+    {
+        Ok(friends) => friends,
+        Err(error) => {
+            return friend_use_case_error_response(error);
+        }
+    };
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "success": true,
+            "data": friends
+        })),
+    )
+        .into_response()
 }
 
-/// Resolve the caller actor id from request context.
-///
-/// Mirrors the legacy Strategy A resolution: Bearer bot token → human identity
-/// (`human_<staff_no>`) → optional `from_bot` fallback. Returns `Unauthorized`
-/// when no caller can be established.
+#[derive(Debug)]
+enum ResolveCallerError {
+    NoCaller,
+    NoUserIdentity,
+    BotNotFound(String),
+    OwnershipDenied(String),
+}
+
+#[derive(Debug)]
+enum ActorOwnershipError {
+    NoUserIdentity,
+    BotNotFound,
+    Denied,
+}
+
+struct ResolvedRequestReceiverCaller {
+    actor_id: String,
+    request_to_bot: Option<String>,
+}
+
 async fn resolve_caller(
     state: &HttpAppState,
     headers: &HeaderMap,
     uri: &Uri,
-    from_bot: Option<&str>,
-) -> Result<String, HttpAdapterError> {
-    if let Some(actor_id) = caller_actor_id_from_headers(state, headers, uri).await {
+    requested_actor_id: Option<&str>,
+) -> Result<String, ResolveCallerError> {
+    if let Some(actor_id) = optional_caller_from_token(state, headers).await {
         return Ok(actor_id);
     }
-    if let Some(actor_id) = from_bot.filter(|id| !id.is_empty()) {
-        // TODO(installment-3): ownership enforcement moved to the service layer —
-        // ConnectService::create_connect MUST verify the authenticated caller is
-        // authorized to act as `from_bot` (the legacy HTTP-layer
-        // `check_actor_ownership` was removed as part of the edge-permission
-        // authz reform). Until the real service lands, `create_connect` is Noop
-        // and no friend state changes; see plan Installment 3 index.
-        return Ok(actor_id.to_string());
+
+    if let Some(actor_id) = requested_actor_id.filter(|id| !id.is_empty()) {
+        match check_actor_ownership(state, headers, uri, actor_id).await {
+            Ok(()) => return Ok(actor_id.to_string()),
+            Err(ActorOwnershipError::NoUserIdentity) => {
+                return Err(ResolveCallerError::NoUserIdentity);
+            }
+            Err(ActorOwnershipError::BotNotFound) => {
+                return Err(ResolveCallerError::BotNotFound(actor_id.to_string()));
+            }
+            Err(ActorOwnershipError::Denied) => {}
+        }
+        return Err(ResolveCallerError::OwnershipDenied(actor_id.to_string()));
     }
-    Err(HttpAdapterError::Unauthorized(
-        "no valid token or caller identity provided".to_string(),
-    ))
+
+    Err(ResolveCallerError::NoCaller)
 }
 
-fn parse_status_filter(s: &str) -> Option<bcs_domain::edge_permission::RequestStatus> {
-    use bcs_domain::edge_permission::RequestStatus;
-    match s {
-        "pending" => Some(RequestStatus::Pending),
-        "approved" => Some(RequestStatus::Approved),
-        "rejected" => Some(RequestStatus::Rejected),
-        "cancelled" => Some(RequestStatus::Cancelled),
-        // Legacy "accepted" alias used by older clients.
-        "accepted" => Some(RequestStatus::Approved),
-        _ => None,
+async fn resolve_request_receiver_caller(
+    state: &HttpAppState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    request_id: &str,
+    action: &str,
+) -> Result<ResolvedRequestReceiverCaller, Response> {
+    if let Some(actor_id) = optional_caller_from_token(state, headers).await {
+        return Ok(ResolvedRequestReceiverCaller {
+            actor_id,
+            request_to_bot: None,
+        });
     }
+
+    let request_to_bot = match state
+        .services
+        .friend_use_cases
+        .friend_request_receiver(request_id)
+        .await
+    {
+        Ok(to_bot) => to_bot,
+        Err(error) => return Err(friend_use_case_error_response(error)),
+    };
+
+    match check_actor_ownership(state, headers, uri, &request_to_bot).await {
+        Ok(()) => Ok(ResolvedRequestReceiverCaller {
+            actor_id: request_to_bot.clone(),
+            request_to_bot: Some(request_to_bot),
+        }),
+        Err(ActorOwnershipError::NoUserIdentity) => Err(error_response(
+            StatusCode::UNAUTHORIZED,
+            "Unauthorized: no valid token or login session",
+        )),
+        Err(ActorOwnershipError::BotNotFound) => Err(error_response(
+            StatusCode::NOT_FOUND,
+            format!("Bot '{}' not found", request_to_bot),
+        )),
+        Err(ActorOwnershipError::Denied) => Err(error_response(
+            StatusCode::FORBIDDEN,
+            format!(
+                "Not authorized to {} request for bot '{}'",
+                action, request_to_bot
+            ),
+        )),
+    }
+}
+
+async fn resolve_friends_list_caller(
+    state: &HttpAppState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    target_actor_id: &str,
+) -> Result<String, Response> {
+    if let Some(actor_id) = optional_caller_from_token(state, headers).await {
+        return Ok(actor_id);
+    }
+
+    match check_actor_ownership(state, headers, uri, target_actor_id).await {
+        Ok(()) => Ok(target_actor_id.to_string()),
+        Err(ActorOwnershipError::NoUserIdentity) => Err(error_response(
+            StatusCode::UNAUTHORIZED,
+            "Unauthorized: no valid token or login session",
+        )),
+        Err(ActorOwnershipError::BotNotFound) => Err(error_response(
+            StatusCode::NOT_FOUND,
+            format!("Bot '{}' not found", target_actor_id),
+        )),
+        Err(ActorOwnershipError::Denied) => Err(error_response(
+            StatusCode::FORBIDDEN,
+            format!("Not authorized to access bot '{}'", target_actor_id),
+        )),
+    }
+}
+
+async fn check_actor_ownership(
+    state: &HttpAppState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    actor_id: &str,
+) -> Result<(), ActorOwnershipError> {
+    let staff_no = state
+        .user_identity
+        .extract(headers, uri)
+        .await
+        .and_then(|identity| identity.staff_no)
+        .filter(|staff_no| !staff_no.is_empty());
+    let Some(staff_no) = staff_no else {
+        return Err(ActorOwnershipError::NoUserIdentity);
+    };
+
+    match state
+        .services
+        .bot_query
+        .get_bot(BotDetailCommand {
+            caller_actor_id: None,
+            bot_id: actor_id.to_string(),
+        })
+        .await
+    {
+        Ok(bot) => {
+            if bot
+                .created_by
+                .as_deref()
+                .map(|owner| owner == staff_no)
+                .unwrap_or(true)
+            {
+                Ok(())
+            } else {
+                Err(ActorOwnershipError::Denied)
+            }
+        }
+        Err(BotUseCaseError::Service(
+            ServiceError::BotNotFound(_) | ServiceError::BotNotRegistered(_),
+        )) => Err(ActorOwnershipError::BotNotFound),
+        Err(_) => Err(ActorOwnershipError::Denied),
+    }
+}
+
+async fn optional_caller_from_token(state: &HttpAppState, headers: &HeaderMap) -> Option<String> {
+    state.bot_uuid_from_headers(headers).await
+}
+
+fn friend_request_created_response(request: FriendRequest) -> Response {
+    if request.id.is_empty() {
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true,
+                "message": "Already friends"
+            })),
+        )
+            .into_response();
+    }
+
+    let status_code = match request.status {
+        FriendRequestStatus::Accepted => StatusCode::OK,
+        _ => StatusCode::CREATED,
+    };
+
+    (
+        status_code,
+        Json(serde_json::json!({
+            "success": true,
+            "data": friend_request_to_json(request)
+        })),
+    )
+        .into_response()
+}
+
+fn friend_request_to_json(request: FriendRequest) -> Value {
+    serde_json::json!({
+        "id": request.id,
+        "from_bot": request.from_bot,
+        "to_bot": request.to_bot,
+        "status": request.status,
+        "created_at": request.created_at,
+        "updated_at": request.updated_at
+    })
+}
+
+fn success_empty_response() -> Response {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "success": true
+        })),
+    )
+        .into_response()
+}
+
+fn service_error_response(error: ServiceError) -> Response {
+    let status = match error {
+        ServiceError::CannotAddSelf => StatusCode::BAD_REQUEST,
+        ServiceError::PendingRequestExists { .. } => StatusCode::CONFLICT,
+        ServiceError::BotNotFound(_) | ServiceError::BotNotRegistered(_) => StatusCode::NOT_FOUND,
+        ServiceError::FriendRequestNotFound(_) => StatusCode::NOT_FOUND,
+        ServiceError::NotFriends(_) => StatusCode::FORBIDDEN,
+        ServiceError::Conflict(_) => StatusCode::CONFLICT,
+        ServiceError::InvalidOperation { .. }
+        | ServiceError::CannotAcceptRejected
+        | ServiceError::CannotRejectAccepted => StatusCode::CONFLICT,
+        ServiceError::PrivateBotCannotCollaborate => StatusCode::FORBIDDEN,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    error_response(status, error.to_string())
+}
+
+fn friend_use_case_error_response(error: FriendUseCaseError) -> Response {
+    match error {
+        FriendUseCaseError::Forbidden(message) => error_response(StatusCode::FORBIDDEN, message),
+        FriendUseCaseError::Service(error) => service_error_response(error),
+    }
+}
+
+fn error_response(status: StatusCode, message: impl Into<String>) -> Response {
+    (
+        status,
+        Json(serde_json::json!({
+            "success": false,
+            "error": message.into()
+        })),
+    )
+        .into_response()
 }

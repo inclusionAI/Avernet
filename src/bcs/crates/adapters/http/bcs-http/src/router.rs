@@ -209,15 +209,14 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/friends/requests/{id}/reject",
             post(routes::friends::reject_friend_request),
         )
-        .route(
-            "/friends/requests/{id}/cancel",
-            post(routes::friends::cancel_friend_request),
-        )
-        .route(
-            "/friends/{actor}/revoke",
-            post(routes::friends::revoke_friend),
-        )
-        .route("/friends", get(routes::friends::list_friends_by_actor))
+        .route("/v2/friends/request", post(routes::v2_friends::create_friend_request))
+        .route("/v2/friends/requests", get(routes::v2_friends::list_friend_requests))
+        .route("/v2/friends/requests/{id}/accept", post(routes::v2_friends::accept_friend_request))
+        .route("/v2/friends/requests/{id}/reject", post(routes::v2_friends::reject_friend_request))
+        .route("/v2/friends/requests/{id}/cancel", post(routes::v2_friends::cancel_friend_request))
+        .route("/v2/friends/{actor}/revoke", post(routes::v2_friends::revoke_friend))
+        .route("/v2/friends", get(routes::v2_friends::list_friends_by_actor))
+        .route("/v2/bots/{id}/friends", get(routes::v2_friends::list_friends))
         .route(
             "/bots/{id}/admission",
             get(routes::admission::get_admission),

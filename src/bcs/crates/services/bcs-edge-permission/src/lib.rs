@@ -36,12 +36,11 @@ use bcs_service_api::application::admission::AdmissionService;
 use bcs_service_api::application::connect::{
     ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage,
 };
-use bcs_service_api::core::friend::FriendCoreService;
 use bcs_service_api::port::repo::{
     BotActorConfigRepoPort, EdgeGrantRepoPort, PermissionProfileRepoPort,
     PermissionRequestRepoPort,
 };
-use bcs_service_api::{Friendship, ServiceError, ServiceResult};
+use bcs_service_api::{ServiceError, ServiceResult};
 use uuid::Uuid;
 
 /// DB-backed `ConnectService` implementation.
@@ -1134,140 +1133,6 @@ impl DbAdmissionService {
             return p.permission_profile_id == ref_id;
         }
         false
-    }
-}
-
-// ---- EdgeAuthzFriendAdapter (B3) ------------------------------------------
-
-/// `FriendCoreService` adapter that reads friend state from the edge-permission
-/// `edge_grants` store instead of the legacy `friendships` table.
-///
-/// Read methods (`are_friends`, `try_are_friends`, `list_friends`,
-/// `are_all_friends`) delegate to [`EdgeGrantRepoPort::has_friend_edge`] /
-/// [`EdgeGrantRepoPort::list_friends`], keyed on the adapter's `env`. Write
-/// methods (`add_friendship`, `remove_all_friendships`, `remove_friendship`)
-/// return [`ServiceError::InternalError`] directing callers to the
-/// `ConnectService` (the edge-permission model authors friend edges only via
-/// connect/approve/revoke, not via the legacy friendship mutators).
-///
-/// `status ≠ hidden` guard (B3 §4): `are_friends` returns `false` when either
-/// side is a bot whose `bcs_bots.status == "hidden"`, since hidden bots are
-/// non-discoverable / non-collaborative. When the optional bot-config port is
-/// absent, the hidden check is skipped (TODO).
-///
-/// Constructed at the composition root and injected wherever a
-/// `FriendCoreService` is expected by group/proposal/a2a/bot-discovery
-/// consumers (candidate search, group membership gates, etc.). The legacy
-/// `FriendCore` wiring is replaced by this adapter in the DB-backed path.
-pub struct EdgeAuthzFriendAdapter {
-    edge_grants: Arc<dyn EdgeGrantRepoPort>,
-    bot_config: Option<Arc<dyn BotActorConfigRepoPort>>,
-    env: String,
-}
-
-impl EdgeAuthzFriendAdapter {
-    /// Build an adapter backed by `edge_grants` scoped to `env`. Pass a
-    /// bot-config repo to enable the hidden-bot guard; `None` skips it.
-    pub fn new(
-        edge_grants: Arc<dyn EdgeGrantRepoPort>,
-        bot_config: Option<Arc<dyn BotActorConfigRepoPort>>,
-        env: impl Into<String>,
-    ) -> Self {
-        Self {
-            edge_grants,
-            bot_config,
-            env: env.into(),
-        }
-    }
-
-    /// Is `bot` hidden (and thus non-friend-visible)? Returns `false` when the
-    /// bot-config port is absent or the bot is unknown / not hidden.
-    async fn is_hidden(&self, bot: &str) -> bool {
-        let Some(bc) = self.bot_config.as_ref() else {
-            return false;
-        };
-        bc.get(bot, &self.env).await.map(|c| c.status == "hidden").unwrap_or(false)
-    }
-}
-
-#[async_trait]
-impl FriendCoreService for EdgeAuthzFriendAdapter {
-    async fn list_friends(&self, bot_id: &str) -> Vec<String> {
-        self.edge_grants.list_friends(bot_id, &self.env).await
-    }
-
-    async fn are_friends(&self, bot_a: &str, bot_b: &str) -> bool {
-        // status≠hidden guard (B3 §4): a hidden bot has no visible friends.
-        if self.is_hidden(bot_a).await || self.is_hidden(bot_b).await {
-            return false;
-        }
-        self.edge_grants.has_friend_edge(bot_a, bot_b, &self.env).await
-    }
-
-    async fn try_are_friends(&self, bot_a: &str, bot_b: &str) -> ServiceResult<bool> {
-        Ok(self.are_friends(bot_a, bot_b).await)
-    }
-
-    async fn are_all_friends(&self, bot_id: &str, others: &[String]) -> ServiceResult<()> {
-        let mut non_friends = Vec::new();
-        for other in others {
-            if self.are_friends(bot_id, other).await {
-                continue;
-            }
-            non_friends.push(other.clone());
-        }
-        if non_friends.is_empty() {
-            Ok(())
-        } else {
-            Err(ServiceError::NotFriends(non_friends))
-        }
-    }
-
-    async fn add_friendship(&self, _bot_a: &str, _bot_b: &str) -> ServiceResult<()> {
-        Err(ServiceError::InternalError(
-            "EdgeAuthzFriendAdapter is read-only; use ConnectService to author friend edges"
-                .to_string(),
-        ))
-    }
-
-    async fn remove_all_friendships(&self, _bot_id: &str) -> ServiceResult<usize> {
-        Err(ServiceError::InternalError(
-            "EdgeAuthzFriendAdapter is read-only; use ConnectService::revoke_friend to remove friend edges"
-                .to_string(),
-        ))
-    }
-
-    async fn list_friendships_paginated(
-        &self,
-        bot_id: &str,
-        offset: u64,
-        limit: u64,
-    ) -> ServiceResult<(Vec<Friendship>, u64)> {
-        // Project friend ids into symmetric Friendship shells. Enrichment
-        // (name/summary) is the caller's job; the adapter only carries ids.
-        // Pagination is applied in memory after the (typically small) friend
-        // list is fetched — the edge-grants friend scan is already bounded by
-        // the actor's degree.
-        let friends = self.edge_grants.list_friends(bot_id, &self.env).await;
-        let total = friends.len() as u64;
-        let start = (offset as usize).min(friends.len());
-        let end = (start + limit as usize).min(friends.len());
-        let page: Vec<Friendship> = friends[start..end]
-            .iter()
-            .map(|friend_bot_uuid| Friendship {
-                bot_uuid: bot_id.to_string(),
-                friend_bot_uuid: friend_bot_uuid.clone(),
-                created_at: 0,
-            })
-            .collect();
-        Ok((page, total))
-    }
-
-    async fn remove_friendship(&self, _bot_a: &str, _bot_b: &str) -> ServiceResult<bool> {
-        Err(ServiceError::InternalError(
-            "EdgeAuthzFriendAdapter is read-only; use ConnectService::revoke_friend to remove a friend edge"
-                .to_string(),
-        ))
     }
 }
 
