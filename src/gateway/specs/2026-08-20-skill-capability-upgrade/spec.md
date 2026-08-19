@@ -109,6 +109,8 @@ Backend 真实提供，同时避免在 Review 阶段暴露返回 `501` 的占位
 - 将 Legacy Repo Catalog、SkillSet、MCP、CLI 产品能力迁入 canonical OpenAPI。
 - 建立统一的 Bot Skill/MCP 有效安装清单和 Runtime Resolver。
 - Local、Repo、Space 不发生原地转换。
+- 本阶段只交付 Backend、Gateway 合同和 Runtime 兼容能力；产品前端切流由前端团队
+  独立实施与验收，不作为 Backend 实现 Ticket 的完成条件。
 
 #### Phase 2：Space Skill 能力升级
 
@@ -629,8 +631,17 @@ Phase 1 必测：
 - Legacy Local/Repo/Bot-local 不转换，System Default Skill/MCP/CLI 仍然生效。
 - 所有支持 Bot Type × Engine 组合及未支持组合 fail-closed。
 
-Phase 1 完成定义：Gateway OpenAPI gate 通过，存量 BFF 与 canonical OpenAPI 的
-等价测试通过，产品前端只调用 Gateway，Legacy 全矩阵无回归。
+Phase 1 Backend 完成定义：Gateway OpenAPI gate 通过，存量 BFF 与 canonical
+OpenAPI 的等价测试通过，全部产品能力均存在可供前端切流的 Gateway Backend 合同，
+Legacy 全矩阵无回归。产品前端是否已经完成调用切换和页面 E2E 属于独立的产品切流
+验收，不阻塞 Backend Phase 1 代码完成，但在产品正式切流前仍必须由前端团队验证。
+
+Phase 1 对新产品 PRD 的可测边界：Local 上传、Repo Catalog、MCP Catalog/权限、
+添加到 SkillSet、SkillSet 整体激活/停用、System Default 和 Runtime 恢复可做完整
+Backend 验收。真实 Space Skill 的 ZIP/Git 创建、Draft 编辑、Owner/Manager/Edit
+Lease、发布、版本升级、Skill Center 物化、Track Latest、Service Artifact 精确版本
+和退役属于 Phase 2；Phase 1 只能通过兼容 Fixture 验证已有 Space wire 和消费边界，
+不能把它计为新产品主流程 E2E。
 
 Phase 2 必测：
 
@@ -677,6 +688,18 @@ Phase 2 完成定义：产品主流程 E2E、SC pre 联调、多引擎矩阵、S
 ### Ticket 治理
 
 - 本 Spec 发布后重新执行 to-tickets，按 Phase 1/Phase 2 建立 blocking edges。
+- Phase 1 采用五个纵向实现 Ticket 加一个 Backend Gate，顺序如下：
+  1. `P1-01 Installation 深模块与 Local 兼容` 无业务实现 blocker，先建立 Skill/MCP
+     Installation 事实源、统一 Service 边界和已发布 Local wire 兼容。
+  2. `P1-02 Repo Catalog 与 Direct API`、`P1-03 SkillSet Skill 原子语义` 均被
+     P1-01 阻塞，P1-01 完成后可以并行。
+  3. `P1-04 MCP Direct 与 SkillSet 语义` 被 P1-03 阻塞，复用同一套 SkillSet
+     原子命令和 Installation 语义。
+  4. `P1-05 统一 Resolver 与 Runtime 全量投影` 被 P1-02、P1-03、P1-04 阻塞。
+  5. `P1-GATE Backend 全量兼容与矩阵验收` 被 P1-05 阻塞，并复用已经落地的
+     Legacy 回归基线。
+- 不创建 Phase 1 前端实现 Ticket；前端切流只作为独立产品发布验收项，由前端团队
+  依据生成 OpenAPI/Swagger 执行。
 - 旧 #1165～#1187 必须逐条归类为“已完成并关闭”“修订复用”或“被新 Ticket
   取代并关闭”；禁止保留两套同时可领取的 ready-for-agent 工作。
 - 每个实现 Ticket 使用独立上下文和 `implement` 流程，以小 PR 合入
