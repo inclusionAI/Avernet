@@ -248,6 +248,8 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                     )
                 return self._check_response_envelope(data)
             except BaseException as exc:
+                if isinstance(exc, PaasError):
+                    raise
                 if attempt < _BINDING_MAX_ATTEMPTS:
                     logger.warning(
                         "[bot-service] get_binding transient request error; "
