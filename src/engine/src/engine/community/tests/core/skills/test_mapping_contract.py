@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from engine.community.core.skills.exceptions import (
     InvalidPoolMappingRequestError,
 )
@@ -218,6 +217,31 @@ def test_invalid_contract_shape_has_no_filesystem_side_effect(
         )
 
     assert _snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize(
+    "version,payload,message",
+    [
+        (MAPPING_V3_CONTRACT_VERSION, ["not-an-object"], "must be an object"),
+        (MAPPING_CONTRACT_VERSION, [{"corpus": "center", "skill_uuid": "u", "sc_version_number": "1", "link_name": "a"}], "v2 logical"),
+        (MAPPING_V3_CONTRACT_VERSION, [{"corpus": "repo", "skill_uuid": "u", "sc_version_number": "1", "link_name": "a"}], "structured"),
+        (MAPPING_V3_CONTRACT_VERSION, [{"corpus": "center", "relative_path": "x", "link_name": "a"}], "logical mapping"),
+    ],
+)
+def test_mapping_contract_rejects_invalid_v3_shapes_before_resolution(
+    tmp_path: Path,
+    version: str,
+    payload: list[object],
+    message: str,
+) -> None:
+    with pytest.raises(InvalidPoolMappingRequestError, match=message):
+        resolve_mapping_payload(
+            engine="openclaw",
+            source_layout=MappingSourceLayout.POOL,
+            mapping_contract_version=version,
+            payload=payload,
+            home=tmp_path,
+        )
 
 
 def test_internal_layout_resolution_error_is_not_reclassified(
