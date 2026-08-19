@@ -28,6 +28,12 @@ ruling lives in a companion reference: **[`engine-surface.md`](engine-surface.md
 ([简体中文](engine-surface.zh-CN.md)). This README stays the single status board;
 that file holds the inventory.
 
+**Writing a client against this surface?** Start at **[`usage.md`](usage.md)**
+([简体中文](usage.zh-CN.md)) — the caller-facing guide: which credential to
+present for which scenario, what the gateway does with it, how an application
+gets authorized for a user's bot, and how to diagnose a refusal. This README is
+for the people building the surface; that one is for the people calling it.
+
 ---
 
 ## The big picture (read this first)
