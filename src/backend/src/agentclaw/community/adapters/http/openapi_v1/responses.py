@@ -169,7 +169,13 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillOwnerAmbiguousError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
+    RepositoryCatalogNotFoundError,
+    RepositoryCatalogSyncFailedError,
+    RepositoryCatalogSyncInProgressError,
+    SkillEngineNotSupportedError,
+    SkillManagedBySkillSetError,
     SkillParameterValidationError,
+    SkillRuntimeNameConflictError,
     LocalSkillTooLargeError,
 )
 from agentclaw.community.core.services.identity import (
@@ -425,6 +431,12 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
     LocalSkillEditLockUnavailableError: (503, "Skill update service is temporarily unavailable"),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
+    SkillManagedBySkillSetError: (409, "Skill is managed by a SkillSet"),
+    SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with an active Skill"),
+    SkillEngineNotSupportedError: (409, "Skill is not supported by this bot type and engine"),
+    RepositoryCatalogNotFoundError: (404, "Not found"),
+    RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
+    RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
     # caller learns the limit instead of hitting it inside a container. The
@@ -570,6 +582,11 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillStorageError: 502101,
     SkillParameterValidationError: 422101,
     LocalSkillRuntimeSyncError: 502102,
+    SkillManagedBySkillSetError: 409105,
+    SkillRuntimeNameConflictError: 409106,
+    SkillEngineNotSupportedError: 409107,
+    RepositoryCatalogSyncInProgressError: 409108,
+    RepositoryCatalogSyncFailedError: 502103,
 }
 
 

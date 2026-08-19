@@ -3,13 +3,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page, PageParamsDep
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors, page as page_envelope
 from agentclaw.community.api.repository_catalog_service import RepositoryCatalogServiceProtocol
+from agentclaw.community.core.skill_center.errors import (
+    RepositoryCatalogNotFoundError,
+    RepositoryCatalogSyncFailedError,
+    RepositoryCatalogSyncInProgressError,
+)
 from agentclaw.community.di import Injected
 
 router = APIRouter(prefix="/openapi/v1/skills", tags=["repository-skills"])
@@ -27,12 +32,14 @@ async def list_repository_skills(
     service: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> Envelope[Page[dict[str, Any]]]:
     # Existing `hotest` is the persisted installation-count ordering; do not invent one.
-    items = service.list(path=path, orderby="hotest" if sort == "hottest" else "latest")
-    if keyword:
-        lowered = keyword.lower()
-        items = [item for item in items if lowered in " ".join(str(item.get(key) or "") for key in ("name", "description", "category")).lower()]
-    start = (page.page - 1) * page.page_size
-    return page_envelope(len(items), list(items[start:start + page.page_size]), request)
+    total, items = service.list_page(
+        path=path,
+        orderby="hotest" if sort == "hottest" else "latest",
+        keyword=keyword,
+        page=page.page,
+        page_size=page.page_size,
+    )
+    return page_envelope(total, items, request)
 
 
 @router.get("/repository/tree", response_model=Envelope[list[dict[str, Any]]])
@@ -47,7 +54,7 @@ async def repository_tree(request: Request, _actor_id: UserIdDep, service: Repos
 async def get_repository_skill(skill_id: str, request: Request, _actor_id: UserIdDep, service: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol)) -> Envelope[dict[str, Any]]:
     skill = service.detail(skill_id)
     if skill is None:
-        raise HTTPException(status_code=404, detail="Repository skill not found")
+        raise RepositoryCatalogNotFoundError()
     return envelope(skill, request)
 
 
@@ -57,9 +64,9 @@ async def sync_repository_skills(request: Request, _actor_id: UserIdDep, service
     """Synchronously run the established global master fetch and DB scan once."""
     result = await run_in_threadpool(service.sync)
     if result["status"] == "in_progress":
-        raise HTTPException(status_code=409, detail="SYNC_IN_PROGRESS")
+        raise RepositoryCatalogSyncInProgressError()
     if result["status"] == "failed":
-        raise HTTPException(status_code=500, detail=result["message"])
+        raise RepositoryCatalogSyncFailedError()
     # GitSyncService owns fetch/extract/DB scan/cache refresh as one operation.
     # Calling sync_skills_from_git here would scan the same master tree twice.
     return envelope({"synced": bool(result["result"].get("synced"))}, request)
