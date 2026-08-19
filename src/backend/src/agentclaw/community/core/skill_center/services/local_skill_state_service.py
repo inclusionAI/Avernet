@@ -24,8 +24,15 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetManagedResourceError,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
+    BotCapabilityMutationBusyError,
+    BotCapabilityMutationGuard,
+    BotCapabilityMutationLockUnavailableError,
+)
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillSetRepository,
+)
 from agentclaw.community.core.repository.protocols.skill_installation import (
     SkillInstallationRepositoryProtocol,
 )
@@ -67,17 +74,19 @@ class LocalSkillStateService:
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_set_service_factory: SkillSetServiceFactory,
+        mutation_guard: BotCapabilityMutationGuard,
         edit_guard: SkillsPoolEditGuard,
         pool_runtime: SkillsPoolRuntimeProtocol,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
-        skill_set_repo: SkillSetRepository | None = None,
+        skill_set_repo: SkillSetRepository,
     ) -> None:
         self._skill_repo = skill_repo
         self._installations = installations
         self._bot_repo = bot_repo
         self._collaborators = collaborator_service
         self._skill_set_service_factory = skill_set_service_factory
+        self._mutation_guard = mutation_guard
         self._edit_guard = edit_guard
         self._pool_runtime = pool_runtime
         self._pool_skills = pool_skills
@@ -89,62 +98,73 @@ class LocalSkillStateService:
     ) -> dict[str, Any]:
         scope = self._discover_scope(skill_id)
         try:
-            lease = self._edit_guard.acquire_for_edit(scope=scope)
-        except SkillsPoolEditBusyError as exc:
+            mutation_lease = self._mutation_guard.acquire(scope=scope)
+        except BotCapabilityMutationBusyError as exc:
             raise LocalSkillEditBusyError() from exc
-        except SkillsPoolEditRollbackError as exc:
-            raise LocalSkillLayoutRollbackError() from exc
-        except SkillsPoolEditLockUnavailableError as exc:
+        except BotCapabilityMutationLockUnavailableError as exc:
             raise LocalSkillEditLockUnavailableError() from exc
-        except SkillsPoolEditPausedError as exc:
-            raise LocalSkillEditPausedError() from exc
         try:
-            skill, bot, owner_id, bot_id = self._authorize(skill_id, actor_id)
-            self._reject_ordinary_skill_set_member(skill_id=skill_id, bot_id=bot_id)
-            if self._scope_for(bot, bot_id) != scope:
-                raise LocalSkillNotFoundError()
-            if not is_bot_ready(bot):
-                raise LocalSkillNotReadyError()
-            changed = self._write_desired_state(
-                active=active,
-                env=str(bot["env"]),
-                bot_id=bot_id,
-                skill_id=skill_id,
-            )
-
-            if active:
-                synced = self._sync_runtime(bot=bot, owner_id=owner_id, bot_id=bot_id)
-            else:
-                synced = await self._reconcile_deactivation(
-                    scope=scope,
-                    bot=bot,
-                    skill=skill,
-                    owner_id=owner_id,
+            try:
+                lease = self._edit_guard.acquire_for_edit(scope=scope)
+            except SkillsPoolEditBusyError as exc:
+                raise LocalSkillEditBusyError() from exc
+            except SkillsPoolEditRollbackError as exc:
+                raise LocalSkillLayoutRollbackError() from exc
+            except SkillsPoolEditLockUnavailableError as exc:
+                raise LocalSkillEditLockUnavailableError() from exc
+            except SkillsPoolEditPausedError as exc:
+                raise LocalSkillEditPausedError() from exc
+            try:
+                skill, bot, owner_id, bot_id = self._authorize(skill_id, actor_id)
+                self._reject_ordinary_skill_set_member(skill_id=skill_id, bot_id=bot_id)
+                if self._scope_for(bot, bot_id) != scope:
+                    raise LocalSkillNotFoundError()
+                if not is_bot_ready(bot):
+                    raise LocalSkillNotReadyError()
+                changed = self._write_desired_state(
+                    active=active,
+                    env=str(bot["env"]),
                     bot_id=bot_id,
+                    skill_id=skill_id,
                 )
-            if not synced:
-                if changed:
-                    try:
-                        self._write_desired_state(
-                            active=not active,
-                            env=str(bot["env"]),
-                            bot_id=bot_id,
-                            skill_id=skill_id,
-                        )
-                    except Exception as exc:
-                        raise LocalSkillStorageError() from exc
-                    # Restore through the established runtime synchronizer.
-                    # It owns each engine's actual active-root compatibility,
-                    # including Claude Code's historical workspace root.
-                    restored = self._sync_runtime(
+
+                if active:
+                    synced = self._sync_runtime(
                         bot=bot, owner_id=owner_id, bot_id=bot_id
                     )
-                    if not restored:
-                        raise LocalSkillRuntimeSyncError()
-                raise LocalSkillRuntimeSyncError()
-            return {**skill, "active": active, "changed": changed}
+                else:
+                    synced = await self._reconcile_deactivation(
+                        scope=scope,
+                        bot=bot,
+                        skill=skill,
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                    )
+                if not synced:
+                    if changed:
+                        try:
+                            self._write_desired_state(
+                                active=not active,
+                                env=str(bot["env"]),
+                                bot_id=bot_id,
+                                skill_id=skill_id,
+                            )
+                        except Exception as exc:
+                            raise LocalSkillStorageError() from exc
+                        # Restore through the established runtime synchronizer.
+                        # It owns each engine's actual active-root compatibility,
+                        # including Claude Code's historical workspace root.
+                        restored = self._sync_runtime(
+                            bot=bot, owner_id=owner_id, bot_id=bot_id
+                        )
+                        if not restored:
+                            raise LocalSkillRuntimeSyncError()
+                    raise LocalSkillRuntimeSyncError()
+                return {**skill, "active": active, "changed": changed}
+            finally:
+                self._edit_guard.release(lease)
         finally:
-            self._edit_guard.release(lease)
+            self._mutation_guard.release(mutation_lease)
 
     def _discover_scope(self, skill_id: str) -> BotSkillLayoutScope:
         """Find only the lock identity before serializing the authoritative read."""
@@ -215,14 +235,10 @@ class LocalSkillStateService:
             return self._installations.install(
                 env=env, bot_id=bot_id, skill_id=skill_id
             )
-        return self._installations.uninstall(
-            env=env, bot_id=bot_id, skill_id=skill_id
-        )
+        return self._installations.uninstall(env=env, bot_id=bot_id, skill_id=skill_id)
 
     def _reject_ordinary_skill_set_member(self, *, skill_id: str, bot_id: str) -> None:
         """Direct state is forbidden once ordinary SkillSet owns the Skill."""
-        if self._skill_set_repo is None:
-            return
         skill = self._skill_repo.get_by_id(skill_id)
         for reference in self._skill_repo.list_skill_set_references(
             skill_id, skill.get("skill_uuid") if skill else None

@@ -42,6 +42,9 @@ class _Skills:
             "git_path": self.git_path,
         }
 
+    def list_skill_set_references(self, _skill_id: str, _skill_uuid: str | None):
+        return []
+
     def get_bot_local_skill(self, **kwargs):
         if not self.git_path.startswith("local://"):
             return None
@@ -160,9 +163,10 @@ class _Collaborators:
 
 
 class _Guard:
-    def __init__(self, on_acquire=None) -> None:
+    def __init__(self, on_acquire=None, release_error: Exception | None = None) -> None:
         self.events: list[str] = []
         self._on_acquire = on_acquire
+        self._release_error = release_error
 
     def acquire_for_edit(self, *, scope):
         self.events.append(f"acquire:{scope.env}:{scope.entity_id}:{scope.bot_id}")
@@ -173,6 +177,20 @@ class _Guard:
 
     def release(self, _lease):
         self.events.append("release")
+        if self._release_error is not None:
+            raise self._release_error
+        return True
+
+
+class _MutationGuard:
+    def __init__(self) -> None:
+        self.releases = 0
+
+    def acquire(self, *, scope):
+        return object()
+
+    def release(self, _lease):
+        self.releases += 1
         return True
 
 
@@ -246,13 +264,18 @@ def _service(
     on_acquire=None,
     pool_layout: bool = False,
     guard_error=None,
+    guard_release_error: Exception | None = None,
+    mutation_guard=None,
 ):
     skills = _Skills(active=active, git_path=git_path)
     sets = _Sets(skills, associated=associated)
-    guard = _Guard(on_acquire)
+    guard = _Guard(on_acquire, guard_release_error)
+    mutation_guard = mutation_guard or _MutationGuard()
     if guard_error is not None:
+
         def fail_acquire(*, scope):
             raise guard_error
+
         guard.acquire_for_edit = fail_acquire
     runtime = _Runtime(sync_success)
     factory = _Factory(runtime)
@@ -262,10 +285,12 @@ def _service(
         _Bots(status, entity_id),
         collaborators or _Collaborators(),
         factory,
+        mutation_guard,
         guard,
         runtime,
         skills,
         _Layouts(pool=pool_layout),
+        sets,
     )
     return service, skills, sets, guard, runtime, factory
 
@@ -285,14 +310,31 @@ def _service(
 async def test_state_change_maps_guard_failures_to_public_domain_errors(
     guard_error, expected_error
 ):
+    mutation_guard = _MutationGuard()
     service, _skills, _sets, _guard, _runtime, _factory = _service(
-        guard_error=guard_error
+        guard_error=guard_error, mutation_guard=mutation_guard
     )
 
     with pytest.raises(expected_error):
         await service.set_local_skill_active(
             skill_id="9", actor_id="owner", active=True
         )
+    assert mutation_guard.releases == 1
+
+
+@pytest.mark.asyncio
+async def test_mutation_lease_releases_when_pool_guard_release_fails():
+    mutation_guard = _MutationGuard()
+    service, _skills, _sets, _guard, _runtime, _factory = _service(
+        guard_release_error=RuntimeError("pool release failed"),
+        mutation_guard=mutation_guard,
+    )
+
+    with pytest.raises(RuntimeError, match="pool release failed"):
+        await service.set_local_skill_active(
+            skill_id="9", actor_id="owner", active=True
+        )
+    assert mutation_guard.releases == 1
 
 
 @pytest.mark.asyncio
@@ -349,7 +391,9 @@ async def test_idempotent_activate_runtime_failure_never_uninstalls_existing_des
     )
 
     with pytest.raises(LocalSkillRuntimeSyncError):
-        await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
+        await service.set_local_skill_active(
+            skill_id="9", actor_id="owner", active=True
+        )
 
     assert skills.active is True
     assert installations.install_calls == 1

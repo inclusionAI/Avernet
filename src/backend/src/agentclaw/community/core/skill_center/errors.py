@@ -85,5 +85,9 @@ class SkillSetRuntimeReconcileError(Exception):
     """Runtime reconciliation failed after desired-state compensation."""
 
 
+class SkillSetControlPlaneLockUnavailableError(Exception):
+    """The Bot capability mutation fence is unavailable; mutation failed closed."""
+
+
 class SkillSetManagedResourceError(Exception):
     """A Direct command targets a resource managed by an ordinary SkillSet."""

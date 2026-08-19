@@ -171,6 +171,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillStorageError,
     SkillParameterValidationError,
     SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
     SkillSetManagedResourceError,
@@ -417,7 +418,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     InvalidResourcePathError: (400, "Invalid resource path"),
     LocalSkillNotFoundError: (404, "Not found"),
     SkillSetControlPlaneNotFoundError: (404, "Not found"),
-    SkillSetControlPlaneConflictError: (409, "SkillSet state conflicts with this operation"),
+    SkillSetControlPlaneConflictError: (
+        409,
+        "SkillSet state conflicts with this operation",
+    ),
+    SkillSetControlPlaneLockUnavailableError: (
+        503,
+        "SkillSet mutation service is temporarily unavailable",
+    ),
     SkillSetRuntimeReconcileError: (502, "Skill runtime synchronization failed"),
     SkillSetManagedResourceError: (409, "Skill is managed by a SkillSet"),
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
@@ -431,7 +439,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
     LocalSkillEditBusyError: (409, "Another Skill update is in progress"),
     LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
-    LocalSkillEditLockUnavailableError: (503, "Skill update service is temporarily unavailable"),
+    LocalSkillEditLockUnavailableError: (
+        503,
+        "Skill update service is temporarily unavailable",
+    ),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
@@ -449,7 +460,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ),
     # ... and refused outright for a bot whose container cannot run one,
     # rather than stored where it would silently never execute.
-    StartupScriptUnsupportedError: (409, "Startup script is not supported for this bot"),
+    StartupScriptUnsupportedError: (
+        409,
+        "Startup script is not supported for this bot",
+    ),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
@@ -729,9 +743,7 @@ def envelope_errors(
             response = mapped_error_response(exc, request)
             if response is None:
                 raise
-            log_public_error(
-                request, exc, status=response.status_code, params=params
-            )
+            log_public_error(request, exc, status=response.status_code, params=params)
             return response
 
     return wrapper
