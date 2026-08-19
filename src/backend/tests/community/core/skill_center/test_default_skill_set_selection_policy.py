@@ -68,6 +68,33 @@ def test_registered_policy_orders_routed_claude_code_global_default_fallbacks():
     ]
 
 
+def test_registered_policy_orders_routed_claude_code_bot_then_global_fallbacks():
+    plan = get_default_skill_set_selection_policy().resolve_candidates(
+        persisted_engine_type="claude_code",
+        runtime_engine_type="aicoding",
+        bolt_id="bot-1",
+    )
+
+    assert [(item.engine_type, item.bolt_id) for item in plan] == [
+        ("claude_code", "bot-1"),
+        ("aicoding", "default"),
+        ("claude_code", "default"),
+    ]
+
+
+def test_registered_policy_does_not_duplicate_global_default_bolt_id():
+    plan = get_default_skill_set_selection_policy().resolve_candidates(
+        persisted_engine_type="claude_code",
+        runtime_engine_type="aicoding",
+        bolt_id="default",
+    )
+
+    assert [(item.engine_type, item.bolt_id) for item in plan] == [
+        ("aicoding", "default"),
+        ("claude_code", "default"),
+    ]
+
+
 def test_policy_accepts_single_selection_resolver_result():
     from agentclaw.community.core.skill_center.policies.default_skill_set_selection import (
         DefaultSkillSetSelection,
