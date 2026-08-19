@@ -157,7 +157,7 @@ pub use message_flow::{
 };
 pub use onboard::{
     AdminBotOnboardCommand, BotOnboardCommand, BotOnboardResult, BotOnboardingService,
-    OnboardActorIdentity,
+    EnsureBotCommand, EnsureBotResult, OnboardActorIdentity,
 };
 pub use application::{
     DeleteProviderBotCommand, DeleteProviderBotOutcome, ProviderBotCoordinationCommand,

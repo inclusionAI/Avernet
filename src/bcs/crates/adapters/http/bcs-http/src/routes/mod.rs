@@ -10,6 +10,7 @@ pub mod collaboration_definitions;
 pub mod collaboration_runs;
 mod caller;
 pub mod discover;
+pub mod ensure;
 pub mod friends;
 pub mod group_messages;
 pub mod group_requests;

@@ -1639,6 +1639,12 @@ impl BotOnboardingService for NoopBotOnboardingService {
             "Noop implementation".to_string(),
         ))
     }
+
+    async fn ensure_bot(&self, _command: EnsureBotCommand) -> ServiceResult<EnsureBotResult> {
+        Err(ServiceError::InternalError(
+            "Noop implementation".to_string(),
+        ))
+    }
 }
 
 #[derive(Debug, Default)]

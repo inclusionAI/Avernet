@@ -33,7 +33,7 @@ pub use messages::{
     BotContextSummary, Conflict, ConflictPosition, FusionRequest, FusionResponse,
     ParticipantPerspective,
 };
-pub use onboard::{AdminOnboardRequest, OnboardRequest, OnboardResponse};
+pub use onboard::{AdminOnboardRequest, EnsureBotRequest, EnsureBotResponse, OnboardRequest, OnboardResponse};
 pub use organizations::{
     CreateOrganizationRequest, OrganizationCandidateBotDetailResponse,
     OrganizationCandidateBotListResponse, OrganizationCandidateBotResponse,

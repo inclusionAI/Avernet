@@ -182,6 +182,10 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/admin/bots/onboard",
             post(routes::onboard::admin_onboard_bot),
         )
+        .route(
+            "/admin/bots/{bot_uuid}/ensure",
+            post(routes::ensure::ensure_bot),
+        )
         .route("/admin/secret/{name}", get(routes::secret::pull_secret))
         .route("/actors/list", get(routes::actors::list_actors))
         .route("/actors/search", get(routes::actors::search_actors))
