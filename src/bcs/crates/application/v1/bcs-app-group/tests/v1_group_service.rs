@@ -3216,4 +3216,62 @@ mod originator_v1_policy {
             .expect("driver ungated vs caller");
         assert_eq!(collaboration_originator(detail), "human_staff-1");
     }
+
+    #[tokio::test]
+    async fn owned_bot_originator_equal_to_driver_succeeds() {
+        // A human designates an owned bot as BOTH originator and driver. The
+        // driver is self-reachable — must not require self-friendship.
+        let fixture = Fixture::new().await;
+        fixture.add_bot_owned_by("bot-o", "staff-1", "protected").await;
+        let detail = fixture
+            .service
+            .create(chat_group_with_driver("bot-o", Some("bot-o".into()), vec![]))
+            .await
+            .expect("originator==driver must succeed without self-friendship");
+        assert_eq!(collaboration_originator(detail), "bot-o");
+    }
+
+    #[tokio::test]
+    async fn owned_bot_originator_accepts_friend_driver() {
+        // When the originator is a caller-owned Bot distinct from the driver,
+        // the driver must be reachable from that originator bot — here, a
+        // friend (covers the try_are_friends==true reachable branch).
+        let fixture = Fixture::new().await;
+        fixture.add_bot_owned_by("bot-o", "staff-1", "public").await;
+        fixture.add_bot_owned_by("driver", "someone-else", "protected").await;
+        fixture
+            .friends
+            .add_friendship("bot-o", "driver")
+            .await
+            .expect("originator/driver friendship");
+        let detail = fixture
+            .service
+            .create(chat_group_with_driver("driver", Some("bot-o".into()), vec![]))
+            .await
+            .expect("friend driver reachable from originator bot");
+        assert_eq!(collaboration_originator(detail), "bot-o");
+    }
+
+    #[tokio::test]
+    async fn originator_rejects_registered_human_as_originator() {
+        // A registered non-Bot actor (a human) passed as originator is not
+        // the caller-self and is not a Bot, so it must be rejected with
+        // invalid_originator (covers authorize_originator's actor_kind arm).
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        fixture
+            .bots
+            .ensure_human_actor("staff-2", "Bob")
+            .await
+            .expect("register Human actor");
+        let err = fixture
+            .service
+            .create(chat_group(Some("human_staff-2".into()), vec![]))
+            .await
+            .expect_err("registered non-bot originator must be rejected");
+        assert!(
+            matches!(err, ApplicationError::InvalidInput { ref code, .. } if code == "invalid_originator"),
+            "got {err:?}"
+        );
+    }
 }
