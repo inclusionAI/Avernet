@@ -17,6 +17,8 @@ from gateway.community.plugin_registry import (
     inject_into_plugin_container,
     register_plugin_option,
 )
+from gateway.community.plugins.database.mariadb._plugin import MariaDbOrmPlugin
+from gateway.community.plugins.database.sqlite._plugin import SqliteDatabasePlugin
 
 
 class TestPluginConfig:
@@ -80,6 +82,26 @@ class TestPluginContainerSelectors:
 
         cache = plugins.cache_plugin()
         assert cache is not None
+
+    def test_mariadb_orm_selects_mariadb_plugin(self) -> None:
+        container = ApplicationContainer()
+        init_container_config(container)
+        container.config.from_dict(
+            {"plugins": {"database": {"plugin_database": "MARIADB_ORM"}}}
+        )
+
+        db = container.plugins().database()
+        assert isinstance(db, MariaDbOrmPlugin)
+
+    def test_sqlite_orm_selects_sqlite_plugin(self) -> None:
+        container = ApplicationContainer()
+        init_container_config(container)
+        container.config.from_dict(
+            {"plugins": {"database": {"plugin_database": "SQLITE_ORM"}}}
+        )
+
+        db = container.plugins().database()
+        assert isinstance(db, SqliteDatabasePlugin)
 
 
 class TestPluginRegistryInjection:

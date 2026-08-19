@@ -1,5 +1,6 @@
 from dependency_injector import containers, providers
 
+from ._configs import ConfigError, ConfigKey, DatabaseConfig, _read_config
 from .plugins import PluginContainer
 
 
@@ -103,6 +104,51 @@ def _resolve_all_providers(container: containers.DeclarativeContainer) -> None:
             raise
 
 
+def _build_db_config(config) -> DatabaseConfig:
+    """Construct DatabaseConfig from the DI ``config`` provider.
+
+    Mirrors the baas ``_build_db_config``: reads the dotted database paths via
+    ``_read_config``, raises for a missing URL on SQLite_ORM, and otherwise
+    falls back to baas-compatible defaults. Credentials are never logged.
+    """
+    from gateway.community.spi.database import PluginDatabaseType
+
+    plugin_type = PluginDatabaseType(_read_config(config, ConfigKey.PLUGIN_DATABASE))
+    try:
+        db_url = _read_config(config, ConfigKey.DATABASE_URL)
+    except ConfigError:
+        if plugin_type == PluginDatabaseType.SQLITE_ORM:
+            raise
+        db_url = ""
+
+    def _opt(key: ConfigKey) -> str:
+        try:
+            return _read_config(config, key)
+        except ConfigError:
+            return ""
+
+    def _opt_bool_default_false(key: ConfigKey, default: bool = False) -> bool:
+        try:
+            val = _read_config(config, key)
+        except ConfigError:
+            return default
+        if isinstance(val, bool):
+            return val
+        return str(val).strip().lower() in {"1", "true", "yes", "on"}
+
+    return DatabaseConfig(
+        plugin_type=plugin_type.value,
+        db_url=db_url,
+        create_schema=_opt_bool_default_false(ConfigKey.CREATE_SCHEMA),
+        seed_data=_opt_bool_default_false(ConfigKey.SEED_DATA),
+        mariadb_host=_opt(ConfigKey.MARIADB_HOST) or "127.0.0.1",
+        mariadb_port=int(_opt(ConfigKey.MARIADB_PORT) or 3306),
+        mariadb_database=_opt(ConfigKey.MARIADB_DATABASE),
+        mariadb_user=_opt(ConfigKey.MARIADB_USER),
+        mariadb_password=_opt(ConfigKey.MARIADB_PASSWORD),
+    )
+
+
 def initialize_services(container: containers.DeclarativeContainer) -> None:
     import logging
 
@@ -118,17 +164,13 @@ def initialize_services(container: containers.DeclarativeContainer) -> None:
     logger.info("Building authenticator …")
     plugins = container.plugins()
     from ._authn import build_authenticator
-    from ._configs import DatabaseConfig
     from ._database import initialize_database
 
     # Initialise the DI-selected database plugin so DB-backed auth strategies
     # and credential issuer/registrar share one ready DataSourcePlugin.
     initialize_database(
         plugins.database(),
-        DatabaseConfig(
-            plugin_type=container.config.plugins.database.plugin_database(),
-            db_url=container.config.plugins.database.database_url(),
-        ),
+        _build_db_config(container.config),
     )
 
     container.authenticator.override(
