@@ -1468,6 +1468,7 @@ fn build_openapi_v1_state(
         session_repo,
         group_message_history,
         collaboration_runtime,
+        system_message.clone(),
         SessionServiceConfig { relation_env },
     ));
     let session_file_service = Arc::new(SessionFileApplicationServiceImpl::new(
