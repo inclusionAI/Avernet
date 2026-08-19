@@ -104,15 +104,25 @@ class ExpertChatInstanceService:
         self._common_config_service = common_config_service
         self._image_policy_resolver = PublishImagePolicyResolver(
             publish_repository=bot_publish_repo,
-            binding_repository=binding_repo,
             common_config_service=common_config_service,
         )
 
-    def _resolve_publish_image_pin(
-        self, publish_record, *, bot_id: str | None = None, owner_id: str | None = None
-    ):
-        """Resolve through the shared seam; legacy caller args are ignored."""
-        return self._image_policy_resolver.resolve(publish_record)
+    def _resolve_publish_image_pin(self, publish_record, *, bot_id: str, owner_id: str):
+        """Resolve through the shared seam.
+
+        The image policy follows the bot's container, so the provider is resolved
+        from the bot here rather than sniffed out of the publish record's ``ext``.
+        """
+        bot_info = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if not bot_info:
+            raise ConnectionError(
+                f"Bot not found: bot_id={bot_id} owner_id={owner_id}",
+                error_code="5001",
+            )
+        return self._image_policy_resolver.resolve(
+            publish_record,
+            device_provider=self._baas.resolve_container_provider(bot_info),
+        )
 
     # ------------------------------------------------------------------
     # Public entry
@@ -152,7 +162,9 @@ class ExpertChatInstanceService:
             bot_id, owner_id
         )
         version = publish_record.version or 1
-        image_pin = self._resolve_publish_image_pin(publish_record)
+        image_pin = self._resolve_publish_image_pin(
+            publish_record, bot_id=bot_id, owner_id=owner_id
+        )
 
         # --- Step 1: look up / create instance row ---
         instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)
