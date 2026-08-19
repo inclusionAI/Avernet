@@ -108,3 +108,54 @@ class TestAliyunAckSelector:
         )
         plugin = container.arca_sandbox_plugin_factory()
         assert plugin is StubArcaSandboxPlugin
+
+
+class TestRedisCacheSelector:
+    """The redis cache option resolves to RedisCachePlugin with stub default."""
+
+    def _container(self, cache: str = "stub", cache_redis: dict | None = None):
+        from secbaas.community.bootstrap.plugins import PluginContainer
+
+        container = PluginContainer()
+        cfg: dict = {
+            "plugins": {
+                "secret": "stub",
+                "cache": cache,
+            }
+        }
+        if cache_redis is not None:
+            cfg["plugins"]["cache_redis"] = cache_redis
+        container.config.from_dict(cfg)
+        return container
+
+    def test_redis_selector_wired(self):
+        from secbaas.community.plugins.cache.redis import RedisCachePlugin
+
+        container = self._container(
+            cache="redis", cache_redis={"host": "h", "port": 6379}
+        )
+        plugin = container.cache_plugin()
+        assert isinstance(plugin, RedisCachePlugin)
+        assert plugin._config.host == "h"
+        assert plugin._config.port == 6379
+
+    def test_stub_selector_default(self):
+        from secbaas.community.plugins.cache.stub import StubCachePlugin
+
+        plugin = self._container(cache="stub").cache_plugin()
+        assert isinstance(plugin, StubCachePlugin)
+
+    def test_secret_reference_password_resolved(self):
+        from secbaas.community.plugins.cache.redis import RedisCachePlugin
+        from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
+
+        container = self._container(
+            cache="redis",
+            cache_redis={"host": "h", "password": "@redis_pw"},
+        )
+        secret_plugin = container.secret_plugin()
+        assert isinstance(secret_plugin, StubSecretStorePlugin)
+        secret_plugin.set_secret("redis_pw", "super-secret")
+        plugin = container.cache_plugin()
+        assert isinstance(plugin, RedisCachePlugin)
+        assert plugin._config.password == "super-secret"

@@ -222,7 +222,8 @@ class PluginConfig(ConfigSchema):
     secret_aliyun_kms: dict = Field(default_factory=dict)
     auth: str = Field(default="stub", pattern=r"^(buservice|oauth|stub)$")
     scheduler: str = Field(default="stub", pattern=r"^(real|stub)$")
-    cache: str = Field(default="stub", pattern=r"^(real|stub)$")
+    cache: str = Field(default="stub", pattern=r"^(real|stub|redis)$")
+    cache_redis: dict = Field(default_factory=dict)
     bot_service: str = Field(default="stub", pattern=r"^(real|local|stub)$")
 
     engine_adapter: str = Field(default="stub", pattern=r"^(real|stub)$")
