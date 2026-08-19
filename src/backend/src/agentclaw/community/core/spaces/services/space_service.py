@@ -5,12 +5,19 @@ from __future__ import annotations
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
-from agentclaw.community.core.spaces.errors import SpaceNameInvalidError
+from agentclaw.community.core.spaces.errors import (
+    SpaceAccessDeniedError,
+    SpaceNameInvalidError,
+    SpaceNotFoundError,
+)
 from agentclaw.community.core.spaces.models import (
     PersonalSpaceLookupRecord,
     SpaceRecord,
     SpaceSummaryRecord,
     SpaceType,
+)
+from agentclaw.community.core.spaces.services.space_access_service import (
+    SpaceAccessService,
 )
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
@@ -25,9 +32,11 @@ class SpaceService:
         self,
         repository: SpaceRepositoryProtocol,
         skill_center_client: SkillCenterClient,
+        access: SpaceAccessService,
     ) -> None:
         self._repository = repository
         self._skill_center_client = skill_center_client
+        self._access = access
 
     def initialize_personal(self, *, user_id: str) -> tuple[SpaceRecord, bool]:
         return self._repository.initialize_personal(
@@ -88,3 +97,14 @@ class SpaceService:
             offset=(page_no - 1) * page_size,
             limit=page_size,
         )
+
+    def get_space(self, *, space_id: int, user_id: str) -> SpaceSummaryRecord:
+        self._access.require_space_member(space_id=space_id, user_id=user_id)
+        summary = self._repository.get_space_summary(
+            space_id=space_id, user_id=user_id, env=get_current_env()
+        )
+        if summary is None:
+            raise SpaceNotFoundError("space not found")
+        if summary.current_user_role is None:
+            raise SpaceAccessDeniedError("space membership required")
+        return summary

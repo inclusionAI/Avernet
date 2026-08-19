@@ -48,7 +48,7 @@ class _Resolver:
         return _Secret()
 
 
-def _principal_headers() -> dict[str, str]:
+def _principal_headers(user_id: str = _USER_ID) -> dict[str, str]:
     now = int(time.time())
     token = jwt.encode(
         {
@@ -61,8 +61,8 @@ def _principal_headers() -> dict[str, str]:
                     "type": "user",
                     "tenant": "spaces-endpoint-test",
                     "subject": {
-                        "id": _USER_ID,
-                        "username": "spaces-endpoint-user@example.com",
+                        "id": user_id,
+                        "username": f"{user_id}@example.com",
                     },
                 }
             ],
@@ -147,6 +147,87 @@ def list_spaces_happy():
     expect=ExpectError(status=403),
 )
 def list_spaces_wrong_user():
+    """The framework owns invocation."""
+
+
+# ── GET /openapi/v1/spaces/{space_id} ──────────────────────────────────────
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/spaces/{space_id}",
+    scenario="happy",
+    seed=_seed_team_space,
+    input=CaseInput(
+        path_params={"space_id": 1},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "space_name": "Endpoint Team",
+                "current_user_role": "ADMINISTRATOR",
+            },
+        },
+    ),
+)
+def get_space_happy():
+    """The framework owns invocation."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/spaces/{space_id}",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(path_params={"space_id": 1}),
+    expect=ExpectError(status=403),
+)
+def get_space_wrong_user():
+    """The framework owns invocation."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/spaces/{space_id}",
+    scenario="non_member",
+    seed=_seed_team_space,
+    input=CaseInput(
+        path_params={"space_id": 1},
+        query_params={"user_id": _MEMBER_ID},
+        headers=_principal_headers(_MEMBER_ID),
+    ),
+    expect=ExpectError(status=403),
+)
+def get_space_non_member():
+    """The framework owns invocation."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/spaces/{space_id}",
+    scenario="personal_happy",
+    seed=_seed_personal_space,
+    input=CaseInput(
+        path_params={"space_id": 1},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "space_type": "PERSONAL",
+                "current_user_role": "ADMINISTRATOR",
+            },
+        },
+    ),
+)
+def get_personal_space_happy():
     """The framework owns invocation."""
 
 

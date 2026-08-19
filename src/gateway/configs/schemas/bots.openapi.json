@@ -5280,6 +5280,48 @@
         "title": "Envelope[SpaceCreated]",
         "type": "object"
       },
+      "Envelope_SpaceItem_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceItem"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SpaceItem]",
+        "type": "object"
+      },
       "Envelope_SpaceJoinRequestCreated_": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -9361,10 +9403,22 @@
       "SpaceItem": {
         "description": "Summary of a Space visible to the current user.",
         "properties": {
+          "administrator_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number of active Space Administrators. Null is reserved for backwards-compatible callers.",
+            "title": "Administrator Count"
+          },
           "current_user_role": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SpaceRole"
+                "$ref": "#/components/schemas/SpaceMembershipRole"
               },
               {
                 "type": "null"
@@ -9388,7 +9442,8 @@
             "type": "integer"
           },
           "owner_count": {
-            "description": "Number of owners in the Space.",
+            "deprecated": true,
+            "description": "Deprecated compatibility alias for administrator_count; it never represents a Skill Owner or Skill Grant.",
             "title": "Owner Count",
             "type": "integer"
           },
@@ -9531,8 +9586,8 @@
             "type": "boolean"
           },
           "role": {
-            "$ref": "#/components/schemas/SpaceRole",
-            "description": "Role currently held by the member."
+            "$ref": "#/components/schemas/SpaceMembershipRole",
+            "description": "Governance role currently held by the member."
           },
           "user_id": {
             "description": "Identifier of the member user.",
@@ -9586,6 +9641,27 @@
         ],
         "title": "SpaceMemberMutationResult",
         "type": "object"
+      },
+      "SpaceMembershipRole": {
+        "description": "Governance role held by a member of a Space.",
+        "enum": [
+          "ADMINISTRATOR",
+          "MEMBER"
+        ],
+        "title": "SpaceMembershipRole",
+        "type": "string",
+        "x-enum-descriptions": [
+          "May administer the Space and its membership.",
+          "May use the Space without administering it."
+        ],
+        "x-enum-varnames": [
+          "ADMINISTRATOR",
+          "MEMBER"
+        ],
+        "x-enumNames": [
+          "ADMINISTRATOR",
+          "MEMBER"
+        ]
       },
       "SpaceRole": {
         "description": "Role held by a user in a Space.",
@@ -40252,6 +40328,173 @@
           }
         },
         "summary": "Initialize Personal Space",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/spaces/{space_id}": {
+      "get": {
+        "operationId": "get_space_openapi_v1_spaces__space_id__get",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SpaceItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Get Space",
         "tags": [
           "spaces"
         ]

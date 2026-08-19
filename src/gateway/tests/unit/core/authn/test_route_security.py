@@ -41,6 +41,7 @@ def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
 _HUMAN_ONLY = [
     ("GET", "/openapi/v1/caller"),
     ("GET", "/openapi/v1/spaces"),
+    ("GET", "/openapi/v1/spaces/1"),
     ("POST", "/openapi/v1/spaces/personal/initialize"),
     ("POST", "/openapi/v1/spaces/create"),
     ("GET", "/openapi/v1/spaces/1/members"),

@@ -12,7 +12,14 @@ import pytest
 from agentclaw.community.core.repository.implementations.spaces.space import (
     SpaceRepository,
 )
-from agentclaw.community.core.spaces.models import SpaceRecord, SpaceType
+from agentclaw.community.core.spaces.models import (
+    SpaceJoinStatus,
+    SpaceRecord,
+    SpaceRole,
+    SpaceSummaryRecord,
+    SpaceType,
+)
+from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.services.space_service import SpaceService
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterTeamCreateError,
@@ -62,7 +69,7 @@ def test_create_team_pushes_to_sc_before_transaction_commit() -> None:
     skill_center.create_team.return_value = SkillCenterTeamCreateResult(
         team_id="sc-team-9001"
     )
-    service = SpaceService(repository, skill_center)
+    service = SpaceService(repository, skill_center, MagicMock())
 
     record = service.create_team(name="  Demo Team  ", creator_id="owner-1")
 
@@ -88,7 +95,7 @@ def test_create_team_rolls_back_when_sc_creation_fails() -> None:
     repository = _TransactionRepository(_space())
     skill_center = MagicMock()
     skill_center.create_team.side_effect = SkillCenterTeamCreateError("SC failed")
-    service = SpaceService(repository, skill_center)
+    service = SpaceService(repository, skill_center, MagicMock())
 
     with pytest.raises(SkillCenterTeamCreateError, match="SC failed"):
         service.create_team(name="Demo Team", creator_id="owner-1")
@@ -108,7 +115,7 @@ def test_generated_space_code_matches_sc_format() -> None:
 def test_create_team_rejects_invalid_name(name: str) -> None:
     repository = MagicMock()
     skill_center = MagicMock()
-    service = SpaceService(repository, skill_center)
+    service = SpaceService(repository, skill_center, MagicMock())
 
     from agentclaw.community.core.spaces.errors import SpaceNameInvalidError
 
@@ -122,7 +129,7 @@ def test_create_team_rejects_invalid_name(name: str) -> None:
 def test_initialize_personal_delegates_to_repository() -> None:
     repository = MagicMock()
     repository.initialize_personal.return_value = (_space(), True)
-    service = SpaceService(repository, MagicMock())
+    service = SpaceService(repository, MagicMock(), MagicMock())
 
     assert service.initialize_personal(user_id="owner-1") == (_space(), True)
     repository.initialize_personal.assert_called_once_with(user_id="owner-1", env="dev")
@@ -131,7 +138,7 @@ def test_initialize_personal_delegates_to_repository() -> None:
 def test_list_spaces_normalizes_filters_and_pagination() -> None:
     repository = MagicMock()
     repository.list_spaces.return_value = (0, [])
-    service = SpaceService(repository, MagicMock())
+    service = SpaceService(repository, MagicMock(), MagicMock())
 
     assert service.list_spaces(
         user_id="owner-1",
@@ -153,7 +160,7 @@ def test_list_spaces_normalizes_filters_and_pagination() -> None:
 def test_list_spaces_turns_blank_optional_filters_into_none() -> None:
     repository = MagicMock()
     repository.list_spaces.return_value = (0, [])
-    service = SpaceService(repository, MagicMock())
+    service = SpaceService(repository, MagicMock(), MagicMock())
 
     service.list_spaces(
         user_id="owner-1",
@@ -167,10 +174,46 @@ def test_list_spaces_turns_blank_optional_filters_into_none() -> None:
     assert repository.list_spaces.call_args.kwargs["space_type"] is None
 
 
+def test_get_space_requires_membership_and_returns_space_summary() -> None:
+    repository = MagicMock()
+    access = MagicMock()
+    expected = SpaceSummaryRecord(
+        space=_space(),
+        current_user_role=SpaceRole.OWNER,
+        join_status=SpaceJoinStatus.JOINED,
+        member_count=3,
+        owner_count=1,
+    )
+    repository.get_space_summary.return_value = expected
+    service = SpaceService(repository, MagicMock(), access)
+
+    assert service.get_space(space_id=7, user_id="member-1") == expected
+    access.require_space_member.assert_called_once_with(
+        space_id=7, user_id="member-1"
+    )
+    repository.get_space_summary.assert_called_once_with(
+        space_id=7, user_id="member-1", env="dev"
+    )
+
+
+def test_get_space_does_not_read_when_membership_is_denied() -> None:
+    repository = MagicMock()
+    access = MagicMock()
+    access.require_space_member.side_effect = SpaceAccessDeniedError(
+        "space membership required"
+    )
+    service = SpaceService(repository, MagicMock(), access)
+
+    with pytest.raises(SpaceAccessDeniedError, match="membership required"):
+        service.get_space(space_id=7, user_id="non-member")
+
+    repository.get_space_summary.assert_not_called()
+
+
 def test_batch_query_personal_deduplicates_and_preserves_first_occurrence() -> None:
     repository = MagicMock()
     repository.batch_query_personal.return_value = []
-    service = SpaceService(repository, MagicMock())
+    service = SpaceService(repository, MagicMock(), MagicMock())
 
     assert service.batch_query_personal(user_ids=[" user-2 ", "user-1", "user-2"]) == []
     repository.batch_query_personal.assert_called_once_with(
@@ -181,7 +224,7 @@ def test_batch_query_personal_deduplicates_and_preserves_first_occurrence() -> N
 @pytest.mark.parametrize("user_ids", [[], ["  "], [str(index) for index in range(501)]])
 def test_batch_query_personal_rejects_invalid_ids(user_ids: list[str]) -> None:
     repository = MagicMock()
-    service = SpaceService(repository, MagicMock())
+    service = SpaceService(repository, MagicMock(), MagicMock())
 
     with pytest.raises(ValueError, match="user_id"):
         service.batch_query_personal(user_ids=user_ids)

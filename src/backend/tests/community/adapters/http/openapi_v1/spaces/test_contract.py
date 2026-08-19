@@ -15,6 +15,7 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.router import router
 from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     MarketFavoriteItem,
     SpaceMemberItem,
+    SpaceMembershipRole,
 )
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
@@ -24,6 +25,10 @@ from agentclaw.community.api.space_service import (
     SpaceServiceProtocol,
 )
 from agentclaw.community.core.market_favorites.errors import FavoriteNotFoundError
+from agentclaw.community.core.spaces.errors import (
+    SpaceAccessDeniedError,
+    SpaceNotFoundError,
+)
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
@@ -122,7 +127,7 @@ def test_naive_persisted_datetime_is_serialized_as_explicit_utc():
         user_id="member-1",
         user_name=None,
         display_name=None,
-        role=SpaceRole.MEMBER,
+        role=SpaceMembershipRole.MEMBER,
         is_creator=False,
         gmt_modified=datetime(2026, 8, 17, 7, 50, 45),
     )
@@ -169,6 +174,13 @@ def test_add_member_accepts_an_optional_role(
 
 def test_openapi_advertises_nullable_member_profile_fields(client):
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
+
+    space_properties = schemas["SpaceItem"]["properties"]
+    assert "administrator_count" in space_properties
+    assert space_properties["owner_count"]["deprecated"] is True
+    assert "never represents a Skill Owner" in space_properties["owner_count"][
+        "description"
+    ]
 
     member_properties = schemas["SpaceMemberItem"]["properties"]
     assert "user_name" in member_properties
@@ -286,6 +298,49 @@ def test_list_spaces_forwards_filters_and_maps_page(client, space_service):
         page_no=2,
         page_size=5,
     )
+
+
+def test_get_space_returns_member_visible_space_detail(client, space_service):
+    space_service.get_space.return_value = SpaceSummaryRecord(
+        space=_space_record(),
+        current_user_role=SpaceRole.OWNER,
+        join_status=SpaceJoinStatus.JOINED,
+        member_count=3,
+        owner_count=1,
+    )
+
+    response = client.get("/openapi/v1/spaces/7")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "space_id": 7,
+        "space_code": "spc-7",
+        "space_name": "Team",
+        "space_type": "TEAM",
+        "current_user_role": "ADMINISTRATOR",
+        "join_status": "JOINED",
+        "member_count": 3,
+        "administrator_count": 1,
+        "owner_count": 1,
+        "gmt_modified": "2026-08-18T01:02:03Z",
+    }
+    space_service.get_space.assert_called_once_with(space_id=7, user_id="owner-1")
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [
+        (SpaceAccessDeniedError("space membership required"), 403),
+        (SpaceNotFoundError("space not found"), 404),
+    ],
+)
+def test_get_space_maps_access_and_missing_errors(client, space_service, error, status):
+    space_service.get_space.side_effect = error
+
+    response = client.get("/openapi/v1/spaces/7")
+
+    assert response.status_code == status
+    assert response.json()["data"] is None
 
 
 @pytest.mark.parametrize("was_created", [True, False])

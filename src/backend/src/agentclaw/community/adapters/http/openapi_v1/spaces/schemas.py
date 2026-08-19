@@ -33,6 +33,18 @@ class SpaceRole(_DocumentedEnum):
     }
 
 
+class SpaceMembershipRole(_DocumentedEnum):
+    """Governance role held by a member of a Space."""
+
+    ADMINISTRATOR = "ADMINISTRATOR"
+    MEMBER = "MEMBER"
+
+    __descriptions__ = {
+        "ADMINISTRATOR": "May administer the Space and its membership.",
+        "MEMBER": "May use the Space without administering it.",
+    }
+
+
 class SpaceJoinStatus(_DocumentedEnum):
     """Current user's membership state for a Space."""
 
@@ -87,14 +99,27 @@ class SpaceItem(_UtcResponseModel):
     space_code: str = Field(description="Stable external code of the Space.")
     space_name: str = Field(description="Display name of the Space.")
     space_type: SpaceType = Field(description="Ownership model of the Space.")
-    current_user_role: SpaceRole | None = Field(
+    current_user_role: SpaceMembershipRole | None = Field(
         description="Current user's role, or null when the user has not joined."
     )
     join_status: SpaceJoinStatus = Field(
         description="Current user's membership or application state."
     )
     member_count: int = Field(description="Number of members in the Space.")
-    owner_count: int = Field(description="Number of owners in the Space.")
+    administrator_count: int | None = Field(
+        default=None,
+        description=(
+            "Number of active Space Administrators. Null is reserved for "
+            "backwards-compatible callers."
+        ),
+    )
+    owner_count: int = Field(
+        description=(
+            "Deprecated compatibility alias for administrator_count; it never "
+            "represents a Skill Owner or Skill Grant."
+        ),
+        json_schema_extra={"deprecated": True},
+    )
     gmt_modified: datetime = Field(
         description="UTC time when the Space metadata was last modified.",
         json_schema_extra={"format": "date-time"},
@@ -148,7 +173,9 @@ class SpaceMemberItem(_UtcResponseModel):
     display_name: str | None = Field(
         default=None, description="Display name of the member, when available."
     )
-    role: SpaceRole = Field(description="Role currently held by the member.")
+    role: SpaceMembershipRole = Field(
+        description="Governance role currently held by the member."
+    )
     is_creator: bool = Field(
         description="Whether this member originally created the Space."
     )
