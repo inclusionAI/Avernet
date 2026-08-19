@@ -10,7 +10,10 @@ from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.models.skill import (
-    BotSkillInstallation, Skill, SkillSet, SkillSetSkill,
+    BotSkillInstallation,
+    Skill,
+    SkillSet,
+    SkillSetSkill,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
     SkillSetControlPlaneRepository,
@@ -50,10 +53,12 @@ def test_activation_rolls_back_all_membership_installations_when_nth_insert_fail
         second = Skill(name="two", git_path="git://two", env="dev")
         session.add_all([skill_set, first, second])
         session.flush()
-        session.add_all([
-            SkillSetSkill(skill_set_id=skill_set.id, skill_id=first.id, env="dev"),
-            SkillSetSkill(skill_set_id=skill_set.id, skill_id=second.id, env="dev"),
-        ])
+        session.add_all(
+            [
+                SkillSetSkill(skill_set_id=skill_set.id, skill_id=first.id, env="dev"),
+                SkillSetSkill(skill_set_id=skill_set.id, skill_id=second.id, env="dev"),
+            ]
+        )
 
     inserts = 0
 
@@ -66,7 +71,9 @@ def test_activation_rolls_back_all_membership_installations_when_nth_insert_fail
     event.listen(BotSkillInstallation, "before_insert", fail_second_install)
     try:
         with pytest.raises(RuntimeError, match="second installation"):
-            SkillSetControlPlaneRepository(db).set_active(bot_id="bot", set_id="1", active=True)
+            SkillSetControlPlaneRepository(db).set_active(
+                bot_id="bot", set_id="1", active=True
+            )
     finally:
         event.remove(BotSkillInstallation, "before_insert", fail_second_install)
 
@@ -81,14 +88,41 @@ def test_create_idempotency_replays_the_original_set_without_a_second_row():
     repository = SkillSetControlPlaneRepository(db)
 
     first = repository.create_set(
-        bot_id="bot", owner_id="owner", name="set", description="description",
+        bot_id="bot",
+        owner_id="owner",
+        name="set",
+        description="description",
         idempotency_key="request-1",
     )
     replay = repository.create_set(
-        bot_id="bot", owner_id="owner", name="set", description="description",
+        bot_id="bot",
+        owner_id="owner",
+        name="set",
+        description="description",
         idempotency_key="request-1",
     )
 
     assert replay == first
     with db.orm_session() as session:
         assert session.query(SkillSet).count() == 1
+
+
+def test_create_idempotency_rejects_same_key_with_a_different_request_hash():
+    db = _Database()
+    repository = SkillSetControlPlaneRepository(db)
+    repository.create_set(
+        bot_id="bot",
+        owner_id="owner",
+        name="set",
+        description="first",
+        idempotency_key="request-1",
+    )
+
+    with pytest.raises(Exception, match="IDEMPOTENCY_KEY_REUSED"):
+        repository.create_set(
+            bot_id="bot",
+            owner_id="owner",
+            name="set",
+            description="second",
+            idempotency_key="request-1",
+        )
