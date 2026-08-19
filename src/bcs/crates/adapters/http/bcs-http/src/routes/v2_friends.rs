@@ -38,7 +38,7 @@ pub async fn create_friend_request(
     uri: Uri,
     Json(body): Json<CreateFriendRequestBody>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let from = resolve_caller(&state, &headers, &uri, body.from_bot.as_deref()).await?;
+    let from = resolve_caller(&state, &headers, &uri, body.from_actor.as_deref(), body.actor_kind.as_deref()).await?;
     let res = state
         .connect
         .create_connect(&from, &body.to_bot, body.message.clone())
@@ -63,7 +63,7 @@ pub async fn accept_friend_request(
     uri: Uri,
     Path(id): Path<String>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let caller = resolve_caller(&state, &headers, &uri, None).await?;
+    let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
     let edge_ids = state.connect.approve(&id, &caller).await?;
     Ok(Json(envelope(&AcceptFriendRequestResponse { edge_ids })))
 }
@@ -76,7 +76,7 @@ pub async fn reject_friend_request(
     Path(id): Path<String>,
     body: Option<Json<DecisionBody>>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let caller = resolve_caller(&state, &headers, &uri, None).await?;
+    let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
     // Body is optional: bcs-cli POSTs reject with no body / no content-type.
     let reason = body.and_then(|Json(b)| b.reason);
     state.connect.reject(&id, &caller, reason).await?;
@@ -94,7 +94,7 @@ pub async fn cancel_friend_request(
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     // Caller identity is resolved for auth-area consistency; `cancel` acts on
     // the request id and the service layer verifies the caller is the sender.
-    let _caller = resolve_caller(&state, &headers, &uri, None).await?;
+    let _caller = resolve_caller(&state, &headers, &uri, None, None).await?;
     state.connect.cancel(&id).await?;
     Ok(Json(envelope(&StatusResponse {
         status: "cancelled".into(),
@@ -108,7 +108,7 @@ pub async fn list_friend_requests(
     uri: Uri,
     Query(q): Query<ListRequestsQuery>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let caller = resolve_caller(&state, &headers, &uri, None).await?;
+    let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
     let direction = match q.direction.as_str() {
         "sent" => RequestDirection::Sent,
         "all" => RequestDirection::All,
@@ -136,7 +136,7 @@ pub async fn revoke_friend(
     Path(actor): Path<String>,
     _body: Option<Json<DecisionBody>>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let caller = resolve_caller(&state, &headers, &uri, None).await?;
+    let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
     // Body optional (bcs-cli sends empty POSTs). The service now returns the
     // actual revoked edge_ids (B4c) rather than a count.
     let revoked_edges = state.connect.revoke_friend(&caller, &actor).await?;
@@ -152,7 +152,7 @@ pub async fn list_friends(
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     // Caller identity is resolved for auth-area consistency; the service layer
     // enforces any visibility/ownership rules on listing.
-    let _caller = resolve_caller(&state, &headers, &uri, None).await?;
+    let _caller = resolve_caller(&state, &headers, &uri, None, None).await?;
     let items = state.connect.list_friends(&bot_id).await?;
     let total = items.len() as u32;
     Ok(Json(envelope(&FriendListResponse { items, total })))
@@ -167,8 +167,12 @@ pub async fn list_friends_by_actor(
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     // Caller identity resolved for auth-area consistency; the service layer
     // enforces visibility/ownership on listing.
-    let _caller = resolve_caller(&state, &headers, &uri, None).await?;
-    let items = state.connect.list_friends(&q.actor).await?;
+    let _caller = resolve_caller(&state, &headers, &uri, None, None).await?;
+    let actor = match q.actor_kind.as_deref() {
+        Some("human") => format!("human_{}", q.actor),
+        _ => q.actor.clone(),
+    };
+    let items = state.connect.list_friends(&actor).await?;
     let total = items.len() as u32;
     Ok(Json(envelope(&FriendListResponse { items, total })))
 }
@@ -182,19 +186,18 @@ async fn resolve_caller(
     state: &HttpAppState,
     headers: &HeaderMap,
     uri: &Uri,
-    from_bot: Option<&str>,
+    from_actor: Option<&str>,
+    actor_kind: Option<&str>,
 ) -> Result<String, HttpAdapterError> {
     if let Some(actor_id) = caller_actor_id_from_headers(state, headers, uri).await {
         return Ok(actor_id);
     }
-    if let Some(actor_id) = from_bot.filter(|id| !id.is_empty()) {
-        // TODO(installment-3): ownership enforcement moved to the service layer —
-        // ConnectService::create_connect MUST verify the authenticated caller is
-        // authorized to act as `from_bot` (the legacy HTTP-layer
-        // `check_actor_ownership` was removed as part of the edge-permission
-        // authz reform). Until the real service lands, `create_connect` is Noop
-        // and no friend state changes; see plan Installment 3 index.
-        return Ok(actor_id.to_string());
+    if let Some(actor_id) = from_actor.filter(|id| !id.is_empty()) {
+        let canonical = match actor_kind {
+            Some("human") => format!("human_{}", actor_id),
+            _ => actor_id.to_string(),
+        };
+        return Ok(canonical);
     }
     Err(HttpAdapterError::Unauthorized(
         "no valid token or caller identity provided".to_string(),

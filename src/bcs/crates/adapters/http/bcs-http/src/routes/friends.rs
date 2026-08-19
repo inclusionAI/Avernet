@@ -22,7 +22,7 @@ pub async fn create_friend_request(
     Json(req): Json<CreateFriendRequestBody>,
 ) -> Response {
     let caller_actor_id =
-        match resolve_caller(&state, &headers, &uri, req.from_bot.as_deref()).await {
+        match resolve_caller(&state, &headers, &uri, req.from_actor.as_deref()).await {
             Ok(caller) => caller,
             Err(ResolveCallerError::NoCaller) => {
                 return error_response(

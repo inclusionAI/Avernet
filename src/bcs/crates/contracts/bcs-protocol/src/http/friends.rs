@@ -8,9 +8,13 @@ use serde::{Deserialize, Serialize};
 /// Request body for creating a friend (connect) request.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateFriendRequestBody {
-    /// Caller bot UUID (fallback when no Bearer token is provided).
+    /// Caller actor id (raw staff_no or bot_uuid; fallback when no Bearer).
     #[serde(default)]
-    pub from_bot: Option<String>,
+    pub from_actor: Option<String>,
+    /// Caller actor kind: "human" → prefix `human_`, "bot" → use as-is.
+    /// When omitted, the id is used as-is (backward compat with `human_` prefix).
+    #[serde(default)]
+    pub actor_kind: Option<String>,
     pub to_bot: String,
     #[serde(default)]
     pub message: Option<String>,
@@ -90,6 +94,9 @@ pub struct FriendListResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct FriendListByActorQuery {
     pub actor: String,
+    /// Actor kind: "human" → prefix `human_`, "bot" → use as-is. Optional.
+    #[serde(default)]
+    pub actor_kind: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
