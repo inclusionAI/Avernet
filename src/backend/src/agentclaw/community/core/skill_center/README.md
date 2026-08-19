@@ -46,6 +46,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
+  - agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane
   - agentclaw.community.core.access
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator
@@ -68,6 +69,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.mcp_center
+  - agentclaw.community.plugin_api.passport
   - agentclaw.community.plugin_api.object_storage
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.skill_center_client

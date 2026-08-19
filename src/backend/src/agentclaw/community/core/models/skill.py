@@ -255,6 +255,34 @@ class BotSkillInstallation(Base):
 register_avernet_tenant_guard(BotSkillInstallation)
 
 
+class SkillSetCreateIdempotency(Base):
+    """Durable replay record for canonical SkillSet create commands."""
+
+    __tablename__ = "ac_skill_set_create_idempotency"
+
+    id = Column(_UNSIGNED_BIGINT, primary_key=True, autoincrement=True)
+    bot_id = Column(String(100), nullable=False)
+    owner_id = Column(String(128), nullable=False)
+    idempotency_key = Column(String(190), nullable=False)
+    request_name = Column(String(100), nullable=False)
+    request_description = Column(Text, nullable=True)
+    skill_set_id = Column(Integer, ForeignKey("ac_skill_set.id"), nullable=False)
+    env = Column(String(20), default=get_current_env, nullable=False)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_created = Column(DateTime, default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant", "env", "bot_id", "owner_id", "idempotency_key",
+            name="uk_skill_set_create_idempotency",
+        ),
+        {"extend_existing": True},
+    )
+
+
+register_avernet_tenant_guard(SkillSetCreateIdempotency)
+
+
 class UserDefaultSkillSet(Base):
     """用户默认能力集启用状态关联表"""
     __tablename__ = "ac_user_default_skill_set"

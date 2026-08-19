@@ -209,6 +209,7 @@ from .resources import router as resources_router
 from .repository_catalog import router as repository_catalog_router
 from .routines import router as routines_router
 from .skills import router as skills_router
+from .skill_sets import router as skill_sets_router
 from .service_publications import (
     edit_lock_router as service_edit_lock_router,
     router as service_lifecycle_router,
@@ -309,6 +310,7 @@ _GRANT_CHECKED_SUBGROUPS = [
     # rather than the engine-runtime one, and mounting it here is what gives it
     # both. See ``bots/engine_config.py``.
     engine_config_router,
+    skill_sets_router,
     identity_router,
     resources_router,
     routines_router,

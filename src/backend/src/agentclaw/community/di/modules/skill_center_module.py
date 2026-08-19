@@ -79,6 +79,9 @@ from agentclaw.community.api.local_skill_delete_service import (
 from agentclaw.community.api.bot_skill_asset_service import (
     BotSkillAssetServiceProtocol,
 )
+from agentclaw.community.api.skill_set_control_plane import (
+    SkillSetControlPlaneServiceProtocol,
+)
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
 )
@@ -103,6 +106,9 @@ from agentclaw.community.core.repository.protocols.skill_installation import (
 )
 from agentclaw.community.core.repository.implementations.skill_center.installation import (
     SkillInstallationRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
+    SkillSetControlPlaneRepository,
 )
 from agentclaw.community.core.skill_center.services.skill_auth_service import (
     SkillAuthService,
@@ -170,6 +176,11 @@ from agentclaw.community.core.skill_center.services.local_skill_delete_service i
 )
 from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
     BotSkillAssetService,
+)
+from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
+    SkillSetControlPlaneService,
+    SkillSetRuntimeReconciler,
+    SkillSetRuntimeReconcilerProtocol,
 )
 from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 from agentclaw.community.core.bot_collaborator.protocols import (
@@ -290,6 +301,9 @@ class SkillCenterModule(Module):
             to=SkillInstallationRepository,
             scope=singleton,
         )
+        binder.bind(SkillSetControlPlaneRepository, to=SkillSetControlPlaneRepository, scope=singleton)
+        binder.bind(SkillSetRuntimeReconcilerProtocol, to=SkillSetRuntimeReconciler, scope=singleton)
+        binder.bind(SkillSetControlPlaneServiceProtocol, to=SkillSetControlPlaneService, scope=singleton)
         binder.bind(
             SkillBatchSyncService,
             to=SkillBatchSyncService,
@@ -390,6 +404,7 @@ class SkillCenterModule(Module):
     def local_skill_state_service(
         self,
         skill_repo: SkillRepository,
+        skill_set_repo: SkillSetRepository,
         installations: SkillInstallationRepositoryProtocol,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
@@ -409,6 +424,7 @@ class SkillCenterModule(Module):
             pool_runtime,
             pool_skills,
             pool_layouts,
+            skill_set_repo,
         )
 
     @singleton
