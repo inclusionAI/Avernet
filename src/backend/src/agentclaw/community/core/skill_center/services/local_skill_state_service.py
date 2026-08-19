@@ -71,7 +71,7 @@ class LocalSkillStateService:
         pool_runtime: SkillsPoolRuntimeProtocol,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
-        skill_set_repo: SkillSetRepository | None = None,
+        skill_set_repo: SkillSetRepository,
     ) -> None:
         self._skill_repo = skill_repo
         self._installations = installations
@@ -221,8 +221,6 @@ class LocalSkillStateService:
 
     def _reject_ordinary_skill_set_member(self, *, skill_id: str, bot_id: str) -> None:
         """Direct state is forbidden once ordinary SkillSet owns the Skill."""
-        if self._skill_set_repo is None:
-            return
         skill = self._skill_repo.get_by_id(skill_id)
         for reference in self._skill_repo.list_skill_set_references(
             skill_id, skill.get("skill_uuid") if skill else None

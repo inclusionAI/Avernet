@@ -756,6 +756,7 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
                 http_status,
                 message,
                 request,
-                code=ENVELOPE_ERROR_CODES.get(error_type),
+                code=getattr(exc, "envelope_code", None)
+                or ENVELOPE_ERROR_CODES.get(error_type),
             )
     return None

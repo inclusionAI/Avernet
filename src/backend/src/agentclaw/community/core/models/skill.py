@@ -283,6 +283,36 @@ class SkillSetCreateIdempotency(Base):
 register_avernet_tenant_guard(SkillSetCreateIdempotency)
 
 
+class SkillSetNameClaim(Base):
+    """Durable ordinary-Set name claim.
+
+    ``ac_skill_set`` intentionally has no production business unique key.  A
+    separate additive claim is therefore the concurrency boundary for the
+    canonical API without retroactively changing legacy rows.
+    """
+
+    __tablename__ = "ac_skill_set_name_claim"
+
+    id = Column(_UNSIGNED_BIGINT, primary_key=True, autoincrement=True)
+    bot_id = Column(String(100), nullable=False)
+    name = Column(String(100), nullable=False)
+    skill_set_id = Column(Integer, ForeignKey("ac_skill_set.id"), nullable=False)
+    env = Column(String(20), default=get_current_env, nullable=False)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_created = Column(DateTime, default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant", "env", "bot_id", "name",
+            name="uk_skill_set_name_claim",
+        ),
+        {"extend_existing": True},
+    )
+
+
+register_avernet_tenant_guard(SkillSetNameClaim)
+
+
 class UserDefaultSkillSet(Base):
     """用户默认能力集启用状态关联表"""
     __tablename__ = "ac_user_default_skill_set"

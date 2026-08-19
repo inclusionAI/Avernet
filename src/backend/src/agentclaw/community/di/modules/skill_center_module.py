@@ -81,6 +81,7 @@ from agentclaw.community.api.bot_skill_asset_service import (
 from agentclaw.community.api.skill_set_control_plane import (
     SkillSetControlPlaneServiceProtocol,
 )
+from agentclaw.community.api.skill_set_access import SkillSetAccessProtocol
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
 )
@@ -180,6 +181,7 @@ from agentclaw.community.core.skill_center.services.skill_set_control_plane impo
     SkillSetRuntimeReconciler,
     SkillSetRuntimeReconcilerProtocol,
 )
+from agentclaw.community.core.skill_center.services.skill_set_access import SkillSetAccess
 from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
@@ -299,6 +301,7 @@ class SkillCenterModule(Module):
             scope=singleton,
         )
         binder.bind(SkillSetControlPlaneRepository, to=SkillSetControlPlaneRepository, scope=singleton)
+        binder.bind(SkillSetAccessProtocol, to=SkillSetAccess, scope=singleton)
         binder.bind(SkillSetRuntimeReconcilerProtocol, to=SkillSetRuntimeReconciler, scope=singleton)
         binder.bind(SkillSetControlPlaneServiceProtocol, to=SkillSetControlPlaneService, scope=singleton)
         binder.bind(

@@ -80,6 +80,22 @@ class SkillSetControlPlaneNotFoundError(Exception):
 class SkillSetControlPlaneConflictError(Exception):
     """A canonical SkillSet command conflicts with desired state."""
 
+    _CODES = {
+        "RESOURCE_DIRECT_ACTIVE": 409201,
+        "RESOURCE_MANAGED_BY_SKILL_SET": 409202,
+        "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": 409203,
+        "SYSTEM_DEFAULT_IMMUTABLE": 409204,
+        "SKILL_SET_NAME_CONFLICT": 409205,
+        "SKILL_SET_ACTIVE": 409206,
+        "IDEMPOTENCY_KEY_REUSED": 409207,
+        "BOT_NOT_READY": 409208,
+    }
+
+    def __init__(self, error_code: str) -> None:
+        super().__init__(error_code)
+        self.error_code = error_code
+        self.envelope_code = self._CODES.get(error_code, 409200)
+
 
 class SkillSetRuntimeReconcileError(Exception):
     """Runtime reconciliation failed after desired-state compensation."""

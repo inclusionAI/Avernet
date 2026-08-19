@@ -15,3 +15,15 @@ CREATE TABLE IF NOT EXISTS ac_skill_set_create_idempotency (
     UNIQUE KEY uk_skill_set_create_idempotency
       (avernet_tenant, env, bot_id, owner_id, idempotency_key)
 );
+
+CREATE TABLE IF NOT EXISTS ac_skill_set_name_claim (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw',
+    env VARCHAR(20) NOT NULL,
+    bot_id VARCHAR(100) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    skill_set_id INT NOT NULL,
+    gmt_created DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_skill_set_name_claim (avernet_tenant, env, bot_id, name)
+);

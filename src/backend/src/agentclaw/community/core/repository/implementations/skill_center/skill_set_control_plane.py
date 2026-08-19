@@ -10,8 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from injector import inject
+from sqlalchemy.exc import IntegrityError
 from agentclaw.community.core.models.skill import (
-    BotSkillInstallation, Skill, SkillSet, SkillSetCreateIdempotency, SkillSetSkill,
+    BotSkillInstallation, Skill, SkillSet, SkillSetCreateIdempotency,
+    SkillSetNameClaim, SkillSetSkill,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
@@ -71,6 +73,28 @@ class SkillSetControlPlaneRepository:
             return _item(row)
 
     def create_set(self, *, bot_id: str, owner_id: str, name: str, description: str | None, idempotency_key: str) -> dict:
+        try:
+            return self._create_set(
+                bot_id=bot_id, owner_id=owner_id, name=name,
+                description=description, idempotency_key=idempotency_key,
+            )
+        except IntegrityError:
+            # A unique claim/idempotency insert lost a concurrent race.  The
+            # losing transaction has already rolled back; read the winner in a
+            # new session and turn it into the public replay/conflict contract.
+            with self._db.orm_session() as session:
+                replay = self._scope(session.query(SkillSetCreateIdempotency), SkillSetCreateIdempotency).filter(
+                    SkillSetCreateIdempotency.bot_id == bot_id,
+                    SkillSetCreateIdempotency.owner_id == owner_id,
+                    SkillSetCreateIdempotency.idempotency_key == idempotency_key,
+                ).one_or_none()
+                if replay is not None:
+                    if replay.request_name != name or replay.request_description != description:
+                        raise SkillSetControlPlaneConflictError("IDEMPOTENCY_KEY_REUSED")
+                    return _item(self._set(session, bot_id=bot_id, set_id=str(replay.skill_set_id)))
+                raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_CONFLICT")
+
+    def _create_set(self, *, bot_id: str, owner_id: str, name: str, description: str | None, idempotency_key: str) -> dict:
         with self._db.transactional_orm_session() as session:
             replay = self._scope(session.query(SkillSetCreateIdempotency), SkillSetCreateIdempotency).filter(
                 SkillSetCreateIdempotency.bot_id == bot_id,
@@ -99,6 +123,10 @@ class SkillSetControlPlaneRepository:
                 request_name=name, request_description=description, skill_set_id=row.id,
                 env=get_current_env(), avernet_tenant=get_current_avernet_tenant(),
             ))
+            session.add(SkillSetNameClaim(
+                bot_id=bot_id, name=name, skill_set_id=row.id,
+                env=get_current_env(), avernet_tenant=get_current_avernet_tenant(),
+            ))
             session.flush()
             return _item(row)
 
@@ -113,6 +141,21 @@ class SkillSetControlPlaneRepository:
                 ).first()
                 if duplicate is not None:
                     raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_CONFLICT")
+                claim = self._scope(session.query(SkillSetNameClaim), SkillSetNameClaim).filter(
+                    SkillSetNameClaim.bot_id == bot_id, SkillSetNameClaim.name == name
+                ).with_for_update().one_or_none()
+                if claim is not None:
+                    raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_CONFLICT")
+                session.add(SkillSetNameClaim(
+                    bot_id=bot_id, name=name, skill_set_id=row.id,
+                    env=get_current_env(), avernet_tenant=get_current_avernet_tenant(),
+                ))
+                old_claim = self._scope(session.query(SkillSetNameClaim), SkillSetNameClaim).filter(
+                    SkillSetNameClaim.skill_set_id == row.id,
+                    SkillSetNameClaim.name == row.name,
+                ).with_for_update().one_or_none()
+                if old_claim is not None:
+                    session.delete(old_claim)
                 row.name = name
             if description is not None:
                 row.description = description
@@ -126,6 +169,9 @@ class SkillSetControlPlaneRepository:
                 raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
             if row.is_active:
                 raise SkillSetControlPlaneConflictError("SKILL_SET_ACTIVE")
+            self._scope(session.query(SkillSetNameClaim), SkillSetNameClaim).filter(
+                SkillSetNameClaim.skill_set_id == row.id
+            ).delete(synchronize_session=False)
             session.delete(row)
 
     def list_skills(self, *, bot_id: str, set_id: str) -> list[dict]:
@@ -149,8 +195,12 @@ class SkillSetControlPlaneRepository:
             ).first()
             if current is not None:
                 return SkillSetMutation(_item(row), False, old)
-            # An installed skill without an ordinary Membership is Direct-active.
-            if skill.id in old.installations:
+            # An Installation with no ordinary Membership is Direct only when
+            # System Default does not also source it.  Default is always
+            # active and deliberately shares the Installation projection.
+            if skill.id in old.installations and not self._is_default_member(
+                session, bot_id=bot_id, skill_id=int(skill.id)
+            ):
                 raise SkillSetControlPlaneConflictError("RESOURCE_DIRECT_ACTIVE")
             owner = self._scope(session.query(SkillSet), SkillSet).join(
                 SkillSetSkill, SkillSetSkill.skill_set_id == SkillSet.id
@@ -183,7 +233,9 @@ class SkillSetControlPlaneRepository:
             if membership is None:
                 return SkillSetMutation(_item(row), False, old)
             session.delete(membership)
-            if row.is_active:
+            if row.is_active and not self._has_other_active_source(
+                session, bot_id=bot_id, skill_id=int(skill_id), excluding_set_id=int(row.id)
+            ):
                 self._scope(session.query(BotSkillInstallation), BotSkillInstallation).filter(
                     BotSkillInstallation.bot_id == bot_id,
                     BotSkillInstallation.skill_id == int(skill_id),
@@ -210,10 +262,18 @@ class SkillSetControlPlaneRepository:
                 for skill_id in ids - existing:
                     session.add(BotSkillInstallation(bot_id=bot_id, skill_id=skill_id, env=get_current_env(), avernet_tenant=get_current_avernet_tenant()))
             elif ids:
-                self._scope(session.query(BotSkillInstallation), BotSkillInstallation).filter(
-                    BotSkillInstallation.bot_id == bot_id,
-                    BotSkillInstallation.skill_id.in_(ids),
-                ).delete(synchronize_session=False)
+                removable = {
+                    skill_id for skill_id in ids
+                    if not self._has_other_active_source(
+                        session, bot_id=bot_id, skill_id=skill_id,
+                        excluding_set_id=int(row.id),
+                    )
+                }
+                if removable:
+                    self._scope(session.query(BotSkillInstallation), BotSkillInstallation).filter(
+                        BotSkillInstallation.bot_id == bot_id,
+                        BotSkillInstallation.skill_id.in_(removable),
+                    ).delete(synchronize_session=False)
             session.flush()
             return SkillSetMutation(_item(row), changed, old)
 
@@ -267,6 +327,24 @@ class SkillSetControlPlaneRepository:
                 session.query(BotSkillInstallation.skill_id), BotSkillInstallation
             ).filter(BotSkillInstallation.bot_id == bot_id).all()
         }
+
+    def _is_default_member(self, session, *, bot_id: str, skill_id: int) -> bool:
+        return self._scope(session.query(SkillSetSkill), SkillSetSkill).join(
+            SkillSet, SkillSet.id == SkillSetSkill.skill_set_id
+        ).filter(
+            SkillSet.bolt_id == bot_id, SkillSet.is_default.is_(True),
+            SkillSetSkill.skill_id == skill_id,
+        ).first() is not None
+
+    def _has_other_active_source(
+        self, session, *, bot_id: str, skill_id: int, excluding_set_id: int
+    ) -> bool:
+        return self._scope(session.query(SkillSetSkill), SkillSetSkill).join(
+            SkillSet, SkillSet.id == SkillSetSkill.skill_set_id
+        ).filter(
+            SkillSet.bolt_id == bot_id, SkillSet.is_active.is_(True),
+            SkillSet.id != excluding_set_id, SkillSetSkill.skill_id == skill_id,
+        ).first() is not None
 
     def _snapshot(self, session, bot_id: str) -> SkillSetDesiredState:
         """Lock and capture every ordinary-set desired fact for this Bot."""
