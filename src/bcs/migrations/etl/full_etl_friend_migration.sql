@@ -25,7 +25,7 @@ SELECT
   SHA2('[{"tool":"*","specifier":"*","effect":"allow"}]', 256),
   TRUE, 'active', 'system',
   UNIX_TIMESTAMP()*1000, UNIX_TIMESTAMP()*1000
-FROM bcs_bots b;=】
+FROM bcs_bots b;
 
 
 -- =========================================================================
