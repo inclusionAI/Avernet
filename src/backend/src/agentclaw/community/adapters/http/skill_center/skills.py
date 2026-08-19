@@ -111,6 +111,7 @@ from agentclaw.community.api.skill_set_activator_factory import SkillSetActivato
 from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
 from agentclaw.community.api.skill_set_switcher_factory import SkillSetSwitcherFactoryProtocol
 from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+from agentclaw.community.api.repository_catalog_service import RepositoryCatalogServiceProtocol
 from agentclaw.community.core.config_compose.teclaw_paths import to_local_skill_engine_path
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
@@ -1533,9 +1534,10 @@ async def list_local_market_skills(
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> MarketListResponse:
     """Get all local skills (alias for /market/list with empty path)."""
-    logger.info(f"[skills.list_local_market_skills] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, entity_id={entity_id}")
+    return MarketListResponse(success=True, data=repository_catalog.list(), count=len(repository_catalog.list()))
 
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
@@ -1571,9 +1573,10 @@ async def get_market_tree(
     bot_id: Optional[str] = Query(None, description="Bot ID"),
     engine_type: Optional[str] = Query(None, description="Engine type override; defaults to bot's active_engine"),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> MarketTreeResponse:
     """Get skill market tree structure from git repo."""
-    logger.info(f"[skills.get_market_tree] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, entity_id={entity_id}")
+    return MarketTreeResponse(success=True, data=repository_catalog.tree())
 
     # Get user-specific paths
     # Get effective path parameters
@@ -1611,6 +1614,7 @@ async def list_market_skills(
     entity_type: Optional[str] = Query(None, description="Entity type (staff/proj/team, default: staff)"),
     bot_id: Optional[str] = Query(None, description="Bot ID"),
     engine_type: Optional[str] = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> MarketListResponse:
     """Get all skills in marketplace (only git:// skills from database).
 
@@ -1618,7 +1622,9 @@ async def list_market_skills(
     - orderby=latest: 按创建时间倒序
     - orderby=hotest: 按被添加到能力集的次数倒序
     """
-    logger.info(f"[skills.list_market_skills] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, path={path}, orderby={orderby}, entity_id={entity_id}")
+    canonical_order = "hotest" if orderby == "hotest" else orderby
+    items = repository_catalog.list(path=path or None, orderby=canonical_order)
+    return MarketListResponse(success=True, data=items, count=len(items))
 
     # 验证排序参数
     if orderby and orderby not in ('latest', 'hotest'):
@@ -1755,9 +1761,11 @@ async def search_market_skills(
     bot_id: Optional[str] = Query(None, description="Bot ID"),
     engine_type: Optional[str] = Query(None, description="Engine type override; defaults to bot's active_engine"),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> SearchResponse:
     """Search skills in marketplace."""
-    logger.info(f"[skills.search_market_skills] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, query={request.query}, entity_id={entity_id}")
+    results = repository_catalog.search(keyword=request.query, limit=100)
+    return SearchResponse(success=True, data=results, count=len(results))
 
     # Get user-specific paths
     # Get effective path parameters
@@ -1796,6 +1804,7 @@ async def sync_market(
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> SyncStatusResponse:
     """Sync skills from git repository with rate limiting.
 
@@ -1806,7 +1815,13 @@ async def sync_market(
     - 5分钟内重复请求不会实际同步
     - 返回详细的同步状态和下次可同步时间
     """
-    logger.info(f"[skills.sync_market] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}")
+    result = await run_in_threadpool(repository_catalog.sync)
+    if result["status"] == "in_progress":
+        return SyncStatusResponse(success=True, data={"synced": False, "message": "同步进行中，请稍后再试"})
+    if result["status"] == "failed":
+        raise HTTPException(status_code=500, detail=result["message"])
+    sync_result = result["result"]
+    return SyncStatusResponse(success=True, data={"synced": bool(sync_result.get("synced")), "last_sync": sync_result.get("last_sync"), "next_sync_in": sync_result.get("next_sync_in", 0)}, message=sync_result.get("message", "Sync completed"))
 
     # Get user-specific paths
     # Get effective path parameters
