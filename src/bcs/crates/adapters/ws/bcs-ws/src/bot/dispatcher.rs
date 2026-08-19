@@ -94,10 +94,13 @@ pub enum BotWsDispatchError {
     BotConnectError(Box<BotWsDispatchError>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BotDispatchOutcome {
     Dispatched,
-    BotConnect { registered: bool },
+    BotConnect {
+        registered: bool,
+        bot_uuid: Option<String>,
+    },
 }
 
 #[async_trait]
@@ -137,8 +140,16 @@ pub async fn dispatch_frame(
 
     match frame {
         BcsFrame::Request(req) => {
-            let is_initial_connect =
-                req.method == "bot.connect" && registered_bot_id.is_none();
+            let is_initial_connect = req.method == "bot.connect" && registered_bot_id.is_none();
+            let requested_bot_uuid = if is_initial_connect {
+                req.params
+                    .as_ref()
+                    .and_then(|params| params.get("bot_id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            } else {
+                None
+            };
             if let Err(error) = handle_request_frame(state, &req, tx, registered_bot_id).await {
                 if is_initial_connect {
                     return Err(BotWsDispatchError::BotConnectError(Box::new(error)));
@@ -148,6 +159,7 @@ pub async fn dispatch_frame(
             if is_initial_connect {
                 return Ok(BotDispatchOutcome::BotConnect {
                     registered: registered_bot_id.is_some(),
+                    bot_uuid: registered_bot_id.clone().or(requested_bot_uuid),
                 });
             }
         }

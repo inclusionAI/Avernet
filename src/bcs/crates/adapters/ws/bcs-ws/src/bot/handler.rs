@@ -60,6 +60,7 @@ pub async fn handle_connection(
 
     // Track registered bot_id for cleanup
     let mut registered_bot_id: Option<String> = None;
+    let mut observed_bot_uuid: Option<String> = None;
 
     info!(duration_ms = 0u64, "New WebSocket connection established");
 
@@ -72,7 +73,14 @@ pub async fn handle_connection(
                 match dispatch_frame(&state, &text, &client_tx, &mut registered_bot_id).await {
                     Ok(outcome) => {
                         debug!("Frame dispatched successfully");
-                        if let BotDispatchOutcome::BotConnect { registered } = outcome {
+                        if let BotDispatchOutcome::BotConnect {
+                            registered,
+                            bot_uuid,
+                        } = outcome
+                        {
+                            if observed_bot_uuid.is_none() {
+                                observed_bot_uuid = bot_uuid;
+                            }
                             if registered {
                                 metrics_hook
                                     .registered(WsPeer::Bot, crate::bot::BOT_WS_ENDPOINT)
@@ -157,12 +165,21 @@ pub async fn handle_connection(
                 break;
             }
             Err(e) => {
+                let bot_uuid = observed_bot_uuid
+                    .as_deref()
+                    .or(registered_bot_id.as_deref());
+                let registered = registered_bot_id.is_some();
                 if is_connection_reset_without_closing_handshake(&e) {
                     close_reason = WsCloseReason::ClientClose;
-                    debug!(error = %e, "WebSocket connection reset without close frame");
+                    debug!(
+                        bot_uuid = bot_uuid.unwrap_or("unknown"),
+                        registered,
+                        error = %e,
+                        "WebSocket connection reset without close frame"
+                    );
                 } else {
                     close_reason = WsCloseReason::ProtocolError;
-                    error!(error = %e, "WebSocket error");
+                    log_websocket_error(&e, bot_uuid, registered);
                     metrics_hook
                         .error(
                             WsPeer::Bot,
@@ -227,6 +244,15 @@ pub async fn handle_connection(
         .await;
 }
 
+fn log_websocket_error(error: &impl std::fmt::Display, bot_uuid: Option<&str>, registered: bool) {
+    error!(
+        bot_uuid = bot_uuid.unwrap_or("unknown"),
+        registered,
+        error = %error,
+        "WebSocket error"
+    );
+}
+
 fn should_close_after_sending_bot_frame(frame: &str) -> bool {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(frame) else {
         return false;
@@ -250,6 +276,84 @@ fn should_close_after_sending_bot_frame(frame: &str) -> bool {
             is_error && is_provider_delivery_rejection
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod log_tests {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    use tracing::field::{Field, Visit};
+    use tracing::{Event, Subscriber};
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::layer::Context;
+    use tracing_subscriber::prelude::*;
+
+    use super::*;
+
+    #[derive(Clone, Default)]
+    struct EventCapture {
+        events: Arc<Mutex<Vec<HashMap<String, String>>>>,
+    }
+
+    impl<S> Layer<S> for EventCapture
+    where
+        S: Subscriber,
+    {
+        fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+            let mut fields = HashMap::new();
+            event.record(&mut FieldVisitor(&mut fields));
+            self.events.lock().unwrap().push(fields);
+        }
+    }
+
+    struct FieldVisitor<'a>(&'a mut HashMap<String, String>);
+
+    impl Visit for FieldVisitor<'_> {
+        fn record_bool(&mut self, field: &Field, value: bool) {
+            self.0.insert(field.name().to_string(), value.to_string());
+        }
+
+        fn record_str(&mut self, field: &Field, value: &str) {
+            self.0.insert(field.name().to_string(), value.to_string());
+        }
+
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            self.0
+                .insert(field.name().to_string(), format!("{value:?}"));
+        }
+    }
+
+    fn capture_error_event(bot_uuid: Option<&str>) -> HashMap<String, String> {
+        let capture = EventCapture::default();
+        let events = Arc::clone(&capture.events);
+        let subscriber = tracing_subscriber::registry().with(capture);
+
+        tracing::subscriber::with_default(subscriber, || {
+            log_websocket_error(&"boom", bot_uuid, false);
+        });
+
+        events.lock().unwrap().pop().expect("expected error event")
+    }
+
+    #[test]
+    fn websocket_error_log_includes_observed_bot_uuid() {
+        let event = capture_error_event(Some("bot-provider"));
+
+        assert_eq!(
+            event.get("bot_uuid").map(String::as_str),
+            Some("bot-provider")
+        );
+        assert_eq!(event.get("registered").map(String::as_str), Some("false"));
+    }
+
+    #[test]
+    fn websocket_error_log_uses_unknown_before_bot_connect() {
+        let event = capture_error_event(None);
+
+        assert_eq!(event.get("bot_uuid").map(String::as_str), Some("unknown"));
+        assert_eq!(event.get("registered").map(String::as_str), Some("false"));
     }
 }
 

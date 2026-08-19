@@ -26,7 +26,7 @@ use bcs_service_api::{
 };
 use bcs_session::NoopSessionManagementService;
 use bcs_test_support::NoopBotRunContextPort;
-use bcs_ws::bot::{BotConnectionRegistry, BotDispatchState, dispatch_frame};
+use bcs_ws::bot::{BotConnectionRegistry, BotDispatchOutcome, BotDispatchState, dispatch_frame};
 use bcs_ws::shared::RunChannelManager;
 use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
 use tokio::sync::{Mutex, mpsc};
@@ -387,7 +387,7 @@ async fn bot_connect_rejects_provider_delivery_before_streaming_registration() {
             "protocol_version": 1
         })),
     ));
-    dispatch_frame(
+    let outcome = dispatch_frame(
         &state.dispatch_state,
         &serde_json::to_string(&connect).unwrap(),
         &tx,
@@ -395,6 +395,14 @@ async fn bot_connect_rejects_provider_delivery_before_streaming_registration() {
     )
     .await
     .unwrap();
+
+    assert!(matches!(
+        outcome,
+        BotDispatchOutcome::BotConnect {
+            registered: false,
+            bot_uuid: Some(ref bot_uuid),
+        } if bot_uuid == "bot-provider"
+    ));
 
     let rejected = recv_response(&mut rx).await;
     assert!(!rejected.ok);
