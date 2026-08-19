@@ -11,6 +11,7 @@ provides:
   - "SkillSetActivator"
   - "SkillSetSwitcher"
   - "MarketSyncService"
+  - "RepositoryCatalogService"
   - "GitSyncService"
   - "SkillAuthService"
   - "CurrentRuntimeLayoutProbeService"

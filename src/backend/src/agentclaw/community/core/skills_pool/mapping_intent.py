@@ -66,7 +66,10 @@ def build_logical_skill_mappings(
             corpus = "center"
         else:
             continue
-        link_name = asset.name if corpus == "center" else relative.name
+        # ``ac_skill.name`` is the single runtime-name policy for every shared
+        # asset.  Repo paths are locators, not user-visible link identities:
+        # two different directories can legitimately share the same tail.
+        link_name = asset.name if corpus in {"repo", "center"} else relative.name
         identity = (
             f"center:{asset.skill_uuid}:{asset.sc_version_number}"
             if corpus == "center"

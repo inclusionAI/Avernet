@@ -495,6 +495,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # Not a new exposure: every authenticated caller in the tenant already gets
     # the identical answer, and there is no user here to gate against.
     ("GET", "/openapi/v1/bots/check-name"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/skills/repository"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/skills/repository/tree"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/skills/{skill_id}"): AdmissionMode.USER_GATED,
+    ("POST", "/openapi/v1/skills/repository/sync"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/mcp/servers"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/servers/{server_code}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/tenants"): AdmissionMode.OPEN,

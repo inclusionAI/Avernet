@@ -41,6 +41,7 @@ import pytest
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
 )
+from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
@@ -75,6 +76,9 @@ from agentclaw.community.api.local_skill_delete_service import (
 )
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
+)
+from agentclaw.community.api.repository_catalog_service import (
+    RepositoryCatalogServiceProtocol,
 )
 from agentclaw.community.api.service_publication_facade import (
     ServicePublicationFacadeProtocol,
@@ -117,6 +121,9 @@ from agentclaw.community.core.services.engine_config import EngineConfigService
 from agentclaw.community.core.skill_center.services.local_skill_query_service import (
     LocalSkillQueryService,
 )
+from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
+    BotSkillAssetService,
+)
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
@@ -126,6 +133,9 @@ from agentclaw.community.core.skill_center.services.local_skill_state_service im
 from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
+)
+from agentclaw.community.core.skill_center.services.repository_catalog_service import (
+    RepositoryCatalogService,
 )
 from agentclaw.community.core.market_favorites.services import MarketFavoriteService
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
@@ -153,10 +163,12 @@ _PAIRS = [
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),
     (HealthDiagnosisServiceProtocol, HealthDiagnosisService),
+    (BotSkillAssetServiceProtocol, BotSkillAssetService),
     (LocalSkillQueryServiceProtocol, LocalSkillQueryService),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
     (LocalSkillStateServiceProtocol, LocalSkillStateService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),
+    (RepositoryCatalogServiceProtocol, RepositoryCatalogService),
     (SpaceServiceProtocol, SpaceService),
     (SpaceAccessServiceProtocol, SpaceAccessService),
     (SpaceMemberServiceProtocol, SpaceMemberService),
