@@ -230,7 +230,7 @@ def test_default_skill_set_query_kwargs_keeps_normal_claude_code_query_shape(tmp
     assert service._default_skill_set_query_kwargs() == {}
 
 
-def test_default_skill_set_query_kwargs_routes_claude_code_default_to_aicoding(tmp_path):
+def test_default_skill_set_query_kwargs_routes_claude_code_null_default_to_aicoding(tmp_path):
     from agentclaw.community.core.bot_management.engines.registry import (
         get_default_skill_set_selection_policy,
     )
@@ -243,12 +243,12 @@ def test_default_skill_set_query_kwargs_routes_claude_code_default_to_aicoding(t
     )
 
     assert service._default_skill_set_query_kwargs() == {
-        "default_skill_set_bolt_id": "default",
+        "default_skill_set_bolt_id": None,
         "default_skill_set_engine_type": "aicoding",
     }
 
 
-def test_active_skill_sets_falls_back_from_bot_default_to_aicoding_then_claude_code_default(tmp_path):
+def test_active_skill_sets_falls_back_to_aicoding_legacy_null_then_claude_code_default(tmp_path):
     from agentclaw.community.core.bot_management.engines.registry import (
         get_default_skill_set_selection_policy,
     )
@@ -275,10 +275,10 @@ def test_active_skill_sets_falls_back_from_bot_default_to_aicoding_then_claude_c
     third_kwargs = repo.get_all_active_skill_sets.call_args_list[2].kwargs
     assert first_kwargs["default_skill_set_bolt_id"] == "bot"
     assert first_kwargs["default_skill_set_engine_type"] == "claude_code"
-    assert second_kwargs["default_skill_set_bolt_id"] == "default"
+    assert second_kwargs["default_skill_set_bolt_id"] is None
     assert second_kwargs["default_skill_set_engine_type"] == "aicoding"
-    assert third_kwargs["default_skill_set_bolt_id"] == "default"
-    assert third_kwargs["default_skill_set_engine_type"] == "claude_code"
+    assert "default_skill_set_bolt_id" not in third_kwargs
+    assert "default_skill_set_engine_type" not in third_kwargs
 
 
 def test_active_skill_sets_stops_when_bot_default_exists(tmp_path):
@@ -356,7 +356,7 @@ def test_list_skill_sets_uses_aicoding_scoped_default_candidates(tmp_path):
     assert first_kwargs["default_skill_set_engine_type"] == "claude_code"
     assert second_kwargs["bolt_id"] == "bot"
     assert second_kwargs["engine_type"] == "claude_code"
-    assert second_kwargs["default_skill_set_bolt_id"] == "default"
+    assert second_kwargs["default_skill_set_bolt_id"] is None
     assert second_kwargs["default_skill_set_engine_type"] == "aicoding"
 
 
@@ -465,7 +465,7 @@ def test_env_active_skill_sets_fallback_stops_when_default_exists(tmp_path):
     assert first_kwargs["default_skill_set_bolt_id"] == "bot"
     assert first_kwargs["default_skill_set_engine_type"] == "claude_code"
     assert first_kwargs["env"] == "pre"
-    assert second_kwargs["default_skill_set_bolt_id"] == "default"
+    assert second_kwargs["default_skill_set_bolt_id"] is None
     assert second_kwargs["default_skill_set_engine_type"] == "aicoding"
     assert second_kwargs["env"] == "pre"
 
