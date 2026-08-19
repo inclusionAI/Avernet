@@ -8,9 +8,13 @@
 from typing import TYPE_CHECKING, Any
 
 from secbaas.community.api.bot_runtime import BotBindingInfo
+from secbaas.community.core.service.config._constants import SystemConfigKey
 from secbaas.community.logger import get_logger
 
 if TYPE_CHECKING:
+    from secbaas.community.api.config_manage._protocols import (
+        SystemConfigManageService,
+    )
     from secbaas.community.core.repository.ac_bot import AcBotRepository
     from secbaas.community.core.repository.ac_bot_publish import (
         AcBotPublishRepository,
@@ -71,10 +75,12 @@ class BotBindingResolver:
         ac_bot_repo: "AcBotRepository",
         publish_repo: "AcBotPublishRepository",
         binding_repo: "DeviceBindingRepository",
+        system_config_service: "SystemConfigManageService | None" = None,
     ):
         self._ac_bot_repo = ac_bot_repo
         self._publish_repo = publish_repo
         self._binding_repo = binding_repo
+        self._system_config_service = system_config_service
 
     def resolve(
         self,
@@ -119,19 +125,39 @@ class BotBindingResolver:
 
         # Step 2: For service bots, resolve binding based on lifecycle_stage
         if ac_bot.bot_type == "service":
-            # eval 生命周期阶段 → 走 eval binding 解析
+            # eval 生命周期阶段 → 检查开关后决定走 eval binding 还是降级走 online
             if lifecycle_stage in ("eval", "default"):
-                resolved_binding_id = self._resolve_eval_binding(
-                    bot_id=bot_id,
-                    entity_id=entity_id,
-                    env=env,
-                )
-                if resolved_binding_id is None:
-                    logger.warning(
-                        f"[resolve] No eval binding found for service bot: bot_id={bot_id}"
+                if self._is_eval_env_enabled():
+                    # 开关开启：走 eval binding 解析
+                    resolved_binding_id = self._resolve_eval_binding(
+                        bot_id=bot_id,
+                        entity_id=entity_id,
+                        env=env,
                     )
-                    return None
-                binding_id = resolved_binding_id
+                    if resolved_binding_id is None:
+                        logger.warning(
+                            f"[resolve] No eval binding found for service bot: bot_id={bot_id}"
+                        )
+                        return None
+                    binding_id = resolved_binding_id
+                else:
+                    # 开关关闭：降级走 online 生产路由
+                    logger.warning(
+                        f"[resolve] Eval env disabled, fallback to online: "
+                        f"bot_id={bot_id}, lifecycle_stage={lifecycle_stage}"
+                    )
+                    resolved_binding_id = self._resolve_service_bot_binding(
+                        bot_id=bot_id,
+                        entity_id=entity_id,
+                        lifecycle_stage="online",
+                        draft_binding_id=binding_id,
+                    )
+                    if resolved_binding_id is None:
+                        logger.warning(
+                            f"[resolve] No online binding found for service bot: bot_id={bot_id}"
+                        )
+                        return None
+                    binding_id = resolved_binding_id
             else:
                 stages = (
                     ["online", "verify", "draft"]
@@ -365,3 +391,34 @@ class BotBindingResolver:
 
         # 回退到第一个匹配的 binding
         return matched[0].id
+
+    def _is_eval_env_enabled(self) -> bool:
+        """检查评测环境开关是否开启。
+
+        安全默认策略：
+        - system_config_service 为 None → False（安全默认）
+        - get_config 异常 → False（安全默认）
+        - config 为 None → False（安全默认）
+        - conf_value 为空 → False（安全默认）
+        - conf_value 为 "true" → True
+
+        Returns:
+            True=评测环境开启，False=评测环境关闭（降级走 online）
+        """
+        if self._system_config_service is None:
+            return False
+
+        try:
+            config = self._system_config_service.get_config(
+                SystemConfigKey.EVAL_ENV_ENABLED
+            )
+        except Exception as e:
+            logger.warning(
+                "[_is_eval_env_enabled] 读取配置异常, fallback disabled: %s", e,
+            )
+            return False
+
+        if config is None:
+            return False
+
+        return (config.conf_value or "").strip().lower() == "true"

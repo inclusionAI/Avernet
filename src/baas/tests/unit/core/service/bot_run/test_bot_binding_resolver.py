@@ -749,10 +749,20 @@ class TestServiceBotEvalStage:
 
     BINDING_ID_EVAL = 100099
 
+    def _make_eval_resolver(self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo):
+        """创建带 eval 开关开启的 BotBindingResolver。"""
+        return BotBindingResolver(
+            ac_bot_repo=mock_ac_bot_repo,
+            publish_repo=mock_publish_repo,
+            binding_repo=mock_binding_repo,
+            system_config_service=_make_config_service(enabled=True),
+        )
+
     def test_eval_stage_resolves_eval_binding(
-        self, resolver, mock_ac_bot_repo, mock_binding_repo
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
     ):
         """lifecycle_stage='eval' 走 _resolve_eval_binding 解析 binding。"""
+        resolver = self._make_eval_resolver(mock_ac_bot_repo, mock_publish_repo, mock_binding_repo)
         mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
             _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
         )
@@ -782,9 +792,10 @@ class TestServiceBotEvalStage:
         mock_ac_bot_repo.get_by_bot_id_env_exclude_default.assert_called_once()
 
     def test_eval_stage_prefers_eval_tag_over_default(
-        self, resolver, mock_ac_bot_repo, mock_binding_repo
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
     ):
         """有多个 AGENTCLAW_DEFAULT_TAG 的 binding 时，优先选择 tag='eval' 的。"""
+        resolver = self._make_eval_resolver(mock_ac_bot_repo, mock_publish_repo, mock_binding_repo)
         mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
             _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
         )
@@ -815,9 +826,10 @@ class TestServiceBotEvalStage:
         assert result.binding_id == self.BINDING_ID_EVAL
 
     def test_eval_stage_no_bindings_returns_none(
-        self, resolver, mock_ac_bot_repo, mock_binding_repo
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
     ):
         """无含 AGENTCLAW_DEFAULT_TAG 的 binding 时返回 None。"""
+        resolver = self._make_eval_resolver(mock_ac_bot_repo, mock_publish_repo, mock_binding_repo)
         mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
             _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
         )
@@ -834,9 +846,10 @@ class TestServiceBotEvalStage:
         assert result is None
 
     def test_eval_stage_filters_released_bindings(
-        self, resolver, mock_ac_bot_repo, mock_binding_repo
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
     ):
         """RELEASED 状态的 binding 不参与 eval 匹配。"""
+        resolver = self._make_eval_resolver(mock_ac_bot_repo, mock_publish_repo, mock_binding_repo)
         mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
             _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
         )
@@ -860,9 +873,10 @@ class TestServiceBotEvalStage:
         assert result is None
 
     def test_eval_stage_filters_other_bot_id(
-        self, resolver, mock_ac_bot_repo, mock_binding_repo
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
     ):
         """device_props 中 bot_id 不匹配的 binding 被过滤。"""
+        resolver = self._make_eval_resolver(mock_ac_bot_repo, mock_publish_repo, mock_binding_repo)
         mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
             _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
         )
@@ -885,9 +899,10 @@ class TestServiceBotEvalStage:
         assert result is None
 
     def test_eval_stage_falls_back_to_non_eval_tag(
-        self, resolver, mock_ac_bot_repo, mock_binding_repo
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
     ):
         """无 tag='eval' 的 binding 时，回退到第一个匹配的 binding。"""
+        resolver = self._make_eval_resolver(mock_ac_bot_repo, mock_publish_repo, mock_binding_repo)
         mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
             _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
         )
@@ -910,3 +925,240 @@ class TestServiceBotEvalStage:
 
         assert result is not None
         assert result.binding_id == 100077
+
+
+# ==================== Tests: eval 开关降级 ====================
+
+
+def _make_config_service(enabled=True):
+    """创建 mock SystemConfigManageService。"""
+    from secbaas.community.api.config_manage._protocols import SystemConfigManageService
+
+    svc = MagicMock(spec=SystemConfigManageService)
+    if enabled:
+        config_resp = MagicMock()
+        config_resp.conf_value = "true"
+    else:
+        config_resp = MagicMock()
+        config_resp.conf_value = "false"
+    svc.get_config.return_value = config_resp
+    return svc
+
+
+class TestEvalSwitchControl:
+    """Tests for eval 环境开关降级逻辑。
+
+    当开关关闭或不可用时，eval/default lifecycle_stage 降级走 online binding；
+    当开关开启时，走 _resolve_eval_binding。
+    """
+
+    BINDING_ID_EVAL = 100099
+
+    def _make_resolver_with_config(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, config_svc
+    ):
+        """创建带 system_config_service 的 BotBindingResolver。"""
+        return BotBindingResolver(
+            ac_bot_repo=mock_ac_bot_repo,
+            publish_repo=mock_publish_repo,
+            binding_repo=mock_binding_repo,
+            system_config_service=config_svc,
+        )
+
+    def _setup_service_bot(self, mock_ac_bot_repo):
+        """设置 service bot 记录。"""
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
+            _make_bot_record(bot_type="service", binding_id=BINDING_ID_DRAFT)
+        )
+
+    def _setup_online_binding(self, mock_publish_repo, mock_binding_repo):
+        """设置 online binding 返回。"""
+        mock_publish_repo.get_binding_id.return_value = BINDING_ID_ONLINE
+        mock_binding_repo.get_by_id.return_value = _make_binding_record(
+            device_provider="baas",
+            device_id=DEVICE_ID_BAAS,
+            binding_id=BINDING_ID_ONLINE,
+        )
+
+    def _setup_eval_binding(self, mock_binding_repo):
+        """设置 eval binding 返回。"""
+        eval_binding = _make_binding_record(
+            device_provider="baas",
+            device_id="eval-uuid-001",
+            binding_id=self.BINDING_ID_EVAL,
+            props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": BOT_ID},
+        )
+        mock_binding_repo.list_bindings.return_value = (1, [eval_binding])
+        mock_binding_repo.get_by_id.return_value = eval_binding
+
+    # ---------- 1. eval stage + 开关关闭 → 降级走 online binding ----------
+
+    def test_eval_stage_disabled_falls_back(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """lifecycle_stage='eval' + 开关关闭 → 降级走 online binding。"""
+        config_svc = _make_config_service(enabled=False)
+        resolver = self._make_resolver_with_config(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, config_svc
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        self._setup_online_binding(mock_publish_repo, mock_binding_repo)
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is not None
+        assert result.binding_id == BINDING_ID_ONLINE
+        # 降级走 online，应查询 publish_repo
+        mock_publish_repo.get_binding_id.assert_called_once_with(
+            source_bot_id=BOT_ID, status="success", owner_id=ENTITY_ID
+        )
+        # 不应调用 list_bindings（eval 路径被开关拦截）
+        mock_binding_repo.list_bindings.assert_not_called()
+
+    # ---------- 2. default stage + 开关关闭 → 降级走 online binding ----------
+
+    def test_default_stage_disabled_falls_back(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """lifecycle_stage='default' + 开关关闭 → 降级走 online binding。"""
+        config_svc = _make_config_service(enabled=False)
+        resolver = self._make_resolver_with_config(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, config_svc
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        self._setup_online_binding(mock_publish_repo, mock_binding_repo)
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="default",
+        )
+
+        assert result is not None
+        assert result.binding_id == BINDING_ID_ONLINE
+        mock_publish_repo.get_binding_id.assert_called_once_with(
+            source_bot_id=BOT_ID, status="success", owner_id=ENTITY_ID
+        )
+        mock_binding_repo.list_bindings.assert_not_called()
+
+    # ---------- 3. 开关开启 → 走 _resolve_eval_binding ----------
+
+    def test_eval_stage_enabled_uses_eval_binding(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """开关开启 → lifecycle_stage='eval' 走 _resolve_eval_binding。"""
+        config_svc = _make_config_service(enabled=True)
+        resolver = self._make_resolver_with_config(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, config_svc
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        self._setup_eval_binding(mock_binding_repo)
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is not None
+        assert result.binding_id == self.BINDING_ID_EVAL
+        # 走 eval 路径，应调用 list_bindings
+        mock_binding_repo.list_bindings.assert_called_once()
+        # 不应查询 publish_repo
+        mock_publish_repo.get_binding_id.assert_not_called()
+
+    # ---------- 4. system_config_service=None → 降级走 online ----------
+
+    def test_no_config_service_defaults_disabled(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """system_config_service=None → 视同开关关闭，降级走 online binding。"""
+        resolver = BotBindingResolver(
+            ac_bot_repo=mock_ac_bot_repo,
+            publish_repo=mock_publish_repo,
+            binding_repo=mock_binding_repo,
+            system_config_service=None,
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        self._setup_online_binding(mock_publish_repo, mock_binding_repo)
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is not None
+        assert result.binding_id == BINDING_ID_ONLINE
+        mock_publish_repo.get_binding_id.assert_called_once_with(
+            source_bot_id=BOT_ID, status="success", owner_id=ENTITY_ID
+        )
+        mock_binding_repo.list_bindings.assert_not_called()
+
+    # ---------- 5. get_config()异常 → 降级走 online ----------
+
+    def test_config_read_failure_defaults_disabled(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """get_config() 抛异常 → 视同开关关闭，降级走 online binding。"""
+        from secbaas.community.api.config_manage._protocols import SystemConfigManageService
+        from secbaas.community.core.service.config._constants import SystemConfigKey
+
+        config_svc = MagicMock(spec=SystemConfigManageService)
+        config_svc.get_config.side_effect = Exception("config service unavailable")
+
+        resolver = self._make_resolver_with_config(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, config_svc
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        self._setup_online_binding(mock_publish_repo, mock_binding_repo)
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is not None
+        assert result.binding_id == BINDING_ID_ONLINE
+        mock_publish_repo.get_binding_id.assert_called_once_with(
+            source_bot_id=BOT_ID, status="success", owner_id=ENTITY_ID
+        )
+        mock_binding_repo.list_bindings.assert_not_called()
+
+    # ---------- 6. online stage 不受开关影响 ----------
+
+    def test_online_stage_not_affected(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """lifecycle_stage='online' 不受开关影响，始终走 online binding。"""
+        # 即使开关开启，online stage 也不走 eval 路径
+        config_svc = _make_config_service(enabled=True)
+        resolver = self._make_resolver_with_config(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, config_svc
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        self._setup_online_binding(mock_publish_repo, mock_binding_repo)
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="online",
+        )
+
+        assert result is not None
+        assert result.binding_id == BINDING_ID_ONLINE
+        mock_publish_repo.get_binding_id.assert_called_once_with(
+            source_bot_id=BOT_ID, status="success", owner_id=ENTITY_ID
+        )
+        mock_binding_repo.list_bindings.assert_not_called()

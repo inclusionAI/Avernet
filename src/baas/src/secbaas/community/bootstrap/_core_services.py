@@ -386,6 +386,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         ac_bot_repo=ac_bot_repo,
         publish_repo=ac_bot_publish_repo,
         binding_repo=device_binding_repo,
+        system_config_service=system_config_service,
     )
 
     # Engine adapter registry — 按 config.plugins.engine_adapter 切 stub/real,
