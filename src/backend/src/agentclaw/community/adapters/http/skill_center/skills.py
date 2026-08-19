@@ -4,6 +4,7 @@ Migrated from: services/openclawserver/server/skills
 Unified Skills router for skill management, activation, and metadata.
 Combines functionality from skills, skills_metadata, and skillset_switch routers.
 """
+import asyncio
 import io
 import json
 import os
@@ -1703,7 +1704,7 @@ async def sync_market(
 ) -> SyncStatusResponse:
     """Compatibility adapter for the one governed environment-wide sync."""
     _ = (entity_id, entity_type, bot_id, engine_type, ctx)
-    result = await run_in_threadpool(repository_catalog.sync)
+    result = await asyncio.to_thread(repository_catalog.sync)
     if result["status"] == "in_progress":
         return SyncStatusResponse(success=True, data={"synced": False, "message": "同步进行中，请稍后再试"})
     if result["status"] == "failed":

@@ -1,10 +1,10 @@
 """Canonical public adapter for the governed aiworkbench Repo catalog."""
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Query, Request
-from starlette.concurrency import run_in_threadpool
+from fastapi import APIRouter, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page, PageParamsDep
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
@@ -26,9 +26,9 @@ async def list_repository_skills(
     request: Request,
     _actor_id: UserIdDep,
     page: PageParamsDep,
-    keyword: str = Query(default="", max_length=200),
-    path: str | None = Query(default=None, max_length=500),
-    sort: str = Query(default="latest", pattern="^(latest|hottest)$"),
+    keyword: str = Query(default="", max_length=200, description="Case-insensitive name, description, or category filter."),
+    path: str | None = Query(default=None, max_length=500, description="Optional governed Repo-relative path prefix."),
+    sort: str = Query(default="latest", pattern="^(latest|hottest)$", description="Catalog ordering: latest or persisted hottest."),
     service: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> Envelope[Page[dict[str, Any]]]:
     # Existing `hotest` is the persisted installation-count ordering; do not invent one.
@@ -51,7 +51,7 @@ async def repository_tree(request: Request, _actor_id: UserIdDep, service: Repos
 
 @router.get("/{skill_id}", response_model=Envelope[dict[str, Any]])
 @envelope_errors
-async def get_repository_skill(skill_id: str, request: Request, _actor_id: UserIdDep, service: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol)) -> Envelope[dict[str, Any]]:
+async def get_repository_skill(skill_id: Annotated[str, Path(description="Decimal public identifier of the shared Repo Skill.")], request: Request, _actor_id: UserIdDep, service: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol)) -> Envelope[dict[str, Any]]:
     skill = service.detail(skill_id)
     if skill is None:
         raise RepositoryCatalogNotFoundError()
@@ -62,7 +62,7 @@ async def get_repository_skill(skill_id: str, request: Request, _actor_id: UserI
 @envelope_errors
 async def sync_repository_skills(request: Request, _actor_id: UserIdDep, service: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol)) -> Envelope[dict[str, Any]]:
     """Synchronously run the established global master fetch and DB scan once."""
-    result = await run_in_threadpool(service.sync)
+    result = await asyncio.to_thread(service.sync)
     if result["status"] == "in_progress":
         raise RepositoryCatalogSyncInProgressError()
     if result["status"] == "failed":
