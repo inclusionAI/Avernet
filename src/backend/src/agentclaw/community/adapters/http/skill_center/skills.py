@@ -389,9 +389,10 @@ async def _set_legacy_asset_active_if_resolved(
     active: bool,
 ) -> dict[str, Any] | None:
     """Adapt historical path/link references to the one Installation command."""
-    if not skill_reference.isdecimal() and not callable(
+    control_plane_bound = callable(
         getattr(asset_service, "resolve_legacy_skill_id", None)
-    ):
+    )
+    if not skill_reference.isdecimal() and not control_plane_bound:
         # Transitional compatibility fixtures and deployments that have not
         # bound the additive control plane retain the old adapter path.  Once
         # the control plane is bound, a non-decimal reference may never fall
@@ -413,6 +414,8 @@ async def _set_legacy_asset_active_if_resolved(
             skill_id=skill_id, bot_id=bot_id, actor_id=actor_id, active=active
         )
     except LocalSkillNotFoundError:
+        if control_plane_bound:
+            raise
         return None
 
 

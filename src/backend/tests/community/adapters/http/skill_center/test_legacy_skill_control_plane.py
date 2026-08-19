@@ -2,6 +2,7 @@
 
 import inspect
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -20,6 +21,7 @@ from agentclaw.community.adapters.http.skill_center.skills import (
     sync_market,
 )
 from agentclaw.community.adapters.http.dependencies import get_request_context
+from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 
 
 class _Bots:
@@ -129,6 +131,26 @@ async def test_legacy_activate_with_link_name_resolves_decimal_id_before_control
         device_sync_dispatcher=object(), asset_service=assets,
     )
     assert assets.calls == [("get", None), ("set", True)]
+
+
+@pytest.mark.asyncio
+async def test_bound_control_plane_not_found_never_falls_back_to_legacy_mutation() -> None:
+    class _MissingAssets(_Assets):
+        def resolve_legacy_skill_id(self, **_kwargs):
+            raise LocalSkillNotFoundError()
+
+    legacy_service_factory = MagicMock()
+    with pytest.raises(LocalSkillNotFoundError):
+        await activate_skill(
+            "missing-link", ActivateRequest(source_path="missing/path"),
+            bot_id="bot", ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+            bot_repo=_Bots(), path_factory=object(),
+            skill_service_factory=legacy_service_factory,
+            skill_set_service_factory=object(), resolver=object(),
+            device_sync_dispatcher=object(), asset_service=_MissingAssets(),
+        )
+
+    legacy_service_factory.create.assert_not_called()
 
 
 @pytest.mark.asyncio
