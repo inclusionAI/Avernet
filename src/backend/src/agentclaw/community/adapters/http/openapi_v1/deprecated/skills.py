@@ -58,8 +58,8 @@ from agentclaw.community.api.local_skill_delete_service import (
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
+from agentclaw.community.api.bot_skill_asset_service import (
+    BotSkillAssetServiceProtocol,
 )
 from agentclaw.community.di import Injected
 
@@ -226,6 +226,7 @@ async def get_skill_legacy(
     query_service: LocalSkillQueryServiceProtocol = Injected(
         LocalSkillQueryServiceProtocol
     ),
+    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
 ) -> Envelope[Skill]:
     """Get public metadata for one Local Skill; the Skill ID selects its Bot.
 
@@ -240,7 +241,7 @@ async def get_skill_legacy(
         actor_id=actor_id,
         caller=caller,
         request=request,
-        query_service=query_service,
+        asset_service=asset_service,
     )
 
 
@@ -283,9 +284,7 @@ def _state_shim(handler, verb: str):
         query_service: LocalSkillQueryServiceProtocol = Injected(
             LocalSkillQueryServiceProtocol
         ),
-        state_service: LocalSkillStateServiceProtocol = Injected(
-            LocalSkillStateServiceProtocol
-        ),
+        asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
     ) -> Envelope[SkillState]:
         bot_id = await _bot_behind(
             query_service, caller, skill_id=skill_id, actor_id=actor_id
@@ -296,8 +295,7 @@ def _state_shim(handler, verb: str):
             actor_id=actor_id,
             caller=caller,
             request=request,
-            query_service=query_service,
-            state_service=state_service,
+            asset_service=asset_service,
         )
 
     shim.__name__ = f"{handler.__name__}_legacy"

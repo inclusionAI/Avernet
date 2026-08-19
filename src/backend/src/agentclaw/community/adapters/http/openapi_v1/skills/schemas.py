@@ -8,7 +8,7 @@ internal names belong in ``#`` comments.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -132,4 +132,19 @@ class SkillState(BaseModel):
     changed: bool = Field(
         description="False when the skill was already in the requested state "
         "— the call is idempotent and succeeded either way."
+    )
+
+
+class SkillContent(BaseModel):
+    """The consumable, canonical SKILL.md document for one Skill asset."""
+
+    content: str = Field(description="The full SKILL.md document.")
+
+
+class SkillParameters(BaseModel):
+    """The complete Bot-level parameter object for one Skill."""
+
+    parameters: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Complete values for this Bot and Skill; replacement is full, not patch semantics.",
     )

@@ -10,7 +10,13 @@
 旧路径反向 re-export。
 """
 
-from agentclaw.community.core.models.skill import Skill, SkillSet, SkillSetSkill, UserDefaultSkillSet  # noqa: F401
+from agentclaw.community.core.models.skill import (  # noqa: F401
+    BotSkillInstallation,
+    Skill,
+    SkillSet,
+    SkillSetSkill,
+    UserDefaultSkillSet,
+)
 from agentclaw.community.core.models.mcp import (  # noqa: F401
     SkillSetMCPServer,
     UserMCPConfig,

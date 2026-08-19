@@ -31,6 +31,8 @@ from agentclaw.community.adapters.http.skill_center.skills import router as skil
 from agentclaw.community.api.runtime_layout_probe_service import (
     RuntimeLayoutProbeServiceProtocol,
 )
+from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     LAYOUT_CONTRACT_VERSION,
     RuntimeLayoutProbeResult,
@@ -187,6 +189,11 @@ def _skill_service_di_app(
                 RuntimeLayoutProbeServiceProtocol,
                 to=mock_runtime_layout_probe,
             )
+            class _UnavailableAsset:
+                def get_skill(self, **_kwargs):
+                    raise LocalSkillNotFoundError()
+
+            binder.bind(BotSkillAssetServiceProtocol, to=_UnavailableAsset())
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)

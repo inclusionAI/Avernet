@@ -349,26 +349,6 @@ async def test_active_delete_is_rejected_before_quarantine_or_database_mutation(
 
 
 @pytest.mark.asyncio
-async def test_current_default_set_exclusion_is_the_active_authority_under_lock():
-    service, files, skills, _guard, cleanup = _service(active=False)
-
-    class _CurrentDefaultIsActive:
-        def get_default(self, **_kwargs):
-            return {"id": "4"}
-
-        def get_all_excluded_skills(self, *_args):
-            return []
-
-    service._skill_set_repo = _CurrentDefaultIsActive()
-    with pytest.raises(LocalSkillActiveError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
-
-    assert skills.deleted is False
-    assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
-    assert cleanup.work == []
-
-
-@pytest.mark.asyncio
 async def test_exclusion_from_a_previous_default_set_allows_delete():
     service, files, skills, _guard, cleanup = _service(active=False)
 

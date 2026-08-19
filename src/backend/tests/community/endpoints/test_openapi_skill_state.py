@@ -19,6 +19,9 @@ from agentclaw.community.core.skill_center.services.local_skill_state_service im
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
@@ -166,7 +169,7 @@ def _seed_state(world, *, runtime_success: bool) -> None:
         LocalSkillStateServiceProtocol,
         to=LocalSkillStateService(
             world.get(SkillRepository),
-            world.get(SkillSetRepository),
+            world.get(SkillInstallationRepositoryProtocol),
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             runtime_factory,

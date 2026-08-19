@@ -24,8 +24,8 @@ from agentclaw.community.core.skill_center.factories import (
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
@@ -215,20 +215,13 @@ def _seed_uploadable_bot(world) -> None:
     )
 
 
-def _assert_associated_to_owning_bot_default(response, world) -> None:
+def _assert_created_inactive_without_default_membership(response, world) -> None:
     skill_id = response.json()["data"]["skill"]["skill_id"]
     with avernet_tenant_scope(_TENANT):
-        default_set = world.get(SkillSetRepository).get_default(
-            user_id=_OWNER, bolt_id=_BOT_ID, engine_type="openclaw"
+        skill = world.get(SkillRepository).get_bot_local_skill(
+            skill_id=skill_id, bot_id=_BOT_ID, user_id=_OWNER
         )
-        assert default_set is not None
-        assert default_set["bolt_id"] == _BOT_ID
-        assert skill_id in {
-            skill["id"]
-            for skill in world.get(SkillSetRepository).get_skills_in_set(
-                default_set["id"]
-            )
-        }
+        assert skill is not None and skill["active"] is False
 
 
 @endpoint_test(
@@ -242,7 +235,7 @@ def _assert_associated_to_owning_bot_default(response, world) -> None:
         raw_body=_package(),
     ),
     seed=_seed_uploadable_bot,
-    extra_assertions=(_assert_associated_to_owning_bot_default,),
+    extra_assertions=(_assert_created_inactive_without_default_membership,),
     expect=ExpectSuccess(
         status=201,
         json_contains={
@@ -293,7 +286,7 @@ def multipart_upload_is_an_explicit_error_case():
         raw_body=_package(),
     ),
     seed=_seed_uploadable_bot,
-    extra_assertions=(_assert_associated_to_owning_bot_default,),
+    extra_assertions=(_assert_created_inactive_without_default_membership,),
     expect=ExpectSuccess(
         status=201,
         json_contains={
