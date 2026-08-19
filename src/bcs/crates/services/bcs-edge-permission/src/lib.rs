@@ -82,16 +82,15 @@ impl DbConnectService {
 
 /// Id-by-prefix actor-kind discriminator (D11).
 ///
-/// `human_` prefix → [`ActorKind::Human`]; a composite id containing `:` →
-/// [`ActorKind::Bot`]; anything else → `None` (unrecognized, rejected by the
-/// decision tree).
-fn actor_kind_of(id: &str) -> Option<ActorKind> {
+/// `human_` prefix → [`ActorKind::Human`]; anything else (composite ids with
+/// `:` AND bare BCS-native bot uuids without `:`) → [`ActorKind::Bot`]. The
+/// direction-validity gate in `create_connect` is what rejects invalid
+/// directions (Human↔Human / Bot→Human) — not this helper.
+fn actor_kind_of(id: &str) -> ActorKind {
     if id.starts_with("human_") {
-        Some(ActorKind::Human)
-    } else if id.contains(':') {
-        Some(ActorKind::Bot)
+        ActorKind::Human
     } else {
-        None
+        ActorKind::Bot
     }
 }
 
@@ -130,8 +129,8 @@ impl ConnectService for DbConnectService {
         let caller_kind = actor_kind_of(caller);
         let target_kind = actor_kind_of(to_bot);
         let valid_direction = match (caller_kind, target_kind) {
-            (Some(ActorKind::Human), Some(ActorKind::Bot)) => true,
-            (Some(ActorKind::Bot), Some(ActorKind::Bot)) => true,
+            (ActorKind::Human, ActorKind::Bot) => true,
+            (ActorKind::Bot, ActorKind::Bot) => true,
             _ => false,
         };
         if !valid_direction {
@@ -162,7 +161,7 @@ impl ConnectService for DbConnectService {
         }
         // Human-direction add gate: a Human caller may only connect to a bot
         // whose `human_addable` is true.
-        if matches!(caller_kind, Some(ActorKind::Human)) && !cfg.human_addable {
+        if caller_kind == ActorKind::Human && !cfg.human_addable {
             return Err(ServiceError::Forbidden(format!(
                 "bot '{to_bot}' is not human-addable"
             )));
@@ -298,9 +297,7 @@ impl ConnectService for DbConnectService {
         // §4.1: a single accept on a Bot↔Bot connect approves BOTH requests
         // together. If this is a Bot↔Bot connect, find the reverse pending
         // request (to_bot→caller) and approve it + backfill the reverse edge.
-        if matches!(caller_kind, Some(ActorKind::Bot))
-            && matches!(target_kind, Some(ActorKind::Bot))
-        {
+        if caller_kind == ActorKind::Bot && target_kind == ActorKind::Bot {
             let reverse_edge = edge_ids.get(1).cloned();
             let reverse_pending = self.find_pending_connect(&to_bot, &caller).await;
             for r in reverse_pending {
@@ -357,8 +354,8 @@ impl ConnectService for DbConnectService {
             .await?;
 
         // §4.1: Bot↔Bot — reject the reverse pending request too.
-        if matches!(actor_kind_of(&req.from_id), Some(ActorKind::Bot))
-            && matches!(actor_kind_of(&req.to_id), Some(ActorKind::Bot))
+        if actor_kind_of(&req.from_id) == ActorKind::Bot
+            && actor_kind_of(&req.to_id) == ActorKind::Bot
             && req.request_kind == RequestKind::Connect
         {
             let reverse_pending = self
@@ -387,14 +384,22 @@ impl ConnectService for DbConnectService {
             .await
             .ok_or_else(|| ServiceError::FriendRequestNotFound(request_id.to_string()))?;
 
-        if req.status != RequestStatus::Pending {
-            return Err(ServiceError::InvalidOperation {
-                message: format!(
-                    "cancel: request {} is not pending (status={:?})",
-                    req.request_id, req.status
-                ),
-                request_id: Some(req.request_id.clone()),
-            });
+        // Idempotent: an already-cancelled or rejected request is a no-op Ok
+        // (spec: "已 rejected/cancelled 幂等"). Only pending requests can be
+        // transitioned to Cancelled; an Approved request cannot be cancelled
+        // (that's an unfriend/revoke, not a cancel).
+        match req.status {
+            RequestStatus::Pending => {}
+            RequestStatus::Cancelled | RequestStatus::Rejected => return Ok(()),
+            RequestStatus::Approved => {
+                return Err(ServiceError::InvalidOperation {
+                    message: format!(
+                        "cancel: request {} is approved (cancel not allowed; use revoke_friend)",
+                        req.request_id
+                    ),
+                    request_id: Some(req.request_id.clone()),
+                });
+            }
         }
 
         // The trait passes only request_id; use the request's own `created_by`
@@ -412,8 +417,8 @@ impl ConnectService for DbConnectService {
             .await?;
 
         // Bot↔Bot: cancel the reverse pending request as well.
-        if matches!(actor_kind_of(&req.from_id), Some(ActorKind::Bot))
-            && matches!(actor_kind_of(&req.to_id), Some(ActorKind::Bot))
+        if actor_kind_of(&req.from_id) == ActorKind::Bot
+            && actor_kind_of(&req.to_id) == ActorKind::Bot
             && req.request_kind == RequestKind::Connect
         {
             let reverse_pending = self
@@ -435,11 +440,12 @@ impl ConnectService for DbConnectService {
         Ok(())
     }
 
-    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<usize> {
+    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<String>> {
         // D12 friend edges are `grant_ref_id == target.default` (caller→target)
         // or `grant_ref_id == caller.default` (target→caller, Bot↔Bot). Revoke
         // exactly those friend edges; leave other (profile/rules) edges alone.
-        let mut count = 0usize;
+        // Returns the revoked edge_ids (B4c fix — previously a count).
+        let mut revoked: Vec<String> = Vec::new();
 
         // Forward: caller → target, ref == target's default profile id.
         if let Some(target_default) = self
@@ -455,7 +461,7 @@ impl ConnectService for DbConnectService {
                 if g.grant_ref_id == target_default && g.grant_kind == GrantKind::PermissionProfile
                 {
                     self.edge_grants.revoke_grant(&g.edge_id, &self.env).await?;
-                    count += 1;
+                    revoked.push(g.edge_id);
                 }
             }
         }
@@ -475,7 +481,7 @@ impl ConnectService for DbConnectService {
                 if g.grant_ref_id == caller_default && g.grant_kind == GrantKind::PermissionProfile
                 {
                     self.edge_grants.revoke_grant(&g.edge_id, &self.env).await?;
-                    count += 1;
+                    revoked.push(g.edge_id);
                 }
             }
         }
@@ -483,7 +489,7 @@ impl ConnectService for DbConnectService {
         // TODO(installment-5): spec §4.1 models unfriend as a Revoke-kind
         // request that the owner directly approves; this direct-revoke path is
         // sufficient for T13. The revoke-request flow can layer on later.
-        Ok(count)
+        Ok(revoked)
     }
 
     async fn list_friends(&self, actor: &str) -> ServiceResult<Vec<FriendListEntry>> {
@@ -498,7 +504,7 @@ impl ConnectService for DbConnectService {
                 name: None,
                 summary: None,
                 is_online: false,
-                kind: actor_kind_of(&id).unwrap_or(ActorKind::Bot),
+                kind: actor_kind_of(&id),
             })
             .collect();
         Ok(entries)
@@ -577,8 +583,8 @@ impl DbConnectService {
         &self,
         caller: &str,
         to_bot: &str,
-        caller_kind: Option<ActorKind>,
-        target_kind: Option<ActorKind>,
+        caller_kind: ActorKind,
+        target_kind: ActorKind,
         message: Option<String>,
     ) -> ServiceResult<Vec<String>> {
         let now = now_millis();
@@ -609,9 +615,7 @@ impl DbConnectService {
         ids.push(fwd_id);
 
         // Reverse: to_bot → caller (Bot↔Bot only).
-        if matches!(caller_kind, Some(ActorKind::Bot))
-            && matches!(target_kind, Some(ActorKind::Bot))
-        {
+        if caller_kind == ActorKind::Bot && target_kind == ActorKind::Bot {
             let rev_id = new_request_id();
             self.requests
                 .insert(PermissionRequest {
@@ -655,8 +659,8 @@ impl DbConnectService {
         &self,
         caller: &str,
         to_bot: &str,
-        caller_kind: Option<ActorKind>,
-        target_kind: Option<ActorKind>,
+        caller_kind: ActorKind,
+        target_kind: ActorKind,
     ) -> ServiceResult<(Vec<String>, [String; 2])> {
         let mut edge_ids = Vec::new();
 
@@ -685,9 +689,7 @@ impl DbConnectService {
         let mut default_refs = [target_default, String::new()];
 
         // Reverse edge: to_bot → caller (ref = caller.default), Bot↔Bot only.
-        if matches!(caller_kind, Some(ActorKind::Bot))
-            && matches!(target_kind, Some(ActorKind::Bot))
-        {
+        if caller_kind == ActorKind::Bot && target_kind == ActorKind::Bot {
             self.profiles.ensure_default_profile(caller, &self.env).await?;
             let caller_default = self.default_profile_id_of(caller).await?;
 
@@ -744,8 +746,8 @@ impl DbConnectService {
         &self,
         caller: &str,
         to_bot: &str,
-        caller_kind: Option<ActorKind>,
-        target_kind: Option<ActorKind>,
+        caller_kind: ActorKind,
+        target_kind: ActorKind,
         decider: &str,
         edge_ids: &[String],
         default_refs: &[String; 2],
@@ -779,8 +781,8 @@ impl DbConnectService {
         request_ids.push(fwd_req_id);
 
         // Reverse approved snapshot (Bot↔Bot only).
-        if matches!(caller_kind, Some(ActorKind::Bot))
-            && matches!(target_kind, Some(ActorKind::Bot))
+        if caller_kind == ActorKind::Bot
+            && target_kind == ActorKind::Bot
             && edge_ids.len() == 2
         {
             let rev_req_id = new_request_id();
@@ -1233,9 +1235,12 @@ mod tests {
 
     #[tokio::test]
     async fn actor_kind_helper() {
-        assert_eq!(actor_kind_of("human_88001"), Some(ActorKind::Human));
-        assert_eq!(actor_kind_of("20260421_x:85020"), Some(ActorKind::Bot));
-        assert_eq!(actor_kind_of("plainbot"), None);
+        assert_eq!(actor_kind_of("human_88001"), ActorKind::Human);
+        assert_eq!(actor_kind_of("20260421_x:85020"), ActorKind::Bot);
+        // BCS-native bot uuids (no `:`) now fall back to Bot (A1 fix) instead
+        // of None — the direction gate in create_connect rejects invalid dirs,
+        // not actor_kind_of.
+        assert_eq!(actor_kind_of("plainbot"), ActorKind::Bot);
     }
 
     #[tokio::test]
@@ -1602,12 +1607,11 @@ mod tests {
         svc.cancel(rid).await.expect("cancel ok");
         let r = rq.get(rid, "dev").await.expect("request still exists");
         assert_eq!(r.status, RequestStatus::Cancelled);
-        // cancelling an already-cancelled request should error.
-        let err = svc.cancel(rid).await.expect_err("not pending");
-        assert!(
-            matches!(err, ServiceError::InvalidOperation { .. }),
-            "got {err:?}"
-        );
+        // cancelling an already-cancelled request is idempotent (B4e): Ok, not
+        // an error. Spec says "已 rejected/cancelled 幂等".
+        svc.cancel(rid).await.expect("idempotent cancel ok");
+        let r2 = rq.get(rid, "dev").await.expect("request still exists");
+        assert_eq!(r2.status, RequestStatus::Cancelled);
     }
 
     #[tokio::test]
@@ -1623,7 +1627,7 @@ mod tests {
         assert!(eg.has_friend_edge("human_1", "x:unf", "dev").await);
 
         let n = svc.revoke_friend("human_1", "x:unf").await.expect("revoke ok");
-        assert_eq!(n, 1, "Human→Bot: revoked exactly 1 friend edge");
+        assert_eq!(n.len(), 1, "Human→Bot: revoked exactly 1 friend edge");
         assert!(!eg.has_friend_edge("human_1", "x:unf", "dev").await);
     }
 
@@ -1637,7 +1641,7 @@ mod tests {
         assert!(eg.has_friend_edge("x:uA", "x:uB", "dev").await);
 
         let n = svc.revoke_friend("x:uA", "x:uB").await.expect("revoke ok");
-        assert_eq!(n, 2, "Bot↔Bot: revoked both friend edges");
+        assert_eq!(n.len(), 2, "Bot↔Bot: revoked both friend edges");
         assert!(!eg.has_friend_edge("x:uA", "x:uB", "dev").await);
     }
 
@@ -1666,7 +1670,7 @@ mod tests {
         .expect("insert writer edge");
 
         let n = svc.revoke_friend("human_1", "x:keep").await.expect("revoke");
-        assert_eq!(n, 1, "only the friend (default) edge revoked");
+        assert_eq!(n.len(), 1, "only the friend (default) edge revoked");
         let active = eg.list_active_grants("human_1", "x:keep", "dev").await;
         assert_eq!(active.len(), 1, "writer edge survives");
         assert_eq!(active[0].grant_ref_id, "pp_x:keep_writer");

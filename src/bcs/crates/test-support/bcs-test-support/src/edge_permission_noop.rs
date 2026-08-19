@@ -52,7 +52,7 @@ impl ConnectService for NoopConnectService {
     async fn approve(&self, _: &str, _: &str) -> ServiceResult<Vec<String>> { Ok(vec![]) }
     async fn reject(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<()> { Ok(()) }
     async fn cancel(&self, _: &str) -> ServiceResult<()> { Ok(()) }
-    async fn revoke_friend(&self, _: &str, _: &str) -> ServiceResult<usize> { Ok(0) }
+    async fn revoke_friend(&self, _: &str, _: &str) -> ServiceResult<Vec<String>> { Ok(vec![]) }
     async fn list_friends(&self, _: &str) -> ServiceResult<Vec<FriendListEntry>> { Ok(vec![]) }
     async fn list_requests(
         &self,

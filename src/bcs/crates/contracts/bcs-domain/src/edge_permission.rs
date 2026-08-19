@@ -292,6 +292,7 @@ pub struct BotActorConfig {
 /// Reason code for an admission decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum AdmissionReason {
     /// Active edge grant matched.
     #[default]

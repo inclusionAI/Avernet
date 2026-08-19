@@ -69,7 +69,8 @@ pub trait ConnectService: Send + Sync {
     async fn cancel(&self, request_id: &str) -> ServiceResult<()>;
 
     /// Unfriend: revoke friend edge(s) only (human→bot 1 / bot↔bot 2). Other edges untouched.
-    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<usize>;
+    /// Returns the revoked edge_ids.
+    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<String>>;
 
     /// Friend list (any direction, default-profile edge), enriched.
     async fn list_friends(&self, actor: &str) -> ServiceResult<Vec<FriendListEntry>>;

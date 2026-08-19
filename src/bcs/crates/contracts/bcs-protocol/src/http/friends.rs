@@ -57,6 +57,11 @@ pub struct ListRequestsQuery {
     pub page: u32,
     #[serde(default = "default_page_size")]
     pub page_size: u32,
+    /// `bcs-cli` echoes the caller's `bot_uuid` on this endpoint; we ignore
+    /// it (caller identity comes from auth headers) but accept the param so
+    /// the query deserializes without error.
+    #[serde(default)]
+    pub bot_uuid: Option<String>,
 }
 fn default_direction() -> String {
     "received".into()
@@ -110,7 +115,7 @@ pub struct FriendEntry {
 }
 
 /// Response from friend-related API calls.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FriendApiResponse {
     pub success: bool,
     #[serde(default)]
@@ -119,4 +124,16 @@ pub struct FriendApiResponse {
     pub message: Option<String>,
     #[serde(default)]
     pub data: Option<serde_json::Value>,
+}
+
+/// Wrap a flat DTO in the legacy `{success, data}` envelope that `bcs-cli`
+/// still deserializes (`crates/tools/bcs-cli/src/client.rs` reads
+/// `FriendApiResponse`). Kept until Phase 5 retires the old client contract.
+pub fn envelope<T: Serialize>(payload: &T) -> FriendApiResponse {
+    FriendApiResponse {
+        success: true,
+        error: None,
+        message: None,
+        data: Some(serde_json::to_value(payload).unwrap_or_default()),
+    }
 }

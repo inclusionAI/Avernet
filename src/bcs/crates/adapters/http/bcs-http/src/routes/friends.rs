@@ -9,11 +9,11 @@
 //! Transitional: `state.connect` is `NoopConnectService` until Installment 3.
 //!
 //! # Wire-shape note
-//! The `/friends/*` responses use the edge-permission wire shapes (no legacy
-//! `{success,data}` envelope). `bcs-cli` friend commands
-//! (`crates/tools/bcs-cli/src/client.rs`) currently deserialize `FriendApiResponse`
-//! and will need updating to the new shapes when these routes go live
-//! (tracked: Installment 3 / Phase 5 retire).
+//! Responses are wrapped in the legacy `{success,data}` envelope
+//! ([`FriendApiResponse`]) so the existing `bcs-cli` client
+//! (`crates/tools/bcs-cli/src/client.rs`, deserializing `FriendApiResponse`)
+//! keeps working. The envelope is retired in Phase 5 alongside the old friend
+//! graph.
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -21,8 +21,8 @@ use axum::{
 };
 use bcs_protocol::http::friends::{
     AcceptFriendRequestResponse, CreateFriendRequestBody, CreateFriendRequestResponse,
-    DecisionBody, FriendListByActorQuery, FriendListResponse, ListRequestsQuery,
-    RevokeFriendResponse, StatusResponse,
+    DecisionBody, FriendApiResponse, FriendListByActorQuery, FriendListResponse, ListRequestsQuery,
+    RevokeFriendResponse, StatusResponse, envelope,
 };
 use bcs_service_api::application::{ConnectStatus, RequestDirection};
 
@@ -37,7 +37,7 @@ pub async fn create_friend_request(
     headers: HeaderMap,
     uri: Uri,
     Json(body): Json<CreateFriendRequestBody>,
-) -> Result<Json<CreateFriendRequestResponse>, HttpAdapterError> {
+) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     let from = resolve_caller(&state, &headers, &uri, body.from_bot.as_deref()).await?;
     let res = state
         .connect
@@ -48,12 +48,12 @@ pub async fn create_friend_request(
         ConnectStatus::Approved => "approved",
         ConnectStatus::PublicNoEdge => "public_no_edge",
     };
-    Ok(Json(CreateFriendRequestResponse {
+    Ok(Json(envelope(&CreateFriendRequestResponse {
         request_ids: res.request_ids,
         status: status.into(),
         edge_ids: res.edge_ids,
         auto_accepted: res.auto_accepted,
-    }))
+    })))
 }
 
 /// `POST /friends/requests/{id}/accept` — approve a pending request.
@@ -62,10 +62,10 @@ pub async fn accept_friend_request(
     headers: HeaderMap,
     uri: Uri,
     Path(id): Path<String>,
-) -> Result<Json<AcceptFriendRequestResponse>, HttpAdapterError> {
+) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     let caller = resolve_caller(&state, &headers, &uri, None).await?;
     let edge_ids = state.connect.approve(&id, &caller).await?;
-    Ok(Json(AcceptFriendRequestResponse { edge_ids }))
+    Ok(Json(envelope(&AcceptFriendRequestResponse { edge_ids })))
 }
 
 /// `POST /friends/requests/{id}/reject` — reject a pending request.
@@ -75,14 +75,14 @@ pub async fn reject_friend_request(
     uri: Uri,
     Path(id): Path<String>,
     body: Option<Json<DecisionBody>>,
-) -> Result<Json<StatusResponse>, HttpAdapterError> {
+) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     let caller = resolve_caller(&state, &headers, &uri, None).await?;
     // Body is optional: bcs-cli POSTs reject with no body / no content-type.
     let reason = body.and_then(|Json(b)| b.reason);
     state.connect.reject(&id, &caller, reason).await?;
-    Ok(Json(StatusResponse {
+    Ok(Json(envelope(&StatusResponse {
         status: "rejected".into(),
-    }))
+    })))
 }
 
 /// `POST /friends/requests/{id}/cancel` — caller withdraws a pending request.
@@ -91,14 +91,14 @@ pub async fn cancel_friend_request(
     headers: HeaderMap,
     uri: Uri,
     Path(id): Path<String>,
-) -> Result<Json<StatusResponse>, HttpAdapterError> {
+) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     // Caller identity is resolved for auth-area consistency; `cancel` acts on
     // the request id and the service layer verifies the caller is the sender.
     let _caller = resolve_caller(&state, &headers, &uri, None).await?;
     state.connect.cancel(&id).await?;
-    Ok(Json(StatusResponse {
+    Ok(Json(envelope(&StatusResponse {
         status: "cancelled".into(),
-    }))
+    })))
 }
 
 /// `GET /friends/requests` — paginated inbox/sent list.
@@ -107,7 +107,7 @@ pub async fn list_friend_requests(
     headers: HeaderMap,
     uri: Uri,
     Query(q): Query<ListRequestsQuery>,
-) -> Result<Json<serde_json::Value>, HttpAdapterError> {
+) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     let caller = resolve_caller(&state, &headers, &uri, None).await?;
     let direction = match q.direction.as_str() {
         "sent" => RequestDirection::Sent,
@@ -119,12 +119,13 @@ pub async fn list_friend_requests(
         .connect
         .list_requests(&caller, direction, status, q.page, q.page_size)
         .await?;
-    Ok(Json(serde_json::json!({
+    let payload = serde_json::json!({
         "items": page.items,
         "total": page.total,
         "page": page.page,
         "page_size": page.page_size,
-    })))
+    });
+    Ok(Json(envelope(&payload)))
 }
 
 /// `POST /friends/{actor}/revoke` — unfriend (revoke friend edges only).
@@ -134,15 +135,12 @@ pub async fn revoke_friend(
     uri: Uri,
     Path(actor): Path<String>,
     _body: Option<Json<DecisionBody>>,
-) -> Result<Json<RevokeFriendResponse>, HttpAdapterError> {
+) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     let caller = resolve_caller(&state, &headers, &uri, None).await?;
-    // Body optional (bcs-cli sends empty POSTs). The service returns a revoke
-    // count; real revoked edge_ids are populated when the impl lands
-    // (Installment 3) — return an empty vec until then.
-    let _ = state.connect.revoke_friend(&caller, &actor).await?;
-    Ok(Json(RevokeFriendResponse {
-        revoked_edges: vec![],
-    }))
+    // Body optional (bcs-cli sends empty POSTs). The service now returns the
+    // actual revoked edge_ids (B4c) rather than a count.
+    let revoked_edges = state.connect.revoke_friend(&caller, &actor).await?;
+    Ok(Json(envelope(&RevokeFriendResponse { revoked_edges })))
 }
 
 /// `GET /bots/{id}/friends` — friend list for a bot.
@@ -151,13 +149,13 @@ pub async fn list_friends(
     headers: HeaderMap,
     uri: Uri,
     Path(bot_id): Path<String>,
-) -> Result<Json<FriendListResponse>, HttpAdapterError> {
+) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     // Caller identity is resolved for auth-area consistency; the service layer
     // enforces any visibility/ownership rules on listing.
     let _caller = resolve_caller(&state, &headers, &uri, None).await?;
     let items = state.connect.list_friends(&bot_id).await?;
     let total = items.len() as u32;
-    Ok(Json(FriendListResponse { items, total }))
+    Ok(Json(envelope(&FriendListResponse { items, total })))
 }
 
 /// `GET /friends?actor=` — friend list for any actor, human or bot (api-contract ⑦).
@@ -166,13 +164,13 @@ pub async fn list_friends_by_actor(
     headers: HeaderMap,
     uri: Uri,
     Query(q): Query<FriendListByActorQuery>,
-) -> Result<Json<FriendListResponse>, HttpAdapterError> {
+) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     // Caller identity resolved for auth-area consistency; the service layer
     // enforces visibility/ownership on listing.
     let _caller = resolve_caller(&state, &headers, &uri, None).await?;
     let items = state.connect.list_friends(&q.actor).await?;
     let total = items.len() as u32;
-    Ok(Json(FriendListResponse { items, total }))
+    Ok(Json(envelope(&FriendListResponse { items, total })))
 }
 
 /// Resolve the caller actor id from request context.
