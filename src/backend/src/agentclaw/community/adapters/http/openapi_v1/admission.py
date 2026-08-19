@@ -135,6 +135,12 @@ class AdmissionMode(StrEnum):
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    # Skill asset content/parameters resolve an owner from the asset itself;
+    # app-only callers remain deliberately refused until the unified delegated
+    # asset ACL lands with the Repo/Space adapters.
+    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): AdmissionMode.REFUSED,
+    ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): AdmissionMode.REFUSED,
     # ── own bot: names a bot, resolved as the delegating user's ──────────────
     # The caller can only ever reach their own bots here, so an application
     # acting as them can only reach the same ones.

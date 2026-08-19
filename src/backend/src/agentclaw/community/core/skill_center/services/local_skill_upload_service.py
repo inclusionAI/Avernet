@@ -131,11 +131,6 @@ class LocalSkillUploadService:
             )
             # Re-read same-name candidates, owner, readiness and default state
             # under the edit lock.  Uploader identity is intentionally absent.
-            default_set = self._ensure_default_set(
-                owner_id=owner_id,
-                bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-            )
             matches = self._same_name_matches(
                 bot_id=bot_id, owner_id=owner_id, name=name
             )
@@ -172,7 +167,6 @@ class LocalSkillUploadService:
                 name=name,
                 description=description,
                 files=files,
-                default_set=default_set,
                 is_teclaw=is_teclaw,
             )
         finally:
@@ -188,7 +182,6 @@ class LocalSkillUploadService:
         name: str,
         description: str,
         files: list[tuple[str, bytes]],
-        default_set: dict[str, Any],
         is_teclaw: bool,
     ) -> dict[str, Any]:
         directory, storage = self._skill_service_factory.local_skill_package_storage(
@@ -202,8 +195,6 @@ class LocalSkillUploadService:
             name=name,
         )
         skill: dict[str, Any] | None = None
-        associated = False
-        excluded = False
         try:
             # A previous failed first upload has no authoritative record, but
             # must not be mixed into this package on a retry.
@@ -222,21 +213,6 @@ class LocalSkillUploadService:
                     "source_type": "upload",
                 }
             )
-            default_set = self._ensure_default_set(
-                owner_id=owner_id,
-                bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-            )
-            if not self._skill_set_repo.add_skill_to_set(
-                default_set["id"], skill["id"], user_id=owner_id
-            ):
-                raise RuntimeError("default Skill Set association failed")
-            associated = True
-            if not self._skill_set_repo.add_default_skill_exclusion(
-                owner_id, bot_id, int(default_set["id"]), int(skill["id"])
-            ):
-                raise RuntimeError("default Skill Set exclusion failed")
-            excluded = True
             self._audit_log_repo.insert(
                 {
                     "bot_id": bot_id,
@@ -257,20 +233,6 @@ class LocalSkillUploadService:
         except Exception as exc:  # details remain internal; public mapper is fixed
             # Compensation must continue after a failed rollback step: a failed
             # association delete must never prevent package cleanup.
-            if excluded and skill is not None:
-                try:
-                    self._skill_set_repo.remove_default_skill_exclusion(
-                        owner_id, bot_id, int(default_set["id"]), int(skill["id"])
-                    )
-                except Exception:
-                    pass
-            if associated and skill is not None:
-                try:
-                    self._skill_set_repo.remove_skill_from_set(
-                        default_set["id"], skill["id"]
-                    )
-                except Exception:
-                    pass
             if skill is not None:
                 try:
                     self._skill_repo.delete(skill["id"])
@@ -408,29 +370,6 @@ class LocalSkillUploadService:
                 raise RuntimeError("Local Skill metadata switch failed")
             switched = True
             runtime_sync_attempted = True
-            if bool(skill["active"]):
-                self._ensure_default_set_membership(
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    engine_type=bot.get("active_engine"),
-                    skill_id=str(skill["id"]),
-                )
-            else:
-                # A prior default-set exclusion can be stale after defaults
-                # are recreated.  Mirror the desired inactive state into the
-                # current default set before publishing the replacement.
-                default_set = self._ensure_default_set(
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    engine_type=bot.get("active_engine"),
-                )
-                if not self._skill_set_repo.add_default_skill_exclusion(
-                    owner_id,
-                    bot_id,
-                    int(default_set["id"]),
-                    int(skill["id"]),
-                ):
-                    raise LocalSkillStorageError()
             if not self._sync_runtime(bot, owner_id, bot_id):
                 raise LocalSkillRuntimeSyncError()
             self._audit_log_repo.insert(

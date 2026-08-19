@@ -25,6 +25,7 @@ from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
+    refuse_app_only_caller,
     require_granted_addressed_bot,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -44,13 +45,16 @@ from agentclaw.community.api.local_skill_state_service import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
+from agentclaw.community.api.bot_skill_asset_service import (
+    BotSkillAssetServiceProtocol,
+)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillInvalidPackageError,
     LocalSkillNotFoundError,
 )
 from agentclaw.community.di import Injected
 
-from .schemas import Skill, SkillState, SkillUpload
+from .schemas import Skill, SkillContent, SkillParameters, SkillState, SkillUpload
 
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/skills", tags=["skills"])
 
@@ -247,6 +251,67 @@ async def get_skill(
     # rather than through the helper — one read, not two.
     _require_skills_grant(caller, record)
     return envelope(_to_skill(record), request)
+
+
+@router.get(
+    "/{skill_id}/content",
+    response_model=Envelope[SkillContent],
+    dependencies=[Depends(refuse_app_only_caller)],
+)
+@envelope_errors
+async def get_skill_content(
+    bot_id: BotIdPath,
+    skill_id: SkillIdPath,
+    actor_id: UserIdDep,
+    request: Request,
+    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
+) -> Envelope[SkillContent]:
+    content = await asset_service.get_content(
+        skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
+    )
+    return envelope(SkillContent(content=content), request)
+
+
+@router.get(
+    "/{skill_id}/parameters",
+    response_model=Envelope[SkillParameters],
+    dependencies=[Depends(refuse_app_only_caller)],
+)
+@envelope_errors
+async def get_skill_parameters(
+    bot_id: BotIdPath,
+    skill_id: SkillIdPath,
+    actor_id: UserIdDep,
+    request: Request,
+    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
+) -> Envelope[SkillParameters]:
+    parameters = await asset_service.get_parameters(
+        skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
+    )
+    return envelope(SkillParameters(parameters=parameters), request)
+
+
+@router.put(
+    "/{skill_id}/parameters",
+    response_model=Envelope[SkillParameters],
+    dependencies=[Depends(refuse_app_only_caller)],
+)
+@envelope_errors
+async def replace_skill_parameters(
+    bot_id: BotIdPath,
+    skill_id: SkillIdPath,
+    payload: SkillParameters,
+    actor_id: UserIdDep,
+    request: Request,
+    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
+) -> Envelope[SkillParameters]:
+    parameters = await asset_service.replace_parameters(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        actor_id=actor_id,
+        parameters=payload.parameters,
+    )
+    return envelope(SkillParameters(parameters=parameters), request)
 
 
 @router.post(

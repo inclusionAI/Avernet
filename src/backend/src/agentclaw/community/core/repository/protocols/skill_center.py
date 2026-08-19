@@ -120,6 +120,11 @@ class SkillRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_bot_installed_skills(self, *, env: str, bot_id: str) -> list[dict]:
+        """Return active-only Installation assets for one Bot."""
+        ...
+
+    @abstractmethod
     def create(self, skill_data: dict) -> dict:
         ...
 

@@ -89,19 +89,7 @@ class LocalSkillDeleteService:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
-            default_set = self._skill_set_repo.get_default(
-                user_id=owner_id,
-                bolt_id=bot_id,
-                engine_type=bot.get("active_engine"),
-            )
-            if default_set is None:
-                raise LocalSkillNotFoundError()
-            excluded_skill_ids = self._skill_set_repo.get_all_excluded_skills(
-                owner_id, bot_id
-            )
-            if int(skill_id) not in {
-                int(excluded_id) for excluded_id in excluded_skill_ids
-            }:
+            if bool(skill["active"]):
                 raise LocalSkillActiveError()
             active_custom_set_ids = {
                 str(skill_set["id"])
@@ -112,7 +100,6 @@ class LocalSkillDeleteService:
                     env=str(bot["env"]),
                 )
                 if not skill_set.get("is_default")
-                and str(skill_set["id"]) != str(default_set["id"])
             }
             referenced_set_ids = {
                 reference["skill_set_id"]

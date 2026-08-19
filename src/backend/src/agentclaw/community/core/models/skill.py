@@ -4,8 +4,16 @@ Skill 相关 ORM 模型（迁移自 services/openclawserver/server/models/skill.
 from agentclaw.community.core.base import Base
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
-from sqlalchemy import Column, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint, Integer, func
+from sqlalchemy import BigInteger, Column, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint, Integer, func
+from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
 from sqlalchemy.orm import relationship
+
+
+_UNSIGNED_BIGINT = (
+    BigInteger()
+    .with_variant(MySQLBigInteger(unsigned=True), "mysql")
+    .with_variant(Integer, "sqlite")
+)
 
 
 class SkillSet(Base):
@@ -208,6 +216,40 @@ class SkillSetSkill(Base):
 
 
 register_avernet_tenant_guard(SkillSetSkill)
+
+
+class BotSkillInstallation(Base):
+    """One active desired-state Skill relationship for a Bot.
+
+    A missing row is intentionally the only inactive representation.  This
+    table must not become a second home for membership provenance or runtime
+    observations; those facts have their own owners.
+    """
+
+    __tablename__ = "ac_bot_skill_installation"
+
+    id = Column(
+        _UNSIGNED_BIGINT,
+        primary_key=True,
+        autoincrement=True,
+    )
+    bot_id = Column(String(100), nullable=False, index=True)
+    skill_id = Column(_UNSIGNED_BIGINT, ForeignKey("ac_skill.id"), nullable=False, index=True)
+    env = Column(String(20), default=get_current_env, nullable=False)
+    gmt_created = Column(DateTime, default=func.now(), nullable=False)
+    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant", "env", "bot_id", "skill_id",
+            name="uk_bot_skill_installation",
+        ),
+        {"extend_existing": True},
+    )
+
+
+register_avernet_tenant_guard(BotSkillInstallation)
 
 
 class UserDefaultSkillSet(Base):

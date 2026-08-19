@@ -75,6 +75,9 @@ from agentclaw.community.api.local_skill_upload_service import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
+from agentclaw.community.api.bot_skill_asset_service import (
+    BotSkillAssetServiceProtocol,
+)
 from agentclaw.community.di import config as cfg
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -91,6 +94,12 @@ from agentclaw.community.core.repository.protocols.skill_center import SkillRepo
 from agentclaw.community.core.repository.protocols.skill_center import SkillMemberRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
 from agentclaw.community.core.repository.protocols.skill_center import SpaceSkillRepository
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
+)
+from agentclaw.community.core.repository.implementations.skill_center.installation import (
+    SkillInstallationRepository,
+)
 from agentclaw.community.core.skill_center.services.skill_auth_service import (
     SkillAuthService,
 )
@@ -153,6 +162,9 @@ from agentclaw.community.core.skill_center.services.local_skill_state_service im
 )
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
+)
+from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
+    BotSkillAssetService,
 )
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
@@ -271,6 +283,11 @@ class SkillCenterModule(Module):
             scope=singleton,
         )
         binder.bind(
+            SkillInstallationRepositoryProtocol,
+            to=SkillInstallationRepository,
+            scope=singleton,
+        )
+        binder.bind(
             SkillBatchSyncService,
             to=SkillBatchSyncService,
             scope=singleton,
@@ -328,6 +345,7 @@ class SkillCenterModule(Module):
         self,
         skill_repo: SkillRepository,
         skill_set_repo: SkillSetRepository,
+        installations: SkillInstallationRepositoryProtocol,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
@@ -364,7 +382,7 @@ class SkillCenterModule(Module):
     def local_skill_state_service(
         self,
         skill_repo: SkillRepository,
-        skill_set_repo: SkillSetRepository,
+        installations: SkillInstallationRepositoryProtocol,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_set_service_factory: SkillSetServiceFactory,
@@ -375,7 +393,7 @@ class SkillCenterModule(Module):
     ) -> LocalSkillStateServiceProtocol:
         return LocalSkillStateService(
             skill_repo,
-            skill_set_repo,
+            installations,
             bot_repo,
             collaborator_service,
             skill_set_service_factory,
@@ -407,6 +425,27 @@ class SkillCenterModule(Module):
             skill_service_factory,
             edit_guard,
             cleanup_repo,
+            lambda: injector.get(DeviceContextResolver),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bot_skill_asset_service(
+        self,
+        skill_repo: SkillRepository,
+        bot_repo: BotRepository,
+        collaborator_service: CollaboratorServiceProtocol,
+        skill_service_factory: SkillServiceFactory,
+        parameter_service_factory: SkillParameterServiceFactoryProtocol,
+        injector: Injector,
+    ) -> BotSkillAssetServiceProtocol:
+        return BotSkillAssetService(
+            skill_repo,
+            bot_repo,
+            collaborator_service,
+            skill_service_factory,
+            parameter_service_factory,
             lambda: injector.get(DeviceContextResolver),
         )
 
@@ -610,6 +649,7 @@ class SkillCenterModule(Module):
         self,
         skill_repo: SkillRepository,
         skill_set_repo: SkillSetRepository,
+        installations: SkillInstallationRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         mcp_config_service: MCPConfigService,
         skill_service_factory: SkillServiceFactory,
@@ -633,6 +673,7 @@ class SkillCenterModule(Module):
             path_factory=path_factory,
             pool_layout_paths=skill_service_factory.resolve_pool_paths,
             ext_info_provider=_build__ext_info_provider(injector),
+            installations=installations,
         )
 
     @singleton
