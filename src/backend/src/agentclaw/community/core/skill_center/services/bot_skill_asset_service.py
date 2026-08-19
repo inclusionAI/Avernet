@@ -257,7 +257,10 @@ class _RepoAssetAdapter:
         self._service = service
 
     def resolve(self, *, skill: dict[str, Any], bot_id: str, actor_id: str):
-        if skill.get("user_id") or skill.get("bolt_id"):
+        # Legacy Repo rows are system-owned.  Their repository implementation
+        # persists a historical ``bolt_id='default'`` sentinel, so ownership
+        # must be determined by the governed source scheme, never that column.
+        if skill.get("user_id") or not str(skill.get("git_path") or "").startswith("git://"):
             raise LocalSkillNotFoundError()
         bot = self._service._bot_repo.get_by_id(bot_id)
         if bot is None:
