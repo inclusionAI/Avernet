@@ -27,11 +27,11 @@ use bcs_service_api::application::v1::{
     message::{ListSessionMessages, SessionMessageService},
     require_authenticated_user, require_human,
     session::{
-        AddSessionParticipant, BotParticipantMode, CollectSession, CompleteSession, CreateSession,
-        CreateSessionOutcome, DeleteSession, DeleteSessionParticipant, GetSession, ListSessions,
-        SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionInput,
-        SessionParticipant, SessionService, SessionStatus as V1SessionStatus, SessionSummary,
-        UncollectSession, UpdateSession, UpdateSessionParticipant,
+        AddSessionParticipant, CollectSession, CompleteSession, CreateSession, CreateSessionOutcome,
+        DeleteSession, DeleteSessionParticipant, GetSession, ListSessions, SessionCollectionResult,
+        SessionCompletionResult, SessionDetail, SessionInput, SessionParticipant, SessionService,
+        SessionStatus as V1SessionStatus, SessionSummary, UncollectSession, UpdateSession,
+        UpdateSessionParticipant,
     },
 };
 use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
@@ -198,6 +198,41 @@ impl SessionServiceImpl {
             }
             Principal::Bot(_) => Ok(false),
         }
+    }
+
+    async fn authorize_human_self_mode_update(
+        &self,
+        principal: &Principal,
+        caller: &AuthenticatedCaller,
+        session: &Session,
+        actor_id: &str,
+    ) -> Result<(), ApplicationError> {
+        if principal.actor_id() != actor_id {
+            return Err(ApplicationError::forbidden(
+                "A Human participant may only update its own mode",
+            ));
+        }
+        if !self.can_read_session_detail(caller, session).await? {
+            return Err(ApplicationError::forbidden(
+                "The authenticated Human cannot access this Session",
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_participant_mode(
+        mode: ParticipantMode,
+        actor_kind: ActorKind,
+    ) -> Result<(), ApplicationError> {
+        if mode.is_valid_for(actor_kind) {
+            return Ok(());
+        }
+        Err(ApplicationError::invalid(
+            "invalid_participant_mode",
+            format!(
+                "Participant mode '{mode:?}' is invalid for actor kind '{actor_kind:?}'"
+            ),
+        ))
     }
 
     async fn load_group(&self, group_id: &str) -> Result<DomainGroup, ApplicationError> {
@@ -819,7 +854,7 @@ impl SessionService for SessionServiceImpl {
                 ),
             ));
         }
-        let mode = BotParticipantMode::Auto;
+        let mode = ParticipantMode::Auto;
         // VfhG3: derive role from parent group.participants if the bot is already
         // there; otherwise strategy default (ManagerWorker→Worker, else
         // Consultant). Mirrors legacy bcs-http add_session_participant which picks
@@ -840,7 +875,7 @@ impl SessionService for SessionServiceImpl {
             kind: None,
             role,
             actor_kind: ActorKind::Bot,
-            mode: Some(map_v1_mode_to_domain(mode)),
+            mode: Some(mode),
         };
         let mut updated = self
             .sessions
@@ -856,12 +891,72 @@ impl SessionService for SessionServiceImpl {
         command: UpdateSessionParticipant,
     ) -> Result<SessionParticipant, ApplicationError> {
         let principal = require_human(&command.caller)?;
-        self.load_session_for_manage(&principal, &command.session_id)
+        let session = self.load_session(&command.session_id).await?;
+        let group = self.load_group(&session.group_id).await?;
+        if let Some(actor_kind) = session
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == command.bot_uuid)
+            .map(|participant| participant.actor_kind)
+        {
+            match actor_kind {
+                ActorKind::Human => {
+                    self.authorize_human_self_mode_update(
+                        &principal,
+                        &command.caller,
+                        &session,
+                        &command.bot_uuid,
+                    )
+                    .await?;
+                }
+                ActorKind::Bot => {
+                    if !self.can_manage_session(&principal, &session, &group).await? {
+                        return Err(ApplicationError::forbidden(
+                            "Principal may not manage this Session",
+                        ));
+                    }
+                }
+            }
+            Self::validate_participant_mode(command.mode, actor_kind)?;
+        } else if command.bot_uuid.starts_with("human_") {
+            // Preserve legacy Human first-insert while binding the target to
+            // the authenticated Human and the existing V1 read boundary.
+            self.authorize_human_self_mode_update(
+                &principal,
+                &command.caller,
+                &session,
+                &command.bot_uuid,
+            )
             .await?;
-        let domain_mode = map_v1_mode_to_domain(command.mode);
+            Self::validate_participant_mode(command.mode, ActorKind::Human)?;
+            // Match the legacy endpoint's two-step first-insert flow: add the
+            // Human idempotently with its kind-aware default (Absent), then
+            // always apply the requested mode.  The second write is important
+            // when another request inserts the same Human between our read and
+            // add: an idempotent add may return that concurrent state, but this
+            // request must still apply its own mode.
+            let participant = Participant::human(&command.bot_uuid, ParticipantRole::Observer);
+            self.sessions
+                .add_participant(&command.session_id, participant)
+                .await
+                .map_err(map_session_error)?;
+        } else {
+            if !self.can_manage_session(&principal, &session, &group).await? {
+                return Err(ApplicationError::forbidden(
+                    "Principal may not manage this Session",
+                ));
+            }
+            return Err(ApplicationError::not_found(
+                "participant_not_found",
+                format!(
+                    "Participant '{}' not found in Session '{}'",
+                    command.bot_uuid, command.session_id
+                ),
+            ));
+        }
         let mut updated = self
             .sessions
-            .update_participant_mode(&command.session_id, &command.bot_uuid, domain_mode)
+            .update_participant_mode(&command.session_id, &command.bot_uuid, command.mode)
             .await
             .map_err(map_session_error)?;
         match self
@@ -1018,13 +1113,6 @@ fn project_summary(session: &Session) -> SessionSummary {
         participant_count: Some(session.participants.len()),
         created_at: session.created_at,
         updated_at: session.updated_at,
-    }
-}
-
-fn map_v1_mode_to_domain(mode: BotParticipantMode) -> ParticipantMode {
-    match mode {
-        BotParticipantMode::Auto => ParticipantMode::Auto,
-        BotParticipantMode::Muted => ParticipantMode::Muted,
     }
 }
 

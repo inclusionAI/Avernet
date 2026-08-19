@@ -166,7 +166,7 @@ DDL. Full ruling and per-endpoint mapping in
 | Group | Endpoints | Owner | Pri | Router | State |
 |---|---|---|---|---|---|
 | sessions | 7 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **IMPLEMENTED — PR #630**; operators + stages 2026-08-09 |
-| engine (read-only) | 3 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **IMPLEMENTED — PR #630** |
+| engine (read/write) | 4 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **IMPLEMENTED — PR #630**; process restart added 2026-08-17 |
 | connection | 1 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **IMPLEMENTED — PR #630** |
 | approvals | 3 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **IMPLEMENTED — PR #630** |
 | models | 2 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/models/` | ✅ **IMPLEMENTED — PR #630** |
@@ -181,11 +181,14 @@ DDL. Full ruling and per-endpoint mapping in
 > `…/connection` endpoint returns one complete socket URL, credential included,
 > and the caller builds the connection itself.
 >
-> `engine/switch` and `engine/restart` are deliberately excluded — wrapping
-> `switch` would be a back door around #494's `engine`-immutability ruling on
-> `PUT /openapi/v1/bots/{bot_id}`, and `restart` would give one bot two restart
-> verbs. `session-favorites` and the `/api/openclaw` HTTP trio are **deferred,
-> not cancelled** (both additive later). Reasons in `engine-surface.md`.
+> `engine/switch` remains deliberately excluded: wrapping it would be a back
+> door around #494's `engine`-immutability ruling on
+> `PUT /openapi/v1/bots/{bot_id}`. Engine-process restart is now exposed as
+> `POST /openapi/v1/bots/{bot_id}/engine/restart`; it relays the daemon restart
+> and is distinct from the bot-level `/restart`, which re-provisions the whole
+> container. Because this operation was introduced after bot-first addressing,
+> it has no component-first retiring alias. `session-favorites` and the
+> `/api/openclaw` HTTP trio remain **deferred, not cancelled**.
 >
 > **Routines is Track C's worked precedent, not a Track B one.** Backend
 > `/api/cron` → `CronRelayService` → `DeviceAdapterTransport` → engine has been
@@ -202,7 +205,7 @@ DDL. Full ruling and per-endpoint mapping in
 | Background/scheduled work revisit | ⬜ TODO | before a 2nd tenant holds real data |
 | **Bot identity keys collide across tenants** ([#556](https://github.com/inclusionAI/Avernet/issues/556)) | ⬜ TODO (totalfrank) | Passport, auth relationships, BCN, policy row are keyed on `bot_id`/`owner_id` with no tenant axis, and every owner's first bot is literally `"default"`. **Should gate enabling multi-tenancy.** Stopgapped in #494 by `sync_to_bcn=False` on the public update path |
 | Async create ≠ authorized bot ([#559](https://github.com/inclusionAI/Avernet/issues/559)) | ⬜ TODO (totalfrank) | the pending create spec is never persisted; completion rebuilds it from the polling request. Pre-existing on `dev`; latent (community Passport always issues) |
-| Swallowed external identity writes ([#560](https://github.com/inclusionAI/Avernet/issues/560)) | ⬜ TODO (totalfrank) | owner-grant on create and Passport metadata on update log-and-continue, against `AGENTS.md:203-204`. One ruling settles both sites; recommendation is *report partial success* |
+| Swallowed external identity writes ([#560](https://github.com/inclusionAI/Avernet/issues/560)) | 🔧 PARTIAL | Owner-grant writes in shared cloud create/auth completion and Local Bot completion now propagate failures, and an issued Passport identity without `agent_code` fails closed; public OpenAPI Passport metadata updates are normalized to a 502 envelope instead of returning success. The legacy internal update route still logs and continues, and no durable cross-system repair/reconciliation workflow exists yet. |
 
 > The three issues above came out of #494's review and are **pre-existing on
 > `dev`**, not regressions — they're recorded here because they are decisions
@@ -225,13 +228,28 @@ Per the standing decision, tenant-isolation schema changes are applied on the
 platform out of band, so **these statements are the authoritative record**.
 Hand them to whoever applies DDL together with the ordering notes.
 
-**Stage 1 — `ac_bots`** (already applied):
+**Stage 1 — `ac_bots`** (tenant column already applied; Bot Workshop space column pending platform execution):
 
 ```sql
 ALTER TABLE ac_bots
   ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
     COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+
+-- Bot Workshop Business Space ownership. Run this before deploying code that
+-- contains BotModel.space_id: ORM SELECTs read the column, so a missing column
+-- breaks Bot reads and creation. NULL represents a legacy row with no explicit
+-- space assignment; the public Inventory interprets it as personal:{owner_id},
+-- so no one-time backfill is required. The compatibility column may remain
+-- during code rollback; platform owners should assess DROP COLUMN only after no
+-- deployed version uses it.
+ALTER TABLE ac_bots
+  ADD COLUMN space_id VARCHAR(128) NULL
+    COMMENT 'business-space ownership; NULL uses the owner personal-space fallback';
 ```
+
+The delivery record for `space_id` must identify the environment, change/version
+record, execution time, rollback owner, and result. Team-space support is not
+release-ready until that evidence exists.
 
 **Stage 5 — MCP configuration** (PR #564). Three statements, **two different
 deadlines**:
@@ -940,8 +958,9 @@ literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-approvals  authorized  ceiling  check-name  connection  engine  identity
-loadtest  logs  mcp  models  resources  routines  sessions  skills
+approvals  authorized  all  ceiling  check-name  connection  engine  identity
+loadtest  local  logs  mcp  models  resources  routines  sessions
+skills
 ```
 
 Nine of those fifteen — `approvals`, `connection`, `engine`, `identity`,
@@ -1511,6 +1530,26 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 ---
 
 ## Changelog (append a dated line whenever you move the board)
+
+- **2026-08-18** — **Data-init trigger/status contract completed.** The public
+  trigger now forwards the `IAM_TOKEN` cookie through the HTTP boundary into a
+  typed `DataInitServiceProtocol`; the service persists it only when an
+  initialization attempt will actually run. Added
+  `GET /openapi/v1/bots/{bot_id}/data-init` for polling the bounded public state
+  (`not_started`, `pending_init`, `in_progress`, `completed`, or `failed`)
+  without exposing the Bot `ext` bag, credentials, or downstream sync details.
+  Regenerated the Gateway `bots.openapi.json`; the independent OCB/Sofapy copy
+  and real IAM/Engine/downstream E2E remain deployment verification items.
+
+- **2026-08-17** — **TC bot workshop and local workflows.** Added the
+  aggregated `/bots/all` inventory, personal-local device/create/read/restart/
+  delete/open-folder workflows, dormant activation, cold-start data
+  initialization, and engine-process restart. Local and aggregate inventory
+  remain human-only at both Gateway and backend admission; the remaining bot
+  surface continues to admit an application only within its live grants. The
+  engine restart has only its bot-first address because no earlier public route
+  existed to retire. Regenerated Gateway `bots.openapi.json` is the release
+  artifact for this surface and must be copied unchanged to the OCB Gateway.
 
 - **2026-08-15** — **Bot-first addressing.** Every bot-scoped operation moved
   to `/openapi/v1/bots/{bot_id}/<component>/…`, reversing the component-first

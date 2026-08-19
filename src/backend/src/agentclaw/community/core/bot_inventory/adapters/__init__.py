@@ -1,0 +1,1 @@
+"""Bot inventory fallback adapters."""

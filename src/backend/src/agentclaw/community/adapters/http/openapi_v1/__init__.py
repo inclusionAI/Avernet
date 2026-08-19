@@ -178,6 +178,8 @@ from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
 from .bots.engine_config import router as engine_config_router
 from .caller import router as caller_router
+from .containers import router as containers_router
+from .diagnostics import router as diagnostics_router
 from .deprecated import (
     ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
     GRANT_CHECKED_GROUPS as _LEGACY_GRANT_CHECKED,
@@ -197,6 +199,7 @@ from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
 from .engine_runtime.sessions import router as engine_sessions_router
 from .identity import router as identity_router
+from .local import router as local_router
 from .loadtest import router as loadtest_router
 from .mcp import router as mcp_router
 from .bot_logs import router as logs_router
@@ -204,6 +207,10 @@ from .bot_chats import router as chats_router
 from .resources import router as resources_router
 from .routines import router as routines_router
 from .skills import router as skills_router
+from .service_publications import (
+    edit_lock_router as service_edit_lock_router,
+    router as service_lifecycle_router,
+)
 from .spaces import router as spaces_router
 from .work_orders import router as work_orders_router
 
@@ -265,6 +272,18 @@ _SUBGROUPS = [
     # because it would look the grant up against the delegating user rather than
     # the owner. See `skills/router.py` and `admission.SKILL_SCOPED_OPERATIONS`.
     skills_router,
+    # Local workflows are mixed: listings filter grants, device discovery is
+    # user-gated, existing Bot operations check the own-Bot grant, and only the
+    # creation/authorization pair remains human-only. Dependencies are declared
+    # per route in the local router.
+    local_router,
+    # These groups resolve the addressed owner through OwnerIdDep, which also
+    # performs the application-grant check. Their handlers then enforce the
+    # live Bot collaborator relation at member level before any publication read.
+    service_lifecycle_router,
+    service_edit_lock_router,
+    containers_router,
+    diagnostics_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it

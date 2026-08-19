@@ -97,6 +97,24 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     # reason and with the same default — the caller's own bot.
     ("get", "/openapi/v1/bots/{bot_id}/chats"),
     ("get", "/openapi/v1/bots/{bot_id}/chats/{trace_id}"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"),
+    ("get", "/openapi/v1/bots/{bot_id}/lifecycle"),
+    ("delete", "/openapi/v1/bots/{bot_id}/lifecycle"),
+    ("get", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),
+    ("put", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/restart"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/offline"),
+    ("post", "/openapi/v1/bots/{bot_id}/lifecycle/retry"),
+    ("get", "/openapi/v1/bots/{bot_id}/edit-lock"),
+    ("post", "/openapi/v1/bots/{bot_id}/edit-lock"),
+    ("delete", "/openapi/v1/bots/{bot_id}/edit-lock"),
+    ("post", "/openapi/v1/bots/{bot_id}/edit-lock/steal"),
+    ("get", "/openapi/v1/bots/{bot_id}/containers"),
+    ("post", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"),
+    ("get", "/openapi/v1/bots/{bot_id}/diagnostics/health"),
+    ("post", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"),
 }
 
 
@@ -276,10 +294,10 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
             # parameter existed.
             assert not params["owner_id"].get("required", False), path
 
-    # 16 current operations, and the same 16 answering at their former
-    # addresses while callers migrate. The number halves again when the
-    # deprecated package is deleted.
-    assert len(engine_runtime) == 32
+    # 17 current operations. Sixteen also answer at their former addresses
+    # while callers migrate; engine restart was introduced after bot-first
+    # addressing and therefore has no legacy alias.
+    assert len(engine_runtime) == 33
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (
@@ -290,10 +308,10 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
     assert sorted(carrying_owner) == sorted(
         set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE
     ), (
-        "owner_id belongs to the engine-runtime operations and the "
-        "operations declared in _OWNER_ADDRESSED_ELSEWHERE, and to nothing "
-        "else by accident"
+        "owner_id belongs to engine-runtime and the explicitly listed "
+        "owner-addressed operations, and to nothing else by accident"
     )
+
 
 
 def test_the_stage_enum_publishes_exactly_the_three_runtimes():

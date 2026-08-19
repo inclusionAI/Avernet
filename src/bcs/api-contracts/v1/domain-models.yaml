@@ -912,6 +912,17 @@ BotParticipantMode:
     - auto
     - muted
 
+HumanParticipantMode:
+  type: string
+  enum:
+    - present
+    - absent
+
+SessionParticipantMode:
+  oneOf:
+    - $ref: "#/BotParticipantMode"
+    - $ref: "#/HumanParticipantMode"
+
 SessionStatus:
   type: string
   enum:
