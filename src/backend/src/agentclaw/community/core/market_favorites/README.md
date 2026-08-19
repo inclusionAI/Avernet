@@ -1,8 +1,9 @@
 # `agentclaw.community.core.market_favorites`
 
-Stores a Space's favorite references as `(target_type, target_code)`. Adding an
-already-favorited target is idempotent; canceling requires an existing favorite
-and reports not found when there is nothing to remove.
+Stores a user's favorite references as `(target_type, target_code)`, with the
+Space path used only to authorize access. Adding an already-favorited target is
+idempotent; canceling requires an existing favorite and reports not found when
+there is nothing to remove.
 This phase intentionally does not import Skill or MCP catalogue implementations.
 Catalogue names, descriptions, icons, versions and owners are not exposed at
 the HTTP boundary until a governed catalogue lookup contract is implemented.
@@ -10,7 +11,7 @@ the HTTP boundary until a governed catalogue lookup contract is implemented.
 ## Context Boundary
 
 ```yaml
-purpose: "Own idempotent Space-scoped marketplace favorite references without owning catalogue metadata."
+purpose: "Own idempotent user-scoped marketplace favorite references without owning catalogue metadata."
 provides:
   - MarketFavoriteService
   - MarketFavoriteModel
@@ -32,6 +33,6 @@ internal_dependencies:
 
 ### Change impact
 
-The unique key defines favorite idempotency. Metadata enrichment must be added
-through an explicit Service/Plugin contract; this module must not reach directly
-into Skill Center or an HTTP client.
+The unique key defines favorite idempotency across tenant, environment, user,
+and object. Metadata enrichment must be added through an explicit Service/Plugin
+contract; this module must not reach directly into Skill Center or an HTTP client.

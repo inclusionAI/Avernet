@@ -26,7 +26,7 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
         space_id,
         target_type,
         target_code,
-        created_by,
+        user_id,
         env,
     ):
         try:
@@ -34,7 +34,7 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
                 existing = (
                     db.query(self._Favorite)
                     .filter(
-                        self._Favorite.space_id == space_id,
+                        self._Favorite.user_id == user_id,
                         self._Favorite.target_type == target_type.value,
                         self._Favorite.target_code == target_code,
                         self._Favorite.env == env,
@@ -45,9 +45,10 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
                     return existing.to_record()
                 row = self._Favorite(
                     space_id=space_id,
+                    user_id=user_id,
                     target_type=target_type.value,
                     target_code=target_code,
-                    created_by=created_by,
+                    created_by=user_id,
                     env=env,
                 )
                 db.add(row)
@@ -59,7 +60,7 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
                 existing = (
                     db.query(self._Favorite)
                     .filter(
-                        self._Favorite.space_id == space_id,
+                        self._Favorite.user_id == user_id,
                         self._Favorite.target_type == target_type.value,
                         self._Favorite.target_code == target_code,
                         self._Favorite.env == env,
@@ -70,12 +71,12 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
                     raise
                 return existing.to_record()
 
-    def cancel(self, *, space_id, target_type, target_code, env) -> bool:
+    def cancel(self, *, space_id, target_type, target_code, user_id, env) -> bool:
         with self._db.orm_session() as db:
             deleted = (
                 db.query(self._Favorite)
                 .filter(
-                    self._Favorite.space_id == space_id,
+                    self._Favorite.user_id == user_id,
                     self._Favorite.target_type == target_type.value,
                     self._Favorite.target_code == target_code,
                     self._Favorite.env == env,
@@ -90,13 +91,14 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
         space_id,
         target_type,
         keyword,
+        user_id,
         env,
         offset,
         limit,
     ):
         with self._db.orm_session() as db:
             query = db.query(self._Favorite).filter(
-                self._Favorite.space_id == space_id,
+                self._Favorite.user_id == user_id,
                 self._Favorite.env == env,
             )
             if target_type is not None:

@@ -169,21 +169,21 @@ def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:
         space_id=space.id,
         target_type=FavoriteTargetType.SKILL,
         target_code="skill-1",
-        created_by="owner-1",
+        user_id="owner-1",
         env="dev",
     )
     duplicate = repository.add(
         space_id=space.id,
         target_type=FavoriteTargetType.SKILL,
         target_code="skill-1",
-        created_by="owner-1",
+        user_id="owner-1",
         env="dev",
     )
     repository.add(
         space_id=space.id,
         target_type=FavoriteTargetType.MCP,
         target_code="mcp-1",
-        created_by="owner-1",
+        user_id="owner-1",
         env="dev",
     )
 
@@ -192,6 +192,7 @@ def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:
         space_id=space.id,
         target_type=FavoriteTargetType.SKILL,
         keyword="skill",
+        user_id="owner-1",
         env="dev",
         offset=0,
         limit=10,
@@ -203,6 +204,7 @@ def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:
             space_id=space.id,
             target_type=FavoriteTargetType.SKILL,
             target_code="skill-1",
+            user_id="owner-1",
             env="dev",
         )
         is True
@@ -212,6 +214,7 @@ def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:
             space_id=space.id,
             target_type=FavoriteTargetType.SKILL,
             target_code="skill-1",
+            user_id="owner-1",
             env="dev",
         )
         is False

@@ -9,6 +9,12 @@ export const routes = [
     layout: false,
   },
   {
+    name: '我的收藏',
+    path: '/market/favorites',
+    component: './MarketFavorites',
+    layout: false,
+  },
+  {
     path: '/bcn',
     layout: false,
     component: './Layout/BcnContainer',

@@ -1,4 +1,4 @@
-"""Persistence contract for space-scoped market favorites."""
+"""Persistence contract for user-scoped market favorites."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class MarketFavoriteRepositoryProtocol(Protocol):
         space_id: int,
         target_type: FavoriteTargetType,
         target_code: str,
-        created_by: str,
+        user_id: str,
         env: str,
     ) -> MarketFavoriteRecord: ...
 
@@ -32,6 +32,7 @@ class MarketFavoriteRepositoryProtocol(Protocol):
         space_id: int,
         target_type: FavoriteTargetType,
         target_code: str,
+        user_id: str,
         env: str,
     ) -> bool: ...
 
@@ -42,6 +43,7 @@ class MarketFavoriteRepositoryProtocol(Protocol):
         space_id: int,
         target_type: FavoriteTargetType | None,
         keyword: str | None,
+        user_id: str,
         env: str,
         offset: int,
         limit: int,
