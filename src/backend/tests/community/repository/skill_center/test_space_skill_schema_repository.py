@@ -25,6 +25,10 @@ from agentclaw.community.core.models.space_skill import (
 )
 from agentclaw.community.core.models.skill import Skill, SkillSetSkill
 from agentclaw.community.core.models.skill_center_sync_log import SkillCenterSyncLog
+from agentclaw.community.core.spaces.repository.models import (
+    SpaceMemberModel,
+    SpaceModel,
+)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
@@ -64,6 +68,8 @@ def test_additive_schema_registers_every_space_skill_fact_with_tenant_env_scope(
         "ac_skill_version",
         "ac_skill_publication_attempt",
     } <= tables
+    assert Space is SpaceModel
+    assert SpaceMember is SpaceMemberModel
 
     for model in (
         Space,
@@ -76,6 +82,17 @@ def test_additive_schema_registers_every_space_skill_fact_with_tenant_env_scope(
         columns = {column.name: column for column in model.__table__.columns}
         assert columns["avernet_tenant"].nullable is False
         assert columns["env"].nullable is False
+
+    assert {
+        "description",
+        "sc_mapping_status",
+        "updated_by",
+        "deleted_at",
+        "deleted_by",
+    } <= {column.name for column in SpaceModel.__table__.columns}
+    assert {"status", "removed_at", "removed_by"} <= {
+        column.name for column in SpaceMemberModel.__table__.columns
+    }
 
 
 def test_additive_orm_contract_extends_only_the_documented_legacy_tables(db):
@@ -158,6 +175,7 @@ def test_schema_rejects_empty_env_and_duplicate_active_owner(db):
                 space_type="TEAM",
                 name="Invalid",
                 created_by="u-1",
+                updated_by="u-1",
                 env="",
             )
         )
@@ -275,8 +293,21 @@ def test_additive_migration_is_repeat_safe_and_requires_reviewed_duplicate_clean
     )
     ddl = (sql_dir / "2026_08_19_additive_space_skill_schema.sql").read_text()
     verify = (sql_dir / "2026_08_19_additive_space_skill_schema_verify.sql").read_text()
+    spaces_sql = (
+        Path(__file__).parents[4]
+        / "src"
+        / "agentclaw"
+        / "community"
+        / "core"
+        / "spaces"
+        / "sql"
+        / "2026_08_17_spaces.sql"
+    ).read_text()
 
-    assert ddl.count("CREATE TABLE IF NOT EXISTS") == 7
+    assert ddl.count("CREATE TABLE IF NOT EXISTS") == 5
+    assert "CREATE TABLE IF NOT EXISTS ac_space" not in ddl
+    assert "ALTER TABLE ac_space" in spaces_sql
+    assert "ALTER TABLE ac_space_member" in spaces_sql
     assert "CREATE UNIQUE INDEX IF NOT EXISTS uk_skill_set_skill" in ddl
     assert "DELETE FROM" not in ddl
     assert "ac_skill_set_skill duplicate" in verify

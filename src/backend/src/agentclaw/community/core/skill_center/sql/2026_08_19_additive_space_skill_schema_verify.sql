@@ -14,6 +14,9 @@ SELECT 'ac_skill_set_skill orphan skill' AS check_name, COUNT(*) AS count
 SELECT 'ac_skill_set_skill orphan set' AS check_name, COUNT(*) AS count
   FROM ac_skill_set_skill rel LEFT JOIN ac_skill_set skill_set ON skill_set.id = rel.skill_set_id
  WHERE skill_set.id IS NULL;
+SELECT 'ac_space non-numeric sc team id' AS check_name, COUNT(*) AS count
+  FROM ac_space
+ WHERE sc_team_id IS NOT NULL AND CAST(sc_team_id AS CHAR) REGEXP '[^0-9]';
 
 -- Apply the separately reviewed, exact three-row duplicate cleanup here.
 -- This script deliberately contains no broad DELETE/window-function cleanup.

@@ -10,9 +10,8 @@ from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import (
     SkillGrant,
     SkillSpaceBinding,
-    Space,
-    SpaceMember,
 )
+from agentclaw.community.core.spaces.repository.models import SpaceMemberModel, SpaceModel
 from agentclaw.community.core.repository.protocols.skill_center import (
     SpaceSkillRepository as SpaceSkillRepositoryProtocol,
 )
@@ -44,7 +43,8 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
 
     def create_space(self, data: SpaceCreateData) -> SpaceRecord:
         with self._db.orm_session() as session:
-            space = Space(**data)
+            payload = {**data, "updated_by": data["created_by"]}
+            space = SpaceModel(**payload)
             session.add(space)
             session.flush()
             session.refresh(space)
@@ -53,8 +53,12 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
     def get_space(self, space_id: int, *, env: str) -> SpaceRecord | None:
         with self._db.orm_session() as session:
             space = (
-                session.query(Space)
-                .filter(Space.id == space_id, Space.env == env)
+                session.query(SpaceModel)
+                .filter(
+                    SpaceModel.id == space_id,
+                    SpaceModel.env == env,
+                    SpaceModel.deleted_at.is_(None),
+                )
                 .first()
             )
             return self._space_to_dict(space) if space else None
@@ -79,11 +83,11 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
 
         with self._db.orm_session() as session:
             space = (
-                session.query(Space)
+                session.query(SpaceModel)
                 .filter(
-                    Space.id == ownership_data["space_id"],
-                    Space.env == env,
-                    Space.deleted_at.is_(None),
+                    SpaceModel.id == ownership_data["space_id"],
+                    SpaceModel.env == env,
+                    SpaceModel.deleted_at.is_(None),
                 )
                 .one_or_none()
             )
@@ -91,12 +95,12 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                 raise ValueError("Space Skill ownership requires an active Space")
 
             member = (
-                session.query(SpaceMember)
+                session.query(SpaceMemberModel)
                 .filter(
-                    SpaceMember.space_id == space.id,
-                    SpaceMember.user_id == owner_grant_data["user_id"],
-                    SpaceMember.status == "ACTIVE",
-                    SpaceMember.env == env,
+                    SpaceMemberModel.space_id == space.id,
+                    SpaceMemberModel.user_id == owner_grant_data["user_id"],
+                    SpaceMemberModel.status == "ACTIVE",
+                    SpaceMemberModel.env == env,
                 )
                 .one_or_none()
             )
@@ -131,7 +135,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             }
 
     @staticmethod
-    def _space_to_dict(space: Space) -> SpaceRecord:
+    def _space_to_dict(space: SpaceModel) -> SpaceRecord:
         return {
             "id": space.id,
             "space_code": space.space_code,

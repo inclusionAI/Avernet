@@ -40,6 +40,11 @@ class SpaceRepository(SpaceRepositoryProtocol):
     def _new_code() -> str:
         return f"spc-{uuid4().hex[:20]}"
 
+    @staticmethod
+    def _stored_role(role: SpaceRole) -> str:
+        """Keep the existing OWNER projection over the final ADMINISTRATOR row."""
+        return "ADMINISTRATOR" if role is SpaceRole.OWNER else SpaceRole.MEMBER.value
+
     def initialize_personal(self, *, user_id: str, env: str):
         try:
             with self._db.transactional_orm_session() as db:
@@ -69,7 +74,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member(
                         space_id=space.id,
                         user_id=user_id,
-                        role=SpaceRole.OWNER.value,
+                    role=self._stored_role(SpaceRole.OWNER),
                         env=env,
                         created_by=user_id,
                     )
@@ -112,7 +117,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member(
                         space_id=space.id,
                         user_id=creator_id,
-                        role=SpaceRole.OWNER.value,
+                    role=self._stored_role(SpaceRole.OWNER),
                         env=env,
                         created_by=creator_id,
                     )
@@ -135,7 +140,11 @@ class SpaceRepository(SpaceRepositoryProtocol):
         with self._db.orm_session() as db:
             row = (
                 db.query(self._Space)
-                .filter(self._Space.id == space_id, self._Space.env == env)
+                .filter(
+                    self._Space.id == space_id,
+                    self._Space.env == env,
+                    self._Space.deleted_at.is_(None),
+                )
                 .one_or_none()
             )
             return row.to_record() if row is not None else None
@@ -150,6 +159,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Space.personal_owner_id.in_(user_ids),
                     self._Space.space_type == SpaceType.PERSONAL.value,
                     self._Space.env == env,
+                    self._Space.deleted_at.is_(None),
                 )
                 .all()
             )
@@ -176,6 +186,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
         with self._db.orm_session() as db:
             query = db.query(self._Space).filter(
                 self._Space.env == env,
+                self._Space.deleted_at.is_(None),
                 or_(
                     self._Space.space_type != SpaceType.PERSONAL.value,
                     self._Space.personal_owner_id == user_id,
@@ -200,12 +211,17 @@ class SpaceRepository(SpaceRepositoryProtocol):
                         self._Member.space_id == row.id,
                         self._Member.user_id == user_id,
                         self._Member.env == env,
+                        self._Member.status == "ACTIVE",
                     )
                     .one_or_none()
                 )
                 member_count = (
                     db.query(func.count(self._Member.id))
-                    .filter(self._Member.space_id == row.id, self._Member.env == env)
+                    .filter(
+                        self._Member.space_id == row.id,
+                        self._Member.env == env,
+                        self._Member.status == "ACTIVE",
+                    )
                     .scalar()
                     or 0
                 )
@@ -213,13 +229,14 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     db.query(func.count(self._Member.id))
                     .filter(
                         self._Member.space_id == row.id,
-                        self._Member.role == SpaceRole.OWNER.value,
+                        self._Member.role == self._stored_role(SpaceRole.OWNER),
                         self._Member.env == env,
+                        self._Member.status == "ACTIVE",
                     )
                     .scalar()
                     or 0
                 )
-                role = SpaceRole(current.role) if current is not None else None
+                role = current.to_record().role if current is not None else None
                 items.append(
                     SpaceSummaryRecord(
                         space=row.to_record(),
@@ -243,6 +260,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member.space_id == space_id,
                     self._Member.user_id == user_id,
                     self._Member.env == env,
+                    self._Member.status == "ACTIVE",
                 )
                 .one_or_none()
             )
@@ -259,7 +277,9 @@ class SpaceRepository(SpaceRepositoryProtocol):
     ):
         with self._db.orm_session() as db:
             query = db.query(self._Member).filter(
-                self._Member.space_id == space_id, self._Member.env == env
+                self._Member.space_id == space_id,
+                self._Member.env == env,
+                self._Member.status == "ACTIVE",
             )
             if keyword:
                 query = query.filter(self._Member.user_id.ilike(f"%{keyword}%"))
@@ -272,7 +292,11 @@ class SpaceRepository(SpaceRepositoryProtocol):
             )
             space = (
                 db.query(self._Space)
-                .filter(self._Space.id == space_id, self._Space.env == env)
+                .filter(
+                    self._Space.id == space_id,
+                    self._Space.env == env,
+                    self._Space.deleted_at.is_(None),
+                )
                 .one_or_none()
             )
             creator_id = space.created_by if space is not None else ""
@@ -294,14 +318,31 @@ class SpaceRepository(SpaceRepositoryProtocol):
     ):
         try:
             with self._db.orm_session() as db:
-                row = self._Member(
-                    space_id=space_id,
-                    user_id=user_id,
-                    role=role.value,
-                    env=env,
-                    created_by=creator_id,
+                row = (
+                    db.query(self._Member)
+                    .filter(
+                        self._Member.space_id == space_id,
+                        self._Member.user_id == user_id,
+                        self._Member.env == env,
+                    )
+                    .one_or_none()
                 )
-                db.add(row)
+                if row is not None and row.status == "ACTIVE":
+                    raise SpaceMemberAlreadyExistsError("space member already exists")
+                if row is None:
+                    row = self._Member(
+                        space_id=space_id,
+                        user_id=user_id,
+                        role=self._stored_role(role),
+                        env=env,
+                        created_by=creator_id,
+                    )
+                    db.add(row)
+                else:
+                    row.role = self._stored_role(role)
+                    row.status = "ACTIVE"
+                    row.removed_at = None
+                    row.removed_by = None
                 db.flush()
                 db.refresh(row)
                 return row.to_record()
@@ -316,8 +357,17 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member.space_id == space_id,
                     self._Member.user_id == user_id,
                     self._Member.env == env,
+                    self._Member.status == "ACTIVE",
                 )
-                .delete(synchronize_session=False)
+                .update(
+                    {
+                        self._Member.status: "INACTIVE",
+                        self._Member.removed_at: func.now(),
+                        self._Member.removed_by: user_id,
+                        self._Member.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
             )
             return deleted > 0
 
@@ -331,12 +381,13 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member.space_id == space_id,
                     self._Member.user_id == user_id,
                     self._Member.env == env,
+                    self._Member.status == "ACTIVE",
                 )
                 .one_or_none()
             )
             if row is None:
                 return None
-            row.role = role.value
+            row.role = self._stored_role(role)
             row.gmt_modified = func.now()
             db.flush()
             db.refresh(row)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Index, String, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, Index, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
@@ -21,32 +21,39 @@ class SpaceModel(Base):
     __tablename__ = "ac_space"
 
     id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
-    space_code = Column(String(64), nullable=False)
-    space_type = Column(String(32), nullable=False)
-    name = Column(String(128), nullable=False)
-    personal_owner_id = Column(String(256), nullable=True)
-    sc_team_id = Column(String(64), nullable=True)
+    space_code = Column(String(128), nullable=False)
+    space_type = Column(String(16), nullable=False)
+    name = Column(String(256), nullable=False)
+    description = Column(Text, nullable=True)
+    personal_owner_id = Column(String(128), nullable=True)
+    sc_team_id = Column(BigInteger, nullable=True)
+    sc_mapping_status = Column(String(24), nullable=False, server_default="PENDING")
     env = Column(String(20), nullable=False, default=get_current_env)
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
-    created_by = Column(String(256), nullable=False)
+    created_by = Column(String(128), nullable=False)
     updated_by = Column(String(256), nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(String(128), nullable=True)
     gmt_created = Column(DateTime, nullable=False, server_default=func.now())
     gmt_modified = Column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
     __table_args__ = (
-        UniqueConstraint(
-            "avernet_tenant", "space_code", "env", name="uk_space_code_env"
-        ),
+        UniqueConstraint("avernet_tenant", "env", "space_code", name="uk_space_code"),
         UniqueConstraint(
             "avernet_tenant",
-            "personal_owner_id",
             "env",
-            name="uk_space_personal_owner_env",
+            "personal_owner_id",
+            name="uk_personal_space",
         ),
-        UniqueConstraint("sc_team_id", "env", name="uk_sc_team_id_env"),
-        Index("idx_space_type_env", "avernet_tenant", "space_type", "env"),
+        Index("idx_space_sc_team", "avernet_tenant", "env", "sc_team_id"),
+        CheckConstraint("space_type IN ('PERSONAL', 'TEAM')", name="ck_space_type"),
+        CheckConstraint(
+            "sc_mapping_status IN ('PENDING', 'ACTIVE', 'INACTIVE', 'CLEANUP_FAILED')",
+            name="ck_space_mapping_status",
+        ),
+        CheckConstraint("env <> ''", name="ck_space_env_not_empty"),
     )
 
     def to_record(self) -> SpaceRecord:
@@ -56,7 +63,7 @@ class SpaceModel(Base):
             space_type=SpaceType(self.space_type),
             name=self.name,
             personal_owner_id=self.personal_owner_id,
-            sc_team_id=self.sc_team_id,
+            sc_team_id=str(self.sc_team_id) if self.sc_team_id is not None else None,
             env=self.env,
             created_by=self.created_by,
             updated_by=self.updated_by,
@@ -70,32 +77,25 @@ class SpaceMemberModel(Base):
 
     id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
     space_id = Column(AutoIncrementBigInteger, nullable=False)
-    user_id = Column(String(256), nullable=False)
-    role = Column(String(32), nullable=False)
+    user_id = Column(String(128), nullable=False)
+    role = Column(String(24), nullable=False)
+    status = Column(String(16), nullable=False, server_default="ACTIVE")
     env = Column(String(20), nullable=False, default=get_current_env)
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
-    created_by = Column(String(256), nullable=False)
+    created_by = Column(String(128), nullable=False)
+    removed_at = Column(DateTime, nullable=True)
+    removed_by = Column(String(128), nullable=True)
     gmt_created = Column(DateTime, nullable=False, server_default=func.now())
     gmt_modified = Column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
     __table_args__ = (
-        UniqueConstraint(
-            "avernet_tenant",
-            "space_id",
-            "user_id",
-            "env",
-            name="uk_space_member_user_env",
-        ),
-        Index("idx_space_member_user", "avernet_tenant", "user_id", "env"),
-        Index(
-            "idx_space_member_role",
-            "avernet_tenant",
-            "space_id",
-            "role",
-            "env",
-        ),
+        UniqueConstraint("avernet_tenant", "env", "space_id", "user_id", name="uk_space_member"),
+        Index("idx_space_member_user", "avernet_tenant", "env", "user_id", "status"),
+        CheckConstraint("role IN ('ADMINISTRATOR', 'MEMBER')", name="ck_space_member_role"),
+        CheckConstraint("status IN ('ACTIVE', 'INACTIVE')", name="ck_space_member_status"),
+        CheckConstraint("env <> ''", name="ck_space_member_env_not_empty"),
     )
 
     def to_record(self) -> SpaceMemberRecord:
@@ -103,7 +103,11 @@ class SpaceMemberModel(Base):
             id=self.id,
             space_id=self.space_id,
             user_id=self.user_id,
-            role=SpaceRole(self.role),
+            role=(
+                SpaceRole.OWNER
+                if self.role == "ADMINISTRATOR"
+                else SpaceRole.MEMBER
+            ),
             env=self.env,
             created_by=self.created_by,
             gmt_created=self.gmt_created,
