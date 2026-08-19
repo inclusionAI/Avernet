@@ -224,6 +224,34 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/{bot_id}/models"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/connection"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # harness — bot-scoped diagnostics and patching under the addressed bot.
+    # These operations are intentionally user-only for now: harness access is
+    # checked against the verified user's owner/collaborator relationship, and
+    # app-only delegation is not part of this public contract.
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/harness/diagnose",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/harness/preview",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/harness/apply",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/harness/rollback",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/harness/dim-report",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/harness/dim-history",
+    ): AdmissionMode.REFUSED,
     # ── B: returns a set of bots, narrowed to the granted ones ───────────────
     ("GET", "/openapi/v1/bots"): AdmissionMode.GRANT_FILTERED,
     # The application's own view, and the **complete** one: a granted bot the
@@ -307,6 +335,11 @@ SKILL_SCOPED_OPERATIONS = frozenset(
         ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"),
     }
 )
+
+#: No current harness operation self-checks an app-only grant. Harness is a
+#: user-only surface for now, so app-only callers are refused before the
+#: harness owner/collaborator access dependency runs.
+HARNESS_SCOPED_OPERATIONS = frozenset()
 
 #: The modes that admit a caller naming no end user. Everything else refuses at
 #: ``require_principal``, which is what a route inherits by saying nothing.
