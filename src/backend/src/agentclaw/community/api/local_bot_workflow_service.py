@@ -1,4 +1,5 @@
 """Service API for public local Bot workflows."""
+
 from __future__ import annotations
 
 from typing import Any, Mapping, Protocol, runtime_checkable
@@ -47,6 +48,7 @@ class LocalBotWorkflowServiceProtocol(Protocol):
         header_space_id: str | None,
         keyword: str | None,
         engine: str | None,
+        bot_ids: list[str] | None = None,
         page: int,
         page_size: int,
     ) -> tuple[int, list[Mapping[str, Any]]]: ...
@@ -68,7 +70,9 @@ class LocalBotWorkflowServiceProtocol(Protocol):
         self, *, owner_id: str, header_space_id: str | None, bot_id: str
     ) -> Mapping[str, Any]: ...
 
-    def delete(self, *, owner_id: str, header_space_id: str | None, bot_id: str) -> None: ...
+    def delete(
+        self, *, owner_id: str, header_space_id: str | None, bot_id: str
+    ) -> None: ...
 
     def open_folder(
         self,

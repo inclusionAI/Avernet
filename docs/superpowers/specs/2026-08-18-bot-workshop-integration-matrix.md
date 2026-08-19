@@ -271,16 +271,16 @@ Backend/上游 Contract 的接口变成已接入能力**。
 
 | 接口 | 状态 | 上游/说明 |
 |---|---|---|
-| `GET /openapi/v1/bots/all` | 已实现 | `BotInventoryServiceProtocol`；应用调用仍为 `REFUSED`，只允许人类调用 |
-| `GET /openapi/v1/bots/local/devices` | 已实现 | Desktop device inventory |
-| `GET /openapi/v1/bots/local/devices/{machine_id}/files` | 已实现 | 本地设备挂载目录选择，不是容器文件 API |
-| `POST /openapi/v1/bots/local` | 已实现 | 本地 Bot 创建，支持 201/202 |
-| `GET /openapi/v1/bots/local` | 已实现 | 本地 Bot 列表 |
-| `GET /openapi/v1/bots/{bot_id}/local` | 已实现 | 本地 Bot 详情 |
-| `GET /openapi/v1/bots/{bot_id}/local/auth-status` | 已实现 | Passport 授权轮询和完成创建 |
-| `POST /openapi/v1/bots/{bot_id}/local/restart` | 已实现 | Desktop Bot 重启 |
-| `DELETE /openapi/v1/bots/{bot_id}/local` | 已实现 | Desktop Bot 删除 |
-| `POST /openapi/v1/bots/{bot_id}/local/open-folder` | 已实现 | 本地打开目录 |
+| `GET /openapi/v1/bots/all` | 已实现 | `GRANT_FILTERED`：人类看到本人全量；应用仅看到该用户授权给它且由该用户拥有的 Bot，过滤发生在分页前 |
+| `GET /openapi/v1/bots/local/devices` | 已实现 | Desktop device inventory；`USER_GATED`，应用须持有该用户至少一个实时 Bot delegation |
+| `GET /openapi/v1/bots/local/devices/{machine_id}/files` | 已实现 | 本地设备挂载目录选择，不是容器文件 API；`USER_GATED` |
+| `POST /openapi/v1/bots/local` | 已实现 | 本地 Bot 创建，支持 201/202；没有既存 Bot 可供 grant 覆盖，保持 `REFUSED`（仅人类） |
+| `GET /openapi/v1/bots/local` | 已实现 | `GRANT_FILTERED`，应用结果按本人拥有且已授权的 Bot 在分页前过滤 |
+| `GET /openapi/v1/bots/{bot_id}/local` | 已实现 | `GRANT_CHECKED_OWN_BOT` |
+| `GET /openapi/v1/bots/{bot_id}/local/auth-status` | 已实现 | Passport 授权轮询和完成创建；属于创建事务，保持 `REFUSED`（仅人类） |
+| `POST /openapi/v1/bots/{bot_id}/local/restart` | 已实现 | Desktop Bot 重启；`GRANT_CHECKED_OWN_BOT` |
+| `DELETE /openapi/v1/bots/{bot_id}/local` | 已实现 | Desktop Bot 删除；`GRANT_CHECKED_OWN_BOT` |
+| `POST /openapi/v1/bots/{bot_id}/local/open-folder` | 已实现 | 本地打开目录；`GRANT_CHECKED_OWN_BOT` |
 | `POST /openapi/v1/bots/{bot_id}/activate` | 已实现 | 沉寂个人云端 Bot 激活 |
 | `POST /openapi/v1/bots/{bot_id}/data-init` | 已实现 | 传递 `IAM_TOKEN` 到 typed Service API；异步执行，异常被观察和记录 |
 | `GET /openapi/v1/bots/{bot_id}/data-init` | 已实现 | 仅返回公开状态字段，不暴露 `bot.ext`、IAM token 或下游内部状态 |
@@ -592,12 +592,13 @@ flow.openapi.json
    - OCB 对应 Gateway `application.yaml`
    - OCB 对应 served OpenAPI schema
 
-本轮已在 OCB/Sofapy 仓库 `dev` 分支、基线 `6fbdc74e4fb9032ae98afe942c2f83611c3b908b` 上同步：
+Avernet 当前准入已按 `admission.py` 的操作形状拆分，不能再把 `/bots/all` 与 local 整组配置成 human-only：
 
-- `src/gateway/configs/application.yaml`：补齐 `/bots/all` 与 local 两类 human-only 规则；
-- `src/gateway/configs/schemas/bots.openapi.json`：与 Avernet 本轮生成产物一致。
+- Gateway 通配规则允许 user/app 身份进入 Backend；
+- 仅 `POST /bots/local` 与 `GET /bots/{bot_id}/local/auth-status` 保留 user-required；
+- Backend 对列表执行 `GRANT_FILTERED`，对设备账户信息执行 `USER_GATED`，对既存本地 Bot 操作执行 `GRANT_CHECKED_OWN_BOT`。
 
-该 OCB 工作区原有未跟踪目录 `openocb/`，本轮未触碰；上述两项当前仍是未提交修改，最终完成状态以 OCB 独立提交/PR SHA 为准。
+OCB/Sofapy 是独立部署副本，必须由对应 Gateway 团队按上述最终规则同步 `application.yaml` 和 served `bots.openapi.json`；本仓库不能以 Avernet 的修改代替其提交。完成状态以 OCB 独立提交/PR SHA 和部署验证为准。
 
 ---
 

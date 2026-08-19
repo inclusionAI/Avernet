@@ -177,14 +177,13 @@ user_config:
     "/openapi/v1/work-order-notifications/**":
       user: required
 
-    # Bot workshop aggregation is not grant-filtered yet, and local workflows
-    # expose host devices/directories and desktop actions. Keep both surfaces
-    # human-only until the backend has an application-safe scope contract.
-    "GET /openapi/v1/bots/all":
+    # Local Bot creation has no existing Bot grant to check and may initiate
+    # Passport consent. Polling auth-status completes that same human creation
+    # transaction. Other workshop/local operations inherit the wide user-or-app
+    # rule and are narrowed or grant-checked by Backend admission.
+    "POST /openapi/v1/bots/local":
       user: required
-    "/openapi/v1/bots/local/**":
-      user: required
-    "/openapi/v1/bots/{bot_id}/local/**":
+    "GET /openapi/v1/bots/{bot_id}/local/auth-status":
       user: required
 
     # Creating a bot. No bot exists yet for a grant to cover, and creation

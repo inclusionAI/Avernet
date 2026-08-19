@@ -272,8 +272,10 @@ _SUBGROUPS = [
     # because it would look the grant up against the delegating user rather than
     # the owner. See `skills/router.py` and `admission.SKILL_SCOPED_OPERATIONS`.
     skills_router,
-    # Local workflows are human-only rather than grant-checked. Their admission
-    # entries and gateway route security refuse application-only callers.
+    # Local workflows are mixed: listings filter grants, device discovery is
+    # user-gated, existing Bot operations check the own-Bot grant, and only the
+    # creation/authorization pair remains human-only. Dependencies are declared
+    # per route in the local router.
     local_router,
     # These groups resolve the addressed owner through OwnerIdDep, which also
     # performs the application-grant check. Their handlers then enforce the

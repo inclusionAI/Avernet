@@ -23,7 +23,6 @@ from agentclaw.community.core.bot_inventory.types import (
 )
 
 
-
 class BotInventoryService:
     def __init__(
         self,
@@ -46,6 +45,7 @@ class BotInventoryService:
         keyword: str | None,
         engine: str | None,
         deploy_mode: DeployMode | None,
+        bot_ids: list[str] | None = None,
         page: int,
         page_size: int,
     ) -> tuple[list[BotInventoryItem], int]:
@@ -55,6 +55,7 @@ class BotInventoryService:
                 owner_id=owner_id,
                 keyword=keyword,
                 engine=engine,
+                bot_ids=bot_ids,
             )
             service_rows = [
                 row for row in cloud_rows if row.get("bot_type") == "service"
@@ -78,6 +79,7 @@ class BotInventoryService:
                     owner_id=owner_id,
                     keyword=keyword,
                     engine=engine,
+                    bot_ids=bot_ids,
                 )
             )
         if space is not None:
@@ -95,7 +97,12 @@ class BotInventoryService:
         return cards[start : start + page_size], total
 
     def _list_cloud_rows(
-        self, *, owner_id: str, keyword: str | None, engine: str | None
+        self,
+        *,
+        owner_id: str,
+        keyword: str | None,
+        engine: str | None,
+        bot_ids: list[str] | None = None,
     ) -> list[Mapping[str, Any]]:
         rows: list[Mapping[str, Any]] = []
         fetch_size = 200
@@ -107,6 +114,7 @@ class BotInventoryService:
                 bot_name=keyword,
                 engine=engine,
                 status=None,
+                bot_ids=bot_ids,
                 page=page,
                 page_size=fetch_size,
             )
@@ -129,13 +137,21 @@ class BotInventoryService:
         ]
 
     def _list_local_rows(
-        self, *, owner_id: str, keyword: str | None, engine: str | None
+        self,
+        *,
+        owner_id: str,
+        keyword: str | None,
+        engine: str | None,
+        bot_ids: list[str] | None = None,
     ) -> list[Mapping[str, Any]]:
         try:
             rows = list(self._desktop.list_user_bots(owner_id))
         except Exception as exc:
             _raise_if_desktop_service_error(exc)
             raise
+        if bot_ids is not None:
+            allowed = frozenset(bot_ids)
+            rows = [r for r in rows if str(r.get("bot_id") or "") in allowed]
         if keyword:
             rows = [r for r in rows if keyword in str(r.get("bot_name") or "")]
         if engine:

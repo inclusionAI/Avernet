@@ -1027,6 +1027,14 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
+- **2026-08-19** —— **Bot 工作台应用准入按操作形状收敛。** `/bots/all` 与
+  `/bots/local` 改为 `GRANT_FILTERED`，只把授权给调用应用、且由委托用户拥有的 Bot
+  交给 Service，并在分页前完成过滤；本地设备与目录读取改为 `USER_GATED`，要求调用
+  应用持有该用户至少一个实时 delegation；本地 Bot 详情、重启、删除和打开目录改为
+  `GRANT_CHECKED_OWN_BOT`。本地创建和创建授权轮询仍为 human-only，因为请求发生时没有
+  既存 Bot 可供 grant 覆盖。Gateway 仅为这两个创建事务保留 user-required 覆盖，其余路径
+  允许应用身份到达 Backend 后接受实时 grant 校验。
+
 - **2026-08-18** —— **data-init 触发/状态契约闭环。** 公开触发接口现在在 HTTP
   边界读取 `IAM_TOKEN` Cookie，并传入 typed `DataInitServiceProtocol`；Service 只在本次
   初始化确实需要执行时暂存凭证。新增 `GET /openapi/v1/bots/{bot_id}/data-init`，供前端
@@ -1036,8 +1044,8 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 - **2026-08-17** —— **TC Bot 工作台与本地工作流。** 新增聚合的 `/bots/all`
   清单、个人本地设备/创建/读取/重启/删除/打开目录工作流、休眠 Bot 激活、冷启动数据初始化，
-  以及 engine 进程级重启。local 与聚合清单在 Gateway 和后端 admission 两层都保持
-  human-only；其余 Bot 面只允许应用在实时授权范围内访问。engine restart 只发布 bot-first
+  以及 engine 进程级重启。该日初始版本把 local 与聚合清单保持 human-only；此结论已由
+  2026-08-19 的按操作形状准入规则取代。engine restart 只发布 bot-first
   地址，因为此前没有可供退役的公共路径。本次生成的 Gateway `bots.openapi.json` 是该公共面的
   发布产物，必须原样同步到独立 OCB Gateway。
 

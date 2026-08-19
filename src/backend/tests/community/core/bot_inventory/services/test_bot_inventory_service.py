@@ -178,3 +178,69 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
     assert [item.publication_id for item in service_items] == [4, 3]
     assert [item.card_id for item in service_items] == ["service:s1:4", "service:s1:3"]
     lifecycle_port.cards_for_bots.assert_called_once_with(bots=[service_row])
+
+
+@pytest.mark.unit
+def test_grant_filter_is_applied_to_both_sources_before_total_and_pagination(
+    service,
+) -> None:
+    inventory, bot, desktop = service
+    bot.list_bots_by_conditions.side_effect = lambda **kwargs: {
+        "total": 1 if "c1" in (kwargs["bot_ids"] or []) else 0,
+        "items": [CLOUD] if "c1" in (kwargs["bot_ids"] or []) else [],
+    }
+    desktop.list_user_bots.return_value = [
+        LOCAL,
+        {**LOCAL, "bot_id": "l2", "bot_name": "Local 2"},
+        {**LOCAL, "bot_id": "l3", "bot_name": "Local 3"},
+    ]
+
+    items, total = inventory.list_items(
+        owner_id="u1",
+        space=None,
+        keyword=None,
+        engine=None,
+        deploy_mode=None,
+        bot_ids=["l1", "l3"],
+        page=2,
+        page_size=1,
+    )
+
+    assert total == 2
+    assert [item.bot_id for item in items] == ["l3"]
+    assert bot.list_bots_by_conditions.call_args.kwargs["bot_ids"] == ["l1", "l3"]
+
+
+@pytest.mark.unit
+def test_cloud_grant_filter_is_forwarded_to_every_upstream_page(service) -> None:
+    inventory, bot, desktop = service
+    desktop.list_user_bots.return_value = []
+    cloud_rows = [
+        {**CLOUD, "bot_id": f"c{i:03d}", "bot_name": f"Cloud {i:03d}"}
+        for i in range(201)
+    ]
+
+    def list_page(**kwargs):
+        assert kwargs["bot_ids"] == ["c000", "c200"]
+        page = kwargs["page"]
+        page_size = kwargs["page_size"]
+        start = (page - 1) * page_size
+        return {
+            "total": len(cloud_rows),
+            "items": cloud_rows[start : start + page_size],
+        }
+
+    bot.list_bots_by_conditions.side_effect = list_page
+
+    inventory.list_items(
+        owner_id="u1",
+        space=None,
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        bot_ids=["c000", "c200"],
+        page=1,
+        page_size=10,
+    )
+
+    assert bot.list_bots_by_conditions.call_count == 2

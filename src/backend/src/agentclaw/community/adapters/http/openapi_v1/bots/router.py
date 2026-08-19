@@ -338,8 +338,7 @@ def _sync_passport_identity(
                         "data": {
                             "bot_id": "20260813_a7k2m9p1",
                             "iframe_url": (
-                                "https://auth.example.com/passport/consent"
-                                "?flow=f-123"
+                                "https://auth.example.com/passport/consent?flow=f-123"
                             ),
                             "redirect_url": "",
                         },
@@ -580,17 +579,16 @@ async def get_bots_ceiling(
 # the read model to the public schema.
 
 
-
 @router.get(
     "/all",
     response_model=Envelope[Page[BotInventoryItem]],
     responses=USER_SCOPED_403,
-    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def list_inventory(
     page_params: PageParamsDep,
     owner_id: UserIdDep,
+    caller: ActingCallerDep,
     request: Request,
     x_space_id: Annotated[
         str | None,
@@ -617,6 +615,9 @@ async def list_inventory(
     ),
 ) -> Envelope[Page[BotInventoryItem]]:
     """List personal cloud, service, and local Bots in the current space."""
+    granted = caller.granted_bot_ids(owned_by_delegator=True)
+    if granted is not None and not granted:
+        return page(0, [], request)
     current_space = space_context.resolve_current(
         owner_id=owner_id,
         header_space_id=x_space_id,
@@ -627,11 +628,11 @@ async def list_inventory(
         keyword=keyword,
         engine=engine,
         deploy_mode=CoreDeployMode(deploy_mode) if deploy_mode is not None else None,
+        bot_ids=sorted(granted) if granted is not None else None,
         page=page_params.page,
         page_size=page_params.page_size,
     )
     return page(total, [_to_inventory_item(item) for item in items], request)
-
 
 
 # ── Dormant Bot activation ─────────────────────────────────────────────────
@@ -706,7 +707,6 @@ async def activate_dormant_bot(
     responses=USER_SCOPED_403,
     dependencies=_GRANT_CHECKED_OWN_BOT,
 )
-
 @envelope_errors
 async def get_bot(
     bot_id: BotIdPath,
@@ -748,7 +748,7 @@ async def update_bot(
         owner_id,
         bot_name=bot_name,
         bot_desc=body.bot_desc,
-# BCN sync re-enabled: new bots get a globally-unique bot_id
+        # BCN sync re-enabled: new bots get a globally-unique bot_id
         # (generate_bot_id), so (bot_id, owner_workno) no longer collides
         # across tenants for them. Legacy "default" bots (pre-retirement,
         # unmigrated) retain residual cross-tenant risk on this identifier —
@@ -1050,7 +1050,6 @@ def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
     if caller.is_application:
         return f"app:{caller.app_id}:on-behalf-of:{owner_id}"
     return owner_id
-
 
 
 @router.get(

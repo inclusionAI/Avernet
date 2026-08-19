@@ -4,6 +4,7 @@ HTTP adapters should remain thin: this service owns local business-space
 policy, local listing filters/pagination, Passport authorization polling, and
 post-creation authorization relationship creation.
 """
+
 from __future__ import annotations
 
 from typing import Any, Mapping
@@ -13,7 +14,9 @@ from agentclaw.community.core.bot_inventory.errors import (
     BotInventoryPermissionError,
     BotInventoryUpstreamError,
 )
-from agentclaw.community.core.bot_inventory.policies.combo_policy import assert_local_create
+from agentclaw.community.core.bot_inventory.policies.combo_policy import (
+    assert_local_create,
+)
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
     DesktopBotInventoryPort,
@@ -97,7 +100,9 @@ class LocalBotWorkflowService:
         header_space_id: str | None,
         command: LocalBotCreateCommand,
     ) -> Mapping[str, Any]:
-        space = self.require_personal_space(owner_id=owner_id, header_space_id=header_space_id)
+        space = self.require_personal_space(
+            owner_id=owner_id, header_space_id=header_space_id
+        )
         decision = assert_local_create(command.engine, space.kind)
         if not decision.ok:
             raise BotInventoryOperationNotAllowedError(
@@ -123,6 +128,7 @@ class LocalBotWorkflowService:
         header_space_id: str | None,
         keyword: str | None,
         engine: str | None,
+        bot_ids: list[str] | None = None,
         page: int,
         page_size: int,
     ) -> tuple[int, list[Mapping[str, Any]]]:
@@ -132,13 +138,20 @@ class LocalBotWorkflowService:
         except Exception as exc:
             _raise_if_desktop_service_error(exc)
             raise
+        if bot_ids is not None:
+            allowed = frozenset(bot_ids)
+            rows = [row for row in rows if str(row.get("bot_id") or "") in allowed]
         if keyword:
             rows = [row for row in rows if keyword in str(row.get("bot_name") or "")]
         if engine:
             rows = [
                 row
                 for row in rows
-                if (row.get("active_engine") or row.get("engine_type") or row.get("engine"))
+                if (
+                    row.get("active_engine")
+                    or row.get("engine_type")
+                    or row.get("engine")
+                )
                 == engine
             ]
         total = len(rows)
@@ -159,15 +172,21 @@ class LocalBotWorkflowService:
         bot_id: str,
         command: LocalBotCreateCommand,
     ) -> LocalAuthStatusResult:
-        space = self.require_personal_space(owner_id=owner_id, header_space_id=header_space_id)
+        space = self.require_personal_space(
+            owner_id=owner_id, header_space_id=header_space_id
+        )
         decision = assert_local_create(command.engine, space.kind)
         if not decision.ok:
             raise BotInventoryOperationNotAllowedError(
                 decision.reason or "local bot create is not allowed"
             )
-        auth_status = self._passport.query_auth_status(bot_id=bot_id, owner_workno=owner_id)
+        auth_status = self._passport.query_auth_status(
+            bot_id=bot_id, owner_workno=owner_id
+        )
         if not auth_status:
-            raise BotInventoryOperationNotAllowedError("authorization status unavailable")
+            raise BotInventoryOperationNotAllowedError(
+                "authorization status unavailable"
+            )
         status_value = str(auth_status.get("status") or "")
         if status_value == "PENDING":
             return LocalAuthStatusResult(
@@ -199,9 +218,7 @@ class LocalBotWorkflowService:
             raise
         agent_code = result.get("agent_code")
         if not isinstance(agent_code, str) or not agent_code.strip():
-            raise BotInventoryUpstreamError(
-                "desktop creation returned no agent_code"
-            )
+            raise BotInventoryUpstreamError("desktop creation returned no agent_code")
         # This relationship is part of the completed creation contract. Surface
         # failures instead of acknowledging ISSUED with missing authorization
         # state; durable cross-system repair remains a separate responsibility.
@@ -218,9 +235,7 @@ class LocalBotWorkflowService:
                 "authorization relationship write failed"
             ) from exc
         if relationship is None:
-            raise BotInventoryUpstreamError(
-                "authorization relationship write failed"
-            )
+            raise BotInventoryUpstreamError("authorization relationship write failed")
         return LocalAuthStatusResult(status="ISSUED", bot=result)
 
     def restart(
@@ -234,7 +249,9 @@ class LocalBotWorkflowService:
             _raise_if_desktop_service_error(exc)
             raise
 
-    def delete(self, *, owner_id: str, header_space_id: str | None, bot_id: str) -> None:
+    def delete(
+        self, *, owner_id: str, header_space_id: str | None, bot_id: str
+    ) -> None:
         self.require_personal_space(owner_id=owner_id, header_space_id=header_space_id)
         self._verify_visible(owner_id=owner_id, bot_id=bot_id)
         try:
