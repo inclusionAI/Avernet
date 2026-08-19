@@ -32,10 +32,32 @@ user_config:
     forwarder: "httpx"
     schema_catalog: "file"
     cache: "stub"
+    # To use the Redis-backed cache plugin, set ``cache: "redis"`` and provide
+    # a ``cache_redis`` block (see below). Default ``stub`` is the in-memory,
+    # single-process option.
+    #
+    # cache: "redis"
+    # cache_redis:
+    #   host: "127.0.0.1"
+    #   port: 6379
+    #   db: 0
+    #   ssl: false
+    #   # Password may be a plain value or a secret reference (``@name``)
+    #   # resolved through the active SecretResolver.
+    #   password: "@redis_password"
     auth: "stub"
     # SecretResolver flavor. Community reads creds from env; enterprise overlays
     # this with a corp/KMS-backed selector registered via the plugin_registry.
+    # Set ``secret: "aliyun_kms"`` to resolve signing keys/credentials from
+    # Aliyun KMS, with the resolver's own access credentials provided as secret
+    # references in ``plugins.secret_aliyun_kms``.
     secret: "community"
+    # secret_aliyun_kms:
+    #   endpoint: ""
+    #   region_id: ""
+    #   access_key_id: "@kms_access_key_id"
+    #   access_key_secret: "@kms_access_key_secret"
+    #   secret_name_prefix: ""
     authn:
       app_token: "stub"
       tenant: "stub"

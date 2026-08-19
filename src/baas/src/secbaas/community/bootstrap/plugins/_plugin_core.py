@@ -25,6 +25,7 @@ from secbaas.community.plugins.bot_service import (
     LocalBotServicePlugin,
     StubBotServicePlugin,
 )
+from secbaas.community.plugins.cache.redis import RedisCacheConfig, RedisCachePlugin
 from secbaas.community.plugins.cache.stub import StubCachePlugin
 from secbaas.community.plugins.database.mariadb.mariadb_orm import MariaDbOrmPlugin
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
@@ -71,21 +72,25 @@ def _build_aliyun_ack_templates(
     return out
 
 
+def _build_redis_config(raw_config: dict, secret_plugin) -> RedisCacheConfig:
+    """Build a redis plugin config, resolving secret references up front.
+
+    Sensitive connection fields (e.g. ``password``) may carry a secret
+    reference (``@name``). The composition root resolves those references via
+    the baas ``SecretStorePlugin`` (``resolve_secret``) before constructing the
+    client, so the plugin never runs with a raw reference.
+    """
+    resolved = dict(raw_config)
+    for key, value in resolved.items():
+        if isinstance(value, str) and value.startswith("@"):
+            resolved[key] = secret_plugin.resolve_secret(value)
+    return RedisCacheConfig(**resolved)
+
+
 class PluginContainer(containers.DeclarativeContainer):
     config = providers.Configuration()
     connection_management = providers.Dependency()
     ws_relay_session_repository = providers.Dependency()
-
-    cache_plugin = providers.Selector(
-        config.plugins.cache,
-        stub=providers.Singleton(StubCachePlugin),
-    )
-
-    plugin_database = providers.Selector(
-        config.plugins.database.plugin_database,
-        SQLITE_ORM=providers.Singleton(SqliteOrmPlugin),
-        MARIADB_ORM=providers.Singleton(MariaDbOrmPlugin),
-    )
 
     secret_plugin = providers.Selector(
         config.plugins.secret,
@@ -94,6 +99,25 @@ class PluginContainer(containers.DeclarativeContainer):
             config=config.plugins.secret_aliyun_kms,
         ),
         stub=providers.Singleton(StubSecretStorePlugin),
+    )
+
+    cache_plugin = providers.Selector(
+        config.plugins.cache,
+        stub=providers.Singleton(StubCachePlugin),
+        redis=providers.Singleton(
+            RedisCachePlugin,
+            config=providers.Callable(
+                _build_redis_config,
+                raw_config=config.plugins.cache_redis,
+                secret_plugin=secret_plugin,
+            ),
+        ),
+    )
+
+    plugin_database = providers.Selector(
+        config.plugins.database.plugin_database,
+        SQLITE_ORM=providers.Singleton(SqliteOrmPlugin),
+        MARIADB_ORM=providers.Singleton(MariaDbOrmPlugin),
     )
 
     arca_utils = providers.Singleton(

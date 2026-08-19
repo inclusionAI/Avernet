@@ -25,6 +25,7 @@ dependencies = [
     "opentelemetry-instrumentation-asgi>=0.63b1",
     "dependency-injector>=4.49.1",
     "pydantic-settings>=2.14.2",
+    "redis==7.4.0",
 ]
 
 [project.optional-dependencies]

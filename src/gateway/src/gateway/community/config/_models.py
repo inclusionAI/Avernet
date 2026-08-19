@@ -105,6 +105,8 @@ class PluginConfig(BaseSettings):
     secret: str = Field(default="community", min_length=1)
     authn: AuthnPluginConfig = Field(default_factory=AuthnPluginConfig)
     database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
+    cache_redis: dict[str, Any] = Field(default_factory=dict)
+    secret_aliyun_kms: dict[str, Any] = Field(default_factory=dict)
 
 
 class UserConfig(BaseModel):
