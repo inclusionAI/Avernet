@@ -117,6 +117,7 @@ class CoreTaskContainer(containers.DeclarativeContainer):
                 config.renewal_scheduler.engine,
             ),
             engine=config.renewal_scheduler.engine,
+            env=providers.Callable(get_current_env),
         )
 
         deadline_renewal_scheduler = providers.Singleton(

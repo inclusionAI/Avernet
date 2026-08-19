@@ -12,6 +12,8 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
+from secbaas.community.core.utils.env_utils import get_current_env
+
 from secbaas.community.api.device_manage import (
     DestroyDeviceResponse,
     DeviceConfig,
@@ -1082,6 +1084,7 @@ class DefaultDeviceService(DeviceService):
                         )
                         next_renew_at = expiration_dt - timedelta(hours=12)
                         self._schedule_repo.register(
+                            get_current_env(),
                             sandbox_id=provider_device_id,
                             source_table="baas_device",
                             source_id=record.id,
@@ -2185,6 +2188,7 @@ class DefaultDeviceService(DeviceService):
                 and self._schedule_repo is not None
             ):
                 self._schedule_repo.set_status(
+                    get_current_env(),
                     source_table="baas_device",
                     source_id=record.id,
                     status="STOPPED",
@@ -2352,6 +2356,7 @@ class DefaultDeviceService(DeviceService):
             and self._schedule_repo is not None
         ):
             self._schedule_repo.set_status(
+                get_current_env(),
                 source_table="baas_device",
                 source_id=record.id,
                 status="STOPPED",
