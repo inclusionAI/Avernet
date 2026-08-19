@@ -60,7 +60,8 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
   详见其看板行。
 - **Track C —— Engine（运行时）面。** _2026-07-30 新增。_ 把 engine adapter 面向
   客户端的 HTTP 包装到 `/openapi/v1/bots/<component>/{bot_id}/…` 之下，并用一个净化过的
-  socket 信息端点取代 `get_device_connection` 的移交。**16 个端点 —— 已实现，PR #630。**
+  socket 信息端点取代 `get_device_connection` 的移交。**当前六组共 18 个端点，均已实现**
+  （PR #630 为基线，后续增加 engine restart 与只读 nodes）。
 
 > ⚠️ **唯一需要避免的误解：** "隔离 Stage N 已完成"**并不**意味着任何 API 端点被实现了。
 > Track A 的每个阶段都只是底层管道（可复用机制 + 该类别的记录）。API 端点落在
@@ -140,7 +141,7 @@ _按优先级分层排序。_
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS（PARTIAL）— 3 handler 全接通但 NOT PUBLIC-READY | bots 隔离（Stage 1 ✅）；Track B 3 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | 🔧 **实现 + CI 完成；发布待定**——六个已定案 Local Skill 操作 | #725 cleanup-work DDL 必须先于代码部署；[预发验收 runbook](skills-track-b-preprod-acceptance.md) 仍为 **PRE-PROD PENDING** |
 
-### Track C —— Engine（运行时）面（5 组已全部实现 —— PR #630）
+### Track C —— Engine（运行时）面（6 组已全部实现）
 _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶段，没有 DDL。
 完整裁定与逐端点映射见
 **[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**。_
@@ -152,12 +153,15 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 | connection | 1 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **已实现 —— PR #630** |
 | approvals | 3 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **已实现 —— PR #630** |
 | models | 2 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/models/` | ✅ **已实现 —— PR #630** |
+| nodes | 1 | joseph | P2 | `openapi_v1/engine_runtime/nodes/` | ✅ **已实现 —— 2026-08-19**；只读列表，与当前前端保持一致 |
 
 > **范围规则（为什么只有这些）。** 只包装前端经 proxypass **直连**的 engine HTTP
 > （`src/frontend/src/requestConfig.ts:189-205`）。前端**经由后端**触达的 engine
 > 路由 —— `/api/cron`（已经是 `routines` 类别）、`/api/file`、`/api/skills`、
 > `/api/mcp`、`/api/resource-materializations`、`/api/bash`、`/api/bot/config`、
 > `/api/work-items` —— 已经有后端契约在其之上，不纳入。仅 aicoding 的路由不纳入。
+> 当前前端直连的只读 `/api/nodes` 清单纳入；前端与 Engine HTTP 目前都没有节点写操作，
+> 因此不扩展注册、解绑或状态写入。
 > **WebSocket 不包装**：新的 `…/connection` 端点返回一条完整的 socket URL（凭据在其中），
 > 由调用方自己建连。
 >
@@ -621,9 +625,9 @@ GET /openapi/v1/bots/b-1/connection?user_id=u-collab&owner_id=u-owner&stage=veri
 skills 组的 `owner_entity_id` 定位参数早于 `owner_id`；已于 2026-08-15 随 Agent 在前的
 寻址统一为 `owner_id`，待退役的 skills 旧地址仍发布旧参数名（spec 未决问题 1，已关闭）。
 
-`tests/…/openapi_v1/engine_runtime/test_operator_access.py` 对全部十六个操作扫掠
-运维者矩阵；`…/test_stage_addressing.py` 钉住阶段行为并断言两个参数恰好出现在这
-十六个操作上、可选、位于 query；`tests/community/core/engine_runtime/test_stage.py`
+`tests/…/openapi_v1/engine_runtime/test_operator_access.py` 对共享扫描覆盖的运行时操作扫掠
+运维者矩阵；`…/test_stage_addressing.py` 钉住阶段行为并断言两个参数恰好出现在所有
+运行时操作上、可选、位于 query；`tests/community/core/engine_runtime/test_stage.py`
 钉住存活规则。
 
 ---
@@ -974,7 +978,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 > 不写数据 —— 但在本面上任何 socket 路由开始接触数据之前，这是第一件要修的事：在默认
 > 租户下执行按租户收敛的读取是数据隔离故障，而不只是少了一行日志。
 
-### ⬜ 未分配 · Track C —— engine 运行时（19 个端点）
+### ⬜ 未分配 · Track C —— engine 运行时（21 个端点）
 这不是一个 Track B 类别 —— 它们包装的是 Bot 设备上的 **engine adapter**，
 而不是某个后端服务。逐端点清单、每个端点对应的 engine 路由，以及那约 72 条
 *不*包装的 engine 路由的裁定，都在
@@ -983,8 +987,9 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 | 组 | 端点数 | 公共路径 |
 |---|---|---|
 | sessions | 10 | `/openapi/v1/bots/{bot_id}/sessions…` —— 拥有者/协作者运维，含收藏 |
-| engine | 3 | `/openapi/v1/bots/{bot_id}/engine/{status,capabilities,available}` |
+| engine | 4 | `/openapi/v1/bots/{bot_id}/engine/{status,capabilities,available,restart}` |
 | models | 2 | `/openapi/v1/bots/{bot_id}/models`、`…/models/{model_id}` |
+| nodes | 1 | `/openapi/v1/bots/{bot_id}/nodes` —— 只读节点清单 |
 | approvals | 3 | `/openapi/v1/bots/{bot_id}/approvals/mode`（GET/PUT）、`…/modes` |
 | connection | 1 | `/openapi/v1/bots/{bot_id}/connection` —— 完整 WS URL，取代 `get_device_connection` |
 
@@ -1008,10 +1013,10 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 7. **跨租户的外部身份问题已定案（[#556](https://github.com/inclusionAI/Avernet/issues/556)）** —— Passport、授权关系与 BCN 都带上
    租户维度，从而可以在公共路径上重新打开 BCN 同步。—— _⬜（2026-07-29 新增；它是开启
    多租户的前置闸口）。_
-8. **Track C：** 五个 engine 运行时组（16 个端点）均已实现、按 owner 收敛且能力感知，
+8. **Track C：** 六个 engine 运行时组（18 个端点）均已实现、按 owner 收敛且能力感知，
    并且 `…/connection` 返回 socket URL，使任何外部调用方都看不到 proxypass target
-   或裸设备 token。—— _✅ 5 组全部完成（PR #630）。与其它类别一样，在第 6 项落地
-   之前一律返回 401；singlebox E2E 流也阻塞在同一个事件上。_
+   或裸设备 token。—— _✅ 6 组全部完成（PR #630 为基线，后续增加 engine restart
+   与 nodes）。_
 
 ---
 
@@ -1272,6 +1277,11 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   `route_security.yaml` 允许本界面真实的调用方；另外 `app` / `access_key` 调用方在有人
   就"它们归属于谁"定案之前一律 401。SDD：
   `src/backend/specs/2026-07-30-gateway-principal-verifier/`。
+- **2026-08-19** —— **新增只读 Node OpenAPI。** 当前前端与 Engine 只支持
+  `GET /api/nodes`，所以公共 API 只增加
+  `GET /openapi/v1/bots/{bot_id}/nodes`，沿用其他运行时组的 owner/editor、Bot grant 与
+  stage 门禁。它转发 `status`、`platform`、`limit`、`offset`，只发布稳定节点字段，
+  不虚构 register/unregister/status-write 操作。
 - **2026-07-30** —— **Track C 已实现（PR #630）** —— 五个组共 16 个 engine 运行时
   端点，外加 `core/engine_runtime/`（relay 与 connection service）及其 Service API
   Protocol。动这条主线或参考它之前，有七点值得知道：

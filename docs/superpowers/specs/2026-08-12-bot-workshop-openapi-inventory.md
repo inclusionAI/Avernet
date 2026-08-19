@@ -154,7 +154,7 @@
 | 101 | flow | 任务护航 DAG/YAML 编排 | `GET/PUT /openapi/v1/bots/flow/{bot_id}` | 新增 | 未开工 | P2 | 任务护航团队牵头，BCS 提供 State Machine 正式 Service API/OpenAPI Contract；不得让工坊直调内部 `/api` |
 | 102 | flow | 工作流执行历史 | `GET /openapi/v1/bots/flow/{bot_id}/runs` | 新增 | 未开工 | P2 | 同 #101；任务护航团队负责运行语义，BCS 提供状态机契约，A/B 线仅配合上下文和联调 |
 | 103 | channels | 渠道配置 CRUD | `GET/POST/PUT/DELETE /openapi/v1/bots/channels/{bot_id}` | 新增 | 未开工 | P2 | 内部 `ChannelServiceProtocol` 与 `/api/channels` CRUD 已有；公开面缺失，且需先收敛 tenant/owner/bot guard |
-| 104 | nodes | 节点 | `GET /openapi/v1/bots/nodes/{bot_id}` | 新增 | 未开工 | P2 | Engine 内部 `GET /api/nodes` 与 capability 已有；公开字段 Contract/relay 尚缺 |
+| 104 | nodes | 节点 | `GET /openapi/v1/bots/{bot_id}/nodes` | 新增 | 已开发 | P2 | 只对齐前端现有只读能力：转发 Engine `GET /api/nodes`，支持 status/platform/limit/offset；owner/editor 与 stage 门禁先于设备调用，内部 metadata/raw 不出公共契约 |
 | 105 | render-screens | 副屏 | `GET/POST /openapi/v1/bots/{bot_id}/render-screens`、`PATCH/DELETE /openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}` | 新增 | 已开发 | P2 | GET 供已认证查看者及持 Bot grant 的 App 渲染副屏；写操作仅真人且要求实时 Bot Editor Member+；记录 ID 回绑 Bot/Owner/env |
 | 106 | spaces | 当前用户空间列表（切换器） | `GET /openapi/v1/spaces` | 新增 | 未开工 | P3 | `SpaceScopeProtocol` prod；工坊只 own list + 迁移；**唯一不带 `/bots` 中段** |
 | 107 | migrate | 个人↔团队迁移 | `POST /openapi/v1/bots/migrate/{bot_id}` | 新增 | 未开工 | P3 | body `{target_space}`；校验编辑者是否目标空间成员，非成员移除 |

@@ -11,8 +11,8 @@ from agentclaw.community.adapters.http.openapi_v1 import (
     build_public_router,
 )
 
-#: sessions 10 + engine 3 + models 2 + approvals 3 + connection 1
-_EXPECTED_ROUTE_COUNT = 20
+#: sessions 10 + engine 4 + models 2 + nodes 1 + approvals 3 + connection 1
+_EXPECTED_ROUTE_COUNT = 21
 
 _BOTS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/"
 
@@ -75,7 +75,7 @@ def test_every_route_begins_with_the_bots_prefix():
 
 
 #: Each group's component segment, which its paths must name after ``{bot_id}``.
-_COMPONENTS = ("sessions", "engine", "models", "approvals", "connection")
+_COMPONENTS = ("sessions", "engine", "models", "nodes", "approvals", "connection")
 
 
 def test_every_route_names_the_bot_then_its_component():
@@ -116,6 +116,7 @@ def test_groups_are_mounted_and_reachable_in_the_public_router():
         f"{_BOTS_PREFIX}{{bot_id}}/sessions",
         f"{_BOTS_PREFIX}{{bot_id}}/engine/capabilities",
         f"{_BOTS_PREFIX}{{bot_id}}/models",
+        f"{_BOTS_PREFIX}{{bot_id}}/nodes",
         f"{_BOTS_PREFIX}{{bot_id}}/approvals/mode",
         f"{_BOTS_PREFIX}{{bot_id}}/connection",
     ):

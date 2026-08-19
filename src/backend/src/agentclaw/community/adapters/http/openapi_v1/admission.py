@@ -19,11 +19,11 @@ masked ``404``. A bot merely *shared* with the caller is unreachable here **for
 a human too**, so an application acting as that human inherits the same limit
 without anything being written to enforce it.
 
-**Engine-runtime groups** (``sessions``, ``engine``, ``models``, ``approvals``,
-``connection``) take ``user_id`` as the *caller* and a second ``owner_id``
-naming the *addressed bot's owner*, then adjudicate through the collaborator
-gate. This is where a shared bot is reachable, and therefore where a delegation
-actually pays off. For an app-only caller the addressed owner comes from the
+**Engine-runtime groups** (``sessions``, ``engine``, ``models``, ``nodes``,
+``approvals``, ``connection``) take ``user_id`` as the *caller* and a second
+``owner_id`` naming the *addressed bot's owner*, then adjudicate through the
+collaborator gate. This is where a shared bot is reachable, and therefore where
+a delegation actually pays off. For an app-only caller the addressed owner comes from the
 **grant record**, never from the request — see ``engine_runtime/params.py``.
 
 The invariant every mode below serves
@@ -389,6 +389,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/models/{model_id:path}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/nodes",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",

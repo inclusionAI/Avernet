@@ -1,6 +1,6 @@
 """The resolve-and-gate step every engine-runtime group runs before forwarding.
 
-One helper, used by the sessions, engine, models and approvals routers (the
+One helper, used by the sessions, engine, models, nodes and approvals routers (the
 connection endpoint runs the same gate inside ``EngineConnectionService``,
 where its socket is composed). The rules themselves live in
 ``core/engine_runtime/gate.py``: who may operate a bot (its owner, or a

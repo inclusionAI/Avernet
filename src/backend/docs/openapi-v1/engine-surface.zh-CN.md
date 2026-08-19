@@ -58,7 +58,7 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 
 ---
 
-## 公共面 —— 19 个端点
+## 公共面 —— 21 个端点
 
 全部按 bot 收敛在 `/openapi/v1/bots/{bot_id}/<component>/…` 之下，全部返回
 `openapi_v1/contracts.py` 的 `Envelope[T]` / `Page[T]` 形状。
@@ -68,7 +68,7 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 > 保持一致，而且**网关正是按这个前缀转发到 agentclaw 的**，所以挂在别处的路由
 > 在生产上根本不可达。有测试对此做断言。
 >
-> **`{bot_id}` 在组件名之前。** 这五个组最初就是这样上线的，2026-08-03 被规范化
+> **`{bot_id}` 在组件名之前。** 最初的五个组就是这样上线的，2026-08-03 被规范化
 > 为组件在前，2026-08-15 随整个面的规则反转又改回 Agent 在前 —— 见
 > [`README.zh-CN.md`](README.zh-CN.md) 的**寻址规则**。下表用的是当前地址；组件在
 > 前的旧地址仍会应答、标记为 `deprecated`，直至日落（见 `README.zh-CN.md` 的
@@ -119,19 +119,19 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
   取决于该 bot 跑的是哪个引擎。仍然发送它的调用方会拿到 422，而不是一个静默的
   空操作。_2026-07-30 决定。_
 
-### engine，只读（3）—— engine `/api/engine`
+### engine（4）—— engine `/api/engine`
 
 | 方法 | 公共路径 | engine 路由 | 说明 |
 |---|---|---|---|
 | GET | `…/{bot_id}/engine/status` | `GET /api/engine/status` | 进程 / 切换阶段 / 连接数 |
 | GET | `…/{bot_id}/engine/capabilities` | `GET /api/engine/capabilities` | **Track C 里最重要的端点** —— 见下文《能力》 |
 | GET | `…/{bot_id}/engine/available` | `GET /api/engine/list` | **差异：** `list` 是动词路径，公共面改用名词。已注册引擎 + active 标记 + 版本 |
+| POST | `…/{bot_id}/engine/restart` | `POST /api/engine/restart` | 只重启 engine 进程；不同于会重新置备容器的 Bot 级 restart |
 
-> **`POST /api/engine/switch` 与 `POST /api/engine/restart` 刻意不包装。**
-> PR #494 已经让 `engine` 在 `PUT /openapi/v1/bots/{bot_id}` 上不可变
+> **`POST /api/engine/switch` 仍刻意不包装。** PR #494 已经让 `engine` 在
+> `PUT /openapi/v1/bots/{bot_id}` 上不可变
 > （`extra="forbid"` → 422）；包装 `switch` 等于给那条裁定开后门。而
-> `POST /openapi/v1/bots/{bot_id}/restart` 本身就会重新置备设备，包装 `restart`
-> 会让同一个 bot 拥有两个影响范围不同的重启动词。_2026-07-30 决定。_
+> engine 进程重启已于 2026-08-17 用带组件名的独立路径加入，避免与 Bot 级重启混淆。
 
 ### models（2）—— engine `/api/models`
 
@@ -139,6 +139,16 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 |---|---|---|---|
 | GET | `…/{bot_id}/models` | `GET /api/models` | `Envelope[Page[Model]]` |
 | GET | `…/{bot_id}/models/{model_id}` | `GET /api/models/{model_id:path}` | **模型 id 里带斜杠**（`openai/gpt-5.3`）。engine 用 `:path` 转换器；公共路由必须在「URL 编码」与「`:path` 转换器」之间定下来并写进文档 |
+
+### nodes（1）—— engine `/api/nodes`
+
+| 方法 | 公共路径 | engine 路由 | 说明 |
+|---|---|---|---|
+| GET | `…/{bot_id}/nodes` | `GET /api/nodes` | 对齐当前前端使用的只读清单；转发 `status`、`platform`、`limit`、`offset`，返回 `Envelope[list[Node]]` |
+
+只发布列表能力。前端与 Engine HTTP 当前都没有节点注册、解绑或状态写入流程，因此
+Track C 不虚构这些写操作。公共投影保留前端稳定字段并改用 snake_case，同时丢弃
+Engine 内部 `metadata` / provider raw payload。_2026-08-19 新增。_
 
 ### approvals（3）—— engine `/api/approvals`
 
@@ -225,10 +235,10 @@ socket 也是干净的。
 | engine router | 前缀 | HTTP | WS | 裁定 | 理由 |
 |---|---|---|---|---|---|
 | `api/session` | `/api/sessions` | 7 | — | ✅ **C1 —— 包装** | 在前端 proxypass 列表中 |
-| `api/engine` | `/api/engine` | 5 | — | ✅ **C1 —— 5 取 3** | `switch`/`restart` 排除，见上文 |
+| `api/engine` | `/api/engine` | 5 | — | ✅ **C1 —— 5 取 4** | `switch` 排除；进程重启使用组件限定路径，见上文 |
 | `api/models` | `/api/models` | 2 | — | ✅ **C1 —— 包装** | 在 proxypass 列表中 |
 | `api/approvals` | `/api/approvals` | 3 | — | ✅ **C1 —— 包装** | 在 proxypass 列表中 |
-| `api/node` | `/api/nodes` | 1 | — | ⛔ **2026-07-30 移除** | 在 proxypass 列表中，按 C1 本应包装 —— 但产品并不需要在公共面上暴露节点清单。以后可增量加回。 |
+| `api/node` | `/api/nodes` | 1 | — | ✅ **C1 —— 2026-08-19 已包装** | 工坊现在需要与前端一致的只读节点清单；没有增加推测性的写操作 |
 | `api/cron` | `/api/cron` | 10 | — | ⛔ **C2** | **已经是 `routines` 类别** —— 后端 `/api/cron` → `CronRelayService` → engine。在前端 proxypass 列表里被显式注释掉（`requestConfig.ts:195`） |
 | `api/file` | `/api/file` | 5 | — | ⛔ **C2** | 后端在服务端调用 `/api/file/{read,upload,list,remove,rmtree}`；前端从不 proxypass 它 |
 | `api/skills` | `/api/skills` | 10 | — | ⛔ **C2** | 后端 `skills_pool` / `skill_center` 驱动 layout、symlink、bindpath；属内部文件系统机制，没有面向租户的契约 |
@@ -289,7 +299,7 @@ engine 的每个 handler 都会调用 `check_capability()`
 - `CapabilityNotSupportedError` / 传输层的 501 需要一条 `ENVELOPE_ERRORS` 条目，
   配固定公共文案，并指引调用方去看 `…/{bot_id}/engine/capabilities`。
 - 这正是 `…/{bot_id}/engine/capabilities` 进入 v1 而非延后的原因：它是调用方在事前判断
-  另外 16 个端点里哪些会被自己的 bot 真正应答的唯一方式。
+  另外 17 个端点里哪些会被自己的 bot 真正应答的唯一方式。
 
 ### 3. `user_id` 必须来自 principal，绝不来自调用方
 
@@ -308,7 +318,7 @@ engine 的每个 handler 都会调用 `check_capability()`
 
 冷启动、休眠或正在重启的设备会让每一次 engine 调用在传输层失败。请复用
 `core/bot_management/readiness.py`（#494 抽出的），而不是另造一套策略，并为全部
-16 个端点定下**同一种**行为：掩码 `409 device not ready`，还是自动唤醒后重试。
+18 个端点定下**同一种**行为：掩码 `409 device not ready`，还是自动唤醒后重试。
 无论选哪种，`GET /openapi/v1/bots/{bot_id}/status` 仍然是告诉调用方*原因*的端点。
 
 ### 5. 封闭值集合用枚举，开放的保持字符串
@@ -410,6 +420,10 @@ _沿革：这些组最初就比 `{bot_id}` 通配符深一段，2026-08-03 被�
 
 ## 已定的决策
 
+- **2026-08-19 —— 增量恢复只读 nodes。** 当前前端只 proxypass
+  `GET /api/nodes`，Engine 也只提供这一条 HTTP 操作，因此公共面只增加
+  `GET /openapi/v1/bots/{bot_id}/nodes`。它继承运行时 owner/editor、Bot grant 与
+  stage 门禁；节点注册、删除和状态写入仍不纳入。
 - **2026-07-30 —— 采纳范围规则（C1–C4）。** 包装前端直连的 engine HTTP；经由后端
   的 engine 调用交给已经在其之上的后端契约；socket 返回连接信息而不是转发；排除
   aicoding。
@@ -469,7 +483,7 @@ _沿革：这些组最初就比 `{bot_id}` 通配符深一段，2026-08-03 被�
 
 1. **`Envelope` 上的 `warning`** —— 增加可选字段（推荐）、走响应头，还是丢弃该
    信号？涉及共享的 Track B 契约。
-2. **就绪行为** —— 掩码 `409` 还是自动唤醒后重试，16 个端点统一。
+2. **就绪行为** —— 掩码 `409` 还是自动唤醒后重试，18 个端点统一。
 3. **带斜杠的 `model_id`** —— `:path` 转换器还是强制 URL 编码。
 4. **分页** —— engine 收 `limit`/`offset`；公共 `Page` 形状必须干净映射，包括
    `/api/models` 这个返回扁平列表、没有 `total` 的路由。

@@ -168,6 +168,7 @@ _GROUP_ROUTES = [
     ("sessions", f"/openapi/v1/bots/{BOT}/sessions"),
     ("engine", f"/openapi/v1/bots/{BOT}/engine/capabilities"),
     ("models", f"/openapi/v1/bots/{BOT}/models"),
+    ("nodes", f"/openapi/v1/bots/{BOT}/nodes"),
     ("approvals", f"/openapi/v1/bots/{BOT}/approvals/mode?session_key=k"),
 ]
 
@@ -188,7 +189,9 @@ def test_a_named_stage_travels_to_the_forward_unchanged(
     relay.set_bot_type("service")
     relay.results = [
         EngineResult(
-            data={"supported": [], "sessionKey": "k", "mode": "approve", "id": "s"}
+            data=[]
+            if group == "nodes"
+            else {"supported": [], "sessionKey": "k", "mode": "approve", "id": "s"}
         )
     ]
     client = make_client(module.router)
@@ -315,8 +318,9 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
 
     # The original 16 operations also answer at their former addresses while
     # callers migrate. The three newly added favorite operations have only
-    # their bot-first address, so there are 20 current + 16 retiring operations.
-    assert len(engine_runtime) == 36
+    # their bot-first address; engine restart and nodes also have no legacy
+    # alias. That yields 21 current + 16 retiring operations.
+    assert len(engine_runtime) == 37
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (

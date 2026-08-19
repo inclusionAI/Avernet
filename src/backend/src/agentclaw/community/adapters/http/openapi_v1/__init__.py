@@ -199,6 +199,7 @@ from .engine_runtime.approvals import router as engine_approvals_router
 from .engine_runtime.connection import router as engine_connection_router
 from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
+from .engine_runtime.nodes import router as engine_nodes_router
 from .engine_runtime.sessions import router as engine_sessions_router
 from .identity import router as identity_router
 from .local import router as local_router
@@ -341,6 +342,7 @@ _ENGINE_RUNTIME_GROUPS = [
     engine_sessions_router,
     engine_engine_router,
     engine_models_router,
+    engine_nodes_router,
     engine_approvals_router,
     engine_connection_router,
 ]
