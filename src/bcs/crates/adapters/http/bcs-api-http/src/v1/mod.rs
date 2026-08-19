@@ -23,9 +23,19 @@ pub fn router(state: ApiState) -> Router {
             state.clone(),
             verify_principal::<ApiState>,
         ));
+    let internal_bot_attributes = match (
+        state.internal_bot_attributes_service.clone(),
+        state.internal_provider_authenticator.clone(),
+    ) {
+        (Some(service), Some(authenticator)) => {
+            internal::bot_attributes_router(service, authenticator)
+        }
+        _ => Router::new(),
+    };
     Router::new()
         .merge(protected)
         .merge(openapi::public_router())
         .merge(internal::public_router())
+        .merge(internal_bot_attributes)
         .with_state(state)
 }

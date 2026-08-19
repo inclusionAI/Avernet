@@ -30,6 +30,7 @@ use crate::config::{
     BcsConfig, CollaborationTemplateStorageKind, GatewayPrincipalConfig, GroupSessionWsConfig,
     LlmConfig, LlmProviderType,
 };
+use crate::internal_api::ProviderAdminInternalAuthenticator;
 use crate::lifecycle::LifecycleOrchestrator;
 use crate::plugins::{
     DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
@@ -37,7 +38,7 @@ use crate::plugins::{
     build_registered_llm_provider, build_registered_security_gateway,
     build_registered_user_directory,
 };
-use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
+use bcs_app_bot::{BotServiceConfig, BotServiceImpl, InternalBotAttributesServiceImpl};
 use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
 use bcs_app_invitation::{InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl};
 use bcs_app_session::{
@@ -1413,6 +1414,7 @@ fn build_openapi_v1_state(
     invite_token_secret: Vec<u8>,
     control_plane_repo: Arc<dyn BotControlPlaneRepoPort>,
     provider_repos: &ProviderRepoBundle,
+    provider_core: Arc<dyn ProviderCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     groups: Arc<dyn GroupCoreService>,
     friends: Arc<dyn FriendCoreService>,
@@ -1436,13 +1438,23 @@ fn build_openapi_v1_state(
         provider_repos.provider_bindings.clone(),
     ));
     let bot_service = Arc::new(BotServiceImpl::new(
-        control_plane,
+        control_plane.clone(),
         registry.clone(),
         friends.clone(),
         candidate_search,
         BotServiceConfig {
             env: relation_env.clone(),
         },
+    ));
+    let internal_bot_attributes_service = Arc::new(InternalBotAttributesServiceImpl::new(
+        control_plane,
+        BotServiceConfig {
+            env: relation_env.clone(),
+        },
+    ));
+    let internal_provider_authenticator = Arc::new(ProviderAdminInternalAuthenticator::new(
+        provider_core,
+        config.internal_api.trusted_backend_provider_id.clone(),
     ));
     let group_service = Arc::new(
         GroupServiceImpl::new(
@@ -1520,6 +1532,10 @@ fn build_openapi_v1_state(
     )
     .with_bot_service(bot_service)
     .with_session_file_service(session_file_service, session_file_url_projector)
+    .with_internal_bot_attributes(
+        internal_bot_attributes_service,
+        internal_provider_authenticator,
+    )
 }
 
 pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifier> {
@@ -2005,6 +2021,7 @@ impl Default for BcsServerState {
             invite_token_secret.clone(),
             control_plane_repo,
             &provider_repos,
+            provider_core.clone(),
             bot_registry.clone(),
             sessions.clone(),
             friend_store.clone(),
@@ -3413,6 +3430,7 @@ impl BcsServer {
             invite_token_secret.clone(),
             control_plane_repo,
             &provider_repos,
+            provider_core.clone(),
             bot_registry.clone(),
             sessions.clone(),
             friend_store.clone(),
@@ -4047,6 +4065,7 @@ impl BcsServer {
             invite_token_secret.clone(),
             control_plane_repo,
             &provider_repos,
+            provider_core.clone(),
             bot_registry.clone(),
             sessions.clone(),
             friend_svc.clone(),

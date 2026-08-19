@@ -9,6 +9,9 @@ use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
+use bcs_api_http::v1::internal::{
+    InternalProviderAuthError, InternalProviderAuthenticator,
+};
 use bcs_service_api::application::v1::*;
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -41,6 +44,39 @@ impl PrincipalVerifier for HeaderVerifier {
         } else {
             Err(PrincipalVerificationError::Missing)
         }
+    }
+}
+
+struct InternalAuth;
+
+#[async_trait]
+impl InternalProviderAuthenticator for InternalAuth {
+    async fn authenticate(
+        &self,
+        token: &str,
+        provider_id: &str,
+    ) -> Result<(), InternalProviderAuthError> {
+        if token == "internal-token" && provider_id == "backend-provider" {
+            Ok(())
+        } else {
+            Err(InternalProviderAuthError::Unauthorized)
+        }
+    }
+}
+
+struct InternalAttributes;
+
+#[async_trait]
+impl InternalBotAttributesService for InternalAttributes {
+    async fn get(&self, _bot_id: String) -> Result<BotInternalAttributes, ApplicationError> {
+        Ok(BotInternalAttributes::default())
+    }
+
+    async fn patch(
+        &self,
+        _command: PatchBotInternalAttributes,
+    ) -> Result<BotInternalAttributes, ApplicationError> {
+        Ok(BotInternalAttributes::default())
     }
 }
 
@@ -324,8 +360,41 @@ fn test_router(service: Arc<FakeBotService>) -> axum::Router {
             Arc::new(NoopFriendshipService),
             Arc::new(HeaderVerifier),
         )
-        .with_bot_service(service),
+        .with_bot_service(service)
+        .with_internal_bot_attributes(Arc::new(InternalAttributes), Arc::new(InternalAuth)),
     )
+}
+
+#[tokio::test]
+async fn internal_provider_branch_bypasses_gateway_principal_but_public_branch_does_not() {
+    let app = test_router(Arc::new(FakeBotService::default()));
+
+    let internal = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/internal/v1/bots/bot-1/attributes")
+                .header("authorization", "Bearer internal-token")
+                .header("x-bcn-provider-id", "backend-provider")
+                .body(Body::empty())
+                .expect("internal request"),
+        )
+        .await
+        .expect("internal response");
+    assert_eq!(internal.status(), StatusCode::OK);
+
+    let public = app
+        .oneshot(
+            Request::builder()
+                .uri("/openapi/v1/collaboration/bots/bot-1")
+                .header("authorization", "Bearer internal-token")
+                .header("x-bcn-provider-id", "backend-provider")
+                .body(Body::empty())
+                .expect("public request"),
+        )
+        .await
+        .expect("public response");
+    assert_eq!(public.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
