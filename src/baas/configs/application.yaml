@@ -17,9 +17,15 @@ user_config:
   plugins:
     auth: "stub"
     crypto: "stub"          # stub | real
-    secret: "stub"          # stub | real
+    secret: "stub"          # stub | real | aliyun_kms
     scheduler: "stub"       # stub | real
-    cache: "stub"           # stub | real
+    cache: "stub"           # stub | real | redis
+    # cache_redis:
+    #   host: "127.0.0.1"
+    #   port: 6379
+    #   db: 0
+    #   ssl: false
+    #   password: "@redis_password"   # plain value or secret reference
     bot_service: "stub"  # real | local | stub
     engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
     file_transfer: "stub"  # stub | real

@@ -74,8 +74,11 @@ class PluginConfig(ConfigSchema):
     schema_catalog: str = Field(default="file", min_length=1)
     cache: str = Field(default="stub", min_length=1)
     auth: str = Field(default="stub", min_length=1)
+    secret: str = Field(default="community", min_length=1)
     authn: AuthnPluginConfig = Field(default_factory=AuthnPluginConfig)
     database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
+    cache_redis: dict = Field(default_factory=dict)
+    secret_aliyun_kms: dict = Field(default_factory=dict)
 
 
 def _read_config(cfg, key: ConfigKey):
