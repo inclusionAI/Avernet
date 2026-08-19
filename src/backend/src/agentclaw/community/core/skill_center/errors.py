@@ -101,6 +101,10 @@ class SkillSetControlPlaneNotFoundError(Exception):
     """A canonical SkillSet is absent from the addressed Bot scope."""
 
 
+class SkillSetAccessDeniedError(Exception):
+    """The authenticated principal cannot mutate the addressed Bot SkillSet."""
+
+
 class SkillSetControlPlaneConflictError(Exception):
     """A canonical SkillSet command conflicts with desired state."""
 

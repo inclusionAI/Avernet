@@ -45,7 +45,10 @@ def _item(row: SkillSet) -> dict:
         "description": row.description,
         "is_default": bool(row.is_default),
         "is_builtin": bool(row.is_builtin),
-        "is_active": bool(row.is_active),
+        # System Default is a platform projection, not mutable desired state.
+        # Historical rows may contain false from the old storage model, but the
+        # public contract must always expose Default as active.
+        "is_active": True if row.is_default else bool(row.is_active),
         "user_id": row.user_id,
         "bolt_id": row.bolt_id,
         "engine_type": row.engine_type,
@@ -122,7 +125,6 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                     .filter(
                         SkillSet.bolt_id == bot_id,
                         SkillSet.name == name,
-                        SkillSet.engine_type == engine_type,
                     )
                     .first()
                 )
@@ -205,7 +207,6 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                         SkillSet.bolt_id == bot_id,
                         SkillSet.name == name,
                         SkillSet.id != row.id,
-                        SkillSet.engine_type == engine_type,
                     )
                     .first()
                 )
@@ -355,6 +356,7 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                 SkillSetSkill(
                     skill_set_id=row.id,
                     skill_id=skill.id,
+                    bot_id=bot_id,
                     user_id=row.user_id,
                     env=get_current_env(),
                     avernet_tenant=get_current_avernet_tenant(),
@@ -572,6 +574,7 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                         SkillSetSkill(
                             skill_set_id=set_id,
                             skill_id=skill_id,
+                            bot_id=bot_id,
                             user_id=user_id,
                             skill_uuid=skill_uuid,
                             env=get_current_env(),

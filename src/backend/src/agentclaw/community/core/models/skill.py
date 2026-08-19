@@ -239,6 +239,13 @@ class SkillSetSkill(Base):
             "skill_id",
             name="uk_skill_set_skill",
         ),
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "bot_id",
+            "skill_id",
+            name="uk_bot_skill_set_skill",
+        ),
         {"extend_existing": True},
     )
 
@@ -252,6 +259,10 @@ class SkillSetSkill(Base):
     skill_uuid = Column(
         String(128), nullable=True, index=True, comment="技能唯一标识(跨版本不变)"
     )
+    # Additive denormalization used only to make the *ordinary* cross-SkillSet
+    # invariant database-expressible. System Default and historical rows keep
+    # NULL; writers for ordinary SkillSets persist the parent Bot id.
+    bot_id = Column(String(100), nullable=True, index=True)
     user_id = Column(String(128), nullable=True, index=True)
     gmt_created = Column(DateTime, default=func.now(), nullable=False)
     gmt_modified = Column(

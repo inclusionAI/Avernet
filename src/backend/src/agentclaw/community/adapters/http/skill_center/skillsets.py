@@ -48,6 +48,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneNotFoundError,
     SkillSetControlPlaneLockUnavailableError,
     SkillSetRuntimeReconcileError,
+    SkillSetAccessDeniedError,
 )
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
@@ -88,6 +89,8 @@ def _legacy_skill_set(item: dict) -> SkillSetResponse:
 def _legacy_error(exc: Exception) -> HTTPException:
     if isinstance(exc, (LocalSkillNotFoundError, SkillSetControlPlaneNotFoundError)):
         return HTTPException(status_code=404, detail="Skill set not found")
+    if isinstance(exc, SkillSetAccessDeniedError):
+        return HTTPException(status_code=403, detail="Forbidden")
     if isinstance(exc, SkillSetControlPlaneConflictError):
         return HTTPException(status_code=400, detail=str(exc))
     if isinstance(exc, SkillSetControlPlaneLockUnavailableError):
@@ -499,7 +502,11 @@ async def add_skills_to_set(
                     skill_id=stable_skill_id,
                 )
                 results["success"].append({"skill_id": str(stable_skill_id), "name": str(skill_id)})
-            except Exception as exc:
+            except (
+                LocalSkillNotFoundError,
+                SkillSetControlPlaneNotFoundError,
+                SkillSetControlPlaneConflictError,
+            ) as exc:
                 results["failed"].append({"skill_id": skill_id, "error": str(exc)})
         success_count = len(results["success"])
         failed_count = len(results["failed"])

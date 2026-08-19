@@ -26,6 +26,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
+    SkillSetAccessDeniedError,
     SkillSetRuntimeReconcileError,
 )
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
@@ -36,6 +37,7 @@ from agentclaw.community.core.skill_center.factories import SkillSetServiceFacto
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationBusyError,
     BotCapabilityMutationGuard,
+    BotCapabilityMutationLease,
     BotCapabilityMutationLockUnavailableError,
 )
 from agentclaw.community.core.skills_pool.edit_guard import (
@@ -47,6 +49,7 @@ from agentclaw.community.core.skills_pool.edit_guard import (
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 class SkillSetRuntimeReconcilerProtocol(Protocol):
@@ -120,7 +123,7 @@ class SkillSetControlPlaneService:
                 bot_id, owner_id, actor_id, PermissionLevel.MEMBER
             )
             if not permission.get("has_permission"):
-                raise LocalSkillNotFoundError()
+                raise SkillSetAccessDeniedError()
         return bot
 
     @staticmethod
@@ -143,21 +146,32 @@ class SkillSetControlPlaneService:
         idempotency_key: str,
     ) -> dict:
         bot = self._bot(bot_id, actor_id)
-        item = self._repository.create_set(
-            bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
-            name=name,
-            description=description,
-            idempotency_key=idempotency_key,
-            engine_type=self._engine(bot),
-        )
-        self._audit(
-            bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
-            actor_id=actor_id,
-            action="skill_set_create",
-        )
-        return item
+        scope = self._scope(bot, bot_id)
+        try:
+            mutation_lease = self._mutation_guard.acquire(scope=scope)
+        except BotCapabilityMutationBusyError as exc:
+            raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY") from exc
+        except BotCapabilityMutationLockUnavailableError as exc:
+            raise SkillSetControlPlaneLockUnavailableError() from exc
+        try:
+            item = self._repository.create_set(
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                name=name,
+                description=description,
+                idempotency_key=idempotency_key,
+                engine_type=self._engine(bot),
+            )
+            self._ensure_mutation_lease(mutation_lease)
+            self._audit(
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                actor_id=actor_id,
+                action="skill_set_create",
+            )
+            return item
+        finally:
+            self._mutation_guard.release(mutation_lease)
 
     def create_legacy_set(
         self,
@@ -168,9 +182,15 @@ class SkillSetControlPlaneService:
         description: str | None,
         idempotency_key: str,
     ) -> dict:
-        """Preserve pre-Bot-record legacy creation without weakening canonical ACL."""
-        bot = self._bot_repo.get_by_id(bot_id)
-        if bot is not None:
+        """Preserve only the released virtual-Default compatibility case.
+
+        Canonical and addressed Legacy requests still require a real Bot.  The
+        historical no-``bot_id`` wire, however, names the environment's
+        virtual ``default`` Bot and shipped before ``ac_bots`` was mandatory.
+        Keep that one owner-scoped case without restoring arbitrary orphan
+        SkillSet creation for caller-supplied Bot ids.
+        """
+        if self._bot_repo.get_by_id(bot_id) is not None or bot_id != "default":
             return self.create_set(
                 bot_id=bot_id,
                 actor_id=actor_id,
@@ -178,21 +198,35 @@ class SkillSetControlPlaneService:
                 description=description,
                 idempotency_key=idempotency_key,
             )
-        item = self._repository.create_set(
-            bot_id=bot_id,
-            owner_id=actor_id,
-            name=name,
-            description=description,
-            idempotency_key=idempotency_key,
-            engine_type="openclaw",
+
+        scope = BotSkillLayoutScope(
+            env=get_current_env(), entity_id=actor_id, bot_id="default"
         )
-        self._audit(
-            bot_id=bot_id,
-            owner_id=actor_id,
-            actor_id=actor_id,
-            action="skill_set_create_legacy",
-        )
-        return item
+        try:
+            mutation_lease = self._mutation_guard.acquire(scope=scope)
+        except BotCapabilityMutationBusyError as exc:
+            raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY") from exc
+        except BotCapabilityMutationLockUnavailableError as exc:
+            raise SkillSetControlPlaneLockUnavailableError() from exc
+        try:
+            item = self._repository.create_set(
+                bot_id="default",
+                owner_id=actor_id,
+                name=name,
+                description=description,
+                idempotency_key=idempotency_key,
+                engine_type="openclaw",
+            )
+            self._ensure_mutation_lease(mutation_lease)
+            self._audit(
+                bot_id="default",
+                owner_id=actor_id,
+                actor_id=actor_id,
+                action="skill_set_create_legacy_default",
+            )
+            return item
+        finally:
+            self._mutation_guard.release(mutation_lease)
 
     def get_set(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
         bot = self._bot(bot_id, actor_id)
@@ -219,32 +253,54 @@ class SkillSetControlPlaneService:
         description: str | None,
     ) -> dict:
         bot = self._bot(bot_id, actor_id)
-        item = self._repository.update_set(
-            bot_id=bot_id,
-            set_id=set_id,
-            name=name,
-            description=description,
-            engine_type=self._engine(bot),
-        )
-        self._audit(
-            bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
-            actor_id=actor_id,
-            action="skill_set_update",
-        )
-        return item
+        scope = self._scope(bot, bot_id)
+        try:
+            mutation_lease = self._mutation_guard.acquire(scope=scope)
+        except BotCapabilityMutationBusyError as exc:
+            raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY") from exc
+        except BotCapabilityMutationLockUnavailableError as exc:
+            raise SkillSetControlPlaneLockUnavailableError() from exc
+        try:
+            item = self._repository.update_set(
+                bot_id=bot_id,
+                set_id=set_id,
+                name=name,
+                description=description,
+                engine_type=self._engine(bot),
+            )
+            self._ensure_mutation_lease(mutation_lease)
+            self._audit(
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                actor_id=actor_id,
+                action="skill_set_update",
+            )
+            return item
+        finally:
+            self._mutation_guard.release(mutation_lease)
 
     def delete_set(self, *, bot_id: str, actor_id: str, set_id: str) -> None:
         bot = self._bot(bot_id, actor_id)
-        self._repository.delete_set(
-            bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
-        )
-        self._audit(
-            bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
-            actor_id=actor_id,
-            action="skill_set_delete",
-        )
+        scope = self._scope(bot, bot_id)
+        try:
+            mutation_lease = self._mutation_guard.acquire(scope=scope)
+        except BotCapabilityMutationBusyError as exc:
+            raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY") from exc
+        except BotCapabilityMutationLockUnavailableError as exc:
+            raise SkillSetControlPlaneLockUnavailableError() from exc
+        try:
+            self._repository.delete_set(
+                bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+            )
+            self._ensure_mutation_lease(mutation_lease)
+            self._audit(
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                actor_id=actor_id,
+                action="skill_set_delete",
+            )
+        finally:
+            self._mutation_guard.release(mutation_lease)
 
     def list_skills(self, *, bot_id: str, actor_id: str, set_id: str) -> list[dict]:
         bot = self._bot(bot_id, actor_id)
@@ -437,6 +493,7 @@ class SkillSetControlPlaneService:
                 if not is_bot_ready(bot):
                     raise LocalSkillNotReadyError()
                 mutation_result = mutation()
+                self._ensure_mutation_lease(mutation_lease)
                 # An inactive-set membership change has no runtime projection
                 # to apply.  Reconcile only becomes a required side effect
                 # when that membership is active (or for all lifecycle/sync
@@ -456,7 +513,9 @@ class SkillSetControlPlaneService:
                         bot_id=bot_id,
                         actor_id=actor_id,
                         mutation=mutation_result,
+                        mutation_lease=mutation_lease,
                     )
+                self._ensure_mutation_lease(mutation_lease)
                 self._audit(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -470,12 +529,20 @@ class SkillSetControlPlaneService:
             self._mutation_guard.release(mutation_lease)
 
     async def _reconcile(
-        self, *, bot: dict, bot_id: str, actor_id: str, mutation: SkillSetMutation
+        self,
+        *,
+        bot: dict,
+        bot_id: str,
+        actor_id: str,
+        mutation: SkillSetMutation,
+        mutation_lease: BotCapabilityMutationLease,
     ) -> dict:
         owner_id = str(bot["owner_id"])
         try:
             await self._runtime.reconcile(bot_id=bot_id, owner_id=owner_id)
         except Exception as exc:
+            # A stale holder must never compensate over a newer command.
+            self._ensure_mutation_lease(mutation_lease)
             self._repository.restore_desired_state(
                 bot_id=bot_id,
                 state=mutation.previous_state,
@@ -485,8 +552,16 @@ class SkillSetControlPlaneService:
                 await self._runtime.reconcile(bot_id=bot_id, owner_id=owner_id)
             except Exception as restore_error:
                 raise SkillSetRuntimeReconcileError() from restore_error
+            self._ensure_mutation_lease(mutation_lease)
             raise SkillSetRuntimeReconcileError() from exc
+        self._ensure_mutation_lease(mutation_lease)
         return {**mutation.item, "changed": mutation.changed, **mutation.details}
+
+    def _ensure_mutation_lease(self, lease: BotCapabilityMutationLease) -> None:
+        try:
+            self._mutation_guard.ensure_valid(lease)
+        except BotCapabilityMutationLockUnavailableError as exc:
+            raise SkillSetControlPlaneLockUnavailableError() from exc
 
     def _audit(self, *, bot_id: str, owner_id: str, actor_id: str, action: str) -> None:
         self._audit_log_repo.insert(

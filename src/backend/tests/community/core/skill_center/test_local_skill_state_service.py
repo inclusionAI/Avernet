@@ -192,6 +192,9 @@ class _MutationGuard:
     def acquire(self, *, scope):
         return object()
 
+    def ensure_valid(self, _lease) -> None:
+        return None
+
     def release(self, _lease):
         self.releases += 1
         return True

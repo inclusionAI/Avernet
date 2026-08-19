@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
@@ -9,6 +11,8 @@ from agentclaw.community.core.repository.implementations.skill_center.skill_set_
     SkillSetMutation,
 )
 from agentclaw.community.core.skill_center.errors import (
+    LocalSkillNotFoundError,
+    SkillSetAccessDeniedError,
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
 )
@@ -17,6 +21,7 @@ from agentclaw.community.core.skill_center.services.skill_set_control_plane impo
 )
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationGuard,
+    BotCapabilityMutationLockUnavailableError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
@@ -47,6 +52,15 @@ class _MutationGuard:
     def release(self, _lease) -> bool:
         return True
 
+    def ensure_valid(self, _lease) -> None:
+        return None
+
+
+class _AnyMutationGuard(_MutationGuard):
+    def acquire(self, *, scope):
+        self.scope = scope
+        return object()
+
 
 class _Repository:
     def __init__(self) -> None:
@@ -61,6 +75,22 @@ class _Repository:
 
     def restore_desired_state(self, **kwargs) -> None:
         self.restore_calls.append(kwargs)
+
+
+class _CreateRepository(_Repository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.create_calls = []
+
+    def create_set(self, **kwargs):
+        self.create_calls.append(kwargs)
+        return {
+            "id": "set-1",
+            "name": kwargs["name"],
+            "bolt_id": kwargs["bot_id"],
+            "is_default": False,
+            "is_active": False,
+        }
 
 
 class _Bots:
@@ -83,6 +113,17 @@ class _Collaborators:
     def check_collaborator_permission(self, *args):
         self.calls.append(args)
         return {"has_permission": True}
+
+
+class _DeniedCollaborators(_Collaborators):
+    def check_collaborator_permission(self, *args):
+        self.calls.append(args)
+        return {"has_permission": False}
+
+
+class _MissingBots:
+    def get_by_id(self, _bot_id: str):
+        return None
 
 
 class _Runtime:
@@ -118,6 +159,9 @@ class _Cache:
             return False
         del self.held[key]
         return True
+
+    def renew_lock_strict(self, key: str, token: str, ttl: int) -> bool:
+        return self.held.get(key) == token
 
 
 class _BlockingRuntime:
@@ -244,6 +288,94 @@ def test_mutation_guard_keeps_same_env_bot_ids_isolated_by_tenant():
     assert first.key != second.key
     assert guard.release(first)
     assert guard.release(second)
+
+
+def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
+    service = SkillSetControlPlaneService(
+        repository=_Repository(),
+        bot_repo=_MissingBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        collaborators=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+    )
+
+    with pytest.raises(LocalSkillNotFoundError):
+        service.create_legacy_set(
+            bot_id="missing",
+            actor_id="actor",
+            name="set",
+            description=None,
+            idempotency_key="request-1",
+        )
+
+
+def test_legacy_create_retains_only_virtual_default_bot_compatibility():
+    repository = _CreateRepository()
+    mutation_guard = _AnyMutationGuard()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_MissingBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        collaborators=_Collaborators(),
+        mutation_guard=mutation_guard,
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+    )
+
+    result = service.create_legacy_set(
+        bot_id="default",
+        actor_id="actor",
+        name="set",
+        description=None,
+        idempotency_key="request-1",
+    )
+
+    assert result["bolt_id"] == "default"
+    assert repository.create_calls[0]["owner_id"] == "actor"
+    assert mutation_guard.scope.entity_id == "actor"
+
+
+def test_skill_set_acl_denial_is_forbidden_not_not_found():
+    service = SkillSetControlPlaneService(
+        repository=_Repository(),
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        collaborators=_DeniedCollaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+    )
+
+    with pytest.raises(SkillSetAccessDeniedError):
+        service.list_sets(bot_id="bot-1", actor_id="collaborator")
+
+
+def test_mutation_guard_heartbeat_fails_closed_and_stops_on_release(monkeypatch):
+    cache = _Cache()
+    guard = BotCapabilityMutationGuard(cache)
+    monkeypatch.setattr(guard, "_HEARTBEAT_SECONDS", 0.01)
+    cache.renew_lock_strict = lambda *_args, **_kwargs: False
+    lease = guard.acquire(
+        scope=BotSkillLayoutScope(env="dev", entity_id="entity-1", bot_id="bot-1")
+    )
+
+    deadline = time.time() + 1
+    while not lease.lost.is_set() and time.time() < deadline:
+        time.sleep(0.01)
+
+    with pytest.raises(BotCapabilityMutationLockUnavailableError):
+        guard.ensure_valid(lease)
+    assert guard.release(lease) is False
+    assert lease.heartbeat is not None
+    assert not lease.heartbeat.is_alive()
 
 
 @pytest.mark.asyncio

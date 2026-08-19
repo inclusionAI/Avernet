@@ -741,6 +741,9 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
         def release(self, _lease):
             return True
 
+        def ensure_valid(self, _lease) -> None:
+            return None
+
     factory = _Factory()
     service = LocalSkillStateService(
         skills,

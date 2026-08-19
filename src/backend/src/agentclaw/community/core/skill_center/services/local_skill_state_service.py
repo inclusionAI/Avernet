@@ -30,6 +30,7 @@ from agentclaw.community.core.skill_center.factories import SkillSetServiceFacto
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationBusyError,
     BotCapabilityMutationGuard,
+    BotCapabilityMutationLease,
     BotCapabilityMutationLockUnavailableError,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
@@ -129,6 +130,7 @@ class LocalSkillStateService:
                     bot_id=bot_id,
                     skill_id=skill_id,
                 )
+                self._ensure_mutation_lease(mutation_lease)
 
                 if active:
                     synced = self._sync_runtime(
@@ -142,8 +144,10 @@ class LocalSkillStateService:
                         owner_id=owner_id,
                         bot_id=bot_id,
                     )
+                self._ensure_mutation_lease(mutation_lease)
                 if not synced:
                     if changed:
+                        self._ensure_mutation_lease(mutation_lease)
                         try:
                             self._write_desired_state(
                                 active=not active,
@@ -159,6 +163,7 @@ class LocalSkillStateService:
                         restored = self._sync_runtime(
                             bot=bot, owner_id=owner_id, bot_id=bot_id
                         )
+                        self._ensure_mutation_lease(mutation_lease)
                         if not restored:
                             raise LocalSkillRuntimeSyncError()
                     raise LocalSkillRuntimeSyncError()
@@ -237,6 +242,7 @@ class LocalSkillStateService:
                     )
                 except Exception as exc:
                     raise LocalSkillStorageError() from exc
+                self._ensure_mutation_lease(mutation_lease)
                 if active:
                     synced = await self._publish_current_mappings(
                         scope=scope, bot=bot, owner_id=owner_id, bot_id=bot_id
@@ -249,6 +255,7 @@ class LocalSkillStateService:
                         owner_id=owner_id,
                         bot_id=bot_id,
                     )
+                self._ensure_mutation_lease(mutation_lease)
                 if synced:
                     return {
                         **raw,
@@ -258,6 +265,7 @@ class LocalSkillStateService:
                         "changed": changed,
                     }
                 if changed:
+                    self._ensure_mutation_lease(mutation_lease)
                     try:
                         self._write_desired_state(
                             active=not active,
@@ -271,6 +279,7 @@ class LocalSkillStateService:
                         scope=scope, bot=bot, owner_id=owner_id, bot_id=bot_id
                     ):
                         raise LocalSkillRuntimeSyncError()
+                    self._ensure_mutation_lease(mutation_lease)
                 raise LocalSkillRuntimeSyncError()
             finally:
                 self._edit_guard.release(lease)
@@ -290,6 +299,12 @@ class LocalSkillStateService:
         if bot is None:
             raise LocalSkillNotFoundError()
         return self._scope_for(bot, bot_id)
+
+    def _ensure_mutation_lease(self, lease: BotCapabilityMutationLease) -> None:
+        try:
+            self._mutation_guard.ensure_valid(lease)
+        except BotCapabilityMutationLockUnavailableError as exc:
+            raise LocalSkillEditLockUnavailableError() from exc
 
     def _authorize(
         self, skill_id: str, actor_id: str

@@ -124,7 +124,16 @@ def test_delete_removes_all_associations_for_active_and_inactive_local_skills(
     inactive_set = sets.create({"name": "inactive", "is_active": False})
     extra_set = sets.create({"name": "extra", "is_active": True})
     sets.add_skill_to_set(active_set["id"], active_skill["id"])
-    sets.add_skill_to_set(extra_set["id"], active_skill["id"])
+    # Model a historical duplicate that predates the ordinary-set uniqueness rule.
+    with db.orm_session() as session:
+        session.add(
+            SkillSetSkill(
+                skill_set_id=int(extra_set["id"]),
+                skill_id=int(active_skill["id"]),
+                bot_id=None,
+                env="dev",
+            )
+        )
     sets.add_skill_to_set(inactive_set["id"], inactive_skill["id"])
 
     assert skills.delete(active_skill["id"]) is True
@@ -527,7 +536,7 @@ def test_delete_by_bot_id(skills):
 
 
 def test_list_skill_set_references_includes_active_and_inactive_sets(
-    skills, sets
+    skills, sets, db
 ):
     skill = skills.create({"name": "referenced", "bolt_id": "bot-x"})
     active_set = sets.create(
@@ -537,7 +546,16 @@ def test_list_skill_set_references_includes_active_and_inactive_sets(
         {"name": "inactive", "bolt_id": "bot-x", "is_active": False}
     )
     sets.add_skill_to_set(active_set["id"], skill["id"])
-    sets.add_skill_to_set(inactive_set["id"], skill["id"])
+    # Preserve coverage for legacy duplicate membership rows.
+    with db.orm_session() as session:
+        session.add(
+            SkillSetSkill(
+                skill_set_id=int(inactive_set["id"]),
+                skill_id=int(skill["id"]),
+                bot_id=None,
+                env="dev",
+            )
+        )
 
     assert skills.list_skill_set_references(skill["id"]) == [
         {"skill_set_id": active_set["id"]},

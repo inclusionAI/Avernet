@@ -9,8 +9,10 @@ from fastapi import HTTPException
 
 from agentclaw.community.adapters.http.skill_center.schemas import (
     ActivateRequest,
+    AddSkillsRequest,
     SearchRequest,
 )
+from agentclaw.community.adapters.http.skill_center.skillsets import add_skills_to_set
 from agentclaw.community.adapters.http.skill_center.skills import (
     activate_skill,
     deactivate_skill,
@@ -21,7 +23,10 @@ from agentclaw.community.adapters.http.skill_center.skills import (
     sync_market,
 )
 from agentclaw.community.adapters.http.dependencies import get_request_context
-from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
+from agentclaw.community.core.skill_center.errors import (
+    LocalSkillNotFoundError,
+    SkillSetControlPlaneConflictError,
+)
 
 
 class _Bots:
@@ -266,3 +271,55 @@ def test_legacy_repo_catalog_routes_retain_request_context_auth_dependency() -> 
             if parameter.name == "ctx"
         )
         assert dependency.dependency is get_request_context
+
+
+@pytest.mark.asyncio
+async def test_legacy_skill_set_batch_keeps_domain_partial_success() -> None:
+    class _ControlPlane:
+        def resolve_legacy_skill_id(self, **kwargs):
+            return kwargs["identifier"]
+
+        async def add_skill(self, **_kwargs):
+            raise SkillSetControlPlaneConflictError("duplicate")
+
+    response = await add_skills_to_set(
+        "set-1",
+        AddSkillsRequest(skill_ids=["7"], user_id="owner", bot_id="bot"),
+        entity_id=None,
+        entity_type=None,
+        bot_id=None,
+        engine_type=None,
+        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+        bot_repo=_Bots(),
+        control_plane=_ControlPlane(),
+    )
+
+    assert response.success is True
+    assert response.data["success"] == []
+    assert response.data["failed"][0]["skill_id"] == "7"
+
+
+@pytest.mark.asyncio
+async def test_legacy_skill_set_batch_propagates_infrastructure_failure() -> None:
+    class _ControlPlane:
+        def resolve_legacy_skill_id(self, **kwargs):
+            return kwargs["identifier"]
+
+        async def add_skill(self, **_kwargs):
+            raise RuntimeError("database unavailable")
+
+    with pytest.raises(HTTPException) as failure:
+        await add_skills_to_set(
+            "set-1",
+            AddSkillsRequest(skill_ids=["7"], user_id="owner", bot_id="bot"),
+            entity_id=None,
+            entity_type=None,
+            bot_id=None,
+            engine_type=None,
+            ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+            bot_repo=_Bots(),
+            control_plane=_ControlPlane(),
+        )
+
+    assert failure.value.status_code == 500
+    assert failure.value.detail == "Skill set operation failed"
