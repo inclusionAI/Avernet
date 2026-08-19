@@ -641,7 +641,8 @@ class _FakeSkillsPort:
     async def skills_clean_symlinks(self, token=None) -> dict:
         return {"directories_scanned": 2, "removed": ["x"]}
 
-    async def skills_ensure_center(self, token=None) -> dict:
+    async def skills_ensure_center(self, items, token=None) -> dict:
+        self.calls.append({"method": "skills_ensure_center", "items": items, "token": token})
         return {"ok": [{"skill_uuid": "u1", "version": "1.0"}],
                 "failed": [{"skill_uuid": "u2", "version": "2.0", "reason": "missing"}]}
 
@@ -708,7 +709,8 @@ class TestSkillsAdapter:
         assert result.removed == ["x"]
 
     async def test_ensure_center_builds_result(self):
-        adapter = ClaudeCodeSkillsAdapter(_FakeSkillsPort())
+        port = _FakeSkillsPort()
+        adapter = ClaudeCodeSkillsAdapter(port)
         result = await adapter.ensure_center_skills(
             CenterEnsureRequest(items=[CenterEnsureItem(skill_uuid="u1", version="1.0")]),
             auth=_auth("t"),
@@ -717,6 +719,13 @@ class TestSkillsAdapter:
         assert result.ok[0].skill_uuid == "u1"
         assert len(result.failed) == 1
         assert result.failed[0].reason == "missing"
+        assert port.calls == [
+            {
+                "method": "skills_ensure_center",
+                "items": [{"skill_uuid": "u1", "version": "1.0"}],
+                "token": "t",
+            }
+        ]
 
 
 # ──────────────────────────────────────────────────────────────────────────────

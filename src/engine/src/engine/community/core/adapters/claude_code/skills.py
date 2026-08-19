@@ -341,7 +341,13 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         auth: AuthContext | None = None,
     ) -> CenterEnsureResult:
         token = auth.token if auth is not None else None
-        raw = await self._port.skills_ensure_center(token=token)
+        raw = await self._port.skills_ensure_center(
+            token=token,
+            items=[
+                {"skill_uuid": item.skill_uuid, "version": item.version}
+                for item in request.items
+            ],
+        )
         ok = [
             CenterEnsureItem(
                 skill_uuid=d.get("skill_uuid", ""), version=str(d.get("version", ""))

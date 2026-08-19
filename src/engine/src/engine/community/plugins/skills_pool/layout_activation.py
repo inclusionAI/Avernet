@@ -141,7 +141,7 @@ def mapping_sources_use_pool(
     layout = _Layout.for_engine(engine, Path(home))
     pool_roots = tuple(
         Path(os.path.abspath(root))
-        for root in (layout.pool_local, layout.pool_repo, layout.pool_center)
+        for root in (layout.pool_local, layout.pool_repo)
     )
     legacy_roots = tuple(
         Path(os.path.abspath(root))
@@ -166,6 +166,10 @@ def mapping_sources_use_pool(
         normalized = Path(os.path.abspath(source))
         if any(normalized.is_relative_to(root) for root in pool_roots):
             has_pool = True
+        elif normalized.is_relative_to(Path(os.path.abspath(layout.pool_center))):
+            # Center has one canonical root in both Legacy and Pool layouts.
+            # It must therefore never select, or conflict with, either layout.
+            continue
         elif stable_repo_root is not None and normalized.is_relative_to(
             stable_repo_root
         ):

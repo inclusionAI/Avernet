@@ -65,6 +65,15 @@ def test_mapping_source_classifier_selects_one_managed_layout(
     legacy_source = (
         home / ".openclaw" / "workspace" / "skills" / "skills-local" / "legacy-skill"
     )
+    center_source = (
+        home
+        / ".openclaw"
+        / "workspace"
+        / "skills-pool"
+        / "skill-center"
+        / "2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a"
+        / "2026.8.19"
+    )
     external_source = home / "external-skills" / "external"
 
     assert mapping_sources_use_pool(
@@ -75,6 +84,16 @@ def test_mapping_source_classifier_selects_one_managed_layout(
     assert not mapping_sources_use_pool(
         engine="openclaw",
         sources=[legacy_source, external_source],
+        home=home,
+    )
+    assert not mapping_sources_use_pool(
+        engine="openclaw",
+        sources=[legacy_source, center_source],
+        home=home,
+    )
+    assert mapping_sources_use_pool(
+        engine="openclaw",
+        sources=[pool_source, center_source],
         home=home,
     )
     with pytest.raises(ValueError, match="mix Legacy and Pool"):

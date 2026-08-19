@@ -307,5 +307,12 @@ class _SkillsPortMixin:
     async def skills_clean_symlinks(self, token: str | None = None) -> dict:
         return await self._skills_passthrough("skills.clean_symlinks", {})
 
-    async def skills_ensure_center(self, token: str | None = None) -> dict:
-        return await self._skills_passthrough("skills.ensure_center", {})
+    async def skills_ensure_center(
+        self,
+        token: str | None = None,
+        items: list[dict[str, str]] | None = None,
+    ) -> dict:
+        return await self._skills_passthrough(
+            "skills.ensure_center",
+            {} if items is None else {"items": items},
+        )
