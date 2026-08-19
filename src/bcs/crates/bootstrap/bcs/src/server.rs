@@ -508,6 +508,18 @@ impl ChannelBindingCleanupPort for DeferredChannelBindingCleanupPort {
         })?;
         service.delete_bindings_for_group(group_id).await
     }
+
+    async fn delete_bindings_for_bot(
+        &self,
+        bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<u64> {
+        let service = self.service.get().ok_or_else(|| {
+            bcs_service_api::ServiceError::InternalError(
+                "channel binding cleanup port is not initialized".to_string(),
+            )
+        })?;
+        service.delete_bindings_for_bot(bot_id).await
+    }
 }
 
 type ChannelRepos = (
@@ -1159,6 +1171,7 @@ fn build_provider_services_with_webhook_url_guard(
     relation: Arc<dyn bcs_service_api::RelationCoreService>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     webhook_url_guard: OutboundUrlGuard,
+    channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
 ) -> (
     Arc<dyn ProviderCoreService>,
     Arc<dyn ProviderBotCoreService>,
@@ -1178,7 +1191,8 @@ fn build_provider_services_with_webhook_url_guard(
         provider_bot_core.clone(),
         registry,
         relation,
-    );
+    )
+    .with_channel_binding_cleanup(channel_binding_cleanup);
     if let Some(user_directory) = user_directory {
         provider_management = provider_management.with_user_directory(user_directory);
     }
@@ -1697,6 +1711,7 @@ impl Default for BcsServerState {
         let relation_store: Arc<RelationCore> = Arc::new(RelationCore::memory());
         let user_directory =
             create_user_directory_plugin(&config).expect("default user directory config is valid");
+        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -1704,6 +1719,7 @@ impl Default for BcsServerState {
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
                 user_directory.clone(),
                 outbound_url_guard.clone(),
+                channel_binding_cleanup.clone(),
             );
         let (organization_core, organization_management) = memory_organization_services(
             &provider_repos,
@@ -1881,7 +1897,6 @@ impl Default for BcsServerState {
             provider_stream_gray_list.clone(),
             state_machine_terminal_observer.clone(),
         );
-        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let group_management_impl = Arc::new(GroupManagement::new(
             sessions.clone(),
             bot_registry.clone(),
@@ -3148,6 +3163,7 @@ impl BcsServer {
         let relation_store: Arc<RelationCore> = Arc::new(RelationCore::memory());
         let user_directory = create_user_directory_plugin(&config)
             .expect("user directory config is valid for in-memory server");
+        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -3155,6 +3171,7 @@ impl BcsServer {
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
                 user_directory.clone(),
                 provider_webhook_url_guard,
+                channel_binding_cleanup.clone(),
             );
         let (organization_core, organization_management) = memory_organization_services(
             &provider_repos,
@@ -3284,7 +3301,6 @@ impl BcsServer {
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
-        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let use_cases = build_use_case_bundle(
             &config,
             bot_registry.clone(),
@@ -3715,6 +3731,7 @@ impl BcsServer {
         let relation_svc: Arc<dyn bcs_service_api::RelationCoreService> =
             Arc::new(RelationCore::with_repo(relation_repo));
 
+        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -3722,6 +3739,7 @@ impl BcsServer {
                 relation_svc.clone(),
                 user_directory.clone(),
                 outbound_url_guard.clone(),
+                channel_binding_cleanup.clone(),
             );
         let (organization_core, organization_management) = db_organization_services(
             db_plugin.clone(),
@@ -3905,7 +3923,6 @@ impl BcsServer {
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
-        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let use_cases = build_use_case_bundle(
             &config,
             bot_registry.clone(),
@@ -4785,6 +4802,99 @@ mod tests {
     #[derive(Default)]
     struct RecordingSessionChannelOutbound {
         events: tokio::sync::Mutex<Vec<HumanInputReadyEvent>>,
+    }
+
+    #[derive(Default)]
+    struct RecordingChannelBindingCleanup {
+        deleted_bot_ids: tokio::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl ChannelBindingCleanupPort for RecordingChannelBindingCleanup {
+        async fn delete_bindings_for_group(
+            &self,
+            _group_id: &str,
+        ) -> bcs_service_api::ServiceResult<u64> {
+            Ok(0)
+        }
+
+        async fn delete_bindings_for_bot(
+            &self,
+            bot_id: &str,
+        ) -> bcs_service_api::ServiceResult<u64> {
+            self.deleted_bot_ids.lock().await.push(bot_id.to_string());
+            Ok(1)
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_management_deletes_channel_bindings_when_provider_bot_is_deleted() {
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let provider_repos = memory_provider_repos();
+        let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+        let bot_registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_provider_repos(
+            bot_repo,
+            provider_repos.provider_repo.clone(),
+            provider_repos.provider_credentials.clone(),
+            provider_repos.provider_bindings.clone(),
+        ));
+        let relation: Arc<dyn bcs_service_api::RelationCoreService> =
+            Arc::new(RelationCore::memory());
+        let cleanup = Arc::new(RecordingChannelBindingCleanup::default());
+        let (_provider_core, _provider_bot_core, provider_management) =
+            build_provider_services_with_webhook_url_guard(
+                &provider_repos,
+                bot_registry,
+                relation,
+                None,
+                OutboundUrlGuard::allowing_private_networks_for_tests(),
+                cleanup.clone(),
+            );
+
+        let registered = provider_management
+            .register_provider(RegisterProviderCommand {
+                name: "Provider".to_string(),
+                webhook_url: "https://provider.example.com/bcs/webhook".to_string(),
+                admin_callback_url: None,
+                auth_mode: bcs_domain::ProviderAuthMode::StaticBearer,
+                created_by: "11111111".to_string(),
+                protocol_version: None,
+                coordination: None,
+            })
+            .await
+            .expect("register provider");
+        let bot = provider_management
+            .register_provider_bot(bcs_service_api::RegisterProviderBotCommand {
+                provider_id: registered.provider_id.clone(),
+                provider_admin_token: registered.provider_admin_token.clone(),
+                name: "Bot".to_string(),
+                summary: None,
+                owners: vec!["11111111".to_string()],
+                provider_bot_ref: "bot-ref-1".to_string(),
+                domains: Vec::new(),
+                skills: Vec::new(),
+                scopes: Vec::new(),
+                bot_uuid: None,
+                reject_existing_bot_uuid: false,
+            })
+            .await
+            .expect("register provider bot");
+
+        let outcome = provider_management
+            .delete_provider_bot(bcs_service_api::DeleteProviderBotCommand {
+                provider_id: registered.provider_id,
+                provider_admin_token: registered.provider_admin_token,
+                provider_bot_ref: "bot-ref-1".to_string(),
+                allow_unbound_owner_suffixed_bot: false,
+            })
+            .await
+            .expect("delete provider bot");
+
+        assert!(outcome.deleted);
+        assert_eq!(
+            cleanup.deleted_bot_ids.lock().await.as_slice(),
+            &[bot.bot_uuid]
+        );
     }
 
     #[tokio::test]

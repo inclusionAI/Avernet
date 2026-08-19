@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::{
-    BotRegistryCoreService, DeleteProviderBotCommand, DeleteProviderBotOutcome, ProviderBotBinding,
+    BotRegistryCoreService, ChannelBindingCleanupPort, DeleteProviderBotCommand,
+    DeleteProviderBotOutcome, NoopChannelBindingCleanupPort, ProviderBotBinding,
     ProviderBotCoreService, ProviderCoreService, ProviderManagementService, ProviderRecord,
     RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderBotParams,
     RegisterProviderCommand, RegisterProviderOutcome, RelationCoreService, ServiceError,
@@ -16,6 +17,7 @@ pub struct ProviderManagement {
     provider_bot_core: Arc<dyn ProviderBotCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     relation: Arc<dyn RelationCoreService>,
+    channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
 }
 
@@ -31,8 +33,17 @@ impl ProviderManagement {
             provider_bot_core,
             registry,
             relation,
+            channel_binding_cleanup: Arc::new(NoopChannelBindingCleanupPort),
             user_directory: None,
         }
+    }
+
+    pub fn with_channel_binding_cleanup(
+        mut self,
+        channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
+    ) -> Self {
+        self.channel_binding_cleanup = channel_binding_cleanup;
+        self
     }
 
     pub fn with_user_directory(mut self, user_directory: Arc<dyn UserDirectoryPlugin>) -> Self {
@@ -308,7 +319,14 @@ impl ProviderManagementService for ProviderManagement {
             }
         };
 
+        // Soft-delete the bot first so concurrent channel binding creation can no
+        // longer validate this bot as a target, then remove its channel bindings.
+        // Cleanup failure is returned as an error; re-deleting is idempotent for
+        // binding-backed bots because the provider binding row still resolves bot_uuid.
         let deleted = self.registry.soft_delete(&bot_uuid).await;
+        self.channel_binding_cleanup
+            .delete_bindings_for_bot(&bot_uuid)
+            .await?;
         Ok(DeleteProviderBotOutcome {
             bot_uuid,
             provider_id: command.provider_id,

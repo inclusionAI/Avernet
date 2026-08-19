@@ -1578,6 +1578,28 @@ impl ChannelBindingCleanupPort for BcsChannelService {
         }
         Ok(deleted)
     }
+
+    async fn delete_bindings_for_bot(
+        &self,
+        bot_id: &str,
+    ) -> ServiceResult<u64> {
+        let _guard = self.binding_admin_lock.lock().await;
+        let bindings = self
+            .bindings
+            .list_by_target(
+                &BindingTarget::Bot {
+                bot_id: bot_id.to_string(),
+                },
+                None,
+            )
+            .await?;
+        let mut deleted = 0;
+        for binding in bindings {
+            self.delete_binding_locked(&binding).await?;
+            deleted += 1;
+        }
+        Ok(deleted)
+    }
 }
 
 impl BcsChannelService {
@@ -2905,6 +2927,81 @@ mod tests {
             1
         );
         assert_eq!(harness.binding_repo.list_by_target(&bot, None).await?.len(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn bot_binding_cleanup_removes_only_bindings_for_requested_bot() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        let bot_1 = BindingTarget::Bot {
+            bot_id: "bot_1".to_string(),
+        };
+        let bot_2 = BindingTarget::Bot {
+            bot_id: "bot_2".to_string(),
+        };
+        let group = BindingTarget::Group {
+            group_id: "group_1".to_string(),
+        };
+
+        harness
+            .binding_repo
+            .create(active_binding(
+                "bot_1_dingtalk",
+                "robot_1",
+                bot_1.clone(),
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        let mut bot_1_other_channel = active_binding(
+            "bot_1_other_channel",
+            "account_2",
+            bot_1.clone(),
+            Visibility::FullTranscript,
+        );
+        bot_1_other_channel.channel_type = "test_im".to_string();
+        harness.binding_repo.create(bot_1_other_channel).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "bot_2_dingtalk",
+                "robot_2",
+                bot_2.clone(),
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "group_dingtalk",
+                "robot_3",
+                group.clone(),
+                Visibility::FullTranscript,
+            ))
+            .await?;
+
+        let removed = harness.service.delete_bindings_for_bot("bot_1").await?;
+
+        assert_eq!(removed, 2);
+        assert!(
+            harness
+                .binding_repo
+                .list_by_target(&bot_1, None)
+                .await?
+                .is_empty()
+        );
+        assert_eq!(
+            harness
+                .binding_repo
+                .list_by_target(&bot_2, None)
+                .await?
+                .len(),
+            1
+        );
+        assert_eq!(
+            harness.binding_repo.list_by_target(&group, None).await?.len(),
+            1
+        );
 
         Ok(())
     }

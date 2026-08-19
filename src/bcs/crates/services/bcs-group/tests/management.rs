@@ -122,6 +122,7 @@ use tokio::sync::Mutex;
 #[derive(Default)]
 struct RecordingChannelBindingCleanup {
     deleted_group_ids: Mutex<Vec<String>>,
+    deleted_bot_ids: Mutex<Vec<String>>,
     fail: bool,
 }
 
@@ -129,6 +130,7 @@ impl RecordingChannelBindingCleanup {
     fn failing() -> Self {
         Self {
             deleted_group_ids: Mutex::new(Vec::new()),
+            deleted_bot_ids: Mutex::new(Vec::new()),
             fail: true,
         }
     }
@@ -138,6 +140,16 @@ impl RecordingChannelBindingCleanup {
 impl ChannelBindingCleanupPort for RecordingChannelBindingCleanup {
     async fn delete_bindings_for_group(&self, group_id: &str) -> ServiceResult<u64> {
         self.deleted_group_ids.lock().await.push(group_id.to_string());
+        if self.fail {
+            return Err(ServiceError::InternalError(
+                "channel binding cleanup failed".to_string(),
+            ));
+        }
+        Ok(1)
+    }
+
+    async fn delete_bindings_for_bot(&self, bot_id: &str) -> ServiceResult<u64> {
+        self.deleted_bot_ids.lock().await.push(bot_id.to_string());
         if self.fail {
             return Err(ServiceError::InternalError(
                 "channel binding cleanup failed".to_string(),
