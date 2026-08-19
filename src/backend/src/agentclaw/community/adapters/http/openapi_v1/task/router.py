@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from agentclaw.community.adapters.http.task.schemas import (
+from agentclaw.community.adapters.http.openapi_v1.task.schemas import (
     ApiResponse,
     BbsAttachDTO,
     BbsClaimDTO,
@@ -181,11 +181,11 @@ async def bbs_result(
 # 幂等:result 重投到已终态节点→200 ack;start stale→409。无节点名字面量(零 case)。
 from fastapi import Depends, HTTPException, Request
 
-from agentclaw.community.adapters.http.task.auth import CallbackAuthenticator
-from agentclaw.community.adapters.http.task.schemas import (
+from agentclaw.community.adapters.http.openapi_v1.task.auth import CallbackAuthenticator
+from agentclaw.community.adapters.http.openapi_v1.task.schemas import (
     CallbackResponse, TaskCallbackRequest, TaskNodeCallbackRequest,
 )
-from agentclaw.community.adapters.http.task.translator import translate
+from agentclaw.community.adapters.http.openapi_v1.task.translator import translate
 from agentclaw.community.core.errors import (
     CallbackAuthError, CallbackCorrelationError,
 )

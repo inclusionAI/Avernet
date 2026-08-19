@@ -117,7 +117,7 @@ def _run_root(world, task_id: str) -> None:
 # handler calls to raise, exercising the defensive ``except`` end-to-end. The
 # happy cases restore the originals (and point the reader at an absent db so
 # ``discover()`` makes no engine call), so the seam never leaks past this file.
-import agentclaw.community.adapters.http.task_discovery.router as _disc_router  # noqa: E402
+import agentclaw.community.adapters.http.openapi_v1.task.discovery.router as _disc_router  # noqa: E402
 
 _orig_build_service = _disc_router._build_service
 _orig_resolve_db_path = _disc_router._resolve_db_path

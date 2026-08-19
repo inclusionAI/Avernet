@@ -11,7 +11,7 @@
 |---|---|---|
 | api/ | `community/api/task/` | 对外 Service API Protocols(transport-agnostic) |
 | core/ | `community/core/task/` | 业务实现(transport-agnostic,禁 transport import) |
-| adapters/http/ | `community/adapters/http/task/` | HTTP transport(thin:router+schema,不持 domain policy) |
+| adapters/http/ | `community/adapters/http/openapi_v1/task/` | HTTP transport(thin:router+schema,不持 domain policy) |
 | di/modules/ | `community/di/modules/task_module.py` | composition root(DI 接线) |
 
 ## core/task/ 目录树

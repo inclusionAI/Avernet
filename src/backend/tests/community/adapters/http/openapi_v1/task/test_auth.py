@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from agentclaw.community.adapters.http.task.auth import (
+from agentclaw.community.adapters.http.openapi_v1.task.auth import (
     HmacCallbackAuthenticator, NoopCallbackAuthenticator,
 )
 from agentclaw.community.core.errors import CallbackAuthError

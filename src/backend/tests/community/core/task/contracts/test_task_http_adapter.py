@@ -18,7 +18,7 @@ from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
-from agentclaw.community.adapters.http.task.router import router as task_router
+from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, Status, TaskInfo, TaskSpec,
 )

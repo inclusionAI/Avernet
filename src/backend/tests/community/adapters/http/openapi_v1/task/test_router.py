@@ -6,10 +6,10 @@ from fastapi_injector import attach_injector
 from fastapi.testclient import TestClient
 from injector import Injector, Module, provider, singleton
 
-from agentclaw.community.adapters.http.task.auth import (
+from agentclaw.community.adapters.http.openapi_v1.task.auth import (
     CallbackAuthenticator, NoopCallbackAuthenticator,
 )
-from agentclaw.community.adapters.http.task.router import task_callback_router
+from agentclaw.community.adapters.http.openapi_v1.task.router import task_callback_router
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
 from agentclaw.community.core.task.domain.models import (

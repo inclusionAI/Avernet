@@ -12,7 +12,7 @@ import os
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
-from agentclaw.community.adapters.http.task.auth import (
+from agentclaw.community.adapters.http.openapi_v1.task.auth import (
     CallbackAuthenticator, NoopCallbackAuthenticator,
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
