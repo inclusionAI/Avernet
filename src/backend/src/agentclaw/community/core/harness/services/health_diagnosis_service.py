@@ -7,10 +7,7 @@ from typing import Any
 
 from injector import inject
 
-from agentclaw.community.api.content_scanner_service import ContentScannerProtocol
-from agentclaw.community.api.health_diagnosis_service import (
-    HealthDiagnosisServiceProtocol,
-)
+from agentclaw.community.core.harness.protocols import ContentScannerPort
 from agentclaw.community.core.harness.errors import (
     HealthDiagnosisConflictError,
     HealthDiagnosisNotFoundError,
@@ -27,13 +24,13 @@ from agentclaw.community.utils.env_utils import get_current_env
 logger = get_logger()
 
 
-class HealthDiagnosisService(HealthDiagnosisServiceProtocol):
+class HealthDiagnosisService:
     """Run the existing health scanner and persist its lifecycle."""
 
     @inject
     def __init__(
         self,
-        scanner: ContentScannerProtocol,
+        scanner: ContentScannerPort,
         scan_repo: HarnessScanRecordRepository,
     ) -> None:
         self._scanner = scanner
