@@ -21,12 +21,14 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
-    SkillEngineNotSupportedError,
     SkillManagedBySkillSetError,
     SkillRuntimeNameConflictError,
     SkillSetManagedResourceError,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.skill_center.runtime_policy import (
+    require_supported_bot_skill_runtime,
+)
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationBusyError,
     BotCapabilityMutationGuard,
@@ -365,16 +367,7 @@ class LocalSkillStateService:
 
     @staticmethod
     def _require_supported_repo_runtime(bot: dict[str, Any]) -> None:
-        """Fail closed outside the Phase-1 Bot type × Engine matrix."""
-        supported = {
-            "personal": {"openclaw", "claude_code", "hermes", "teclaw"},
-            "desktop": {"openclaw", "hermes"},
-            "service": {"openclaw", "claude_code", "teclaw"},
-        }
-        bot_type = str(bot.get("bot_type") or "")
-        engine = str(bot.get("active_engine") or "")
-        if engine not in supported.get(bot_type, set()):
-            raise SkillEngineNotSupportedError()
+        require_supported_bot_skill_runtime(bot)
 
     def _require_no_normal_skill_set_membership(
         self,

@@ -21,6 +21,7 @@ from agentclaw.community.core.repository.implementations.skill_center.skill_set_
     SkillSetControlPlaneRepository,
 )
 from agentclaw.community.core.skill_center.errors import (
+    SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
 )
 
@@ -86,6 +87,37 @@ def test_activation_rolls_back_all_membership_installations_when_nth_insert_fail
         assert session.query(SkillSet).one().is_active is False
         assert session.query(SkillSetSkill).count() == 2
         assert session.query(BotSkillInstallation).count() == 0
+
+
+def test_activation_rejects_runtime_name_conflict_before_installation_write():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        skill_set = SkillSet(name="set", bolt_id="bot", is_active=False, env="dev")
+        active = Skill(name="same", git_path="git://active", env="dev")
+        candidate = Skill(name="same", git_path="git://candidate", env="dev")
+        session.add_all([skill_set, active, candidate])
+        session.flush()
+        session.add_all(
+            [
+                BotSkillInstallation(bot_id="bot", skill_id=active.id, env="dev"),
+                SkillSetSkill(
+                    skill_set_id=skill_set.id,
+                    skill_id=candidate.id,
+                    bot_id="bot",
+                    env="dev",
+                ),
+            ]
+        )
+
+    with pytest.raises(SkillRuntimeNameConflictError):
+        SkillSetControlPlaneRepository(db).set_active(
+            bot_id="bot", set_id="1", active=True
+        )
+
+    with db.orm_session() as session:
+        assert session.query(SkillSet).one().is_active is False
+        installations = session.query(BotSkillInstallation).all()
+        assert [row.skill_id for row in installations] == [1]
 
 
 def test_create_idempotency_replays_the_original_set_without_a_second_row():

@@ -33,6 +33,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 
 from agentclaw.community.core.skill_center.errors import (
+    SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
@@ -352,6 +353,10 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                 raise SkillSetControlPlaneConflictError(
                     "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
                 )
+            if row.is_active:
+                self._require_unique_runtime_names(
+                    session, bot_id=bot_id, candidate_ids={int(skill.id)}
+                )
             session.add(
                 SkillSetSkill(
                     skill_set_id=row.id,
@@ -438,6 +443,9 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
             changed = bool(row.is_active) != active
             row.is_active = active
             if active:
+                self._require_unique_runtime_names(
+                    session, bot_id=bot_id, candidate_ids=ids
+                )
                 existing = self._installations(session, bot_id)
                 for skill_id in ids - existing:
                     session.add(
@@ -691,6 +699,26 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
             .filter(BotSkillInstallation.bot_id == bot_id)
             .all()
         }
+
+    def _require_unique_runtime_names(
+        self, session, *, bot_id: str, candidate_ids: set[int]
+    ) -> None:
+        """Validate the complete post-command projection before any write."""
+        selected_ids = self._installations(session, bot_id) | candidate_ids
+        if not selected_ids:
+            return
+        rows = (
+            self._scope(session.query(Skill.id, Skill.name), Skill)
+            .filter(Skill.id.in_(selected_ids))
+            .all()
+        )
+        owner_by_name: dict[str, int] = {}
+        for skill_id, name in rows:
+            runtime_name = str(name or "")
+            existing = owner_by_name.get(runtime_name)
+            if existing is not None and existing != int(skill_id):
+                raise SkillRuntimeNameConflictError()
+            owner_by_name[runtime_name] = int(skill_id)
 
     def _snapshot(
         self, session, bot_id: str, *, engine_type: str | None = None

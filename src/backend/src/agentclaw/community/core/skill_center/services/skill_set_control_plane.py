@@ -33,6 +33,9 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
     LegacySkillSetCompatibilityFactoryProtocol,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.skill_center.runtime_policy import (
+    require_supported_bot_skill_runtime,
+)
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationBusyError,
     BotCapabilityMutationGuard,
@@ -499,6 +502,7 @@ class SkillSetControlPlaneService:
             try:
                 if not is_bot_ready(bot):
                     raise LocalSkillNotReadyError()
+                require_supported_bot_skill_runtime(bot)
                 self._ensure_mutation_lease(mutation_lease)
                 mutation_result = mutation()
                 self._ensure_mutation_lease(mutation_lease)

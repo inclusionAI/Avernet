@@ -15,6 +15,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetAccessDeniedError,
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
+    SkillEngineNotSupportedError,
 )
 from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
     SkillSetControlPlaneService,
@@ -118,6 +119,7 @@ class _Bots:
             "env": "dev",
             "entity_id": "entity-1",
             "active_engine": "openclaw",
+            "bot_type": "personal",
             "entity_type": "staff",
             "status": "ACTIVE",
         }
@@ -141,6 +143,12 @@ class _DeniedCollaborators(_Collaborators):
 class _MissingBots:
     def get_unique_by_id(self, _bot_id: str):
         return None
+
+
+class _UnsupportedBots(_Bots):
+    def get_unique_by_id(self, bot_id: str) -> dict:
+        bot = super().get_unique_by_id(bot_id)
+        return {**bot, "bot_type": "desktop", "active_engine": "claude_code"}
 
 
 class _Runtime:
@@ -428,6 +436,29 @@ def test_skill_set_acl_denial_is_forbidden_not_not_found():
 
     with pytest.raises(SkillSetAccessDeniedError):
         service.list_sets(bot_id="bot-1", actor_id="collaborator")
+
+
+@pytest.mark.asyncio
+async def test_skill_set_mutation_fails_closed_for_unsupported_bot_engine_pair():
+    repository = _Repository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_UnsupportedBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+    )
+
+    with pytest.raises(SkillEngineNotSupportedError):
+        await service.activate(
+            bot_id="bot-1", actor_id="true-owner", set_id="set-1"
+        )
+
+    assert repository.set_active_calls == []
 
 
 def test_mutation_guard_heartbeat_fails_closed_and_stops_on_release(monkeypatch):
