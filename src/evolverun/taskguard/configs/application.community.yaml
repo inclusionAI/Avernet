@@ -1,10 +1,30 @@
 # TaskGuard Community Default Configuration
-# Open-source defaults — SQLite database, basic alerts, no internal endpoints
+# Open-source defaults — SQLite database, basic alerts, no internal endpoints.
+#
+# To switch to API mode (delegate persistence to a clawweb-compatible HTTP API),
+# change `database.mode` from "sqlite" to "api" and fill in database.api.* values.
+# You can also override these settings at runtime via environment variables
+# (highest priority):
+#   DATABASE_MODE=sqlite|prod|api
+#   SQLITE_PATH=/path/to/engine.db
+#   CLAWWEB_API_URL=https://your-clawweb.example.com
+#   CLAWMIND_PRIVATE_KEY=base64-encoded-key
+#   CLAWMIND_IAM_TOKEN=your-iam-token
+#   CLAWWEB_API_TIMEOUT=5000
+#   CLAWWEB_API_MAX_RETRIES=3
 
 database:
-  type: sqlite
+  mode: sqlite
   sqlite:
     path: ~/.taskguard/workflow/engine.db
+
+  # API mode settings. Uncomment and configure when database.mode: api.
+  # api:
+  #   baseUrl: "https://your-clawweb.example.com"
+  #   privateKeyB64: "base64-encoded-key"
+  #   iamtoken: "your-iam-token"
+  #   timeout: 5000
+  #   maxRetries: 3
 
 alerts:
   dingtalk:
