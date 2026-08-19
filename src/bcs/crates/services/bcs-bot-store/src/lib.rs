@@ -96,6 +96,12 @@ pub struct BotInfo {
     /// AI安全网关授权token
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_token: Option<String>,
+    #[serde(default)]
+    pub user_visibility: bcs_service_api::UserVisibility,
+    #[serde(default)]
+    pub friend_ext: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub friend_check_in_strategy: bcs_service_api::FriendCheckInStrategy,
 }
 
 /// A bot streaming connection marker (process-local, not serializable).
@@ -355,6 +361,7 @@ impl PersistentBotRepo {
             hidden,
             agent_code: caps.agent_code.clone(),
             agent_token: caps.agent_token.clone(),
+            ..Default::default()
         };
         let bot_info_json = serde_json::to_string(&bot_info)
             .map_err(|e| ServiceError::InternalError(e.to_string()))?;
@@ -2623,6 +2630,9 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
         agent_code,
         created_at,
         updated_at,
+        user_visibility: bot_info.user_visibility,
+        friend_ext: bot_info.friend_ext,
+        friend_check_in_strategy: bot_info.friend_check_in_strategy,
     })
 }
 
@@ -2808,6 +2818,18 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         env: &str,
         patch: BotControlPlanePatch,
     ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        if patch.user_visibility.is_some()
+            || patch.friend_ext.is_some()
+            || patch.friend_check_in_strategy.is_some()
+        {
+            debug!(
+                bot_id = %bot_id,
+                has_user_visibility = patch.user_visibility.is_some(),
+                has_friend_ext = patch.friend_ext.is_some(),
+                has_friend_check_in_strategy = patch.friend_check_in_strategy.is_some(),
+                "Patching internal Bot attributes in persistent storage"
+            );
+        }
         let existing = self.get_control_plane(bot_id, env).await?;
         if existing.is_none() {
             return Ok(None);
@@ -2830,7 +2852,11 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
                 bcs_service_api::ActorStatus::Hidden => "hidden",
             }));
         }
-        if let Some(descriptor) = patch.descriptor.as_ref() {
+        if patch.descriptor.is_some()
+            || patch.user_visibility.is_some()
+            || patch.friend_ext.is_some()
+            || patch.friend_check_in_strategy.is_some()
+        {
             let rows = self
                 .db_query(
                     "SELECT bot_info FROM bcs_bots WHERE bot_uuid = ? AND env = ? \
@@ -2851,32 +2877,55 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
                 .filter(serde_json::Value::is_object)
                 .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
             let object = value.as_object_mut().ok_or_else(|| {
-                ServiceError::InternalError("Bot descriptor is not a JSON object".to_string())
+                ServiceError::InternalError("Bot attributes are not a JSON object".to_string())
             })?;
-            if let Some(summary) = descriptor.summary.as_ref() {
-                object.insert(
-                    "summary".to_string(),
-                    serde_json::Value::String(summary.clone()),
-                );
+            if let Some(descriptor) = patch.descriptor.as_ref() {
+                if let Some(summary) = descriptor.summary.as_ref() {
+                    object.insert(
+                        "summary".to_string(),
+                        serde_json::Value::String(summary.clone()),
+                    );
+                }
+                if let Some(domains) = descriptor.domains.as_ref() {
+                    object.insert(
+                        "domains".to_string(),
+                        serde_json::to_value(domains)
+                            .map_err(|error| ServiceError::InternalError(error.to_string()))?,
+                    );
+                }
+                if let Some(skills) = descriptor.skills.as_ref() {
+                    object.insert(
+                        "skills".to_string(),
+                        serde_json::to_value(skills)
+                            .map_err(|error| ServiceError::InternalError(error.to_string()))?,
+                    );
+                }
+                if let Some(scopes) = descriptor.scopes.as_ref() {
+                    object.insert(
+                        "scopes".to_string(),
+                        serde_json::to_value(scopes)
+                            .map_err(|error| ServiceError::InternalError(error.to_string()))?,
+                    );
+                }
             }
-            if let Some(domains) = descriptor.domains.as_ref() {
+            if let Some(user_visibility) = patch.user_visibility {
                 object.insert(
-                    "domains".to_string(),
-                    serde_json::to_value(domains)
+                    "user_visibility".to_string(),
+                    serde_json::to_value(user_visibility)
                         .map_err(|error| ServiceError::InternalError(error.to_string()))?,
                 );
             }
-            if let Some(skills) = descriptor.skills.as_ref() {
+            if let Some(friend_ext) = patch.friend_ext.as_ref() {
                 object.insert(
-                    "skills".to_string(),
-                    serde_json::to_value(skills)
+                    "friend_ext".to_string(),
+                    serde_json::to_value(friend_ext)
                         .map_err(|error| ServiceError::InternalError(error.to_string()))?,
                 );
             }
-            if let Some(scopes) = descriptor.scopes.as_ref() {
+            if let Some(friend_check_in_strategy) = patch.friend_check_in_strategy {
                 object.insert(
-                    "scopes".to_string(),
-                    serde_json::to_value(scopes)
+                    "friend_check_in_strategy".to_string(),
+                    serde_json::to_value(friend_check_in_strategy)
                         .map_err(|error| ServiceError::InternalError(error.to_string()))?,
                 );
             }
@@ -2949,6 +2998,7 @@ mod tests {
             hidden: false,
             agent_code: None,
             agent_token: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&bot_info).unwrap();
@@ -3138,6 +3188,7 @@ mod tests {
             hidden: false,
             agent_code: None,
             agent_token: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&bot_info).unwrap();
@@ -3292,6 +3343,7 @@ mod tests {
             hidden: false,
             agent_code: None,
             agent_token: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&bot_info).unwrap();
@@ -3416,6 +3468,7 @@ mod tests {
             hidden: false,
             agent_code: None,
             agent_token: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&bot_info).unwrap();
         // JSON escaping handles most cases, but the SQL layer also does escaping

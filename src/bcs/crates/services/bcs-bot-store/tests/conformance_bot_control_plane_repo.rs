@@ -17,7 +17,7 @@ use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateVisibility, BotCapabilities,
     BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRepoPort, BotRepoPort,
+    BotControlPlaneRepoPort, BotRepoPort, FriendCheckInStrategy, UserVisibility,
 };
 
 #[tokio::test]
@@ -129,6 +129,59 @@ async fn memory_control_plane_supports_both_kinds_candidates_and_patch_timestamp
     assert_eq!(after.descriptor.domains, vec!["memory"]);
     assert_eq!(after.created_at, before.created_at);
     assert!(after.updated_at > before.updated_at);
+}
+
+#[tokio::test]
+async fn memory_control_plane_restores_internal_attributes_from_persisted_capabilities() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let env = bcs_config::resolve_env_str();
+    let repo = MemoryBotRepo::with_base_dir(temp.path().to_path_buf());
+    repo.register_with_owner_and_token(
+        "memory-attributes".to_string(),
+        BotCapabilities {
+            name: Some("Memory Attributes".to_string()),
+            ..Default::default()
+        },
+        "staff-1",
+        "token-1",
+    )
+    .await
+    .expect("register memory bot");
+    repo.patch_control_plane(
+        "memory-attributes",
+        &env,
+        BotControlPlanePatch {
+            user_visibility: Some(UserVisibility::Public),
+            friend_ext: Some(serde_json::Map::from_iter([(
+                "team".to_string(),
+                serde_json::json!("platform"),
+            )])),
+            friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch memory bot");
+
+    let restored = MemoryBotRepo::with_base_dir(temp.path().to_path_buf());
+    restored
+        .register(
+            "memory-attributes".to_string(),
+            BotCapabilities {
+                name: Some("Memory Attributes".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("restore memory bot");
+    let record = restored
+        .get_control_plane("memory-attributes", &env)
+        .await
+        .expect("read restored bot")
+        .expect("restored bot exists");
+    assert_eq!(record.user_visibility, UserVisibility::Public);
+    assert_eq!(record.friend_ext["team"], "platform");
+    assert_eq!(record.friend_check_in_strategy, FriendCheckInStrategy::Open);
 }
 
 #[tokio::test]
@@ -431,6 +484,7 @@ async fn persistent_control_plane_owned_filters_and_patch_replace_descriptor_arr
                     skills: None,
                     scopes: Some(vec!["new-scope".to_string()]),
                 }),
+                ..Default::default()
             },
         )
         .await
@@ -484,6 +538,77 @@ async fn persistent_control_plane_patch_returns_existing_row_when_mysql_changes_
 
     assert_eq!(updated.bot_id, "unchanged");
     assert_eq!(updated.name, "Unchanged");
+}
+
+#[tokio::test]
+async fn persistent_control_plane_internal_attributes_round_trip_and_clear_friend_ext() {
+    let (repo, db) = fixture().await;
+    seed_bot(
+        db.as_ref(),
+        "attributes",
+        "Attributes",
+        "bot",
+        "protected",
+        "online",
+        Some("staff-1"),
+        "2026-01-01 00:00:00",
+    )
+    .await;
+
+    let legacy = repo
+        .get_control_plane("attributes", "dev")
+        .await
+        .expect("read legacy row")
+        .expect("legacy row exists");
+    assert_eq!(legacy.user_visibility, UserVisibility::Protected);
+    assert!(legacy.friend_ext.is_empty());
+    assert_eq!(
+        legacy.friend_check_in_strategy,
+        FriendCheckInStrategy::Approval
+    );
+
+    let updated = repo
+        .patch_control_plane(
+            "attributes",
+            "dev",
+            BotControlPlanePatch {
+                user_visibility: Some(UserVisibility::Private),
+                friend_ext: Some(serde_json::Map::from_iter([(
+                    "scope".to_string(),
+                    serde_json::json!("engineering"),
+                )])),
+                friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("patch internal attributes")
+        .expect("patched row exists");
+    assert_eq!(updated.user_visibility, UserVisibility::Private);
+    assert_eq!(updated.friend_ext["scope"], "engineering");
+    assert_eq!(
+        updated.friend_check_in_strategy,
+        FriendCheckInStrategy::DeptFree
+    );
+
+    let cleared = repo
+        .patch_control_plane(
+            "attributes",
+            "dev",
+            BotControlPlanePatch {
+                friend_ext: Some(serde_json::Map::new()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("clear friend extension")
+        .expect("cleared row exists");
+    assert!(cleared.friend_ext.is_empty());
+    assert_eq!(cleared.user_visibility, UserVisibility::Private);
+    assert_eq!(
+        cleared.friend_check_in_strategy,
+        FriendCheckInStrategy::DeptFree
+    );
 }
 
 struct UnchangedUpdateDb;
