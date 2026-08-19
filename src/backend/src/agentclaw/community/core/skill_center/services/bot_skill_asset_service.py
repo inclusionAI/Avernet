@@ -51,6 +51,10 @@ class _LocalSkillStatePort(Protocol):
         self, *, skill_id: str, actor_id: str, active: bool
     ) -> dict[str, Any]: ...
 
+    async def set_repo_skill_active(
+        self, *, skill_id: str, bot_id: str, actor_id: str, active: bool
+    ) -> dict[str, Any]: ...
+
 
 class BotSkillAssetService:
     """Resolve one public ``skill_id`` before invoking its registered reader."""
@@ -75,7 +79,7 @@ class BotSkillAssetService:
         self._local_state_service = local_state_service
         self._adapters: dict[SkillAssetKind, _AssetAdapter] = {
             SkillAssetKind.LOCAL: _LocalAssetAdapter(self),
-            SkillAssetKind.REPO: _UnavailableAssetAdapter(),
+            SkillAssetKind.REPO: _RepoAssetAdapter(self),
             SkillAssetKind.SPACE: _UnavailableAssetAdapter(),
         }
 
@@ -91,7 +95,11 @@ class BotSkillAssetService:
     async def set_active(
         self, *, skill_id: str, bot_id: str, actor_id: str, active: bool
     ) -> dict[str, Any]:
-        self.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+        skill = self.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+        if self._kind_for(skill) is SkillAssetKind.REPO:
+            return await self._local_state_service.set_repo_skill_active(
+                skill_id=skill_id, bot_id=bot_id, actor_id=actor_id, active=active
+            )
         return await self._local_state_service.set_local_skill_active(
             skill_id=skill_id, actor_id=actor_id, active=active
         )
@@ -100,9 +108,23 @@ class BotSkillAssetService:
         skill, bot, owner_id = self._resolve(
             skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
         )
-        content = await self._local_storage(skill, bot, owner_id).read_file("SKILL.md")
+        if self._kind_for(skill) is SkillAssetKind.REPO:
+            service = self._skill_service_factory.create(
+                entity_id=str(bot["entity_id"]),
+                bot_owner_id=owner_id,
+                bot_id=bot_id,
+                engine_type=bot.get("active_engine"),
+                device_owner_id=owner_id,
+            )
+            content = await service.get_skill_readme(
+                skill_id, actor_id, bot_id, device_owner_id=owner_id
+            )
+        else:
+            content = await self._local_storage(skill, bot, owner_id).read_file("SKILL.md")
         if content is None:
             raise LocalSkillNotFoundError()
+        if isinstance(content, str):
+            return content
         return SkillParser.decode_content_for_display(content)
 
     async def get_parameters(
@@ -226,6 +248,32 @@ class _LocalAssetAdapter:
         return self._service._resolve_local(
             skill=skill, bot_id=bot_id, actor_id=actor_id
         )
+
+
+class _RepoAssetAdapter:
+    """Authorize a shared governed Repo asset against the addressed Bot."""
+
+    def __init__(self, service: BotSkillAssetService) -> None:
+        self._service = service
+
+    def resolve(self, *, skill: dict[str, Any], bot_id: str, actor_id: str):
+        if skill.get("user_id") or skill.get("bolt_id"):
+            raise LocalSkillNotFoundError()
+        bot = self._service._bot_repo.get_by_id(bot_id)
+        if bot is None:
+            raise LocalSkillNotFoundError()
+        owner_id = str(bot.get("user_id") or bot.get("owner_id") or "")
+        if not owner_id:
+            raise LocalSkillNotFoundError()
+        if actor_id != owner_id:
+            permission = self._service._collaborators.check_collaborator_permission(
+                bot_id, owner_id, actor_id, PermissionLevel.MEMBER
+            )
+            if not permission.get("has_permission"):
+                raise LocalSkillNotFoundError()
+        # The HTTP adapter's grant checker is intentionally record-shaped.
+        # Enrich a copy only; shared Repo persistence remains bot-independent.
+        return {**skill, "bolt_id": bot_id, "user_id": owner_id}, bot, owner_id
 
 
 class _UnavailableAssetAdapter:

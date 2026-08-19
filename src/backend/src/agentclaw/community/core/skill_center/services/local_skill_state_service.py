@@ -141,6 +141,52 @@ class LocalSkillStateService:
         finally:
             self._edit_guard.release(lease)
 
+    async def set_repo_skill_active(
+        self, *, skill_id: str, bot_id: str, actor_id: str, active: bool
+    ) -> dict[str, Any]:
+        """Apply the same Installation/reconcile transaction to shared Repo assets."""
+        raw = self._skill_repo.get_by_id(skill_id) if skill_id.isdecimal() else None
+        if not raw or raw.get("user_id") or raw.get("bolt_id") or not str(raw.get("git_path") or "").startswith("git://"):
+            raise LocalSkillNotFoundError()
+        bot = self._bot_repo.get_by_id(bot_id)
+        owner_id = str((bot or {}).get("user_id") or (bot or {}).get("owner_id") or "")
+        if not bot or not owner_id:
+            raise LocalSkillNotFoundError()
+        if actor_id != owner_id:
+            permission = self._collaborators.check_collaborator_permission(
+                bot_id, owner_id, actor_id, PermissionLevel.MEMBER
+            )
+            if not permission.get("has_permission"):
+                raise LocalSkillNotFoundError()
+        if not is_bot_ready(bot):
+            raise LocalSkillNotReadyError()
+        scope = self._scope_for(bot, bot_id)
+        try:
+            lease = self._edit_guard.acquire_for_edit(scope=scope)
+        except SkillsPoolEditBusyError as exc:
+            raise LocalSkillEditBusyError() from exc
+        except SkillsPoolEditRollbackError as exc:
+            raise LocalSkillLayoutRollbackError() from exc
+        except SkillsPoolEditLockUnavailableError as exc:
+            raise LocalSkillEditLockUnavailableError() from exc
+        except SkillsPoolEditPausedError as exc:
+            raise LocalSkillEditPausedError() from exc
+        try:
+            changed = self._write_desired_state(
+                active=active, env=str(bot["env"]), bot_id=bot_id, skill_id=skill_id
+            )
+            if self._sync_runtime(bot=bot, owner_id=owner_id, bot_id=bot_id):
+                return {**raw, "bolt_id": bot_id, "user_id": owner_id, "active": active, "changed": changed}
+            if changed:
+                self._write_desired_state(
+                    active=not active, env=str(bot["env"]), bot_id=bot_id, skill_id=skill_id
+                )
+                if not self._sync_runtime(bot=bot, owner_id=owner_id, bot_id=bot_id):
+                    raise LocalSkillRuntimeSyncError()
+            raise LocalSkillRuntimeSyncError()
+        finally:
+            self._edit_guard.release(lease)
+
     def _discover_scope(self, skill_id: str) -> BotSkillLayoutScope:
         """Find only the lock identity before serializing the authoritative read."""
         if not skill_id.isdecimal():
