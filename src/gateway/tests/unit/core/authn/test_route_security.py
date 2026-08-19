@@ -33,6 +33,26 @@ def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
     assert req[PrincipalType.APP] is Presence.OPTIONAL
 
 
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/openapi/v1/bots/market/skills"),
+        ("POST", "/openapi/v1/bots/market/mcp-servers"),
+        ("POST", "/openapi/v1/bots/market/skill-center/skills"),
+    ],
+)
+def test_shipped_config_admits_app_only_market_queries(method: str, path: str) -> None:
+    """Market discovery accepts an application identity without a human."""
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    requirement = rs.resolve(method, path)
+
+    assert requirement is not None
+    assert requirement[PrincipalType.USER] is Presence.OPTIONAL
+    assert requirement[PrincipalType.APP] is Presence.OPTIONAL
+
+
 #: The operations that still require a human on the wire. Mirrors Mode REFUSED
 #: in the backend's ``adapters/http/openapi_v1/admission.py`` — that table is
 #: the authority, and this list is the edge's expression of it. They are two
@@ -40,16 +60,16 @@ def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
 #: enumeration rather than by a shared import.
 _HUMAN_ONLY = [
     ("GET", "/openapi/v1/caller"),
-    ("GET", "/openapi/v1/spaces"),
-    ("POST", "/openapi/v1/spaces/personal/initialize"),
-    ("POST", "/openapi/v1/spaces/create"),
-    ("GET", "/openapi/v1/spaces/1/members"),
-    ("POST", "/openapi/v1/spaces/1/members"),
-    ("DELETE", "/openapi/v1/spaces/1/members/user-1"),
-    ("PUT", "/openapi/v1/spaces/1/members/user-1/role"),
-    ("POST", "/openapi/v1/spaces/1/market-favorites"),
-    ("POST", "/openapi/v1/spaces/1/market-favorites/cancel"),
-    ("POST", "/openapi/v1/spaces/1/market-favorites/search"),
+    ("GET", "/openapi/v1/bots/spaces"),
+    ("POST", "/openapi/v1/bots/spaces/personal/initialize"),
+    ("POST", "/openapi/v1/bots/spaces/create"),
+    ("GET", "/openapi/v1/bots/spaces/1/members"),
+    ("POST", "/openapi/v1/bots/spaces/1/members"),
+    ("DELETE", "/openapi/v1/bots/spaces/1/members/user-1"),
+    ("PUT", "/openapi/v1/bots/spaces/1/members/user-1/role"),
+    ("POST", "/openapi/v1/bots/spaces/1/market-favorites"),
+    ("POST", "/openapi/v1/bots/spaces/1/market-favorites/cancel"),
+    ("POST", "/openapi/v1/bots/spaces/1/market-favorites/search"),
     ("POST", "/openapi/v1/bots"),
     ("POST", "/openapi/v1/bots/local"),
     ("GET", "/openapi/v1/bots/bot-123/local/auth-status"),

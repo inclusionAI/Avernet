@@ -22,6 +22,7 @@ provides:
   - WorkOrderMessageTitle
   - WorkOrderMessageContent
   - WorkOrderNotificationDetail
+  - WorkOrderNotificationBadgeSummary
 consumes:
   - "WorkOrderRepositoryProtocol (core.repository) — persistence and transactional state changes"
   - "SpaceRepositoryProtocol and SpaceAccessService — Space existence, membership, and OWNER authorization"
@@ -77,6 +78,22 @@ notification row. Clients display the stored text directly.
 
 `SPACE_JOIN_REVIEWED` deliberately uses one event value for both outcomes;
 the associated work-order status selects the approved or rejected template.
+
+## Notification inbox and badge semantics
+
+- `PENDING_FOR_ME` contains pending approval notifications and unread notices.
+- `PROCESSED_BY_ME` contains approved/rejected approval notifications and read notices.
+- `pending_approval_count` counts distinct pending Space-join work orders that
+  the recipient can still approve as an active Space administrator.
+- `unread_notice_count` counts unread `NOTICE` notifications only.
+- `badge_count` is `pending_approval_count + unread_notice_count`; notification
+  read state never removes a still-actionable approval from the badge.
+- `unread_count` retains the historical count of all unread notifications for
+  compatibility and is not used to calculate `badge_count`.
+
+Approval remarks are optional: an omitted or blank value is persisted as
+`null`. Rejection remarks remain required after trimming and are limited to 512
+characters for both operations.
 
 ## OpenAPI error contract
 

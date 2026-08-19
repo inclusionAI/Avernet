@@ -106,12 +106,12 @@ def _mismatched_user(path_params: dict | None = None, json_body: dict | None = N
     )
 
 
-# ── POST /openapi/v1/spaces/{space_id}/join-requests ─────────────────────────
+# ── POST /openapi/v1/bots/spaces/{space_id}/join-requests ─────────────────────────
 
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/{space_id}/join-requests",
+    path="/openapi/v1/bots/spaces/{space_id}/join-requests",
     scenario="happy",
     seed=_seed_joinable_space,
     input=CaseInput(
@@ -134,7 +134,7 @@ def create_space_join_request_happy():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/{space_id}/join-requests",
+    path="/openapi/v1/bots/spaces/{space_id}/join-requests",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(
@@ -146,19 +146,21 @@ def create_space_join_request_wrong_user():
     """The framework owns invocation."""
 
 
-# ── GET /openapi/v1/work-orders ──────────────────────────────────────────────
+# ── GET /openapi/v1/bots/work-orders ──────────────────────────────────────────────
 
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/work-orders",
+    path="/openapi/v1/bots/work-orders",
     scenario="happy",
     seed=_seed_pending_request_for_me,
     input=CaseInput(
         query_params={"user_id": _USER_ID},
         headers=_principal_headers(),
     ),
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"total": 1}}),
+    expect=ExpectSuccess(
+        status=200, json_contains={"code": 200000, "data": {"total": 1}}
+    ),
 )
 def list_work_orders_happy():
     """The framework owns invocation."""
@@ -166,7 +168,7 @@ def list_work_orders_happy():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/work-orders",
+    path="/openapi/v1/bots/work-orders",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(),
@@ -176,12 +178,12 @@ def list_work_orders_wrong_user():
     """The framework owns invocation."""
 
 
-# ── GET /openapi/v1/work-orders/{work_order_id} ──────────────────────────────
+# ── GET /openapi/v1/bots/work-orders/{work_order_id} ──────────────────────────────
 
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/work-orders/{work_order_id}",
+    path="/openapi/v1/bots/work-orders/{work_order_id}",
     scenario="happy",
     seed=_seed_pending_request_for_me,
     input=CaseInput(
@@ -203,7 +205,7 @@ def get_work_order_happy():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/work-orders/{work_order_id}",
+    path="/openapi/v1/bots/work-orders/{work_order_id}",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(path_params={"work_order_id": 1}),
@@ -213,12 +215,12 @@ def get_work_order_wrong_user():
     """The framework owns invocation."""
 
 
-# ── POST /openapi/v1/work-orders/{work_order_id}/approve ─────────────────────
+# ── POST /openapi/v1/bots/work-orders/{work_order_id}/approve ─────────────────────
 
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/work-orders/{work_order_id}/approve",
+    path="/openapi/v1/bots/work-orders/{work_order_id}/approve",
     scenario="happy",
     seed=_seed_pending_request_for_me,
     input=CaseInput(
@@ -241,7 +243,7 @@ def approve_work_order_happy():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/work-orders/{work_order_id}/approve",
+    path="/openapi/v1/bots/work-orders/{work_order_id}/approve",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(
@@ -253,12 +255,12 @@ def approve_work_order_wrong_user():
     """The framework owns invocation."""
 
 
-# ── POST /openapi/v1/work-orders/{work_order_id}/reject ──────────────────────
+# ── POST /openapi/v1/bots/work-orders/{work_order_id}/reject ──────────────────────
 
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/work-orders/{work_order_id}/reject",
+    path="/openapi/v1/bots/work-orders/{work_order_id}/reject",
     scenario="happy",
     seed=_seed_pending_request_for_me,
     input=CaseInput(
@@ -281,7 +283,7 @@ def reject_work_order_happy():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/work-orders/{work_order_id}/reject",
+    path="/openapi/v1/bots/work-orders/{work_order_id}/reject",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(
@@ -293,12 +295,12 @@ def reject_work_order_wrong_user():
     """The framework owns invocation."""
 
 
-# ── GET /openapi/v1/work-order-notifications/unread-count ────────────────────
+# ── GET /openapi/v1/bots/work-order-notifications/unread-count ────────────────────
 
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/work-order-notifications/unread-count",
+    path="/openapi/v1/bots/work-order-notifications/unread-count",
     scenario="happy",
     seed=_seed_pending_request_for_me,
     input=CaseInput(
@@ -306,7 +308,16 @@ def reject_work_order_wrong_user():
         headers=_principal_headers(),
     ),
     expect=ExpectSuccess(
-        status=200, json_contains={"code": 200000, "data": {"unread_count": 1}}
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "unread_count": 1,
+                "pending_approval_count": 1,
+                "unread_notice_count": 0,
+                "badge_count": 1,
+            },
+        },
     ),
 )
 def unread_notification_count_happy():
@@ -315,7 +326,7 @@ def unread_notification_count_happy():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/work-order-notifications/unread-count",
+    path="/openapi/v1/bots/work-order-notifications/unread-count",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(),
@@ -325,12 +336,12 @@ def unread_notification_count_wrong_user():
     """The framework owns invocation."""
 
 
-# ── POST /openapi/v1/work-order-notifications/read-all ───────────────────────
+# ── POST /openapi/v1/bots/work-order-notifications/read-all ───────────────────────
 
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/work-order-notifications/read-all",
+    path="/openapi/v1/bots/work-order-notifications/read-all",
     scenario="happy",
     seed=_seed_pending_request_for_me,
     input=CaseInput(
@@ -347,7 +358,7 @@ def mark_all_notifications_read_happy():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/work-order-notifications/read-all",
+    path="/openapi/v1/bots/work-order-notifications/read-all",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(),
@@ -357,12 +368,12 @@ def mark_all_notifications_read_wrong_user():
     """The framework owns invocation."""
 
 
-# ── GET /openapi/v1/work-order-notifications/{notification_id} ───────────────
+# ── GET /openapi/v1/bots/work-order-notifications/{notification_id} ───────────────
 
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/work-order-notifications/{notification_id}",
+    path="/openapi/v1/bots/work-order-notifications/{notification_id}",
     scenario="happy",
     seed=_seed_pending_request_for_me,
     input=CaseInput(
@@ -386,7 +397,7 @@ def get_notification_happy():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/work-order-notifications/{notification_id}",
+    path="/openapi/v1/bots/work-order-notifications/{notification_id}",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(path_params={"notification_id": 1}),
@@ -396,12 +407,12 @@ def get_notification_wrong_user():
     """The framework owns invocation."""
 
 
-# ── POST /openapi/v1/work-order-notifications/{notification_id}/read ─────────
+# ── POST /openapi/v1/bots/work-order-notifications/{notification_id}/read ─────────
 
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/work-order-notifications/{notification_id}/read",
+    path="/openapi/v1/bots/work-order-notifications/{notification_id}/read",
     scenario="happy",
     seed=_seed_pending_request_for_me,
     input=CaseInput(
@@ -420,7 +431,7 @@ def mark_notification_read_happy():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/work-order-notifications/{notification_id}/read",
+    path="/openapi/v1/bots/work-order-notifications/{notification_id}/read",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(path_params={"notification_id": 1}),

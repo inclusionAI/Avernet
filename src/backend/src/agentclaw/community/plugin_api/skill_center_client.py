@@ -10,7 +10,7 @@
 """
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from agentclaw.community.plugin_api.base import Plugin
 
@@ -36,6 +36,41 @@ class SkillCenterTeamCreateResult:
     """Confirmed SC team identity returned after a successful creation."""
 
     team_id: str
+
+
+class SkillCenterMarketSearchError(RuntimeError):
+    """Raised when Skill Center market search fails or returns invalid data."""
+
+
+@dataclass(frozen=True)
+class SkillCenterMarketSearchRequest:
+    """Transport-neutral Skill Center market search request.
+
+    ``appKey`` and ``source`` are deployment configuration and deliberately do
+    not appear here. ``team_id`` is retained for trusted internal callers; the
+    public OPEN adapter always sends ``None`` and forces ``PUBLIC`` access.
+    """
+
+    keyword: str | None = None
+    page_num: int = 1
+    page_size: int = 20
+    is_official: bool | None = None
+    is_recommended: bool | None = None
+    tag_list: tuple[str, ...] = ()
+    sort_by: str | None = None
+    creator_name: str | None = None
+    creator_work_no: str | None = None
+    team_id: str | None = None
+    access_level: str | None = None
+    belong_to: str | None = None
+
+
+@dataclass(frozen=True)
+class SkillCenterMarketSearchResult:
+    """Validated page returned by Skill Center market search."""
+
+    total: int
+    items: tuple[dict[str, Any], ...]
 
 
 @runtime_checkable
@@ -85,14 +120,15 @@ class SkillCenterClient(Plugin, Protocol):
         ...
 
     def search_market_skills(
-        self,
-        keyword: str = "",
-        tag: str = "",
-        page: int = 1,
-        page_size: int = 20,
-        team_id: str | None = None,
-    ) -> dict:
-        """搜索公开市场技能。"""
+        self, request: SkillCenterMarketSearchRequest
+    ) -> SkillCenterMarketSearchResult:
+        """Search Skill Center and return a validated, transport-neutral page.
+
+        Implementations inject ``appKey`` and ``source`` from deployment
+        configuration. Rejected, unavailable, or malformed upstream responses
+        raise :class:`SkillCenterMarketSearchError`; they must not be converted
+        into an empty successful page.
+        """
         ...
 
     def get_market_tags(self) -> list[dict]:

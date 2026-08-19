@@ -24,6 +24,7 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
         self,
         *,
         space_id,
+        market_source,
         target_type,
         target_code,
         created_by,
@@ -35,6 +36,7 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
                     db.query(self._Favorite)
                     .filter(
                         self._Favorite.space_id == space_id,
+                        self._Favorite.market_source == market_source.value,
                         self._Favorite.target_type == target_type.value,
                         self._Favorite.target_code == target_code,
                         self._Favorite.env == env,
@@ -42,9 +44,10 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
                     .one_or_none()
                 )
                 if existing is not None:
-                    return existing.to_record()
+                    return existing.to_record(), False
                 row = self._Favorite(
                     space_id=space_id,
+                    market_source=market_source.value,
                     target_type=target_type.value,
                     target_code=target_code,
                     created_by=created_by,
@@ -53,13 +56,14 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
                 db.add(row)
                 db.flush()
                 db.refresh(row)
-                return row.to_record()
+                return row.to_record(), True
         except IntegrityError:
             with self._db.orm_session() as db:
                 existing = (
                     db.query(self._Favorite)
                     .filter(
                         self._Favorite.space_id == space_id,
+                        self._Favorite.market_source == market_source.value,
                         self._Favorite.target_type == target_type.value,
                         self._Favorite.target_code == target_code,
                         self._Favorite.env == env,
@@ -68,14 +72,15 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
                 )
                 if existing is None:
                     raise
-                return existing.to_record()
+                return existing.to_record(), False
 
-    def cancel(self, *, space_id, target_type, target_code, env) -> bool:
+    def cancel(self, *, space_id, market_source, target_type, target_code, env) -> bool:
         with self._db.orm_session() as db:
             deleted = (
                 db.query(self._Favorite)
                 .filter(
                     self._Favorite.space_id == space_id,
+                    self._Favorite.market_source == market_source.value,
                     self._Favorite.target_type == target_type.value,
                     self._Favorite.target_code == target_code,
                     self._Favorite.env == env,
@@ -88,6 +93,7 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
         self,
         *,
         space_id,
+        market_source,
         target_type,
         keyword,
         env,
@@ -99,6 +105,10 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
                 self._Favorite.space_id == space_id,
                 self._Favorite.env == env,
             )
+            if market_source is not None:
+                query = query.filter(
+                    self._Favorite.market_source == market_source.value
+                )
             if target_type is not None:
                 query = query.filter(self._Favorite.target_type == target_type.value)
             if keyword:
@@ -113,3 +123,28 @@ class MarketFavoriteRepository(MarketFavoriteRepositoryProtocol):
                 .all()
             )
             return total, [row.to_record() for row in rows]
+
+    def find_favorited_codes(
+        self,
+        *,
+        space_id,
+        market_source,
+        target_type,
+        target_codes,
+        env,
+    ) -> set[str]:
+        if not target_codes:
+            return set()
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self._Favorite.target_code)
+                .filter(
+                    self._Favorite.space_id == space_id,
+                    self._Favorite.market_source == market_source.value,
+                    self._Favorite.target_type == target_type.value,
+                    self._Favorite.target_code.in_(target_codes),
+                    self._Favorite.env == env,
+                )
+                .all()
+            )
+            return {row[0] for row in rows}

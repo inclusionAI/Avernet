@@ -201,6 +201,7 @@ from .engine_runtime.sessions import router as engine_sessions_router
 from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
+from .market import router as market_router
 from .mcp import router as mcp_router
 from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
@@ -372,15 +373,16 @@ def build_public_router() -> APIRouter:
     public = APIRouter()
     # The caller's own identity — the one operation whose answer IS the user,
     # so it takes no ``user_id`` and can answer no 403: it gets the base error
-    # table, not the user-scoped one. Top-level like ``spaces``, because the
-    # caller is not a bots resource.
+    # table, not the user-scoped one. The caller is the sole top-level public
+    # resource here because it describes the authenticated principal itself.
     public.include_router(
         caller_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
-    # Space APIs are user-only in the first phase. They are top-level
-    # resources, so they intentionally do not inherit any bot grant gate.
+    # Space and work-order APIs use literal groups under the common ``bots``
+    # namespace, but are not scoped to one bot and therefore do not inherit a
+    # bot grant gate.
     public.include_router(
         spaces_router,
         responses=SPACE_SCOPED_ERROR_RESPONSES,
@@ -389,6 +391,13 @@ def build_public_router() -> APIRouter:
     public.include_router(
         work_orders_router,
         responses=SPACE_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Tenant-identical marketplace queries. This literal group must be mounted
+    # before the ``{bot_id}`` wildcard router below.
+    public.include_router(
+        market_router,
+        responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
     for router in _GROUPS_WITHOUT_CALLER_SCOPE + _MIXED_GROUPS:

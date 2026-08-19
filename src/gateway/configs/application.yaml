@@ -170,11 +170,11 @@ user_config:
     # refactor phase. Keep this explicit even though /** also requires a user:
     # when the broader public API policy evolves, these routes must remain
     # fail-closed until app identity semantics for spaces are approved.
-    "/openapi/v1/spaces/**":
+    "/openapi/v1/bots/spaces/**":
       user: required
-    "/openapi/v1/work-orders/**":
+    "/openapi/v1/bots/work-orders/**":
       user: required
-    "/openapi/v1/work-order-notifications/**":
+    "/openapi/v1/bots/work-order-notifications/**":
       user: required
 
     # Local Bot creation has no existing Bot grant to check and may initiate

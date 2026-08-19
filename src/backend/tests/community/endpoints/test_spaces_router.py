@@ -21,7 +21,10 @@ from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
-from agentclaw.community.core.market_favorites.models import FavoriteTargetType
+from agentclaw.community.core.market_favorites.models import (
+    FavoriteTargetType,
+    MarketSource,
+)
 from agentclaw.community.core.spaces.models import SpaceRole
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -105,6 +108,7 @@ def _seed_team_with_favorite(world) -> None:
     world.get(MarketFavoriteServiceProtocol).add(
         space_id=1,
         actor_id=_USER_ID,
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         target_code="skill-endpoint-1",
     )
@@ -120,19 +124,21 @@ def _mismatched_user(path_params: dict | None = None, json_body: dict | None = N
     )
 
 
-# ── GET /openapi/v1/spaces ───────────────────────────────────────────────────
+# ── GET /openapi/v1/bots/spaces ───────────────────────────────────────────────────
 
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/spaces",
+    path="/openapi/v1/bots/spaces",
     scenario="happy",
     seed=_seed_personal_space,
     input=CaseInput(
         query_params={"user_id": _USER_ID},
         headers=_principal_headers(),
     ),
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"total": 1}}),
+    expect=ExpectSuccess(
+        status=200, json_contains={"code": 200000, "data": {"total": 1}}
+    ),
 )
 def list_spaces_happy():
     """The framework owns invocation."""
@@ -140,7 +146,7 @@ def list_spaces_happy():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/spaces",
+    path="/openapi/v1/bots/spaces",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(),
@@ -150,12 +156,12 @@ def list_spaces_wrong_user():
     """The framework owns invocation."""
 
 
-# ── POST /openapi/v1/spaces/personal/initialize ──────────────────────────────
+# ── POST /openapi/v1/bots/spaces/personal/initialize ──────────────────────────────
 
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/personal/initialize",
+    path="/openapi/v1/bots/spaces/personal/initialize",
     scenario="happy",
     seed=_enable_public_auth,
     input=CaseInput(
@@ -172,7 +178,7 @@ def initialize_personal_space_happy():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/personal/initialize",
+    path="/openapi/v1/bots/spaces/personal/initialize",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(),
@@ -182,12 +188,12 @@ def initialize_personal_space_wrong_user():
     """The framework owns invocation."""
 
 
-# ── POST /openapi/v1/spaces/create ───────────────────────────────────────────
+# ── POST /openapi/v1/bots/spaces/create ───────────────────────────────────────────
 
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/create",
+    path="/openapi/v1/bots/spaces/create",
     scenario="happy",
     seed=_enable_public_auth,
     input=CaseInput(
@@ -209,7 +215,7 @@ def create_team_space_happy():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/create",
+    path="/openapi/v1/bots/spaces/create",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(json_body={"space_name": "Endpoint Team"}),
@@ -219,12 +225,12 @@ def create_team_space_wrong_user():
     """The framework owns invocation."""
 
 
-# ── GET /openapi/v1/spaces/{space_id}/members ────────────────────────────────
+# ── GET /openapi/v1/bots/spaces/{space_id}/members ────────────────────────────────
 
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/spaces/{space_id}/members",
+    path="/openapi/v1/bots/spaces/{space_id}/members",
     scenario="happy",
     seed=_seed_team_space,
     input=CaseInput(
@@ -232,7 +238,9 @@ def create_team_space_wrong_user():
         query_params={"user_id": _USER_ID},
         headers=_principal_headers(),
     ),
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"total": 1}}),
+    expect=ExpectSuccess(
+        status=200, json_contains={"code": 200000, "data": {"total": 1}}
+    ),
 )
 def list_space_members_happy():
     """The framework owns invocation."""
@@ -240,7 +248,7 @@ def list_space_members_happy():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/spaces/{space_id}/members",
+    path="/openapi/v1/bots/spaces/{space_id}/members",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(path_params={"space_id": 1}),
@@ -250,12 +258,12 @@ def list_space_members_wrong_user():
     """The framework owns invocation."""
 
 
-# ── POST /openapi/v1/spaces/{space_id}/members ───────────────────────────────
+# ── POST /openapi/v1/bots/spaces/{space_id}/members ───────────────────────────────
 
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/{space_id}/members",
+    path="/openapi/v1/bots/spaces/{space_id}/members",
     scenario="happy",
     seed=_seed_team_space,
     input=CaseInput(
@@ -278,7 +286,7 @@ def add_space_member_happy():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/{space_id}/members",
+    path="/openapi/v1/bots/spaces/{space_id}/members",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(
@@ -290,12 +298,12 @@ def add_space_member_wrong_user():
     """The framework owns invocation."""
 
 
-# ── DELETE /openapi/v1/spaces/{space_id}/members/{member_user_id} ────────────
+# ── DELETE /openapi/v1/bots/spaces/{space_id}/members/{member_user_id} ────────────
 
 
 @endpoint_test(
     method="DELETE",
-    path="/openapi/v1/spaces/{space_id}/members/{member_user_id}",
+    path="/openapi/v1/bots/spaces/{space_id}/members/{member_user_id}",
     scenario="happy",
     seed=_seed_team_with_member,
     input=CaseInput(
@@ -313,7 +321,7 @@ def delete_space_member_happy():
 
 @endpoint_test(
     method="DELETE",
-    path="/openapi/v1/spaces/{space_id}/members/{member_user_id}",
+    path="/openapi/v1/bots/spaces/{space_id}/members/{member_user_id}",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(path_params={"space_id": 1, "member_user_id": _MEMBER_ID}),
@@ -323,12 +331,12 @@ def delete_space_member_wrong_user():
     """The framework owns invocation."""
 
 
-# ── PUT /openapi/v1/spaces/{space_id}/members/{member_user_id}/role ──────────
+# ── PUT /openapi/v1/bots/spaces/{space_id}/members/{member_user_id}/role ──────────
 
 
 @endpoint_test(
     method="PUT",
-    path="/openapi/v1/spaces/{space_id}/members/{member_user_id}/role",
+    path="/openapi/v1/bots/spaces/{space_id}/members/{member_user_id}/role",
     scenario="happy",
     seed=_seed_team_with_member,
     input=CaseInput(
@@ -339,7 +347,10 @@ def delete_space_member_wrong_user():
     ),
     expect=ExpectSuccess(
         status=200,
-        json_contains={"code": 200000, "data": {"user_id": _MEMBER_ID, "role": "OWNER"}},
+        json_contains={
+            "code": 200000,
+            "data": {"user_id": _MEMBER_ID, "role": "OWNER"},
+        },
     ),
 )
 def update_space_member_role_happy():
@@ -348,7 +359,7 @@ def update_space_member_role_happy():
 
 @endpoint_test(
     method="PUT",
-    path="/openapi/v1/spaces/{space_id}/members/{member_user_id}/role",
+    path="/openapi/v1/bots/spaces/{space_id}/members/{member_user_id}/role",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(
@@ -361,25 +372,34 @@ def update_space_member_role_wrong_user():
     """The framework owns invocation."""
 
 
-# ── POST /openapi/v1/spaces/{space_id}/market-favorites ──────────────────────
+# ── POST /openapi/v1/bots/spaces/{space_id}/market-favorites ──────────────────────
 
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/{space_id}/market-favorites",
+    path="/openapi/v1/bots/spaces/{space_id}/market-favorites",
     scenario="happy",
     seed=_seed_team_space,
     input=CaseInput(
         path_params={"space_id": 1},
         query_params={"user_id": _USER_ID},
-        json_body={"target_type": "SKILL", "target_code": "skill-endpoint-1"},
+        json_body={
+            "market_source": "SKILLCENTER",
+            "target_type": "SKILL",
+            "target_code": "skill-endpoint-1",
+        },
         headers=_principal_headers(),
     ),
     expect=ExpectSuccess(
         status=200,
         json_contains={
             "code": 200000,
-            "data": {"target_type": "SKILL", "target_code": "skill-endpoint-1"},
+            "data": {
+                "market_source": "SKILLCENTER",
+                "target_type": "SKILL",
+                "target_code": "skill-endpoint-1",
+                "changed": True,
+            },
         },
     ),
 )
@@ -389,12 +409,16 @@ def add_market_favorite_happy():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/{space_id}/market-favorites",
+    path="/openapi/v1/bots/spaces/{space_id}/market-favorites",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(
         path_params={"space_id": 1},
-        json_body={"target_type": "SKILL", "target_code": "skill-endpoint-1"},
+        json_body={
+            "market_source": "SKILLCENTER",
+            "target_type": "SKILL",
+            "target_code": "skill-endpoint-1",
+        },
     ),
     expect=ExpectError(status=403),
 )
@@ -402,25 +426,34 @@ def add_market_favorite_wrong_user():
     """The framework owns invocation."""
 
 
-# ── POST /openapi/v1/spaces/{space_id}/market-favorites/cancel ───────────────
+# ── POST /openapi/v1/bots/spaces/{space_id}/market-favorites/cancel ───────────────
 
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/{space_id}/market-favorites/cancel",
+    path="/openapi/v1/bots/spaces/{space_id}/market-favorites/cancel",
     scenario="happy",
     seed=_seed_team_with_favorite,
     input=CaseInput(
         path_params={"space_id": 1},
         query_params={"user_id": _USER_ID},
-        json_body={"target_type": "SKILL", "target_code": "skill-endpoint-1"},
+        json_body={
+            "market_source": "SKILLCENTER",
+            "target_type": "SKILL",
+            "target_code": "skill-endpoint-1",
+        },
         headers=_principal_headers(),
     ),
     expect=ExpectSuccess(
         status=200,
         json_contains={
             "code": 200000,
-            "data": {"target_type": "SKILL", "target_code": "skill-endpoint-1"},
+            "data": {
+                "market_source": "SKILLCENTER",
+                "target_type": "SKILL",
+                "target_code": "skill-endpoint-1",
+                "changed": True,
+            },
         },
     ),
 )
@@ -430,12 +463,16 @@ def cancel_market_favorite_happy():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/{space_id}/market-favorites/cancel",
+    path="/openapi/v1/bots/spaces/{space_id}/market-favorites/cancel",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(
         path_params={"space_id": 1},
-        json_body={"target_type": "SKILL", "target_code": "skill-endpoint-1"},
+        json_body={
+            "market_source": "SKILLCENTER",
+            "target_type": "SKILL",
+            "target_code": "skill-endpoint-1",
+        },
     ),
     expect=ExpectError(status=403),
 )
@@ -443,21 +480,23 @@ def cancel_market_favorite_wrong_user():
     """The framework owns invocation."""
 
 
-# ── POST /openapi/v1/spaces/{space_id}/market-favorites/search ───────────────
+# ── POST /openapi/v1/bots/spaces/{space_id}/market-favorites/search ───────────────
 
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/{space_id}/market-favorites/search",
+    path="/openapi/v1/bots/spaces/{space_id}/market-favorites/search",
     scenario="happy",
     seed=_seed_team_with_favorite,
     input=CaseInput(
         path_params={"space_id": 1},
         query_params={"user_id": _USER_ID},
-        json_body={},
+        json_body={"market_source": "SKILLCENTER"},
         headers=_principal_headers(),
     ),
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"total": 1}}),
+    expect=ExpectSuccess(
+        status=200, json_contains={"code": 200000, "data": {"total": 1}}
+    ),
 )
 def search_market_favorites_happy():
     """The framework owns invocation."""
@@ -465,13 +504,43 @@ def search_market_favorites_happy():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/spaces/{space_id}/market-favorites/search",
+    path="/openapi/v1/bots/spaces/{space_id}/market-favorites/search",
     scenario="wrong_user",
     seed=_enable_public_auth,
     input=_mismatched_user(path_params={"space_id": 1}, json_body={}),
     expect=ExpectError(status=403),
 )
 def search_market_favorites_wrong_user():
+    """The framework owns invocation."""
+
+
+# ── POST /openapi/v1/bots/spaces/{space_id}/market-favorites/status ─────────
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/market-favorites/status",
+    scenario="happy",
+    seed=_seed_team_with_favorite,
+    input=CaseInput(
+        path_params={"space_id": 1},
+        query_params={"user_id": _USER_ID},
+        json_body={
+            "market_source": "SKILLCENTER",
+            "target_type": "SKILL",
+            "target_codes": ["skill-endpoint-1", "missing"],
+        },
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"favorited_target_codes": ["skill-endpoint-1"]},
+        },
+    ),
+)
+def market_favorite_status_happy():
     """The framework owns invocation."""
 
 

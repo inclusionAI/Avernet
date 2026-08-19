@@ -13,9 +13,15 @@ class FavoriteTargetType(StrEnum):
     MCP = "MCP"
 
 
+class MarketSource(StrEnum):
+    SKILLCENTER = "SKILLCENTER"
+    TEAMCLAW = "TEAMCLAW"
+
+
 class MarketFavoriteRecord(BaseModel):
     id: int
     space_id: int
+    market_source: MarketSource
     target_type: FavoriteTargetType
     target_code: str
     created_by: str

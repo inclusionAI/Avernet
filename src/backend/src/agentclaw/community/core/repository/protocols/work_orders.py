@@ -11,6 +11,7 @@ if TYPE_CHECKING:
         WorkOrderItemType,
         WorkOrderListItem,
         WorkOrderNotificationDetail,
+        WorkOrderNotificationBadgeSummary,
         WorkOrderNotificationDraft,
         WorkOrderNotificationRecord,
         WorkOrderQueryType,
@@ -56,7 +57,7 @@ class WorkOrderRepositoryProtocol(Protocol):
         *,
         work_order_id: int,
         reviewer_user_id: str,
-        review_remark: str,
+        review_remark: str | None,
         target_status: WorkOrderStatus,
         notification: WorkOrderNotificationDraft,
         env: str,
@@ -74,6 +75,11 @@ class WorkOrderRepositoryProtocol(Protocol):
 
     @abstractmethod
     def count_unread(self, *, recipient_user_id: str, env: str) -> int: ...
+
+    @abstractmethod
+    def get_notification_badge_summary(
+        self, *, recipient_user_id: str, env: str
+    ) -> WorkOrderNotificationBadgeSummary: ...
 
     @abstractmethod
     def mark_notification_read(

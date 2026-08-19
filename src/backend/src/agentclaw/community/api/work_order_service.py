@@ -11,6 +11,7 @@ if TYPE_CHECKING:
         WorkOrderItemType,
         WorkOrderListItem,
         WorkOrderNotificationDetail,
+        WorkOrderNotificationBadgeSummary,
         WorkOrderNotificationRecord,
         WorkOrderQueryType,
         WorkOrderRecord,
@@ -41,12 +42,12 @@ class WorkOrderServiceProtocol(Protocol):
 
     @abstractmethod
     def approve(
-        self, *, work_order_id: int, actor_id: str, review_remark: str
+        self, *, work_order_id: int, actor_id: str, review_remark: str | None
     ) -> WorkOrderReviewResult: ...
 
     @abstractmethod
     def reject(
-        self, *, work_order_id: int, actor_id: str, review_remark: str
+        self, *, work_order_id: int, actor_id: str, review_remark: str | None
     ) -> WorkOrderReviewResult: ...
 
 
@@ -59,6 +60,9 @@ class WorkOrderNotificationServiceProtocol(Protocol):
 
     @abstractmethod
     def unread_count(self, *, actor_id: str) -> int: ...
+
+    @abstractmethod
+    def badge_summary(self, *, actor_id: str) -> WorkOrderNotificationBadgeSummary: ...
 
     @abstractmethod
     def mark_read(

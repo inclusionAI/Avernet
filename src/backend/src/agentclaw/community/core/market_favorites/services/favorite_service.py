@@ -8,12 +8,10 @@ from __future__ import annotations
 
 from injector import inject
 
-from agentclaw.community.core.market_favorites.errors import (
-    FavoriteNotFoundError,
-    FavoriteTargetInvalidError,
-)
+from agentclaw.community.core.market_favorites.errors import FavoriteTargetInvalidError
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
+    MarketSource,
     MarketFavoriteRecord,
 )
 from agentclaw.community.core.repository.protocols.market_favorites import (
@@ -49,12 +47,14 @@ class MarketFavoriteService:
         *,
         space_id: int,
         actor_id: str,
+        market_source: MarketSource,
         target_type: FavoriteTargetType,
         target_code: str,
-    ) -> MarketFavoriteRecord:
+    ) -> tuple[MarketFavoriteRecord, bool]:
         self._access.require_space_member(space_id=space_id, user_id=actor_id)
         return self._repository.add(
             space_id=space_id,
+            market_source=market_source,
             target_type=target_type,
             target_code=self._target_code(target_code),
             created_by=actor_id,
@@ -66,25 +66,25 @@ class MarketFavoriteService:
         *,
         space_id: int,
         actor_id: str,
+        market_source: MarketSource,
         target_type: FavoriteTargetType,
         target_code: str,
     ) -> bool:
         self._access.require_space_member(space_id=space_id, user_id=actor_id)
-        deleted = self._repository.cancel(
+        return self._repository.cancel(
             space_id=space_id,
+            market_source=market_source,
             target_type=target_type,
             target_code=self._target_code(target_code),
             env=get_current_env(),
         )
-        if not deleted:
-            raise FavoriteNotFoundError("market favorite not found")
-        return True
 
     def search(
         self,
         *,
         space_id: int,
         actor_id: str,
+        market_source: MarketSource | None,
         target_type: FavoriteTargetType | None,
         keyword: str | None,
         page_no: int,
@@ -93,9 +93,32 @@ class MarketFavoriteService:
         self._access.require_space_member(space_id=space_id, user_id=actor_id)
         return self._repository.search(
             space_id=space_id,
+            market_source=market_source,
             target_type=target_type,
             keyword=keyword.strip() if keyword and keyword.strip() else None,
             env=get_current_env(),
             offset=(page_no - 1) * page_size,
             limit=page_size,
         )
+
+    def find_favorited_codes(
+        self,
+        *,
+        space_id: int,
+        actor_id: str,
+        market_source: MarketSource,
+        target_type: FavoriteTargetType,
+        target_codes: list[str],
+    ) -> list[str]:
+        self._access.require_space_member(space_id=space_id, user_id=actor_id)
+        normalized_codes = list(
+            dict.fromkeys(self._target_code(code) for code in target_codes)
+        )
+        favorited = self._repository.find_favorited_codes(
+            space_id=space_id,
+            market_source=market_source,
+            target_type=target_type,
+            target_codes=normalized_codes,
+            env=get_current_env(),
+        )
+        return [code for code in normalized_codes if code in favorited]

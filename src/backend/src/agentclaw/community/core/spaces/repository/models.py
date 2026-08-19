@@ -13,7 +13,6 @@ from agentclaw.community.core.spaces.models import (
     SpaceType,
 )
 from agentclaw.community.plugin_api.models import AutoIncrementBigInteger
-from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -29,7 +28,6 @@ class SpaceModel(Base):
     sc_team_id = Column(String(64), nullable=True)
     sc_mapping_status = Column(String(24), nullable=False, server_default="PENDING")
     env = Column(String(20), nullable=False, default=get_current_env)
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     created_by = Column(String(128), nullable=False)
     updated_by = Column(String(256), nullable=False)
     deleted_at = Column(DateTime, nullable=True)
@@ -40,15 +38,14 @@ class SpaceModel(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("avernet_tenant", "env", "space_code", name="uk_space_code"),
+        UniqueConstraint("env", "space_code", name="uk_space_code"),
         UniqueConstraint(
-            "avernet_tenant",
             "env",
             "personal_owner_id",
             name="uk_personal_space",
         ),
         UniqueConstraint("sc_team_id", "env", name="uk_sc_team_id_env"),
-        Index("idx_space_sc_team", "avernet_tenant", "env", "sc_team_id"),
+        Index("idx_space_sc_team", "env", "sc_team_id"),
         CheckConstraint("space_type IN ('PERSONAL', 'TEAM')", name="ck_space_type"),
         CheckConstraint(
             "sc_mapping_status IN ('PENDING', 'ACTIVE', 'INACTIVE', 'CLEANUP_FAILED')",
@@ -82,7 +79,6 @@ class SpaceMemberModel(Base):
     role = Column(String(24), nullable=False)
     status = Column(String(16), nullable=False, server_default="ACTIVE")
     env = Column(String(20), nullable=False, default=get_current_env)
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     created_by = Column(String(128), nullable=False)
     removed_at = Column(DateTime, nullable=True)
     removed_by = Column(String(128), nullable=True)
@@ -92,8 +88,8 @@ class SpaceMemberModel(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("avernet_tenant", "env", "space_id", "user_id", name="uk_space_member"),
-        Index("idx_space_member_user", "avernet_tenant", "env", "user_id", "status"),
+        UniqueConstraint("env", "space_id", "user_id", name="uk_space_member"),
+        Index("idx_space_member_user", "env", "user_id", "status"),
         CheckConstraint("role IN ('ADMINISTRATOR', 'MEMBER')", name="ck_space_member_role"),
         CheckConstraint("status IN ('ACTIVE', 'INACTIVE')", name="ck_space_member_status"),
         CheckConstraint("env <> ''", name="ck_space_member_env_not_empty"),
@@ -114,7 +110,3 @@ class SpaceMemberModel(Base):
             gmt_created=self.gmt_created,
             gmt_modified=self.gmt_modified,
         )
-
-
-register_avernet_tenant_guard(SpaceModel)
-register_avernet_tenant_guard(SpaceMemberModel)

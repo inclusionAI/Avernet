@@ -440,54 +440,73 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/mcp/servers"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/servers/{server_code}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/tenants"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/market/skill-center/skills"): AdmissionMode.OPEN,
     # ── Space and work-order APIs ───────────────────────────────────────────
     # Read and self-service operations resolve an application-only caller to
     # its delegating user and continue enforcing live Space membership or
     # work-order recipient checks. Space ownership initialization, team/member
     # administration, and work-order review remain human-only.
-    ("GET", "/openapi/v1/spaces"): AdmissionMode.USER_GATED,
-    ("POST", "/openapi/v1/spaces/personal/initialize"): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/spaces/create"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/spaces/{space_id}/members"): AdmissionMode.USER_GATED,
-    ("POST", "/openapi/v1/spaces/{space_id}/members"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/spaces"): AdmissionMode.USER_GATED,
+    ("POST", "/openapi/v1/bots/spaces/personal/initialize"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/create"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.USER_GATED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.REFUSED,
     (
         "DELETE",
-        "/openapi/v1/spaces/{space_id}/members/{member_user_id}",
+        "/openapi/v1/bots/spaces/{space_id}/members/{member_user_id}",
     ): AdmissionMode.REFUSED,
     (
         "PUT",
-        "/openapi/v1/spaces/{space_id}/members/{member_user_id}/role",
+        "/openapi/v1/bots/spaces/{space_id}/members/{member_user_id}/role",
     ): AdmissionMode.REFUSED,
     (
         "POST",
-        "/openapi/v1/spaces/{space_id}/market-favorites",
+        "/openapi/v1/bots/spaces/{space_id}/market-favorites",
     ): AdmissionMode.USER_GATED,
     (
         "POST",
-        "/openapi/v1/spaces/{space_id}/market-favorites/cancel",
+        "/openapi/v1/bots/spaces/{space_id}/market-favorites/cancel",
     ): AdmissionMode.USER_GATED,
     (
         "POST",
-        "/openapi/v1/spaces/{space_id}/market-favorites/search",
+        "/openapi/v1/bots/spaces/{space_id}/market-favorites/search",
     ): AdmissionMode.USER_GATED,
-    ("POST", "/openapi/v1/spaces/{space_id}/join-requests"): AdmissionMode.USER_GATED,
-    ("GET", "/openapi/v1/work-orders"): AdmissionMode.USER_GATED,
-    ("GET", "/openapi/v1/work-orders/{work_order_id}"): AdmissionMode.USER_GATED,
-    ("POST", "/openapi/v1/work-orders/{work_order_id}/approve"): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/work-orders/{work_order_id}/reject"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/market-favorites/status",
+    ): AdmissionMode.USER_GATED,
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/join-requests",
+    ): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/work-orders"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/work-orders/{work_order_id}"): AdmissionMode.USER_GATED,
+    (
+        "POST",
+        "/openapi/v1/bots/work-orders/{work_order_id}/approve",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/work-orders/{work_order_id}/reject",
+    ): AdmissionMode.REFUSED,
     (
         "GET",
-        "/openapi/v1/work-order-notifications/{notification_id}",
+        "/openapi/v1/bots/work-order-notifications/{notification_id}",
     ): AdmissionMode.USER_GATED,
     (
         "GET",
-        "/openapi/v1/work-order-notifications/unread-count",
+        "/openapi/v1/bots/work-order-notifications/unread-count",
     ): AdmissionMode.USER_GATED,
     (
         "POST",
-        "/openapi/v1/work-order-notifications/{notification_id}/read",
+        "/openapi/v1/bots/work-order-notifications/{notification_id}/read",
     ): AdmissionMode.USER_GATED,
-    ("POST", "/openapi/v1/work-order-notifications/read-all"): AdmissionMode.USER_GATED,
+    (
+        "POST",
+        "/openapi/v1/bots/work-order-notifications/read-all",
+    ): AdmissionMode.USER_GATED,
     # ── Workshop/local admission follows the operation's shape ───────────────
     # Both listings are owner-scoped, so an application sees only the named
     # user's own bots that user delegated to it. The restriction is applied by

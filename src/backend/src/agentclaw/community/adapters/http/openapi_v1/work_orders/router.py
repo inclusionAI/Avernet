@@ -114,7 +114,7 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
 
 
 @router.post(
-    "/openapi/v1/spaces/{space_id}/join-requests",
+    "/openapi/v1/bots/spaces/{space_id}/join-requests",
     status_code=201,
     response_model=Envelope[SpaceJoinRequestCreated],
 )
@@ -143,7 +143,7 @@ async def create_space_join_request(
 
 
 @router.get(
-    "/openapi/v1/work-orders",
+    "/openapi/v1/bots/work-orders",
     response_model=Envelope[Page[WorkOrderListItem]],
 )
 @envelope_errors
@@ -173,7 +173,7 @@ async def list_work_orders(
 
 
 @router.get(
-    "/openapi/v1/work-orders/{work_order_id}",
+    "/openapi/v1/bots/work-orders/{work_order_id}",
     response_model=Envelope[WorkOrderDetailResponse],
 )
 @envelope_errors
@@ -222,7 +222,7 @@ def _review_response(result) -> WorkOrderReviewResponse:
 
 
 @router.post(
-    "/openapi/v1/work-orders/{work_order_id}/approve",
+    "/openapi/v1/bots/work-orders/{work_order_id}/approve",
     response_model=Envelope[WorkOrderReviewResponse],
     dependencies=_REFUSES_APP_ONLY,
 )
@@ -243,7 +243,7 @@ async def approve_work_order(
 
 
 @router.post(
-    "/openapi/v1/work-orders/{work_order_id}/reject",
+    "/openapi/v1/bots/work-orders/{work_order_id}/reject",
     response_model=Envelope[WorkOrderReviewResponse],
     dependencies=_REFUSES_APP_ONLY,
 )
@@ -264,7 +264,7 @@ async def reject_work_order(
 
 
 @router.get(
-    "/openapi/v1/work-order-notifications/unread-count",
+    "/openapi/v1/bots/work-order-notifications/unread-count",
     response_model=Envelope[UnreadCountResponse],
 )
 @envelope_errors
@@ -276,12 +276,12 @@ async def unread_notification_count(
     ),
 ) -> Envelope[UnreadCountResponse]:
     actor_id = _require_user_delegation(caller)
-    count = service.unread_count(actor_id=actor_id)
-    return envelope(UnreadCountResponse(unread_count=count), request)
+    summary = service.badge_summary(actor_id=actor_id)
+    return envelope(UnreadCountResponse(**summary.model_dump()), request)
 
 
 @router.post(
-    "/openapi/v1/work-order-notifications/read-all",
+    "/openapi/v1/bots/work-order-notifications/read-all",
     response_model=Envelope[NotificationsReadAllResponse],
 )
 @envelope_errors
@@ -298,7 +298,7 @@ async def mark_all_notifications_read(
 
 
 @router.get(
-    "/openapi/v1/work-order-notifications/{notification_id}",
+    "/openapi/v1/bots/work-order-notifications/{notification_id}",
     response_model=Envelope[NotificationDetailResponse],
 )
 @envelope_errors
@@ -332,7 +332,7 @@ async def get_notification(
 
 
 @router.post(
-    "/openapi/v1/work-order-notifications/{notification_id}/read",
+    "/openapi/v1/bots/work-order-notifications/{notification_id}/read",
     response_model=Envelope[NotificationReadResponse],
 )
 @envelope_errors
