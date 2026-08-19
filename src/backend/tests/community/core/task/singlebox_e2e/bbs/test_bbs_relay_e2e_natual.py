@@ -20,8 +20,8 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
 # 与 ``test_bbs_relay_e2e_live.py`` 的区别(live 是演练接力 mechanics,natual 是自然链)
 
 - live:in-process FastAPI+白盒直置 bbs 可恢复态 + 用例编排 claim/attach/result 复刻 6 步 loop。
-- natual:**真实后端 ``POST /openapi/v1/task/execute`` 走框架 planner/dispatch 自然升 BBS**;接力 loop 由金庸
-  自身跑(``bbs-relay-pickup`` 用 ``exec``+HTTP 直调真实后端 ``/openapi/v1/task/bbs/*``),用例只做
+- natual:**真实后端 ``POST /openapi/v1/collaboration/tasks/execute`` 走框架 planner/dispatch 自然升 BBS**;接力 loop 由金庸
+  自身跑(``bbs-relay-pickup`` 用 ``exec``+HTTP 直调真实后端 ``/openapi/v1/collaboration/tasks/bbs/*``),用例只做
   provisioning + 提交 + 轮询 + 一次唤醒 + 断言。
 
 # 设计约束
@@ -84,7 +84,7 @@ _DASH_TIMEOUT = 60.0
 
 
 async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
-    """读 ``/openapi/v1/task/dashboard``;一次性排队/断网时返 ``None`` 供外层轮询重试(不直接 fail 用例)。
+    """读 ``/openapi/v1/collaboration/tasks/dashboard``;一次性排队/断网时返 ``None`` 供外层轮询重试(不直接 fail 用例)。
 
     engine 的 ``on_miss``/``on_execute`` 等在 per-task ``threading.RLock`` 内跨长 LLM,而
     ``query_task_dashboard`` 同锁,写路径持锁规划期间读会阻塞。用短超时把"单次卡死"降级为重试,
@@ -92,7 +92,7 @@ async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
     """
     try:
         r = await cli.get(
-            f"{_BACKEND}/openapi/v1/task/dashboard",
+            f"{_BACKEND}/openapi/v1/collaboration/tasks/dashboard",
             params={"task_id": task_id},
             timeout=_DASH_TIMEOUT,
         )
@@ -106,7 +106,7 @@ async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
 
 
 def _execute_body(owner_id: str) -> dict:
-    """``POST /openapi/v1/task/execute`` 请求体(TaskInfoDTO):整理「基础架构」方向架构师。
+    """``POST /openapi/v1/collaboration/tasks/execute`` 请求体(TaskInfoDTO):整理「基础架构」方向架构师。
 
     剧本收敛为**单一交付物**(一张基础架构方向的小型架构师名册),配 ``MAX_DEPTH=1`` 使规划只展一层:
     - 目标粒度收窄到"3 位核心架构师姓名/角色/职责",且 instruction 明示"单一交付的人才名册,不要按子方向
@@ -185,9 +185,9 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
         adapter = SingleboxEngineAdapter(backend_base_url=_BACKEND, user_id=_USER_ID)
 
         async with httpx.AsyncClient(timeout=300.0, headers=_HDRS) as cli:
-            # 3) POST /openapi/v1/task/execute → backend 进程内真实 engine 推进:owner 规划 → search 派发 →
+            # 3) POST /openapi/v1/collaboration/tasks/execute → backend 进程内真实 engine 推进:owner 规划 → search 派发 →
             #    候选不匹配 → on_miss@MAX_DEPTH 自然升 BBS(bbs_mode=True / 根 PLANNING / 图空闲)。
-            r = await cli.post(f"{_BACKEND}/openapi/v1/task/execute", json=_execute_body(owner_id))
+            r = await cli.post(f"{_BACKEND}/openapi/v1/collaboration/tasks/execute", json=_execute_body(owner_id))
             r.raise_for_status()
             print(f"[execute] {r.json().get('message')} data={r.json().get('data')}")
 

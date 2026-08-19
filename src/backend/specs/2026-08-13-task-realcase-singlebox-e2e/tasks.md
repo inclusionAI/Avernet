@@ -56,7 +56,7 @@
 - **T2.1** **`adapters/http/task/schemas.py`**：DTO↔domain（`TaskInfo`/`TaskCallbackData`/`TaskExecutionGraph`/`TaskOpResult`/`TaskNodePatch` 视需）。
 - **T2.2** **`adapters/http/task/router.py`（thin，Rule 22）**：
   ```python
-  router = APIRouter(prefix="/openapi/v1/task", tags=["task"])
+  router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"])
   @router.post("/execute")        # TaskInfoDTO -> TaskOpResultDTO   (async, delegate TaskServiceProtocol.execute)
   @router.get("/dashboard")       # ?task_id=&node_id= -> TaskExecutionGraphDTO (delegate get_task_dashboard)
   @router.post("/callback/report")# TaskCallbackDataDTO -> {"ok": true}  (async, 调 TaskLoopCallbackProtocol.report_result)
@@ -87,9 +87,9 @@
 
 - **T4.1** **session fixture**（gated + health wait）：async httpx client；cleanup；确保 `TASK_ENGINE=skill` 生效（singlebox 起态或运行时切换）。
 - **T4.2** **setup**（AC-1）：create owner bot + worker bots（供应链专家/行业信息抓取/报告聚合/实践 Bot 等，按案例 catalog）；upload 3 skill 包 → `/api/skills/upload`；activate skillset 到 owner bot；查 `/api/skills/.../active` 确认激活。
-- **T4.3** **drive**（AC-2）：`POST /openapi/v1/task/execute`，body = `gwqie46v7hzr1w6h` TaskInfo（`metadata.task_id` 固定；`goal.objective`=产出尽调报告；5 acceptances；`execution_config`: `MAX_DEPTH`/`BBS_MAX_DEPTH`；`source_channel_id`=owner bot）。轮询 `GET /openapi/v1/task/dashboard?task_id=`（带超时保护）至 `status ∈ {DONE, HUNG}`。
+- **T4.3** **drive**（AC-2）：`POST /openapi/v1/collaboration/tasks/execute`，body = `gwqie46v7hzr1w6h` TaskInfo（`metadata.task_id` 固定；`goal.objective`=产出尽调报告；5 acceptances；`execution_config`: `MAX_DEPTH`/`BBS_MAX_DEPTH`；`source_channel_id`=owner bot）。轮询 `GET /openapi/v1/collaboration/tasks/dashboard?task_id=`（带超时保护）至 `status ∈ {DONE, HUNG}`。
 - **T4.4** **R3 并发锁验证**：观察并发回投下状态正确性（poller 线程 vs 请求线程）；若竞态落 T1.9 `_lock_factory` seam，否则记录"RLock 成立"。
-- **T4.5** **assert happy（AC-3/AC-4）**：分解树 root→N_overview→{N_market,N_tech,N_compete,N_customer}→N_practice_bbs→N_report（结构由 skill 产出）；run_mode/assignee 由搜推 skill 决出（多 bot 维度→`coop_group`+`GroupFormation`；其余 `single_bot`）；执行结果经 `POST /openapi/v1/task/callback/report`→`on_report` 翻态/传播；终态 root `DONE`、图 `output.result=all_done`；`GET /openapi/v1/task/dashboard` 反映分解树推进。
+- **T4.5** **assert happy（AC-3/AC-4）**：分解树 root→N_overview→{N_market,N_tech,N_compete,N_customer}→N_practice_bbs→N_report（结构由 skill 产出）；run_mode/assignee 由搜推 skill 决出（多 bot 维度→`coop_group`+`GroupFormation`；其余 `single_bot`）；执行结果经 `POST /openapi/v1/collaboration/tasks/callback/report`→`on_report` 翻态/传播；终态 root `DONE`、图 `output.result=all_done`；`GET /openapi/v1/collaboration/tasks/dashboard` 反映分解树推进。
 - **T4.6** **assert recover（AC-5）**：第二 TaskInfo 或同案例注入 FAIL 路径：某叶验收 FAIL+gaps → planner 产补救子 → 重投 → PASS → 上行传播至 DONE。断言轨迹 `FAILED→PLANNING→补救子→DONE` + gaps 消解。
 - **T4.7** **（可选，时间盒）BBS/STUCK**：MISS→升 BBS→BBS 认领子→DONE；STUCK→HUNG（`BBS_MAX_DEPTH` 达上限）。
 - **T4.8** **AC-8 回归断言**：`grep` 框架代码（`core/task` + `adapters/http/task` + `di/modules/task_module`）无节点名字面量（`N_overview`/`N_market`… 只出现在 skill 产出/测试）。

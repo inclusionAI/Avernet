@@ -2,9 +2,9 @@
 
 独立 TestClient + 小型 test injector(仅 TaskModule + BotDiscoverServiceProtocol stub),
 不拉起 singlebox 全栈。验证:
-- POST /openapi/v1/task/execute 返 TaskOpResultDTO(success/run_id)
-- GET  /openapi/v1/task/dashboard 返 TaskExecutionGraphDTO(含节点/状态)
-- POST /openapi/v1/task/callback/report 返 {ok:true} 且翻态(N_overview PASS → DONE)
+- POST /openapi/v1/collaboration/tasks/execute 返 TaskOpResultDTO(success/run_id)
+- GET  /openapi/v1/collaboration/tasks/dashboard 返 TaskExecutionGraphDTO(含节点/状态)
+- POST /openapi/v1/collaboration/tasks/callback/report 返 {ok:true} 且翻态(N_overview PASS → DONE)
 
 不验真实 plan/dispatch body(已在 test_executor_e2e 覆盖);此测聚焦 HTTP 边界协议正确。
 """
@@ -76,7 +76,7 @@ def _task_info_dict(task_id="t_http") -> dict:
 class TestTaskExecute:
     def test_execute_returns_op_result(self, client):
         c, _ = client
-        r = c.post("/openapi/v1/task/execute", json=_task_info_dict())
+        r = c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["code"] == 200000
@@ -88,8 +88,8 @@ class TestTaskExecute:
 class TestTaskDashboard:
     def test_dashboard_returns_graph_structure(self, client):
         c, _ = client
-        c.post("/openapi/v1/task/execute", json=_task_info_dict())
-        r = c.get("/openapi/v1/task/dashboard", params={"task_id": "t_http"})
+        c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
+        r = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": "t_http"})
         assert r.status_code == 200, r.text
         body = r.json()["data"]
         # stub 路径无 owner bot → 无法规划 → 根 gap 拆不出 → 图 HUNG(语义正确:无规划端口不假 done)
@@ -104,8 +104,8 @@ class TestTaskDashboard:
 
     def test_dashboard_include_action_log_populates(self, client):
         c, _ = client
-        c.post("/openapi/v1/task/execute", json=_task_info_dict())
-        r = c.get("/openapi/v1/task/dashboard",
+        c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
+        r = c.get("/openapi/v1/collaboration/tasks/dashboard",
                   params={"task_id": "t_http", "include_action_log": "true"})
         assert r.status_code == 200, r.text
         body = r.json()["data"]
@@ -143,7 +143,7 @@ class TestTaskCallbackReport:
         )
         graph_svc.add_task_nodes([child], "t_http")  # 子节点以 RUNNING 入图(add 保留状态)
         # 回投 PASS(acceptance 驱动 RUNNING→DONE)
-        r = c.post("/openapi/v1/task/callback/report", json={
+        r = c.post("/openapi/v1/collaboration/tasks/callback/report", json={
             "loop_task_id": "t_http::N_http",
             "workflow_type": "single_bot",
             "result": {"success": True, "data": "ok"},

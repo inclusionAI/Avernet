@@ -12,7 +12,7 @@ from agentclaw.community.core.errors import CallbackAuthError
 _SECRET = "s3cr3t"
 
 
-def _signed(method="POST", path="/openapi/v1/task/callback/workflow_result", body=b'{"x":1}',
+def _signed(method="POST", path="/openapi/v1/collaboration/tasks/callback/workflow_result", body=b'{"x":1}',
             ts=None, secret=_SECRET, token="bcn"):
     ts = ts if ts is not None else str(int(time.time()))
     body_hex = hashlib.sha256(body).hexdigest()
@@ -29,7 +29,7 @@ def test_hmac_verify_passes():
     auth = HmacCallbackAuthenticator(secrets={"bcn": _SECRET, "claw_mind": "other"})
     h = _signed()
     auth.verify(source="bcn", headers=h, raw_body=b'{"x":1}',
-                method="POST", path="/openapi/v1/task/callback/workflow_result")
+                method="POST", path="/openapi/v1/collaboration/tasks/callback/workflow_result")
 
 
 def test_hmac_bad_signature_raises():

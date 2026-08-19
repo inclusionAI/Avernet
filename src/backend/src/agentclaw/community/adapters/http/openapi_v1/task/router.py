@@ -1,8 +1,8 @@
 """Task HTTP adapter routes —— thin(Rule 22:只转协议,不持领域策略)。
 
-POST /openapi/v1/task/execute            — 提交任务(delegate TaskServiceProtocol.execute)
-GET  /openapi/v1/task/dashboard          — 查任务图(delegate TaskServiceProtocol.get_task_dashboard)
-POST /openapi/v1/task/callback/report    — 执行实体回投(delegate TaskLoopCallbackProtocol.report_result)
+POST /openapi/v1/collaboration/tasks/execute            — 提交任务(delegate TaskServiceProtocol.execute)
+GET  /openapi/v1/collaboration/tasks/dashboard          — 查任务图(delegate TaskServiceProtocol.get_task_dashboard)
+POST /openapi/v1/collaboration/tasks/callback/report    — 执行实体回投(delegate TaskLoopCallbackProtocol.report_result)
 
 统一 ``/openapi/v1`` 返回协议:成功经 ``envelope()`` → ``Envelope{code,message,data,request_id}``;
 领域异常(GraphAlreadyInitialized/TaskNotFound/TaskState/GraphIntegrity/CallbackAuth/Correlation…)直接上抛,
@@ -41,7 +41,7 @@ from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/openapi/v1/task", tags=["task"])
+router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"])
 
 
 @router.post("/execute", response_model=Envelope[TaskOpResultDTO])
@@ -180,7 +180,7 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
 )
 
-task_callback_router = APIRouter(prefix="/openapi/v1/task/callback", tags=["task-callback"])
+task_callback_router = APIRouter(prefix="/openapi/v1/collaboration/tasks/callback", tags=["task-callback"])
 
 _TERMINAL = {Status.DONE, Status.FAILED, Status.HUNG}
 

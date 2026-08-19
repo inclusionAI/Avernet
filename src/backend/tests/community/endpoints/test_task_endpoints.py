@@ -1,6 +1,6 @@
 """Endpoint-framework coverage for the task API surface.
 
-Covers the 13 routes mounted under ``/openapi/v1/task(...)`` (task router,
+Covers the 13 routes mounted under ``/openapi/v1/collaboration/tasks(...)`` (task router,
 task-callback router, task-discovery router) with a happy + error case each,
 so the coverage gate sees every route as covered.
 
@@ -20,7 +20,7 @@ task-level callback → 400, non-holder BBS op → 409, invalid status → 400).
 The two discovery routes (``/discover``, ``/status``) build their service from
 env (not DI-wired), so no request input produces a failure. Their error case
 substitutes the module-level builder the handler calls — a forced raise that the
-handler catches and converts to ``HTTPException(500)`` → ``ErrorEnvelope``. This
+handler catches and converts to ``InternalError`` → ``ErrorEnvelope``. This
 is direct attribute assignment on the router module (not a mock library, not
 ``setattr``); the ``test_no_mock_in_endpoint_tests`` scanner permits it, and each
 happy case restores the originals so nothing leaks.
@@ -112,9 +112,9 @@ def _run_root(world, task_id: str) -> None:
 # task-discovery seam substitution
 # --------------------------------------------------------------------------
 # The discovery router self-builds its service from env (not DI-wired). Its
-# handlers catch build/read failures and raise ``HTTPException(500)``. The error
+# handlers catch build/read failures and raise ``InternalError``. The error
 # cases below force the builder the handler calls to raise, exercising that
-# ``except → HTTPException(500)`` end-to-end. The happy cases restore the
+# ``except → InternalError`` end-to-end. The happy cases restore the
 # originals (and point the reader at an absent db so ``discover()`` makes no
 # engine call), so the seam never leaks past this file.
 import agentclaw.community.adapters.http.openapi_v1.task.discovery.router as _disc_router  # noqa: E402
@@ -138,7 +138,7 @@ class _FailingTaskReader:
     ``/status`` calls ``SqliteTaskReader(db_path).read_discovered_tasks()`` *inside*
     its ``try/except`` (unlike ``_resolve_db_path``, which sits outside). Substituting
     the reader — not the path resolver — is what keeps the forced raise caught by the
-    handler and converted to ``HTTPException(500)`` rather than escaping.
+    handler and converted to ``InternalError`` rather than escaping.
     """
 
     def __init__(self, *_args, **_kwargs) -> None:
@@ -180,11 +180,11 @@ def _seed_status_err(_world) -> None:
     _disc_router.SqliteTaskReader = _FailingTaskReader
 
 
-# ===== POST /openapi/v1/task/execute =====
+# ===== POST /openapi/v1/collaboration/tasks/execute =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/execute",
+    path="/openapi/v1/collaboration/tasks/execute",
     scenario="ok",
     input=CaseInput(json_body={
         "task_spec": {
@@ -205,7 +205,7 @@ def execute_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/execute",
+    path="/openapi/v1/collaboration/tasks/execute",
     scenario="conflict_on_reexecute",
     input=CaseInput(json_body={
         "task_spec": {
@@ -224,11 +224,11 @@ def execute_conflict_on_reexecute():
     """Same task_id already initialized → GraphAlreadyInitializedError → 409."""
 
 
-# ===== GET /openapi/v1/task/dashboard =====
+# ===== GET /openapi/v1/collaboration/tasks/dashboard =====
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/task/dashboard",
+    path="/openapi/v1/collaboration/tasks/dashboard",
     scenario="ok",
     input=CaseInput(query_params={"task_id": "t_dash_ok"}),
     seed=lambda w: _seed_graph(w, "t_dash_ok"),
@@ -240,7 +240,7 @@ def dashboard_ok():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/task/dashboard",
+    path="/openapi/v1/collaboration/tasks/dashboard",
     scenario="task_not_found",
     input=CaseInput(query_params={"task_id": "t_dash_ghost"}),
     expect=ExpectError(status=404),
@@ -249,11 +249,11 @@ def dashboard_task_not_found():
     """Unknown task_id → TaskNotFoundError → 404."""
 
 
-# ===== GET /openapi/v1/task/list =====
+# ===== GET /openapi/v1/collaboration/tasks/list =====
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/task/list",
+    path="/openapi/v1/collaboration/tasks/list",
     scenario="ok",
     seed=lambda w: _seed_graph(w, "t_list_ok"),
     expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
@@ -264,7 +264,7 @@ def list_ok():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/task/list",
+    path="/openapi/v1/collaboration/tasks/list",
     scenario="invalid_status_filter",
     input=CaseInput(query_params={"status": "INVALID_STATUS"}),
     expect=ExpectError(status=400),
@@ -273,11 +273,11 @@ def list_invalid_status_filter():
     """Non-enum status → router rejects with 400 (not an uncaught ValueError 500)."""
 
 
-# ===== POST /openapi/v1/task/callback/report =====
+# ===== POST /openapi/v1/collaboration/tasks/callback/report =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/callback/report",
+    path="/openapi/v1/collaboration/tasks/callback/report",
     scenario="ok",
     input=CaseInput(json_body={
         "loop_task_id": "t_cb_report_ok::t_cb_report_ok",
@@ -293,7 +293,7 @@ def callback_report_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/callback/report",
+    path="/openapi/v1/collaboration/tasks/callback/report",
     scenario="invalid_body",
     input=CaseInput(json_body={"workflow_type": "single_bot"}),
     expect=ExpectError(status=422),
@@ -302,11 +302,11 @@ def callback_report_invalid_body():
     """Missing required loop_task_id → RequestValidationError → 422."""
 
 
-# ===== POST /openapi/v1/task/bbs/claim =====
+# ===== POST /openapi/v1/collaboration/tasks/bbs/claim =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/bbs/claim",
+    path="/openapi/v1/collaboration/tasks/bbs/claim",
     scenario="ok",
     input=CaseInput(json_body={"task_id": "t_bbs_claim_ok", "bot_id": "bot1"}),
     seed=lambda w: _seed_graph_bbs(w, "t_bbs_claim_ok"),
@@ -318,7 +318,7 @@ def bbs_claim_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/bbs/claim",
+    path="/openapi/v1/collaboration/tasks/bbs/claim",
     scenario="non_bbs_task",
     input=CaseInput(json_body={"task_id": "t_bbs_claim_err", "bot_id": "bot1"}),
     seed=lambda w: _seed_graph(w, "t_bbs_claim_err"),
@@ -328,11 +328,11 @@ def bbs_claim_non_bbs_task():
     """Claim on a plain (non-bbs_mode) task → TaskStateError → 409."""
 
 
-# ===== POST /openapi/v1/task/bbs/attach =====
+# ===== POST /openapi/v1/collaboration/tasks/bbs/attach =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/bbs/attach",
+    path="/openapi/v1/collaboration/tasks/bbs/attach",
     scenario="ok",
     input=CaseInput(json_body={
         "task_id": "t_bbs_attach_ok",
@@ -349,7 +349,7 @@ def bbs_attach_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/bbs/attach",
+    path="/openapi/v1/collaboration/tasks/bbs/attach",
     scenario="not_holder",
     input=CaseInput(json_body={
         "task_id": "t_bbs_attach_err",
@@ -364,11 +364,11 @@ def bbs_attach_not_holder():
     """Attach without holding the claim → TaskStateError → 409."""
 
 
-# ===== POST /openapi/v1/task/bbs/result =====
+# ===== POST /openapi/v1/collaboration/tasks/bbs/result =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/bbs/result",
+    path="/openapi/v1/collaboration/tasks/bbs/result",
     scenario="ok",
     input=CaseInput(json_body={
         "task_id": "t_bbs_result_ok",
@@ -385,7 +385,7 @@ def bbs_result_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/bbs/result",
+    path="/openapi/v1/collaboration/tasks/bbs/result",
     scenario="not_holder",
     input=CaseInput(json_body={
         "task_id": "t_bbs_result_err",
@@ -400,11 +400,11 @@ def bbs_result_not_holder():
     """Report without holding the claim → TaskStateError → 409."""
 
 
-# ===== POST /openapi/v1/task/callback/workflow_start =====
+# ===== POST /openapi/v1/collaboration/tasks/callback/workflow_start =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/callback/workflow_start",
+    path="/openapi/v1/collaboration/tasks/callback/workflow_start",
     scenario="ok",
     input=CaseInput(json_body={
         "task_id": "t_wf_start_ok",
@@ -424,7 +424,7 @@ def workflow_start_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/callback/workflow_start",
+    path="/openapi/v1/collaboration/tasks/callback/workflow_start",
     scenario="invalid_body",
     input=CaseInput(raw_body=b"not-json"),
     expect=ExpectError(status=422),
@@ -433,11 +433,11 @@ def workflow_start_invalid_body():
     """Malformed raw body → model_validate_json fails → 422."""
 
 
-# ===== POST /openapi/v1/task/callback/workflow_result =====
+# ===== POST /openapi/v1/collaboration/tasks/callback/workflow_result =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/callback/workflow_result",
+    path="/openapi/v1/collaboration/tasks/callback/workflow_result",
     scenario="ok",
     input=CaseInput(json_body={
         "task_id": "t_wf_result_ok",
@@ -458,7 +458,7 @@ def workflow_result_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/callback/workflow_result",
+    path="/openapi/v1/collaboration/tasks/callback/workflow_result",
     scenario="unregistered_no_loop_task_id",
     input=CaseInput(json_body={
         "task_id": "t_wf_result_err",
@@ -474,11 +474,11 @@ def workflow_result_unregistered():
     """Task-level result with no loop_task_id and unregistered instance → 400."""
 
 
-# ===== POST /openapi/v1/task/callback/node_start =====
+# ===== POST /openapi/v1/collaboration/tasks/callback/node_start =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/callback/node_start",
+    path="/openapi/v1/collaboration/tasks/callback/node_start",
     scenario="ok",
     input=CaseInput(json_body={
         "task_id": "t_node_start_ok",
@@ -498,7 +498,7 @@ def node_start_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/callback/node_start",
+    path="/openapi/v1/collaboration/tasks/callback/node_start",
     scenario="node_not_found",
     input=CaseInput(json_body={
         "task_id": "t_node_start_err",
@@ -516,11 +516,11 @@ def node_start_node_not_found():
     """Node-level start on a non-existent node → NodeNotFoundError → 404."""
 
 
-# ===== POST /openapi/v1/task/callback/node_result =====
+# ===== POST /openapi/v1/collaboration/tasks/callback/node_result =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/callback/node_result",
+    path="/openapi/v1/collaboration/tasks/callback/node_result",
     scenario="ok",
     input=CaseInput(json_body={
         "task_id": "t_node_result_ok",
@@ -541,7 +541,7 @@ def node_result_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/callback/node_result",
+    path="/openapi/v1/collaboration/tasks/callback/node_result",
     scenario="node_not_found",
     input=CaseInput(json_body={
         "task_id": "t_node_result_err",
@@ -559,11 +559,11 @@ def node_result_node_not_found():
     """Node-level result on a non-existent node → NodeNotFoundError → 404."""
 
 
-# ===== POST /openapi/v1/task/discovery/discover =====
+# ===== POST /openapi/v1/collaboration/tasks/discovery/discover =====
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/discovery/discover",
+    path="/openapi/v1/collaboration/tasks/discovery/discover",
     scenario="ok",
     input=CaseInput(query_params={"user_id": "u1", "agent_id": "bot_001"}),
     seed=_seed_discover_ok,
@@ -575,7 +575,7 @@ def discovery_discover_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/task/discovery/discover",
+    path="/openapi/v1/collaboration/tasks/discovery/discover",
     scenario="build_failure",
     input=CaseInput(query_params={"user_id": "u1", "agent_id": "bot_001"}),
     seed=_seed_discover_err,
@@ -585,11 +585,11 @@ def discovery_discover_build_failure():
     """Forced ``_build_service`` raise → handler catches → ``InternalError`` → app ``DomainError`` handler → 500 ``ErrorEnvelope``."""
 
 
-# ===== GET /openapi/v1/task/discovery/status =====
+# ===== GET /openapi/v1/collaboration/tasks/discovery/status =====
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/task/discovery/status",
+    path="/openapi/v1/collaboration/tasks/discovery/status",
     scenario="build_failure",
     seed=_seed_status_err,
     expect=ExpectError(status=500),
@@ -600,7 +600,7 @@ def discovery_status_build_failure():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/task/discovery/status",
+    path="/openapi/v1/collaboration/tasks/discovery/status",
     scenario="ok",
     seed=_seed_status_ok,
     expect=ExpectSuccess(status=200, json_contains={"code": 200000}),

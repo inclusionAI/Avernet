@@ -305,7 +305,7 @@ class H(http.server.BaseHTTPRequestHandler):
             qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             st = qs.get('status')
             try:
-                url = f"{BACKEND}/openapi/v1/task/list"
+                url = f"{BACKEND}/openapi/v1/collaboration/tasks/list"
                 if st:
                     url += urllib.parse.urlencode({'status': st[0]})
                 req = urllib.request.Request(url, headers={'x-user-id': USER_ID})
@@ -323,7 +323,7 @@ class H(http.server.BaseHTTPRequestHandler):
             tid = (qs.get('task_id') or ['t_case'])[0]
             try:
                 req = urllib.request.Request(
-                    f"{BACKEND}/openapi/v1/task/dashboard?task_id={urllib.parse.quote(tid)}",
+                    f"{BACKEND}/openapi/v1/collaboration/tasks/dashboard?task_id={urllib.parse.quote(tid)}",
                     headers={'x-user-id': USER_ID})
                 with urllib.request.urlopen(req, timeout=15) as r:
                     body = r.read()
@@ -338,5 +338,5 @@ class H(http.server.BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     print(f"◈ 可视化: http://localhost:{PORT}/  (默认最新 task;下拉按标题切换)")
-    print(f"◈ 代理 → {BACKEND}  (user {USER_ID})  GET /openapi/v1/task/list + /openapi/v1/task/dashboard")
+    print(f"◈ 代理 → {BACKEND}  (user {USER_ID})  GET /openapi/v1/collaboration/tasks/list + /openapi/v1/collaboration/tasks/dashboard")
     http.server.HTTPServer(('127.0.0.1',PORT),H).serve_forever()

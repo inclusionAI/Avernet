@@ -60,7 +60,7 @@ class TaskDiscoveryLifecycle(LifecycleBase):
     ``discover_lifecycle_participants`` 机制。
 
     默认每天 11:00 执行一次。手动触发可通过:
-    - HTTP:  POST /openapi/v1/task/discovery/discover
+    - HTTP:  POST /openapi/v1/collaboration/tasks/discovery/discover
     - CLI:   ./scripts/task_discovery.sh discover
     """
 

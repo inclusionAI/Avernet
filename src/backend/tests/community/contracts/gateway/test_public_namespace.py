@@ -13,8 +13,8 @@ from fastapi import FastAPI
 
 #: Sub-namespaces the gateway is permitted to forward under ``/openapi/v1``.
 #: Each entry is a first-class public domain. ``task`` joins ``bots`` now that
-#: the task API has been normalized to ``/openapi/v1/task/*``.
-_SANCTIONED_PUBLIC_SUBNAMESPACES = ("/openapi/v1/bots", "/openapi/v1/task")
+#: the task API has been normalized to ``/openapi/v1/collaboration/tasks/*``.
+_SANCTIONED_PUBLIC_SUBNAMESPACES = ("/openapi/v1/bots", "/openapi/v1/collaboration/tasks")
 
 
 def _public_paths(app: FastAPI) -> list[str]:

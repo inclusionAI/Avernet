@@ -1,4 +1,4 @@
-"""BBS claim HTTP 路由契约测试(FR-PICK-02):POST /openapi/v1/task/bbs/claim。
+"""BBS claim HTTP 路由契约测试(FR-PICK-02):POST /openapi/v1/collaboration/tasks/bbs/claim。
 
 独立 TestClient + 小型 test injector(TaskModule + stub discover),不拉起 singlebox 全栈。
 验证:首次 claim 200(返 root_node_id);再次 claim 同任务 409(CAS 输者)。
@@ -79,11 +79,11 @@ def _bbs_task(injector: Injector, task_id: str) -> None:
 def test_claim_route_200_then_409(client):
     c, inj = client
     _bbs_task(inj, "r1")
-    r1 = c.post("/openapi/v1/task/bbs/claim", json={"task_id": "r1", "bot_id": "botA"})
+    r1 = c.post("/openapi/v1/collaboration/tasks/bbs/claim", json={"task_id": "r1", "bot_id": "botA"})
     assert r1.status_code == 200, r1.text
     body = r1.json()
     assert body["code"] == 200000
     assert body["data"]["root_node_id"] == "r1"
     assert body["data"]["task_id"] == "r1"
-    r2 = c.post("/openapi/v1/task/bbs/claim", json={"task_id": "r1", "bot_id": "botB"})
+    r2 = c.post("/openapi/v1/collaboration/tasks/bbs/claim", json={"task_id": "r1", "bot_id": "botB"})
     assert r2.status_code == 409, r2.text

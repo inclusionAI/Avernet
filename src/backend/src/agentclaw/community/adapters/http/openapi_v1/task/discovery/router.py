@@ -4,8 +4,8 @@
 供 CLI 或外部调度器通过 HTTP 触发。
 
 端点:
-  POST /openapi/v1/task/discovery/discover          手动触发任务发现
-  GET  /openapi/v1/task/discovery/status             查看任务状态
+  POST /openapi/v1/collaboration/tasks/discovery/discover          手动触发任务发现
+  GET  /openapi/v1/collaboration/tasks/discovery/status             查看任务状态
 
 任务执行不在本模块负责 — 由 task 目录下另外的执行框架处理。
 """
@@ -33,7 +33,7 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/task/discovery", tags=["task-discovery"])
+router = APIRouter(prefix="/openapi/v1/collaboration/tasks/discovery", tags=["task-discovery"])
 
 #: 默认 db 文件路径(9 级上溯到项目根 → scripts/.dependencies/data/discovered_tasks.db)
 _PROJECT_ROOT = Path(__file__).resolve()
