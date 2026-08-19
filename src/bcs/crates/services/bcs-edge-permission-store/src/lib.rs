@@ -906,7 +906,6 @@ impl DbBotActorConfigStore {
         })
     }
 
-    #[cfg(test)]
     async fn execute(&self, operation: &'static str, statement: DbStatement) -> ServiceResult<()> {
         self.db
             .execute(statement)
@@ -953,6 +952,32 @@ impl BotActorConfigRepoPort for DbBotActorConfigStore {
                 None
             }
         }
+    }
+
+    async fn set_human_addable(&self, bot_id: &str, env: &str, value: bool) -> ServiceResult<()> {
+        self.execute(
+            "set_human_addable",
+            DbStatement::with_params(
+                "UPDATE bcs_bots SET human_addable = ? WHERE bot_uuid = ? AND env = ?",
+                vec![
+                    DbValue::from(if value { 1_i64 } else { 0_i64 }),
+                    DbValue::from(bot_id),
+                    DbValue::from(env),
+                ],
+            ),
+        )
+        .await
+    }
+
+    async fn set_friend_approval(&self, bot_id: &str, env: &str, value: &str) -> ServiceResult<()> {
+        self.execute(
+            "set_friend_approval",
+            DbStatement::with_params(
+                "UPDATE bcs_bots SET friend_approval = ? WHERE bot_uuid = ? AND env = ?",
+                vec![DbValue::from(value), DbValue::from(bot_id), DbValue::from(env)],
+            ),
+        )
+        .await
     }
 }
 

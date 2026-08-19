@@ -10,10 +10,17 @@
 //! edge-permission decision path.
 use async_trait::async_trait;
 use bcs_domain::edge_permission::BotActorConfig;
+use crate::core::error::ServiceResult;
 
 #[async_trait]
 pub trait BotActorConfigRepoPort: Send + Sync {
     /// Read the bot's actor config. `None` if the bot does not exist in `env`
     /// (or the read is unavailable — log + None, non-fallible).
     async fn get(&self, bot_id: &str, env: &str) -> Option<BotActorConfig>;
+
+    /// Set `human_addable` (spec §3.2). Errors if the bot doesn't exist.
+    async fn set_human_addable(&self, bot_id: &str, env: &str, value: bool) -> ServiceResult<()>;
+
+    /// Set `friend_approval` (spec §3.2). Errors if the bot doesn't exist.
+    async fn set_friend_approval(&self, bot_id: &str, env: &str, value: &str) -> ServiceResult<()>;
 }
