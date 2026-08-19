@@ -126,3 +126,35 @@ def test_create_idempotency_rejects_same_key_with_a_different_request_hash():
             description="second",
             idempotency_key="request-1",
         )
+
+
+def test_legacy_switch_replaces_all_ordinary_active_sets_in_one_uow():
+    """The compatibility switch cannot expose a deactivate/activate gap."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        old_set = SkillSet(name="old", bolt_id="bot", is_active=True, env="dev")
+        target_set = SkillSet(name="target", bolt_id="bot", is_active=False, env="dev")
+        old_skill = Skill(name="old-skill", git_path="git://old", env="dev")
+        target_skill = Skill(name="target-skill", git_path="git://target", env="dev")
+        session.add_all([old_set, target_set, old_skill, target_skill])
+        session.flush()
+        session.add_all([
+            SkillSetSkill(skill_set_id=old_set.id, skill_id=old_skill.id, env="dev"),
+            SkillSetSkill(skill_set_id=target_set.id, skill_id=target_skill.id, env="dev"),
+            BotSkillInstallation(bot_id="bot", skill_id=old_skill.id, env="dev"),
+        ])
+
+    result = SkillSetControlPlaneRepository(db).replace_active_set(
+        bot_id="bot", set_id="2"
+    )
+
+    assert result.changed is True
+    assert result.item["id"] == "2"
+    assert result.details == {"activated": ["2"], "deactivated": ["1"]}
+    with db.orm_session() as session:
+        sets = {row.name: row.is_active for row in session.query(SkillSet).all()}
+        installed = {
+            row.skill_id for row in session.query(BotSkillInstallation).all()
+        }
+    assert sets == {"old": False, "target": True}
+    assert installed == {2}

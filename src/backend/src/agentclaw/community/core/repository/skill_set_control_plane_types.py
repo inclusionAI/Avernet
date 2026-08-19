@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -17,3 +17,4 @@ class SkillSetMutation:
     item: dict
     changed: bool
     previous_state: SkillSetDesiredState
+    details: dict = field(default_factory=dict)

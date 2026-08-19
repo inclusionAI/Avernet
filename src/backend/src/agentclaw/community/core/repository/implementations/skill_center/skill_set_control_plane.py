@@ -11,6 +11,7 @@ import hashlib
 import json
 
 from injector import inject
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
@@ -43,7 +44,15 @@ def _item(row: SkillSet) -> dict:
         "name": row.name,
         "description": row.description,
         "is_default": bool(row.is_default),
+        "is_builtin": bool(row.is_builtin),
         "is_active": bool(row.is_active),
+        "user_id": row.user_id,
+        "bolt_id": row.bolt_id,
+        "engine_type": row.engine_type,
+        "gmt_created": row.gmt_created.isoformat() if row.gmt_created else "",
+        "gmt_modified": row.gmt_modified.isoformat() if row.gmt_modified else "",
+        "env": row.env,
+        "type": "default" if row.is_default else "custom",
     }
 
 
@@ -247,9 +256,32 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                     "id": str(skill.id),
                     "name": skill.name,
                     "description": skill.description,
+                    "category": skill.category,
+                    "git_path": skill.git_path,
+                    "tags": skill.tags if isinstance(skill.tags, list) else [],
+                    "status": skill.status,
+                    "version": skill.version,
+                    "skill_uuid": skill.skill_uuid,
+                    "source_type": skill.source_type,
                 }
                 for skill in rows
             ]
+
+    def resolve_legacy_skill_id(self, *, bot_id: str, identifier: str) -> str:
+        """Resolve the historical ID/name/git-path batch wire to a stable ID."""
+        with self._db.orm_session() as session:
+            query = self._scope(session.query(Skill), Skill)
+            if identifier.isdigit():
+                query = query.filter(Skill.id == int(identifier))
+            else:
+                query = query.filter(or_(Skill.name == identifier, Skill.git_path == identifier))
+            skill = query.one_or_none()
+            if skill is None or (
+                str(skill.git_path or "").startswith("local://")
+                and skill.bolt_id != bot_id
+            ):
+                raise SkillSetControlPlaneNotFoundError()
+            return str(skill.id)
 
     def add_skill(
         self, *, bot_id: str, set_id: str, skill_id: str, engine_type: str | None = None
@@ -407,6 +439,90 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
             session.flush()
             return SkillSetMutation(_item(row), changed, old)
 
+    def replace_active_set(
+        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+    ) -> SkillSetMutation:
+        """Atomically replace all ordinary active sets with ``set_id``.
+
+        This is deliberately distinct from canonical ``activate``.  It exists
+        only for the deprecated single-select switch wire, whose published
+        operation is an all-or-nothing replacement rather than a sequence of
+        deactivate/activate calls.
+        """
+        with self._db.transactional_orm_session() as session:
+            target = self._set(
+                session,
+                bot_id=bot_id,
+                set_id=set_id,
+                engine_type=engine_type,
+                locked=True,
+            )
+            self._ordinary(target)
+            old = self._snapshot(session, bot_id, engine_type=engine_type)
+            query = self._scope(session.query(SkillSet), SkillSet).filter(
+                SkillSet.bolt_id == bot_id, SkillSet.is_default.is_(False)
+            )
+            if engine_type is not None:
+                query = query.filter(SkillSet.engine_type == engine_type)
+            sets = query.with_for_update().all()
+            set_ids = {int(row.id) for row in sets}
+            memberships = []
+            if set_ids:
+                memberships = (
+                    self._scope(session.query(SkillSetSkill), SkillSetSkill)
+                    .filter(SkillSetSkill.skill_set_id.in_(set_ids))
+                    .with_for_update()
+                    .all()
+                )
+            active_member_ids = {
+                int(member.skill_id)
+                for member in memberships
+                if old.set_active.get(int(member.skill_set_id), False)
+            }
+            target_member_ids = {
+                int(member.skill_id)
+                for member in memberships
+                if int(member.skill_set_id) == int(target.id)
+            }
+            for row in sets:
+                row.is_active = int(row.id) == int(target.id)
+            if active_member_ids:
+                self._scope(
+                    session.query(BotSkillInstallation), BotSkillInstallation
+                ).filter(
+                    BotSkillInstallation.bot_id == bot_id,
+                    BotSkillInstallation.skill_id.in_(active_member_ids),
+                ).delete(synchronize_session=False)
+            existing = self._installations(session, bot_id)
+            for skill_id in target_member_ids - existing:
+                session.add(
+                    BotSkillInstallation(
+                        bot_id=bot_id,
+                        skill_id=skill_id,
+                        env=get_current_env(),
+                        avernet_tenant=get_current_avernet_tenant(),
+                    )
+                )
+            session.flush()
+            activated = [str(target.id)] if not old.set_active.get(int(target.id), False) else []
+            deactivated = [
+                str(row.id)
+                for row in sets
+                if int(row.id) != int(target.id)
+                and old.set_active.get(int(row.id), False)
+            ]
+            changed = any(
+                old.set_active.get(int(row.id), False)
+                != (int(row.id) == int(target.id))
+                for row in sets
+            )
+            return SkillSetMutation(
+                _item(target),
+                changed,
+                old,
+                {"activated": activated, "deactivated": deactivated},
+            )
+
     def restore_desired_state(
         self,
         *,
@@ -457,6 +573,12 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                     )
                 )
             session.flush()
+
+    def snapshot_desired_state(
+        self, *, bot_id: str, engine_type: str | None = None
+    ) -> SkillSetDesiredState:
+        with self._db.orm_session() as session:
+            return self._snapshot(session, bot_id, engine_type=engine_type)
 
     def _set(
         self,

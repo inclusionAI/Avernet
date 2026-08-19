@@ -53,6 +53,8 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
         self, *, bot_id: str, set_id: str, engine_type: str | None = None
     ) -> list[dict]: ...
     @abstractmethod
+    def resolve_legacy_skill_id(self, *, bot_id: str, identifier: str) -> str: ...
+    @abstractmethod
     def add_skill(
         self, *, bot_id: str, set_id: str, skill_id: str, engine_type: str | None = None
     ) -> SkillSetMutation: ...
@@ -64,6 +66,14 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
     def set_active(
         self, *, bot_id: str, set_id: str, active: bool, engine_type: str | None = None
     ) -> SkillSetMutation: ...
+    @abstractmethod
+    def replace_active_set(
+        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+    ) -> SkillSetMutation: ...
+    @abstractmethod
+    def snapshot_desired_state(
+        self, *, bot_id: str, engine_type: str | None = None
+    ) -> SkillSetDesiredState: ...
     @abstractmethod
     def restore_desired_state(
         self,

@@ -35,29 +35,13 @@ from typing import Callable
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
-from agentclaw.community.api.git_sync_service import GitSyncServiceProtocol
-from agentclaw.community.api.skill_auth_service import SkillAuthServiceProtocol
-from agentclaw.community.api.skill_batch_sync_service import (
-    SkillBatchSyncServiceProtocol,
-)
-from agentclaw.community.api.skill_center_sync_service import (
-    SkillCenterSyncServiceProtocol,
-)
-from agentclaw.community.api.skill_member_service import SkillMemberServiceProtocol
 from agentclaw.community.api.skill_parameter_service_factory import (
     SkillParameterServiceFactoryProtocol,
 )
-from agentclaw.community.api.skill_propagation_service import (
-    SkillPropagationServiceProtocol,
-)
-from agentclaw.community.api.skill_publish_service import SkillPublishServiceProtocol
-from agentclaw.community.api.runtime_layout_probe_service import (
-    RuntimeLayoutProbeServiceProtocol,
-)
-from agentclaw.community.api.skill_scan_service import SkillScanServiceProtocol
-from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
 from agentclaw.community.api.skill_market_service import SkillMarketServiceProtocol
-from agentclaw.community.api.repository_catalog_service import RepositoryCatalogServiceProtocol
+from agentclaw.community.api.repository_catalog_service import (
+    RepositoryCatalogServiceProtocol,
+)
 from agentclaw.community.api.skill_set_activator_factory import (
     SkillSetActivatorFactoryProtocol,
 )
@@ -135,9 +119,6 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 )
 from agentclaw.community.core.skill_center.services.skill_member_service import (
     SkillMemberService,
-)
-from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
-    CurrentRuntimeLayoutProbeService,
 )
 from agentclaw.community.core.skill_center.services.market_sync import MarketSyncService
 from agentclaw.community.core.skill_center.services.repository_catalog_service import (
@@ -238,6 +219,9 @@ from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
+from agentclaw.community.di.modules.skill_center_protocols import (
+    SkillCenterProtocolBindings,
+)
 from agentclaw.community.core.repository.implementations.skill_center.sync_log import (
     SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository,
 )
@@ -278,7 +262,7 @@ logger = get_logger()
 # ── Module ─────────────────────────────────────────────────────────────────
 
 
-class SkillCenterModule(Module):
+class SkillCenterModule(SkillCenterProtocolBindings, Module):
     """Production singletons + factories for skill_center."""
 
     def configure(self, binder: Binder) -> None:
@@ -971,118 +955,3 @@ class SkillCenterModule(Module):
             desktop_layout_authority=desktop_layout_authority,
             desktop_reconcile_wakeup=skills_pool_wakeup.handle,
         )
-
-    # ── Service API Protocol aliases ────────────────────────────────────
-    # Each @provider below resolves the concrete singleton and returns it
-    # under the Protocol type. Adapters use ``Injected(<X>Protocol)``;
-    # internal modules can still resolve the concrete class directly.
-
-    @singleton
-    @provider
-    @inject
-    def _git_sync_service_protocol(self, svc: GitSyncService) -> GitSyncServiceProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_auth_service_protocol(
-        self, svc: SkillAuthService
-    ) -> SkillAuthServiceProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_batch_sync_service_protocol(
-        self, svc: SkillBatchSyncService
-    ) -> SkillBatchSyncServiceProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_center_sync_service_protocol(
-        self, svc: SkillCenterSyncService
-    ) -> SkillCenterSyncServiceProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_member_service_protocol(
-        self, svc: SkillMemberService
-    ) -> SkillMemberServiceProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_parameter_service_factory_protocol(
-        self, svc: SkillParameterServiceFactory
-    ) -> SkillParameterServiceFactoryProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_propagation_service_protocol(
-        self, svc: SkillPropagationService
-    ) -> SkillPropagationServiceProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_publish_service_protocol(
-        self, svc: SkillPublishService
-    ) -> SkillPublishServiceProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _runtime_layout_probe_service_protocol(
-        self, svc: CurrentRuntimeLayoutProbeService
-    ) -> RuntimeLayoutProbeServiceProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_scan_service_protocol(
-        self, svc: SkillScanService
-    ) -> SkillScanServiceProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_service_factory_protocol(
-        self, svc: SkillServiceFactory
-    ) -> SkillServiceFactoryProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_set_service_factory_protocol(
-        self, svc: SkillSetServiceFactory
-    ) -> SkillSetServiceFactoryProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_set_activator_factory_protocol(
-        self, svc: SkillSetActivatorFactory
-    ) -> SkillSetActivatorFactoryProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_set_switcher_factory_protocol(
-        self, svc: SkillSetSwitcherFactory
-    ) -> SkillSetSwitcherFactoryProtocol:
-        return svc
