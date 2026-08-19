@@ -20,7 +20,6 @@ Task 3 of `docs/superpowers/plans/2026-06-15-device-sync-supplier-for-bot-cleanu
 """
 from __future__ import annotations
 
-import json
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
 
@@ -119,12 +118,45 @@ def _skills_router_app(mock_ctx, tmp_path):
         return_value={"success": [{"path": "a", "skill_id": "a", "link_name": "a"}], "failed": []}
     )
     skill_service.get_link_name = MagicMock(return_value="link_name")
+    skill_service.list_git_skills = MagicMock(return_value=[])
+    skill_service.get_market_tree = MagicMock(return_value=[])
+    skill_service.get_sync_status = MagicMock(return_value={"status": "idle"})
 
     skill_service_factory = MagicMock()
     skill_service_factory.create.return_value = skill_service
 
     skill_set_service = MagicMock()
     skill_set_service.get_symlink_mappings.return_value = []
+    skill_set_service.ensure_default_skill_set.return_value = {
+        "id": "default-set",
+        "name": "默认技能集",
+        "description": "default",
+        "is_default": True,
+        "is_builtin": False,
+        "user_id": "user-1",
+        "bolt_id": "bot-1",
+        "engine_type": "openclaw",
+        "gmt_created": "",
+        "gmt_modified": "",
+    }
+    skill_set_service.get_default_skill_set.return_value = {
+        "id": "default-set",
+        "name": "默认技能集",
+        "description": "default",
+        "is_default": True,
+        "is_builtin": False,
+        "user_id": "user-1",
+        "bolt_id": "bot-1",
+        "engine_type": "openclaw",
+        "gmt_created": "",
+        "gmt_modified": "",
+    }
+    skill_set_service.add_mcp_to_skill_set = AsyncMock(
+        return_value={"success": True}
+    )
+    skill_set_service.remove_mcp_from_skill_set = AsyncMock(
+        return_value={"success": True}
+    )
     skill_set_service_factory = MagicMock()
     skill_set_service_factory.create.return_value = skill_set_service
 
@@ -193,6 +225,34 @@ def _skillsets_router_app(mock_ctx, tmp_path):
 
     skill_set_service = MagicMock()
     skill_set_service.get_symlink_mappings.return_value = []
+    skill_set_service.ensure_default_skill_set.return_value = {
+        "id": "default-set",
+        "name": "默认技能集",
+        "description": "default",
+        "is_default": True,
+        "is_builtin": False,
+        "user_id": "user-1",
+        "bolt_id": "bot-1",
+        "engine_type": "openclaw",
+        "gmt_created": "",
+        "gmt_modified": "",
+    }
+    skill_set_service.get_default_skill_set.return_value = {
+        "id": "default-set",
+        "name": "默认技能集",
+        "description": "default",
+        "is_default": True,
+        "is_builtin": False,
+        "user_id": "user-1",
+        "bolt_id": "bot-1",
+        "engine_type": "openclaw",
+        "gmt_created": "",
+        "gmt_modified": "",
+    }
+    skill_set_service.add_mcp_to_skill_set = AsyncMock(return_value={"success": True})
+    skill_set_service.remove_mcp_from_skill_set = AsyncMock(
+        return_value={"success": True}
+    )
     skill_set_service_factory = MagicMock()
     skill_set_service_factory.create.return_value = skill_set_service
 
@@ -277,7 +337,7 @@ class TestSkillsEndpointsUseResolver:
             dispatcher,
             _sync_plugin,
         ):
-            resp = client.post(
+            client.post(
                 "/api/skills/market/activate-batch",
                 json={"skill_paths": ["sk-x"]},
                 params={
@@ -293,8 +353,67 @@ class TestSkillsEndpointsUseResolver:
             resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
             dispatcher.dispatch.assert_called_once()
 
+    def test_market_runtime_path_endpoints_resolve_runtime_paths(
+        self, mock_request_ctx, tmp_path
+    ):
+        with _skills_router_app(mock_request_ctx, tmp_path) as (
+            client,
+            _resolver,
+            _dispatcher,
+            _sync_plugin,
+        ):
+            params = {
+                "entity_id": "user-1",
+                "entity_type": "staff",
+                "bot_id": "bot-1",
+                "engine_type": "openclaw",
+            }
+
+            local_resp = client.get("/api/skills/market/local", params=params)
+            tree_resp = client.get("/api/skills/market/tree", params=params)
+            status_resp = client.get("/api/skills/market/sync-status", params=params)
+
+            assert local_resp.status_code == 200, local_resp.text
+            assert tree_resp.status_code == 200, tree_resp.text
+            assert status_resp.status_code == 200, status_resp.text
+
+
 
 class TestSkillsetsEndpointUsesResolver:
+
+    def test_default_and_mcp_endpoints_thread_runtime_engine(
+        self, mock_request_ctx, tmp_path
+    ):
+        with _skillsets_router_app(mock_request_ctx, tmp_path) as (
+            client,
+            _resolver,
+            _dispatcher,
+            _sync_plugin,
+        ):
+            params = {
+                "entity_id": "user-1",
+                "entity_type": "staff",
+                "bot_id": "bot-1",
+                "engine_type": "openclaw",
+            }
+
+            ensure_resp = client.post("/api/skillsets/default/ensure", params=params)
+            current_resp = client.get("/api/skillsets/default/current", params=params)
+            add_mcp_resp = client.post(
+                "/api/skillsets/default-set/mcps",
+                params=params,
+                json={"server_code": "mcp.example"},
+            )
+            remove_mcp_resp = client.delete(
+                "/api/skillsets/default-set/mcps/mcp.example",
+                params=params,
+            )
+
+            assert ensure_resp.status_code == 200, ensure_resp.text
+            assert current_resp.status_code == 200, current_resp.text
+            assert add_mcp_resp.status_code == 200, add_mcp_resp.text
+            assert remove_mcp_resp.status_code == 200, remove_mcp_resp.text
+
     def test_sync_skills_to_device_endpoint_uses_resolver(
         self, mock_request_ctx, tmp_path
     ):
@@ -304,7 +423,7 @@ class TestSkillsetsEndpointUsesResolver:
             dispatcher,
             _sync_plugin,
         ):
-            resp = client.post(
+            client.post(
                 "/api/skillsets/sync-skills",
                 params={
                     "entity_id": "user-1",
@@ -404,7 +523,7 @@ class TestIdentityRouterUsesResolver:
             # Hit the bot-level write endpoint (uses _write_file_safely
             # with bot_id+owner_id, which triggers the Arca branch).
             # PUT /api/identity/{entity_type}/{entity_id}/bot/{bot_id}/{file_type}
-            resp = client.put(
+            client.put(
                 "/api/identity/staff/user-1/bot/bot-1/RULES.md",
                 json={"content": "hello"},
             )
@@ -425,9 +544,6 @@ class TestIdentityRouterUsesResolver:
 @contextmanager
 def _resources_router_app(mock_ctx, tmp_path):
     from agentclaw.community.adapters.http.resources.router import router as resources_router
-    from agentclaw.community.adapters.http.resources.file_router import (
-        router as file_router,
-    )
     from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
@@ -523,7 +639,7 @@ class TestResourcesRouterUsesResolver:
             # a get_legacy_resource_service patch is overkill; instead the
             # test gives up reaching final status and just verifies the
             # resolver call happened during the request lifecycle.
-            resp = client.delete(
+            client.delete(
                 "/api/resources/some-resource-id",
                 params={
                     "entity_id": "user-1",
@@ -549,7 +665,7 @@ class TestResourcesRouterUsesResolver:
             resource_repo,
             fake_resource,
         ):
-            resp = client.post(
+            client.post(
                 "/api/resources/file",
                 files=[("files", ("test.txt", b"hello", "text/plain"))],
                 params={
@@ -651,7 +767,7 @@ class TestFileRouterUsesResolver:
             dispatcher,
             device_fs,
         ):
-            resp = client.get(
+            client.get(
                 "/files",
                 params={
                     "path": "",
@@ -673,7 +789,7 @@ class TestFileRouterUsesResolver:
             dispatcher,
             device_fs,
         ):
-            resp = client.post(
+            client.post(
                 "/files/upload",
                 files=[("files", ("test.txt", b"hello", "text/plain"))],
                 params={

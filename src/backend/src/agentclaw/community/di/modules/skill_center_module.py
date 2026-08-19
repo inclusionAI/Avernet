@@ -128,7 +128,10 @@ from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skills_pool.reconcile_task import (
     SkillsPoolReconcileWakeupListener,
 )
-from agentclaw.community.core.skills_pool.models import pool_paths_for_engine
+from agentclaw.community.core.skills_pool.models import (
+    FILESYSTEM_POOL_ENGINES,
+    pool_paths_for_engine,
+)
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
@@ -554,13 +557,10 @@ class SkillCenterModule(Module):
         def resolve_pool_paths(
             owner_id: str,
             bot_id: str,
-            _requested_engine: str,
+            requested_runtime_engine: str,
         ) -> tuple[str, str, str] | None:
             bot = bot_repo.get_by_id_and_owner(bot_id, owner_id)
             if bot is None:
-                return None
-            engine = bot.get("active_engine")
-            if not isinstance(engine, str):
                 return None
             state = layout_repository.get(
                 BotSkillLayoutScope(
@@ -571,11 +571,21 @@ class SkillCenterModule(Module):
             )
             if not runtime_uses_pool_paths(state):
                 return None
-            paths = pool_paths_for_engine(engine)
+            if requested_runtime_engine not in FILESYSTEM_POOL_ENGINES:
+                logger.warning(
+                    "[SkillCenterModule] unsupported Pool runtime engine: "
+                    "owner_id=%s bot_id=%s engine=%s; falling back to legacy paths",
+                    owner_id,
+                    bot_id,
+                    requested_runtime_engine,
+                )
+                return None
+            paths = pool_paths_for_engine(requested_runtime_engine)
             return paths.active, paths.pool_local, paths.pool_repo
 
         return SkillServiceFactory(
             skill_repo=skill_repo,
+            bot_repo=bot_repo,
             skill_repo_sync=skill_repo_sync,
             category_repo=category_repo,
             device_fs_dispatcher=device_fs_dispatcher,
