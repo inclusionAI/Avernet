@@ -142,5 +142,49 @@ class TaskDiscoveryScheduler(LifecycleBase):
                 bot_id, owner_id,
             )
 
+    def get_status(self) -> dict:
+        """返回 APScheduler 当前调度状态 — 供 HTTP 端点查询。
+
+        Returns:
+            running: 调度器是否在运行
+            jobs: 已注册的 job 列表（id, cron 表达式, next_run_time, 时区）
+            auto_start: TASK_DISCOVERY_AUTO_START 配置值
+            cron: TASK_DISCOVERY_CRON 配置值
+            timezone: TASK_DISCOVERY_TIMEZONE 配置值
+        """
+        cron_expr = os.environ.get("TASK_DISCOVERY_CRON", _DEFAULT_CRON)
+        tz = os.environ.get("TASK_DISCOVERY_TIMEZONE", _DEFAULT_TIMEZONE)
+        auto_start = os.environ.get("TASK_DISCOVERY_AUTO_START", "true")
+
+        if self._scheduler is None:
+            return {
+                "running": False,
+                "jobs": [],
+                "auto_start": auto_start,
+                "cron": cron_expr,
+                "timezone": tz,
+            }
+
+        jobs = []
+        for job in self._scheduler.get_jobs():
+            trigger = job.trigger
+            jobs.append({
+                "id": job.id,
+                "cron": str(trigger),
+                "next_run_time": (
+                    job.next_run_time.isoformat()
+                    if job.next_run_time else None
+                ),
+                "timezone": str(trigger.timezone) if hasattr(trigger, "timezone") else None,
+            })
+
+        return {
+            "running": self._scheduler.running,
+            "jobs": jobs,
+            "auto_start": auto_start,
+            "cron": cron_expr,
+            "timezone": tz,
+        }
+
 
 __all__ = ["TaskDiscoveryScheduler"]

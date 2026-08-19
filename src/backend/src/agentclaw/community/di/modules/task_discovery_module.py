@@ -66,8 +66,10 @@ class TaskDiscoveryModule(Module):
     def configure(self, binder: Binder) -> None:
         # Lifecycle 参与者 — startup() 中启动 cron 调度,
         # shutdown() 中停止。由 discover_lifecycle_participants 自动发现。
+        # NOTE: DiscoveryService 不用 binder.bind — _provide_discovery_service
+        # 的 @provider @singleton 已处理绑定，binder.bind 会遮盖 provider 导致
+        # injector 直接调 __init__() 但无法注入 reader/initiator/notify_sender。
         binder.bind(TaskDiscoveryScheduler, to=TaskDiscoveryScheduler, scope=singleton)
-        binder.bind(DiscoveryService, to=DiscoveryService, scope=singleton)
 
     @singleton
     @provider

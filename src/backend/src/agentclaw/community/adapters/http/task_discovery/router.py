@@ -168,6 +168,17 @@ async def toggle_dream_mode(
     return {"success": True, "enabled": enabled, "bot_id": bot_id}
 
 
+# ── 调度器状态 ──────────────────────────────────────────────
+
+
+@router.get("/scheduler-status")
+async def get_scheduler_status(
+    scheduler: TaskDiscoveryScheduler = Injected(TaskDiscoveryScheduler),
+) -> dict:
+    """查看 APScheduler 调度状态 — cron 表达式、下次触发时间、是否运行。"""
+    return {"success": True, **scheduler.get_status()}
+
+
 # ── 状态查询 ───────────────────────────────────────────────
 
 
