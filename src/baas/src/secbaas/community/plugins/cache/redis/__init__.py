@@ -1,7 +1,3 @@
-from ._config import RedisCacheConfig
-from ._plugin import RedisCachePlugin
+from ._redis_cache import RedisCachePlugin
 
-__all__ = [
-    "RedisCacheConfig",
-    "RedisCachePlugin",
-]
+__all__ = ["RedisCachePlugin"]

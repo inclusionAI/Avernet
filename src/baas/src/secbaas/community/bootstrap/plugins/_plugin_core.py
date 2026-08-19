@@ -20,12 +20,13 @@ from dependency_injector import containers, providers
 from secbaas.community.api.device_manage import K8sCredentials
 from secbaas.community.plugins.auth.oauth import OAuthPlugin
 from secbaas.community.plugins.auth.stub import StubAuthPlugin
+from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.bot_service import (
     AiohttpBotServicePlugin,
     LocalBotServicePlugin,
     StubBotServicePlugin,
 )
-from secbaas.community.plugins.cache.redis import RedisCacheConfig, RedisCachePlugin
+from secbaas.community.plugins.cache.redis import RedisCachePlugin
 from secbaas.community.plugins.cache.stub import StubCachePlugin
 from secbaas.community.plugins.database.mariadb.mariadb_orm import MariaDbOrmPlugin
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
@@ -55,9 +56,8 @@ from secbaas.community.plugins.sandbox.k8s import (
 )
 from secbaas.community.plugins.sandbox.k8s.real import K8sClientManager
 from secbaas.community.plugins.sandbox.poolab import StubPoolabSandboxPlugin
-from secbaas.community.plugins.sandbox.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
-from secbaas.community.plugins.secret import AliyunKmsSecretStorePlugin
+from secbaas.community.plugins.secret.env import EnvSecretStorePlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
 
 
@@ -72,52 +72,42 @@ def _build_aliyun_ack_templates(
     return out
 
 
-def _build_redis_config(raw_config: dict, secret_plugin) -> RedisCacheConfig:
-    """Build a redis plugin config, resolving secret references up front.
-
-    Sensitive connection fields (e.g. ``password``) may carry a secret
-    reference (``@name``). The composition root resolves those references via
-    the baas ``SecretStorePlugin`` (``resolve_secret``) before constructing the
-    client, so the plugin never runs with a raw reference.
-    """
-    resolved = dict(raw_config)
-    for key, value in resolved.items():
-        if isinstance(value, str) and value.startswith("@"):
-            resolved[key] = secret_plugin.resolve_secret(value)
-    return RedisCacheConfig(**resolved)
-
-
 class PluginContainer(containers.DeclarativeContainer):
     config = providers.Configuration()
     connection_management = providers.Dependency()
     ws_relay_session_repository = providers.Dependency()
-
-    secret_plugin = providers.Selector(
-        config.plugins.secret,
-        aliyun_kms=providers.Singleton(
-            AliyunKmsSecretStorePlugin,
-            config=config.plugins.secret_aliyun_kms,
-        ),
-        stub=providers.Singleton(StubSecretStorePlugin),
-    )
 
     cache_plugin = providers.Selector(
         config.plugins.cache,
         stub=providers.Singleton(StubCachePlugin),
         redis=providers.Singleton(
             RedisCachePlugin,
-            config=providers.Callable(
-                _build_redis_config,
-                raw_config=config.plugins.cache_redis,
-                secret_plugin=secret_plugin,
-            ),
+            url=config.cache_redis.url,
+            socket_timeout=config.cache_redis.socket_timeout,
+            socket_connect_timeout=config.cache_redis.socket_connect_timeout,
         ),
     )
 
     plugin_database = providers.Selector(
-        config.plugins.database.plugin_database,
-        SQLITE_ORM=providers.Singleton(SqliteOrmPlugin),
-        MARIADB_ORM=providers.Singleton(MariaDbOrmPlugin),
+        config.plugins.database,
+        sqlite=providers.Singleton(
+            SqliteOrmPlugin,
+            database_url=config.database.database_url,
+            create_schema=config.database.create_schema,
+            seed_data=config.database.seed_data,
+        ),
+        mariadb=providers.Singleton(
+            MariaDbOrmPlugin,
+            database_url=config.database.database_url,
+            create_schema=config.database.create_schema,
+            seed_data=config.database.seed_data,
+        ),
+    )
+
+    secret_plugin = providers.Selector(
+        config.plugins.secret,
+        env=providers.Singleton(EnvSecretStorePlugin),
+        stub=providers.Singleton(StubSecretStorePlugin),
     )
 
     arca_utils = providers.Singleton(
@@ -158,7 +148,7 @@ class PluginContainer(containers.DeclarativeContainer):
     )
 
     teclaw_bot_plugin_factory = providers.Selector(
-        config.plugins.sandbox.teclaw,
+        config.plugins.bot.teclaw,
         stub=providers.Object(StubTeClawBotPlugin),
     )
 

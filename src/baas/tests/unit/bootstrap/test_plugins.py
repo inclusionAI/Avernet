@@ -25,15 +25,13 @@ class TestPluginContainerStandalone:
         container.config.from_dict(
             {
                 "plugins": {
-                    "crypto": "stub",
                     "secret": "stub",
                     "permission": "stub",
                     "identity": "stub",
-                    "scheduler": "stub",
                 },
             }
         )
-        assert container.config.plugins.crypto() == "stub"
+        assert container.config.plugins.secret() == "stub"
 
     def test_singlebox_dev_config_defines_required_selectors(self):
         """Singlebox dev config defines every selector resolved at startup."""
@@ -46,13 +44,13 @@ class TestPluginContainerStandalone:
         assert plugins["cache"] == "stub"
         assert plugins["engine_adapter"] == "stub"
         assert plugins["bot_service"] == "local"
-        assert plugins["database"]["plugin_database"] == "SQLITE_ORM"
+        assert plugins["database"] == "sqlite"
         assert sandbox["arca"] == "local_proc"
         assert sandbox["desktop"] == "stub"
-        assert sandbox["teclaw"] == "stub"
         assert sandbox["k8s"] == "stub"
         assert sandbox["docker"] == "stub"
         assert sandbox["poolab"] == "stub"
+        assert plugins["bot"]["teclaw"] == "stub"
 
 
 class TestAliyunAckSelector:
