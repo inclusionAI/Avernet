@@ -7,7 +7,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, ERROR_RESPONSES
-from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
@@ -34,7 +33,6 @@ from agentclaw.community.adapters.http.harness.schemas import (
 from agentclaw.community.di import Injected
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
-from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
 from agentclaw.community.core.harness.models import (
     PatchOperation,
     PatchTarget,
@@ -69,7 +67,6 @@ router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/harness", tags=["harness"])
 
 
 async def require_harness_bot_access(
-    principal: Annotated[Principal, Depends(require_principal)],
     user_id: UserIdDep,
     bot_id: Annotated[str, Path(..., description="Bot ID")],
     bot_repo: BotRepository = Injected(BotRepository),
