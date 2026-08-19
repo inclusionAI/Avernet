@@ -1,9 +1,16 @@
 """ARCA service-bot image policy helpers.
 
 New bots and successful draft restarts explicitly opt into the BaaS/ARCA
-default image. Published operations are reproducible: they read only the target
-publish record. Records created before the policy existed are lazily protected
-by the environment common-config and snapshot the configured image once.
+default image. The *image* a published operation ships is reproducible: it is
+read only from the target publish record. Records created before the policy
+existed are lazily protected by the environment common-config and snapshot the
+configured image once.
+
+Which *provider* a bot runs on is deliberately NOT a publish-record fact. The
+container follows the bot (``resolve_container_provider``) and its device
+binding; callers pass the resolved ``device_provider`` in rather than having it
+sniffed back out of the record's ``ext`` blob, so the image policy can never
+disagree with the container the build and release stages actually target.
 """
 from __future__ import annotations
 
@@ -13,6 +20,9 @@ from typing import Any, Callable
 
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord
+from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
+    TECLAW_DEVICE_PROVIDER,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -27,12 +37,6 @@ IMAGE_POLICY_KEYS = (
     IMAGE_PIN_ENABLED_KEY,
     IMAGE_PIN_VALUE_KEY,
 )
-SERVICE_BOT_RUNTIME_KIND_KEY = "sbot_runtime_kind"
-RUNTIME_KIND_ARCA = "arca"
-RUNTIME_KIND_TECLAW = "teclaw"
-_RUNTIME_KINDS = {RUNTIME_KIND_ARCA, RUNTIME_KIND_TECLAW}
-_LEGACY_RUNTIME_KIND_TYPO = "arka"
-
 
 
 class ImagePolicyState(str, Enum):
@@ -90,64 +94,6 @@ def resolve_current_arca_image(
     if isinstance(image, str) and image.strip():
         return image.strip()
     return None
-
-
-def runtime_kind_from_provider(device_provider: str | None) -> str | None:
-    if device_provider == RUNTIME_KIND_TECLAW:
-        return RUNTIME_KIND_TECLAW
-    if device_provider in {"arca", "baas"}:
-        return RUNTIME_KIND_ARCA
-    return None
-
-
-def apply_runtime_kind_to_ext(
-    ext: dict[str, Any] | None, runtime_kind: str | None
-) -> dict[str, Any] | None:
-    updated = dict(ext or {})
-    if runtime_kind in _RUNTIME_KINDS:
-        updated[SERVICE_BOT_RUNTIME_KIND_KEY] = runtime_kind
-    return updated or None
-
-
-def resolve_publish_runtime_kind(
-    publish_record: BotPublishRecord,
-    *,
-    binding_repository: Any | None = None,
-) -> str:
-    """Resolve runtime only from immutable publish-owned facts.
-
-    New records carry ``sbot_runtime_kind``. Historical TeClaw records are
-    recognized from their config artifact or stage bindings; the final fallback
-    is ARCA because ARCA predates the external-runtime publish format.
-    """
-    ext = publish_record.ext or {}
-    explicit = ext.get(SERVICE_BOT_RUNTIME_KIND_KEY)
-    if explicit == _LEGACY_RUNTIME_KIND_TYPO:
-        return RUNTIME_KIND_ARCA
-    if explicit in _RUNTIME_KINDS:
-        return explicit
-
-    artifact = ext.get("config_artifact")
-    if isinstance(artifact, dict) and artifact.get("engine_type") == RUNTIME_KIND_TECLAW:
-        return RUNTIME_KIND_TECLAW
-
-    binding_ids = (ext.get("binding") or {}).values() if isinstance(ext.get("binding"), dict) else ()
-    if binding_repository is not None:
-        for binding_id in binding_ids:
-            try:
-                resolved_binding_id = int(binding_id)
-            except (TypeError, ValueError):
-                continue
-            binding = binding_repository.get_by_id(resolved_binding_id)
-            kind = runtime_kind_from_provider(getattr(binding, "device_provider", None))
-            if kind is not None:
-                return kind
-
-    logger.warning(
-        "[arca_image_pin] publish runtime kind missing; using legacy ARCA fallback: publish_id=%s",
-        publish_record.id,
-    )
-    return RUNTIME_KIND_ARCA
 
 
 def has_explicit_image_policy(ext: dict[str, Any] | None) -> bool:
@@ -344,26 +290,35 @@ class PublishImagePolicyResolver:
         self,
         *,
         publish_repository: Any,
-        binding_repository: Any,
         common_config_service: CommonConfigService | None,
         max_cas_attempts: int = 3,
     ) -> None:
         self._publish_repository = publish_repository
-        self._binding_repository = binding_repository
         self._common_config_service = common_config_service
         self._max_cas_attempts = max_cas_attempts
 
-    def resolve(self, publish_record: BotPublishRecord) -> ServiceBotImagePin:
-        """Return only an explicit policy or a legacy decision persisted by CAS."""
+    def resolve(
+        self,
+        publish_record: BotPublishRecord,
+        *,
+        device_provider: str,
+    ) -> ServiceBotImagePin:
+        """Return only an explicit policy or a legacy decision persisted by CAS.
+
+        ``device_provider`` is the caller's already-resolved container token (the
+        same value that selects the build producer and the provider behavior). It
+        is required rather than re-derived here so the image policy and the
+        deployed container can never disagree.
+        """
         for _attempt in range(self._max_cas_attempts):
             latest = self._publish_repository.get_by_id(publish_record.id)
             if latest is None:
                 raise ImagePinPersistenceError(
                     f"Publish record disappeared while resolving image policy: {publish_record.id}"
                 )
-            if resolve_publish_runtime_kind(
-                latest, binding_repository=self._binding_repository
-            ) == RUNTIME_KIND_TECLAW:
+            # The teclaw container owns its own image; the ARCA policy — including
+            # the lazy legacy snapshot below — never applies to it.
+            if device_provider == TECLAW_DEVICE_PROVIDER:
                 publish_record.ext = latest.ext
                 return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
 

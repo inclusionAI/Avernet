@@ -486,13 +486,6 @@ class PublishFlowService(
             action="process",
         )
 
-    def _provider_behavior(self, bot: dict):
-        """The :class:`ProviderBehavior` for ``bot``'s container, resolved via the
-        same ``resolve_container_provider`` mapping used for producer selection."""
-        return self._provider_behaviors.resolve(
-            self._baas_service.resolve_container_provider(bot)
-        )
-
     # ── phase entry points for the durable task handlers ─────────────────────
     # Public: the task handlers (publish_flow/tasks.py) are an external consumer
     # (queue-adapter layer, own lifecycle) — these three phase methods ARE the

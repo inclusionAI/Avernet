@@ -152,11 +152,12 @@ def _wire_bot_build_service_async(bot_build_service, create_result=None, upgrade
 class TestResolvePublishImagePin:
     def test_teclaw_skips_arca_policy_resolution(self):
         svc, _, baas, _, bot_repo, *_ = _make_service()
-        record = MockPublishRecord(
-            ext={"migration_path": "/nas/path", "sbot_runtime_kind": "teclaw"}
-        )
+        record = MockPublishRecord(ext={"migration_path": "/nas/path"})
         publish_repo = svc._publish_repo
         publish_repo.get_by_id.return_value = record
+        # The container follows the bot, not anything cached on the record.
+        bot_repo.get_by_id_and_owner.return_value = {"active_engine": "teclaw"}
+        baas.resolve_container_provider.return_value = "teclaw"
 
         resolved = svc._resolve_publish_image_pin(
             record,
