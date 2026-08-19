@@ -181,8 +181,8 @@ identity in a body or in a path segment.
 ```
 
 `sessions`, `skills`, `routines`, `resources`, `engine`, `identity`,
-`approvals`, `models`, `connection`, `startup-script` and `authorized-apps` all
-hang off `{bot_id}`.
+`approvals`, `models`, `connection`, `startup-script`, `harness` and
+`authorized-apps` all hang off `{bot_id}`.
 
 A handful of literals are served in the `{bot_id}` position, so a bot cannot be
 named any of them:
@@ -235,6 +235,8 @@ under more than one owner, so `(bot_id, owner_id)` is the real address.
 Who may operate a shared bot: its **owner**, or a **collaborator at member level
 or above**. A bot being publicly visible grants operation to nobody. Anyone else
 gets the same answer as for a bot that does not exist — a `404`, never a `403`.
+The `harness` group is the one exception and sets the bar higher: owner, or a
+collaborator at **admin** level.
 
 ### `?stage=` — which runtime you mean
 
@@ -375,7 +377,7 @@ shape C can make at all.
 | **Filtered result** | `GET /bots`, `GET /bots/authorized` | Always allowed; the listing is narrowed to the bots you were authorized for. |
 | **Needs any authorization from that user** | `GET /bots/ceiling` | No bot dimension, so the bar is the relationship: allowed while you hold at least one authorization from the named user. |
 | **Always allowed** | `GET /bots/check-name`, `GET /bots/mcp/servers`, `…/mcp/servers/{server_code}`, `…/mcp/tenants` | Catalogue and availability reads with the same answer for everyone. |
-| **Requires a human** — `401` | `POST /bots`, all three `…/authorized-apps` operations, `…/bots/logs/**`, `…/mcp/servers/{server_code}/config`, `…/mcp/servers/{server_code}/permissions`, `…/loadtest/**` | Present the user's credential too (shape B). |
+| **Requires a human** — `401` | `POST /bots`, all three `…/authorized-apps` operations, `…/{bot_id}/harness/**`, `…/bots/logs/**`, `…/mcp/servers/{server_code}/config`, `…/mcp/servers/{server_code}/permissions`, `…/loadtest/**` | Present the user's credential too (shape B). |
 
 Why those last ones need a person, since they are what an integration has to
 design a human into:
@@ -391,6 +393,9 @@ design a human into:
 - **MCP configuration** is account-level state with no bot dimension. Being
   authorized on a bot is not permission to reconfigure an account. (The MCP
   *catalogue* reads are a different thing and are always allowed.)
+- **Harness** diagnoses and rewrites a bot's live configuration files. It is a
+  maintenance surface rather than a delegated one, and it asks for admin-level
+  access rather than the member-level bar the rest of the API uses.
 
 **The rule behind all of it:** your reach is exactly the authorizing user's
 reach, re-checked on every request. Not a snapshot taken when they authorized
@@ -521,6 +526,7 @@ whatever the method, whatever the body.
 | routines | `…/{bot_id}/routines` | scheduled routines, runs, run history |
 | resources | `…/{bot_id}/resources` | the bot's workspace files — list, stat, upload, download, preview, mkdir, delete |
 | identity | `…/{bot_id}/identity` | the bot's identity files |
+| harness | `…/{bot_id}/harness` | diagnose the bot's live config, preview / apply / roll back a patch, and read the diagnostic report and its history |
 | authorized-apps | `…/{bot_id}/authorized-apps`, `…/bots/authorized` | the authorization record (§5) |
 | mcp | `…/bots/mcp` | MCP marketplace catalogue, and per-account server config |
 | logs | `…/bots/logs` | trace-level observability across bots (needs both credentials) |

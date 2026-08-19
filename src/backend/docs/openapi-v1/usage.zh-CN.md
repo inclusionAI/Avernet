@@ -160,7 +160,8 @@ token 的 `sub` 就是这套接口据以收敛的用户 id —— 也就是你�
 ```
 
 `sessions`、`skills`、`routines`、`resources`、`engine`、`identity`、`approvals`、
-`models`、`connection`、`startup-script`、`authorized-apps` 全部挂在 `{bot_id}` 之下。
+`models`、`connection`、`startup-script`、`harness`、`authorized-apps` 全部挂在
+`{bot_id}` 之下。
 
 有少量字面量本身就占用了 `{bot_id}` 这个位置，因此 bot 不能取这些名字：
 
@@ -204,7 +205,7 @@ owner 名下，所以 `(bot_id, owner_id)` 才是真正的地址。
 
 谁可以操作共享 bot：它的 **owner**，或 **member 级及以上的协作者**。bot 设为公开可见
 并不授予任何人操作权。其他任何人得到的回答与"这个 bot 不存在"完全一致——是 `404`，
-不是 `403`。
+不是 `403`。`harness` 那一组是唯一的例外，门槛更高：owner，或 **admin 级**协作者。
 
 ### `?stage=` —— 你指的是哪个运行时
 
@@ -329,7 +330,7 @@ curl -X DELETE 'https://<域名>/openapi/v1/bots/{bot_id}/authorized-apps/4711?u
 | **结果被收窄** | `GET /bots`、`GET /bots/authorized` | 一定允许；返回的列表被收窄为你已获授权的那些 bot。 |
 | **需要该用户的任意一条授权** | `GET /bots/ceiling` | 没有 bot 维度，所以门槛是关系本身：只要你持有该用户的至少一条授权就允许。 |
 | **总是允许** | `GET /bots/check-name`、`GET /bots/mcp/servers`、`…/mcp/servers/{server_code}`、`…/mcp/tenants` | 目录与可用性查询，对所有人答案相同。 |
-| **必须有真人** —— `401` | `POST /bots`、三个 `…/authorized-apps` 操作、`…/bots/logs/**`、`…/mcp/servers/{server_code}/config`、`…/mcp/servers/{server_code}/permissions`、`…/loadtest/**` | 请一并带上用户凭证（形态 B）。 |
+| **必须有真人** —— `401` | `POST /bots`、三个 `…/authorized-apps` 操作、`…/{bot_id}/harness/**`、`…/bots/logs/**`、`…/mcp/servers/{server_code}/config`、`…/mcp/servers/{server_code}/permissions`、`…/loadtest/**` | 请一并带上用户凭证（形态 B）。 |
 
 最后一档为什么必须有人——这正是集成必须把真人设计进产品流程的地方：
 
@@ -340,6 +341,8 @@ curl -X DELETE 'https://<域名>/openapi/v1/bots/{bot_id}/authorized-apps/4711?u
   一个 bot，翻译不成那个含义。
 - **MCP 配置**是账号级状态，没有 bot 维度。在某个 bot 上被授权，不等于被允许重配一个
   账号。（MCP **目录**查询是另一回事，总是允许。）
+- **Harness** 会诊断并改写 bot 的线上配置文件。它是维护面而不是可委托面，而且要求的是
+  admin 级访问，比这套接口其余部分的 member 门槛更高。
 
 **贯穿全部规则的一句话：** 你的触达范围恰好等于授权用户的触达范围，且每次请求都重新
 核对。不是他授权那一刻的快照，是活的。
@@ -454,6 +457,7 @@ curl -X DELETE 'https://<域名>/openapi/v1/bots/{bot_id}/authorized-apps/4711?u
 | routines | `…/{bot_id}/routines` | 定时任务、执行与历史 |
 | resources | `…/{bot_id}/resources` | bot 工作区文件——列表、stat、上传、下载、预览、mkdir、删除 |
 | identity | `…/{bot_id}/identity` | bot 的身份文件 |
+| harness | `…/{bot_id}/harness` | 诊断 bot 的线上配置，预览 / 应用 / 回滚补丁，读取诊断报告及其历史 |
 | authorized-apps | `…/{bot_id}/authorized-apps`、`…/bots/authorized` | 授权记录（§5） |
 | mcp | `…/bots/mcp` | MCP 市场目录，以及账号级 server 配置 |
 | logs | `…/bots/logs` | 跨 bot 的 trace 级可观测面（需要两个凭证） |
