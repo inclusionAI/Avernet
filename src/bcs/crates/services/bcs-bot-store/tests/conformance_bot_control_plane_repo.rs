@@ -19,6 +19,7 @@ use bcs_service_api::{
     BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotControlPlaneRepoPort, BotRepoPort, FriendCheckInStrategy, UserVisibility,
 };
+use tokio::sync::Barrier;
 
 #[tokio::test]
 async fn memory_control_plane_supports_both_kinds_candidates_and_patch_timestamps() {
@@ -182,6 +183,78 @@ async fn memory_control_plane_restores_internal_attributes_from_persisted_capabi
     assert_eq!(record.user_visibility, UserVisibility::Public);
     assert_eq!(record.friend_ext["team"], "platform");
     assert_eq!(record.friend_check_in_strategy, FriendCheckInStrategy::Open);
+}
+
+#[tokio::test]
+async fn memory_control_plane_concurrent_partial_patches_preserve_both_changes() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let env = bcs_config::resolve_env_str();
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
+    repo.register_with_owner_and_token(
+        "memory-concurrent-attributes".to_string(),
+        BotCapabilities {
+            name: Some("Memory Concurrent Attributes".to_string()),
+            ..Default::default()
+        },
+        "staff-1",
+        "token-1",
+    )
+    .await
+    .expect("register memory bot");
+
+    let start = Arc::new(Barrier::new(3));
+    let visibility_repo = repo.clone();
+    let visibility_start = start.clone();
+    let visibility_env = env.clone();
+    let visibility_patch = tokio::spawn(async move {
+        visibility_start.wait().await;
+        visibility_repo
+            .patch_control_plane(
+                "memory-concurrent-attributes",
+                &visibility_env,
+                BotControlPlanePatch {
+                    user_visibility: Some(UserVisibility::Private),
+                    ..Default::default()
+                },
+            )
+            .await
+    });
+    let strategy_repo = repo.clone();
+    let strategy_start = start.clone();
+    let strategy_env = env.clone();
+    let strategy_patch = tokio::spawn(async move {
+        strategy_start.wait().await;
+        strategy_repo
+            .patch_control_plane(
+                "memory-concurrent-attributes",
+                &strategy_env,
+                BotControlPlanePatch {
+                    friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
+                    ..Default::default()
+                },
+            )
+            .await
+    });
+    start.wait().await;
+    visibility_patch
+        .await
+        .expect("visibility patch task")
+        .expect("visibility patch");
+    strategy_patch
+        .await
+        .expect("strategy patch task")
+        .expect("strategy patch");
+
+    let record = repo
+        .get_control_plane("memory-concurrent-attributes", &env)
+        .await
+        .expect("read memory bot")
+        .expect("memory bot exists");
+    assert_eq!(record.user_visibility, UserVisibility::Private);
+    assert_eq!(
+        record.friend_check_in_strategy,
+        FriendCheckInStrategy::DeptFree
+    );
 }
 
 #[tokio::test]
@@ -609,6 +682,174 @@ async fn persistent_control_plane_internal_attributes_round_trip_and_clear_frien
         cleared.friend_check_in_strategy,
         FriendCheckInStrategy::DeptFree
     );
+}
+
+#[tokio::test]
+async fn persistent_capability_save_preserves_patched_internal_attributes() {
+    let (repo, db) = fixture().await;
+    seed_bot(
+        db.as_ref(),
+        "lifecycle-attributes",
+        "Lifecycle Attributes",
+        "bot",
+        "protected",
+        "online",
+        Some("staff-1"),
+        "2026-01-01 00:00:00",
+    )
+    .await;
+    let patched = repo.patch_control_plane(
+        "lifecycle-attributes",
+        "dev",
+        BotControlPlanePatch {
+            user_visibility: Some(UserVisibility::Private),
+            friend_ext: Some(serde_json::Map::from_iter([(
+                "source".to_string(),
+                serde_json::json!("control-plane"),
+            )])),
+            friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch internal attributes")
+    .expect("patched bot exists");
+    assert_eq!(patched.user_visibility, UserVisibility::Private);
+    assert_eq!(
+        patched.friend_check_in_strategy,
+        FriendCheckInStrategy::DeptFree
+    );
+
+    repo.save_to_storage(
+        "lifecycle-attributes",
+        &BotCapabilities {
+            name: Some("Lifecycle Attributes Saved".to_string()),
+            summary: Some("saved capabilities".to_string()),
+            visibility: "protected".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("save capabilities");
+
+    let record = repo
+        .get_control_plane("lifecycle-attributes", "dev")
+        .await
+        .expect("read lifecycle bot")
+        .expect("lifecycle bot exists");
+    assert_eq!(record.name, "Lifecycle Attributes Saved");
+    assert_eq!(record.user_visibility, UserVisibility::Private);
+    assert_eq!(record.friend_ext["source"], "control-plane");
+    assert_eq!(
+        record.friend_check_in_strategy,
+        FriendCheckInStrategy::DeptFree
+    );
+}
+
+#[tokio::test]
+async fn persistent_control_plane_concurrent_partial_patches_preserve_both_changes() {
+    let db = sqlite_db().await;
+    seed_bot(
+        db.as_ref(),
+        "persistent-concurrent-attributes",
+        "Persistent Concurrent Attributes",
+        "bot",
+        "protected",
+        "online",
+        Some("staff-1"),
+        "2026-01-01 00:00:00",
+    )
+    .await;
+    let synchronized_db: Arc<dyn DbPlugin> = Arc::new(SynchronizedSnapshotDb {
+        inner: db,
+        snapshot_read_barrier: Barrier::new(2),
+    });
+    let repo = Arc::new(PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
+        Arc::new(InMemoryCachePlugin::new()),
+        synchronized_db,
+        DbSqlFlavor::Sqlite,
+        "test:",
+    ));
+
+    let visibility_repo = repo.clone();
+    let visibility_patch = tokio::spawn(async move {
+        visibility_repo
+            .patch_control_plane(
+                "persistent-concurrent-attributes",
+                "dev",
+                BotControlPlanePatch {
+                    user_visibility: Some(UserVisibility::Private),
+                    ..Default::default()
+                },
+            )
+            .await
+    });
+    let strategy_repo = repo.clone();
+    let strategy_patch = tokio::spawn(async move {
+        strategy_repo
+            .patch_control_plane(
+                "persistent-concurrent-attributes",
+                "dev",
+                BotControlPlanePatch {
+                    friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
+                    ..Default::default()
+                },
+            )
+            .await
+    });
+    visibility_patch
+        .await
+        .expect("visibility patch task")
+        .expect("visibility patch");
+    strategy_patch
+        .await
+        .expect("strategy patch task")
+        .expect("strategy patch");
+
+    let record = repo
+        .get_control_plane("persistent-concurrent-attributes", "dev")
+        .await
+        .expect("read persistent bot")
+        .expect("persistent bot exists");
+    assert_eq!(record.user_visibility, UserVisibility::Private);
+    assert_eq!(
+        record.friend_check_in_strategy,
+        FriendCheckInStrategy::DeptFree
+    );
+}
+
+struct SynchronizedSnapshotDb {
+    inner: Arc<dyn DbPlugin>,
+    snapshot_read_barrier: Barrier,
+}
+
+#[async_trait]
+impl DbPlugin for SynchronizedSnapshotDb {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        let synchronize_snapshot = statement
+            .sql()
+            .starts_with("SELECT bot_info FROM bcs_bots");
+        let rows = self.inner.query(statement).await?;
+        if synchronize_snapshot {
+            self.snapshot_read_barrier.wait().await;
+        }
+        Ok(rows)
+    }
+
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        self.inner.transaction(steps).await
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
 }
 
 struct UnchangedUpdateDb;

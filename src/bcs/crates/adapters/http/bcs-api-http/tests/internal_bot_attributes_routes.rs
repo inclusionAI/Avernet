@@ -3,6 +3,7 @@
     reason = "test assertions intentionally fail fast"
 )]
 
+use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -45,6 +46,33 @@ impl InternalProviderAuthenticator for RejectProvider {
         _provider_id: &str,
     ) -> Result<(), InternalProviderAuthError> {
         Err(self.0)
+    }
+}
+
+#[derive(Clone, Default)]
+struct SharedLogBuffer(Arc<Mutex<Vec<u8>>>);
+
+struct SharedLogWriter(Arc<Mutex<Vec<u8>>>);
+
+impl Write for SharedLogWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0
+            .lock()
+            .expect("log buffer lock")
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedLogBuffer {
+    type Writer = SharedLogWriter;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        SharedLogWriter(self.0.clone())
     }
 }
 
@@ -209,6 +237,97 @@ async fn internal_patch_rejects_empty_unknown_null_and_wrong_attribute_shapes() 
         );
     }
     assert!(service.patch.lock().expect("patch lock").is_none());
+}
+
+#[tokio::test]
+async fn malformed_friend_ext_is_redacted_from_error_envelope_and_diagnostics() {
+    let sentinel = "friend-extension-private-sentinel";
+    let buffer = SharedLogBuffer::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_level(false)
+        .with_target(false)
+        .with_writer(buffer.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let app = router(
+        Arc::new(FakeInternalBotAttributesService::default()),
+        Arc::new(AcceptTrustedProvider),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/internal/v1/bots/bot-1/attributes")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer provider-admin-token")
+                .header("x-bcn-provider-id", "backend-provider")
+                .header("x-request-id", "request-malformed-friend-ext")
+                .body(Body::from(format!(r#"{{"friend_ext":"{sentinel}"}}"#)))
+                .expect("request"),
+        )
+        .await
+        .expect("malformed patch response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
+    assert!(!body.to_string().contains(sentinel));
+    let logs = String::from_utf8(buffer.0.lock().expect("log buffer lock").clone())
+        .expect("UTF-8 logs");
+    assert!(!logs.contains(sentinel));
+}
+
+#[tokio::test]
+async fn internal_auth_rejects_duplicate_security_headers_in_both_orderings() {
+    for (first_authorization, second_authorization) in [
+        ("Bearer provider-admin-token", "Basic malformed"),
+        ("Basic malformed", "Bearer provider-admin-token"),
+    ] {
+        let app = router(
+            Arc::new(FakeInternalBotAttributesService::default()),
+            Arc::new(AcceptTrustedProvider),
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/internal/v1/bots/bot-1/attributes")
+                    .header("authorization", first_authorization)
+                    .header("authorization", second_authorization)
+                    .header("x-bcn-provider-id", "backend-provider")
+                    .header("x-request-id", "request-duplicate-authorization")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("duplicate Authorization response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    for (first_provider_id, second_provider_id) in [
+        ("backend-provider", "other-provider"),
+        ("other-provider", "backend-provider"),
+    ] {
+        let app = router(
+            Arc::new(FakeInternalBotAttributesService::default()),
+            Arc::new(AcceptTrustedProvider),
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/internal/v1/bots/bot-1/attributes")
+                    .header("authorization", "Bearer provider-admin-token")
+                    .header("x-bcn-provider-id", first_provider_id)
+                    .header("x-bcn-provider-id", second_provider_id)
+                    .header("x-request-id", "request-duplicate-provider-id")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("duplicate Provider ID response");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
 }
 
 #[tokio::test]

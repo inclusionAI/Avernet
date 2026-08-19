@@ -8,7 +8,7 @@ use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use bcs_service_api::application::v1::InternalBotAttributesService;
-use tracing::info;
+use tracing::{info, warn};
 
 use super::auth::{InternalProviderAuthenticator, authenticate_internal_provider};
 use super::dto::PatchBotInternalAttributesRequest;
@@ -61,7 +61,14 @@ async fn patch_attributes(
     body: Result<Json<PatchBotInternalAttributesRequest>, JsonRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Path(bot_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
-    let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let Json(body) = body.map_err(|_| {
+        warn!(
+            request_id = %request_id.0,
+            failure = "invalid_json_body",
+            "Internal Bot attributes patch rejected"
+        );
+        invalid_request(&request_id, "Request body is invalid")
+    })?;
     if body.is_empty() {
         return Err(invalid_request(
             &request_id,
