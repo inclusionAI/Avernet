@@ -920,6 +920,7 @@ pub async fn add_session_participant(
         role,
         actor_kind: bot.actor_kind,
         mode,
+        tags: Vec::new(),
     };
 
     match state
@@ -1077,6 +1078,7 @@ pub async fn remove_session_participant(
                         role: bcs_domain::ParticipantRole::Observer,
                         actor_kind: kind,
                         mode: None,
+                        tags: Vec::new(),
                     },
                 };
                 let _ = state

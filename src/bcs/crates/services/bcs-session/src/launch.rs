@@ -219,6 +219,7 @@ impl SessionLaunchApplication {
                 role: ParticipantRole::Observer,
                 actor_kind: ActorKind::Human,
                 mode: Some(ParticipantMode::Present),
+                tags: Vec::new(),
             });
         }
 
@@ -258,6 +259,7 @@ impl SessionLaunchApplication {
                 } else {
                     ParticipantMode::Auto
                 }),
+                tags: Vec::new(),
             });
         }
 
@@ -277,6 +279,7 @@ impl SessionLaunchApplication {
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
+            tags: Vec::new(),
         });
 
         Ok(BuiltParticipants {

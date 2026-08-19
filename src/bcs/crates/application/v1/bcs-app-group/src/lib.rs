@@ -1137,6 +1137,7 @@ impl GroupServiceImpl {
             None => request.participants.push(CreateParticipant {
                 actor_id: request.driver_bot_uuid.clone(),
                 role: lead_role,
+                tags: Vec::new(),
             }),
             _ => {}
         }
@@ -1204,6 +1205,7 @@ impl GroupServiceImpl {
             .map(|participant| GroupCreateParticipantCommand {
                 bot_id: participant.actor_id,
                 role: Some(role_name(participant.role).to_string()),
+                tags: normalize_participant_tags(participant.tags),
             })
             .collect::<Vec<_>>();
         let created = self
@@ -2365,6 +2367,7 @@ fn project_participant(participant: &bcs_service_api::Participant) -> V1Particip
         name: participant.bot_name.clone(),
         role: participant.role,
         mode: participant.effective_mode(),
+        tags: participant.tags.clone(),
     }
 }
 
@@ -2381,7 +2384,15 @@ fn participant_view_to_v1(view: GroupParticipantView) -> V1Participant {
         mode: view
             .mode
             .unwrap_or_else(|| ParticipantMode::default_for(view.actor_kind)),
+        tags: view.tags,
     }
+}
+
+fn normalize_participant_tags(tags: Vec<String>) -> Vec<String> {
+    tags.into_iter()
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .collect()
 }
 
 fn parse_participant_role(role: &str) -> bcs_service_api::ParticipantRole {

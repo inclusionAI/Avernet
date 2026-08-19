@@ -251,6 +251,7 @@ CREATE TABLE IF NOT EXISTS `bcs_group_participants` (
   `env` varchar(64) NOT NULL,
   `actor_kind` varchar(16) NOT NULL DEFAULT 'bot',
   `mode` varchar(16) NOT NULL DEFAULT 'auto',
+  `tags_json` text DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_env_group_bot` (`env`, `group_id`, `bot_uuid`),
   KEY `idx_bot` (`bot_uuid`),

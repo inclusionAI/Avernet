@@ -129,6 +129,7 @@ impl GroupService for FakeGroupService {
             actor_kind: ActorKind::Bot,
             name: None,
             role: ParticipantRole::Consultant,
+            tags: Vec::new(),
             mode: ParticipantMode::Auto,
         })
     }
@@ -146,6 +147,7 @@ impl GroupService for FakeGroupService {
             actor_kind: ActorKind::Bot,
             name: None,
             role: ParticipantRole::Consultant,
+            tags: Vec::new(),
             mode: command.mode,
         })
     }
@@ -353,6 +355,7 @@ fn group_detail() -> GroupDetail {
             actor_kind: ActorKind::Bot,
             name: Some("Bot 1".into()),
             role: ParticipantRole::Driver,
+            tags: Vec::new(),
             mode: ParticipantMode::Auto,
         }],
         driver_bot_uuid: "bot-1".into(),

@@ -48,6 +48,8 @@ export interface GroupMember {
   type: GroupMemberType;
   /** 成员角色（Bot类型时必填） */
   role?: GroupMemberRole;
+  /** Provider 下行时透传的标识 */
+  tags?: string[];
   /** Actor 类型（新增） */
   actorKind?: ActorKind;
   /** 协作姿态/发言模式（新增） */
@@ -193,6 +195,7 @@ export interface CreateGroupParams {
     bot_uuid: string;
     bot_name?: string;
     role?: GroupMemberRole;
+    tags?: string[];
   }>;
   /** 结构化协同 participant 逻辑角色绑定 */
   participant_bindings?: Record<

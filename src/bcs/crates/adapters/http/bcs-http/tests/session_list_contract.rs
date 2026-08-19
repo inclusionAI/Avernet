@@ -221,6 +221,7 @@ async fn human_owner_app() -> (axum::Router, Arc<RecordingSessions>, TempDir, Ar
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+                tags: Vec::new(),
             }],
         ))
         .await
@@ -317,6 +318,7 @@ async fn test_app(
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+                tags: Vec::new(),
             }],
         ))
         .await
@@ -360,6 +362,7 @@ async fn test_app_with_observer() -> (
                     role: ParticipantRole::Driver,
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+                    tags: Vec::new(),
                 },
                 Participant {
                     bot_uuid: "observer-bot".to_string(),
@@ -368,6 +371,7 @@ async fn test_app_with_observer() -> (
                     role: ParticipantRole::Consultant,
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+                    tags: Vec::new(),
                 },
             ],
         ))

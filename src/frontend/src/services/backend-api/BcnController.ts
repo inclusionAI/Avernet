@@ -174,6 +174,7 @@ export interface GetGroupResponse {
     bot_uuid: string;
     bot_name?: string;
     role: string;
+    tags?: string[];
     /** Actor 类型：human 或 bot */
     actor_kind?: 'human' | 'bot';
     /** 协作姿态/发言模式 */
@@ -288,6 +289,7 @@ export interface GroupInfo {
     bot_uuid: string;
     bot_name?: string;
     role: string;
+    tags?: string[];
     /** Actor 类型：human 或 bot */
     actor_kind?: 'human' | 'bot';
     /** 协作姿态/发言模式 */
@@ -1442,6 +1444,7 @@ export interface SessionInfoResponse {
     bot_uuid?: string;
     bot_name?: string;
     role?: string;
+    tags?: string[];
     type?: string;
     mode?: 'present' | 'absent' | 'auto' | 'muted';
   }>;

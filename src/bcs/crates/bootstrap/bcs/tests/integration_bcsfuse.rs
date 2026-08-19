@@ -97,8 +97,8 @@ async fn fuse_without_bcsfuse_uses_local_engine() {
     // Create a group
     let client = bot1.http_client(addr);
     let participants = vec![
-        ParticipantInfo { bot_uuid: bot1.bot_id.clone(), role: Some("driver".into()) },
-        ParticipantInfo { bot_uuid: bot2.bot_id.clone(), role: Some("consultant".into()) },
+        ParticipantInfo { bot_uuid: bot1.bot_id.clone(), role: Some("driver".into()), tags: Vec::new() },
+        ParticipantInfo { bot_uuid: bot2.bot_id.clone(), role: Some("consultant".into()), tags: Vec::new() },
     ];
     let group = client
         .create_group_no_mode(&bot1.bot_id, participants)
@@ -182,8 +182,8 @@ async fn fuse_with_bcsfuse_enabled_but_unreachable_returns_error() {
 
     let client = bot1.http_client(addr);
     let participants = vec![
-        ParticipantInfo { bot_uuid: bot1.bot_id.clone(), role: Some("driver".into()) },
-        ParticipantInfo { bot_uuid: bot2.bot_id.clone(), role: Some("consultant".into()) },
+        ParticipantInfo { bot_uuid: bot1.bot_id.clone(), role: Some("driver".into()), tags: Vec::new() },
+        ParticipantInfo { bot_uuid: bot2.bot_id.clone(), role: Some("consultant".into()), tags: Vec::new() },
     ];
     let group = client
         .create_group_no_mode(&bot1.bot_id, participants)

@@ -2503,6 +2503,7 @@ fn participant(bot_id: &str, role: Option<&str>) -> GroupCreateParticipantComman
     GroupCreateParticipantCommand {
         bot_id: bot_id.to_string(),
         role: role.map(str::to_string),
+        tags: Vec::new(),
     }
 }
 
