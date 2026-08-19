@@ -36,11 +36,12 @@ use bcs_service_api::application::admission::AdmissionService;
 use bcs_service_api::application::connect::{
     ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage,
 };
+use bcs_service_api::core::friend::FriendCoreService;
 use bcs_service_api::port::repo::{
     BotActorConfigRepoPort, EdgeGrantRepoPort, PermissionProfileRepoPort,
     PermissionRequestRepoPort,
 };
-use bcs_service_api::{ServiceError, ServiceResult};
+use bcs_service_api::{Friendship, ServiceError, ServiceResult};
 use uuid::Uuid;
 
 /// DB-backed `ConnectService` implementation.
@@ -518,21 +519,40 @@ impl ConnectService for DbConnectService {
         page: u32,
         page_size: u32,
     ) -> ServiceResult<RequestsPage> {
-        // Received: to_id == actor — fully supported via list_inbox.
-        // Sent / All: the repo port only exposes `list_inbox` (to_id filter).
-        // A `list_sent` (from_id filter) is T9 scope creep; for T13 Sent and
-        // All return empty with the total we can compute (Received). Marked
-        // TODO for a later installment.
+        // Received: to_id == actor (inbox). Sent: from_id == actor (outbox).
+        // All: inbox ∪ sent, deduped by request_id. Each branch is backed by a
+        // repo call; status is pushed down to SQL where possible (the All
+        // union filters in memory after the two repo calls, since the two
+        // queries are independent and a single SQL UNION would bypass the
+        // repo-port abstraction).
         let all: Vec<PermissionRequest> = match direction {
             RequestDirection::Received => {
                 self.requests.list_inbox(actor, &self.env, status).await
             }
-            RequestDirection::Sent | RequestDirection::All => {
-                // TODO(installment-3): add `list_sent(from_id, env, status)`
-                // to `PermissionRequestRepoPort` (or extend list_inbox) so the
-                // sent direction is backed by the repo. Until then, return an
-                // empty page with total=0.
-                Vec::new()
+            RequestDirection::Sent => {
+                self.requests.list_sent(actor, &self.env, status).await
+            }
+            RequestDirection::All => {
+                let inbox = self.requests.list_inbox(actor, &self.env, status).await;
+                let sent = self.requests.list_sent(actor, &self.env, status).await;
+                // Dedup by request_id (a self-connect Bot↔Bot produces two
+                // rows for the same pair, but request_ids are unique per row,
+                // so dedup only collapses the identity overlap where the same
+                // request is both from+to — which cannot happen here; this is
+                // defensive). Preserve updated_at DESC order across the union
+                // by merging and re-sorting.
+                let mut seen: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                let mut combined: Vec<PermissionRequest> = Vec::with_capacity(
+                    inbox.len() + sent.len(),
+                );
+                for r in inbox.into_iter().chain(sent.into_iter()) {
+                    if seen.insert(r.request_id.clone()) {
+                        combined.push(r);
+                    }
+                }
+                combined.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+                combined
             }
         };
 
@@ -936,7 +956,7 @@ impl AdmissionService for DbAdmissionService {
         // `Specific`/`Owner` policies in a later installment.
         let _ = originator;
 
-        if self.edge_grants.has_friend_edge(actor, bot, env).await {
+        if self.edge_grants.is_authorized(actor, bot, env).await {
             if let Some(grant) = self
                 .ensure_default_profile_ref(bot, env, GrantSource::EdgeGrant)
                 .await
@@ -1073,6 +1093,140 @@ impl DbAdmissionService {
             return p.permission_profile_id == ref_id;
         }
         false
+    }
+}
+
+// ---- EdgeAuthzFriendAdapter (B3) ------------------------------------------
+
+/// `FriendCoreService` adapter that reads friend state from the edge-permission
+/// `edge_grants` store instead of the legacy `friendships` table.
+///
+/// Read methods (`are_friends`, `try_are_friends`, `list_friends`,
+/// `are_all_friends`) delegate to [`EdgeGrantRepoPort::has_friend_edge`] /
+/// [`EdgeGrantRepoPort::list_friends`], keyed on the adapter's `env`. Write
+/// methods (`add_friendship`, `remove_all_friendships`, `remove_friendship`)
+/// return [`ServiceError::InternalError`] directing callers to the
+/// `ConnectService` (the edge-permission model authors friend edges only via
+/// connect/approve/revoke, not via the legacy friendship mutators).
+///
+/// `status ≠ hidden` guard (B3 §4): `are_friends` returns `false` when either
+/// side is a bot whose `bcs_bots.status == "hidden"`, since hidden bots are
+/// non-discoverable / non-collaborative. When the optional bot-config port is
+/// absent, the hidden check is skipped (TODO).
+///
+/// Constructed at the composition root and injected wherever a
+/// `FriendCoreService` is expected by group/proposal/a2a/bot-discovery
+/// consumers (candidate search, group membership gates, etc.). The legacy
+/// `FriendCore` wiring is replaced by this adapter in the DB-backed path.
+pub struct EdgeAuthzFriendAdapter {
+    edge_grants: Arc<dyn EdgeGrantRepoPort>,
+    bot_config: Option<Arc<dyn BotActorConfigRepoPort>>,
+    env: String,
+}
+
+impl EdgeAuthzFriendAdapter {
+    /// Build an adapter backed by `edge_grants` scoped to `env`. Pass a
+    /// bot-config repo to enable the hidden-bot guard; `None` skips it.
+    pub fn new(
+        edge_grants: Arc<dyn EdgeGrantRepoPort>,
+        bot_config: Option<Arc<dyn BotActorConfigRepoPort>>,
+        env: impl Into<String>,
+    ) -> Self {
+        Self {
+            edge_grants,
+            bot_config,
+            env: env.into(),
+        }
+    }
+
+    /// Is `bot` hidden (and thus non-friend-visible)? Returns `false` when the
+    /// bot-config port is absent or the bot is unknown / not hidden.
+    async fn is_hidden(&self, bot: &str) -> bool {
+        let Some(bc) = self.bot_config.as_ref() else {
+            return false;
+        };
+        bc.get(bot, &self.env).await.map(|c| c.status == "hidden").unwrap_or(false)
+    }
+}
+
+#[async_trait]
+impl FriendCoreService for EdgeAuthzFriendAdapter {
+    async fn list_friends(&self, bot_id: &str) -> Vec<String> {
+        self.edge_grants.list_friends(bot_id, &self.env).await
+    }
+
+    async fn are_friends(&self, bot_a: &str, bot_b: &str) -> bool {
+        // status≠hidden guard (B3 §4): a hidden bot has no visible friends.
+        if self.is_hidden(bot_a).await || self.is_hidden(bot_b).await {
+            return false;
+        }
+        self.edge_grants.has_friend_edge(bot_a, bot_b, &self.env).await
+    }
+
+    async fn try_are_friends(&self, bot_a: &str, bot_b: &str) -> ServiceResult<bool> {
+        Ok(self.are_friends(bot_a, bot_b).await)
+    }
+
+    async fn are_all_friends(&self, bot_id: &str, others: &[String]) -> ServiceResult<()> {
+        let mut non_friends = Vec::new();
+        for other in others {
+            if self.are_friends(bot_id, other).await {
+                continue;
+            }
+            non_friends.push(other.clone());
+        }
+        if non_friends.is_empty() {
+            Ok(())
+        } else {
+            Err(ServiceError::NotFriends(non_friends))
+        }
+    }
+
+    async fn add_friendship(&self, _bot_a: &str, _bot_b: &str) -> ServiceResult<()> {
+        Err(ServiceError::InternalError(
+            "EdgeAuthzFriendAdapter is read-only; use ConnectService to author friend edges"
+                .to_string(),
+        ))
+    }
+
+    async fn remove_all_friendships(&self, _bot_id: &str) -> ServiceResult<usize> {
+        Err(ServiceError::InternalError(
+            "EdgeAuthzFriendAdapter is read-only; use ConnectService::revoke_friend to remove friend edges"
+                .to_string(),
+        ))
+    }
+
+    async fn list_friendships_paginated(
+        &self,
+        bot_id: &str,
+        offset: u64,
+        limit: u64,
+    ) -> ServiceResult<(Vec<Friendship>, u64)> {
+        // Project friend ids into symmetric Friendship shells. Enrichment
+        // (name/summary) is the caller's job; the adapter only carries ids.
+        // Pagination is applied in memory after the (typically small) friend
+        // list is fetched — the edge-grants friend scan is already bounded by
+        // the actor's degree.
+        let friends = self.edge_grants.list_friends(bot_id, &self.env).await;
+        let total = friends.len() as u64;
+        let start = (offset as usize).min(friends.len());
+        let end = (start + limit as usize).min(friends.len());
+        let page: Vec<Friendship> = friends[start..end]
+            .iter()
+            .map(|friend_bot_uuid| Friendship {
+                bot_uuid: bot_id.to_string(),
+                friend_bot_uuid: friend_bot_uuid.clone(),
+                created_at: 0,
+            })
+            .collect();
+        Ok((page, total))
+    }
+
+    async fn remove_friendship(&self, _bot_a: &str, _bot_b: &str) -> ServiceResult<bool> {
+        Err(ServiceError::InternalError(
+            "EdgeAuthzFriendAdapter is read-only; use ConnectService::revoke_friend to remove a friend edge"
+                .to_string(),
+        ))
     }
 }
 
@@ -1726,12 +1880,16 @@ mod tests {
             .await
             .expect("list ok");
         assert_eq!(page.total, 0, "no approved requests in inbox");
-        // Sent direction is a T13 TODO (empty).
+        // Sent direction is now backed by list_sent (B4d): the human caller's
+        // outbox contains the pending request they just sent.
         let page = svc
             .list_requests("human_1", RequestDirection::Sent, None, 1, 20)
             .await
             .expect("list ok");
-        assert_eq!(page.total, 0, "Sent direction not yet backed by repo");
+        assert_eq!(page.total, 1, "Sent direction backed by list_sent");
+        assert_eq!(page.items[0].request_id, pending.request_ids[0]);
+        assert_eq!(page.items[0].from_id, "human_1");
+        assert_eq!(page.items[0].to_id, "x:lr");
     }
 
     #[tokio::test]
@@ -1913,5 +2071,179 @@ mod tests {
             .expect("ctx");
         assert_eq!(ctx.grants.len(), 1, "public bot: public_default grant injected");
         assert_eq!(ctx.grants[0].source, GrantSource::PublicDefault);
+    }
+
+    // ---- B4b: is_authorized distinguishes Rules-edge admission from friend ----
+
+    #[tokio::test]
+    async fn is_authorized_true_for_rules_edge_while_has_friend_edge_false() {
+        // A GrantKind::Rules edge (NOT a default-profile edge) must admit via
+        // `is_authorized` but NOT via `has_friend_edge`. This is the B4b
+        // conformance check: admission uses is_authorized (edge superset),
+        // friendship uses has_friend_edge (default-profile only).
+        let (eg, pp, _rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:rules", "protected", true, "manual", "online", Some("85020")).await;
+        // Ensure the target has a default profile so has_friend_edge can resolve,
+        // then insert a Rules edge (grant_kind=Rules, arbitrary ref) from→to.
+        pp.ensure_default_profile("x:rules", "dev").await.expect("ensure default");
+        eg.insert_grant(EdgeGrant {
+            edge_id: "eg_rules_1".to_string(),
+            env: "dev".to_string(),
+            from_id: "human_1".to_string(),
+            to_id: "x:rules".to_string(),
+            grant_kind: GrantKind::Rules,
+            grant_ref_id: "rules_ref_1".to_string(),
+            rules: None,
+            status: EdgeStatus::Approved,
+            originator_policy_type: OriginatorPolicyType::Any,
+            originator_policy_data: None,
+        })
+        .await
+        .expect("insert rules edge");
+
+        // is_authorized ⇒ true (any active edge from→to).
+        assert!(
+            eg.is_authorized("human_1", "x:rules", "dev").await,
+            "Rules edge must authorize via is_authorized"
+        );
+        // has_friend_edge ⇒ false (Rules edge is not a default-profile friend edge).
+        assert!(
+            !eg.has_friend_edge("human_1", "x:rules", "dev").await,
+            "Rules edge is not a friend edge (D12 default-profile only)"
+        );
+        // list_active_grants surfaces the Rules edge.
+        let active = eg.list_active_grants("human_1", "x:rules", "dev").await;
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].grant_kind, GrantKind::Rules);
+    }
+
+    #[tokio::test]
+    async fn admission_admits_via_rules_edge_without_friend_edge() {
+        // Admission must admit via a Rules edge (is_authorized superset), even
+        // when no friend (default-profile) edge exists. This is the behavioral
+        // proof that check_admission uses is_authorized, not has_friend_edge.
+        let (eg, pp, _rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:radm", "protected", true, "manual", "online", Some("85020")).await;
+        pp.ensure_default_profile("x:radm", "dev").await.expect("ensure default");
+        eg.insert_grant(EdgeGrant {
+            edge_id: "eg_radm_1".to_string(),
+            env: "dev".to_string(),
+            from_id: "human_1".to_string(),
+            to_id: "x:radm".to_string(),
+            grant_kind: GrantKind::Rules,
+            grant_ref_id: "rules_ref_2".to_string(),
+            rules: None,
+            status: EdgeStatus::Approved,
+            originator_policy_type: OriginatorPolicyType::Any,
+            originator_policy_data: None,
+        })
+        .await
+        .expect("insert rules edge");
+
+        let svc = admission_service(&eg, &bc, &pp);
+        let r = svc
+            .check_admission("human_1", "x:radm", "originator", "dev")
+            .await
+            .expect("rules-edge admission");
+        assert!(r.allowed, "Rules edge must admit via is_authorized");
+        assert_eq!(r.reason_code, AdmissionReason::Ok);
+        assert!(
+            !r.public_default,
+            "Rules-edge admission is not the public_default path"
+        );
+    }
+
+    // ---- B4d: Sent + All directions of list_requests ----
+
+    #[tokio::test]
+    async fn list_requests_sent_and_all_with_status_filter() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:sa", "protected", true, "manual", "online", Some("85020")).await;
+        let svc = service(&eg, &pp, &rq, &bc);
+        let pending = svc
+            .create_connect("human_1", "x:sa", Some("hi".into()))
+            .await
+            .expect("pending");
+        let rid = &pending.request_ids[0];
+
+        // Sent: the human caller's outbox has the pending request.
+        let sent = svc
+            .list_requests("human_1", RequestDirection::Sent, None, 1, 20)
+            .await
+            .expect("sent ok");
+        assert_eq!(sent.total, 1);
+        assert_eq!(sent.items[0].request_id, *rid);
+        assert_eq!(sent.items[0].from_id, "human_1");
+
+        // Sent + Approved filter ⇒ empty (still pending).
+        let sent_approved = svc
+            .list_requests(
+                "human_1",
+                RequestDirection::Sent,
+                Some(RequestStatus::Approved),
+                1,
+                20,
+            )
+            .await
+            .expect("sent approved ok");
+        assert_eq!(sent_approved.total, 0);
+
+        // All from the human caller's view: inbox (none for human_1) ∪ sent
+        // (1) ⇒ total 1.
+        let all = svc
+            .list_requests("human_1", RequestDirection::All, None, 1, 20)
+            .await
+            .expect("all ok");
+        assert_eq!(all.total, 1);
+        assert_eq!(all.items[0].request_id, *rid);
+
+        // Approve, then All from the bot's view: inbox (1 approved) ∪ sent
+        // (the bot sent nothing) ⇒ total 1, status approved.
+        svc.approve(rid, "85020").await.expect("approve");
+        let all_bot = svc
+            .list_requests("x:sa", RequestDirection::All, None, 1, 20)
+            .await
+            .expect("all bot ok");
+        assert_eq!(all_bot.total, 1);
+        assert_eq!(all_bot.items[0].status, RequestStatus::Approved);
+    }
+
+    #[tokio::test]
+    async fn list_requests_all_dedupes_and_appplies_pagination() {
+        // All = inbox ∪ sent, deduped by request_id. For a Bot↔Bot connect,
+        // each side's All view sees both rows (one from_id, one to_id) — no
+        // dedup collapse (distinct request_ids), exercising the union + sort.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:btA", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:btB", "protected", true, "manual", "online", Some("85020")).await;
+        let svc = service(&eg, &pp, &rq, &bc);
+        let pending = svc
+            .create_connect("x:btA", "x:btB", None)
+            .await
+            .expect("pending bot↔bot");
+        assert_eq!(pending.request_ids.len(), 2);
+
+        // btA's All view: inbox (btB→btA) ∪ sent (btA→btB) ⇒ 2 rows.
+        let all = svc
+            .list_requests("x:btA", RequestDirection::All, None, 1, 20)
+            .await
+            .expect("all ok");
+        assert_eq!(all.total, 2);
+        assert_eq!(all.items.len(), 2);
+        // Pagination: page_size=1 returns 1 item, total stays 2.
+        let page1 = svc
+            .list_requests("x:btA", RequestDirection::All, None, 1, 1)
+            .await
+            .expect("page1 ok");
+        assert_eq!(page1.total, 2);
+        assert_eq!(page1.items.len(), 1);
+        let page2 = svc
+            .list_requests("x:btA", RequestDirection::All, None, 2, 1)
+            .await
+            .expect("page2 ok");
+        assert_eq!(page2.items.len(), 1);
+        // The two pages return distinct request_ids (union order is stable
+        // within a run: updated_at DESC).
+        assert_ne!(page1.items[0].request_id, page2.items[0].request_id);
     }
 }

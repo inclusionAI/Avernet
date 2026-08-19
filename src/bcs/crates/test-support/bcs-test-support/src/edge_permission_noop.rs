@@ -18,6 +18,7 @@ pub struct NoopEdgeGrantRepo;
 #[async_trait]
 impl EdgeGrantRepoPort for NoopEdgeGrantRepo {
     async fn list_active_grants(&self, _: &str, _: &str, _: &str) -> Vec<EdgeGrant> { vec![] }
+    async fn is_authorized(&self, _: &str, _: &str, _: &str) -> bool { false }
     async fn has_friend_edge(&self, _: &str, _: &str, _: &str) -> bool { false }
     async fn list_friends(&self, _: &str, _: &str) -> Vec<String> { vec![] }
     async fn insert_grant(&self, _: EdgeGrant) -> ServiceResult<()> { Ok(()) }
@@ -39,6 +40,7 @@ impl PermissionRequestRepoPort for NoopPermissionRequestRepo {
     async fn insert(&self, _: PermissionRequest) -> ServiceResult<()> { Ok(()) }
     async fn get(&self, _: &str, _: &str) -> Option<PermissionRequest> { None }
     async fn list_inbox(&self, _: &str, _: &str, _: Option<RequestStatus>) -> Vec<PermissionRequest> { vec![] }
+    async fn list_sent(&self, _: &str, _: &str, _: Option<RequestStatus>) -> Vec<PermissionRequest> { vec![] }
     async fn decide(&self, _: &str, _: &str, _: RequestStatus, _: &str, _: Option<&str>, _: u64) -> ServiceResult<()> { Ok(()) }
     async fn backfill_edge_id(&self, _: &str, _: &str, _: &str) -> ServiceResult<()> { Ok(()) }
 }

@@ -10,6 +10,12 @@ pub struct AdmissionQuery {
     pub originator: Option<String>,
     #[serde(default)]
     pub env: Option<String>,
+    /// Optional actor-kind hint. When `Some("human")` and `actor` is not
+    /// already `human_`-prefixed, the handler prefixes it (D11 id-by-prefix)
+    /// before delegating to `AdmissionService::check_admission`. Any other
+    /// value (or `None`) leaves `actor` untouched.
+    #[serde(default)]
+    pub actor_kind: Option<String>,
 }
 
 /// `AdmissionResult` serializes directly as the response body (domain type,

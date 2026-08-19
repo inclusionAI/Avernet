@@ -149,6 +149,14 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         }
     }
 
+    async fn is_authorized(&self, from: &str, to: &str, env: &str) -> bool {
+        // Any active approved edge from→to admits (friend OR non-friend).
+        // `list_active_grants` already filters `status='approved'`, so a
+        // non-empty result ⇒ authorized. Keep the repo-level call (not a raw
+        // SELECT 1) so this stays a pure projection over the same SoR.
+        !self.list_active_grants(from, to, env).await.is_empty()
+    }
+
     async fn has_friend_edge(&self, x: &str, y: &str, env: &str) -> bool {
         // D12: any-direction default-profile edge. x→y uses y's default (dy);
         // y→x uses x's default (dx). Either direction being a friend edge
@@ -625,6 +633,19 @@ impl DbPermissionRequestStore {
                 created_at, updated_at, decided_at \
          FROM permission_requests WHERE to_id = ? AND env = ? AND status = ? \
          ORDER BY updated_at DESC";
+
+    const LIST_SENT_ALL_SQL: &'static str =
+        "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+                requested_rules, message, status, decision_reason, created_by, decided_by, \
+                created_at, updated_at, decided_at \
+         FROM permission_requests WHERE from_id = ? AND env = ? ORDER BY updated_at DESC";
+
+    const LIST_SENT_STATUS_SQL: &'static str =
+        "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+                requested_rules, message, status, decision_reason, created_by, decided_by, \
+                created_at, updated_at, decided_at \
+         FROM permission_requests WHERE from_id = ? AND env = ? AND status = ? \
+         ORDER BY updated_at DESC";
 }
 
 #[async_trait]
@@ -733,6 +754,59 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
                 .collect(),
             Err(err) => {
                 warn!(error = %err, "db_permission_request: list_inbox failed");
+                Vec::new()
+            }
+        }
+    }
+
+    async fn list_sent(
+        &self,
+        from_id: &str,
+        env: &str,
+        status: Option<RequestStatus>,
+    ) -> Vec<PermissionRequest> {
+        // Mirror list_inbox's two-branch pattern: a status-filtered SELECT
+        // when a status is supplied, else the all-statuses SELECT. Both
+        // ordered by updated_at DESC.
+        let rows = match status {
+            Some(s) => {
+                self.query(
+                    "list_sent_status",
+                    DbStatement::with_params(
+                        Self::LIST_SENT_STATUS_SQL,
+                        vec![
+                            DbValue::from(from_id),
+                            DbValue::from(env),
+                            DbValue::from(request_status_str(s)),
+                        ],
+                    ),
+                )
+                .await
+            }
+            None => {
+                self.query(
+                    "list_sent_all",
+                    DbStatement::with_params(
+                        Self::LIST_SENT_ALL_SQL,
+                        vec![DbValue::from(from_id), DbValue::from(env)],
+                    ),
+                )
+                .await
+            }
+        };
+        match rows {
+            Ok(rows) => rows
+                .iter()
+                .filter_map(|row| match row_to_permission_request(row) {
+                    Ok(r) => Some(r),
+                    Err(err) => {
+                        warn!(error = %err, "db_permission_request: list_sent row skipped");
+                        None
+                    }
+                })
+                .collect(),
+            Err(err) => {
+                warn!(error = %err, "db_permission_request: list_sent failed");
                 Vec::new()
             }
         }

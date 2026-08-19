@@ -18,6 +18,16 @@ pub trait PermissionRequestRepoPort: Send + Sync {
         status: Option<RequestStatus>,
     ) -> Vec<PermissionRequest>;
 
+    /// Sent outbox: requests whose `from_id == from_id` (optionally filtered
+    /// by status). Mirrors [`Self::list_inbox`] but keyed on the sender. Used
+    /// by the `Sent`/`All` directions of `ConnectService::list_requests`.
+    async fn list_sent(
+        &self,
+        from_id: &str,
+        env: &str,
+        status: Option<RequestStatus>,
+    ) -> Vec<PermissionRequest>;
+
     async fn decide(
         &self,
         request_id: &str,

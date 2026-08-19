@@ -9,6 +9,13 @@ pub trait EdgeGrantRepoPort: Send + Sync {
     /// Active approved edges `from -> to` in `env` (friend + non-friend).
     async fn list_active_grants(&self, from: &str, to: &str, env: &str) -> Vec<EdgeGrant>;
 
+    /// Is `from` authorized to reach `to` in `env`? True iff at least one
+    /// active approved edge `from → to` exists (friend OR non-friend: rules,
+    /// non-default profile, etc.). This is the admission-edge superset of
+    /// [`Self::has_friend_edge`] — it admits via ANY active edge, not just the
+    /// default-profile friend edge (D12).
+    async fn is_authorized(&self, from: &str, to: &str, env: &str) -> bool;
+
     /// `are_friends(x, y)` = any approved default-profile edge x→y OR y→x (D12).
     async fn has_friend_edge(&self, x: &str, y: &str, env: &str) -> bool;
 
