@@ -14,6 +14,7 @@ from secbaas.community.core.service.scheduler import (
     FileTransferPoller,
     FileTransferPollerConfig,
 )
+from secbaas.community.core.utils.env_utils import get_current_env
 
 # ── Enterprise-only optional imports ─────────────────────────────────────
 # DeadlineRenewalScheduler lives in the enterprise flat tree. Community
@@ -116,6 +117,7 @@ class CoreTaskContainer(containers.DeclarativeContainer):
                 config.renewal_scheduler.engine,
             ),
             engine=config.renewal_scheduler.engine,
+            env=providers.Callable(get_current_env),
         )
 
         deadline_renewal_scheduler = providers.Singleton(
