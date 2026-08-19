@@ -278,11 +278,12 @@ class SkillSetService:
         return self._default_skill_set_selection_candidates(engine_type)[0]
 
     def _default_skill_set_selection_candidates(
-        self, engine_type: str | None = None
+        self, engine_type: str | None = None, bolt_id: str | None = None
     ) -> tuple[DefaultSkillSetSelection, ...]:
         return self._default_skill_set_selection_policy.resolve_candidates(
             persisted_engine_type=self.engine_type if engine_type is None else engine_type,
             runtime_engine_type=self.runtime_engine_type,
+            bolt_id=bolt_id,
         )
 
     def _default_skill_set_query_kwargs(
@@ -315,7 +316,9 @@ class SkillSetService:
     def _ordered_active_default_selections(
         self, *, bolt_id: str | None, engine_type: str | None
     ) -> tuple[DefaultSkillSetSelection, ...] | None:
-        candidates = self._default_skill_set_selection_candidates(engine_type)
+        candidates = self._default_skill_set_selection_candidates(
+            engine_type, bolt_id=bolt_id
+        )
         if (
             len(candidates) == 1
             and candidates[0].bolt_id is None
@@ -324,12 +327,9 @@ class SkillSetService:
             return None
 
         # Compatibility-only path. Keep the generic repository query primitive
-        # unchanged, and express the lookup order in the service layer:
-        # bot-scoped persisted default -> resolver-provided global fallbacks.
-        return (
-            DefaultSkillSetSelection(engine_type=engine_type, bolt_id=bolt_id),
-            *candidates,
-        )
+        # unchanged, and let engine-specific resolvers contribute the lookup
+        # order (for example: bot-scoped default -> global fallbacks).
+        return candidates
 
     def _get_all_active_skill_sets_with_default_fallback(
         self,
@@ -619,11 +619,29 @@ class SkillSetService:
             List of SkillSet dicts
         """
         effective_bolt_id = bolt_id if bolt_id else self.bot_id
-        return self.skill_set_repo.list_all(
-            user_id,
-            bolt_id=effective_bolt_id,
-            engine_type=self.engine_type,
+        selections = self._ordered_active_default_selections(
+            bolt_id=effective_bolt_id, engine_type=self.engine_type
         )
+        if selections is None:
+            return self.skill_set_repo.list_all(
+                user_id,
+                bolt_id=effective_bolt_id,
+                engine_type=self.engine_type,
+            )
+
+        first_result: list[dict] | None = None
+        for selection in selections:
+            result = self.skill_set_repo.list_all(
+                user_id=user_id,
+                bolt_id=effective_bolt_id,
+                engine_type=self.engine_type,
+                **self._default_skill_set_query_kwargs(self.engine_type, selection),
+            )
+            if first_result is None:
+                first_result = result
+            if self._has_default_skill_set(result):
+                return result
+        return first_result or []
 
     def update_skill_set(
         self,
