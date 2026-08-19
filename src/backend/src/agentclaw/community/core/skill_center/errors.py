@@ -71,3 +71,27 @@ class LocalSkillEditLockUnavailableError(LocalSkillEditPausedError):
 
 class ActiveSkillSetReferenceError(RuntimeError):
     """A Skill became referenced by an active custom SkillSet."""
+
+
+class SkillManagedBySkillSetError(Exception):
+    """A Direct command addressed a Skill owned by a normal SkillSet."""
+
+
+class SkillRuntimeNameConflictError(Exception):
+    """A Direct activation would create an ambiguous runtime entry name."""
+
+
+class SkillEngineNotSupportedError(Exception):
+    """The addressed Bot type and logical Engine cannot consume this Skill."""
+
+
+class RepositoryCatalogNotFoundError(Exception):
+    """A governed shared Repo Skill is not visible in this environment."""
+
+
+class RepositoryCatalogSyncInProgressError(Exception):
+    """The environment-wide governed Repo synchronization already has a holder."""
+
+
+class RepositoryCatalogSyncFailedError(Exception):
+    """The governed Repo synchronization could not finish successfully."""

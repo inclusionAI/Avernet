@@ -4,6 +4,7 @@ Migrated from: services/openclawserver/server/skills
 Unified Skills router for skill management, activation, and metadata.
 Combines functionality from skills, skills_metadata, and skillset_switch routers.
 """
+import asyncio
 import io
 import json
 import os
@@ -83,7 +84,6 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
-from agentclaw.community.core.skill_center.constants import LOCK_HELD_ERRORS
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     SkillDeleteConsistencyError,
@@ -111,6 +111,7 @@ from agentclaw.community.api.skill_set_activator_factory import SkillSetActivato
 from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
 from agentclaw.community.api.skill_set_switcher_factory import SkillSetSwitcherFactoryProtocol
 from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
+from agentclaw.community.api.repository_catalog_service import RepositoryCatalogServiceProtocol
 from agentclaw.community.core.config_compose.teclaw_paths import to_local_skill_engine_path
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
@@ -376,6 +377,46 @@ def _require_pool_runtime_sync_success(
         return
     if not isinstance(sync_result, dict) or sync_result.get("success") is not True:
         raise HTTPException(status_code=502, detail=detail)
+
+
+async def _set_legacy_asset_active_if_resolved(
+    *,
+    asset_service: BotSkillAssetServiceProtocol,
+    skill_reference: str,
+    source_path: str,
+    bot_id: str,
+    actor_id: str,
+    active: bool,
+) -> dict[str, Any] | None:
+    """Adapt historical path/link references to the one Installation command."""
+    control_plane_bound = callable(
+        getattr(asset_service, "resolve_legacy_skill_id", None)
+    )
+    if not skill_reference.isdecimal() and not control_plane_bound:
+        # Transitional compatibility fixtures and deployments that have not
+        # bound the additive control plane retain the old adapter path.  Once
+        # the control plane is bound, a non-decimal reference may never fall
+        # through to a second mutation model.
+        return None
+    try:
+        skill_id = (
+            skill_reference
+            if skill_reference.isdecimal()
+            else asset_service.resolve_legacy_skill_id(
+                skill_reference=skill_reference,
+                source_path=source_path,
+                bot_id=bot_id,
+                actor_id=actor_id,
+            )
+        )
+        asset_service.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+        return await asset_service.set_active(
+            skill_id=skill_id, bot_id=bot_id, actor_id=actor_id, active=active
+        )
+    except LocalSkillNotFoundError:
+        if control_plane_bound:
+            raise
+        return None
 
 
 # ==================== Core CRUD APIs ====================
@@ -1040,28 +1081,24 @@ async def activate_skill(
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    # Keep the published BFF response shape, but hand numeric Local Skill IDs
-    # to the same desired-state control plane as canonical OpenAPI.  Repo/Space
-    # fall through to their still-legacy Catalog implementation until P1-02.
-    if skill_id.isdecimal():
-        try:
-            item = asset_service.get_skill(
-                skill_id=skill_id, bot_id=effective_bot_id, actor_id=ctx.user_id
-            )
-        except LocalSkillNotFoundError:
-            item = None
-        if item is not None:
-            result = await asset_service.set_active(
-                skill_id=skill_id,
-                bot_id=effective_bot_id,
-                actor_id=ctx.user_id,
-                active=True,
-            )
-            return ActivateResponse(
-                success=True,
-                message="Skill activated successfully",
-                link_name=str(result["name"]),
-            )
+    # Keep the published BFF response shape, but translate every reference that
+    # now resolves to an ``ac_skill.id`` through the unified desired-state
+    # control plane.  Non-decimal relative paths/link names are legacy wire,
+    # not a second activation model.
+    result = await _set_legacy_asset_active_if_resolved(
+        asset_service=asset_service,
+        skill_reference=request.relative_path or skill_id,
+        source_path=request.source_path,
+        bot_id=effective_bot_id,
+        actor_id=ctx.user_id,
+        active=True,
+    )
+    if result is not None:
+        return ActivateResponse(
+            success=True,
+            message="Skill activated successfully",
+            link_name=str(result["name"]),
+        )
 
     # Get user-specific paths using new directory structure
     skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
@@ -1156,25 +1193,16 @@ async def deactivate_skill(
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    # See ``activate_skill``: Local IDs share canonical Installation desired
-    # state; unsupported asset adapters retain their published BFF behavior.
-    if skill_id.isdecimal():
-        try:
-            item = asset_service.get_skill(
-                skill_id=skill_id, bot_id=effective_bot_id, actor_id=ctx.user_id
-            )
-        except LocalSkillNotFoundError:
-            item = None
-        if item is not None:
-            await asset_service.set_active(
-                skill_id=skill_id,
-                bot_id=effective_bot_id,
-                actor_id=ctx.user_id,
-                active=False,
-            )
-            return DeactivateResponse(
-                success=True, message="Skill deactivated successfully"
-            )
+    result = await _set_legacy_asset_active_if_resolved(
+        asset_service=asset_service,
+        skill_reference=skill_id,
+        source_path="",
+        bot_id=effective_bot_id,
+        actor_id=ctx.user_id,
+        active=False,
+    )
+    if result is not None:
+        return DeactivateResponse(success=True, message="Skill deactivated successfully")
 
     # Get user-specific paths using new directory structure
     skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
@@ -1530,87 +1558,40 @@ async def list_local_market_skills(
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
     engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
     ctx: RequestContext = Depends(get_request_context),
-    bot_repo: BotRepository = Injected(BotRepository),
-    path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> MarketListResponse:
-    """Get all local skills (alias for /market/list with empty path)."""
-    logger.info(f"[skills.list_local_market_skills] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, entity_id={entity_id}")
-
-    # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
-
-    # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-
-    # Create per-request service instance with user-specific paths
-    service = skill_service_factory.create(
-        active_dir=skills_dir,
-        repo_dir=repo_dir,
-        local_dir=local_dir,
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-    )
-
-    skills = service.get_skills_in_path("")
-    logger.info(f"[skills.list_local_market_skills] Found {len(skills)} local skills")
-    return MarketListResponse(success=True, data=skills, count=len(skills))
+    """Compatibility alias for the governed shared Repo catalog."""
+    # Keep the historical Bot-shaped query wire.  Repo Catalog has always
+    # been environment-wide, so the adapter intentionally ignores it.
+    _ = (entity_id, entity_type, bot_id, engine_type, ctx)
+    items = repository_catalog.list()
+    return MarketListResponse(success=True, data=items, count=len(items))
 
 
 @router.get("/market/tree", response_model=MarketTreeResponse)
 async def get_market_tree(
-    ctx: RequestContext = Depends(get_request_context),
-    bot_repo: BotRepository = Injected(BotRepository),
-    path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     entity_id: Optional[str] = Query(None, description="Entity ID (纯ID，不需要前缀)"),
     entity_type: Optional[str] = Query(None, description="Entity type (staff/proj/team, default: staff)"),
     bot_id: Optional[str] = Query(None, description="Bot ID"),
     engine_type: Optional[str] = Query(None, description="Engine type override; defaults to bot's active_engine"),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    ctx: RequestContext = Depends(get_request_context),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> MarketTreeResponse:
     """Get skill market tree structure from git repo."""
-    logger.info(f"[skills.get_market_tree] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, entity_id={entity_id}")
-
-    # Get user-specific paths
-    # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
-
-    # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-
-    # Create per-request service instance with user-specific paths
-    service = skill_service_factory.create(
-        active_dir=skills_dir,
-        repo_dir=repo_dir,
-        local_dir=local_dir,
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-    )
-
-    tree = service.get_market_tree()
-    logger.info(f"[skills.get_market_tree] Found {len(tree)} top-level items")
-    return MarketTreeResponse(success=True, data=tree)
+    _ = (entity_id, entity_type, bot_id, engine_type, ctx)
+    return MarketTreeResponse(success=True, data=repository_catalog.tree())
 
 
 @router.get("/market/list", response_model=MarketListResponse)
 async def list_market_skills(
     path: str = "",
     orderby: str | None = Query(None, description="排序方式: 'latest'(最新), 'hotest'(最热)，默认按创建时间倒序"),
-    ctx: RequestContext = Depends(get_request_context),
-    bot_repo: BotRepository = Injected(BotRepository),
-    path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
     entity_id: Optional[str] = Query(None, description="Entity ID (纯ID，不需要前缀)"),
     entity_type: Optional[str] = Query(None, description="Entity type (staff/proj/team, default: staff)"),
     bot_id: Optional[str] = Query(None, description="Bot ID"),
     engine_type: Optional[str] = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    ctx: RequestContext = Depends(get_request_context),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> MarketListResponse:
     """Get all skills in marketplace (only git:// skills from database).
 
@@ -1618,35 +1599,14 @@ async def list_market_skills(
     - orderby=latest: 按创建时间倒序
     - orderby=hotest: 按被添加到能力集的次数倒序
     """
-    logger.info(f"[skills.list_market_skills] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, path={path}, orderby={orderby}, entity_id={entity_id}")
-
-    # 验证排序参数
-    if orderby and orderby not in ('latest', 'hotest'):
-        raise HTTPException(status_code=400, detail="orderby must be 'latest' or 'hotest'")
-
-    # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
-
-    # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-
-    # Create per-request service instance with user-specific paths
-    service = skill_service_factory.create(
-        active_dir=skills_dir,
-        repo_dir=repo_dir,
-        local_dir=local_dir,
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-    )
-
-    # 从数据库查询 git_path 以 git:// 开头的技能 (marketplace 不区分 bolt_id)
-    skills = service.list_git_skills(path=path or None, bolt_id=None, orderby=orderby)
-
-    logger.info(f"[skills.list_market_skills] Found {len(skills)} git skills from database")
-    return MarketListResponse(success=True, data=skills, count=len(skills))
+    _ = (entity_id, entity_type, bot_id, engine_type, ctx)
+    if orderby and orderby not in ("latest", "hotest"):
+        raise HTTPException(
+            status_code=400, detail="orderby must be 'latest' or 'hotest'"
+        )
+    canonical_order = "hotest" if orderby == "hotest" else orderby
+    items = repository_catalog.list(path=path or None, orderby=canonical_order)
+    return MarketListResponse(success=True, data=items, count=len(items))
 
 
 @router.post("/market/activate-batch", response_model=ActivateSkillsResponse)
@@ -1747,42 +1707,16 @@ async def activate_skills_batch(
 @router.post("/market/search", response_model=SearchResponse)
 async def search_market_skills(
     request: SearchRequest,
-    ctx: RequestContext = Depends(get_request_context),
-    bot_repo: BotRepository = Injected(BotRepository),
-    path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     entity_id: Optional[str] = Query(None, description="Entity ID (纯ID，不需要前缀)"),
     entity_type: Optional[str] = Query(None, description="Entity type (staff/proj/team, default: staff)"),
     bot_id: Optional[str] = Query(None, description="Bot ID"),
     engine_type: Optional[str] = Query(None, description="Engine type override; defaults to bot's active_engine"),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    ctx: RequestContext = Depends(get_request_context),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> SearchResponse:
     """Search skills in marketplace."""
-    logger.info(f"[skills.search_market_skills] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, query={request.query}, entity_id={entity_id}")
-
-    # Get user-specific paths
-    # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
-
-    # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-
-    # Create per-request service instance with user-specific paths
-    service = skill_service_factory.create(
-        active_dir=skills_dir,
-        repo_dir=repo_dir,
-        local_dir=local_dir,
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-    )
-
-    # 使用缓存搜索市场技能（复用 list_git_skills 缓存，limit=100）
-    results = service.search_market_skills(request.query, limit=100)
-
-    logger.info(f"[skills.search_market_skills] Found {len(results)} matching skills")
+    _ = (entity_id, entity_type, bot_id, engine_type, ctx)
+    results = repository_catalog.search(keyword=request.query, limit=100)
     return SearchResponse(success=True, data=results, count=len(results))
 
 
@@ -1793,84 +1727,32 @@ async def sync_market(
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
     engine_type: str | None = Query(None, description="Engine type (default: moltis)"),
     ctx: RequestContext = Depends(get_request_context),
-    bot_repo: BotRepository = Injected(BotRepository),
-    path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> SyncStatusResponse:
-    """Sync skills from git repository with rate limiting.
-
-    This endpoint performs two operations:
-    1. Git pull/clone to update local skills repository
-    2. Scan repository and sync skill metadata to database (only if step 1 actually ran)
-
-    - 5分钟内重复请求不会实际同步
-    - 返回详细的同步状态和下次可同步时间
-    """
-    logger.info(f"[skills.sync_market] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}")
-
-    # Get user-specific paths
-    # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
-
-    # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-
-    # Create per-request service instance with user-specific paths
-    service = skill_service_factory.create(
-        active_dir=skills_dir,
-        repo_dir=repo_dir,
-        local_dir=local_dir,
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-    )
-
-    # Step 1: Sync repository (git pull/clone)
-    result = await run_in_threadpool(service.sync_repo_with_lock, min_interval=300)
-
-    # 锁被占用时（两把锁任一：进程内 GlobalSyncLock / 跨机分布式锁），
-    # 说明已有同步在进行，返回成功 + 提示（而非 500 错误）。
-    if result.get("error") in LOCK_HELD_ERRORS:
-        return SyncStatusResponse(
-            success=True,
-            data={
-                "synced": False,
-                "message": "同步进行中，请稍后再试"
-            }
-        )
-
-    if not result.get("success"):
-        raise HTTPException(
-            status_code=500,
-            detail=result.get("message", "同步技能仓库失败")
-        )
-
-    # Step 2: Sync skills from git to database (only if git sync actually ran)
-    db_sync_result = None
-    if result.get("synced"):
-        logger.info("[skills.sync_market] Repository synced, syncing skills to database...")
-        try:
-            # See sync_skills_from_git above — same false-positive pattern.
-            db_sync_result = await run_in_threadpool(service.sync_skills_from_git, user_id=ctx.user_id)  # allow-run-in-threadpool
-            logger.info(f"[skills.sync_market] DB sync completed: created={db_sync_result.get('created', 0)}, updated={db_sync_result.get('updated', 0)}, deleted={db_sync_result.get('deleted', 0)}, failed={db_sync_result.get('failed', 0)}")
-        except Exception as e:
-            logger.error(f"[skills.sync_market] DB sync failed: {e}")
-            db_sync_result = {"error": str(e)}
-
-    logger.info(f"[skills.sync_market] Success: synced={result.get('synced', False)}")
-    return SyncStatusResponse(
-        success=True,
-        data={
-            "synced": result.get("synced", False),
-            "last_sync": result.get("last_sync"),
-            "next_sync_in": result.get("next_sync_in", 0),
-            "db_sync": db_sync_result,
-        },
-        message=result.get("message", "Sync completed")
-    )
+    """Compatibility adapter for the one governed environment-wide sync."""
+    _ = (entity_id, entity_type, bot_id, engine_type, ctx)
+    result = await asyncio.to_thread(repository_catalog.sync)
+    if result["status"] == "in_progress":
+        return SyncStatusResponse(success=True, data={"synced": False, "message": "同步进行中，请稍后再试"})
+    if result["status"] == "failed":
+        sync_result = result.get("result") or {}
+        # The pre-Gateway response published the completed DB scan verbatim in
+        # ``data.db_sync``.  Keep that diagnostic wire for partial scans even
+        # though canonical sync now correctly fails as one operation.
+        if isinstance(sync_result.get("database"), dict):
+            return SyncStatusResponse(
+                success=True,
+                data={
+                    "synced": False,
+                    "last_sync": sync_result.get("last_sync"),
+                    "next_sync_in": sync_result.get("next_sync_in", 0),
+                    "db_sync": sync_result["database"],
+                },
+                message=result["message"],
+            )
+        raise HTTPException(status_code=500, detail=result["message"])
+    sync_result = result["result"]
+    return SyncStatusResponse(success=True, data={"synced": bool(sync_result.get("synced")), "last_sync": sync_result.get("last_sync"), "next_sync_in": sync_result.get("next_sync_in", 0), "db_sync": sync_result.get("database")}, message=sync_result.get("message", "Sync completed"))
 
 
 @router.get("/market/sync-status", response_model=SyncStatusResponse)
