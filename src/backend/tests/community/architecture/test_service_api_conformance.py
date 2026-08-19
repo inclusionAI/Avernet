@@ -73,6 +73,9 @@ from agentclaw.community.api.local_skill_delete_service import (
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
 )
+from agentclaw.community.api.repository_catalog_service import (
+    RepositoryCatalogServiceProtocol,
+)
 from agentclaw.community.api.service_publication_facade import (
     ServicePublicationFacadeProtocol,
 )
@@ -120,6 +123,9 @@ from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
+from agentclaw.community.core.skill_center.services.repository_catalog_service import (
+    RepositoryCatalogService,
+)
 from agentclaw.community.core.market_favorites.services import MarketFavoriteService
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
@@ -145,6 +151,7 @@ _PAIRS = [
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
     (LocalSkillStateServiceProtocol, LocalSkillStateService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),
+    (RepositoryCatalogServiceProtocol, RepositoryCatalogService),
     (SpaceServiceProtocol, SpaceService),
     (SpaceMemberServiceProtocol, SpaceMemberService),
     (MarketFavoriteServiceProtocol, MarketFavoriteService),

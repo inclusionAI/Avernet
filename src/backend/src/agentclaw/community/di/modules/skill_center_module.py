@@ -308,7 +308,6 @@ class SkillCenterModule(Module):
         self, service: SkillMarketService
     ) -> SkillMarketServiceProtocol:
         return service
-
     @singleton
     @provider
     @inject

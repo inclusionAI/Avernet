@@ -156,6 +156,8 @@ user_config:
     "/openapi/v1/bots/**":
       user: optional
       app: optional
+    "/openapi/v1/skills/**":
+      user: required
 
     # ── The refusals: operations that still require a human on the wire ──────
 
@@ -426,6 +428,13 @@ user_config:
           path: schemas/bots.openapi.json
           refresh_seconds: 300
       caller:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      repository-skills:
+        match: /openapi/v1/skills/**
         server: backend
         schema:
           source: file

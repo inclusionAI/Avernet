@@ -19,6 +19,31 @@ class RepositoryCatalogService:
     def list(self, *, path: str | None = None, orderby: str | None = None) -> list[dict[str, Any]]:
         return self._factory.create().list_git_skills(path=path, bolt_id=None, orderby=orderby)
 
+    def list_page(
+        self,
+        *,
+        path: str | None = None,
+        orderby: str | None = None,
+        keyword: str = "",
+        page: int,
+        page_size: int,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """Apply the catalog's filter and pagination as one service operation."""
+        items = self.list(path=path, orderby=orderby)
+        if keyword:
+            lowered = keyword.lower()
+            items = [
+                item
+                for item in items
+                if lowered
+                in " ".join(
+                    str(item.get(key) or "")
+                    for key in ("name", "description", "category")
+                ).lower()
+            ]
+        start = (page - 1) * page_size
+        return len(items), list(items[start : start + page_size])
+
     def search(self, *, keyword: str, limit: int = 100) -> list[dict[str, Any]]:
         return self._factory.create().search_market_skills(keyword, limit=limit)
 

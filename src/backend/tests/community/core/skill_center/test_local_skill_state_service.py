@@ -12,6 +12,9 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
+    SkillEngineNotSupportedError,
+    SkillManagedBySkillSetError,
+    SkillRuntimeNameConflictError,
 )
 from agentclaw.community.core.skill_center.services.local_skill_state_service import (
     LocalSkillStateService,
@@ -354,6 +357,173 @@ async def test_idempotent_activate_runtime_failure_never_uninstalls_existing_des
     assert skills.active is True
     assert installations.install_calls == 1
     assert installations.events == []
+    assert runtime.calls == 1
+
+
+class _RepoSkills(_Skills):
+    def __init__(self, *, active: bool = False, references=None, name: str = "repo"):
+        super().__init__(active=active, git_path="git://tools/repo")
+        self.references = references or []
+        self.name = name
+
+    def get_by_id(self, skill_id: str):
+        if skill_id != "9":
+            return None
+        return {
+            "id": "9",
+            "name": self.name,
+            "user_id": None,
+            # Historical scanner sentinel: this must remain consumable.
+            "bolt_id": "default",
+            "git_path": self.git_path,
+        }
+
+    def list_skill_set_references(self, skill_id: str):
+        assert skill_id == "9"
+        return self.references
+
+
+class _RepoBots(_Bots):
+    def __init__(self, *, bot_type: str = "personal", engine: str = "openclaw"):
+        super().__init__("ACTIVE")
+        self.bot_type = bot_type
+        self.engine = engine
+
+    def get_by_id(self, bot_id: str):
+        assert bot_id == "bot"
+        return {
+            "status": "ACTIVE",
+            "active_engine": self.engine,
+            "bot_type": self.bot_type,
+            "env": "pre",
+            "entity_id": "owner",
+            "entity_type": "staff",
+            "owner_id": "owner",
+        }
+
+
+class _RepoSetService:
+    def __init__(self, *, normal_member: bool) -> None:
+        self.normal_member = normal_member
+
+    def get_skill_set(self, skill_set_id: str, user_id: str):
+        assert skill_set_id == "17"
+        assert user_id == "owner"
+        return {"id": "17", "bolt_id": "bot", "is_default": not self.normal_member}
+
+
+class _RepoFactory(_Factory):
+    def __init__(self, runtime: _Runtime, *, normal_member: bool = False) -> None:
+        super().__init__(runtime)
+        self.set_service = _RepoSetService(normal_member=normal_member)
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        return self.set_service if self.set_service.normal_member else self.runtime
+
+
+def _repo_service(
+    *,
+    active: bool = False,
+    sync_success: bool = True,
+    references=None,
+    bot_type: str = "personal",
+    engine: str = "openclaw",
+    active_assets=None,
+):
+    skills = _RepoSkills(active=active, references=references)
+    installations = _Installations(skills)
+    runtime = _Runtime(sync_success)
+    factory = _RepoFactory(runtime, normal_member=bool(references))
+    guard = _Guard()
+    if active_assets is not None:
+        skills.list_bot_active_assets = lambda **_kwargs: active_assets
+    service = LocalSkillStateService(
+        skills,
+        installations,
+        _RepoBots(bot_type=bot_type, engine=engine),
+        _Collaborators(),
+        factory,
+        guard,
+        runtime,
+        skills,
+        _Layouts(),
+    )
+    return service, skills, installations, runtime
+
+
+@pytest.mark.asyncio
+async def test_repo_direct_accepts_shared_scanner_sentinel_and_reconciles():
+    service, _skills, installations, runtime = _repo_service()
+
+    result = await service.set_repo_skill_active(
+        skill_id="9", bot_id="bot", actor_id="owner", active=True
+    )
+
+    assert result["active"] is True
+    assert result["changed"] is True
+    assert installations.events == ["install:pre:bot:9"]
+    assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_repo_direct_rejects_normal_skill_set_membership_before_writing_state():
+    service, _skills, installations, _runtime = _repo_service(
+        references=[{"skill_set_id": "17"}]
+    )
+
+    with pytest.raises(SkillManagedBySkillSetError):
+        await service.set_repo_skill_active(
+            skill_id="9", bot_id="bot", actor_id="owner", active=True
+        )
+
+    assert installations.events == []
+
+
+@pytest.mark.asyncio
+async def test_repo_direct_fails_closed_for_unsupported_bot_engine_pair():
+    service, _skills, installations, _runtime = _repo_service(
+        bot_type="desktop", engine="claude_code"
+    )
+
+    with pytest.raises(SkillEngineNotSupportedError):
+        await service.set_repo_skill_active(
+            skill_id="9", bot_id="bot", actor_id="owner", active=True
+        )
+
+    assert installations.events == []
+
+
+@pytest.mark.asyncio
+async def test_repo_direct_rejects_runtime_name_conflict_before_writing_state():
+    conflicting = RegisteredSkillAsset(
+        skill_id=10, name="repo", git_path="git://other/repo"
+    )
+    service, _skills, installations, _runtime = _repo_service(
+        active_assets=[conflicting]
+    )
+
+    with pytest.raises(SkillRuntimeNameConflictError):
+        await service.set_repo_skill_active(
+            skill_id="9", bot_id="bot", actor_id="owner", active=True
+        )
+
+    assert installations.events == []
+
+
+@pytest.mark.asyncio
+async def test_repo_direct_idempotent_runtime_failure_preserves_old_installation():
+    service, skills, installations, runtime = _repo_service(
+        active=True, sync_success=False
+    )
+
+    with pytest.raises(LocalSkillRuntimeSyncError):
+        await service.set_repo_skill_active(
+            skill_id="9", bot_id="bot", actor_id="owner", active=True
+        )
+
+    assert skills.active is True
+    assert installations.events == ["install:pre:bot:9"]
     assert runtime.calls == 1
 
 

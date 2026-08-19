@@ -109,15 +109,10 @@ class BotSkillAssetService:
             skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
         )
         if self._kind_for(skill) is SkillAssetKind.REPO:
-            service = self._skill_service_factory.create(
-                entity_id=str(bot["entity_id"]),
-                bot_owner_id=owner_id,
-                bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-                device_owner_id=owner_id,
-            )
-            content = await service.get_skill_readme(
-                skill_id, actor_id, bot_id, device_owner_id=owner_id
+            # Repo assets are read from the global skills-repo corpus, never a
+            # Bot workspace and never the historical README fallback.
+            content = self._skill_service_factory.create().get_repository_skill_content(
+                skill_id
             )
         else:
             content = await self._local_storage(skill, bot, owner_id).read_file("SKILL.md")
