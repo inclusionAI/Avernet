@@ -84,4 +84,13 @@ pub trait ConnectService: Send + Sync {
         page: u32,
         page_size: u32,
     ) -> ServiceResult<RequestsPage>;
+
+    /// Set the bot's `human_addable` flag (spec §3.2). Caller must own the bot
+    /// (ownership is verified by the implementation). Backs
+    /// `PUT /bots/{id}/human-addable`.
+    async fn set_human_addable(&self, bot_id: &str, value: bool, caller: &str) -> ServiceResult<()>;
+
+    /// Set the bot's `friend_approval` policy (spec §3.2). Caller must own the
+    /// bot. Backs `PUT /bots/{id}/friend-approval`.
+    async fn set_friend_approval(&self, bot_id: &str, value: &str, caller: &str) -> ServiceResult<()>;
 }

@@ -574,11 +574,52 @@ impl ConnectService for DbConnectService {
             page_size,
         })
     }
+
+    async fn set_human_addable(&self, bot_id: &str, value: bool, caller: &str) -> ServiceResult<()> {
+        self.verify_ownership(bot_id, caller).await?;
+        self.bot_config
+            .set_human_addable(bot_id, &self.env, value)
+            .await
+    }
+
+    async fn set_friend_approval(
+        &self,
+        bot_id: &str,
+        value: &str,
+        caller: &str,
+    ) -> ServiceResult<()> {
+        self.verify_ownership(bot_id, caller).await?;
+        self.bot_config
+            .set_friend_approval(bot_id, &self.env, value)
+            .await
+    }
 }
 
 // ---- private helpers ------------------------------------------------------
 
 impl DbConnectService {
+    /// Verify `caller` owns `bot_id` (spec §3.2 ownership gate for config
+    /// writes: `set_human_addable` / `set_friend_approval`).
+    ///
+    /// Rules (mirrors `docs/CLAUDE.md` "Bot Ownership Verification"):
+    /// - `created_by` present AND matches `caller` → allow.
+    /// - `created_by` present AND differs from `caller` → `Forbidden`.
+    /// - `created_by` absent (legacy bot) → allow (auto-claim; CLAUDE.md).
+    /// - bot not found in this env → `BotNotFound` (so `PUT` on a missing bot
+    ///   surfaces as 404 rather than a misleading 403).
+    async fn verify_ownership(&self, bot_id: &str, caller: &str) -> ServiceResult<()> {
+        match self.bot_config.get(bot_id, &self.env).await {
+            Some(cfg) => match &cfg.created_by {
+                Some(owner) if owner == caller => Ok(()),
+                Some(_) => Err(ServiceError::Forbidden(format!(
+                    "caller '{caller}' does not own bot '{bot_id}'"
+                ))),
+                None => Ok(()), // legacy bot (no created_by) → auto-claim
+            },
+            None => Err(ServiceError::BotNotFound(bot_id.to_string())),
+        }
+    }
+
     /// Find pending `Connect` requests from `from` → `to` in this env.
     ///
     /// Implemented on top of the existing `list_inbox(to, env, status)` (the

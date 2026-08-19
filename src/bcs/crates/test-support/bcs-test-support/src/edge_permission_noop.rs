@@ -66,6 +66,17 @@ impl ConnectService for NoopConnectService {
     ) -> ServiceResult<RequestsPage> {
         Ok(RequestsPage { items: vec![], total: 0, page, page_size })
     }
+    async fn set_human_addable(&self, _bot_id: &str, _value: bool, _caller: &str) -> ServiceResult<()> {
+        Ok(())
+    }
+    async fn set_friend_approval(
+        &self,
+        _bot_id: &str,
+        _value: &str,
+        _caller: &str,
+    ) -> ServiceResult<()> {
+        Ok(())
+    }
 }
 
 pub struct NoopAdmissionService;

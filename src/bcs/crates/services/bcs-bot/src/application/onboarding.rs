@@ -224,6 +224,14 @@ impl BotOnboarding {
             .ensure_owner_edges(&human_id, bot_uuid, &env)
             .await?;
 
+        // NOTE (B4a): `ensure_default_profile` is NOT in the same DB transaction
+        // as `ensure_owner_edges` above — they hit different stores
+        // (`bcs-relation-store` vs `bcs-edge-permission-store`). If the profile
+        // seed fails, the owner edges are already committed but the default
+        // profile is missing, so admission will fall back to `public_default`
+        // until repair (ETL reconciliation catches this). Spec §8.3 prefers a
+        // same-tx write; this is degraded until a cross-store transaction lands.
+        //
         // Seed the bot's default permission profile (wildcard-allow) — idempotent;
         // D12 rule 2: never overwrites an existing default. Spec §5.1.1.
         if let Some(profiles) = &self.profiles {
