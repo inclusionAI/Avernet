@@ -18,16 +18,28 @@ class SkillCenterTeamCreateRequest:
     team_code: str
     team_name: str
     ref_source_id: str
+    ref_source_platform: str
     description: str | None = None
     icon: str | None = None
-    ref_source_platform: str | None = None
 
 
 @dataclass(frozen=True)
 class SkillCenterTeamCreateResult:
     """Confirmed SC team identity returned after a successful creation."""
 
-    team_id: str
+    team_id: int
+    team_code: str
+    team_name: str
+    ref_source_platform: str
+    ref_source_id: str
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamSkillPage:
+    """One page of the official SC Team Skill listing."""
+
+    items: list[dict]
+    total: int
 
 
 @runtime_checkable
@@ -156,12 +168,25 @@ class SkillCenterGateway(Plugin, Protocol):
     retries a POST; its caller owns Attempt and ``RESULT_UNKNOWN`` handling.
     """
 
-    def create_team(self, *, name: str, request_id: str) -> dict:
-        """Create the SC Team for one TC Space mapping request."""
+    def create_team(self, request: SkillCenterTeamCreateRequest) -> SkillCenterTeamCreateResult:
+        """Create a Team using the official SC Team-create request DTO."""
         ...
 
-    def close_team(self, team_id: str) -> dict:
-        """Close a previously mapped SC Team."""
+    def get_team_by_ref_source(
+        self, *, ref_source_platform: str, ref_source_id: str
+    ) -> SkillCenterTeamCreateResult:
+        """Confirm a TC→SC Team mapping after an unknown create outcome."""
+        ...
+
+    def list_team_skills(
+        self,
+        *,
+        team_id: int,
+        keyword: str = "",
+        page_num: int = 1,
+        page_size: int = 20,
+    ) -> SkillCenterTeamSkillPage:
+        """List one Team's Skills; callers must provide the explicit SC teamId."""
         ...
 
     def upload_and_publish(self, payload: dict, *, team_id: str) -> dict:

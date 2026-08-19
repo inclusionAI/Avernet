@@ -11,6 +11,7 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterGatewayErrorCode,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamCreateResult,
+    SkillCenterTeamSkillPage,
 )
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
 from agentclaw.community.plugins.local._mock_seam import MockSeam
@@ -30,7 +31,13 @@ class LocalSkillCenterClient(MockSeam, SkillCenterClient):
         self, request: SkillCenterTeamCreateRequest
     ) -> SkillCenterTeamCreateResult:
         logger.info("[LocalMock] create_team: %s", request.team_code)
-        return SkillCenterTeamCreateResult(team_id=f"mock-{request.team_code}")
+        return SkillCenterTeamCreateResult(
+            team_id=1,
+            team_code=request.team_code,
+            team_name=request.team_name,
+            ref_source_platform=request.ref_source_platform,
+            ref_source_id=request.ref_source_id,
+        )
 
     def upload_and_publish(self, payload: dict) -> dict:
         skill_code = payload.get("skillCode", "local-mock")
@@ -166,13 +173,25 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
         if error := self._next_errors.pop(operation, None):
             raise error
 
-    def create_team(self, *, name: str, request_id: str) -> dict:
+    def create_team(self, request: SkillCenterTeamCreateRequest) -> SkillCenterTeamCreateResult:
         self._consume_error("create_team")
-        return {"success": True, "data": {"teamId": f"local-team-{request_id}", "name": name}}
+        return SkillCenterTeamCreateResult(
+            team_id=1,
+            team_code=request.team_code,
+            team_name=request.team_name,
+            ref_source_platform=request.ref_source_platform,
+            ref_source_id=request.ref_source_id,
+        )
 
-    def close_team(self, team_id: str) -> dict:
-        self._consume_error("close_team")
-        return {"success": True, "data": {"teamId": team_id, "status": "CLOSED"}}
+    def get_team_by_ref_source(self, *, ref_source_platform: str, ref_source_id: str) -> SkillCenterTeamCreateResult:
+        self._consume_error("get_team_by_ref_source")
+        return SkillCenterTeamCreateResult(1, "team-1", "Local Team", ref_source_platform, ref_source_id)
+
+    def list_team_skills(self, *, team_id: int, keyword: str = "", page_num: int = 1, page_size: int = 20) -> SkillCenterTeamSkillPage:
+        self._consume_error("list_team_skills")
+        if page_size > 100:
+            raise SkillCenterGatewayError(SkillCenterGatewayErrorCode.PROTOCOL, "page_size must be <= 100")
+        return SkillCenterTeamSkillPage([{"skillId": 1, "userProvidedSkillId": "skill-uuid", "name": "Local Skill", "description": "", "releaseVersionNumber": "1.0.0", "belongTo": team_id}], 1)
 
     def upload_and_publish(self, payload: dict, *, team_id: str) -> dict:
         self._consume_error("upload_and_publish")

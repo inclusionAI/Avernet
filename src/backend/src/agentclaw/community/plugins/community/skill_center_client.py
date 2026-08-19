@@ -13,6 +13,9 @@ from __future__ import annotations
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
     SkillCenterGateway,
+    SkillCenterTeamCreateRequest,
+    SkillCenterTeamCreateResult,
+    SkillCenterTeamSkillPage,
     SkillCenterGatewayError,
     SkillCenterGatewayErrorCode,
     SkillCenterTeamCreateError,
@@ -81,10 +84,13 @@ class CommunitySkillCenterGateway(SkillCenterGateway):
     def _unsupported() -> None:
         raise SkillCenterGatewayError(SkillCenterGatewayErrorCode.UNAVAILABLE, _MSG)
 
-    def create_team(self, *, name: str, request_id: str) -> dict:
+    def create_team(self, request: SkillCenterTeamCreateRequest) -> SkillCenterTeamCreateResult:
         self._unsupported()
 
-    def close_team(self, team_id: str) -> dict:
+    def get_team_by_ref_source(self, *, ref_source_platform: str, ref_source_id: str) -> SkillCenterTeamCreateResult:
+        self._unsupported()
+
+    def list_team_skills(self, *, team_id: int, keyword: str = "", page_num: int = 1, page_size: int = 20) -> SkillCenterTeamSkillPage:
         self._unsupported()
 
     def upload_and_publish(self, payload: dict, *, team_id: str) -> dict:

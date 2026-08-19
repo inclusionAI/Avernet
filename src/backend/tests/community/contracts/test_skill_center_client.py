@@ -48,14 +48,16 @@ def test_local_skill_center_client_query_status_envelope(world) -> None:
 def test_local_skill_center_client_create_team_records_plugin_hit(world) -> None:
     client = world.get(SkillCenterClient)
     request = SkillCenterTeamCreateRequest(
-        team_code="spc-0123456789abcdef0123",
-        team_name="Demo Team",
-        ref_source_id="7",
+            team_code="spc-0123456789abcdef0123",
+            team_name="Demo Team",
+            ref_source_id="7",
+            ref_source_platform="teamclaw",
     )
 
     result = client.create_team(request)
 
-    assert result.team_id == f"mock-{request.team_code}"
+    assert result.team_id == 1
+    assert result.ref_source_id == request.ref_source_id
     calls = client.calls_to("create_team")
     assert len(calls) == 1
     assert calls[0].args == (request,)
@@ -67,8 +69,9 @@ def test_local_skill_center_gateway_records_explicit_team_per_request(world) -> 
     consumer = world.get(SkillCenterGatewayService)
     gateway = world.get(SkillCenterGateway)
 
-    created = consumer.create_team(name="Risk reviewers", request_id="create-space-1")
-    team_id = created["data"]["teamId"]
+    request = SkillCenterTeamCreateRequest("risk-team", "Risk reviewers", "space-1", ref_source_platform="teamclaw")
+    created = consumer.create_team(request)
+    team_id = created.team_id
     consumer.submit_publish(
         {"skillCode": "skill-uuid", "versionNumber": "2.0.0"},
         team_id=team_id,
@@ -79,7 +82,8 @@ def test_local_skill_center_gateway_records_explicit_team_per_request(world) -> 
     consumer.get_download_url("skill-uuid", "2.0.0", team_id=team_id)
     assert consumer.search_market_skills(keyword="risk")["success"] is True
     assert consumer.get_market_tags() == []
-    consumer.close_team(team_id)
+    assert consumer.get_team_by_ref_source(ref_source_platform="teamclaw", ref_source_id="space-1").team_id == team_id
+    assert consumer.list_team_skills(team_id=team_id).total == 1
 
     assert [call.method for call in gateway.calls] == [
         "create_team",
@@ -90,7 +94,8 @@ def test_local_skill_center_gateway_records_explicit_team_per_request(world) -> 
         "get_download_url",
         "search_market_skills",
         "get_market_tags",
-        "close_team",
+        "get_team_by_ref_source",
+        "list_team_skills",
     ]
     for operation in ("upload_and_publish", "query_publish_status", "get_skill_detail", "list_versions", "get_download_url"):
         assert gateway.calls_to(operation)[0].kwargs["team_id"] == team_id
@@ -120,7 +125,7 @@ def test_local_skill_center_gateway_normalizes_failures(world, code, operation) 
     gateway = world.get(SkillCenterGateway)
     gateway.fail_next(operation, code, "stable failure")
     calls = {
-        "create_team": lambda: consumer.create_team(name="Risk", request_id="request-1"),
+        "create_team": lambda: consumer.create_team(SkillCenterTeamCreateRequest("risk", "Risk", "space-1", ref_source_platform="teamclaw")),
         "upload_and_publish": lambda: consumer.submit_publish(
             {"skillCode": "skill-uuid", "versionNumber": "1.0.0"}, team_id="team-1"
         ),

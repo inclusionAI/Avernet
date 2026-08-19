@@ -30,9 +30,10 @@ def _client() -> CommunitySkillCenterClient:
 
 def test_create_team_raises_stable_sync_error():
     request = SkillCenterTeamCreateRequest(
-        team_code="spc-0123456789abcdef0123",
-        team_name="Demo Team",
-        ref_source_id="7",
+            team_code="spc-0123456789abcdef0123",
+            team_name="Demo Team",
+            ref_source_id="7",
+            ref_source_platform="teamclaw",
     )
     with pytest.raises(SkillCenterTeamCreateError):
         _client().create_team(request)
@@ -85,6 +86,8 @@ def test_delete_skill_raises():
 
 def test_q5_gateway_is_explicitly_unavailable_in_the_community_build():
     with pytest.raises(SkillCenterGatewayError) as raised:
-        CommunitySkillCenterGateway().create_team(name="Risk", request_id="request-1")
+        CommunitySkillCenterGateway().create_team(
+            SkillCenterTeamCreateRequest("risk", "Risk", "space-1", ref_source_platform="teamclaw")
+        )
 
     assert raised.value.code is SkillCenterGatewayErrorCode.UNAVAILABLE

@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from injector import inject
 
-from agentclaw.community.plugin_api.skill_center_client import SkillCenterGateway
+from agentclaw.community.plugin_api.skill_center_client import (
+    SkillCenterGateway,
+    SkillCenterTeamCreateRequest,
+    SkillCenterTeamCreateResult,
+    SkillCenterTeamSkillPage,
+)
 
 
 class SkillCenterGatewayService:
@@ -18,11 +23,14 @@ class SkillCenterGatewayService:
     def __init__(self, gateway: SkillCenterGateway) -> None:
         self._gateway = gateway
 
-    def create_team(self, *, name: str, request_id: str) -> dict:
-        return self._gateway.create_team(name=name, request_id=request_id)
+    def create_team(self, request: SkillCenterTeamCreateRequest) -> SkillCenterTeamCreateResult:
+        return self._gateway.create_team(request)
 
-    def close_team(self, team_id: str) -> dict:
-        return self._gateway.close_team(team_id)
+    def get_team_by_ref_source(self, *, ref_source_platform: str, ref_source_id: str) -> SkillCenterTeamCreateResult:
+        return self._gateway.get_team_by_ref_source(ref_source_platform=ref_source_platform, ref_source_id=ref_source_id)
+
+    def list_team_skills(self, *, team_id: int, keyword: str = "", page_num: int = 1, page_size: int = 20) -> SkillCenterTeamSkillPage:
+        return self._gateway.list_team_skills(team_id=team_id, keyword=keyword, page_num=page_num, page_size=page_size)
 
     def submit_publish(self, payload: dict, *, team_id: str) -> dict:
         """Submit exactly one publish request; caller owns retry decisions."""
