@@ -79,7 +79,7 @@ class TestTaskExecute:
         r = c.post("/openapi/v1/task/execute", json=_task_info_dict())
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["success"] is True
+        assert body["code"] == 200000
         assert body["data"]["task_id"] == "t_http"
         assert body["data"]["success"] is True
         assert body["data"]["run_id"] > 0

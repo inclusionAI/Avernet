@@ -5,19 +5,13 @@
 """
 from __future__ import annotations
 
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-T = TypeVar("T")
-
-
-class ApiResponse(BaseModel, Generic[T]):
-    """统一 API 响应格式(与其它 http adapter 一致 envelope)。"""
-    success: bool
-    message: str = "OK"
-    error_code: int = 200
-    data: T | None = None
+# Success/error envelopes come from the unified /openapi/v1 contract
+# (``openapi_v1.contracts.Envelope`` / ``ErrorEnvelope``); this module keeps only
+# the task-specific request/response DTOs.
 
 
 # ===== Request DTOs =====
@@ -299,9 +293,3 @@ class TaskNodeCallbackRequest(TaskCallbackRequest):
     """node 级回调载荷(node_id 即 Avernet 子节点 id,统一领域对象 1:1 映射)。"""
 
     node_id: str
-
-
-class CallbackResponse(BaseModel):
-    success: bool
-    code: int = 200
-    message: str = "OK"

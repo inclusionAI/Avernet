@@ -15,16 +15,15 @@ The root ``node_id`` is deterministic (``initialize_graph`` sets it to the
 
 Error cases use *real input-driven* branches wherever the contract exposes one
 (re-execute → 409, missing task → 404, malformed body → 422, unregistered
-task-level callback → 400, non-holder BBS op → 409, invalid status → 500).
+task-level callback → 400, non-holder BBS op → 409, invalid status → 400).
 
-The two discovery routes (``/discover``, ``/status``) have no input-reachable
-error branch: the handlers self-build their service from env and swallow every
-exception by design. Their error case exercises that defensive ``except`` by
-substituting the module-level builder the handler calls — a forced raise through
-the production call path (the handler still runs end-to-end; only the edge it
-builds stands in). Direct attribute assignment on the router module is used
-(not a mock library, not ``setattr``): the ``test_no_mock_in_endpoint_tests``
-scanner permits it, and each happy case restores the originals so nothing leaks.
+The two discovery routes (``/discover``, ``/status``) build their service from
+env (not DI-wired), so no request input produces a failure. Their error case
+substitutes the module-level builder the handler calls — a forced raise that the
+handler catches and converts to ``HTTPException(500)`` → ``ErrorEnvelope``. This
+is direct attribute assignment on the router module (not a mock library, not
+``setattr``); the ``test_no_mock_in_endpoint_tests`` scanner permits it, and each
+happy case restores the originals so nothing leaks.
 """
 from __future__ import annotations
 
@@ -112,11 +111,12 @@ def _run_root(world, task_id: str) -> None:
 # --------------------------------------------------------------------------
 # task-discovery seam substitution
 # --------------------------------------------------------------------------
-# The discovery router self-builds its service from env (not DI-wired), and its
-# handlers swallow every exception. The error cases below force the builder the
-# handler calls to raise, exercising the defensive ``except`` end-to-end. The
-# happy cases restore the originals (and point the reader at an absent db so
-# ``discover()`` makes no engine call), so the seam never leaks past this file.
+# The discovery router self-builds its service from env (not DI-wired). Its
+# handlers catch build/read failures and raise ``HTTPException(500)``. The error
+# cases below force the builder the handler calls to raise, exercising that
+# ``except → HTTPException(500)`` end-to-end. The happy cases restore the
+# originals (and point the reader at an absent db so ``discover()`` makes no
+# engine call), so the seam never leaks past this file.
 import agentclaw.community.adapters.http.openapi_v1.task.discovery.router as _disc_router  # noqa: E402
 
 _orig_build_service = _disc_router._build_service
@@ -138,7 +138,7 @@ class _FailingTaskReader:
     ``/status`` calls ``SqliteTaskReader(db_path).read_discovered_tasks()`` *inside*
     its ``try/except`` (unlike ``_resolve_db_path``, which sits outside). Substituting
     the reader — not the path resolver — is what keeps the forced raise caught by the
-    handler rather than escaping as an unhandled 500.
+    handler and converted to ``HTTPException(500)`` rather than escaping.
     """
 
     def __init__(self, *_args, **_kwargs) -> None:
@@ -197,7 +197,7 @@ def _seed_status_err(_world) -> None:
         "source_channel_id": "owner_bot",
         "execution_config": {"MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3},
     }),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def execute_ok():
     """New task → graph initialized → 200 with run_id (fire-and-forget)."""
@@ -232,7 +232,7 @@ def execute_conflict_on_reexecute():
     scenario="ok",
     input=CaseInput(query_params={"task_id": "t_dash_ok"}),
     seed=lambda w: _seed_graph(w, "t_dash_ok"),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def dashboard_ok():
     """Existing task → graph snapshot → 200."""
@@ -256,7 +256,7 @@ def dashboard_task_not_found():
     path="/openapi/v1/task/list",
     scenario="ok",
     seed=lambda w: _seed_graph(w, "t_list_ok"),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def list_ok():
     """List summaries (seeded graph present) → 200."""
@@ -282,10 +282,10 @@ def list_invalid_status_filter():
     input=CaseInput(json_body={
         "loop_task_id": "t_cb_report_ok::t_cb_report_ok",
         "workflow_type": "single_bot",
-        "result": {"success": True, "data": {"report": "dd"}},
+        "result": {"code": 200000, "data": {"report": "dd"}},
     }),
     seed=lambda w: (_seed_graph(w, "t_cb_report_ok"), _run_root(w, "t_cb_report_ok")),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def callback_report_ok():
     """Result fold on a RUNNING root → 200 {ok: true}."""
@@ -310,7 +310,7 @@ def callback_report_invalid_body():
     scenario="ok",
     input=CaseInput(json_body={"task_id": "t_bbs_claim_ok", "bot_id": "bot1"}),
     seed=lambda w: _seed_graph_bbs(w, "t_bbs_claim_ok"),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def bbs_claim_ok():
     """CAS claim on a bbs_mode task → 200 {root_node_id, task_id}."""
@@ -341,7 +341,7 @@ def bbs_claim_non_bbs_task():
         "bot_id": "bot1",
     }),
     seed=lambda w: _seed_graph_bbs(w, "t_bbs_attach_ok", claim_bot="bot1"),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def bbs_attach_ok():
     """Holder attaches a scoped bbs child under the PENDING root → 200."""
@@ -377,7 +377,7 @@ def bbs_attach_not_holder():
         "output_patch": {"checkpoint": "v1"},
     }),
     seed=lambda w: _seed_graph_bbs(w, "t_bbs_result_ok", claim_bot="bot1"),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def bbs_result_ok():
     """Holder reports a checkpoint fold (no terminal flip) on the root → 200."""
@@ -416,7 +416,7 @@ def bbs_result_not_holder():
         "loop_task_id": "t_wf_start_ok::t_wf_start_ok",
     }),
     seed=lambda w: _seed_graph(w, "t_wf_start_ok"),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def workflow_start_ok():
     """Task-level start callback on a PENDING root → PENDING→RUNNING → 200."""
@@ -450,7 +450,7 @@ def workflow_start_invalid_body():
         "loop_task_id": "t_wf_result_ok::t_wf_result_ok",
     }),
     seed=lambda w: (_seed_graph(w, "t_wf_result_ok"), _run_root(w, "t_wf_result_ok")),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def workflow_result_ok():
     """Task-level result callback on a RUNNING root → 200."""
@@ -490,7 +490,7 @@ def workflow_result_unregistered():
         "is_success": True,
     }),
     seed=lambda w: _seed_graph(w, "t_node_start_ok"),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def node_start_ok():
     """Node-level start callback on the PENDING root → 200."""
@@ -533,7 +533,7 @@ def node_start_node_not_found():
         "output": {"report": "dd"},
     }),
     seed=lambda w: (_seed_graph(w, "t_node_result_ok"), _run_root(w, "t_node_result_ok")),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def node_result_ok():
     """Node-level result callback on a RUNNING root → 200."""
@@ -567,7 +567,7 @@ def node_result_node_not_found():
     scenario="ok",
     input=CaseInput(query_params={"user_id": "u1", "agent_id": "bot_001"}),
     seed=_seed_discover_ok,
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def discovery_discover_ok():
     """Manual discovery trigger over an absent db → {success: true, discovered: 0}."""
@@ -579,10 +579,10 @@ def discovery_discover_ok():
     scenario="build_failure",
     input=CaseInput(query_params={"user_id": "u1", "agent_id": "bot_001"}),
     seed=_seed_discover_err,
-    expect=ExpectError(status=200, json_contains={"success": False}),
+    expect=ExpectError(status=500),
 )
 def discovery_discover_build_failure():
-    """Forced ``_build_service`` raise → handler's except → {success: false} 200."""
+    """Forced ``_build_service`` raise → handler catches → ``InternalError`` → app ``DomainError`` handler → 500 ``ErrorEnvelope``."""
 
 
 # ===== GET /openapi/v1/task/discovery/status =====
@@ -592,10 +592,10 @@ def discovery_discover_build_failure():
     path="/openapi/v1/task/discovery/status",
     scenario="build_failure",
     seed=_seed_status_err,
-    expect=ExpectError(status=200, json_contains={"success": False}),
+    expect=ExpectError(status=500),
 )
 def discovery_status_build_failure():
-    """Forced ``SqliteTaskReader.read`` raise (inside the try) → handler's except → {success: false} 200."""
+    """Forced ``SqliteTaskReader.read`` raise (inside the try) → ``InternalError`` → app ``DomainError`` handler → 500 ``ErrorEnvelope``."""
 
 
 @endpoint_test(
@@ -603,7 +603,7 @@ def discovery_status_build_failure():
     path="/openapi/v1/task/discovery/status",
     scenario="ok",
     seed=_seed_status_ok,
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
 def discovery_status_ok():
     """Status read over an absent db → {success: true, total: 0}."""

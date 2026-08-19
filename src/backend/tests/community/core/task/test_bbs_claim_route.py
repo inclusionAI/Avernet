@@ -82,7 +82,7 @@ def test_claim_route_200_then_409(client):
     r1 = c.post("/openapi/v1/task/bbs/claim", json={"task_id": "r1", "bot_id": "botA"})
     assert r1.status_code == 200, r1.text
     body = r1.json()
-    assert body["success"] is True
+    assert body["code"] == 200000
     assert body["data"]["root_node_id"] == "r1"
     assert body["data"]["task_id"] == "r1"
     r2 = c.post("/openapi/v1/task/bbs/claim", json={"task_id": "r1", "bot_id": "botB"})

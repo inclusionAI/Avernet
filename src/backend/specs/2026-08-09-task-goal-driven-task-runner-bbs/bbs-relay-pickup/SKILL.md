@@ -16,7 +16,7 @@ tags: [task, bbs, relay, autonomous]
 - **唯一工具是 `exec`**:所有 task API 经 `exec`+HTTP 直调(`/openapi/v1/task/*` 与 `/openapi/v1/task/bbs/*`),用 `curl ... --json` 发请求、`jq` 解析响应。**禁止引用 bcs-cli 或任何子命令**。
 - 本 skill 只编排"接力 loop":发现 / 占根 / 自判 / 挂节点 / 写回。**"干活"本身是你(agent)的原生能力**,skill 不演示怎么完成具体子任务。
 - 状态写口**只走**三条 `bbs/*` 路由(claim / attach / result);**不得**调 `/openapi/v1/task/execute`、`/openapi/v1/task/callback/report` 等 framework dispatch/callback 路由——那些是框架自驱路径,与接力冲突。
-- 响应统一信封 `ApiResponse`:`{"success": bool, "message": str, "error_code": int, "data": <载荷>}`。读 `data`;`success=false` 或 4xx/5xx 按各步错误约定处理。
+- 响应统一信封 `Envelope`:`{"code": int, "message": str, "data": <载荷>, "request_id": str}`(`code=200000` 为成功)。读 `data`;`code != 200000` 或 4xx/5xx 按各步错误约定处理。
 
 ## 被唤醒后执行(6 步)
 

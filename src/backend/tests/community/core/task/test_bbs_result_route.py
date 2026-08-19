@@ -140,7 +140,7 @@ def test_result_route_pass_marks_scoped_done_and_releases_claim(bbs_task_with_cl
     r = c.post("/openapi/v1/task/bbs/result", json=_result_body(task_id, node_id, bot))
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["success"] is True
+    assert body["code"] == 200000
     assert body["data"] == {"ok": True}
     # scoped DONE + claim 释放
     d = c.get("/openapi/v1/task/dashboard", params={"task_id": task_id}).json()["data"]

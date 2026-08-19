@@ -14,8 +14,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    envelope,
+    envelope_errors,
+)
+from agentclaw.community.core.errors import InternalError
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
     create_default_service,
@@ -56,14 +62,18 @@ def _build_service() -> DiscoveryService:
     )
 
 
-@router.post("/discover")
+@router.post("/discover", response_model=Envelope[dict])
+@envelope_errors
 async def discover_tasks(
+    request: Request,
     user_id: str = Query("default", description="用户 ID"),
     agent_id: str = Query("bot_001", description="Bot/Agent ID"),
-) -> dict:
+) -> Envelope[dict]:
     """手动触发任务发现流程。
 
-    读取 mock 数据中的待确认任务，为每个任务创建 engine session + session_url。
+    读取 mock 数据中的待确认任务，为每个任务创建 engine session + session_url。统一信封
+    ``Envelope{code,data:{discovered,tasks},...}``;失败的 build/discover 经 ``@envelope_errors``
+    上抛 → 中央 handler → ``ErrorEnvelope``(非 200 内吞)。
     """
     logger.info(
         "[task_discovery] discover triggered: user_id=%s, agent_id=%s",
@@ -72,9 +82,11 @@ async def discover_tasks(
     try:
         service = _build_service()
         results = await service.discover(user_id=user_id, agent_id=agent_id)
-
-        return {
-            "success": True,
+    except Exception as exc:
+        logger.error("[task_discovery] discover failed: %s", exc, exc_info=True)
+        raise InternalError("discovery failed") from exc
+    return envelope(
+        {
             "discovered": len(results),
             "tasks": [
                 {
@@ -87,32 +99,34 @@ async def discover_tasks(
                 }
                 for r in results
             ],
-        }
-    except Exception as exc:
-        logger.error("[task_discovery] discover failed: %s", exc, exc_info=True)
-        return {"success": False, "message": str(exc)}
+        },
+        request,
+    )
 
 
-@router.get("/status")
-async def get_status() -> dict:
-    """查看任务发现状态(从 SQLite db 读取)。"""
+@router.get("/status", response_model=Envelope[dict])
+@envelope_errors
+async def get_status(request: Request) -> Envelope[dict]:
+    """查看任务发现状态(从 SQLite db 读取)。统一信封 ``Envelope{code,data:{total,tasks},...}``;
+    db 读失败 → ``InternalError`` 经 ``@envelope_errors`` 映射 500 → ``ErrorEnvelope``。"""
     db_path = _resolve_db_path()
     try:
         reader = SqliteTaskReader(db_path)
         tasks = reader.read_discovered_tasks()
     except Exception as exc:
-        return {"success": False, "message": str(exc)}
-
-    return {
-        "success": True,
-        "total": len(tasks),
-        "tasks": [
-            {
-                "task_id": t.task_id,
-                "project_name": t.project_name,
-                "status": t.status,
-                "priority": t.priority,
-            }
-            for t in tasks
-        ],
-    }
+        raise InternalError("status read failed") from exc
+    return envelope(
+        {
+            "total": len(tasks),
+            "tasks": [
+                {
+                    "task_id": t.task_id,
+                    "project_name": t.project_name,
+                    "status": t.status,
+                    "priority": t.priority,
+                }
+                for t in tasks
+            ],
+        },
+        request,
+    )

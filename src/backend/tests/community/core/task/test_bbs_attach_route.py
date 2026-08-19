@@ -109,7 +109,7 @@ def test_attach_route_creates_node(client):
     r = c.post("/openapi/v1/task/bbs/attach", json=_attach_body("x1", "x1", "botA"))
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["success"] is True
+    assert body["code"] == 200000
     assert body["data"]["node_id"].startswith("bbs-")
     assert body["data"]["task_id"] == "x1"
 
