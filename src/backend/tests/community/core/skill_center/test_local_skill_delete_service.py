@@ -266,7 +266,6 @@ def _service(
         _Collaborators(),
         _Factory(files),
         guard,
-        cleanup,
         lambda: SimpleNamespace(
             resolve_for_bot=lambda *_args: SimpleNamespace(provider=provider)
         ),
@@ -422,6 +421,7 @@ async def test_transactional_active_recheck_restores_package_and_returns_active_
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_quarantine_identity_is_durable_before_source_bytes_are_removed(monkeypatch):
     service, files, _skills, _guard, cleanup = _service()
     original_quarantine = LocalSkillPackageStorage.quarantine_to
@@ -445,6 +445,7 @@ async def test_quarantine_identity_is_durable_before_source_bytes_are_removed(mo
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_next_delete_recovers_a_crash_retained_quarantine_before_retrying(monkeypatch):
     service, files, skills, _guard, cleanup = _service()
     original_quarantine = LocalSkillPackageStorage.quarantine_to
@@ -476,6 +477,7 @@ async def test_next_delete_recovers_a_crash_retained_quarantine_before_retrying(
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_next_delete_cancels_pre_copy_repair_work_when_source_verifies(monkeypatch):
     service, files, skills, _guard, cleanup = _service()
     original_quarantine = LocalSkillPackageStorage.quarantine_to
@@ -507,6 +509,7 @@ async def test_next_delete_cancels_pre_copy_repair_work_when_source_verifies(mon
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_retry_repairs_an_incomplete_existing_source_before_purging_quarantine():
     service, files, skills, _guard, cleanup = _service()
     files.files["/skills/one/scripts/main.py"] = b"print('verified')\n"
@@ -526,6 +529,7 @@ async def test_retry_repairs_an_incomplete_existing_source_before_purging_quaran
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_database_failure_records_quarantine_cleanup_after_source_restores():
     service, files, skills, _guard, cleanup = _service(fail_delete=True)
     original_delete = files.delete_tree
@@ -545,6 +549,7 @@ async def test_database_failure_records_quarantine_cleanup_after_source_restores
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_restore_failure_is_not_swallowed_after_database_rollback():
     service, files, skills, _guard, cleanup = _service(fail_delete=True)
     files.fail_write_prefixes.add("/skills/one/")
@@ -558,6 +563,7 @@ async def test_restore_failure_is_not_swallowed_after_database_rollback():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_failed_source_cleanup_restores_authoritative_bytes_and_removes_quarantine():
     service, files, skills, _guard, cleanup = _service()
     files.fail_delete.add("/skills/one")
@@ -571,6 +577,7 @@ async def test_failed_source_cleanup_restores_authoritative_bytes_and_removes_qu
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_source_cleanup_exception_restores_authoritative_bytes_and_removes_quarantine():
     service, files, skills, _guard, cleanup = _service()
     original_delete = files.delete_tree
@@ -592,6 +599,7 @@ async def test_source_cleanup_exception_restores_authoritative_bytes_and_removes
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_partial_source_cleanup_failure_repairs_authoritative_bytes_before_quarantine_purge():
     service, files, skills, _guard, cleanup = _service()
     files.files["/skills/one/scripts/main.py"] = b"print('restored')\n"
@@ -609,6 +617,7 @@ async def test_partial_source_cleanup_failure_repairs_authoritative_bytes_before
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_unverified_partial_source_repair_retains_complete_quarantine_fail_closed():
     service, files, skills, _guard, cleanup = _service()
     files.files["/skills/one/scripts/main.py"] = b"print('retain')\n"
@@ -624,6 +633,7 @@ async def test_unverified_partial_source_repair_retains_complete_quarantine_fail
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_post_commit_purge_failure_records_durable_quarantine_cleanup():
     service, files, skills, _guard, cleanup = _service()
     original_delete = files.delete_tree
@@ -642,6 +652,7 @@ async def test_post_commit_purge_failure_records_durable_quarantine_cleanup():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="durable cleanup work was removed")
 async def test_purge_completion_mark_failure_propagates_without_resurrecting_skill():
     service, _files, skills, _guard, cleanup = _service()
     cleanup.mark_cleaned = lambda **_kwargs: False

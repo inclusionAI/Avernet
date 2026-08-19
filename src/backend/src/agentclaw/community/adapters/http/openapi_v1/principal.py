@@ -56,7 +56,8 @@ checked against, and that follows from whether the credential names a person:
 - **An application acting alone** names no end user, so there is nothing to
   compare with. Its ``user_id`` is authorized against the **grant** instead —
   "has this person delegated to this application, for this bot?" — which happens
-  in :data:`GrantCheckedDep` below, because only there is the bot known.
+  in the grant dependencies below (:func:`require_granted_own_bot` /
+  :func:`require_granted_addressed_bot`), because only there is the bot known.
 
 This is the split :func:`require_user_id`'s own docstring predicted: acquisition
 here, adjudication one step later. It is why the parameter had to exist before
@@ -90,14 +91,12 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import Depends, Query, Request
+from starlette.requests import HTTPConnection
 
-from agentclaw.community.adapters.http.openapi_v1.admission import (
-    ADMISSION,
-    ActingCaller,
-    AdmissionMode,
-)
+from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
+    _refuse,
     require_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
@@ -231,9 +230,9 @@ async def require_user_id(
     naming no end user — an application acting alone — there is no second id to
     compare with, so the comparison is skipped and the parameter is authorized
     against the delegation instead. That check needs the bot, which this
-    dependency does not have, so it happens one step later in
-    :data:`GrantCheckedDep`. Nothing else moved: no handler, schema or path
-    changed, because none of them ever named the user.
+    dependency does not have, so it happens one step later, in whichever grant
+    dependency the route declares. Nothing else moved: no handler, schema or
+    path changed, because none of them ever named the user.
 
     Skipping the comparison is not skipping a check. An application that reaches
     an operation without also taking the grant-checked dependency would be
@@ -364,11 +363,62 @@ _BOT_ID_KEY = "bot_id"
 _OWNER_ID_KEY = "owner_id"
 
 
-async def require_granted_bot(
+async def require_granted_own_bot(
     request: Request,
     caller: ActingCallerDep,
 ) -> str:
-    """Authorize the addressed bot for an application caller; a no-op for a human.
+    """Authorize the addressed bot as the **delegating user's own**.
+
+    The dependency every ``GRANT_CHECKED_OWN_BOT`` operation declares — at
+    ``include_router`` for the wholly own-bot groups, per route in the mixed
+    ``bots`` group — and the declaration *is* the mode: a route says which id
+    model it has by naming this dependency or its addressed-bot sibling, and
+    ``test_admission_inventory.py`` fails if the name and the table disagree.
+
+    The owner is ``caller.user_id`` and nothing else, which is not shorthand —
+    it is the security property. ``request.query_params`` is the raw parsed
+    query string, not the parameters a route declares, so an operation that
+    never publishes ``owner_id`` would still be handed one if a client appended
+    it. An earlier revision read it wherever it appeared, and that let an
+    application aim the *check* at a bot it held a grant on while the *handler*
+    — reading only its own ``user_id`` — resolved and acted on the delegating
+    user's own, different, ungranted bot of the same id. A grant on anyone's
+    ``default`` became access to the delegator's ``default``. This function
+    cannot repeat that mistake because it never consults the wire at all: check
+    and resolution read the same value by construction.
+    """
+    return _require_granted_bot(request, caller, owner_id=caller.user_id)
+
+
+async def require_granted_addressed_bot(
+    request: Request,
+    caller: ActingCallerDep,
+) -> str:
+    """Authorize the bot the request **addresses**, which may be shared.
+
+    The dependency every ``GRANT_CHECKED_ADDRESSED_BOT`` operation declares —
+    the engine-runtime groups through :data:`AddressedBotGrantDep` (their
+    ``resolve_owner_id`` consumes the returned owner), the skills collection
+    operations per route. Declaring it is what entitles an operation to an
+    owner off the wire: these operations publish an ``owner_id`` query
+    parameter, defaulting to the caller, and this reads the same value the
+    handler acts on — so the check and the resolution mean the same bot here
+    for the same reason the own-bot dependency's constant does there.
+
+    An operation that does *not* publish ``owner_id`` must declare
+    :func:`require_granted_own_bot` instead; giving it this dependency would
+    reintroduce the surface's oldest defect (see that function's docstring).
+    ``test_admission_inventory.py`` holds each route to the dependency its
+    admission mode calls for.
+    """
+    addressed_owner = request.query_params.get(_OWNER_ID_KEY) or caller.user_id
+    return _require_granted_bot(request, caller, owner_id=addressed_owner)
+
+
+def _require_granted_bot(
+    request: Request, caller: ActingCaller, *, owner_id: str
+) -> str:
+    """The shared half: find the bot on the wire, ask the grant, return the owner.
 
     Returns the resolved **owner** of the addressed bot — which the
     engine-runtime groups need and the user-scoped groups discard. One lookup,
@@ -379,37 +429,29 @@ async def require_granted_bot(
     would risk a second, different answer.
 
     For an application it is the authorization: no live grant for
-    ``(app, bot, delegating user)`` raises :class:`GrantNotResolvableError`,
-    which the app maps to a ``404`` byte-identical to a nonexistent bot.
+    ``(app, bot, owner, delegating user)`` raises
+    :class:`GrantNotResolvableError`, which the app maps to a ``404``
+    byte-identical to a nonexistent bot.
 
     **What this needs is a bot *and an owner*, because ``bot_id`` alone does not
-    identify a bot.** Seven operations could not supply both, so the check ran
-    in their handlers instead — one carried its bot in the request body, four
-    named only a skill, and two named a bot but addressed an owner under a
-    parameter this dependency did not know. That was ``TODO(#960)``: two
-    mechanisms doing one job, and it had already cost one real defect, because a
-    handler-side check is a place the check and the resolution can drift apart.
+    identify a bot.** The two callers above differ only in where the owner comes
+    from; everything both need — and the ``TODO(#960)`` history of the
+    operations that could not supply a bot here — lives once, in this body.
 
-    Bot-first addressing removed the reason for **three of the seven**. The
-    routines create takes its bot on the path; the two skills collection
-    operations spell their owner locator ``owner_id``, so
-    :func:`_addressed_owner` reads the same value the handler acts on.
-
-    The four ``{skill_id}`` operations remain, and not by omission. They resolve
-    by ``(skill, actor)``, so the bot's owner arrives *on the record* — a
-    collaborator reaches a skill on someone else's bot routinely — and there is
-    nothing here to look a grant up against until that read has happened. They
-    are named in ``admission.SKILL_SCOPED_OPERATIONS``, mounted without this
-    dependency rather than exempted from it, and check the pair the record
-    carries before acting.
+    The four ``{skill_id}`` operations declare neither caller, and not by
+    omission. They resolve by ``(skill, actor)``, so the bot's owner arrives
+    *on the record* — a collaborator reaches a skill on someone else's bot
+    routinely — and there is nothing here to look a grant up against until that
+    read has happened. They are named in ``admission.SKILL_SCOPED_OPERATIONS``,
+    mounted without either dependency rather than exempted from one, and check
+    the pair the record carries before acting.
 
     The refusal below is what stays. An operation that reaches here without a
-    bot id is refused rather than waved through. The *legacy* addresses cannot
-    be checked here either — their bot really is in a body or behind a skill id
-    — so they check themselves, inside ``openapi_v1/deprecated``, and that half
-    of the mechanism is deleted when they are.
+    bot id is refused rather than waved through. The *legacy* addresses that
+    cannot be checked here — their bot really is in a body or behind a skill id
+    — check themselves, inside ``openapi_v1/deprecated``, and that half of the
+    mechanism is deleted when they are.
     """
-    addressed_owner = _addressed_owner(request, caller.user_id)
     bot_id = request.path_params.get(_BOT_ID_KEY) or request.query_params.get(
         _BOT_ID_KEY
     )
@@ -422,50 +464,37 @@ async def require_granted_bot(
             "no bot id on a grant-checked request; the operation must resolve "
             "its own bot before acting"
         )
-    return caller.require_bot(str(bot_id), owner_id=addressed_owner)
+    return caller.require_bot(str(bot_id), owner_id=owner_id)
 
 
-def _addressed_owner(request: Request, caller_id: str) -> str:
-    """Whose bot this request addresses — never a guess, and never ``None``.
+#: What an engine-runtime handler's ``resolve_owner_id`` declares to have the
+#: addressed bot authorized *and* receive the owner the grant actually covers.
+AddressedBotGrantDep = Annotated[str, Depends(require_granted_addressed_bot)]
 
-    ``bot_id`` does not identify a bot; ``(owner_id, bot_id)`` does. So the
-    grant lookup needs an owner, and every operation on this surface already
-    knows one:
 
-    - The **user-scoped groups** resolve through ``get_by_id_and_owner`` with
-      the delegating user. The owner is the caller, full stop, and **nothing on
-      the wire may say otherwise** — see below.
-    - The **engine-runtime groups** publish an ``owner_id`` query parameter that
-      defaults to the caller, and adjudicate it in ``resolve_owner_id``. There
-      the request is entitled to name an owner, so this reads the same value the
-      operation will act on.
+async def refuse_app_only_caller(
+    connection: HTTPConnection,
+    principal: Annotated[Principal, Depends(require_principal)],
+) -> None:
+    """The declaration a ``REFUSED`` operation carries: no machine callers.
 
-    **The mode decides whether the wire is consulted at all, and that gate is
-    load-bearing.** ``request.query_params`` is the raw parsed query string, not
-    the parameters a route declares, so an operation that never publishes
-    ``owner_id`` will still hand one over if a client appends it. Trusting it
-    unconditionally let an application aim the *check* at a bot it held a grant
-    on while the *handler* — reading only its own ``user_id`` — resolved and
-    acted on the delegating user's own, different, ungranted bot of the same id.
-    A grant on anyone's ``default`` became access to the delegator's ``default``.
+    The refusal itself already happens centrally — :func:`require_principal`
+    admits a caller naming no end user only on an operation whose table entry
+    is in ``ADMITTING_MODES``, and an operation *absent* from the table refuses
+    by omission. That fail-closed default stays, and this dependency does not
+    replace it.
 
-    That failure is this surface's oldest one, in a new place: the check and the
-    resolution must never be able to mean different bots. Reading the wire only
-    where the operation itself reads it keeps them the same value by
-    construction.
+    What this adds is the same thing the two grant dependencies above add to
+    their modes: the decision is visible on the route that carries it, and
+    checked there. A ``REFUSED`` operation whose table entry were ever
+    mislabelled to an admitting mode would still refuse here, instead of
+    silently widening — and ``test_admission_inventory.py`` holds the set of
+    routes declaring this to exactly the table's ``REFUSED`` entries.
 
-    An operation this cannot classify answers with the caller's own id, the
-    stricter side — it has not been placed in a mode and is refused a moment
-    later anyway.
+    Refuses in the shape :func:`require_principal` refuses — the same ``401``
+    on HTTP, the same ``1008`` close on a WebSocket handshake — so a caller
+    cannot tell which of the two said no.
     """
-    route = request.scope.get("route")
-    path = getattr(route, "path", None)
-    if path is None:
-        return caller_id
-    if ADMISSION.get((request.method, path)) is not AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT:
-        return caller_id
-    return request.query_params.get(_OWNER_ID_KEY) or caller_id
-
-
-#: What a grant-checked handler declares to have its bot authorized.
-GrantCheckedDep = Annotated[str, Depends(require_granted_bot)]
+    if caller_names_a_user(principal):
+        return
+    _refuse(connection, "this operation requires a caller naming an end user")

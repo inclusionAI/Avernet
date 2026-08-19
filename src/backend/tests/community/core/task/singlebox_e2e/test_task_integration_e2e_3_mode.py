@@ -97,10 +97,10 @@ _DASH_TIMEOUT = 60.0
 
 
 async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
-    """读 ``/api/task/dashboard``;一次性排队/断网时返 ``None`` 供外层轮询重试(不直接 fail 用例)。"""
+    """读 ``/openapi/v1/collaboration/tasks/dashboard``;一次性排队/断网时返 ``None`` 供外层轮询重试(不直接 fail 用例)。"""
     try:
         r = await cli.get(
-            f"{_BACKEND}/api/task/dashboard",
+            f"{_BACKEND}/openapi/v1/collaboration/tasks/dashboard",
             params={"task_id": task_id},
             timeout=_DASH_TIMEOUT,
         )
@@ -114,7 +114,7 @@ async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
 
 
 def _execute_body(owner_id: str) -> dict:
-    """``POST /api/task/execute`` 请求体(TaskInfoDTO):基础架构方向三份交付物。
+    """``POST /openapi/v1/collaboration/tasks/execute`` 请求体(TaskInfoDTO):基础架构方向三份交付物。
 
     planning-arch(通用 LLM)读根 goal 自拆 ~3 子:技术栈概览(命中 技术栈概览Bot → single_bot HIT)、
     业务+数据双视角分析(命中 业务架构视角Bot+数据架构视角Bot → coop_group HIT_MULTI_BOTS)、
@@ -209,12 +209,12 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
         adapter = SingleboxEngineAdapter(backend_base_url=_BACKEND, user_id=_USER_ID)
 
         async with httpx.AsyncClient(timeout=300.0, headers=_HDRS) as cli:
-            # 3) POST /api/task/execute → backend 进程内真实 engine 推进:
+            # 3) POST /openapi/v1/collaboration/tasks/execute → backend 进程内真实 engine 推进:
             #    planning-arch LLM 自拆 ~3 子 → owner 通用 LLM 派发判:
             #      技术栈概览 → HIT_SINGLE 技术栈概览Bot(single_bot);
             #      业务+数据双视角 → HIT_MULTI_BOTS [业务架构视角Bot,数据架构视角Bot](coop_group,BCS 拉群);
             #      架构师名册 → MISS → @MAX_DEPTH=1 升 BBS(bbs_mode=True / 根 PLANNING / 图空闲;前两子在跑保根可恢复)。
-            r = await cli.post(f"{_BACKEND}/api/task/execute", json=_execute_body(owner_id))
+            r = await cli.post(f"{_BACKEND}/openapi/v1/collaboration/tasks/execute", json=_execute_body(owner_id))
             r.raise_for_status()
             print(f"[execute] {r.json().get('message')} data={r.json().get('data')}")
 

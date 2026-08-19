@@ -7,6 +7,7 @@ Deterministic (sorted keys) so drift/compat diffs are stable.
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -14,10 +15,14 @@ from typing import Any
 _PUBLIC_BASE = "/openapi/v1"
 
 
-def build_public_openapi() -> dict[str, Any]:
-    """The backend's OpenAPI narrowed to the public ``/openapi/v1`` surface.
+def build_public_openapi(path_prefix: str = _PUBLIC_BASE) -> dict[str, Any]:
+    """The backend's OpenAPI narrowed to the public ``path_prefix`` surface.
 
-    Both ``paths`` and ``components`` are narrowed: paths to ``/openapi/v1`` and
+    ``path_prefix`` is typically ``/openapi/v1`` (legacy single-domain dump) or
+    a more specific prefix such as ``/openapi/v1/bots`` when the gateway wants
+    per-domain schema artifacts.
+
+    Both ``paths`` and ``components`` are narrowed: paths to the prefix and
     components to only those transitively referenced by those paths. Keeping the
     whole app's components would drag every legacy/internal schema into the
     published artifact and make the compat gate block on purely-internal changes.
@@ -29,7 +34,7 @@ def build_public_openapi() -> dict[str, Any]:
     public_paths = {
         path: item
         for path, item in spec.get("paths", {}).items()
-        if path.startswith(_PUBLIC_BASE)
+        if path.startswith(path_prefix)
     }
     out = {
         key: value for key, value in spec.items() if key not in ("paths", "components")
@@ -98,9 +103,9 @@ def _resolve_ref(components: dict[str, Any], ref: str) -> Any:
     return section_map.get(name) if isinstance(section_map, dict) else None
 
 
-def dump_openapi(target: str | Path) -> dict[str, Any]:
+def dump_openapi(target: str | Path, *, path_prefix: str = _PUBLIC_BASE) -> dict[str, Any]:
     """Write the public description to *target* (deterministic JSON)."""
-    spec = build_public_openapi()
+    spec = build_public_openapi(path_prefix=path_prefix)
     Path(target).write_text(
         json.dumps(spec, indent=2, sort_keys=True, ensure_ascii=False),
         encoding="utf-8",
@@ -109,8 +114,13 @@ def dump_openapi(target: str | Path) -> dict[str, Any]:
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry for CI
-    import sys
-
-    dest = sys.argv[1] if len(sys.argv) > 1 else "bots.openapi.json"
-    dump_openapi(dest)
-    print(f"wrote public OpenAPI to {dest}")
+    parser = argparse.ArgumentParser(description="Dump backend public OpenAPI")
+    parser.add_argument("dest", nargs="?", default="bots.openapi.json", help="output file")
+    parser.add_argument(
+        "--path-prefix",
+        default=_PUBLIC_BASE,
+        help="only keep paths starting with this prefix",
+    )
+    args = parser.parse_args()
+    dump_openapi(args.dest, path_prefix=args.path_prefix)
+    print(f"wrote public OpenAPI to {args.dest}")

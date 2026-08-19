@@ -14,7 +14,7 @@
 但现状有两个关键缺口：
 
 1. **seam 全是 stub**：Avernet 默认策略 `GapBasedPlanningStrategy` 返 `[]`、`SearchBasedDispatchStrategy` 恒 `MISS`、`TaskRunner` 投递只记日志返 `True`。`gwqie46v7hzr1w6h` 案例目前只在 **`tests/.../task/e2e/test_e2e.py`** 用 **in-process stub**（`CaseDecomposer`/`CaseBotDiscover` + test runner stub）跑通——seam 真值未经验证。
-2. **未接线到运行时**：`TaskService` **未被任何 DI module 装配、没有任何 HTTP router 暴露**（`grep` 无 `task_module.py`、无 `/api/task/*` 路由、`TaskService(` 仅在自身 core 构造）。即框架在 singlebox 运行态根本不可达，无法被真实 API 驱动。
+2. **未接线到运行时**：`TaskService` **未被任何 DI module 装配、没有任何 HTTP router 暴露**（`grep` 无 `task_module.py`、无 `/openapi/v1/collaboration/tasks/*` 路由、`TaskService(` 仅在自身 core 构造）。即框架在 singlebox 运行态根本不可达，无法被真实 API 驱动。
 
 因此现有 e2e 是"内核逻辑正确性"验证，**不是"真实工程链路"验证**：真实 bot、真实 skill（规划/搜推/验收）、真实投递、真实回投都未被打通。一旦 corp 在 ocb 侧替换策略/投递，没有人能保证 seam 契约在真实 IO 下成立、回调并发下锁模型成立、HTTP 边界协议成立。
 
@@ -40,7 +40,7 @@
 - **策略类名/接口不变，只实现体变真实**：`GapBasedPlanningStrategy` / `SearchBasedDispatchStrategy` / `DeliveryPort` 都是框架自带默认策略（Avernet stub）。类名、方法签名、策略池结构都不变。本轮只把实现体从 stub（返 `[]` / 恒 MISS / 记日志）改为真实实现（组 payload → 投 bot → 收结构化 result）。corp 接真实 LLM 同理替换 body，seam 不变。
 - **结果回收分两种**：
   - **plan/dispatch 同步收 result**（`await apply()` 当返回值直接拿，引擎锁内已 await，**不需异步回投**）。
-  - **execute/verify 经 `report_result` 异步回投**（投递给 bot → bot 凭已装 skill 执行完上报 → `POST /api/task/callback/report` → `on_report` 翻态推进）。
+  - **execute/verify 经 `report_result` 异步回投**（投递给 bot → bot 凭已装 skill 执行完上报 → `POST /openapi/v1/collaboration/tasks/callback/report` → `on_report` 翻态推进）。
 - **skill 宿主划分**（bot 侧黑盒，框架不感知 skill 存在，只投 payload 给指定 bot）：
   - `planning` + `search`（验收决策类 skill）→ **owner bot**（`source_channel_id`）。
   - `execute`（执行操作；**叶子节点的自验收 verdict 折叠进 execute 回投**）→ **worker bot**（`assignee`）。
@@ -49,15 +49,15 @@
 
 ### G2. 后端接线（DI + HTTP，补齐运行时可达性缺口）
 - 新 `di/modules/task_module.py`：装配 `TaskService(TaskGraphService, TaskHarness)`，**引擎始终是 `ExecutionEngine`**；`_build_runner` 注入 `build_integration()` 返回的 `TaskExecutor`（三模态投递）+ `set_strategies` 注入真实 plan/dispatch 策略 body（`TASK_ENGINE=skill` 时，否则默认 stub；prod 不清）。`OpenApiBotPort` 经 `ApiKeyProvider`（base_url/api_key/cookie/referer）配置注入——local/prod 纯配置差异。
-- 新 `adapters/http/task/router.py`（thin）：`POST /api/task/execute`、`GET /api/task/dashboard`、`POST /api/task/callback/report`（回投 → `callback.report_result`）。Router 只翻译协议，不持领域策略。
+- 新 `adapters/http/task/router.py`（thin）：`POST /openapi/v1/collaboration/tasks/execute`、`GET /openapi/v1/collaboration/tasks/dashboard`、`POST /openapi/v1/collaboration/tasks/callback/report`（回投 → `callback.report_result`）。Router 只翻译协议，不持领域策略。
 - App include 该 router；router-hit 进 singlebox coverage 记录。
 
 ### G3. 三个真实 skill（作为真实可安装 skill 包）
 - 规划 skill / 搜推 skill / 验收 skill：以 **真实 skill 包**（SKILL.md + 确定性 scaffold）形式存在，经 `/api/skills/upload` 上传、经 skillset 激活安装到 owner bot；输入输出为结构化 JSON（对齐 seam 契约）。scaffold 针对 `gwqie46v7hzr1w6h` 案例确定式产出，确保轨迹可复现（"真实"在工程链路，不在 LLM 随机性）。
 
 ### G4. 真实 case 端到端用例
-- 用例：`POST /api/task/execute` 提交 `gwqie46v7hzr1w6h`（存储行业尽调）TaskInfo；real `on_execute` 跑：规划 skill 拆解 → 搜推 skill 匹配 worker bots → 投递执行 → 验收 skill 验收 → 回投翻态 → FAIL治愈/MISS升BBS（按案例）→ 根 DONE。
-- 轮询 `GET /api/task/dashboard` 至终态，断言分解树、节点状态、run_mode、传播、补救、终态与权威剧本一致。
+- 用例：`POST /openapi/v1/collaboration/tasks/execute` 提交 `gwqie46v7hzr1w6h`（存储行业尽调）TaskInfo；real `on_execute` 跑：规划 skill 拆解 → 搜推 skill 匹配 worker bots → 投递执行 → 验收 skill 验收 → 回投翻态 → FAIL治愈/MISS升BBS（按案例）→ 根 DONE。
+- 轮询 `GET /openapi/v1/collaboration/tasks/dashboard` 至终态，断言分解树、节点状态、run_mode、传播、补救、终态与权威剧本一致。
 - 至少覆盖 **三阶段三模态 happy 路径 + 一条重规划恢复路径（FAIL治愈）**；BBS/STUCK 作为可选第二用例。
 
 ### G5. singlebox 运行入口与门禁
@@ -119,8 +119,8 @@
 ## 6. 成功标准（验收条件）
 
 - **AC-1**：singlebox 起服务后，经真实 HTTP API 能创建 owner bot + N 个 worker bot，并上传+激活安装规划/搜推/验收三个真实 skill 到 owner bot（可查激活状态）。
-- **AC-2**：`POST /api/task/execute` 提交 `gwqie46v7hzr1w6h` TaskInfo 后，框架经 **真实 skill 调用**（非 stub）完成首帧：规划 skill 拆出第一批子节点 → 搜推 skill 为其决出执行者 → 投递给真实 bot。
-- **AC-3**：执行结果经真实回投链路（`/api/task/callback/report` → `callback.report_result` → `on_report`）翻态、传播、补救；`GET /api/task/dashboard` 反映分解树与状态推进。
+- **AC-2**：`POST /openapi/v1/collaboration/tasks/execute` 提交 `gwqie46v7hzr1w6h` TaskInfo 后，框架经 **真实 skill 调用**（非 stub）完成首帧：规划 skill 拆出第一批子节点 → 搜推 skill 为其决出执行者 → 投递给真实 bot。
+- **AC-3**：执行结果经真实回投链路（`/openapi/v1/collaboration/tasks/callback/report` → `callback.report_result` → `on_report`）翻态、传播、补救；`GET /openapi/v1/collaboration/tasks/dashboard` 反映分解树与状态推进。
 - **AC-4**：三阶段三模态 happy 路径跑到 **根 DONE**；断言分解树结构、run_mode（single_bot/coop_group/bbs）、验收 PASS 传播、终态与权威剧本一致。
 - **AC-5**：至少一条重规划恢复路径（FAIL治愈：验收 FAIL+gaps → 规划 skill 产补救子 → 重投 → PASS）被真实链路跑通并断言。
 - **AC-6**：HTTP adapter 有契约测试（execute/callback/dashboard 协议）；`OpenApiBotPort`/`TaskExecutor` 有 double 实现 + 契约测试。
@@ -132,7 +132,7 @@
 ## 7. 风险与开放问题（留给 plan 收敛）
 
 - **R1（已定，同学实现）**："投指令给 bot、取结构化结果"的真值 = `OpenApiBotAdapter`（`OpenApiBotPort` 实现）：`send_and_wait_async`（plan/dispatch 同步 round-trip 取结果）+ `send_message`/`get_run`（execute 异步投递）。已落地于 `integration/open_api_bot_adapter.py`。
-- **R2 回投路径**：真实引擎异步回调 vs 适配层同步回投。为确定性与 singlebox 可行性，倾向 **适配层时效内回投**（`deliver` 调 skill 取结果 → `POST /api/task/callback/report`），但真实异步回调仍需验证。需 plan 决策。
+- **R2 回投路径**：真实引擎异步回调 vs 适配层同步回投。为确定性与 singlebox 可行性，倾向 **适配层时效内回投**（`deliver` 调 skill 取结果 → `POST /openapi/v1/collaboration/tasks/callback/report`），但真实异步回调仍需验证。需 plan 决策。
 - **R3 并发锁模型**：HTTP 回投引入跨请求同 task_id 并发；框架注释指出 corp 单持久 loop 需切 `asyncio.Lock`。需 plan 验证 `threading.RLock` 在 singlebox 回投模型下是否成立，必要时切锁（最小 seam 改动）。
 - **R4 确定性**：skill 产出需确定式（scaffold 而非自由 LLM），否则轨迹不可断言。singlebox 已有 mock model config 可配合。
 - **R5 singlebox 启停开销**：重型、慢；需 gated + 可单独跑 + 复用 coverage harness。

@@ -110,17 +110,46 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["server_code"],
+      "description": "One MCP server, in one of two mutually exclusive forms discriminated by 'transport'. The 'oneOf' below is the authority: a local entry ('stdio') must carry a launch instruction — top-level 'command'/'args'/'env' — and no endpoint/headers; a remote entry ('http'/'sse') must carry no launch instruction. Validating against this schema is enough to reject a half-formed entry — no engine-side launch attempt required.",
       "properties": {
         "server_code": { "type": "string" },
         "name": { "type": ["string", "null"] },
-        "endpoint": { "type": ["string", "null"], "description": "May carry an inlined ?authorization=<token> query." },
-        "transport": { "type": ["string", "null"] },
+        "endpoint": { "type": ["string", "null"], "description": "Remote form. May carry an inlined ?authorization=<token> query." },
+        "transport": { "type": ["string", "null"], "description": "Discriminator: 'stdio' (local) | 'http' | 'sse' (remote)." },
         "headers": {
           "type": "object",
-          "description": "May carry inlined secret headers (e.g. x-ling-auth).",
+          "description": "Remote form. May carry inlined secret headers (e.g. x-ling-auth).",
           "additionalProperties": { "type": "string" }
+        },
+        "command": { "type": ["string", "null"], "description": "Local form (transport == 'stdio'): the executable the engine spawns as a child process, speaking JSON-RPC over its stdin/stdout, e.g. 'python3'. Carries no credentials — the child runs inside the engine's own container. Null/absent for a remote server." },
+        "args": { "type": "array", "items": { "type": "string" }, "description": "Local form. Arguments for 'command'. Empty/absent for a remote server." },
+        "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Local form. Environment variables for the child process. Empty/absent for a remote server." }
+      },
+      "oneOf": [
+        {
+          "title": "local (stdio)",
+          "description": "transport 'stdio' ⇒ a launch instruction, and none of the remote fields.",
+          "required": ["transport", "command"],
+          "properties": {
+            "transport": { "const": "stdio" },
+            "command": { "type": "string", "minLength": 1 },
+            "endpoint": { "type": "null" },
+            "headers": { "type": "object", "maxProperties": 0 }
+          }
+        },
+        {
+          "title": "remote (http/sse)",
+          "description": "transport 'http'/'sse' ⇒ a URL to connect to, and no launch instruction. 'endpoint' is required here even though it is nullable at the top level: an entry with neither a URL nor a launch instruction gives the engine nothing to act on.",
+          "required": ["transport", "endpoint"],
+          "properties": {
+            "transport": { "enum": ["http", "sse"] },
+            "endpoint": { "type": "string", "minLength": 1 },
+            "command": { "type": "null" },
+            "args": { "type": "array", "maxItems": 0 },
+            "env": { "type": "object", "maxProperties": 0 }
+          }
         }
-      }
+      ]
     }
   }
 }

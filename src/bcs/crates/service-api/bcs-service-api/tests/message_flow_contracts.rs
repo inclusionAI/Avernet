@@ -75,6 +75,7 @@ async fn delivery_ports_are_transport_free_contracts() {
             run_id: "run-1".to_string(),
             frame,
             delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await

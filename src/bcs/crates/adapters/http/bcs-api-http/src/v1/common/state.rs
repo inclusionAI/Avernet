@@ -4,6 +4,7 @@ use bcs_service_api::application::v1::{
     BotService, FriendshipService, GroupService, InvitationService, SessionMessageService,
     SessionFileApplicationService, SessionService,
 };
+use bcs_service_api::application::channel::ChannelService;
 
 use crate::v1::openapi::SessionFileUrlProjector;
 
@@ -21,6 +22,7 @@ pub struct ApiState {
     pub message_service: Arc<dyn SessionMessageService>,
     pub invitation_service: Arc<dyn InvitationService>,
     pub friendship_service: Arc<dyn FriendshipService>,
+    pub channel_service: Option<Arc<dyn ChannelService>>,
     pub session_file_service: Option<Arc<dyn SessionFileApplicationService>>,
     pub session_file_url_projector: Option<SessionFileUrlProjector>,
     pub principal_verifier: Arc<dyn PrincipalVerifier>,
@@ -42,6 +44,7 @@ impl ApiState {
             message_service,
             invitation_service,
             friendship_service,
+            channel_service: None,
             session_file_service: None,
             session_file_url_projector: None,
             principal_verifier,
@@ -54,6 +57,14 @@ impl ApiState {
     /// rollout mounts this adapter in the bootstrap composition root.
     pub fn with_bot_service(mut self, bot_service: Arc<dyn BotService>) -> Self {
         self.bot_service = Some(bot_service);
+        self
+    }
+
+    /// Add the shared Channel application service. Channels reuse the legacy
+    /// `ChannelService` impl; permission stays in the adapter, not the app.
+    /// Fail-closed (handler returns `internal` if None) until bootstrap mounts it.
+    pub fn with_channel_service(mut self, service: Arc<dyn ChannelService>) -> Self {
+        self.channel_service = Some(service);
         self
     }
 

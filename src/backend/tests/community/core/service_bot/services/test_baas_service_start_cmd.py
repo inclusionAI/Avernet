@@ -268,55 +268,42 @@ class TestStartupScriptSegment:
         assert encoded in cmd
         assert _b64.b64decode(encoded).decode("utf-8") == body
 
-    # --- runtime bounds -----------------------------------------------------
+    # --- runtime behavior ---------------------------------------------------
 
-    def test_user_stage_runs_under_a_timeout(self):
-        from agentclaw.community.core.service_bot.services.baas_service import (
-            STARTUP_SCRIPT_KILL_GRACE_SECONDS,
-            STARTUP_SCRIPT_TIMEOUT_SECONDS,
-        )
+    def test_user_stage_runs_without_a_timeout(self):
+        """The ``timeout -k`` wrapper was deliberately removed: the script runs
+        to completion however long it takes, and only the publish poller's own
+        budget gives up on a start that overstays."""
+        cmd = self._cmd("echo hi")
+        stage = cmd[cmd.index("__OCB_RC=$?") :]
+        assert "timeout" not in stage
+        assert 'bash "$f"' in stage  # invoked directly, unwrapped
 
-        assert (
-            f"timeout -k {STARTUP_SCRIPT_KILL_GRACE_SECONDS} "
-            f"{STARTUP_SCRIPT_TIMEOUT_SECONDS} bash"
-        ) in self._cmd("echo hi")
+    def test_start_and_finish_markers_bracket_the_run(self):
+        """With no deadline on the run, the log markers are what tells a
+        still-running script apart from a finished one."""
+        cmd = self._cmd("echo hi")
+        stage = cmd[cmd.index("__OCB_RC=$?") :]
+        started = stage.index("[startup_script] started at ")
+        run = stage.index('bash "$f"')
+        finished = stage.index("[startup_script] finished at ")
+        assert started < run < finished
 
-    def test_the_timeout_cannot_be_defeated_by_trapping_term(self):
-        """``timeout N`` alone sends TERM and then waits forever if the script
-        traps it — and nothing upstream bounds the hook (BaaS ignores
-        ``after_create_hook_wait_seconds`` and the wrapper is nohup'd), so this
-        one flag is the whole guarantee that a start terminates."""
-        from agentclaw.community.core.service_bot.services.baas_service import (
-            STARTUP_SCRIPT_KILL_GRACE_SECONDS,
-        )
+    def test_markers_go_to_the_script_log_with_timestamps(self):
+        cmd = self._cmd("echo hi")
+        stage = cmd[cmd.index("__OCB_RC=$?") :]
+        # started marker, script output, finished marker — all in the same log.
+        assert stage.count(">> /home/admin/logs/startup_script.log") == 3
+        # Expanded by the su'd shell at run time, once per marker.
+        assert stage.count("$(date +%Y-%m-%dT%H:%M:%S%z)") == 2
 
-        cmd = self._cmd("trap '' TERM; sleep 100000\n")
-        assert "timeout -k " in cmd
-        assert STARTUP_SCRIPT_KILL_GRACE_SECONDS > 0
-
-    def test_timeout_leaves_headroom_in_the_create_budget(self):
-        """The device only reports once this sequence exits; the poller gives
-        up at 600s (_CREATE_PUBLISH_TIMEOUT_SECONDS).
-
-        Two bounds, because there are two cases. A script that exits or accepts
-        TERM is capped at the deadline, and that is the one sized at half the
-        budget so the platform steps and the callback's retries have the other
-        half. A script that *traps* TERM runs to the KILL instead; that case
-        only has to remain bounded and clear of the poller, not stay under
-        half.
-        """
-        from agentclaw.community.core.service_bot.services.baas_service import (
-            STARTUP_SCRIPT_KILL_GRACE_SECONDS,
-            STARTUP_SCRIPT_TIMEOUT_SECONDS,
-        )
-        from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
-            _CREATE_PUBLISH_TIMEOUT_SECONDS,
-        )
-
-        assert STARTUP_SCRIPT_TIMEOUT_SECONDS <= _CREATE_PUBLISH_TIMEOUT_SECONDS / 2
-
-        hard_cap = STARTUP_SCRIPT_TIMEOUT_SECONDS + STARTUP_SCRIPT_KILL_GRACE_SECONDS
-        assert hard_cap < _CREATE_PUBLISH_TIMEOUT_SECONDS
+    def test_finish_marker_carries_the_scripts_exit_code(self):
+        """``rc`` is captured from ``$?`` immediately after the run, before the
+        marker echo and the mktemp cleanup can overwrite it."""
+        cmd = self._cmd("exit 3")
+        stage = cmd[cmd.index("__OCB_RC=$?") :]
+        assert "; rc=$?; echo " in stage
+        assert 'rc=$rc" >> /home/admin/logs/startup_script.log' in stage
 
     def test_output_goes_to_its_own_log(self):
         cmd = self._cmd("echo hi")

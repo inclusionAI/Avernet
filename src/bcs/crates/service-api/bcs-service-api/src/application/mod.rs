@@ -22,6 +22,7 @@ pub mod provider;
 pub mod secret;
 pub mod session;
 pub mod session_files;
+pub mod session_launch;
 pub mod system_message;
 pub mod v1;
 
@@ -47,6 +48,7 @@ pub use provider::*;
 pub use secret::*;
 pub use session::*;
 pub use session_files::*;
+pub use session_launch::*;
 pub use system_message::*;
 
 pub use crate::port::{

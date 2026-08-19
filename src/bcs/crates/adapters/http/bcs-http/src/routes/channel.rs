@@ -7,7 +7,8 @@ use bcs_channel_api::{
     ChannelHttpMethod, ChannelHttpRequest,
 };
 use bcs_domain::{
-    BindingTarget, ChannelBinding, ChannelConfig, ChannelType, GroupChatScope, Visibility,
+    BindingTarget, ChannelBinding, ChannelConfig, ChannelType, ConversationSessionMap,
+    GroupChatScope, SessionScope, Visibility,
 };
 use bcs_service_api::{ChannelUseCaseError, CreateBindingCommand, ServiceError};
 use serde::{Deserialize, Serialize};
@@ -65,6 +66,34 @@ pub struct BindingListResponse {
     pub items: Vec<BindingResponse>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ConversationResponse {
+    pub binding_id: String,
+    pub conversation_id: String,
+    pub conversation_type: String,
+    pub session_scope: SessionScope,
+    pub bcs_session_id: String,
+    pub last_active_at: u64,
+}
+
+impl From<ConversationSessionMap> for ConversationResponse {
+    fn from(mapping: ConversationSessionMap) -> Self {
+        Self {
+            binding_id: mapping.binding_id,
+            conversation_id: mapping.im_conversation_id,
+            conversation_type: mapping.im_conversation_type,
+            session_scope: mapping.session_scope,
+            bcs_session_id: mapping.bcs_session_id,
+            last_active_at: mapping.last_active_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConversationListResponse {
+    pub items: Vec<ConversationResponse>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BindingTargetType {
@@ -76,6 +105,12 @@ pub enum BindingTargetType {
 pub struct ListBindingsByTargetQuery {
     pub target_type: BindingTargetType,
     pub target_id: String,
+    pub channel_type: Option<ChannelType>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListConversationsBySessionQuery {
+    pub bcs_session_id: String,
     pub channel_type: Option<ChannelType>,
 }
 
@@ -176,6 +211,24 @@ pub async fn list_bindings_by_target(
         .map_err(channel_error)?;
     let items = items.into_iter().map(BindingResponse::from).collect();
     Ok(Json(BindingListResponse { items }))
+}
+
+pub async fn list_conversations_by_session(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    Query(query): Query<ListConversationsBySessionQuery>,
+) -> Result<Json<ConversationListResponse>, HttpAdapterError> {
+    let _staff_no = require_staff_no(&state, &headers, &uri).await?;
+    let (bcs_session_id, channel_type) = normalize_session_query(query)?;
+    let items = state
+        .services
+        .channel
+        .list_conversations_by_session(&bcs_session_id, channel_type)
+        .await
+        .map_err(channel_error)?;
+    let items = items.into_iter().map(ConversationResponse::from).collect();
+    Ok(Json(ConversationListResponse { items }))
 }
 
 pub async fn set_binding_status(
@@ -282,11 +335,28 @@ async fn require_staff_no(
 fn channel_error(error: ChannelUseCaseError) -> HttpAdapterError {
     match error {
         ChannelUseCaseError::NotFound(id) => HttpAdapterError::NotFound(id),
+        ChannelUseCaseError::Conflict(message) => HttpAdapterError::Conflict(message),
         ChannelUseCaseError::InvalidParams(message) => HttpAdapterError::BadRequest(message),
         ChannelUseCaseError::Internal(error) => match error {
             ServiceError::Conflict(message) => HttpAdapterError::Conflict(message),
             other => HttpAdapterError::Service(other),
         },
+    }
+}
+
+#[cfg(test)]
+mod conflict_mapping_tests {
+    use super::channel_error;
+    use crate::error::HttpAdapterError;
+    use bcs_service_api::ChannelUseCaseError;
+
+    #[test]
+    fn channel_error_maps_top_level_conflict_to_http_conflict() {
+        let mapped = channel_error(ChannelUseCaseError::Conflict("dup".to_string()));
+        assert!(matches!(
+            mapped,
+            HttpAdapterError::Conflict(ref msg) if msg.as_str() == "dup"
+        ));
     }
 }
 
@@ -312,6 +382,22 @@ fn normalize_target_query(
         },
     };
     Ok((target, channel_type))
+}
+
+fn normalize_session_query(
+    query: ListConversationsBySessionQuery,
+) -> Result<(String, Option<ChannelType>), HttpAdapterError> {
+    let bcs_session_id = query.bcs_session_id.trim();
+    if bcs_session_id.is_empty() {
+        return Err(HttpAdapterError::BadRequest(
+            "bcs_session_id is required".to_string(),
+        ));
+    }
+    let channel_type = query
+        .channel_type
+        .map(|channel_type| channel_type.trim().to_string())
+        .filter(|channel_type| !channel_type.is_empty());
+    Ok((bcs_session_id.to_string(), channel_type))
 }
 
 #[cfg(test)]
@@ -371,6 +457,24 @@ mod tests {
     }
 
     #[test]
+    fn conversation_response_exposes_lookup_fields_without_im_user_id() {
+        let response = ConversationResponse::from(ConversationSessionMap {
+            binding_id: "binding_1".to_string(),
+            im_conversation_id: "conversation_1".to_string(),
+            im_conversation_type: "2".to_string(),
+            session_scope: SessionScope::PerSender,
+            im_user_id: Some("staff_1".to_string()),
+            bcs_session_id: "group_1:session_1".to_string(),
+            last_active_at: 42,
+        });
+
+        let json = serde_json::to_value(response).expect("serialize response");
+        assert_eq!(json["conversation_id"], "conversation_1");
+        assert_eq!(json["bcs_session_id"], "group_1:session_1");
+        assert!(json.get("im_user_id").is_none());
+    }
+
+    #[test]
     fn target_query_builds_trimmed_bot_target_and_channel_filter() {
         let (target, channel_type) = normalize_target_query(ListBindingsByTargetQuery {
             target_type: BindingTargetType::Bot,
@@ -400,6 +504,33 @@ mod tests {
         assert!(matches!(
             error,
             HttpAdapterError::BadRequest(message) if message == "target_id is required"
+        ));
+    }
+
+    #[test]
+    fn session_query_trims_session_and_channel_type() {
+        let (session_id, channel_type) =
+            normalize_session_query(ListConversationsBySessionQuery {
+                bcs_session_id: " group_1:session_1 ".to_string(),
+                channel_type: Some(" dingtalk ".to_string()),
+            })
+            .expect("valid session query");
+
+        assert_eq!(session_id, "group_1:session_1");
+        assert_eq!(channel_type.as_deref(), Some("dingtalk"));
+    }
+
+    #[test]
+    fn session_query_rejects_blank_session_id() {
+        let error = normalize_session_query(ListConversationsBySessionQuery {
+            bcs_session_id: "   ".to_string(),
+            channel_type: None,
+        })
+        .expect_err("blank session id must fail");
+
+        assert!(matches!(
+            error,
+            HttpAdapterError::BadRequest(message) if message == "bcs_session_id is required"
         ));
     }
 }

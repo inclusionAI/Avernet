@@ -21,7 +21,6 @@ from agentclaw.community.core.skill_center.services.local_skill_delete_service i
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -187,7 +186,6 @@ def _seed_delete(world, *, active: bool) -> None:
             world.get(CollaboratorServiceProtocol),
             storage_factory,
             _Guard(),
-            world.get(LocalSkillCleanupRepository),
             lambda: SimpleNamespace(
                 resolve_for_bot=lambda *_args: SimpleNamespace(provider="local")
             ),

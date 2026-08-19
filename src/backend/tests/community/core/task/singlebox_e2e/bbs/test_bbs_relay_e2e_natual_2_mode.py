@@ -88,10 +88,10 @@ _DASH_TIMEOUT = 60.0
 
 
 async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
-    """读 ``/api/task/dashboard``;一次性排队/断网时返 ``None`` 供外层轮询重试(不直接 fail 用例)。"""
+    """读 ``/openapi/v1/collaboration/tasks/dashboard``;一次性排队/断网时返 ``None`` 供外层轮询重试(不直接 fail 用例)。"""
     try:
         r = await cli.get(
-            f"{_BACKEND}/api/task/dashboard",
+            f"{_BACKEND}/openapi/v1/collaboration/tasks/dashboard",
             params={"task_id": task_id},
             timeout=_DASH_TIMEOUT,
         )
@@ -105,7 +105,7 @@ async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
 
 
 def _execute_body(owner_id: str) -> dict:
-    """``POST /api/task/execute`` 请求体(TaskInfoDTO):基础架构方向「技术栈概览 + 架构师名册」两份交付物。
+    """``POST /openapi/v1/collaboration/tasks/execute`` 请求体(TaskInfoDTO):基础架构方向「技术栈概览 + 架构师名册」两份交付物。
 
     planning-arch(通用 LLM)读根 goal 自拆 ~2 子:技术栈概览(命中 ``基础架构技术栈概览Bot`` → HIT)、
     架构师名册(无匹配 bot → MISS)。``MAX_DEPTH=1`` → 架构师名册 MISS@depth-1 直走 miss_depth_exhausted 升 BBS。
@@ -190,11 +190,11 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
         adapter = SingleboxEngineAdapter(backend_base_url=_BACKEND, user_id=_USER_ID)
 
         async with httpx.AsyncClient(timeout=300.0, headers=_HDRS) as cli:
-            # 3) POST /api/task/execute → backend 进程内真实 engine 推进:
+            # 3) POST /openapi/v1/collaboration/tasks/execute → backend 进程内真实 engine 推进:
             #    planning-arch LLM 自拆 ~2 子 → owner 通用 LLM 派发判:技术栈概览命中技术栈bot(HIT single_bot)、
             #    架构师名册无匹配 bot(MISS)→ 后者 @MAX_DEPTH=1 升 BBS(bbs_mode=True / 根 PLANNING / 图空闲;
             #    技术栈概览在跑保根可恢复)。
-            r = await cli.post(f"{_BACKEND}/api/task/execute", json=_execute_body(owner_id))
+            r = await cli.post(f"{_BACKEND}/openapi/v1/collaboration/tasks/execute", json=_execute_body(owner_id))
             r.raise_for_status()
             print(f"[execute] {r.json().get('message')} data={r.json().get('data')}")
 

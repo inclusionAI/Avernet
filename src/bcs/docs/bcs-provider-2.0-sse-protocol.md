@@ -426,7 +426,7 @@ Requested：
 }
 ```
 
-Submit：
+Submit（前端回传，只发 `values`）：
 
 ```json
 {
@@ -435,6 +435,20 @@ Submit：
     "deploy_target": {"values": ["canary"]},
     "components": {"values": ["web", "worker"]},
     "release_notes": {"values": ["Deploy after 22:00"]}
+  }
+}
+```
+
+BCS 转发给 Provider 时，按 `questionId` 把 requested 存储的原始 `question` 文本
+补进每个 answer（与 `values` 平级），Provider 收到的 answers 形如：
+
+```json
+{
+  "action": "submit",
+  "answers": {
+    "deploy_target": {"values": ["canary"], "question": "Where should this be deployed?"},
+    "components": {"values": ["web", "worker"], "question": "Which components?"},
+    "release_notes": {"values": ["Deploy after 22:00"], "question": "Additional deployment instructions?"}
   }
 }
 ```
@@ -458,6 +472,9 @@ Cancel：
   option value 区分预定义值和自由文本，不引入第二套 custom 字段。
 - resolve 的 `action` 必须是 `submit/cancel`。submit 必须提供 answers，且
   questionId 集合与 requested 完全一致；本期所有问题都必须回答。
+- answers 的键是 `questionId`；每个 answer 只需 `values`，`question` 字段由 BCS
+  按 `questionId` 从 requested 存储的原始问题文本补齐后转发给 Provider，
+  前端 submit 不需要也不应自行回传 `question`。
 - cancel 的语义由 action 决定。BCS 不额外禁止携带 answers，但 Provider/Frontend
   应发送最小的 `{action:"cancel"}`，避免产生歧义。
 - 单选和纯文本恰好一个 value；多选一个或多个；每项都是非空字符串。

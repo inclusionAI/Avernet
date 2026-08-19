@@ -270,6 +270,9 @@ pub struct CreateCollaborationGroup {
     pub driver_bot_uuid: String,
     pub participants: Vec<CreateParticipant>,
     pub collaboration: CollaborationConfiguration,
+    /// Caller-designated originator. `None` ⇒ resolve to the authenticated
+    /// caller principal at the facade (current behavior).
+    pub originator: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,6 +309,7 @@ pub struct GetGroup {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GroupPatch {
     pub name: Option<String>,
+    pub context: Option<String>,
     pub visibility: Option<GroupVisibility>,
     pub delivery_policy: Option<GroupDeliveryPolicy>,
 }
@@ -313,6 +317,7 @@ pub struct GroupPatch {
 impl GroupPatch {
     pub fn is_empty(&self) -> bool {
         self.name.is_none()
+            && self.context.is_none()
             && self.visibility.is_none()
             && self.delivery_policy.is_none()
     }

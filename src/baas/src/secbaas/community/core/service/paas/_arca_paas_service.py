@@ -901,7 +901,7 @@ class ArcaPaasService(PaasService):
             raise self._translate_error(e, ErrorCode.DEVICE_UNAVAILABLE)
 
     async def update_device_ttl(self, paas_device_id: str) -> TTLInfo:
-        """Extend device TTL - target is now() + 24 hours (Arca platform limit).
+        """Extend device TTL - target is now() + 23 hours (under Arca's 24h cap + skew headroom).
 
         Args:
             paas_device_id: Arca sandbox ID (without @tenant_id suffix).
@@ -924,7 +924,9 @@ class ArcaPaasService(PaasService):
         )
 
         now = datetime.now()
-        target_expiration = now + timedelta(hours=24)  # Arca platform limit
+        target_expiration = now + timedelta(
+            hours=23
+        )  # under Arca's 24h cap + skew headroom
 
         self._logger.info(
             f"[update_device_ttl] Extending TTL for {sandbox_id}, target={target_expiration}"

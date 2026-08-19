@@ -9,7 +9,7 @@
 发现流程:
 1. 从 BotService 查出当前所有用户 bot
 2. 为每个 bot 读取已发现的任务数据 (mock)
-3. 为每个待确认任务创建 engine session + session_url
+3. 为每个待确认任务创建 engine session + 投递通知
 
 手动触发可通过 HTTP API 或 CLI。
 
@@ -24,30 +24,24 @@ import asyncio
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
 from agentclaw.community.core.task.task_discovery.discovery_service import (
-    DiscoveryService,
     create_default_service,
+)
+from agentclaw.community.core.task.task_discovery.protocols import BotServiceProtocol
+from agentclaw.community.core.task.task_discovery.session_creator import (
+    HttpSessionCreator,
 )
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
-
-if TYPE_CHECKING:
-    from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
 
 logger = get_logger()
 
 #: 默认 mock 数据文件路径 (相对于项目根目录)
 _DEFAULT_DATA_FILE = "scripts/.dependencies/data/discovered_tasks.db"
-
-#: 默认 engine URL (singlebox local)
-_DEFAULT_ENGINE_URL = "http://localhost:20003"
-
-#: 默认前端 workbench URL (singlebox local, frontend.sh:8000)
-_DEFAULT_FRONTEND_URL = "http://localhost:8000"
 
 #: 默认调度时间
 _DEFAULT_SCHEDULE_HOUR = 11
@@ -61,13 +55,18 @@ class TaskDiscoveryLifecycle(LifecycleBase):
     ``discover_lifecycle_participants`` 机制。
 
     默认每天 11:00 执行一次。手动触发可通过:
-    - HTTP:  POST /api/public/task-discovery/discover
+    - HTTP:  POST /openapi/v1/collaboration/tasks/discovery/discover
     - CLI:   ./scripts/task_discovery.sh discover
     """
 
     @inject
-    def __init__(self, bot_service: "BotService") -> None:
-        self._bot_service: Any = bot_service
+    def __init__(
+        self,
+        bot_service: BotServiceProtocol,
+        notify_sender: NotifySenderPlugin,
+    ) -> None:
+        self._bot_service: BotServiceProtocol = bot_service
+        self._notify_sender = notify_sender
         self._task: asyncio.Task | None = None
 
     async def startup(self) -> None:
@@ -133,9 +132,9 @@ class TaskDiscoveryLifecycle(LifecycleBase):
             len(bots),
         )
 
-        engine_url = os.environ.get("TASK_DISCOVERY_ENGINE_URL", _DEFAULT_ENGINE_URL)
-        frontend_url = os.environ.get("TASK_DISCOVERY_FRONTEND_URL", _DEFAULT_FRONTEND_URL)
         data_file = self._resolve_data_file()
+
+        session_creator = HttpSessionCreator()
 
         total_discovered = 0
         for bot in bots:
@@ -147,20 +146,26 @@ class TaskDiscoveryLifecycle(LifecycleBase):
             try:
                 service = create_default_service(
                     data_file=data_file,
-                    engine_base_url=engine_url,
-                    engine_frontend_url=frontend_url,
+                    notify_sender=self._notify_sender,
+                    session_creator=session_creator,
                 )
-                results = await service.discover(user_id=owner_id, agent_id=bot_id)
+                results = await service.discover(
+                    user_id=owner_id,
+                    agent_id=bot_id,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                )
                 succeeded = sum(1 for r in results if r.success)
                 total_discovered += succeeded
 
                 for r in results:
                     if r.success:
                         logger.info(
-                            "[task_discovery]   ✓ bot=%s task=%s → %s",
+                            "[task_discovery]   ✓ bot=%s task=%s → session=%s notified=%s",
                             bot_id,
                             r.task.task_id,
-                            r.session.session_url,
+                            r.session.session_id,
+                            r.notification_sent,
                         )
                     else:
                         logger.warning(

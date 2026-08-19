@@ -1,4 +1,4 @@
-"""BBS attach HTTP 路由契约测试(FR-PICK-04):POST /api/task/bbs/attach。
+"""BBS attach HTTP 路由契约测试(FR-PICK-04):POST /openapi/v1/collaboration/tasks/bbs/attach。
 
 独立 TestClient + 小型 test injector(TaskModule + stub discover),不拉起 singlebox 全栈,
 不依赖 SINGLEBOX_TASK_E2E=1。验证:claim 持有者 attach 200(返 bbs- node_id);
@@ -12,7 +12,7 @@ from fastapi_injector import attach_injector
 from fastapi.testclient import TestClient
 from injector import Injector, Module, provider, singleton
 
-from agentclaw.community.adapters.http.task.router import router as task_router
+from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.core.task.domain.models import (
@@ -104,12 +104,12 @@ def test_attach_route_creates_node(client):
     """claim 持有者 attach → 200,data.node_id 以 'bbs-' 开头。"""
     c, inj = client
     _bbs_task_planning(inj, "x1")
-    r_claim = c.post("/api/task/bbs/claim", json={"task_id": "x1", "bot_id": "botA"})
+    r_claim = c.post("/openapi/v1/collaboration/tasks/bbs/claim", json={"task_id": "x1", "bot_id": "botA"})
     assert r_claim.status_code == 200, r_claim.text
-    r = c.post("/api/task/bbs/attach", json=_attach_body("x1", "x1", "botA"))
+    r = c.post("/openapi/v1/collaboration/tasks/bbs/attach", json=_attach_body("x1", "x1", "botA"))
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["success"] is True
+    assert body["code"] == 200000
     assert body["data"]["node_id"].startswith("bbs-")
     assert body["data"]["task_id"] == "x1"
 
@@ -118,7 +118,7 @@ def test_attach_route_non_owner_409(client):
     """非 claim 持有者 attach → 409(TaskStateError)。"""
     c, inj = client
     _bbs_task_planning(inj, "x2")
-    r_claim = c.post("/api/task/bbs/claim", json={"task_id": "x2", "bot_id": "botA"})
+    r_claim = c.post("/openapi/v1/collaboration/tasks/bbs/claim", json={"task_id": "x2", "bot_id": "botA"})
     assert r_claim.status_code == 200, r_claim.text
-    r = c.post("/api/task/bbs/attach", json=_attach_body("x2", "x2", "botB"))
+    r = c.post("/openapi/v1/collaboration/tasks/bbs/attach", json=_attach_body("x2", "x2", "botB"))
     assert r.status_code == 409, r.text

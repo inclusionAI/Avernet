@@ -277,6 +277,77 @@ def test_add_session_participant_accepts_only_bot_uuid() -> None:
     }
 
 
+def test_add_session_participant_forbidden_documents_management_and_eligibility() -> None:
+    # The add-participant 403 governs two independent gates: Session-management
+    # authority and the added-Bot collaboration-eligibility sponsorship set
+    # {caller, parent Group driver, parent Group originator}. The contract must
+    # document both so other implementations do not regress to caller-only
+    # eligibility semantics.
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/participants"
+    ]["post"]
+
+    forbidden = operation["responses"]["403"]
+    assert forbidden["x-error-codes"] == ["forbidden"]
+    description = forbidden["description"]
+
+    # Session-management authority gate.
+    assert "manage" in description
+    assert "parent Group management actor" in description
+    assert "driver" in description
+    assert "originator" in description
+
+    # Added-Bot collaboration-eligibility sponsorship gate.
+    assert "collaboration-eligible" in description
+    assert "anchor" in description
+    assert "parent Group driver" in description
+    assert "parent Group originator" in description
+    assert "friend of an anchor" in description
+    assert "Hidden Bot is rejected outright" in description
+
+
+def test_add_session_participant_not_found_does_not_classify_hidden_as_missing() -> None:
+    # A Hidden Bot is a 403, not a 404; the not-found response must describe
+    # only a missing Session or Bot.
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/participants"
+    ]["post"]
+
+    not_found = operation["responses"]["404"]
+    assert not_found["x-error-codes"] == ["session_not_found", "bot_not_found"]
+    assert "hidden" not in not_found["description"].lower()
+
+
+def test_update_session_participant_accepts_bot_and_human_modes() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"
+    ]["patch"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+
+    assert schema["properties"]["mode"] == {
+        "oneOf": [
+            {"type": "string", "enum": ["auto", "muted"]},
+            {"type": "string", "enum": ["present", "absent"]},
+        ]
+    }
+    participant = next(
+        parameter
+        for parameter in operation["parameters"]
+        if parameter["name"] == "bot_uuid"
+    )
+    assert "Bot or Human Actor identifier" in participant["description"]
+    assert set(operation["responses"]["400"]["x-error-codes"]) == {
+        "invalid_request",
+        "invalid_participant_mode",
+    }
+    forbidden = operation["responses"]["403"]["description"]
+    assert "only update its own present/absent mode" in forbidden
+    assert "Bot participant modes require Session management authority" in forbidden
+
+
 def test_delete_session_accepts_optional_acting_bot_id_query() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"][
@@ -299,14 +370,152 @@ def test_delete_session_accepts_optional_acting_bot_id_query() -> None:
     }
 
 
-def test_create_group_session_does_not_accept_driver_or_participants() -> None:
-    contract = load_contract(CONTRACT_ROOT)
-    operation = contract["paths"][
+def _create_session_operation(contract: dict) -> dict:
+    return contract["paths"][
         "/openapi/v1/collaboration/groups/{group_id}/sessions"
     ]["post"]
+
+
+def test_create_group_session_uses_human_or_owned_bot_identity() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = _create_session_operation(contract)
+
+    assert operation["x-avernet-security"] == {
+        "user": "optional",
+        "app": "optional",
+        "bot": "optional",
+    }
+    assert operation["x-bcn-identity-policy"] == "human_or_owned_bot"
+
+
+def test_create_group_session_has_no_v1_reactivation_surface() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+
+    assert not any("reactivat" in path for path in contract["paths"])
+    operation = _create_session_operation(contract)
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+
+    assert "session_id" not in schema["properties"]
+
+
+def test_create_group_session_accepts_the_v1_native_launch_fields() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = _create_session_operation(contract)
     schema = operation["requestBody"]["content"]["application/json"]["schema"]
 
     assert "required" not in schema
-    assert set(schema["properties"]) == {"title", "input"}
+    assert schema["additionalProperties"] is False
+    assert set(schema["properties"]) == {
+        "title",
+        "kind",
+        "acting_bot_id",
+        "creator_role",
+        "input",
+        "meta",
+        "context_delivery",
+    }
     assert "driver_bot_uuid" not in schema["properties"]
     assert "participants" not in schema["properties"]
+    assert schema["properties"]["kind"]["enum"] == [
+        "chat",
+        "service_invocation",
+    ]
+    assert schema["properties"]["creator_role"]["enum"] == [
+        "consultant",
+        "manager",
+        "worker",
+        "observer",
+    ]
+    acting_creator_description = schema["properties"]["acting_bot_id"]["description"]
+    for required_text in (
+        "explicit creator Actor",
+        "human_{user.id}",
+        "Bot ID it owns",
+        "Bot caller may specify only its own Bot ID",
+        "When omitted",
+    ):
+        assert required_text in acting_creator_description
+    assert schema["properties"]["context_delivery"]["enum"] == ["send", "inject"]
+
+
+def test_session_input_is_a_raw_string_or_open_json_object() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    schema = contract["components"]["schemas"]["SessionInput"]
+
+    assert schema["oneOf"][0] == {"type": "string"}
+    object_schema = schema["oneOf"][1]
+    assert object_schema["type"] == "object"
+    assert object_schema["additionalProperties"] is True
+    assert "properties" not in object_schema
+
+
+def test_session_metadata_models_current_legacy_consumers_and_stays_open() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    metadata = contract["components"]["schemas"]["SessionMetadata"]
+
+    assert metadata["type"] == "object"
+    assert metadata["additionalProperties"] is True
+    assert set(metadata["properties"]) == {
+        "callback_target",
+        "channel",
+        "context_projection",
+    }
+    assert "payload" not in metadata["properties"]
+    assert "extensions" not in metadata["properties"]
+
+    callback = metadata["properties"]["callback_target"]
+    assert callback["additionalProperties"] is True
+    assert set(callback["properties"]) == {
+        "baas_session_id",
+        "user_id",
+        "open_conversation_id",
+    }
+
+    channel = metadata["properties"]["channel"]
+    assert channel["additionalProperties"] is True
+    assert set(channel["properties"]) == {
+        "source",
+        "binding_id",
+        "conversation_id",
+        "conversation_type",
+        "session_scope",
+        "im_user_id",
+        "context_projection",
+    }
+    assert channel["properties"]["session_scope"]["enum"] == [
+        "conversation",
+        "per_sender",
+    ]
+    assert channel["properties"]["context_projection"]["enum"] == [
+        "group",
+        "direct_bot",
+    ]
+
+
+def test_created_session_exposes_resolved_launch_and_state_machine_run() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = _create_session_operation(contract)
+    data = operation["responses"]["201"]["content"]["application/json"]["schema"][
+        "properties"
+    ]["data"]
+
+    assert data["additionalProperties"] is False
+    assert {"kind", "input", "meta", "participants"}.issubset(data["properties"])
+    assert data["properties"]["kind"]["enum"] == ["chat", "service_invocation"]
+    assert "type" not in data["properties"]["input"]
+    assert "oneOf" not in data["properties"]["input"]
+    assert "type" not in data["properties"]["meta"]
+    assert "oneOf" not in data["properties"]["meta"]
+    assert "state_machine_run_id" in data["properties"]
+    run_view = data["properties"]["state_machine_run"]
+    assert run_view["additionalProperties"] is False
+    assert set(run_view["required"]) == {"run", "nodes"}
+    assert set(run_view["properties"]) == {"run", "nodes", "judge_outputs"}
+
+
+def test_create_session_documents_only_reachable_errors() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    responses = _create_session_operation(contract)["responses"]
+
+    assert responses["404"]["x-error-codes"] == ["group_not_found"]
+    assert responses["409"]["x-error-codes"] == ["conflict"]

@@ -12,7 +12,7 @@ import os
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
-from agentclaw.community.adapters.http.task.auth import (
+from agentclaw.community.adapters.http.openapi_v1.task.auth import (
     CallbackAuthenticator, NoopCallbackAuthenticator,
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
@@ -26,6 +26,7 @@ from agentclaw.community.core.task.task_graph.task_graph_service import TaskGrap
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
 )
+from agentclaw.community.di.profile import DeployProfile
 
 
 class TaskModule(Module):
@@ -119,7 +120,7 @@ class TaskModule(Module):
         - 其它(corp/prod 由 overlay 覆写)→ 不内联 BaaS/BCS(社区不发 corp 密钥),真实端口由 corp adapter
           覆写本 provider。
         """
-        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != "singlebox":
+        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
             return None, None
         from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
             LocalBcsTokenProvider,
@@ -164,7 +165,7 @@ class TaskModule(Module):
           owner_name,``/api/v1/bot-public/search``);singlebox 无 BCSFuse 索引服务,本地新建 bot 上不了 recommend。
         - 其它(corp/prod)→ 注入的 BCSFuse ``BotDiscoverService``(语义 recommend)。
         """
-        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != "singlebox":
+        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
             return default
         from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
             SingleboxKeywordBotDiscover,

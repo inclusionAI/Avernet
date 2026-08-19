@@ -39,7 +39,7 @@
 
 ```
 外部引擎(claw_mind workflow / bcn state_machine)
-   │  POST /task_loop/callback/{workflow_start|workflow_result|node_start|node_result}
+   │  POST /openapi/v1/task/callback/{workflow_start|workflow_result|node_start|node_result}
    ▼
 task callback router (FastAPI, 4 端点)
    ├─ CallbackAuthenticator.verify(source)         # HMAC(默认)/Noop(double)
@@ -105,7 +105,7 @@ task callback router (FastAPI, 4 端点)
 
 ### 5.1 router / DI 约定（镜像既有模式）
 - FastAPI + Pydantic **v2.13.4**（`uv.lock`）；`from agentclaw.community.di import Injected`。
-- router 风格（镜像 `adapters/http/quality/router.py`）：`router = APIRouter(prefix="/task_loop/callback", tags=["task-callback"])`；handler `async def`，`svc: TaskServiceProtocol = Injected(TaskServiceProtocol)`。
+- router 风格（镜像 `adapters/http/quality/router.py`）：`router = APIRouter(prefix="/openapi/v1/task/callback", tags=["task-callback"])`；handler `async def`，`svc: TaskServiceProtocol = Injected(TaskServiceProtocol)`。
 - `DomainError` 经 `app.py:349 _DOMAIN_ERROR_STATUS_MAP` 中央映射（架构测试要求每个 `DomainError` 子类有 entry）；router 层仅做幂等 ack override 与 router-local guard。
 - DI（镜像 `di/modules/quality_module.py`）：`Module` 子类，`binder.bind(Impl, to=Impl, scope=singleton)` + `@singleton @provider @inject` 暴露 Protocol。
 - 挂载：prod 必需 → `app.include_router(task_callback_router)` 直连（非 `OptionalRouters`，后者仅 local/test 条件挂载）。
@@ -138,10 +138,10 @@ adapters/http/app.py                # include_router(task_callback_router); _DOM
 
 | 方法 | 路径 | 请求体 | disposition | 走向 |
 |---|---|---|---|---|
-| POST | `/task_loop/callback/workflow_start` | `TaskCallbackRequest` | start | `svc.callback.start_run` → `engine.on_start`（root/dispatched 节点 RUNNING） |
-| POST | `/task_loop/callback/workflow_result` | `TaskCallbackRequest` | result | `svc.callback.report_result` → `engine.on_report`（root/dispatched 节点终态） |
-| POST | `/task_loop/callback/node_start` | `TaskNodeCallbackRequest` | start | `svc.callback.start_run`（子节点 RUNNING） |
-| POST | `/task_loop/callback/node_result` | `TaskNodeCallbackRequest` | result | `svc.callback.report_result`（子节点终态） |
+| POST | `/openapi/v1/task/callback/workflow_start` | `TaskCallbackRequest` | start | `svc.callback.start_run` → `engine.on_start`（root/dispatched 节点 RUNNING） |
+| POST | `/openapi/v1/task/callback/workflow_result` | `TaskCallbackRequest` | result | `svc.callback.report_result` → `engine.on_report`（root/dispatched 节点终态） |
+| POST | `/openapi/v1/task/callback/node_start` | `TaskNodeCallbackRequest` | start | `svc.callback.start_run`（子节点 RUNNING） |
+| POST | `/openapi/v1/task/callback/node_result` | `TaskNodeCallbackRequest` | result | `svc.callback.report_result`（子节点终态） |
 
 - 响应统一 `CallbackResponse{success: bool, code: int, message: str}`；成功 / 幂等 ack → 200。
 - 鉴权：handler `Depends(verify_callback)`，`verify_callback` 经 `Injected(CallbackAuthenticator)` 按 `body.workflow_source` 取密钥校验签名；失败 → 401。
@@ -306,7 +306,7 @@ class CallbackAuthenticator(Protocol):
 ## 8. 数据流（端到端）
 
 ### workflow_result（task 级，成功）
-1. bcn state_machine run 完成 → `POST /task_loop/callback/workflow_result`，body `{task_id, workflow_source:"bcn", workflow_instance_id, is_success:true, output:{...}}`。
+1. bcn state_machine run 完成 → `POST /openapi/v1/task/callback/workflow_result`，body `{task_id, workflow_source:"bcn", workflow_instance_id, is_success:true, output:{...}}`。
 2. router：`verify_callback`（HMAC）→ `translator.translate`：
    - 回声 `loop_task_id` 或 registry `resolve("bcn", instance_id)` → `(task_id, root_node_id, loop_task_id)`。
    - `result={"success":true,"data":output}`；`acceptance=PASS`；`patch=TaskNodePatch(task_id, root_node_id, output_patch, acceptance_result=PASS)`。
@@ -314,7 +314,7 @@ class CallbackAuthenticator(Protocol):
 4. 响应 200。
 
 ### node_result（node 级，失败）
-1. claw_mind workflow 内某节点失败 → `POST /task_loop/callback/node_result`，`{task_id, node_id, workflow_source:"claw_mind", is_success:false, failed_info:"..."}`。
+1. claw_mind workflow 内某节点失败 → `POST /openapi/v1/task/callback/node_result`，`{task_id, node_id, workflow_source:"claw_mind", is_success:false, failed_info:"..."}`。
 2. translator：`loop_task_id=f"{task_id}::{node_id}"`；`acceptance=FAIL(gaps=[failed_info])`。
 3. `report_result` → `on_report` → `update_task_node_info`（`RUNNING→FAILED`）→ `_on_fail_collect`（`<MAX_DEPTH`→规划补救子节点；`≥MAX_DEPTH`→`_escalate_bbs` / `HUNG`）→ `_drain`。
 4. 200。
