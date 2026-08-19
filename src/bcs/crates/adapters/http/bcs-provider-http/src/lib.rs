@@ -46,9 +46,9 @@ const SSE_RESPONSE_HEADER_TIMEOUT_MS: u64 = 125_000;
 /// Maximum time to read the finite JSON acknowledgement when an SSE-preferred
 /// request falls back to `application/json`.
 const JSON_FALLBACK_BODY_TIMEOUT_MS: u64 = SSE_RESPONSE_HEADER_TIMEOUT_MS;
-/// Existing provider execution budget for the non-streaming interaction
-/// resolution request. This is intentionally independent from chat runs.
-const INTERACTION_RESOLVE_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
+/// Existing provider execution budget for methods other than `chat.send`.
+/// This is intentionally independent from configurable chat runs.
+const NON_CHAT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
 /// Bounded retry for resolving run context after `deliver()` returns but before
 /// `put_context` lands (#2 put_context race): ~50ms * 20 ≈ 1s.
 const SSE_CTX_RETRY_INTERVAL_MS: u64 = 50;
@@ -293,7 +293,7 @@ impl InteractionProviderPort for HttpProviderTransport {
             before: None,
             after: None,
             limit: None,
-            timeout_ms: INTERACTION_RESOLVE_TIMEOUT_MS,
+            timeout_ms: NON_CHAT_PROVIDER_REQUEST_TIMEOUT_MS,
             extensions: None,
         };
         let ack = post_provider::<ProviderAckResponse>(
@@ -799,7 +799,7 @@ fn provider_request_from_frame(
             .and_then(Value::as_u64)
             .unwrap_or(timeout_ms)
     } else {
-        timeout_ms
+        NON_CHAT_PROVIDER_REQUEST_TIMEOUT_MS
     };
     let attachments = params
         .get("attachments")

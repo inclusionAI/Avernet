@@ -1423,6 +1423,12 @@ impl BcsConfig {
 }
 
 fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::Error>> {
+    if config.provider_chat_run_timeout_ms == 0 {
+        return Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "provider_chat_run_timeout_ms must be greater than zero",
+        )));
+    }
     config.gateway_principal.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -1511,6 +1517,23 @@ mod tests {
         let config: BcsConfig = toml::from_str(toml).expect("parse provider chat run timeout");
 
         assert_eq!(config.provider_chat_run_timeout_ms, 14_400_000);
+    }
+
+    #[test]
+    fn provider_chat_run_timeout_rejects_zero() {
+        let toml = r#"
+            bots_base_dir = "/bots"
+            provider_chat_run_timeout_ms = 0
+        "#;
+
+        let config: BcsConfig = toml::from_str(toml).expect("parse provider chat run timeout");
+        let error = validate_loaded_config(&config).expect_err("zero timeout must be rejected");
+
+        assert!(
+            error
+                .to_string()
+                .contains("provider_chat_run_timeout_ms must be greater than zero")
+        );
     }
 
     #[test]
