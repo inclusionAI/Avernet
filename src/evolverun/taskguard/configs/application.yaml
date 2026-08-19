@@ -1,30 +1,32 @@
 # TaskGuard Community Default Configuration
-# Open-source defaults — SQLite database, basic alerts, no internal endpoints.
+# Default mode: API persistence with a sample clawweb endpoint.
+# Replace `api.baseUrl` with your real clawweb URL before running in production.
+# Set `api.apiKey` or override via the WORKFLOW_API_KEY environment variable.
 #
-# To switch to API mode (delegate persistence to a clawweb-compatible HTTP API),
-# change `database.mode` from "sqlite" to "api" and fill in database.api.* values.
-# You can also override these settings at runtime via environment variables
-# (highest priority):
+# To switch back to local SQLite mode, set `database.mode` to "sqlite".
+#
+# Override these settings at runtime via environment variables (highest priority):
 #   DATABASE_MODE=sqlite|prod|api
 #   SQLITE_PATH=/path/to/engine.db
 #   CLAWWEB_API_URL=https://your-clawweb.example.com
-#   CLAWMIND_PRIVATE_KEY=base64-encoded-key
-#   CLAWMIND_IAM_TOKEN=your-iam-token
+#   WORKFLOW_API_PORT=3210
+#   WORKFLOW_API_HOST=127.0.0.1
+#   WORKFLOW_API_KEY=your-api-key
 #   CLAWWEB_API_TIMEOUT=5000
 #   CLAWWEB_API_MAX_RETRIES=3
 
 database:
-  mode: sqlite
+  mode: "api"
   sqlite:
     path: ~/.taskguard/workflow/engine.db
 
-  # API mode settings. Uncomment and configure when database.mode: api.
-  # api:
-  #   baseUrl: "https://your-clawweb.example.com"
-  #   privateKeyB64: "base64-encoded-key"
-  #   iamtoken: "your-iam-token"
-  #   timeout: 5000
-  #   maxRetries: 3
+# Internal API base URL for clawweb communication
+api:
+  enabled: true
+  port: 3210
+  host: "127.0.0.1"
+  apiKey: ""
+  baseUrl: "https://clawweb.sample.com"
 
 alerts:
   dingtalk:
