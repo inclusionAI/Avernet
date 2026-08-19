@@ -40,6 +40,26 @@ pub async fn authenticate_internal_provider(
     next: Next,
 ) -> Response {
     let request_id = RequestId::from_headers(request.headers());
+    if request.headers().get_all(header::AUTHORIZATION).iter().count() != 1 {
+        warn!(
+            request_id = %request_id.0,
+            failure = "missing_or_duplicate_authorization",
+            "Internal Provider authentication failed"
+        );
+        return ErrorResponse::unauthenticated(request_id.0).into_response();
+    }
+    if request.headers().get_all(PROVIDER_ID_HEADER).iter().count() != 1 {
+        warn!(
+            request_id = %request_id.0,
+            failure = "missing_or_duplicate_provider_id",
+            "Internal Provider authentication failed"
+        );
+        return application_error_response(
+            &request_id,
+            ApplicationError::forbidden("Provider access is forbidden"),
+        )
+        .into_response();
+    }
     let Some(token) = extract_bearer_token(request.headers()) else {
         warn!(
             request_id = %request_id.0,

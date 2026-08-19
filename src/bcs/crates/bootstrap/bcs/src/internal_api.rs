@@ -39,6 +39,13 @@ impl InternalProviderAuthenticator for ProviderAdminInternalAuthenticator {
         token: &str,
         provider_id: &str,
     ) -> Result<(), InternalProviderAuthError> {
+        let Some(trusted_provider_id) = self.trusted_provider_id.as_deref() else {
+            warn!(
+                failure = "trusted_provider_not_configured",
+                "Internal API Provider verification failed"
+            );
+            return Err(InternalProviderAuthError::Forbidden);
+        };
         let provider = self
             .provider_core
             .authenticate_provider_admin(token)
@@ -71,14 +78,6 @@ impl InternalProviderAuthenticator for ProviderAdminInternalAuthenticator {
             );
             return Err(InternalProviderAuthError::Forbidden);
         }
-        let Some(trusted_provider_id) = self.trusted_provider_id.as_deref() else {
-            warn!(
-                provider_id = %provider.provider_id,
-                failure = "trusted_provider_not_configured",
-                "Internal API Provider verification failed"
-            );
-            return Err(InternalProviderAuthError::Forbidden);
-        };
         // COSEC: Private backend access is restricted to one explicitly
         // configured Provider identity and defaults to deny when absent.
         if provider.provider_id != trusted_provider_id {
@@ -110,6 +109,7 @@ mod tests {
     struct FakeProviderCore {
         provider_id: String,
         disabled: bool,
+        reject_authentication_lookup: bool,
     }
 
     #[async_trait]
@@ -127,6 +127,10 @@ mod tests {
         }
 
         async fn authenticate_provider_admin(&self, token: &str) -> ServiceResult<ProviderRecord> {
+            assert!(
+                !self.reject_authentication_lookup,
+                "Provider credential lookup must not run without trusted Provider configuration"
+            );
             if token != "valid-provider-token" {
                 return Err(ServiceError::Unauthorized(
                     "invalid provider admin token".to_string(),
@@ -193,6 +197,7 @@ mod tests {
             Arc::new(FakeProviderCore {
                 provider_id: authenticated_provider_id.to_string(),
                 disabled,
+                reject_authentication_lookup: false,
             }),
             trusted_provider_id.map(str::to_string),
         )
@@ -233,6 +238,25 @@ mod tests {
         assert_eq!(
             authenticator("backend-provider", false, None)
                 .authenticate("valid-provider-token", "backend-provider")
+                .await,
+            Err(InternalProviderAuthError::Forbidden)
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_trusted_provider_rejects_before_provider_credential_lookup() {
+        let authenticator = ProviderAdminInternalAuthenticator::new(
+            Arc::new(FakeProviderCore {
+                provider_id: "backend-provider".to_string(),
+                disabled: false,
+                reject_authentication_lookup: true,
+            }),
+            None,
+        );
+
+        assert_eq!(
+            authenticator
+                .authenticate("invalid-provider-token", "backend-provider")
                 .await,
             Err(InternalProviderAuthError::Forbidden)
         );
