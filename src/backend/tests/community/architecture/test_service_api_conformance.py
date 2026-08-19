@@ -76,6 +76,7 @@ from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
+from agentclaw.community.api.skill_metadata_parser import SkillMetadataParserProtocol
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
 from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryBotPort,
@@ -115,6 +116,7 @@ from agentclaw.community.core.service_bot.services.service_publication_facade im
     ServicePublicationFacade,
 )
 from agentclaw.community.core.spaces.services import SpaceMemberService, SpaceService
+from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
@@ -137,6 +139,7 @@ _PAIRS = [
     (SpaceMemberServiceProtocol, SpaceMemberService),
     (MarketFavoriteServiceProtocol, MarketFavoriteService),
     (ServicePublicationFacadeProtocol, ServicePublicationFacade),
+    (SkillMetadataParserProtocol, SkillParser),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]

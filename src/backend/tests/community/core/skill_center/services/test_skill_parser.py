@@ -1,9 +1,11 @@
-"""Tests for SkillParser extracted to core/services/skill_parser.py"""
+"""Tests for the legacy SKILL.md compatibility parser adapter."""
 
 from pathlib import Path
 
 
-from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.services.skill_parser import (
+    LegacySkillParserAdapter,
+)
 
 
 # ============================================================================
@@ -11,26 +13,26 @@ from agentclaw.community.core.skill_center.services.skill_parser import SkillPar
 # ============================================================================
 
 
-class TestSkillParserFindFile:
+class TestLegacySkillParserAdapterFindFile:
     """Tests for SkillParser.find_skill_file"""
 
     def test_find_skill_md(self, tmp_path: Path):
         """目录有 SKILL.md 时返回它"""
         skill_md = tmp_path / "SKILL.md"
         skill_md.write_text("# Test Skill\n", encoding="utf-8")
-        result = SkillParser.find_skill_file(tmp_path)
+        result = LegacySkillParserAdapter.find_skill_file(tmp_path)
         assert result == skill_md
 
     def test_find_readme_fallback(self, tmp_path: Path):
         """只有 README.md 时返回它"""
         readme = tmp_path / "README.md"
         readme.write_text("# Test Skill\n", encoding="utf-8")
-        result = SkillParser.find_skill_file(tmp_path)
+        result = LegacySkillParserAdapter.find_skill_file(tmp_path)
         assert result == readme
 
     def test_find_no_file(self, tmp_path: Path):
         """空目录返回 None"""
-        result = SkillParser.find_skill_file(tmp_path)
+        result = LegacySkillParserAdapter.find_skill_file(tmp_path)
         assert result is None
 
     def test_skill_md_takes_priority(self, tmp_path: Path):
@@ -39,7 +41,7 @@ class TestSkillParserFindFile:
         skill_md.write_text("# From SKILL.md\n", encoding="utf-8")
         readme = tmp_path / "README.md"
         readme.write_text("# From README.md\n", encoding="utf-8")
-        result = SkillParser.find_skill_file(tmp_path)
+        result = LegacySkillParserAdapter.find_skill_file(tmp_path)
         assert result == skill_md
 
 
@@ -48,22 +50,22 @@ class TestSkillParserFindFile:
 # ============================================================================
 
 
-class TestSkillParserHasSkillFile:
+class TestLegacySkillParserAdapterHasSkillFile:
     """Tests for SkillParser.has_skill_file"""
 
     def test_has_skill_md(self, tmp_path: Path):
         """有 SKILL.md 返回 True"""
         (tmp_path / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
-        assert SkillParser.has_skill_file(tmp_path) is True
+        assert LegacySkillParserAdapter.has_skill_file(tmp_path) is True
 
     def test_readme_only_returns_false(self, tmp_path: Path):
         """只有 README.md 返回 False"""
         (tmp_path / "README.md").write_text("# Readme\n", encoding="utf-8")
-        assert SkillParser.has_skill_file(tmp_path) is False
+        assert LegacySkillParserAdapter.has_skill_file(tmp_path) is False
 
     def test_empty_dir_returns_false(self, tmp_path: Path):
         """空目录返回 False"""
-        assert SkillParser.has_skill_file(tmp_path) is False
+        assert LegacySkillParserAdapter.has_skill_file(tmp_path) is False
 
 
 # ============================================================================
@@ -71,7 +73,7 @@ class TestSkillParserHasSkillFile:
 # ============================================================================
 
 
-class TestSkillParserParse:
+class TestLegacySkillParserAdapterParse:
     """Tests for SkillParser.parse"""
 
     def test_parse_yaml_frontmatter(self, tmp_path: Path):
@@ -101,7 +103,7 @@ Setup instructions.
 Usage instructions.
 """
         (tmp_path / "SKILL.md").write_text(content, encoding="utf-8")
-        result = SkillParser.parse(tmp_path)
+        result = LegacySkillParserAdapter.parse(tmp_path)
 
         assert result is not None
         assert result["name"] == "My Skill"
@@ -119,7 +121,7 @@ Usage instructions.
     def test_parse_nonexistent_dir(self, tmp_path: Path):
         """不存在的目录返回 None"""
         nonexistent = tmp_path / "does_not_exist"
-        result = SkillParser.parse(nonexistent)
+        result = LegacySkillParserAdapter.parse(nonexistent)
         assert result is None
 
     def test_parse_gbk_encoded_skill_md(self, tmp_path: Path):
@@ -135,7 +137,7 @@ author: test
 # 安全检查技能
 """
         (tmp_path / "SKILL.md").write_bytes(content.encode("gbk"))
-        result = SkillParser.parse(tmp_path)
+        result = LegacySkillParserAdapter.parse(tmp_path)
 
         assert result is not None
         assert result["name"] == "安全检查"
@@ -145,7 +147,7 @@ author: test
         """GBK 编码文件不应抛异常"""
         content = "---\nname: 测试技能\ndescription: 这是GBK编码\n---\n"
         (tmp_path / "SKILL.md").write_bytes(content.encode("gbk"))
-        result = SkillParser.parse(tmp_path)
+        result = LegacySkillParserAdapter.parse(tmp_path)
         assert result is not None
         assert isinstance(result["description"], str)
 
@@ -155,7 +157,7 @@ author: test
 # ============================================================================
 
 
-class TestSkillParserParseContent:
+class TestLegacySkillParserAdapterParseContent:
     """Tests for SkillParser.parse_content"""
 
     def test_parse_content_with_frontmatter(self):
@@ -174,7 +176,7 @@ tags: [alpha, beta]
 
 Body text here.
 """
-        result = SkillParser.parse_content(content)
+        result = LegacySkillParserAdapter.parse_content(content)
 
         assert result is not None
         assert result["name"] == "Remote Skill"
@@ -186,5 +188,5 @@ Body text here.
 
     def test_parse_content_empty_string(self):
         """空字符串返回 None"""
-        result = SkillParser.parse_content("")
+        result = LegacySkillParserAdapter.parse_content("")
         assert result is None

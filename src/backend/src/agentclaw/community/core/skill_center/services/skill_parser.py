@@ -13,9 +13,24 @@ from typing import Any
 import yaml
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.skill_center.skill_metadata import (
+    SkillMetadata,
+    SkillMetadataErrorCode,
+    SkillMetadataProjection,
+    SkillMetadataValidationError,
+    SkillMetadataValidationIssue,
+    SkillMetadataValidationResult,
+)
 
 
 logger = get_logger()
+
+_SKILL_FRONTMATTER = re.compile(
+    r"\A---[ \t]*\r?\n(?P<frontmatter>.*?)\r?\n---[ \t]*(?:\r?\n|\Z)(?P<body>.*)\Z",
+    re.DOTALL,
+)
+_MAX_SKILL_NAME_LENGTH = 256
+_MAX_SKILL_DESCRIPTION_LENGTH = 65_535
 
 
 @dataclass
@@ -118,7 +133,128 @@ def _extract_description_from_body(body: str) -> str:
 
 
 class SkillParser:
-    """统一解析 SKILL.md / README.md"""
+    """Canonical, strict parser for the SKILL.md metadata contract."""
+
+    @staticmethod
+    def parse_skill_markdown(
+        content: str | bytes, *, path: str = "SKILL.md"
+    ) -> SkillMetadata:
+        """Read the canonical name and description from SKILL.md frontmatter."""
+        if path != "SKILL.md":
+            raise SkillMetadataValidationError(
+                SkillMetadataValidationIssue(
+                    code=SkillMetadataErrorCode.INVALID_PATH, field="path"
+                )
+            )
+        if isinstance(content, bytes):
+            try:
+                content = content.decode("utf-8", errors="strict")
+            except UnicodeDecodeError as exc:
+                raise SkillMetadataValidationError(
+                    SkillMetadataValidationIssue(
+                        code=SkillMetadataErrorCode.INVALID_ENCODING,
+                        field="content",
+                    )
+                ) from exc
+        frontmatter_match = _SKILL_FRONTMATTER.match(content)
+        if frontmatter_match is None:
+            raise SkillMetadataValidationError(
+                SkillMetadataValidationIssue(
+                    code=(
+                        SkillMetadataErrorCode.INVALID_FRONTMATTER
+                        if content.startswith("---")
+                        else SkillMetadataErrorCode.MISSING_FRONTMATTER
+                    )
+                )
+            )
+        try:
+            metadata = yaml.safe_load(frontmatter_match["frontmatter"])
+        except yaml.YAMLError as exc:
+            raise SkillMetadataValidationError(
+                SkillMetadataValidationIssue(
+                    code=SkillMetadataErrorCode.INVALID_FRONTMATTER
+                )
+            ) from exc
+        if not isinstance(metadata, dict):
+            raise SkillMetadataValidationError(
+                SkillMetadataValidationIssue(
+                    code=SkillMetadataErrorCode.INVALID_FRONTMATTER
+                )
+            )
+        name = metadata.get("name")
+        description = metadata.get("description")
+        if name is None or (isinstance(name, str) and not name.strip()):
+            raise SkillMetadataValidationError(
+                SkillMetadataValidationIssue(
+                    code=SkillMetadataErrorCode.MISSING_NAME, field="name"
+                )
+            )
+        if not isinstance(name, str):
+            raise SkillMetadataValidationError(
+                SkillMetadataValidationIssue(
+                    code=SkillMetadataErrorCode.INVALID_NAME, field="name"
+                )
+            )
+        if description is None or (
+            isinstance(description, str) and not description.strip()
+        ):
+            raise SkillMetadataValidationError(
+                SkillMetadataValidationIssue(
+                    code=SkillMetadataErrorCode.MISSING_DESCRIPTION,
+                    field="description",
+                )
+            )
+        if not isinstance(description, str):
+            raise SkillMetadataValidationError(
+                SkillMetadataValidationIssue(
+                    code=SkillMetadataErrorCode.INVALID_DESCRIPTION,
+                    field="description",
+                )
+            )
+        if not frontmatter_match["body"].strip():
+            raise SkillMetadataValidationError(
+                SkillMetadataValidationIssue(
+                    code=SkillMetadataErrorCode.MISSING_BODY, field="body"
+                )
+            )
+        if len(name.strip()) > _MAX_SKILL_NAME_LENGTH:
+            raise SkillMetadataValidationError(
+                SkillMetadataValidationIssue(
+                    code=SkillMetadataErrorCode.NAME_TOO_LONG, field="name"
+                )
+            )
+        if len(description.strip().encode("utf-8")) > _MAX_SKILL_DESCRIPTION_LENGTH:
+            raise SkillMetadataValidationError(
+                SkillMetadataValidationIssue(
+                    code=SkillMetadataErrorCode.DESCRIPTION_TOO_LONG,
+                    field="description",
+                )
+            )
+        return SkillMetadata(name=name.strip(), description=description.strip())
+
+    @staticmethod
+    def validate_skill_markdown(
+        content: str | bytes, *, path: str = "SKILL.md"
+    ) -> SkillMetadataValidationResult:
+        """Validate one SKILL.md payload without exposing parser exceptions."""
+        try:
+            metadata = SkillParser.parse_skill_markdown(content, path=path)
+        except SkillMetadataValidationError as exc:
+            return SkillMetadataValidationResult(metadata=None, errors=(exc.issue,))
+        return SkillMetadataValidationResult(metadata=metadata)
+
+    @staticmethod
+    def project_skill_markdown(
+        content: str | bytes, *, path: str = "SKILL.md"
+    ) -> SkillMetadataProjection:
+        """Return the name/description read projection for a valid manifest."""
+        return SkillMetadataProjection.from_metadata(
+            SkillParser.parse_skill_markdown(content, path=path)
+        )
+
+
+class LegacySkillParserAdapter:
+    """Best-effort compatibility reader for existing Local and Repo content."""
 
     @staticmethod
     def find_skill_file(skill_path: Path) -> Path | None:
@@ -168,6 +304,14 @@ class SkillParser:
             "created_at": created_at,
             "updated_at": updated_at,
         }
+        projection = None
+        if skill_file.name == "SKILL.md":
+            try:
+                projection = SkillParser.project_skill_markdown(content)
+            except SkillMetadataValidationError:
+                # README and malformed legacy manifests retain their historical
+                # best-effort parsing path; strict callers use the public API.
+                pass
 
         # 提取 YAML frontmatter
         body = content
@@ -210,6 +354,9 @@ class SkillParser:
         if not skill_info["description"]:
             skill_info["description"] = _extract_description_from_body(body)
 
+        if projection is not None:
+            skill_info.update(projection.to_dict())
+
         # 提取能力
         capability_sections = re.findall(r'^##\s+(.+)$', body, re.MULTILINE)
         for cap in capability_sections:
@@ -240,6 +387,12 @@ class SkillParser:
             "output_schema": "",
             "capabilities": [],
         }
+        projection = None
+        try:
+            projection = SkillParser.project_skill_markdown(content)
+        except SkillMetadataValidationError:
+            # Preserve the legacy best-effort reader for historical callers.
+            pass
 
         # 提取 YAML frontmatter
         body = content
@@ -260,5 +413,8 @@ class SkillParser:
         # 从 body 提取描述
         if not skill_info["description"]:
             skill_info["description"] = _extract_description_from_body(body)
+
+        if projection is not None:
+            skill_info.update(projection.to_dict())
 
         return skill_info

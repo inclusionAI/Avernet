@@ -36,7 +36,9 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.services.skill_parser import (
+    LegacySkillParserAdapter,
+)
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
@@ -819,7 +821,7 @@ class LocalSkillUploadService:
             text = markdown.decode("utf-8", errors="strict")
         except UnicodeDecodeError as exc:
             raise LocalSkillInvalidPackageError() from exc
-        metadata = SkillParser.parse_content(text) or {}
+        metadata = LegacySkillParserAdapter.parse_content(text) or {}
         if not metadata.get("name") or not metadata.get("description"):
             try:
                 raw_metadata = yaml.safe_load(text)
