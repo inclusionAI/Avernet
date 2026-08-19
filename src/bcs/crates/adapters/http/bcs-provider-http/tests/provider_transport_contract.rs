@@ -24,7 +24,6 @@ use bcs_service_api::{
     GroupCallbackOutcome, GroupHistoryBotRequestPort, MessageFlowService,
     ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
     ProviderRunTransport, ProviderTransportPreference, ServiceResult,
-    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
 };
@@ -38,7 +37,8 @@ async fn interaction_resolve_reuses_provider_route_and_expects_json_ack() {
         .with_state(captured.clone());
     let (webhook_url, server) = spawn_server(app).await;
     let target = provider_target_v2(webhook_url);
-    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests()
+        .with_chat_run_timeout_ms(42_000);
 
     let ack = transport
         .resolve_interaction(InteractionProviderCommand {
@@ -80,6 +80,7 @@ async fn interaction_resolve_reuses_provider_route_and_expects_json_ack() {
     assert_eq!(request.body["params"]["kind"], "exec");
     assert_eq!(request.body["params"]["idempotencyKey"], "idem-1");
     assert_eq!(request.body["params"]["decision"], "allow_once");
+    assert_eq!(request.body["timeout_ms"], 3_600_000);
     server.abort();
 }
 use serde_json::{Value, json};
@@ -342,7 +343,8 @@ async fn provider_delivery_posts_bearer_token_and_chat_send_body() {
         .with_state(captured.clone());
     let (webhook_url, server) = spawn_server(app).await;
 
-    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests()
+        .with_chat_run_timeout_ms(42_000);
     let result = transport
         .deliver(BotDeliveryCommand {
             target: provider_target(webhook_url),
@@ -701,7 +703,8 @@ async fn provider_delivery_falls_back_to_actor_id_for_sender_name() {
         .with_state(captured.clone());
     let (webhook_url, server) = spawn_server(app).await;
 
-    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests()
+        .with_chat_run_timeout_ms(7_200_000);
     let result = transport
         .deliver(BotDeliveryCommand {
             target: provider_target(webhook_url),
@@ -740,10 +743,7 @@ async fn provider_delivery_falls_back_to_actor_id_for_sender_name() {
     assert_eq!(request.body["from"]["kind"], "bot");
     assert_eq!(request.body["from"]["name"], "sender-bot-id");
     assert_eq!(request.body["from"]["actor_id"], "sender-bot-id");
-    assert_eq!(
-        request.body["timeout_ms"],
-        DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS
-    );
+    assert_eq!(request.body["timeout_ms"], 7_200_000);
 
     server.abort();
 }

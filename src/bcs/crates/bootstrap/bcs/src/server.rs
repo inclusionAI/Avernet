@@ -1766,7 +1766,8 @@ impl Default for BcsServerState {
         let frontend_run_channels = run_channels.clone();
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
-            bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone()),
+            bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone())
+                .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
@@ -1854,6 +1855,7 @@ impl Default for BcsServerState {
                 .with_delivery(bot_delivery.clone())
                 .with_frontend_delivery(frontend_delivery.clone())
                 .with_bot_run_context(bot_run_context.clone())
+                .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
                 .with_message_repo(message_repo.clone())
                 .with_provider_stream_gray_list(provider_stream_gray_list.clone())
                 .register(BotJoinedMessageProducer::new(group_message_history.clone()))
@@ -1896,6 +1898,7 @@ impl Default for BcsServerState {
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
             state_machine_terminal_observer.clone(),
+            config.provider_chat_run_timeout_ms,
         );
         let group_management_impl = Arc::new(GroupManagement::new(
             sessions.clone(),
@@ -1955,6 +1958,7 @@ impl Default for BcsServerState {
             )
             .with_bot_registry(bot_registry.clone())
             .with_bot_run_context(bot_run_context.clone())
+            .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_callback_url_guard(outbound_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(
@@ -2410,6 +2414,7 @@ fn build_use_case_bundle(
             .with_delivery(bot_delivery.clone())
             .with_frontend_delivery(frontend_delivery.clone())
             .with_bot_run_context(bot_run_context)
+            .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_provider_stream_gray_list(provider_stream_gray_list.clone())
             .register(BotJoinedMessageProducer::new(group_message_history.clone()))
             .register(HumanJoinedMessageProducer::new())
@@ -2598,6 +2603,7 @@ fn create_message_flow_services(
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
+    provider_chat_run_timeout_ms: u64,
 ) -> (Arc<dyn MessageFlowService>, ChannelSlot) {
     let mut message_flow = BcsMessageFlow::new(
         group,
@@ -2610,6 +2616,7 @@ fn create_message_flow_services(
     .with_interceptors(interceptors)
     .with_session_management(session_management)
     .with_bot_run_context(bot_run_context)
+    .with_provider_chat_run_timeout_ms(provider_chat_run_timeout_ms)
     .with_system_message(system_message)
     .with_provider_stream_gray_list(provider_stream_gray_list)
     .with_bot_terminal_observer(bot_terminal_observer);
@@ -3223,7 +3230,8 @@ impl BcsServer {
         let frontend_run_channels = run_channels.clone();
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
-            bcs_provider_http::HttpProviderTransport::with_url_guard(provider_request_url_guard),
+            bcs_provider_http::HttpProviderTransport::with_url_guard(provider_request_url_guard)
+                .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
@@ -3351,6 +3359,7 @@ impl BcsServer {
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
             state_machine_terminal_observer.clone(),
+            config.provider_chat_run_timeout_ms,
         );
 
         let collaboration_store = Arc::new(MemoryCollaborationStore::new());
@@ -3378,6 +3387,7 @@ impl BcsServer {
             )
             .with_bot_registry(bot_registry.clone())
             .with_bot_run_context(bot_run_context.clone())
+            .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_callback_url_guard(callback_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(
@@ -3809,7 +3819,8 @@ impl BcsServer {
         let frontend_run_channels = run_channels.clone();
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
-            bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone()),
+            bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone())
+                .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
@@ -3973,6 +3984,7 @@ impl BcsServer {
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
             state_machine_terminal_observer.clone(),
+            config.provider_chat_run_timeout_ms,
         );
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())
@@ -4011,6 +4023,7 @@ impl BcsServer {
                 )
                 .with_bot_registry(bot_registry.clone())
                 .with_bot_run_context(bot_run_context.clone())
+                .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
                 .with_callback_url_guard(outbound_url_guard.clone())
                 .with_session_channel_outbound(session_channel_outbound)
                 .with_result_publisher(Arc::new(
