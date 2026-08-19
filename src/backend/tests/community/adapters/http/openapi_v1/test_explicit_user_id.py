@@ -335,7 +335,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: and five account-level operations. The trace filter remains the sole query
 #: placement. Together with the caller-identity read, the combined contract is
 #: 83/1/41.
-_BOT_ID_PLACEMENT = {"path": 86, "query": 1, "none": 45}
+# P1-03 contributes eleven Bot-scoped SkillSet operations.
+_BOT_ID_PLACEMENT = {"path": 97, "query": 1, "none": 45}
 
 
 def _schema() -> dict:
@@ -421,7 +422,9 @@ def test_the_pinned_number_of_operations_take_it():
     # for the Bot Chats operations. The combined Bot Workshop surface adds a
     # further net 32 user-scoped operations (27 bot-addressed and five
     # account-level operations).
-    assert len(taking) == 121
+    # P1-03 adds eleven Bot-scoped SkillSet operations, all explicitly acting
+    # for the authenticated user rather than accepting a body-supplied owner.
+    assert len(taking) == 132
 
 
 def test_the_exempt_operations_take_none():

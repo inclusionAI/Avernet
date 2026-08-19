@@ -170,6 +170,10 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
     SkillParameterValidationError,
+    SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneNotFoundError,
+    SkillSetRuntimeReconcileError,
+    SkillSetManagedResourceError,
     LocalSkillTooLargeError,
 )
 from agentclaw.community.core.services.identity import (
@@ -412,6 +416,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # rejection into a probe for how addresses are resolved.
     InvalidResourcePathError: (400, "Invalid resource path"),
     LocalSkillNotFoundError: (404, "Not found"),
+    SkillSetControlPlaneNotFoundError: (404, "Not found"),
+    SkillSetControlPlaneConflictError: (409, "SkillSet state conflicts with this operation"),
+    SkillSetRuntimeReconcileError: (502, "Skill runtime synchronization failed"),
+    SkillSetManagedResourceError: (409, "Skill is managed by a SkillSet"),
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
     LocalSkillNotReadyError: (409, "Bot is not ready"),

@@ -71,3 +71,19 @@ class LocalSkillEditLockUnavailableError(LocalSkillEditPausedError):
 
 class ActiveSkillSetReferenceError(RuntimeError):
     """A Skill became referenced by an active custom SkillSet."""
+
+
+class SkillSetControlPlaneNotFoundError(Exception):
+    """A canonical SkillSet is absent from the addressed Bot scope."""
+
+
+class SkillSetControlPlaneConflictError(Exception):
+    """A canonical SkillSet command conflicts with desired state."""
+
+
+class SkillSetRuntimeReconcileError(Exception):
+    """Runtime reconciliation failed after desired-state compensation."""
+
+
+class SkillSetManagedResourceError(Exception):
+    """A Direct command targets a resource managed by an ordinary SkillSet."""

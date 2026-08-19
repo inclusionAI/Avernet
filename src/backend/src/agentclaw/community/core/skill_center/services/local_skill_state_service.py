@@ -21,9 +21,11 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
+    SkillSetManagedResourceError,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_installation import (
     SkillInstallationRepositoryProtocol,
 )
@@ -69,6 +71,7 @@ class LocalSkillStateService:
         pool_runtime: SkillsPoolRuntimeProtocol,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
+        skill_set_repo: SkillSetRepository | None = None,
     ) -> None:
         self._skill_repo = skill_repo
         self._installations = installations
@@ -79,6 +82,7 @@ class LocalSkillStateService:
         self._pool_runtime = pool_runtime
         self._pool_skills = pool_skills
         self._pool_layouts = pool_layouts
+        self._skill_set_repo = skill_set_repo
 
     async def set_local_skill_active(
         self, *, skill_id: str, actor_id: str, active: bool
@@ -96,6 +100,7 @@ class LocalSkillStateService:
             raise LocalSkillEditPausedError() from exc
         try:
             skill, bot, owner_id, bot_id = self._authorize(skill_id, actor_id)
+            self._reject_ordinary_skill_set_member(skill_id=skill_id, bot_id=bot_id)
             if self._scope_for(bot, bot_id) != scope:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
@@ -213,6 +218,22 @@ class LocalSkillStateService:
         return self._installations.uninstall(
             env=env, bot_id=bot_id, skill_id=skill_id
         )
+
+    def _reject_ordinary_skill_set_member(self, *, skill_id: str, bot_id: str) -> None:
+        """Direct state is forbidden once ordinary SkillSet owns the Skill."""
+        if self._skill_set_repo is None:
+            return
+        skill = self._skill_repo.get_by_id(skill_id)
+        for reference in self._skill_repo.list_skill_set_references(
+            skill_id, skill.get("skill_uuid") if skill else None
+        ):
+            skill_set = self._skill_set_repo.get_by_id(reference["skill_set_id"])
+            if (
+                skill_set is not None
+                and not skill_set.get("is_default")
+                and str(skill_set.get("bolt_id")) == bot_id
+            ):
+                raise SkillSetManagedResourceError()
 
     def _sync_runtime(self, *, bot: dict[str, Any], owner_id: str, bot_id: str) -> bool:
         try:
