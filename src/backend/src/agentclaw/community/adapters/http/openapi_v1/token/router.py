@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
 from agentclaw.community.adapters.http.openapi_v1.errors import (
@@ -12,19 +12,25 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     CallerIdentityOpenApiError,
     IamTokenUnavailableError,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    UserIdDep,
+    refuse_app_only_caller,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
 from agentclaw.community.adapters.http.openapi_v1.token.schemas import (
+    CallerIdentityStage,
     CallerIdentityReady,
     IamToken,
 )
 from agentclaw.community.api.caller_iam_token_service import (
     CallerIamTokenServiceProtocol,
 )
-from agentclaw.community.api.caller_identity_service import CallerIdentityStage
+from agentclaw.community.api.caller_identity_service import (
+    CallerIdentityStage as CoreCallerIdentityStage,
+)
 from agentclaw.community.api.caller_credential import (
     CALLER_CREDENTIAL_REQUEST_INVALID,
 )
@@ -64,7 +70,11 @@ def _raise_for_error(error: str | None) -> None:
     raise CallerIdentityOpenApiError(error)
 
 
-@token_router.get("/openapi/v1/token/iam", response_model=Envelope[IamToken])
+@token_router.get(
+    "/openapi/v1/token/iam",
+    response_model=Envelope[IamToken],
+    dependencies=[Depends(refuse_app_only_caller)],
+)
 @envelope_errors
 async def get_iam_token(
     request: Request,
@@ -78,7 +88,7 @@ async def get_iam_token(
         iam_token=request.cookies.get("IAM_TOKEN") or "",
         auth_request=_auth_request(request),
         bot_id=None,
-        stage=CallerIdentityStage.DRAFT,
+        stage=CoreCallerIdentityStage.DRAFT,
         publish_id=None,
         entity_id=None,
         is_test_exchange=False,
@@ -91,6 +101,7 @@ async def get_iam_token(
 @caller_identity_router.post(
     "/openapi/v1/bots/{bot_id}/caller-identity",
     response_model=Envelope[CallerIdentityReady],
+    dependencies=[Depends(refuse_app_only_caller)],
 )
 @envelope_errors
 async def prepare_caller_identity(
@@ -98,9 +109,18 @@ async def prepare_caller_identity(
     request: Request,
     response: Response,
     user_id: UserIdDep,
-    stage: CallerIdentityStage = Query(default=CallerIdentityStage.DRAFT),
-    publish_id: int | None = Query(default=None),
-    entity_id: str | None = Query(default=None),
+    stage: CallerIdentityStage = Query(
+        default=CallerIdentityStage.DRAFT,
+        description="Bot runtime stage whose Caller identity is prepared.",
+    ),
+    publish_id: int | None = Query(
+        default=None,
+        description="Published release identifier when preparing a published runtime.",
+    ),
+    entity_id: str | None = Query(
+        default=None,
+        description="Entity identifier used to resolve the Caller credential.",
+    ),
     service: CallerIamTokenServiceProtocol = Injected(CallerIamTokenServiceProtocol),
 ) -> Envelope[CallerIdentityReady]:
     """Prepare the caller credential required by this bot's chat runtime."""
@@ -109,7 +129,7 @@ async def prepare_caller_identity(
         iam_token=request.cookies.get("IAM_TOKEN") or "",
         auth_request=_auth_request(request),
         bot_id=bot_id,
-        stage=stage,
+        stage=CoreCallerIdentityStage(stage.value),
         publish_id=publish_id,
         entity_id=entity_id,
         is_test_exchange=False,

@@ -21,6 +21,10 @@ _DECLARED_PREFIXES = (
     # The verified caller's own identity — the one operation whose answer is
     # the user. Declared with its gateway domain + route_security entries.
     "/openapi/v1/caller",
+    "/openapi/v1/token",
+    "/openapi/v1/spaces",
+    "/openapi/v1/work-orders",
+    "/openapi/v1/work-order-notifications",
 )
 
 

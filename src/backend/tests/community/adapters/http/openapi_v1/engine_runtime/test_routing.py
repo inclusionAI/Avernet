@@ -12,7 +12,7 @@ from agentclaw.community.adapters.http.openapi_v1 import (
 )
 
 #: sessions 10 + engine 3 + models 2 + approvals 3 + connection 1
-_EXPECTED_ROUTE_COUNT = 19
+_EXPECTED_ROUTE_COUNT = 20
 
 _BOTS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/"
 

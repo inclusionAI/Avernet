@@ -71,6 +71,7 @@ def _is_engine_runtime(path: str) -> bool:
 #: frozen, so they must not have grown the parameter — which the exclusivity
 #: assertion below is what proves.
 _STAGE_ADDRESSED_ELSEWHERE = {
+    ("post", "/openapi/v1/bots/{bot_id}/caller-identity"),
     ("get", "/openapi/v1/bots/{bot_id}/engine/config"),
     ("put", "/openapi/v1/bots/{bot_id}/engine/config"),
     ("get", "/openapi/v1/bots/{bot_id}/identity"),
@@ -299,13 +300,13 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
 
     # The original 16 operations also answer at their former addresses while
     # callers migrate. The three newly added favorite operations have only
-    # their bot-first address, so there are 19 current + 16 retiring operations.
-    assert len(engine_runtime) == 35
+    # their bot-first address, so there are 20 current + 16 retiring operations.
+    assert len(engine_runtime) == 36
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (
-        "stage belongs to the engine-runtime operations and the five per-bot "
-        "file operations, and to nothing else by accident — in particular to "
+        "stage belongs to the engine-runtime operations, Caller preparation, "
+        "and the five per-bot file operations, and to nothing else by accident — in particular to "
         "no retiring address of those five, whose contract is frozen"
     )
     assert sorted(carrying_owner) == sorted(
