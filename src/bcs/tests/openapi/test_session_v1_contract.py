@@ -277,6 +277,49 @@ def test_add_session_participant_accepts_only_bot_uuid() -> None:
     }
 
 
+def test_add_session_participant_forbidden_documents_management_and_eligibility() -> None:
+    # The add-participant 403 governs two independent gates: Session-management
+    # authority and the added-Bot collaboration-eligibility sponsorship set
+    # {caller, parent Group driver, parent Group originator}. The contract must
+    # document both so other implementations do not regress to caller-only
+    # eligibility semantics.
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/participants"
+    ]["post"]
+
+    forbidden = operation["responses"]["403"]
+    assert forbidden["x-error-codes"] == ["forbidden"]
+    description = forbidden["description"]
+
+    # Session-management authority gate.
+    assert "manage" in description
+    assert "parent Group management actor" in description
+    assert "driver" in description
+    assert "originator" in description
+
+    # Added-Bot collaboration-eligibility sponsorship gate.
+    assert "collaboration-eligible" in description
+    assert "anchor" in description
+    assert "parent Group driver" in description
+    assert "parent Group originator" in description
+    assert "friend of an anchor" in description
+    assert "Hidden Bot is rejected outright" in description
+
+
+def test_add_session_participant_not_found_does_not_classify_hidden_as_missing() -> None:
+    # A Hidden Bot is a 403, not a 404; the not-found response must describe
+    # only a missing Session or Bot.
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/participants"
+    ]["post"]
+
+    not_found = operation["responses"]["404"]
+    assert not_found["x-error-codes"] == ["session_not_found", "bot_not_found"]
+    assert "hidden" not in not_found["description"].lower()
+
+
 def test_update_session_participant_accepts_bot_and_human_modes() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"][
