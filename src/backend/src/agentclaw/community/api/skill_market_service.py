@@ -16,6 +16,10 @@ class SkillMarketServiceProtocol(Protocol):
 
     def search(self, query: SkillMarketSearchQuery) -> SkillMarketSearchResult: ...
 
+    def get_repository_skill(self, skill_id: str) -> dict | None: ...
+
+    def repository_tree(self) -> list[dict]: ...
+
 
 __all__ = [
     "SkillMarketSearchQuery",

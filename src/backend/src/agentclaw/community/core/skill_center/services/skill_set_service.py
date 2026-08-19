@@ -1442,7 +1442,7 @@ class SkillSetService:
             if git_path.startswith('git://'):
                 # Git 技能: 指向 skills-repo
                 rel_path = git_path[6:]
-                link_name = rel_path.split('/')[-1] if '/' in rel_path else rel_path
+                link_name = skill_name or (rel_path.split('/')[-1] if '/' in rel_path else rel_path)
                 source = str(skills_repo_dir / rel_path)
                 target = str(base_skills_dir / link_name)
                 symlinks.append(SynlinkMappingInfo(source=source, target=target))

@@ -206,6 +206,7 @@ from .mcp import router as mcp_router
 from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
 from .resources import router as resources_router
+from .repository_catalog import router as repository_catalog_router
 from .routines import router as routines_router
 from .skills import router as skills_router
 from .service_publications import (
@@ -398,6 +399,11 @@ def build_public_router() -> APIRouter:
     public.include_router(
         market_router,
         responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        repository_catalog_router,
+        responses=USER_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
     for router in _GROUPS_WITHOUT_CALLER_SCOPE + _MIXED_GROUPS:
