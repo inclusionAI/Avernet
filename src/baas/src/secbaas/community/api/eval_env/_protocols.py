@@ -17,8 +17,8 @@ from ._models import EvalBindingInfo
 class EvalBindingResolverProtocol(Protocol):
     """评测绑定解析 Protocol。
 
-    从 ``_bot_binding_resolver._resolve_eval_binding`` 和
-    ``_bot_binding_resolver._is_eval_env_enabled`` 迁移。
+    从原 ``_bot_binding_resolver`` 内联逻辑迁移，现已通过
+    ``EvalBindingResolverProtocol`` Plugin 实现插拔式替换。
     """
 
     def resolve_eval_binding(

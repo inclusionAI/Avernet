@@ -14,7 +14,7 @@ class NoopEvalBindingResolver(EvalBindingResolverProtocol):
     """评测绑定解析的 Stub 实现。
 
     返回 ``None`` 使调用方降级到生产 binding 路径，
-    等效于 ``_is_eval_env_enabled() == False`` 时的行为。
+    等效于 ``EvalBindingResolverPlugin.is_eval_env_enabled() == False`` 时的行为。
     """
 
     def resolve_eval_binding(

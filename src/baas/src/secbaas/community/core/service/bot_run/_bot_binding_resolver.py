@@ -123,7 +123,19 @@ class BotBindingResolver:
         if ac_bot.bot_type == "service":
             # eval 生命周期阶段 → 委托 Plugin 决定走 eval binding 还是降级走 online
             if lifecycle_stage in ("eval", "default"):
-                if self._eval_binding_resolver is not None and self._eval_binding_resolver.is_eval_env_enabled():
+                try:
+                    plugin_enabled = (
+                        self._eval_binding_resolver is not None
+                        and self._eval_binding_resolver.is_eval_env_enabled()
+                    )
+                except Exception:
+                    logger.warning(
+                        "[resolve] eval Plugin is_eval_env_enabled 异常, 降级走 online: bot_id=%s",
+                        bot_id,
+                    )
+                    plugin_enabled = False
+
+                if plugin_enabled:
                     # Plugin 启用：走 eval binding 解析
                     resolved_binding_id = self._eval_binding_resolver.resolve_eval_binding(
                         bot_id=bot_id,
@@ -319,32 +331,4 @@ class BotBindingResolver:
             )
             return None
 
-    def _resolve_eval_binding(
-        self,
-        bot_id: str,
-        entity_id: str,
-        env: str,
-    ) -> int | None:
-        """解析 eval 生命周期阶段的 binding_id。
-
-        已迁移至 EvalBindingResolverProtocol Plugin。
-        此方法保留为兼容入口，委托 Plugin 处理。
-        """
-        if self._eval_binding_resolver is None:
-            logger.warning("[_resolve_eval_binding] Plugin 未注入，返回 None")
-            return None
-        return self._eval_binding_resolver.resolve_eval_binding(
-            bot_id=bot_id,
-            entity_id=entity_id,
-            env=env,
-        )
-
-    def _is_eval_env_enabled(self) -> bool:
-        """检查评测环境开关是否开启。
-
-        已迁移至 EvalBindingResolverProtocol.is_eval_env_enabled()。
-        此方法保留为兼容入口，委托 Plugin 处理。
-        """
-        if self._eval_binding_resolver is None:
-            return False
-        return self._eval_binding_resolver.is_eval_env_enabled()
+    
