@@ -72,6 +72,7 @@ class _Sets:
         self.events: list[str] = []
         self.associated = associated
         self.remove_all_calls = 0
+        self.install_calls = 0
 
     def get_default(self, **kwargs):
         return {"id": "4"}
@@ -97,6 +98,43 @@ class _Sets:
 
     def add_default_skill_exclusion(self, *args):
         self.events.append("add")
+        self.skills.active = False
+        return True
+
+    # Compatibility fake for the new Installation Repository seam.  The event
+    # labels intentionally retain the pre-migration assertions below.
+    def install(self, **_kwargs):
+        self.install_calls += 1
+        if self.skills.active:
+            return False
+        self.events.append("remove")
+        self.skills.active = True
+        return True
+
+    def uninstall(self, **_kwargs):
+        if not self.skills.active:
+            return False
+        self.events.append("add")
+        self.skills.active = False
+        return True
+
+
+class _Installations:
+    def __init__(self, skills: _Skills) -> None:
+        self.skills = skills
+        self.events: list[str] = []
+
+    def install(self, *, env: str, bot_id: str, skill_id: str) -> bool:
+        self.events.append(f"install:{env}:{bot_id}:{skill_id}")
+        if self.skills.active:
+            return False
+        self.skills.active = True
+        return True
+
+    def uninstall(self, *, env: str, bot_id: str, skill_id: str) -> bool:
+        self.events.append(f"uninstall:{env}:{bot_id}:{skill_id}")
+        if not self.skills.active:
+            return False
         self.skills.active = False
         return True
 
@@ -280,7 +318,7 @@ async def test_activate_changes_desired_state_then_reconciles_under_bot_layout_l
 
 
 @pytest.mark.asyncio
-async def test_activate_repairs_missing_default_set_membership_before_runtime_sync():
+async def test_activate_does_not_mutate_default_set_membership_before_runtime_sync():
     service, _skills, sets, _guard, runtime, _factory = _service(associated=False)
 
     result = await service.set_local_skill_active(
@@ -288,19 +326,34 @@ async def test_activate_repairs_missing_default_set_membership_before_runtime_sy
     )
 
     assert result["active"] is True
-    assert sets.associated is True
-    assert sets.events == ["associate", "remove"]
+    assert sets.associated is False
+    assert sets.events == ["remove"]
     assert runtime.calls == 1
 
 
 @pytest.mark.asyncio
-async def test_activate_clears_stale_exclusions_from_prior_default_sets():
+async def test_activate_leaves_legacy_exclusions_for_the_migration_adapter():
     service, _skills, sets, _guard, runtime, _factory = _service()
 
     await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
 
-    assert sets.remove_all_calls == 1
+    assert sets.remove_all_calls == 0
     assert sets.events == ["remove"]
+    assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_idempotent_activate_runtime_failure_never_uninstalls_existing_desired_state():
+    service, skills, installations, _guard, runtime, _factory = _service(
+        active=True, sync_success=False
+    )
+
+    with pytest.raises(LocalSkillRuntimeSyncError):
+        await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
+
+    assert skills.active is True
+    assert installations.install_calls == 1
+    assert installations.events == []
     assert runtime.calls == 1
 
 
@@ -316,7 +369,7 @@ async def test_runtime_sync_uses_the_bot_entity_for_skill_paths():
 
 
 @pytest.mark.asyncio
-async def test_idempotent_deactivate_normalizes_current_default_exclusion():
+async def test_idempotent_deactivate_does_not_recreate_a_legacy_exclusion():
     service, _skills, sets, _guard, runtime, _factory = _service(active=False)
 
     result = await service.set_local_skill_active(
@@ -325,7 +378,7 @@ async def test_idempotent_deactivate_normalizes_current_default_exclusion():
 
     assert result["active"] is False
     assert result["changed"] is False
-    assert sets.events == ["add"]
+    assert sets.events == []
     assert runtime.calls == 0
     assert len(runtime.publish_calls) == len(runtime.verify_calls) == 1
 
@@ -526,11 +579,11 @@ async def test_failed_runtime_compensation_never_claims_runtime_sync_error():
         active=False, sync_success=False
     )
 
-    def fail_restore(*_args):
+    def fail_restore(*_args, **_kwargs):
         sets.events.append("add")
         raise RuntimeError("private database failure")
 
-    sets.add_default_skill_exclusion = fail_restore
+    sets.uninstall = fail_restore
     with pytest.raises(LocalSkillStorageError):
         await service.set_local_skill_active(
             skill_id="9", actor_id="owner", active=True

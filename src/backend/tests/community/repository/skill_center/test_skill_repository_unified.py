@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.models import Skill, SkillSet, SkillSetSkill
+from agentclaw.community.core.models import BotSkillInstallation, Skill, SkillSet, SkillSetSkill
 from agentclaw.community.core.skill_center.local_skill_cleanup import (
     LocalSkillCleanupWorkModel,
 )
@@ -67,6 +67,7 @@ def db(tmp_path):
         Skill,
         SkillSet,
         SkillSetSkill,
+        BotSkillInstallation,
         SkillSetMCPServer,
         DefaultSkillsetMcpExclusion,
         DefaultSkillsetSkillExclusion,

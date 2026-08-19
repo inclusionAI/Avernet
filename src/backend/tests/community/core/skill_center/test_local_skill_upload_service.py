@@ -574,11 +574,7 @@ async def test_upload_keeps_bot_owner_when_collaborator_is_actor():
             "detail": '{"action": "local_skill_upload", "skill_id": "9"}',
         }
     ]
-    assert sets.default_args == {
-        "user_id": "owner",
-        "bolt_id": "bot",
-        "engine_type": "moltis",
-    }
+    assert sets.default_args is None
 
 
 @pytest.mark.asyncio
@@ -641,7 +637,7 @@ async def test_upload_resolves_package_storage_with_bot_entity():
 
 
 @pytest.mark.asyncio
-async def test_upload_creates_missing_bot_default_set_before_association():
+async def test_upload_stays_inactive_without_creating_a_default_set_membership():
     filesystem = _Filesystem()
     sets = _Sets(default_exists=False)
     service = _service(filesystem, sets=sets)
@@ -654,25 +650,9 @@ async def test_upload_creates_missing_bot_default_set_before_association():
     )
 
     assert result["operation"] == "created"
-    assert sets.default_args == {
-        "user_id": "owner",
-        "bolt_id": "bot",
-        "engine_type": "moltis",
-    }
-    assert sets.created_sets == [
-        {
-            "id": "4",
-            "name": "默认技能集",
-            "description": "系统默认技能集，用户可以根据需要添加或移除技能",
-            "user_id": "owner",
-            "bolt_id": "bot",
-            "is_default": True,
-            "is_builtin": False,
-            "is_active": False,
-            "engine_type": "moltis",
-        }
-    ]
-    assert sets.associations == [("4", "9")]
+    assert sets.default_args is None
+    assert sets.created_sets == []
+    assert sets.associations == []
 
 
 @pytest.mark.asyncio
@@ -844,7 +824,7 @@ class _FailAudit(_Audit):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "stage", ["write", "create", "association", "exclusion", "audit"]
+    "stage", ["write", "create", "audit"]
 )
 async def test_each_creation_failure_compensates_and_never_returns_success(stage):
     package = _zip({"SKILL.md": _skill_md()})
@@ -949,7 +929,7 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     assert result["skill"]["user_id"] == "owner"
     assert result["skill"]["active"] is False
     assert result["skill"]["git_path"] != "local:///private/skills-local/upload-skill"
-    assert sets.exclusions == [("owner", "bot", 4, 9)]
+    assert sets.exclusions == []
     assert runtime.calls == 1
     assert "/private/skills-local/upload-skill" in filesystem.deleted
     assert any("replacement-" in path for path in filesystem.files)
@@ -1011,7 +991,7 @@ async def test_replacement_reads_desired_state_from_exact_local_skill_query():
 
 
 @pytest.mark.asyncio
-async def test_active_replacement_repairs_missing_default_set_membership_before_sync():
+async def test_active_replacement_keeps_installation_owned_state_before_sync():
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
     repo = _ReplacementRepo([_existing_skill(active=True)])
@@ -1025,7 +1005,7 @@ async def test_active_replacement_repairs_missing_default_set_membership_before_
         package=_zip({"SKILL.md": _skill_md(description="new description")}),
     )
 
-    assert sets.associations == [("4", "9")]
+    assert sets.associations == []
     assert runtime.calls == 1
 
 

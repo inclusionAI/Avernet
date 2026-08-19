@@ -18,6 +18,8 @@ provides:
   - "LocalSkillUploadService"
   - "LocalSkillStateService"
   - "LocalSkillDeleteService"
+  - "SkillInstallationRepositoryProtocol"
+  - "BotSkillAssetService"
   - "LocalSkillCleanupWorkModel"
 consumes:
   - "BotRepository"
@@ -37,11 +39,13 @@ consumes:
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
 internal_dependencies:
+  - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service
   - agentclaw.community.api.space_skill_query_service
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
+  - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
   - agentclaw.community.core.access
   - agentclaw.community.core.base
@@ -79,6 +83,23 @@ internal_dependencies:
 ### Change impact
 
 Skill-set switching is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
+
+Local Skill compatibility materializes active state in
+`ac_bot_skill_installation` and reads it through the Installation repository.
+HTTP and runtime adapters must not write that table or reconstruct Local active
+state from Default SkillSet exclusions.
+
+The P1-01 Local migration is a two-step operation: run the read-only
+`sql/2026_08_20_bot_skill_installation_backfill_dry_run.sql`, retain its
+complete result, then explicitly approve and run
+`sql/2026_08_20_bot_skill_installation_backfill_apply.sql` under the same
+Local-writer freeze. Its selector mirrors the legacy rule that *any* matching
+Default exclusion is inactive, including a stale former-default exclusion.
+The apply script leaves its transaction open; source the paired
+`backfill_verify_commit.sql` in that same session and issue `COMMIT` only after
+its missing-installations count is zero (otherwise `ROLLBACK`).
+The audit run id supports exact rollback only while that writer freeze remains
+in effect; see `sql/2026_08_20_bot_skill_installation_backfill_rollback.sql`.
 
 Local Skill replacement stages a complete package before switching the existing
 Skill metadata. Its old-package cleanup work is persisted before an Active

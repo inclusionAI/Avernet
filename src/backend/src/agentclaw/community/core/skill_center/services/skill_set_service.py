@@ -31,9 +31,15 @@ from agentclaw.community.core.mcp.services._defaults import (
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
+)
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 from agentclaw.community.core.skill_center.path_resolution import (
     canonical_pool_local_path,
+)
+from agentclaw.community.core.skill_center.installation_compatibility import (
+    includes_default_skill_member,
 )
 from agentclaw.community.core.skill_center.utils.skill_metadata_writer import SkillSetMetadataWriter
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE  # noqa: E402
@@ -164,6 +170,7 @@ class SkillSetService:
             tuple[str, str, str] | None,
         ]
         | None = None,
+        installations: SkillInstallationRepositoryProtocol | None = None,
     ):
         """
         Args:
@@ -185,6 +192,7 @@ class SkillSetService:
             entity_type: Entity type (e.g., staff, proj, team), used when entity_id is pure id
         """
         self.skill_repo = skill_repo
+        self._installations = installations
         self.skill_set_repo = skill_set_repo
         self.mcp_center = mcp_center
         self.mcp_config_service = mcp_config_service
@@ -864,6 +872,28 @@ class SkillSetService:
         # Check if this is the default skill set
         skill_set = self.get_skill_set(skill_set_id, user_id)
         if skill_set and skill_set.get('is_default'):
+            skill = self.skill_repo.get_by_id(skill_id)
+            if (
+                skill
+                and str(skill.get("git_path") or "").startswith("local://")
+                and self._installations is not None
+            ):
+                changed = self._installations.uninstall(
+                    env=str(skill["env"]), bot_id=self.bot_id, skill_id=skill_id
+                )
+                synced = await self._sync_symlinks_to_device_if_needed(
+                    user_id or self.entity_id
+                )
+                if not synced and changed:
+                    self._installations.install(
+                        env=str(skill["env"]),
+                        bot_id=self.bot_id,
+                        skill_id=skill_id,
+                    )
+                    await self._sync_symlinks_to_device_if_needed(
+                        user_id or self.entity_id
+                    )
+                return synced
             # Default skill set: write exclusion record instead of deleting
             if not user_id:
                 user_id = self.entity_id
@@ -1217,6 +1247,12 @@ class SkillSetService:
         """
         effective_bolt_id = bolt_id if bolt_id else self.bot_id
         effective_user_id = user_id if user_id else self.entity_id
+        from agentclaw.community.utils.env_utils import get_current_env
+
+        installed_skills = self.skill_repo.list_bot_installed_skills(
+            env=get_current_env(), bot_id=effective_bolt_id
+        )
+        installed_ids = {int(skill["id"]) for skill in installed_skills}
 
         # 1. 查询所有激活的技能集（包含默认能力集）
         active_skill_sets = self.skill_set_repo.get_all_active_skill_sets(
@@ -1224,7 +1260,7 @@ class SkillSetService:
             bolt_id=effective_bolt_id,
             engine_type=self.engine_type
         )
-        if not active_skill_sets:
+        if not active_skill_sets and not installed_skills:
             logger.warning(f"[get_active_skills] 未找到激活的技能集: user_id={effective_user_id}, bolt_id={effective_bolt_id}")
             return []
 
@@ -1234,19 +1270,30 @@ class SkillSetService:
             skill_set_id = skill_set.get('id')
             skills = self.skill_set_repo.get_skills_in_set(str(skill_set_id))
 
-            # Default skill set: filter out user-excluded skills
-            # (mirrors get_set_mcp_servers which filters ac_default_skillset_mcp_exclusion)
+            # Compatibility adapter: historical Local inactivity used a
+            # Default-SkillSet exclusion.  New desired state is Installation;
+            # leave non-Local Default membership untouched and accept a Local
+            # member only when its Installation exists.
             if skill_set.get('is_default') and effective_user_id and effective_bolt_id:
-                excluded = self.skill_set_repo.get_excluded_skills(
-                    user_id=effective_user_id,
-                    bot_id=effective_bolt_id,
-                    skill_set_id=int(skill_set_id),
-                )
-                excluded_ids = set(excluded)
-                if excluded_ids:
-                    # skill id from _skill_to_dict is str, excluded_ids from DB are int
-                    skills = [s for s in skills if int(s.get('id', 0)) not in excluded_ids]
+                excluded_ids = {
+                    int(skill_id)
+                    for skill_id in self.skill_set_repo.get_excluded_skills(
+                        user_id=effective_user_id,
+                        bot_id=effective_bolt_id,
+                        skill_set_id=int(skill_set_id),
+                    )
+                }
+                skills = [
+                    skill
+                    for skill in skills
+                    if includes_default_skill_member(
+                        skill,
+                        installed_ids=installed_ids,
+                        excluded_ids=excluded_ids,
+                    )
+                ]
             all_skills.extend(skills)
+        all_skills.extend(installed_skills)
 
         # 3. 根据 git_path 去重
         seen_git_paths = set()

@@ -140,6 +140,7 @@ provides:
   - SkillMemberRepository
   - SkillPropagationLogRepository
   - SkillRepository
+  - SkillInstallationRepositoryProtocol
   - SpaceSkillRepository
   - SkillSetRepository
   # skills_pool
@@ -187,6 +188,7 @@ provides:
   # skill_center
   - SpaceSkillRepository
   - SqlLocalSkillCleanupRepository
+  - SkillInstallationRepository
   # skills_pool
   - SkillsPoolLayoutRepository
   - SkillsPoolRolloutRepository
