@@ -354,8 +354,8 @@ class _SkillsPortMixin:
                     raise _SkillsEnsureError(
                         f"center skill missing SKILL.md: {nas_version_dir}"
                     )
-                if local_version_dir.exists():
-                    shutil.rmtree(local_version_dir)
+                if local_version_dir.exists() or local_version_dir.is_symlink():
+                    raise _SkillsEnsureError("existing center version incomplete")
                 os.replace(temporary, local_version_dir)
             except Exception:
                 shutil.rmtree(temporary, ignore_errors=True)
