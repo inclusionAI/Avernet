@@ -80,6 +80,7 @@
     "tsx": "*",
     "typescript": "*"
   },
+  "files": ["dist/", "configs/", "skills/", "openclaw.plugin.json"],
   "tshy": {
     "dialects": [
       "esm"

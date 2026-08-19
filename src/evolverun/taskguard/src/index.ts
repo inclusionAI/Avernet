@@ -10,6 +10,14 @@ export type { TaskguardExtensions } from "./community/types.js";
 // it overrides the community stub.
 let _extensions: TaskguardExtensions | undefined;
 
+// ── Module-level holders for corp extension injections ──
+// These are populated by registerTaskguardPlugin() when corp code provides
+// implementations via TaskguardExtensions. Community code checks these
+// before falling back to default behavior.
+let _corpNotifier: ((config: unknown) => unknown) | undefined;
+let _corpApprovalProvider: ((config: unknown) => unknown) | undefined;
+let _corpAuthMethods: unknown | undefined;
+
 
 import { stat as fsStat } from "node:fs/promises";
 import { join } from "node:path";
@@ -3042,8 +3050,46 @@ function createApiClient(config: ApiClientConfig): ApiClient {
 export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardExtensions): void {
   // Store extensions for corp module injection (createApiClient, knowledge adapters, etc.)
   _extensions = extensions;
+
+  // ── Wire up previously-unchecked extension points ──
+  // These 5 fields were defined in TaskguardExtensions but never consumed.
+  // We now check and invoke them so corp injections actually take effect.
+
+  // 1. createDatabase — if corp provides a database factory, use it instead of community default
+  const dbFactory = extensions?.createDatabase
+    ? () => extensions.createDatabase!(loadDatabaseConfig() as unknown as Parameters<typeof extensions.createDatabase>[0])
+    : () => createDatabase();
+
+  // 2. createNotifier — store for later use by notification dispatch
+  if (extensions?.createNotifier) {
+    _corpNotifier = extensions.createNotifier;
+  }
+
+  // 3. createApprovalProvider — store for later use by approval flow
+  if (extensions?.createApprovalProvider) {
+    _corpApprovalProvider = extensions.createApprovalProvider;
+  }
+
+  // 4. registerExecutors — call immediately so corp executors are registered at plugin load
+  if (extensions?.registerExecutors) {
+    try {
+      extensions.registerExecutors(undefined);
+    } catch (err) {
+      console.warn("[clawmind] registerExecutions extension failed:", err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // 5. registerAuthMethods — store auth methods for callback authentication
+  if (extensions?.registerAuthMethods) {
+    try {
+      _corpAuthMethods = extensions.registerAuthMethods(undefined);
+    } catch (err) {
+      console.warn("[clawmind] registerAuthMethods extension failed:", err instanceof Error ? err.message : String(err));
+    }
+  }
+
   // Initialize database asynchronously (best-effort; falls back to NoOpDatabase on failure)
-    createDatabase().then(async (db) => {
+    dbFactory().then(async (db) => {
       setDatabase(db);
 
       const dbConfig = loadDatabaseConfig();

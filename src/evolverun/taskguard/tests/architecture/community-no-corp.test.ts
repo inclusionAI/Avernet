@@ -19,6 +19,10 @@ const FORBIDDEN_IMPORT_PATTERNS = [
   /from\s+["'].*agentmind-adapter["']/,
   /from\s+["'].*approval-card-web-poller["']/,
   /from\s+["'].*dev-workflow-callback["']/,
+  /from\s+["'].*baas["']/,
+  /from\s+["'].*baas-call["']/,
+  /from\s+["'].*corp["']/,
+  /from\s+["'].*internal["']/,
 ];
 
 describe("Architecture boundary: community code must not import corp modules", () => {

@@ -49,6 +49,9 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      - name: Lint (boundary enforcement)
+        run: npx eslint src/ --ext .ts || true
+
       - name: Build
         run: npm run build
 
@@ -71,7 +74,6 @@ jobs:
 
       - name: Run tests
         run: npm test
-        continue-on-error: true # Tests may require runtime deps
 
   boundary-check:
     name: Community Boundary Check
@@ -99,8 +101,16 @@ jobs:
           FORBIDDEN_PATTERNS=(
             "@ocb/"
             "@alipay/"
+            "@clawmind/"
             "mysql2"
             "dingtalk-enterprise"
+            "zdas-database"
+            "yuque-adapter"
+            "agentmind-adapter"
+            "approval-card-web-poller"
+            "dev-workflow-callback"
+            "baas"
+            "baas-call"
           )
 
           FOUND=0
