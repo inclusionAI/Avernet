@@ -27,14 +27,20 @@ class AicodingDefaultSkillSetSelectionResolver:
         runtime_engine_type: str | None,
         normalized_persisted_engine_type: str,
         normalized_runtime_engine_type: str,
-    ) -> DefaultSkillSetSelection | None:
+    ) -> tuple[DefaultSkillSetSelection, ...] | None:
         if (
             normalized_persisted_engine_type == CLAUDE_CODE_ENGINE_TYPE
             and normalized_runtime_engine_type == AICODING_ENGINE_TYPE
         ):
-            return DefaultSkillSetSelection(
-                engine_type=runtime_engine_type,
-                bolt_id=self._GLOBAL_DEFAULT_BOLT_ID,
+            return (
+                DefaultSkillSetSelection(
+                    engine_type=runtime_engine_type,
+                    bolt_id=self._GLOBAL_DEFAULT_BOLT_ID,
+                ),
+                DefaultSkillSetSelection(
+                    engine_type=persisted_engine_type,
+                    bolt_id=self._GLOBAL_DEFAULT_BOLT_ID,
+                ),
             )
         return None
 

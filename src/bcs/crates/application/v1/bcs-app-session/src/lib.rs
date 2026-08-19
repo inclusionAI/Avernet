@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::application::session::{SessionManagementService, SessionUseCaseError};
+use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, Page, Principal,
     message::{ListSessionMessages, SessionMessageService},
@@ -40,7 +41,8 @@ use bcs_service_api::{
     HumanActor, Participant, ParticipantMode, ParticipantRole, RegisteredBot, RelationCoreService,
     RequestedSessionRole, ServiceError, Session, SessionHistoryCommand, SessionKind,
     SessionLaunchError, SessionLaunchRequest, SessionLaunchService,
-    SessionStatus as DomainSessionStatus, StateMachineRunView, backfill_participant_names,
+    SessionStatus as DomainSessionStatus, StateMachineRunView, SystemMessageEvent,
+    backfill_participant_names,
 };
 
 #[derive(Debug, Clone)]
@@ -66,6 +68,7 @@ pub struct SessionServiceImpl {
     session_repo: Arc<dyn SessionRepoPort>,
     history: Arc<dyn GroupMessageHistoryService>,
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
+    system_message: Arc<dyn SystemMessageService>,
     config: SessionServiceConfig,
 }
 
@@ -81,6 +84,7 @@ impl SessionServiceImpl {
         session_repo: Arc<dyn SessionRepoPort>,
         history: Arc<dyn GroupMessageHistoryService>,
         collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
+        system_message: Arc<dyn SystemMessageService>,
         config: SessionServiceConfig,
     ) -> Self {
         Self {
@@ -93,6 +97,7 @@ impl SessionServiceImpl {
             session_repo,
             history,
             collaboration_runtime,
+            system_message,
             config,
         }
     }
@@ -912,6 +917,34 @@ impl SessionService for SessionServiceImpl {
         let principal = require_human(&command.caller)?;
         let session = self.load_session(&command.session_id).await?;
         let group = self.load_group(&session.group_id).await?;
+        // Capture the participant's pre-update identity so a
+        // `ParticipantModeChanged` system message can be emitted when the
+        // mode actually changes — mirroring the legacy
+        // `bcs_http::routes::sessions::update_session_participant_mode` path
+        // (the OpenAPI route previously had no such notification).
+        let existing = session
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == command.bot_uuid)
+            .cloned();
+        let old_mode = existing.as_ref().and_then(|p| p.mode);
+        let actor_kind = existing
+            .as_ref()
+            .map(|p| p.actor_kind)
+            .unwrap_or_else(|| {
+                if command.bot_uuid.starts_with("human_") {
+                    ActorKind::Human
+                } else {
+                    ActorKind::Bot
+                }
+            });
+        let actor_name = self
+            .registry
+            .try_get(&command.bot_uuid)
+            .await
+            .map_err(map_service_error)?
+            .and_then(|bot| bot.capabilities.name)
+            .unwrap_or_else(|| command.bot_uuid.clone());
         if let Some(actor_kind) = session
             .participants
             .iter()
@@ -978,6 +1011,36 @@ impl SessionService for SessionServiceImpl {
             .update_participant_mode(&command.session_id, &command.bot_uuid, command.mode)
             .await
             .map_err(map_session_error)?;
+        // Emit the participant-mode-changed system message only when the mode
+        // actually changed (same gating as the legacy endpoint). Best-effort:
+        // a dispatch failure is logged and never surfaces to the caller.
+        if old_mode != Some(command.mode) {
+            let event = SystemMessageEvent::ParticipantModeChanged {
+                group_id: updated.group_id.clone(),
+                actor_id: command.bot_uuid.clone(),
+                actor_name: actor_name.clone(),
+                actor_kind,
+                from: old_mode,
+                to: command.mode,
+            };
+            if let Err(error) = self
+                .system_message
+                .notify(
+                    &updated.group_id,
+                    event,
+                    &command.session_id,
+                    &updated.participants,
+                )
+                .await
+            {
+                tracing::warn!(
+                    session_id = %command.session_id,
+                    bot_uuid = %command.bot_uuid,
+                    error = %error,
+                    "notify participant mode changed failed"
+                );
+            }
+        }
         match self
             .backfill_and_project_participant(&mut updated.participants, &command.bot_uuid)
             .await

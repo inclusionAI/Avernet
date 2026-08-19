@@ -40,8 +40,8 @@ class DefaultSkillSetSelectionResolver(Protocol):
         runtime_engine_type: str | None,
         normalized_persisted_engine_type: str,
         normalized_runtime_engine_type: str,
-    ) -> DefaultSkillSetSelection | None:
-        """Return default SkillSet lookup constraints, or ``None``."""
+    ) -> tuple[DefaultSkillSetSelection, ...] | DefaultSkillSetSelection | None:
+        """Return default SkillSet lookup candidates, or ``None``."""
 
 
 class DefaultSkillSetSelectionPolicy:
@@ -59,6 +59,17 @@ class DefaultSkillSetSelectionPolicy:
         persisted_engine_type: str | None,
         runtime_engine_type: str | None,
     ) -> DefaultSkillSetSelection:
+        return self.resolve_candidates(
+            persisted_engine_type=persisted_engine_type,
+            runtime_engine_type=runtime_engine_type,
+        )[0]
+
+    def resolve_candidates(
+        self,
+        *,
+        persisted_engine_type: str | None,
+        runtime_engine_type: str | None,
+    ) -> tuple[DefaultSkillSetSelection, ...]:
         normalized_persisted_engine = normalize_engine_for_default_skill_set(
             persisted_engine_type
         )
@@ -72,9 +83,11 @@ class DefaultSkillSetSelectionPolicy:
                 normalized_persisted_engine_type=normalized_persisted_engine,
                 normalized_runtime_engine_type=normalized_runtime_engine,
             )
+            if isinstance(selection, DefaultSkillSetSelection):
+                return (selection,)
             if selection is not None:
                 return selection
-        return DefaultSkillSetSelection(engine_type=persisted_engine_type)
+        return (DefaultSkillSetSelection(engine_type=persisted_engine_type),)
 
 
 __all__ = [

@@ -54,3 +54,36 @@ def test_registered_policy_keeps_openclaw_unchanged():
 
     assert selection.engine_type == "openclaw"
     assert selection.bolt_id is None
+
+
+def test_registered_policy_orders_routed_claude_code_global_default_fallbacks():
+    plan = get_default_skill_set_selection_policy().resolve_candidates(
+        persisted_engine_type="claude_code",
+        runtime_engine_type="aicoding",
+    )
+
+    assert [(item.engine_type, item.bolt_id) for item in plan] == [
+        ("aicoding", "default"),
+        ("claude_code", "default"),
+    ]
+
+
+def test_policy_accepts_single_selection_resolver_result():
+    from agentclaw.community.core.skill_center.policies.default_skill_set_selection import (
+        DefaultSkillSetSelection,
+    )
+
+    class SingleSelectionResolver:
+        def resolve_default_skill_set_selection(self, **_kwargs):
+            return DefaultSkillSetSelection(engine_type="runtime", bolt_id="default")
+
+    candidates = DefaultSkillSetSelectionPolicy(
+        resolvers=[SingleSelectionResolver()]
+    ).resolve_candidates(
+        persisted_engine_type="persisted",
+        runtime_engine_type="runtime",
+    )
+
+    assert [(item.engine_type, item.bolt_id) for item in candidates] == [
+        ("runtime", "default")
+    ]
