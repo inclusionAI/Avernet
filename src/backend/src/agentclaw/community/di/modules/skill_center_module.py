@@ -57,6 +57,7 @@ from agentclaw.community.api.runtime_layout_probe_service import (
 from agentclaw.community.api.skill_scan_service import SkillScanServiceProtocol
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
 from agentclaw.community.api.skill_market_service import SkillMarketServiceProtocol
+from agentclaw.community.api.repository_catalog_service import RepositoryCatalogServiceProtocol
 from agentclaw.community.api.skill_set_activator_factory import (
     SkillSetActivatorFactoryProtocol,
 )
@@ -119,6 +120,7 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 )
 from agentclaw.community.core.skill_center.services.market_sync import MarketSyncService
 from agentclaw.community.core.skill_center.services.skill_market_service import SkillMarketService
+from agentclaw.community.core.skill_center.services.repository_catalog_service import RepositoryCatalogService
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
 from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
@@ -245,6 +247,7 @@ class SkillCenterModule(Module):
         # injection returns the same instance.
         binder.bind(MarketCache, to=MarketCache, scope=singleton)
         binder.bind(SkillMarketService, to=SkillMarketService, scope=singleton)
+        binder.bind(RepositoryCatalogService, to=RepositoryCatalogService, scope=singleton)
         # ``GitSyncConfig.__init__`` reads YAML + env vars; bind as a
         # singleton so the file/env scan happens once.
         binder.bind(GitSyncConfig, to=GitSyncConfig, scope=singleton)
@@ -304,6 +307,12 @@ class SkillCenterModule(Module):
     def skill_market_service(
         self, service: SkillMarketService
     ) -> SkillMarketServiceProtocol:
+        return service
+
+    @singleton
+    @provider
+    @inject
+    def repository_catalog_service(self, service: RepositoryCatalogService) -> RepositoryCatalogServiceProtocol:
         return service
 
     @singleton
