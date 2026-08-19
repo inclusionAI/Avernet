@@ -81,6 +81,9 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     VersionListResponse,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.skill_set_control_plane import (
+    SkillSetControlPlaneServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
@@ -934,6 +937,7 @@ async def activate_skill_set(
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     activator_factory: SkillSetActivatorFactoryProtocol = Injected(SkillSetActivatorFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> ActivateSkillSetResponse:
     """激活单个能力集（增量激活，不清除其他已激活的能力集）
 
@@ -948,23 +952,18 @@ async def activate_skill_set(
         ctx, request.entity_id, request.entity_type, request.bot_id, request.engine_type, bot_repo=bot_repo
     )
 
-    activator = activator_factory.create(
-        entity_id=effective_entity_id,
+    item = await control_plane.activate(
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
-    )
-    result = await activator.activate_skill_set(
-        skill_set_id=request.skill_set_id,
-        user_id=request.entity_id,
-        proxy_token=request.proxy_token
+        actor_id=ctx.user_id,
+        set_id=request.skill_set_id,
     )
 
     return ActivateSkillSetResponse(
-        success=result.success,
-        message=result.message,
+        success=True,
+        message="Skill set activated",
         data={
-            "activated": result.activated,
-            "failed": result.failed
+            "activated": [item["id"]] if item.get("changed") else [],
+            "failed": []
         }
     )
 
@@ -979,6 +978,7 @@ async def deactivate_skill_set(
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     activator_factory: SkillSetActivatorFactoryProtocol = Injected(SkillSetActivatorFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> DeactivateSkillSetResponse:
     """取消激活单个能力集
 
@@ -993,23 +993,18 @@ async def deactivate_skill_set(
         ctx, request.entity_id, request.entity_type, request.bot_id, request.engine_type, bot_repo=bot_repo
     )
 
-    activator = activator_factory.create(
-        entity_id=effective_entity_id,
+    item = await control_plane.deactivate(
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
-    )
-    result = await activator.deactivate_skill_set(
-        skill_set_id=request.skill_set_id,
-        user_id=request.entity_id,
-        proxy_token=request.proxy_token
+        actor_id=ctx.user_id,
+        set_id=request.skill_set_id,
     )
 
     return DeactivateSkillSetResponse(
-        success=result.success,
-        message=result.message,
+        success=True,
+        message="Skill set deactivated",
         data={
-            "deactivated": result.deactivated,
-            "failed": result.failed
+            "deactivated": [item["id"]] if item.get("changed") else [],
+            "failed": []
         }
     )
 
