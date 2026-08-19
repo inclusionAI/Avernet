@@ -1,191 +1,148 @@
-# ClawMind
+# taskguard
 
-通用 YAML DAG 工作流引擎，基于 TaskFlow 持久化编排。
+Universal YAML DAG workflow engine with TaskFlow persistence.
 
-## 概述
+## Overview
 
-ClawMind 是一个基于 YAML 定义的有向无环图 (DAG) 工作流编排系统，构建于 OpenClaw 之上。它使用 TaskFlow 实现状态持久化，支持复杂的多节点工作流执行、人工审批、子工作流嵌套和条件分支。
+taskguard is a YAML-defined Directed Acyclic Graph (DAG) workflow orchestration system. It uses TaskFlow for state persistence, supporting complex multi-node workflow execution, human approval, sub-workflow nesting, and conditional branching.
 
-产品文档: https://yuque.antfin.com/zeodup/vh3397/veerfl7vy7moazf9
+### Core Features
 
+- **YAML-defined workflows** — declarative DAG with `dependsOn` + `triggerRule` semantics
+- **Multiple node executors** — embedded-agent, subagent, cli-script, mcp-call, baas-call, bcs-route, bcs-approval-batch, human-wait, subworkflow, collaboration, action, done, loop-group
+- **TaskFlow persistence** — SQLite (dev) / MySQL (prod) / API mode (decoupled)
+- **Workflow packs** — distribute business workflows via `workflow.pack.yaml` manifests, with facade slash commands
+- **Multi-platform adaptation** — PlatformAdapter abstraction layer, supporting OpenClaw / Claude Code / Hermes / TeClaw
 
-### 核心特性
-
-- **YAML 定义工作流** — 声明式 DAG，`dependsOn` + `triggerRule` 语义
-- **多种节点执行器** — embedded-agent、subagent、cli-script、mcp-call、baas-call、bcs-route、bcs-approval-batch、human-wait、subworkflow、collaboration、action、done、loop-group
-- **TaskFlow 持久化** — SQLite (开发) / ZDAS MySQL (生产) / API 模式 (解耦)
-- **工作流包 (Packs)** — 通过 `workflow.pack.yaml` 清单分发业务工作流，支持 Facade 斜杠命令
-- **多平台适配** — Phase 1: PlatformAdapter 抽象层，支持 OpenClaw / Claude Code / Hermes / TeClaw
-
-## 架构
+## Architecture
 
 ```
-YAML 工作流定义
-       │
-       ▼
-   Runner (纯逻辑 DAG 遍历)
-       │
-       ▼
-  Controller (状态机 — 唯一写入 TaskFlow 的路径)
-       │
-       ▼
-   TaskFlow (持久化层: SQLite / MySQL / API)
+YAML workflow definition
+       |
+       v
+   Runner (pure-logic DAG traversal)
+       |
+       v
+  Controller (state machine — sole writer to TaskFlow)
+       |
+       v
+   TaskFlow (persistence layer: SQLite / MySQL / API)
 ```
 
-## 项目结构
+## Project Structure
 
-| 路径 | 说明 |
-|------|------|
-| `src/controller.ts` | 核心状态机 — 唯一写入 TaskFlow 的路径 |
-| `src/index.ts` | 插件入口，命令分发，执行器编排 |
-| `src/runner.ts` | DAG 遍历逻辑 (纯函数，无副作用) |
-| `src/types.ts` | 核心类型定义 (WorkflowSpec, FlowState, WorkflowNode 等) |
-| `src/executors/` | 节点执行器实现 |
-| `src/platform/` | 多平台适配层 (Phase 1) |
-| `src/db/` | 数据库工厂 + 仓储实现 (sqlite/prod/api) |
-| `src/validation/` | Zod 工作流校验 (schema + 语义 + 资源) |
-| `src/facades/` | 斜杠命令 → 工作流映射 |
-| `src/actions/` | Action 注册表 (Python 脚本, 模板解析) |
-| `src/packs/` | Pack 发现与清单解析 |
-| `packs/` | 生产工作流包 |
-| `tests/` | 测试文件 |
+| Path | Description |
+|------|-------------|
+| `src/controller.ts` | Core state machine — sole writer to TaskFlow |
+| `src/index.ts` | Plugin entry, command dispatch, executor orchestration |
+| `src/runner.ts` | DAG traversal logic (pure function, no side effects) |
+| `src/types.ts` | Core type definitions (WorkflowSpec, FlowState, WorkflowNode, etc.) |
+| `src/executors/` | Node executor implementations |
+| `src/platform/` | Multi-platform adapter layer |
+| `src/db/` | Database factory + repository implementations (sqlite/prod/api) |
+| `src/validation/` | Zod workflow validation (schema + semantic + resource) |
+| `src/facades/` | Slash command to workflow mapping |
+| `src/actions/` | Action registry (Python scripts, template resolution) |
+| `src/packs/` | Pack discovery and manifest parsing |
+| `packs/` | Production workflow packs |
+| `tests/` | Test files |
 
-## 开发
+## Development
 
-### 构建
+### Build
 
 ```bash
 npm install
-npm run build           # tshy + 后置脚本 (bundle-runtime, copy-assets, generate-facade-skills)
-npm run build:all       # 同时构建 clawweb
+npm run build           # tshy + post-build scripts (bundle-runtime, copy-assets, generate-facade-skills)
+npm run build:all       # Build all targets
 ```
 
-### 测试
+### Test
 
 ```bash
 npm test                # node --import tsx --test tests/*.test.ts
 
-# 运行特定测试
+# Run a specific test
 node --import tsx --test tests/workflow-validation.test.ts
 node --import tsx --test tests/controller-node-retry.test.ts
-node --import tsx --test tests/platform/openclaw-adapter.test.ts   # 平台适配器测试
-node --import tsx --test tests/platform/adapter-to-deps.test.ts    # 桥接函数测试
+node --import tsx --test tests/platform/openclaw-adapter.test.ts   # Platform adapter tests
+node --import tsx --test tests/platform/adapter-to-deps.test.ts    # Bridge function tests
 ```
 
-### 打包
+### Packaging
 
 ```bash
-npm run dist:pack                # 打包所有平台
-npm run dist:pack:openclaw       # 仅 OpenClaw 插件包
-npm run dist:pack:claudecode     # 仅 Claude Code 包
-npm run dist:pack:hermes         # 仅 Hermes 包
-npm run dist:pack:teclaw         # 仅 TeClaw 包
+npm run dist:pack                # Pack all platforms
+npm run dist:pack:openclaw       # OpenClaw plugin pack only
+npm run dist:pack:claudecode     # Claude Code pack only
+npm run dist:pack:hermes         # Hermes pack only
+npm run dist:pack:teclaw         # TeClaw pack only
 ```
 
-### 本地同步
+### Local Sync
 
-将构建产物同步到本机各平台的安装目录，便于本地开发调试：
+Sync build artifacts to local platform installation directories for development:
 
 ```bash
-npm run sync                     # 同步所有平台 (openclaw + claudecode + hermes)
-npm run sync:openclaw            # 仅同步 OpenClaw
-npm run sync:claudecode          # 仅同步 Claude Code
-npm run sync:hermes              # 仅同步 Hermes
+npm run sync                     # Sync all platforms (openclaw + claudecode + hermes)
+npm run sync:openclaw            # Sync OpenClaw only
+npm run sync:claudecode          # Sync Claude Code only
+npm run sync:hermes              # Sync Hermes only
 
-# 先构建再同步 (一键完成)
-npm run sync:all                 # npm run build + dist:pack + 同步所有平台
-
-# 也可以直接带 --build 参数
-bash scripts/local_sync/sync.sh --build
-bash scripts/local_sync/sync.sh openclaw --build
+# Build then sync (one-step)
+npm run sync:all                 # npm run build + dist:pack + sync all platforms
 ```
 
-**各平台同步目标：**
+## Multi-Platform Adaptation (Phase 1)
 
-| 平台 | 同步目标 | 说明 |
-|------|---------|------|
-| OpenClaw | `~/.openclaw/extensions/clawmind/` | rsync dist/esm + packs/configs/skills/node_modules |
-| Claude Code | `~/.claude/mcp.json` | 注册 clawmind MCP server 条目 |
-| Hermes | `~/.hermes/extensions/clawmind/` | rsync dist/esm + packs/configs (如已安装) |
+### Architecture
 
-**配置详解：**
-
-- **OpenClaw**: 同步后执行 `openclaw restart` 重启生效
-- **Claude Code**: MCP 配置自动写入 `~/.claude/mcp.json`，重启 Claude Code 生效。
-  手动配置格式：
-  ```json
-  {
-    "mcpServers": {
-      "clawmind": {
-        "command": "node",
-        "args": ["<项目路径>/dist/esm/index.js"],
-        "env": {
-          "DATABASE_MODE": "sqlite",
-          "SQLITE_PATH": "~/.openclaw/workflow/engine.db"
-        },
-        "description": "ClawMind — YAML DAG workflow engine (MCP server)"
-      }
-    }
-  }
-  ```
-- **Hermes**: MCP SSE 传输，支持审批 UI、多租户隔离、实时进度推送
-
-输出到 `dist_pack/<platform>/`:
-- `openclaw/` → `clawmind-<version>.tgz`
-- `claudecode/` → `clawmind-claudecode-<version>.tgz`
-- `hermes/` → `clawmind-hermes-<version>.tgz`
-- `teclaw/` → `clawmind-teclaw-<version>.tgz`
-
-## 多平台适配 (Phase 1)
-
-### 架构
-
-Phase 1 引入 `PlatformAdapter` 抽象层，将 ClawMind 核心引擎与平台特定 API 解耦：
+Phase 1 introduces a `PlatformAdapter` abstraction layer, decoupling the core engine from platform-specific APIs:
 
 ```
-索引层 (index.ts)
-      │
-      ▼
-createOpenClawAdapter()  ──→  PlatformAdapter
-      │                          │
-      ▼                          ▼
-buildControllerDeps()    ──→  ControllerDeps
-      │
-      ▼
+Index layer (index.ts)
+      |
+      v
+createOpenClawAdapter()  -->  PlatformAdapter
+      |                          |
+      v                          v
+buildControllerDeps()    -->  ControllerDeps
+      |
+      v
   Controller
 ```
 
-### 模块说明
+### Module Overview
 
-| 文件 | 说明 |
-|------|------|
-| `src/platform/types.ts` | PlatformAdapter 接口 + 6 个子接口 |
-| `src/platform/openclaw-adapter.ts` | OpenClaw 适配器工厂 |
-| `src/platform/openclaw-types.ts` | OpenClaw PluginApi 类型 (共享) |
-| `src/platform/mcp-adapter.ts` | MCP Server 适配器 (Claude Code / TeClaw) |
-| `src/platform/mcp-entry.ts` | MCP Server 入口 (stdio transport) |
-| `src/platform/mcp-tools.ts` | 共享 MCP 工具注册 |
-| `src/platform/mcp-server-factory.ts` | MCP Server 共享初始化工厂 |
-| `src/platform/mcp-sampling-agent.ts` | MCP sampling 替代 runEmbeddedPiAgent |
-| `src/platform/hermes-adapter.ts` | Hermes 适配器 (SSE, 审批 UI, 多租户) |
-| `src/platform/hermes-entry.ts` | Hermes SSE 入口 |
-| `src/platform/database-taskflow.ts` | 非 OpenClaw TaskFlow 实现 (内存/API) |
-| `src/platform/default-executor.ts` | 默认执行器分发 |
-| `src/platform/adapter-to-deps.ts` | PlatformAdapter → ControllerDeps 桥接 |
-| `src/platform/logger.ts` | 平台结构化日志 |
-| `src/dispatch.ts` | 平台无关命令分发 |
-| `src/platform/index.ts` | Barrel 导出 |
+| File | Description |
+|------|-------------|
+| `src/platform/types.ts` | PlatformAdapter interface + 6 sub-interfaces |
+| `src/platform/openclaw-adapter.ts` | OpenClaw adapter factory |
+| `src/platform/openclaw-types.ts` | OpenClaw PluginApi types (shared) |
+| `src/platform/mcp-adapter.ts` | MCP Server adapter (Claude Code / TeClaw) |
+| `src/platform/mcp-entry.ts` | MCP Server entry (stdio transport) |
+| `src/platform/mcp-tools.ts` | Shared MCP tool registration |
+| `src/platform/mcp-server-factory.ts` | MCP Server shared initialization factory |
+| `src/platform/mcp-sampling-agent.ts` | MCP sampling replacement for runEmbeddedPiAgent |
+| `src/platform/hermes-adapter.ts` | Hermes adapter (SSE, approval UI, multi-tenant) |
+| `src/platform/hermes-entry.ts` | Hermes SSE entry |
+| `src/platform/database-taskflow.ts` | Non-OpenClaw TaskFlow implementation (memory/API) |
+| `src/platform/default-executor.ts` | Default executor dispatch |
+| `src/platform/adapter-to-deps.ts` | PlatformAdapter to ControllerDeps bridge |
+| `src/platform/logger.ts` | Platform structured logging |
+| `src/dispatch.ts` | Platform-agnostic command dispatch |
+| `src/platform/index.ts` | Barrel exports |
 
-### 设计原则
+### Design Principles
 
-- **PlatformAdapter 包装 ControllerDeps 的构造，而非替换它**
-- `executeNode` 不在适配器中 — 它依赖每次调用的上下文 (actionRegistry, toolCtx, 工作流规范)
-- `api` 字段作为 Phase 1 透传保留在 ControllerDeps 中 (Phase 2 移除)
-- `chatInjectFn` 作为回调参数注入 (DingTalk 逻辑不重复)
+- **PlatformAdapter wraps ControllerDeps construction, not replaces it**
+- `executeNode` is not in the adapter — it depends on per-call context (actionRegistry, toolCtx, workflow spec)
+- `api` field retained in ControllerDeps as Phase 1 passthrough (Phase 2 will remove)
+- `chatInjectFn` injected as callback parameter (DingTalk logic not duplicated)
 
 ### Hermes Integration (SSE Transport)
 
-ClawMind supports Hermes via MCP SSE transport. Start the Hermes MCP server:
+taskguard supports Hermes via MCP SSE transport. Start the Hermes MCP server:
 
 ```bash
 # Start Hermes MCP server on port 3100
@@ -199,7 +156,7 @@ Hermes-specific features:
 
 Configuration:
 ```typescript
-import { createHermesServer } from "@alipay/clawmind/platform/hermes-entry";
+import { createHermesServer } from "@avernet/taskguard/platform/hermes-entry";
 
 const { server } = await createHermesServer({ port: 3100 });
 ```
@@ -220,13 +177,13 @@ Flows created with different `tenantId` values are fully isolated — tenant A c
 
 ### TeClaw MCP stdio Integration
 
-TeClaw connects to ClawMind as an MCP client — **zero Rust code changes needed**. See [`docs/openspec/teclaw-mcp-integration.md`](docs/openspec/teclaw-mcp-integration.md) for the full migration guide.
+TeClaw connects to taskguard as an MCP client — **zero Rust code changes needed**.
 
-The deprecated `clawmind/` Rust module should be replaced by MCP auto-discovery:
+The deprecated Rust module should be replaced by MCP auto-discovery:
 ```json
 {
   "mcpServers": {
-    "clawmind": {
+    "taskguard": {
       "command": "node",
       "args": ["dist/esm/platform/mcp-entry.js"],
       "env": { "DATABASE_MODE": "sqlite" }
@@ -235,25 +192,29 @@ The deprecated `clawmind/` Rust module should be replaced by MCP auto-discovery:
 }
 ```
 
-### 平台清单文件
+### Platform Manifest Files
 
-| 文件 | 平台 |
-|------|------|
-| `openclaw.plugin.json` | OpenClaw 插件清单 |
-| `claudecode.plugin.json` | Claude Code 插件清单 |
-| `hermes.plugin.json` | Hermes 插件清单 |
-| `teclaw.plugin.json` | TeClaw 插件清单 |
+| File | Platform |
+|------|----------|
+| `openclaw.plugin.json` | OpenClaw plugin manifest |
+| `claudecode.plugin.json` | Claude Code plugin manifest |
+| `hermes.plugin.json` | Hermes plugin manifest |
+| `teclaw.plugin.json` | TeClaw plugin manifest |
 
-## 环境变量
+## Environment Variables
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `DATABASE_MODE` | 数据库模式: sqlite / prod / api | sqlite |
-| `SQLITE_PATH` | SQLite 数据库路径 | `~/.openclaw/workflow/engine.db` |
-| `ZDAS_HOST` | ZDAS/MySQL 主机 | 127.0.0.1 |
-| `ZDAS_PORT` | ZDAS/MySQL 端口 | 11306 |
-| `CCT_SOP_MCP_SERVER_MODE` | CCT SOP MCP 服务器模式 | local |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_MODE` | Database mode: sqlite / prod / api | sqlite |
+| `SQLITE_PATH` | SQLite database path | `~/.openclaw/workflow/engine.db` |
+| `BAAS_API_KEY` | Fallback API key for BaaS integration (used when not set under the `baas:` config section) | (none) |
+| `BAAS_BASE_URL` | Fallback base URL for BaaS API (used when not set under the `baas:` config section) | (none) |
 
-## 许可证
+> **BaaS credentials** are resolved per call with priority `baas:` config section (local
+> `application.yaml`, overridden by clawweb's `cm_app_config` table row `config_key="baas"`)
+> → workflow YAML executor fields → environment variables. Never hardcode secrets in workflow YAML.
+| `CLAWWEB_BASE_URL` | Base URL for web UI | (none) |
 
-内部使用 — 蚂蚁集团
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) for details.

@@ -445,7 +445,7 @@ export async function createMcpServerBase(config: McpServerConfig): Promise<McpS
       // ANTHROPIC_API_KEY is optional — only passed through if explicitly set.
       let agentSdkRunner: ((params: Record<string, unknown>) => Promise<EmbeddedAgentResult>) | null = null;
       const apiKey = process.env.ANTHROPIC_API_KEY;
-      log.info(`Agent SDK init: ANTHROPIC_API_KEY=${apiKey ? "set (" + apiKey.slice(0, 8) + "...)" : "not set (claude CLI will use its own auth)"} CLAUDE_CODE_EXECUTABLE=${process.env.CLAUDE_CODE_EXECUTABLE ?? "not set"} TECLAW_ENABLED=${config.teclawConfig?.enabled ?? "undefined"}`);
+      log.info(`Agent SDK init: ANTHROPIC_API_KEY=${apiKey ? "set (value redacted)" : "not set (claude CLI will use its own auth)"} CLAUDE_CODE_EXECUTABLE=${process.env.CLAUDE_CODE_EXECUTABLE ?? "not set"} TECLAW_ENABLED=${config.teclawConfig?.enabled ?? "undefined"}`);
       try {
         // Inline MCP server with workflow_state and workflow_runs tools.
         // Uses a deferred TaskFlowAdapter — the actual adapter is created per-session

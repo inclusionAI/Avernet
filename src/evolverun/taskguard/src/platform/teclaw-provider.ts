@@ -976,7 +976,7 @@ export class TeClawProvider {
  * Returns undefined if TECLAW_WS_URL is not set.
  *
  * New env vars (WebSocket):
- *   TECLAW_WS_URL    — WebSocket URL (e.g., "wss://angw.andc-inc.cn/ws/v1/chat")
+ *   TECLAW_WS_URL    — WebSocket URL (e.g., "wss://example.com/ws/v1/chat")
  *   TECLAW_WS_TOKEN  — MCP Token for auth
  *   TECLAW_WS_HEADERS — JSON string of additional headers (e.g., '{"x-andc-target-service":"tautie"}')
  *

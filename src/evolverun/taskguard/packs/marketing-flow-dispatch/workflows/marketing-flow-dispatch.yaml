@@ -302,8 +302,9 @@ nodes:
       mode: message
       botId: "{{nodeOutput.match-routing.targetBotId}}"
       message: "评审活动 {{params.activityId}}"
-      baseUrl: "https://secbaas-prod.alipay.com"
-      iamToken: "eyJraWQiOiJkZWZhdWx0IiwidHlwIjoiSldUIiwiYWxnIjoiUlMyNTYifQ.eyJjbmwiOiJCVUMiLCJzdWIiOiJkYXBlbmcuZmRwIiwiYXV0aF90cCI6WyJGQUNFIiwiWkZBUkIiXSwiaXNzIjoiYnVtbmcuYWxpcGF5LmNvbSIsIm5vbmNlIjoiZWVjOTc2MGQiLCJzaWQiOiIxMDAzOTQiLCJhdWQiOiJ0b2tlbnNlcnZpY2UiLCJuYmYiOjE3NzkyNTEzNzAsInNubyI6IjEwMzg5MiIsInRudF9pZCI6IkFMSVBXM0NOIiwibmFtZSI6IualmueUnyIsImV4cCI6MTc3OTMzNzg5MCwiaWF0IjoxNzc5MjUxNDkwLCJqdGkiOiI1OTYyZWUxMDQ2NTk0OTY4YjUxZGQ0Mzg4YjM2NjgwNCJ9.F6HVmqT2Jp3ce8OY9IaBpfOfvOnjRK9EwTTUYVU5jUCTg6pynnG2kR-Fb_Dfk2Y024ep-YY70dEHzQ-JzMx5FQ"
+      # BaaS credentials (baseUrl / apiKey / iamToken) are resolved from the
+      # `baas:` application config section (clawweb cm_app_config) at runtime —
+      # never hardcode secrets in workflow YAML.
       timeoutMs: 1800000
       pollIntervalMs: 3000
     progressMessage: "正在调用 {{nodeOutput.match-routing.targetBotName}} 评审…"

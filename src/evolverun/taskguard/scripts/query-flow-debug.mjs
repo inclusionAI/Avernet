@@ -16,7 +16,7 @@ const configPath = join(__dirname, "..", "configs", "application.yaml");
 const configText = readFileSync(configPath, "utf-8");
 const config = parseYaml(configText);
 
-const BASE_URL = config.api?.baseUrl || "https://clawweb.antgroup-inc.cn";
+const BASE_URL = config.api?.baseUrl || process.env.CLAWWEB_BASE_URL || "http://localhost:3001";
 const IAM_TOKEN = process.env.IAM_TOKEN || config.api?.iamtoken || "";
 const PRIVATE_KEY_B64 = config.api?.privateKeyB64 || "";
 

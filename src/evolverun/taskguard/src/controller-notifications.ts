@@ -40,10 +40,12 @@ const SENSITIVE_PATTERNS = [
 function buildFlowRunUrl(flowId: string): string {
   try {
     const cfg = loadConfig();
-    const base = cfg.app.api.clawwebUrl || cfg.app.api.baseUrl || "https://clawweb.antgroup-inc.cn";
+    const base = cfg.app.api.clawwebUrl || cfg.app.api.baseUrl || process.env.CLAWWEB_BASE_URL || "";
+    if (!base) return "";
     return `${base.replace(/\/+$/, "")}/runs/${flowId}`;
   } catch {
-    return `https://clawweb.antgroup-inc.cn/runs/${flowId}`;
+    const envBase = (process.env.CLAWWEB_BASE_URL || "").replace(/\/+$/, "");
+    return envBase ? `${envBase}/runs/${flowId}` : "";
   }
 }
 
@@ -695,12 +697,12 @@ export function buildFlowCompletedMessage(params: FlowCompletedParams): string {
     // minimal: keep existing format but with clickable FlowId
     if (status === "failed") {
       const detail = failedNode ? `${failedNode.nodeId}: ${failedNode.error}` : "Unknown error";
-      return `[clawmind] ❌ 工作流失败: ${workflowTitle}\nFlowId: ${flowIdLink}\n阶段: ${currentPhase}\n失败原因: ${truncateValue(detail, 200)}`;
+      return `[taskguard] ❌ 工作流失败: ${workflowTitle}\nFlowId: ${flowIdLink}\n阶段: ${currentPhase}\n失败原因: ${truncateValue(detail, 200)}`;
     }
     if (status === "cancelled") {
-      return `[clawmind] ⏹️ 工作流已取消: ${workflowTitle}\nFlowId: ${flowIdLink}`;
+      return `[taskguard] ⏹️ 工作流已取消: ${workflowTitle}\nFlowId: ${flowIdLink}`;
     }
-    return `[clawmind] ✅ 工作流完成: ${workflowTitle}\nFlowId: ${flowIdLink}\n阶段: ${currentPhase}\n耗时: ${totalDurationMs != null ? `${Math.round(totalDurationMs / 1000)}s` : "n/a"}`;
+    return `[taskguard] ✅ 工作流完成: ${workflowTitle}\nFlowId: ${flowIdLink}\n阶段: ${currentPhase}\n耗时: ${totalDurationMs != null ? `${Math.round(totalDurationMs / 1000)}s` : "n/a"}`;
   }
 
   const lines: string[] = [];

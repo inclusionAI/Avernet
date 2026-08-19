@@ -5,14 +5,14 @@ import * as path from "node:path";
 /**
  * Returns the platform-aware path to the `.credentials` file.
  * - macOS (darwin): $HOME/.credentials
- * - Linux: /home/admin/.credentials
+ * - Linux: $HOME/.credentials (overridable via CREDENTIALS_PATH env var)
  */
 export function getCredentialsPath(): string {
-  if (process.platform === "darwin") {
-    const home = process.env.HOME || os.homedir();
-    return home ? path.join(home, ".credentials") : "/home/admin/.credentials";
+  if (process.env.CREDENTIALS_PATH) {
+    return process.env.CREDENTIALS_PATH;
   }
-  return "/home/admin/.credentials";
+  const home = process.env.HOME || os.homedir();
+  return home ? path.join(home, ".credentials") : path.join("/tmp", ".credentials");
 }
 
 /**

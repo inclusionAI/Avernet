@@ -1,21 +1,21 @@
 #!/bin/bash
 #
-# install-clawmind.sh — Download and overwrite-install clawmind to /home/admin/openclawExt
-# Preserves /home/admin/openclawExt/clawmind/packs across the upgrade.
+# install-clawmind.sh — Download and overwrite-install taskguard to the extension dir
+# Preserves packs across the upgrade.
 # Restarts openclaw gateway after installation.
 #
 
 set -euo pipefail
 
-INSTALL_DIR="/home/admin/openclawExt"
-# Persistent timestamped archive under the ClawMind workspace dir (~/.openclaw/workspace),
+INSTALL_DIR="${OPENCLAW_EXTENSION_DIR:-${HOME}/openclawExt}"
+# Persistent timestamped archive under the workspace dir (~/.openclaw/workspace),
 # so every upgrade keeps a restorable snapshot of the previous packs.
-ARCHIVE_ROOT="${HOME}/.openclaw/workspace/clawmind-packs-archive"
+ARCHIVE_ROOT="${HOME}/.openclaw/workspace/taskguard-packs-archive"
 PACKS_BACKUP_DIR="${ARCHIVE_ROOT}/packs-$(date +%Y%m%d%H%M%S)"
 # Transient copy used to restore packs into the freshly extracted install (deleted after restore).
-PACKS_RESTORE_DIR="/tmp/clawmind-packs-restore-$(date +%Y%m%d%H%M%S)"
-DOWNLOAD_URL="https://alps-risk-com.oss-cn-hangzhou-zmf.aliyuncs.com/clawmind/clawmind-0.1.0.tgz"
-TGZ_FILE="/tmp/clawmind-0.1.0.tgz"
+PACKS_RESTORE_DIR="/tmp/taskguard-packs-restore-$(date +%Y%m%d%H%M%S)"
+DOWNLOAD_URL="${TASKGUARD_DOWNLOAD_URL:-}"
+TGZ_FILE="/tmp/taskguard-0.1.0.tgz"
 
 # How many timestamped snapshots to keep in ARCHIVE_ROOT; older ones are pruned.
 KEEP_ARCHIVES=5

@@ -25,7 +25,7 @@
  */
 import { readFileSync } from "node:fs";
 
-const BASE = "https://clawweb.antgroup-inc.cn";
+const BASE = process.env.CLAWWEB_BASE_URL || "http://localhost:3001";
 const COOKIE = readFileSync("/tmp/clawweb-cookie.txt", "utf-8").trim();
 const COMMAND_PATTERN = /^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$/;
 const dryRun = process.argv.slice(2).includes("--dry-run");

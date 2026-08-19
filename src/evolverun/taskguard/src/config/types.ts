@@ -24,7 +24,7 @@ export type YuQueSourceConfig = {
   enabled: boolean;
   /** YuQue API token. Overridden by YUQUE_TOKEN env var. */
   token: string;
-  /** YuQue domain (e.g. "yuque.antfin.com"). */
+  /** YuQue domain (e.g. "yuque.example.com"). */
   domain: string;
   /** YuQue namespace scopes to search (e.g. ["team/docs"]). */
   namespaces: string[];
@@ -163,7 +163,7 @@ export type WebhookConfig = {
 export type AsyncCallbackConfig = {
   /** Master switch for the async-callback node system. Default: true */
   enabled: boolean;
-  /** Default callback base URL (e.g. "https://clawweb.antgroup-inc.cn").
+  /** Default callback base URL (e.g. "https://callback.example.com").
    *  Nodes can override this with their own `callbackBaseUrl`. */
   callbackBaseUrl: string;
   /** Default timeout for callback tokens if not specified on the node. Default: "1h" */
@@ -305,7 +305,7 @@ export type ExecutionConfig = {
 export type TeClawConfig = {
   /** Master switch for TeClaw integration. When false, TeClaw WS/HTTP is disabled. Default: false */
   enabled: boolean;
-  /** Channel 2 — WebSocket URL (e.g., "wss://angw.andc-inc.cn/ws/v1/chat").
+  /** Channel 2 — WebSocket URL (e.g., "wss://example.com/ws/v1/chat").
    *  Preferred over chatInjectUrl. Overridden by TECLAW_WS_URL env var. */
   wsUrl: string;
   /** MCP Token for WebSocket authentication. Overridden by TECLAW_WS_TOKEN env var. */
@@ -354,7 +354,7 @@ export type GitConfig = {
   username: string;
   /** Git token/password. Override via CLAWMIND_GIT_TOKEN env var. */
   token: string;
-  /** Git commit author email. Corporate git servers require valid company email (e.g. @antgroup.com). Override via CLAWMIND_GIT_EMAIL env var. */
+  /** Git commit author email. Some git servers require valid emails. Override via TASKGUARD_GIT_EMAIL env var. */
   email: string;
 };
 
@@ -366,6 +366,26 @@ export type GuardianAppConfig = {
   enabled: boolean;
   analysisTimeoutSeconds: number;
   maxPromptMultiplier: number;
+};
+
+// ── BaaS (business Agent-as-a-Service) ──
+
+/**
+ * BaaS integration credentials, loaded from the `baas:` config section.
+ * In production this section is managed in clawweb's application config
+ * (cm_app_config table, config_key="baas") and overrides the local
+ * application.yaml value via deepMerge at initConfig().
+ *
+ * All fields may be empty; baas-call nodes resolve credentials with
+ * priority: config.baas → executor (workflow YAML) → env var.
+ */
+export type BaasConfig = {
+  /** Base URL of the BaaS Open API (configured per deployment). */
+  baseUrl: string;
+  /** API key used as the Authorization Bearer token. */
+  apiKey: string;
+  /** IAM token for office-network access (sent via Cookie header). */
+  iamToken: string;
 };
 
 // ── Aggregate Config ──
@@ -403,6 +423,7 @@ export type AppConfig = {
   chatInject: ChatInjectConfig;
   git: GitConfig;
   guardian: GuardianAppConfig;
+  baas: BaasConfig;
 };
 
 /** Default configuration values. */
@@ -424,7 +445,7 @@ export const defaults: AppConfig = {
     cacheTtlMs: 60000,
     maxResults: 5,
     sources: {
-      yuque: { enabled: false, token: "", domain: "yuque.antfin.com", namespaces: [] },
+      yuque: { enabled: false, token: "", domain: "", namespaces: [] },
       agentmind: { enabled: false, token: "", endpoint: "", knowledgeBaseId: "" },
     },
   },
@@ -452,7 +473,7 @@ export const defaults: AppConfig = {
     iamtoken: "",
     timeout: 5000,
     maxRetries: 3,
-    clawwebUrl: "https://clawweb-pre.antgroup-inc.cn",
+    clawwebUrl: "",
     corpId: "",
   },
   scheduler: {
@@ -542,5 +563,10 @@ export const defaults: AppConfig = {
     enabled: true,
     analysisTimeoutSeconds: 60,
     maxPromptMultiplier: 2,
+  },
+  baas: {
+    baseUrl: "",
+    apiKey: "",
+    iamToken: "",
   },
 };

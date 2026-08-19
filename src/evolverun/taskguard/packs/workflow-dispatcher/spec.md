@@ -109,15 +109,15 @@ done
 | 脚本 | 路径 |
 |------|------|
 | check_permission.py | `~/.openclaw/workspace/skills/skills-local/employee-permission-checker/scripts/check_permission.py` |
-| read_dialogue_history.py | `/home/admin/.openclaw/workspace/skills/skills-local/data-preprocessing/scripts/read_dialogue_history.py` |
-| save_user_query.py | `/home/admin/.openclaw/workspace/skills/skills-local/data-preprocessing/scripts/save_user_query.py` |
-| userid_punish_search.py | `/home/admin/.openclaw/workspace/skills/skills-local/userid-punish-search/scripts/userid_punish_search.py` |
-| generate_task_list.py | `/home/admin/.openclaw/workspace/skills/skills-local/task-generator/scripts/generate_task_list.py` |
+| read_dialogue_history.py | `~/.openclaw/workspace/skills/skills-local/data-preprocessing/scripts/read_dialogue_history.py` |
+| save_user_query.py | `~/.openclaw/workspace/skills/skills-local/data-preprocessing/scripts/save_user_query.py` |
+| userid_punish_search.py | `~/.openclaw/workspace/skills/skills-local/userid-punish-search/scripts/userid_punish_search.py` |
+| generate_task_list.py | `~/.openclaw/workspace/skills/skills-local/task-generator/scripts/generate_task_list.py` |
 | bcs_task_dispatcher.py | `~/.openclaw/workspace/skills/skills-local/task-dispatcher/scripts/bcs_task_dispatcher.py` |
 | duty_task_notifier.py | `~/.openclaw/workspace/skills/skills-local/task-dispatcher/scripts/duty_task_notifier.py` |
 | update_subtask_status.py | `~/.openclaw/workspace/skills/skills-local/task-dispatcher/scripts/update_subtask_status.py` |
-| save_boundary_response.py | `/home/admin/.openclaw/workspace/skills/skills-local/boundary-reply-user/scripts/save_boundary_response.py` |
-| send_dingtalk.py | `/home/admin/.openclaw/workspace/skills/skills-local/boundary-reply-user/scripts/send_dingtalk.py` |
+| save_boundary_response.py | `~/.openclaw/workspace/skills/skills-local/boundary-reply-user/scripts/save_boundary_response.py` |
+| send_dingtalk.py | `~/.openclaw/workspace/skills/skills-local/boundary-reply-user/scripts/send_dingtalk.py` |
 
 ## 产出文件
 

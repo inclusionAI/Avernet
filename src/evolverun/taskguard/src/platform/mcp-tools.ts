@@ -543,7 +543,7 @@ export function formatResult(text: string): { content: Array<{ type: "text"; tex
 export function formatError(error: unknown): { content: Array<{ type: "text"; text: string }>; isError: boolean } {
   const message = error instanceof Error ? error.message : String(error);
   return {
-    ...formatEnvelope("reject", { reason: `[clawmind] Error: ${message}` }),
+    ...formatEnvelope("reject", { reason: `[taskguard] Error: ${message}` }),
     isError: true,
   };
 }

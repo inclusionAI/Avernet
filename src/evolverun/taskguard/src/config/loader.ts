@@ -45,7 +45,9 @@ import { defaults } from "./types.js";
 // ── YAML shape types ──
 
 type YamlDatabaseConfig = {
-  mode?: "sqlite" | "prod";
+  /** Deprecated alias: use "mode" instead. Supported for backward compatibility with application.community.yaml. */
+  type?: "sqlite" | "prod" | "api";
+  mode?: "sqlite" | "prod" | "api";
   sqlite?: { path?: string };
   zdas?: {
     enabled?: boolean;
@@ -224,8 +226,14 @@ type YamlGitConfig = {
   remoteUrl?: string;
   username?: string;
   token?: string;
-  /** Git commit author email. Corporate git servers (e.g. code.alipay.com) require valid company email. */
+  /** Git commit author email. Some git servers require valid email addresses. */
   email?: string;
+};
+
+type YamlBaasConfig = {
+  baseUrl?: string;
+  apiKey?: string;
+  iamToken?: string;
 };
 
 export type YamlPacksConfig = {
@@ -259,6 +267,7 @@ type YamlAppConfig = {
   flowControl?: Record<string, unknown>;
   asyncCallback?: Record<string, unknown>;
   git?: YamlGitConfig;
+  baas?: YamlBaasConfig;
   packs?: YamlPacksConfig;
   guardian?: {
     enabled?: boolean;
@@ -276,24 +285,31 @@ const CONFIG_FILENAME = "application.yaml";
 /** Plugin ID as defined in openclaw.plugin.json */
 const PLUGIN_ID = "clawmind";
 
+/** Community config filename — used as fallback when application.yaml is absent. */
+const COMMUNITY_CONFIG_FILENAME = "application.community.yaml";
+
 /**
  * Known OpenClaw extension directories (local dev + production).
  * The loader probes each in order until it finds a config file.
  */
 const KNOWN_EXTENSION_DIRS = [
   () => join(homedir(), ".openclaw", "extensions", PLUGIN_ID),
-  () => join(homedir(), "openclawExt", "clawmind"),
-  () => "/home/admin/openclawExt/clawmind",
-  () => "/usr/local/openclaw/extensions/clawmind",
+  () => join(homedir(), "openclawExt", "taskguard"),
+  () => process.env.OPENCLAW_EXTENSION_DIR || "",
+  () => "/usr/local/openclaw/extensions/taskguard",
 ];
 
 /**
  * Find the plugin's own config file.
  *
- * Search order:
+ * Search order (per directory):
+ * 1. application.yaml (corp/internal deployments)
+ * 2. application.community.yaml (open-source / community deployments)
+ *
+ * Full traversal order:
  * 1. Explicit path (if provided)
  * 2. CLAWMIND_CONFIG_PATH env var (exact file path)
- * 3. OPENCLAW_EXTENSIONS_DIR env var → {dir}/clawmind/configs/application.yaml
+ * 3. OPENCLAW_EXTENSIONS_DIR env var → {dir}/clawmind/configs/
  * 4. Known plugin installation directories
  * 5. Walk up from this file's location to find package.json + configs/
  *
@@ -313,32 +329,39 @@ function findConfigFile(explicitPath?: string): string | null {
     return envPath;
   }
 
+  // Helper: try a directory for either config filename, preferring application.yaml
+  function tryConfigDir(dir: string): string | null {
+    const priority = [CONFIG_FILENAME, COMMUNITY_CONFIG_FILENAME];
+    for (const name of priority) {
+      const candidate = join(dir, "configs", name);
+      if (existsSync(candidate)) {
+        console.error(`[config] findConfigFile: found ${name} at ${candidate}`);
+        return candidate;
+      }
+      console.error(`[config] findConfigFile: ${name} at ${candidate} not found`);
+    }
+    return null;
+  }
+
   // 2. OpenClaw extensions dir via env var
   const extDir = getEnv("OPENCLAW_EXTENSIONS_DIR");
   if (extDir) {
-    const candidate = join(extDir, PLUGIN_ID, "configs", CONFIG_FILENAME);
-    if (existsSync(candidate)) {
-      console.error(`[config] findConfigFile: OPENCLAW_EXTENSIONS_DIR candidate=${candidate} (exists)`);
-      return candidate;
-    }
-    console.error(`[config] findConfigFile: OPENCLAW_EXTENSIONS_DIR candidate=${candidate} (not found)`);
+    const found = tryConfigDir(extDir);
+    if (found) return found;
   }
 
   // 3. Known installation directories
   for (const dirFn of KNOWN_EXTENSION_DIRS) {
     const dir = dirFn();
-    const candidate = join(dir, "configs", CONFIG_FILENAME);
-    if (existsSync(candidate)) {
-      console.error(`[config] findConfigFile: knownDir candidate=${candidate} (exists)`);
-      return candidate;
-    }
-    console.error(`[config] findConfigFile: knownDir candidate=${candidate} (not found)`);
+    if (!dir) continue;
+    const found = tryConfigDir(dir);
+    if (found) return found;
   }
 
   // 4. Fallback: walk up from this file's location to find package.json + configs/
   //    NOTE: dist/ and dist/esm/ may contain a stub package.json (e.g. {"type":"module"}),
   //    so we do NOT stop at the first package.json — we continue walking up until we find
-  //    a directory that has BOTH package.json AND configs/application.yaml.
+  //    a directory that has BOTH package.json AND configs/application.yaml (or community).
   let thisDir: string;
   try {
     thisDir = import.meta.dirname;
@@ -349,11 +372,12 @@ function findConfigFile(explicitPath?: string): string | null {
   for (let dir = thisDir, i = 0; i < 20; i++) {
     const pjPath = join(dir, "package.json");
     const hasPackageJson = existsSync(pjPath);
-    const candidate = hasPackageJson ? join(dir, "configs", CONFIG_FILENAME) : null;
-    const hasConfig = candidate ? existsSync(candidate) : false;
     if (hasPackageJson) {
-      console.error(`[config] findConfigFile: walk-up dir=${dir}, package.json=exists, configs/application.yaml=${hasConfig ? "exists" : "MISSING"}, candidate=${candidate}`);
-      if (hasConfig) return candidate;
+      const found = tryConfigDir(dir);
+      if (found) return found;
+      const hasEither = existsSync(join(dir, "configs", CONFIG_FILENAME))
+        || existsSync(join(dir, "configs", COMMUNITY_CONFIG_FILENAME));
+      console.error(`[config] findConfigFile: walk-up dir=${dir}, package.json=exists, configs/has=${hasEither ? "exists" : "MISSING"}`);
       // Do NOT break — keep walking up; dist/esm/package.json is a stub without configs/.
     }
     const parent = join(dir, "..");
@@ -810,8 +834,8 @@ function buildConfigFromMergedYaml(yaml: YamlAppConfig): { database: DatabaseCon
   const zdasSection = dbSection.zdas ?? {};
   const datasource = zdasSection.datasources?.[0];
 
-  const envMode = getEnv("DATABASE_MODE") as "sqlite" | "prod" | undefined;
-  const mode: "sqlite" | "prod" = envMode ?? dbSection.mode ?? "sqlite";
+  const envMode = getEnv("DATABASE_MODE") as "sqlite" | "prod" | "api" | undefined;
+  const mode: "sqlite" | "prod" | "api" = envMode ?? dbSection.mode ?? dbSection.type ?? "sqlite";
 
   const sqlitePathRaw =
     getEnv("SQLITE_PATH") ?? dbSection.sqlite?.path ?? join(homedir(), ".openclaw", "workflow", "engine.db");
@@ -819,7 +843,20 @@ function buildConfigFromMergedYaml(yaml: YamlAppConfig): { database: DatabaseCon
 
   let database: DatabaseConfig;
 
-  if (mode === "sqlite") {
+  if (mode === "api") {
+    const apiSource = dbSection.api as Record<string, unknown> ?? {};
+    database = {
+      type: "api",
+      sqlitePath,
+      api: {
+        baseUrl: getEnv("CLAWWEB_API_URL") ?? (apiSource.baseUrl as string) ?? "http://localhost:3001",
+        privateKeyB64: getEnv("CLAWMIND_PRIVATE_KEY") ?? (apiSource.privateKeyB64 as string) ?? "",
+        iamtoken: getEnv("CLAWMIND_IAM_TOKEN") ?? (apiSource.iamtoken as string) ?? "",
+        timeout: envInt("CLAWWEB_API_TIMEOUT", Number(apiSource.timeout ?? 5000)),
+        maxRetries: envInt("CLAWWEB_API_MAX_RETRIES", Number(apiSource.maxRetries ?? 3)),
+      },
+    };
+  } else if (mode === "sqlite") {
     database = { type: "sqlite", sqlitePath };
   } else {
     const mysqlConfig: MySqlConfig = {
@@ -866,6 +903,14 @@ function buildConfigFromMergedYaml(yaml: YamlAppConfig): { database: DatabaseCon
       enabled: yaml.guardian?.enabled !== false,
       analysisTimeoutSeconds: yaml.guardian?.analysisTimeoutSeconds ?? 60,
       maxPromptMultiplier: yaml.guardian?.maxPromptMultiplier ?? 2,
+    },
+    // BaaS credentials. Priority per-field: config.baas → executor (workflow YAML) → env.
+    // The config value itself comes from local application.yaml, overridden by clawweb
+    // cm_app_config (config_key="baas") via deepMerge in initConfig().
+    baas: {
+      baseUrl: getEnv("BAAS_BASE_URL") ?? yaml.baas?.baseUrl ?? defaults.baas.baseUrl,
+      apiKey: getEnv("BAAS_API_KEY") ?? yaml.baas?.apiKey ?? defaults.baas.apiKey,
+      iamToken: yaml.baas?.iamToken ?? defaults.baas.iamToken,
     },
   };
 

@@ -2,7 +2,22 @@
   "name": "@avernet/taskguard",
   "version": "0.1.0",
   "description": "Universal YAML DAG workflow engine with TaskFlow persistence",
-  "license": "MIT",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/avernet/taskguard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/avernet/taskguard/issues"
+  },
+  "keywords": [
+    "workflow",
+    "dag",
+    "yaml",
+    "taskflow",
+    "automation",
+    "orchestration"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -63,24 +78,29 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.235",
-    "@modelcontextprotocol/sdk": "*",
-    "cron-parser": "*",
-    "express": "*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "cron-parser": "^5.10.0",
+    "express": "^5.2.1",
     "js-yaml": "^4.3.1",
-    "yaml": "*",
-    "zod": "*"
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/express": "*",
+    "@types/express": "^5.0.6",
     "@types/js-yaml": "^4.0.9",
-    "@types/supertest": "*",
-    "esbuild": "*",
-    "supertest": "*",
-    "tshy": "*",
-    "tsx": "*",
-    "typescript": "*"
+    "@types/supertest": "^7.2.1",
+    "esbuild": "^0.28.2",
+    "supertest": "^7.2.2",
+    "tshy": "^4.1.3",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
   },
-  "files": ["dist/", "configs/", "skills/", "openclaw.plugin.json"],
+  "files": [
+    "dist/",
+    "configs/",
+    "skills/",
+    "openclaw.plugin.json"
+  ],
   "tshy": {
     "dialects": [
       "esm"

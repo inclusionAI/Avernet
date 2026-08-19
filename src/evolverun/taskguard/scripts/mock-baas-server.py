@@ -29,9 +29,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Valid API keys (prefix:id format from baas_api_key table)
+# Valid API keys — load from env or default to a local test key only
 VALID_API_KEYS = {
-    "TnT9oudj7YGMGxiZSfDwk8O0J7Pe9xPY",
+    os.environ.get("BAAS_API_KEY", ""),
     "test-local-key",
 }
 

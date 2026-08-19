@@ -14,6 +14,8 @@ import type { DatabaseConfig, MySqlConfig, ApiConfig } from "./types.js";
 // ── Types ──
 
 type YamlDatabaseConfig = {
+  /** Deprecated alias: use "mode" instead. Supported for backward compatibility with application.community.yaml. */
+  type?: "sqlite" | "prod" | "api";
   mode?: "sqlite" | "prod" | "api";
   api?: {
     baseUrl?: string;
@@ -53,6 +55,7 @@ type YamlAppConfig = {
 // ── Config search paths ──
 
 const CONFIG_FILENAME = "application.yaml";
+const COMMUNITY_CONFIG_FILENAME = "application.community.yaml";
 
 /** Plugin ID as defined in openclaw.plugin.json */
 const PLUGIN_ID = "clawmind";
@@ -63,23 +66,24 @@ const PLUGIN_ID = "clawmind";
  */
 const KNOWN_EXTENSION_DIRS = [
   () => join(homedir(), ".openclaw", "extensions", PLUGIN_ID),
-  () => join(homedir(), "openclawExt", "clawmind"),
-  () => "/home/admin/openclawExt/clawmind",
-  () => "/usr/local/openclaw/extensions/clawmind",
+  () => join(homedir(), "openclawExt", "taskguard"),
+  () => process.env.OPENCLAW_EXTENSION_DIR || "",
+  () => "/usr/local/openclaw/extensions/taskguard",
 ];
 
 /**
  * Find the plugin's own config file.
  *
- * Search order:
+ * Search order (per directory):
+ * 1. application.yaml (corp/internal deployments)
+ * 2. application.community.yaml (open-source / community deployments)
+ *
+ * Full traversal order:
  * 1. Explicit path (if provided)
  * 2. CLAWMIND_CONFIG_PATH env var (exact file path)
- * 3. OPENCLAW_EXTENSIONS_DIR env var → {dir}/clawmind/configs/application.yaml
+ * 3. OPENCLAW_EXTENSIONS_DIR env var → {dir}/clawmind/configs/
  * 4. Known plugin installation directories
  * 5. Walk up from this file's location to find package.json + configs/
- *
- * NOTE: import.meta.dirname / import.meta.url may point to a jiti cache
- * directory when running inside OpenClaw, so we prefer known paths first.
  */
 function findConfigFile(explicitPath?: string): string | null {
   if (explicitPath && existsSync(explicitPath)) {
@@ -92,17 +96,29 @@ function findConfigFile(explicitPath?: string): string | null {
     return envPath;
   }
 
+  // Helper: try a directory for either config filename, preferring application.yaml
+  function tryConfigDir(dir: string): string | null {
+    const priority = [CONFIG_FILENAME, COMMUNITY_CONFIG_FILENAME];
+    for (const name of priority) {
+      const candidate = join(dir, "configs", name);
+      if (existsSync(candidate)) return candidate;
+    }
+    return null;
+  }
+
   // 2. OpenClaw extensions dir via env var
   const extDir = getEnv("OPENCLAW_EXTENSIONS_DIR");
   if (extDir) {
-    const candidate = join(extDir, PLUGIN_ID, "configs", CONFIG_FILENAME);
-    if (existsSync(candidate)) return candidate;
+    const found = tryConfigDir(extDir);
+    if (found) return found;
   }
 
   // 3. Known installation directories
   for (const dirFn of KNOWN_EXTENSION_DIRS) {
-    const candidate = join(dirFn(), "configs", CONFIG_FILENAME);
-    if (existsSync(candidate)) return candidate;
+    const dir = dirFn();
+    if (!dir) continue;
+    const found = tryConfigDir(dir);
+    if (found) return found;
   }
 
   // 4. Fallback: walk up from this file's location to find package.json + configs/
@@ -114,8 +130,8 @@ function findConfigFile(explicitPath?: string): string | null {
   }
   for (let dir = thisDir, i = 0; i < 20; i++) {
     if (existsSync(join(dir, "package.json"))) {
-      const candidate = join(dir, "configs", CONFIG_FILENAME);
-      if (existsSync(candidate)) return candidate;
+      const found = tryConfigDir(dir);
+      if (found) return found;
       break;
     }
     const parent = join(dir, "..");
@@ -214,9 +230,9 @@ export function loadDatabaseConfig(configPath?: string): DatabaseConfig {
   const dbApi = dbSection.api as YamlApiLike | undefined;
   const apiSource: YamlApiLike = topApi ?? dbApi ?? {};
 
-  // Resolve mode: env var > yaml > default "sqlite"
+  // Resolve mode: env var > yaml (mode > type alias) > default "sqlite"
   const envMode = getEnv("DATABASE_MODE") as "sqlite" | "prod" | "api" | undefined;
-  const mode: "sqlite" | "prod" | "api" = envMode ?? dbSection.mode ?? "sqlite";
+  const mode: "sqlite" | "prod" | "api" = envMode ?? dbSection.mode ?? dbSection.type ?? "sqlite";
 
   // Resolve sqlite path
   const sqlitePathRaw =

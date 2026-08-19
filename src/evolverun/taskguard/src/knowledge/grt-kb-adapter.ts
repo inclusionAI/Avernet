@@ -61,8 +61,16 @@ export class GrtKbAdapter implements KnowledgeBase {
     const limit = this.maxResults ?? maxResults;
     try {
       const baseUrl = this.config.env.toLowerCase() === "pre"
-        ? "https://webgw-pre.alipay.com/smartinfrafaas/com.alipay.sofa.function.SOFAFunction/apply/myjf.common.smartinfrafaas.trwrapper.knowledgebase.runservice"
-        : "https://webgw.alipay.com/smartinfrafaas/com.alipay.sofa.function.SOFAFunction/apply/myjf.common.smartinfrafaas.trwrapper.knowledgebase.runservice";
+        ? (process.env.GRT_KB_PRE_URL || "")
+        : (process.env.GRT_KB_PROD_URL || "");
+
+      if (!baseUrl) {
+        console.warn(
+          `[taskguard] GRT KB adapter: base URL not configured ` +
+          `(set GRT_KB_PRE_URL or GRT_KB_PROD_URL for env "${this.config.env}"); skipping KB search`,
+        );
+        return [];
+      }
 
       const body = {
         instanceName: this.config.instanceName,

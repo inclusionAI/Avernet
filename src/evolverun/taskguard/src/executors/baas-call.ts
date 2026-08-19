@@ -6,6 +6,7 @@ import type {
 } from "../types.js";
 import type { TemplateContext } from "../runner.js";
 import { resolveTemplate } from "../runner.js";
+import { loadConfig } from "../config/index.js";
 
 type BaasRunStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
 
@@ -91,13 +92,45 @@ export async function executeBaasCall(
   const executor = node.executor as BaasCallExecutor;
   const mode = executor.mode ?? "run";
   const message = resolveTemplate(executor.message, templateCtx);
-  const baseUrl = executor.baseUrl ?? "https://secbaas-prod.alipay.com";
+
+  // BaaS credentials resolution. Priority per credential:
+  //   1) app config `baas:` section (from local application.yaml, overridden by
+  //      clawweb cm_app_config config_key="baas" via deepMerge in initConfig())
+  //   2) executor fields in the workflow YAML
+  //   3) environment variables as fallback
+  // This matches production where secrets live in clawweb's application config DB.
+  const baasCfg = loadConfig().app.baas;
+  const baseUrl = baasCfg.baseUrl || executor.baseUrl || process.env.BAAS_BASE_URL || "";
   const timeoutMs = executor.timeoutMs ?? (executor.timeoutSeconds ? executor.timeoutSeconds * 1000 : 120_000);
   const pollIntervalMs = executor.pollIntervalMs ?? 3_000;
 
-  // Hardcoded API key for 系统对接 (system integration) — per Open API spec
-  // Not read from env to avoid stale/invalid keys from gateway environment
-  const apiKey = "m3ySgNbkbHB8CbCr2fbRgNeTNq4JmOiC";
+  // API key resolution. Precedence:
+  //   config.baas.apiKey (application.yaml / clawweb cm_app_config) →
+  //   env.BAAS_API_KEY → apiKeyRef (legacy: a literal secret or env name).
+  const apiKeyRef = executor.apiKeyRef ?? "BAAS_API_KEY";
+  const apiKey =
+    baasCfg.apiKey ||
+    process.env.BAAS_API_KEY ||
+    (apiKeyRef && apiKeyRef !== "BAAS_API_KEY" ? apiKeyRef : "") ||
+    "";
+
+  if (!baseUrl) {
+    return {
+      status: "failed",
+      error:
+        "baas-call requires a base URL: configure the `baas:` section in application config " +
+        "(or clawweb cm_app_config config_key=\"baas\"), set `baseUrl` in the workflow YAML, " +
+        "or set the BAAS_BASE_URL env var",
+    };
+  }
+  if (!apiKey) {
+    return {
+      status: "failed",
+      error:
+        "baas-call requires an API key: configure `apiKey` under the `baas:` config section " +
+        "(or clawweb cm_app_config config_key=\"baas\"), or set the BAAS_API_KEY env var",
+    };
+  }
 
   if (mode === "message" && !executor.botId) {
     return {
@@ -127,9 +160,10 @@ export async function executeBaasCall(
   };
 
   // Office network uses IAM token via Cookie header per BaaS Open API doc.
-  // Only set when iamToken is configured in the workflow YAML.
-  const iamToken = executor.iamToken
-    ? resolveTemplate(executor.iamToken, templateCtx)
+  // Precedence: config.baas.iamToken → workflow YAML executor.iamToken.
+  const iamTokenRaw = baasCfg.iamToken || executor.iamToken || undefined;
+  const iamToken = iamTokenRaw
+    ? resolveTemplate(iamTokenRaw, templateCtx)
     : undefined;
   if (iamToken) {
     headers["Cookie"] = `iam_token=${iamToken}`;

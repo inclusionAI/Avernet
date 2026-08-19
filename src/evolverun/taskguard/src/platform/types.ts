@@ -255,7 +255,7 @@ export function resolveEngineName(
     if (valid.includes(envEngine as EngineName)) {
       return envEngine as EngineName;
     }
-    console.warn(`[clawmind] CLAWMIND_ENGINE="${envEngine}" is not a valid EngineName. Valid values: ${valid.join(", ")}. Falling back to auto-detection.`);
+    console.warn(`[taskguard] CLAWMIND_ENGINE="${envEngine}" is not a valid EngineName. Valid values: ${valid.join(", ")}. Falling back to auto-detection.`);
   }
 
   // 2. Config override
@@ -264,7 +264,7 @@ export function resolveEngineName(
     if (valid.includes(options.configEngine as EngineName)) {
       return options.configEngine as EngineName;
     }
-    console.warn(`[clawmind] config engine="${options.configEngine}" is not a valid EngineName. Valid values: ${valid.join(", ")}. Falling back to auto-detection.`);
+    console.warn(`[taskguard] config engine="${options.configEngine}" is not a valid EngineName. Valid values: ${valid.join(", ")}. Falling back to auto-detection.`);
   }
 
   // 3. Auto-detection from platform type + env

@@ -352,7 +352,7 @@ export function isTickEvent(frame: WsEventFrame): frame is WsEventFrame & { payl
 
 /** Configuration for TeClawProvider WebSocket connection. */
 export interface TeClawWsProviderConfig {
-  /** WebSocket URL (e.g., "ws://127.0.0.1:13000/ws/v1/chat" or "wss://angw.andc-inc.cn/ws/v1/chat"). */
+  /** WebSocket URL (e.g., "ws://127.0.0.1:13000/ws/v1/chat" or "wss://example.com/ws/v1/chat"). */
   wsUrl: string;
   /** MCP Token for authentication. */
   token: string;

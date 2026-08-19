@@ -64,9 +64,9 @@ export function extractErrorInfo(err: unknown): {
 export function defaultWorkflowLogDir(): string {
   // macOS → dev; Linux → production
   if (process.platform === "darwin") {
-    return join(homedir(), ".openclaw", "logs", "clawmind");
+    return join(homedir(), ".openclaw", "logs", "taskguard");
   }
-  return "/home/admin/logs/clawmind";
+  return process.env.WORKFLOW_LOG_DIR || join(homedir(), ".openclaw", "logs", "taskguard");
 }
 
 /** Rolling log configuration — read from env vars with sensible defaults. */
@@ -143,7 +143,7 @@ export async function resolveLogFilePath(
   } catch (rollErr) {
     // Rolling failed — continue writing to the current (oversized) file
     // rather than losing logs. Next write will retry rolling.
-    console.warn("[clawmind] log rolling failed, continuing with current file:", rollErr instanceof Error ? rollErr.message : String(rollErr));
+    console.warn("[taskguard] log rolling failed, continuing with current file:", rollErr instanceof Error ? rollErr.message : String(rollErr));
   }
 
   return logPath;
@@ -223,7 +223,7 @@ export async function appendWorkflowJsonlLog(
     const message = error instanceof Error ? error.message : String(error);
     if (!warnedWriteFailure) {
       warnedWriteFailure = true;
-      console.warn("[clawmind] log write failed", message);
+      console.warn("[taskguard] log write failed", message);
     }
   }
 }

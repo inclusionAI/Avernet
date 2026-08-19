@@ -36,6 +36,7 @@ import {
   bundleRuntimeDependencies,
   verifyRuntimeImports,
 } from "./runtime-dependency-bundler.mjs";
+import { copyCommunityPacks } from "./community-packs.mjs";
 
 // ── 常量 ──
 
@@ -144,7 +145,7 @@ writeFileSync(join(pkgDir, "mcp-config.json"), JSON.stringify(mcpConfig, null, 2
 console.log("  📦 Generated mcp-config.json");
 
 // 3.5 复制 packs 与 configs
-copyDirIfExists(join(ROOT_DIR, "packs"), join(pkgDir, "packs"), "packs/");
+copyCommunityPacks(ROOT_DIR, join(pkgDir, "packs"));
 copyDirIfExists(join(ROOT_DIR, "configs"), join(pkgDir, "configs"), "configs/");
 
 // 3.5.1 复制 install-clawmind.sh — `clawmind update` 工具运行时需要
@@ -288,7 +289,7 @@ function uploadToOss(localFile) {
   const OSS_BUCKET = "alps-risk-com";
   const OSS_PATH = `clawmind/${basename(localFile)}`;
   const OSS_URL = `oss://${OSS_BUCKET}/${OSS_PATH}`;
-  const HTTP_URL = `http://${OSS_BUCKET}.oss-cn-hangzhou-zmf.aliyuncs.com/${OSS_PATH}`;
+  const HTTP_URL = process.env.OSS_HTTP_URL || `https://${OSS_BUCKET}.${process.env.OSS_ENDPOINT || "oss.example.com"}/${OSS_PATH}`;
 
   const ossutil = process.env.OSSUTIL_PATH || "ossutil";
 

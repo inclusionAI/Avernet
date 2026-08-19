@@ -31,10 +31,10 @@ cd "$ROOT_DIR"
 
 # Read version from package.json
 VERSION=$(node -e 'console.log(JSON.parse(require("fs").readFileSync("package.json","utf8")).version)')
-PKG_NAME="@alipay/clawmind"
-OUTPUT_FILE="$ROOT_DIR/clawmind-${VERSION}.tgz"
+PKG_NAME="@avernet/taskguard"
+OUTPUT_FILE="$ROOT_DIR/taskguard-${VERSION}.tgz"
 
-echo "=== ClawMind Pack TGZ ==="
+echo "=== taskguard Pack TGZ ==="
 echo "Package: $PKG_NAME"
 echo "Version: $VERSION"
 echo "Output:  $OUTPUT_FILE"

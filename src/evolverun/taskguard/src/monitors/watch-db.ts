@@ -7,8 +7,8 @@
  * and outputs formatted notifications to stdout (one per line).
  *
  * Output format:
- *   [clawmind] 工作流 "{name}" ({flowId}) 状态: {status}
- *   [clawmind] 工作流 "{name}" ({flowId}) 节点 "{node}" {status}
+ *   [taskguard] 工作流 "{name}" ({flowId}) 状态: {status}
+ *   [taskguard] 工作流 "{name}" ({flowId}) 节点 "{node}" {status}
  *
  * Intended to be run as a Plugin Monitor via `monitors/monitors.json`.
  *
@@ -62,7 +62,7 @@ async function poll(db: IDatabase): Promise<void> {
         const name = flow.workflow_title || flow.workflow_id || "未命名";
         const statusText = translateStatus(flow.status);
         // eslint-disable-next-line no-console
-        console.log(`[clawmind] 工作流 "${name}" (${flow.flow_id}) 状态: ${statusText}`);
+        console.log(`[taskguard] 工作流 "${name}" (${flow.flow_id}) 状态: ${statusText}`);
         seenFlowStatuses.set(flow.flow_id, flow.status);
       }
       if (flow.gmt_modified > lastFlowTimestamp) {
@@ -90,7 +90,7 @@ async function poll(db: IDatabase): Promise<void> {
         const nodeId = node.node_id || "未知节点";
         const statusText = translateStatus(node.status);
         // eslint-disable-next-line no-console
-        console.log(`[clawmind] 工作流运行 ${node.flow_id} 节点 "${nodeId}" ${statusText}`);
+        console.log(`[taskguard] 工作流运行 ${node.flow_id} 节点 "${nodeId}" ${statusText}`);
         seenNodeStatuses.set(key, node.status);
       }
       if (node.gmt_modified > lastNodeTimestamp) {
@@ -133,7 +133,7 @@ async function main(): Promise<void> {
     lastNodeTimestamp = now;
 
     // eslint-disable-next-line no-console
-    console.log(`[clawmind] 监控已启动 (间隔: ${intervalMs}ms, 数据库: ${expandedPath})`);
+    console.log(`[taskguard] 监控已启动 (间隔: ${intervalMs}ms, 数据库: ${expandedPath})`);
 
     // Poll loop
     while (true) {

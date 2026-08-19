@@ -123,7 +123,7 @@ export function discoverWorkflowPacks(
         seen.add(key);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`[clawmind] Failed to load workflow pack at "${packRoot}": ${message}`);
+        console.error(`[taskguard] Failed to load workflow pack at "${packRoot}": ${message}`);
       }
     }
   }

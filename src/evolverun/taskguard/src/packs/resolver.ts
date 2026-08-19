@@ -215,7 +215,7 @@ export function resolvePackWorkflows(packs: ResolvedWorkflowPack[]): { workflows
         const spec = loadWorkflowSpecFromFile(workflowRef.absolutePath);
         if (spec.id !== workflowRef.id) {
           console.error(
-            `[clawmind] Workflow id mismatch in pack "${pack.manifest.id}": manifest=${workflowRef.id}, yaml=${spec.id} (skipping)`,
+            `[taskguard] Workflow id mismatch in pack "${pack.manifest.id}": manifest=${workflowRef.id}, yaml=${spec.id} (skipping)`,
           );
           failed.push({
             id: workflowRef.id,
@@ -242,7 +242,7 @@ export function resolvePackWorkflows(packs: ResolvedWorkflowPack[]): { workflows
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(
-          `[clawmind] Failed to load workflow "${workflowRef.id}" from pack "${pack.manifest.id}" (${workflowRef.absolutePath}): ${message}`,
+          `[taskguard] Failed to load workflow "${workflowRef.id}" from pack "${pack.manifest.id}" (${workflowRef.absolutePath}): ${message}`,
         );
         failed.push({
           id: workflowRef.id,
@@ -301,7 +301,7 @@ export async function resolveWorkflow(
 ): Promise<ResolvedWorkflow | undefined> {
   if (!debug && dbSpecRepo) {
     const row = await dbSpecRepo.findByWorkflowId(workflowId);
-    console.info("[clawmind] resolveWorkflow DB/API lookup result", {
+    console.info("[taskguard] resolveWorkflow DB/API lookup result", {
       workflowId,
       hasRow: !!row,
       spec_json_type: row ? typeof row.spec_json : "no-row",
@@ -313,7 +313,7 @@ export async function resolveWorkflow(
       if (!row.spec_json) {
         // API returned a row but spec_json is missing/falsy — likely an auth redirect or malformed response.
         // Fall through to Pack YAML resolution instead of crashing.
-        console.warn("[clawmind] resolveWorkflow: row.spec_json is falsy, falling back to Pack YAML", { workflowId, spec_json: row.spec_json, row_keys: Object.keys(row) });
+        console.warn("[taskguard] resolveWorkflow: row.spec_json is falsy, falling back to Pack YAML", { workflowId, spec_json: row.spec_json, row_keys: Object.keys(row) });
       } else {
         try {
           let raw = JSON.parse(row.spec_json) as unknown;
@@ -341,7 +341,7 @@ export async function resolveWorkflow(
           // DB spec is corrupted (parse/normalize/validate failed) —
           // fall back to local Pack YAML instead of crashing the engine.
           console.warn(
-            `[clawmind] resolveWorkflow: DB spec for "${workflowId}" is corrupted, falling back to Pack YAML: ${dbErr instanceof Error ? dbErr.message : dbErr}`,
+            `[taskguard] resolveWorkflow: DB spec for "${workflowId}" is corrupted, falling back to Pack YAML: ${dbErr instanceof Error ? dbErr.message : dbErr}`,
           );
         }
       }

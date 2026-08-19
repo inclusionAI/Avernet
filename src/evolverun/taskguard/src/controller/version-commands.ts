@@ -75,7 +75,7 @@ export type VersionCommandDeps = {
   gitUsername?: string;
   /** Git token (from env or config) for credential-cache */
   gitToken?: string;
-  /** Git email for commit author. Company git servers (e.g. code.alipay.com) reject non-company emails. */
+  /** Git email for commit author. Some git servers require valid email addresses. */
   gitEmail?: string;
   /**
    * Facade binding repository — used by handleDeploy to write facade_bindings rows
@@ -701,9 +701,9 @@ export async function ensureGitRepoForPack(
   // Use || (not ??) to fallback on empty strings too — loadConfig() defaults git.username to ""
   // which would pass through ?? since "" !== null/undefined, causing "empty ident name" fatal.
   const gitUser = deps.gitUsername || deps.botId || "clawmind";
-  // Email: must be a valid company email on corporate git servers (e.g. code.alipay.com
-  // rejects @clawmind.local). Prefer deps.gitEmail (from config), then derive from username.
-  const gitEmail = deps.gitEmail || `${gitUser}@antgroup.com`;
+  // Email: must be a valid email on corporate git servers.
+  // Prefer deps.gitEmail (from config), then derive from username.
+  const gitEmail = deps.gitEmail || `${gitUser}@example.com`;
   try {
     execFileSync("git", ["config", "user.name", gitUser], { cwd: packDir });
     execFileSync("git", ["config", "user.email", gitEmail], { cwd: packDir });

@@ -455,7 +455,7 @@ async function dispatchWithTimeout(
   const timeoutPromise = new Promise<string>((_resolve) => {
     setTimeout(() => {
       _resolve(
-        `[clawmind] ⏱ 工作流命令执行超过 ${Math.round(timeoutMs / 1000)} 秒超时，工具调用已返回。` +
+        `[taskguard] ⏱ 工作流命令执行超过 ${Math.round(timeoutMs / 1000)} 秒超时，工具调用已返回。` +
         `\n工作流仍在后台运行中，请使用 \`/workflow inspect\` 查看执行状态。` +
         `\n如需取消，请使用 \`/stop\` 命令。` +
         `\n(session: ${sessionKey.slice(0, 16)}...)`,
@@ -550,7 +550,7 @@ async function injectChatMessage(
   label = DEFAULT_CHAT_INJECT_LABEL,
   options: { throwOnError?: boolean } = {},
 ): Promise<void> {
-  console.info("[clawmind] chat.inject start", {
+  console.info("[taskguard] chat.inject start", {
     sessionKey,
     idempotencyKey,
     label,
@@ -575,7 +575,7 @@ async function injectChatMessage(
     ) as SpawnOutput;
   } catch (err) {
     // runCommandWithTimeout throws on timeout / spawn failure — surface it explicitly
-    console.warn("[clawmind] chat.inject threw", {
+    console.warn("[taskguard] chat.inject threw", {
       sessionKey,
       idempotencyKey,
       error: truncateForLog(err),
@@ -591,7 +591,7 @@ async function injectChatMessage(
     return;
   }
   // runCommandWithTimeout does NOT throw on non-zero exit codes — check SpawnResult.code
-  console.info("[clawmind] chat.inject done", {
+  console.info("[taskguard] chat.inject done", {
     sessionKey,
     idempotencyKey,
     exitCode: result.code,
@@ -606,7 +606,7 @@ async function injectChatMessage(
   });
   if (result.code !== 0) {
     const errorDetail = result.stderr?.trim() || `exit code ${result.code}`;
-    console.warn("[clawmind] chat.inject failed", {
+    console.warn("[taskguard] chat.inject failed", {
       sessionKey,
       idempotencyKey,
       message: message.slice(0, 120),
@@ -715,7 +715,7 @@ function readDingTalkCredentials(): { clientId: string; clientSecret: string; ro
     if (!clientId || !clientSecret) return null;
     return { clientId, clientSecret, robotCode: robotCode ?? clientId };
   } catch (err) {
-    console.warn("[clawmind] Failed to read DingTalk credentials", { error: err instanceof Error ? err.message : String(err) });
+    console.warn("[taskguard] Failed to read DingTalk credentials", { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }
@@ -732,7 +732,7 @@ async function sendDingTalkToUser(
   userId: string,
   content: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  console.log("[clawmind] sendDingTalkToUser", { userId, contentLen: content.length });
+  console.log("[taskguard] sendDingTalkToUser", { userId, contentLen: content.length });
   try {
     const creds = readDingTalkCredentials();
     if (!creds) {
@@ -757,7 +757,7 @@ async function sendDingTalkToUser(
       msgParam,
     };
 
-    console.log("[clawmind] sendDingTalkToUser calling API", { userId, robotCode: code, msgKey });
+    console.log("[taskguard] sendDingTalkToUser calling API", { userId, robotCode: code, msgKey });
     const res = await fetch(DINGTALK_SEND_URL, {
       method: "POST",
       headers: {
@@ -769,16 +769,16 @@ async function sendDingTalkToUser(
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.error("[clawmind] sendDingTalkToUser API error", { userId, status: res.status, body: text.slice(0, 500) });
+      console.error("[taskguard] sendDingTalkToUser API error", { userId, status: res.status, body: text.slice(0, 500) });
       return { ok: false, error: `DingTalk API HTTP ${res.status}: ${text.slice(0, 300)}` };
     }
 
     const result = await res.json() as Record<string, unknown>;
-    console.log("[clawmind] sendDingTalkToUser succeeded", { userId, result: JSON.stringify(result).slice(0, 200) });
+    console.log("[taskguard] sendDingTalkToUser succeeded", { userId, result: JSON.stringify(result).slice(0, 200) });
     return { ok: true };
   } catch (err) {
     const errorDetail = err instanceof Error ? err.message : String(err);
-    console.error("[clawmind] sendDingTalkToUser threw", { userId, error: errorDetail });
+    console.error("[taskguard] sendDingTalkToUser threw", { userId, error: errorDetail });
     return { ok: false, error: errorDetail };
   }
 }
@@ -796,7 +796,7 @@ async function sendDingTalkToGroup(
   // DingTalk openConversationId is case-sensitive. OpenClaw normalizes
   // session keys to lowercase, so we must restore the original casing.
   const resolvedConversationId = resolveOriginalConversationId(conversationId);
-  console.log("[clawmind] sendDingTalkToGroup", { conversationId, resolvedConversationId: resolvedConversationId !== conversationId ? resolvedConversationId : undefined, contentLen: content.length });
+  console.log("[taskguard] sendDingTalkToGroup", { conversationId, resolvedConversationId: resolvedConversationId !== conversationId ? resolvedConversationId : undefined, contentLen: content.length });
   try {
     const creds = readDingTalkCredentials();
     if (!creds) {
@@ -820,7 +820,7 @@ async function sendDingTalkToGroup(
       msgParam,
     };
 
-    console.log("[clawmind] sendDingTalkToGroup calling API", { conversationId: resolvedConversationId, robotCode: code, msgKey });
+    console.log("[taskguard] sendDingTalkToGroup calling API", { conversationId: resolvedConversationId, robotCode: code, msgKey });
     const res = await fetch(DINGTALK_GROUP_SEND_URL, {
       method: "POST",
       headers: {
@@ -832,16 +832,16 @@ async function sendDingTalkToGroup(
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.error("[clawmind] sendDingTalkToGroup API error", { conversationId, status: res.status, body: text.slice(0, 500) });
+      console.error("[taskguard] sendDingTalkToGroup API error", { conversationId, status: res.status, body: text.slice(0, 500) });
       return { ok: false, error: `DingTalk group API HTTP ${res.status}: ${text.slice(0, 300)}` };
     }
 
     const result = await res.json() as Record<string, unknown>;
-    console.log("[clawmind] sendDingTalkToGroup succeeded", { conversationId, result: JSON.stringify(result).slice(0, 200) });
+    console.log("[taskguard] sendDingTalkToGroup succeeded", { conversationId, result: JSON.stringify(result).slice(0, 200) });
     return { ok: true };
   } catch (err) {
     const errorDetail = err instanceof Error ? err.message : String(err);
-    console.error("[clawmind] sendDingTalkToGroup threw", { conversationId, error: errorDetail });
+    console.error("[taskguard] sendDingTalkToGroup threw", { conversationId, error: errorDetail });
     return { ok: false, error: errorDetail };
   }
 }
@@ -868,7 +868,7 @@ async function injectCommandEchoMessage(
 ): Promise<void> {
   const command = buildCommandEchoText(raw, commandName);
   if (!command) {
-    console.info("[clawmind] command-echo skipped (empty command)", { sessionKey, commandName, skillName });
+    console.info("[taskguard] command-echo skipped (empty command)", { sessionKey, commandName, skillName });
     recordInjectTrace("command_echo_skipped", {
       session_key: sessionKey,
       command_name: commandName,
@@ -877,7 +877,7 @@ async function injectCommandEchoMessage(
     return;
   }
   const label = formatChatInjectLabel(workflowId);
-  console.info("[clawmind] command-echo before inject", {
+  console.info("[taskguard] command-echo before inject", {
     sessionKey,
     command,
     label,
@@ -888,7 +888,7 @@ async function injectCommandEchoMessage(
     label,
   });
   await injectChatMessage(api, sessionKey, `收到命令：${command}\n<!-- triggerChatSubscribe:true -->`, `command-echo:${sessionKey}:${command}`, label);
-  console.info("[clawmind] command-echo after inject", { sessionKey });
+  console.info("[taskguard] command-echo after inject", { sessionKey });
 }
 
 // ── Real Executor Dispatch ──
@@ -1020,7 +1020,7 @@ async function injectEmbeddedAgentLoopMessage(
 ): Promise<void> {
   const message = formatEmbeddedAgentLoopProgress(node.title, loopEvent);
   if (!message) {
-    console.info("[clawmind] embedded-loop skipped (empty message)", {
+    console.info("[taskguard] embedded-loop skipped (empty message)", {
       flowId, nodeId: node.id, eventType: loopEvent.event ?? "unknown",
     });
     recordInjectTrace("embedded_loop_skipped", {
@@ -1030,7 +1030,7 @@ async function injectEmbeddedAgentLoopMessage(
     }, flowId);
     return;
   }
-  console.info("[clawmind] embedded-loop before inject", {
+  console.info("[taskguard] embedded-loop before inject", {
     flowId, nodeId: node.id, eventType: loopEvent.event ?? "unknown",
     messagePreview: message.slice(0, 120),
   });
@@ -1060,7 +1060,7 @@ async function injectEmbeddedAgentFinalOutput(
 ): Promise<void> {
   const message = formatEmbeddedAgentFinalOutput(node.title, output);
   if (!message) {
-    console.info("[clawmind] embedded-final skipped (empty message)", {
+    console.info("[taskguard] embedded-final skipped (empty message)", {
       flowId, nodeId: node.id, outputPreview: output.slice(0, 120),
     });
     recordInjectTrace("embedded_final_skipped", {
@@ -1070,7 +1070,7 @@ async function injectEmbeddedAgentFinalOutput(
     }, flowId);
     return;
   }
-  console.info("[clawmind] embedded-final before inject", {
+  console.info("[taskguard] embedded-final before inject", {
     flowId, nodeId: node.id, messagePreview: message.slice(0, 120),
   });
   recordInjectTrace("embedded_final_before_inject", {
@@ -1363,7 +1363,7 @@ export function createExecutorDispatch(
     flowId: string,
   ): Promise<ExecutorResult> {
     const delivery = resolveApprovalDelivery(node, flowState);
-    console.log("[clawmind] executeApprovalDelivery", {
+    console.log("[taskguard] executeApprovalDelivery", {
       flowId, nodeId: node.id, deliveryPrimary: delivery.primary, executionMode: flowState.executionMode, sessionKey,
     });
     switch (delivery.primary) {
@@ -1376,7 +1376,7 @@ export function createExecutorDispatch(
       case "bcs-cli":
         return executeApprovalDeliveryAction(node, templateCtx, flowState, flowId, delivery, actionRegistry, sessionKey, user, workflow);
       case "card-dingtalk": {
-        console.log("[clawmind] approval card-dingtalk", {
+        console.log("[taskguard] approval card-dingtalk", {
           flowId, nodeId: node.id, executionMode: flowState.executionMode, sessionKey, bcsGroupId: flowState.bcsGroupId,
         });
         const cardApi = {
@@ -1414,7 +1414,7 @@ export function createExecutorDispatch(
           workflowId: workflow.id,
         } as Parameters<typeof executeApprovalCardDingtalk>[2];
         const result = await executeApprovalCardDingtalk(node, templateCtx, cardApi, flowState, flowId, { workflow });
-        console.log("[clawmind] approval card-dingtalk result", {
+        console.log("[taskguard] approval card-dingtalk result", {
           flowId, nodeId: node.id, status: result.status, error: result.error ?? undefined,
         });
         return result;
@@ -1424,7 +1424,7 @@ export function createExecutorDispatch(
         // via chatInject (for BCS/secoc connector rendering), 2) Send a DingTalk
         // notification message so the user can see the approval request in the
         // DingTalk chat. AixUI rendering depends on the channel connector.
-        console.log("[clawmind] approval card-secoc", {
+        console.log("[taskguard] approval card-secoc", {
           flowId, nodeId: node.id, executionMode: flowState.executionMode, sessionKey,
         });
         const secocExecutor = getLegacyApprovalExecutor(node);
@@ -1449,12 +1449,12 @@ export function createExecutorDispatch(
           );
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.error("[clawmind] approval card-secoc chatInject failed", {
+          console.error("[taskguard] approval card-secoc chatInject failed", {
             flowId, nodeId: node.id, error: errMsg,
           });
           // Don't fail — DingTalk notification is the primary delivery; chatInject is supplementary
         }
-        console.log("[clawmind] approval card-secoc AixUI injected to session", {
+        console.log("[taskguard] approval card-secoc AixUI injected to session", {
           flowId, nodeId: node.id, sessionKey,
         });
 
@@ -1498,11 +1498,11 @@ export function createExecutorDispatch(
           if (secocIsGroup && secocConversationId) {
             const sendResult = await sendDingTalkToGroup(secocConversationId, secocNotification);
             if (!sendResult.ok) {
-              console.error("[clawmind] approval card-secoc sendToGroup failed", {
+              console.error("[taskguard] approval card-secoc sendToGroup failed", {
                 flowId, nodeId: node.id, error: sendResult.error,
               });
             } else {
-              console.log("[clawmind] approval card-secoc notification sent to group", {
+              console.log("[taskguard] approval card-secoc notification sent to group", {
                 flowId, nodeId: node.id, conversationId: secocConversationId,
               });
             }
@@ -1513,11 +1513,11 @@ export function createExecutorDispatch(
               if (approver.empId) {
                 const sendResult = await sendDingTalkToUser(api, approver.empId, secocNotification);
                 if (!sendResult.ok) {
-                  console.error("[clawmind] approval card-secoc sendToUser failed", {
+                  console.error("[taskguard] approval card-secoc sendToUser failed", {
                     flowId, nodeId: node.id, userId: approver.empId, error: sendResult.error,
                   });
                 } else {
-                  console.log("[clawmind] approval card-secoc notification sent to user", {
+                  console.log("[taskguard] approval card-secoc notification sent to user", {
                     flowId, nodeId: node.id, userId: approver.empId,
                   });
                 }
@@ -1525,7 +1525,7 @@ export function createExecutorDispatch(
             }
           }
         } else {
-          console.log("[clawmind] approval card-secoc skipping DingTalk notification (not dingtalk-group or private mode)", {
+          console.log("[taskguard] approval card-secoc skipping DingTalk notification (not dingtalk-group or private mode)", {
             flowId, nodeId: node.id, executionMode: flowState.executionMode,
           });
         }
@@ -1540,7 +1540,7 @@ export function createExecutorDispatch(
         };
       }
       case "card-web": {
-        console.log("[clawmind] approval card-web", {
+        console.log("[taskguard] approval card-web", {
           flowId, nodeId: node.id, executionMode: flowState.executionMode, sessionKey,
         });
         const webApi: ApprovalCardWebApi = {
@@ -1604,7 +1604,7 @@ export function createExecutorDispatch(
           },
         };
         const webResult = await executeApprovalCardWeb(node, templateCtx, webApi, flowState, flowId, { workflow });
-        console.log("[clawmind] approval card-web result", {
+        console.log("[taskguard] approval card-web result", {
           flowId, nodeId: node.id, status: webResult.status, error: webResult.error ?? undefined,
         });
         return webResult;
@@ -1641,7 +1641,7 @@ export function createExecutorDispatch(
     if (skipWhen && evaluateSkipWhenConditions(skipWhen, templateCtx)) {
       const isApproval = !!getLegacyApprovalExecutor(node);
       const result = buildSkipResult(node, isApproval);
-      console.log("[clawmind] skipWhen matched, auto-succeeding", {
+      console.log("[taskguard] skipWhen matched, auto-succeeding", {
         flowId, nodeId: node.id, isApproval,
       });
       return { status: "succeeded", result };
@@ -1901,7 +1901,7 @@ function buildDeps(
   const user = resolveRuntimeUserContext({ deliveryContext: effectiveDeliveryContext, workflowDefaults: workflow?.defaults });
   const resolvedPackRoot = packRoot || (packId ? resolvePackRootFromId(packId) : undefined);
   if (!packRoot && packId) {
-    console.info("[clawmind] packRoot not available from resolved pack, falling back to conventional path", {
+    console.info("[taskguard] packRoot not available from resolved pack, falling back to conventional path", {
       packId,
       fallbackPath: resolvedPackRoot,
     });
@@ -1942,7 +1942,7 @@ function buildDeps(
     const dbConfig = loadDatabaseConfig();
     const isApiMode = dbConfig.type === "api";
     console.log(
-      `[clawmind] Run log uploader: buildDeps diag — ` +
+      `[taskguard] Run log uploader: buildDeps diag — ` +
       `dbConfig.type=${dbConfig.type} dbConfig.api=${dbConfig.api != null} ` +
       `db=${db != null} db.dbType=${(db as any)?.dbType ?? "null"}`,
     );
@@ -1953,12 +1953,12 @@ function buildDeps(
         // register() callback already created the repo — pick it up
         runLogRepo = _pendingRunLogRepo;
         _pendingRunLogRepo = null;
-        console.log("[clawmind] Run log uploader: picked up deferred API repository");
+        console.log("[taskguard] Run log uploader: picked up deferred API repository");
       } else {
         // Create API repo directly (register() callback hasn't run yet)
         const apiClient = createApiClient(dbConfig.api);
         runLogRepo = new RunLogApiRepository(apiClient);
-        console.log("[clawmind] Run log uploader: API mode (direct init in buildDeps)");
+        console.log("[taskguard] Run log uploader: API mode (direct init in buildDeps)");
       }
     } else if (db && db.dbType !== "noop") {
       // Direct DB mode: use RunLogRepository
@@ -1970,13 +1970,13 @@ function buildDeps(
       _runLogUploader = uploader;
       setRunLogUploader(uploader);
       uploader.start();
-      console.log("[clawmind] Run log uploader: created and started");
+      console.log("[taskguard] Run log uploader: created and started");
       // RunArchiveBuilder only works in direct DB mode (not API mode)
       if (!isApiMode && db && db.dbType !== "noop") {
         _runArchiveBuilder = new RunArchiveBuilder(db, runLogRepo);
       }
     } else {
-      console.log("[clawmind] Run log uploader: deferred (database not ready yet)");
+      console.log("[taskguard] Run log uploader: deferred (database not ready yet)");
     }
 
     // ── Guardian Agent: node failure analysis at retry time ──
@@ -1995,13 +1995,13 @@ function buildDeps(
           botId: _activeBotId ?? undefined,
         }, guardianCfg);
         setGuardianAgent(guardianAgent);
-        console.log("[clawmind] Guardian agent: enabled");
+        console.log("[taskguard] Guardian agent: enabled");
       } else {
         setGuardianAgent(null);
-        console.log("[clawmind] Guardian agent: disabled");
+        console.log("[taskguard] Guardian agent: disabled");
       }
     } catch (guardianErr) {
-      console.warn(`[clawmind] Guardian agent init failed: ${guardianErr instanceof Error ? guardianErr.message : guardianErr}`);
+      console.warn(`[taskguard] Guardian agent init failed: ${guardianErr instanceof Error ? guardianErr.message : guardianErr}`);
       setGuardianAgent(null);
     }
   }
@@ -2074,13 +2074,13 @@ function buildDeps(
     const recoveryBotId = loadBotId();
     const recoveryEngine = getEngineName();
     if (recoveryBotId && recoveryEngine && getFlowRunRepository()) {
-      console.log(`[clawmind] buildDeps: triggering orphaned flow recovery (botId=${recoveryBotId} engine=${recoveryEngine})`);
+      console.log(`[taskguard] buildDeps: triggering orphaned flow recovery (botId=${recoveryBotId} engine=${recoveryEngine})`);
       // Fire-and-forget: recovery runs in background, doesn't block deps construction
       recoverOrphanedFlows(deps, recoveryBotId, recoveryEngine).catch((err) => {
-        console.error("[clawmind] orphaned flow recovery failed:", err instanceof Error ? err.message : String(err));
+        console.error("[taskguard] orphaned flow recovery failed:", err instanceof Error ? err.message : String(err));
       });
     } else {
-      console.log(`[clawmind] buildDeps: orphaned flow recovery skipped (botId=${recoveryBotId ?? "NULL"} engine=${recoveryEngine ?? "NULL"} repo=${getFlowRunRepository() ? "OK" : "NULL"})`);
+      console.log(`[taskguard] buildDeps: orphaned flow recovery skipped (botId=${recoveryBotId ?? "NULL"} engine=${recoveryEngine ?? "NULL"} repo=${getFlowRunRepository() ? "OK" : "NULL"})`);
     }
   }
 
@@ -2123,7 +2123,7 @@ async function executeDebugSegment(params: {
       _dbSpecRepo = new WorkflowSpecRepository(_db);
     }
   } catch (err) {
-    console.warn("[clawmind] workflow_debug_segment: failed to init DB spec repo, continuing pack-only", {
+    console.warn("[taskguard] workflow_debug_segment: failed to init DB spec repo, continuing pack-only", {
       error: truncateForLog(err),
     });
   }
@@ -2305,7 +2305,7 @@ function stripFencedCodeBlocksForProbe(text: string): string {
  * 1. scripts/install-clawmind.sh relative to the package root (walk up from
  *    import.meta.url, same strategy as discoverPacksAdjacentToEntry in
  *    packs/resolver.ts).
- * 2. /home/admin/openclawExt/clawmind/scripts/install-clawmind.sh (production
+ * 2. scripts/install-clawmind.sh in the OPENCLAW_EXTENSION_DIR (production
  *    install path on remote openclaw hosts).
  *
  * Returns the absolute path to the script, or undefined if not found.
@@ -2330,10 +2330,13 @@ function locateInstallScript(): string | undefined {
     // import.meta.url unavailable — fall through to Strategy 2
   }
 
-  // Strategy 2: production install path
-  const prodPath = "/home/admin/openclawExt/clawmind/scripts/install-clawmind.sh";
-  if (existsSync(prodPath) && statSync(prodPath).isFile()) {
-    return prodPath;
+  // Strategy 2: production install path (from env var)
+  const extDir = process.env.OPENCLAW_EXTENSION_DIR;
+  if (extDir) {
+    const prodPath = join(extDir, "scripts/install-clawmind.sh");
+    if (existsSync(prodPath) && statSync(prodPath).isFile()) {
+      return prodPath;
+    }
   }
 
   return undefined;
@@ -2358,7 +2361,7 @@ async function handleClawmindUpdate(): Promise<string> {
     ].join("\n");
   }
 
-  console.info("[clawmind] handleClawmindUpdate: located script", { scriptPath });
+  console.info("[taskguard] handleClawmindUpdate: located script", { scriptPath });
 
   try {
     // Execute the install script via bash, stream stdout/stderr to console
@@ -2411,7 +2414,7 @@ async function handleClawmindUpdate(): Promise<string> {
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.error("[clawmind] handleClawmindUpdate error", { error: errMsg });
+    console.error("[taskguard] handleClawmindUpdate error", { error: errMsg });
     return [
       "❌ ClawMind 更新执行异常：",
       "",
@@ -2457,7 +2460,7 @@ async function dispatchWorkflowCommand(params: {
     inlineDebugContext,
   } = params;
   const sessionId = resolveSessionId(sessionKey);
-  console.info("[clawmind] dispatch entry", {
+  console.info("[taskguard] dispatch entry", {
     entrypoint,
     sessionKey,
     commandName,
@@ -2479,7 +2482,7 @@ async function dispatchWorkflowCommand(params: {
 
   try {
     const workflowCatalog = loadWorkflowPackCatalog();
-    console.info("[clawmind] pack catalog loaded", {
+    console.info("[taskguard] pack catalog loaded", {
       packCount: workflowCatalog.packs.length,
       packIds: workflowCatalog.packs.map((p) => p.manifest.id),
       workflowCount: workflowCatalog.workflows.length,
@@ -2501,7 +2504,7 @@ async function dispatchWorkflowCommand(params: {
         _dbSpecRepo = new WorkflowSpecApiRepository(_apiClient);
         _permRepo = new BotWorkflowPermissionApiRepository(_apiClient);
         _notifConfigRepo = new NotificationConfigApiRepository(_apiClient);
-        console.info("[clawmind] loaded facade bindings from API", { dbBindingsCount: _dbBindings.length });
+        console.info("[taskguard] loaded facade bindings from API", { dbBindingsCount: _dbBindings.length });
       } else if (_db && _db.dbType !== "noop") {
         // Direct DB mode: load facade bindings and workflow specs from local database
         _dbBindings = await loadDbFacadeBindings(_db);
@@ -2509,12 +2512,12 @@ async function dispatchWorkflowCommand(params: {
         _notifConfigRepo = new NotificationConfigRepository(_db);
       }
     } catch (err) {
-      console.warn("[clawmind] failed to load DB facade bindings, continuing with pack-only facades", {
+      console.warn("[taskguard] failed to load DB facade bindings, continuing with pack-only facades", {
         error: truncateForLog(err),
       });
     }
     const facadeRegistry = buildFacadeRegistry(workflowCatalog.packs, _dbBindings);
-    console.info("[clawmind] facade registry built", {
+    console.info("[taskguard] facade registry built", {
       commands: facadeRegistry.commands(),
       dbBindingsCount: _dbBindings.length,
     });
@@ -2555,15 +2558,15 @@ async function dispatchWorkflowCommand(params: {
       facade: facade?.command,
       workflowId: actionWorkflowId,
     });
-    console.info("[clawmind] dispatch step: before injectCommandEchoMessage", { sessionKey, commandName, actionWorkflowId });
+    console.info("[taskguard] dispatch step: before injectCommandEchoMessage", { sessionKey, commandName, actionWorkflowId });
     await injectCommandEchoMessage(api, sessionKey, raw, commandName, skillName, actionWorkflowId);
-    console.info("[clawmind] dispatch step: after injectCommandEchoMessage", { sessionKey, commandName, actionWorkflowId });
+    console.info("[taskguard] dispatch step: after injectCommandEchoMessage", { sessionKey, commandName, actionWorkflowId });
     const debugFlag = action.action === "run" ? action.debug : undefined;
-    console.info("[clawmind] dispatch step: before resolveWorkflow", { actionWorkflowId, debugFlag, hasDbSpecRepo: !!_dbSpecRepo });
+    console.info("[taskguard] dispatch step: before resolveWorkflow", { actionWorkflowId, debugFlag, hasDbSpecRepo: !!_dbSpecRepo });
     const resolvedWorkflow = actionWorkflowId
       ? await resolveWorkflow(actionWorkflowId, _dbSpecRepo, workflowCatalog.workflows, debugFlag)
       : undefined;
-    console.info("[clawmind] dispatch step: after resolveWorkflow", {
+    console.info("[taskguard] dispatch step: after resolveWorkflow", {
       actionWorkflowId,
       resolved: !!resolvedWorkflow,
       resolvedId: resolvedWorkflow?.id,
@@ -2572,7 +2575,7 @@ async function dispatchWorkflowCommand(params: {
     // ── Permission check: DB permission (primary) → YAML allowedBots (fallback) ──
     if (resolvedWorkflow) {
       const botId = loadBotId();
-      console.info("[clawmind] dispatch step: permission check", {
+      console.info("[taskguard] dispatch step: permission check", {
         botId,
         ownerId: loadOwnerId(),
         hasPermRepo: !!_permRepo,
@@ -2584,28 +2587,28 @@ async function dispatchWorkflowCommand(params: {
         const ownerId = loadOwnerId();
         if (_permRepo && ownerId) {
           try {
-            console.info("[clawmind] dispatch step: before checkExecutePermission", { botId, ownerId, workflowId: resolvedWorkflow.spec.id });
+            console.info("[taskguard] dispatch step: before checkExecutePermission", { botId, ownerId, workflowId: resolvedWorkflow.spec.id });
             const permResult = await _permRepo.checkExecutePermission(botId, ownerId, resolvedWorkflow.spec.id);
-            console.info("[clawmind] dispatch step: after checkExecutePermission", { allowed: permResult.allowed, hasRecords: permResult.hasRecords });
+            console.info("[taskguard] dispatch step: after checkExecutePermission", { allowed: permResult.allowed, hasRecords: permResult.hasRecords });
             if (permResult.hasRecords) {
               dbPermissionChecked = true;
               if (!permResult.allowed) {
-                const msg = `[clawmind] 工作流 "${resolvedWorkflow.spec.title || resolvedWorkflow.spec.id}" 不允许当前 bot (${botId}) 执行（权限表拒绝）`;
-                console.warn("[clawmind] blocked by bot_workflow_permissions", { botId, ownerId, workflowId: resolvedWorkflow.spec.id });
+                const msg = `[taskguard] 工作流 "${resolvedWorkflow.spec.title || resolvedWorkflow.spec.id}" 不允许当前 bot (${botId}) 执行（权限表拒绝）`;
+                console.warn("[taskguard] blocked by bot_workflow_permissions", { botId, ownerId, workflowId: resolvedWorkflow.spec.id });
                 return msg;
               }
             }
             // hasRecords === false → fall through to allowedBots
           } catch (error) {
-            console.warn("[clawmind] DB permission check failed, falling back to allowedBots", { error: truncateForLog(error) });
+            console.warn("[taskguard] DB permission check failed, falling back to allowedBots", { error: truncateForLog(error) });
           }
         }
 
         // Step 2: Fallback to YAML allowedBots (only if DB check was not conclusive)
         if (!dbPermissionChecked && resolvedWorkflow.spec.allowedBots && resolvedWorkflow.spec.allowedBots.length > 0) {
           if (!resolvedWorkflow.spec.allowedBots.includes(botId)) {
-            const msg = `[clawmind] 工作流 "${resolvedWorkflow.spec.title || resolvedWorkflow.spec.id}" 不允许在当前 bot (${botId}) 上执行，允许的 bot: ${resolvedWorkflow.spec.allowedBots.join(", ")}`;
-            console.warn("[clawmind] blocked by allowedBots filter", { botId, allowedBots: resolvedWorkflow.spec.allowedBots, workflowId: resolvedWorkflow.spec.id });
+            const msg = `[taskguard] 工作流 "${resolvedWorkflow.spec.title || resolvedWorkflow.spec.id}" 不允许在当前 bot (${botId}) 上执行，允许的 bot: ${resolvedWorkflow.spec.allowedBots.join(", ")}`;
+            console.warn("[taskguard] blocked by allowedBots filter", { botId, allowedBots: resolvedWorkflow.spec.allowedBots, workflowId: resolvedWorkflow.spec.id });
             return msg;
           }
         }
@@ -2644,12 +2647,12 @@ async function dispatchWorkflowCommand(params: {
           gitEmail: process.env.CLAWMIND_GIT_EMAIL || _appCfg.git.email || undefined,
         };
         try {
-          console.info("[clawmind] auto-pull: local pack missing, pulling from DB", { workflowId: actionWorkflowId });
+          console.info("[taskguard] auto-pull: local pack missing, pulling from DB", { workflowId: actionWorkflowId });
           const { handlePull } = await import("./controller/version-commands.js");
           const pullResult = await handlePull(autoPullDeps, actionWorkflowId, { skipPermissionCheck: true });
-          console.info("[clawmind] auto-pull result", { workflowId: actionWorkflowId, result: pullResult });
+          console.info("[taskguard] auto-pull result", { workflowId: actionWorkflowId, result: pullResult });
         } catch (err) {
-          console.warn("[clawmind] auto-pull failed (non-fatal, continuing with DB spec)", {
+          console.warn("[taskguard] auto-pull failed (non-fatal, continuing with DB spec)", {
             workflowId: actionWorkflowId,
             error: truncateForLog(err),
           });
@@ -2658,7 +2661,7 @@ async function dispatchWorkflowCommand(params: {
     }
     const workflowForDeps = resolvedWorkflow?.spec;
     const chatInjectLabel = formatChatInjectLabel(actionWorkflowId);
-    console.info("[clawmind] dispatch step: before bindSession", { sessionKey, actionWorkflowId });
+    console.info("[taskguard] dispatch step: before bindSession", { sessionKey, actionWorkflowId });
     const boundTaskFlow = api.runtime.taskFlow.bindSession({
       sessionKey,
       requesterOrigin: deliveryContext,
@@ -2713,7 +2716,7 @@ async function dispatchWorkflowCommand(params: {
       const bcsGroupId = executionMode !== "private"
         ? (deliveryContext?.bcsGroupId as string | undefined) ?? extractGroupIdFromSessionKey(sessionKey)
         : undefined;
-      console.info("[clawmind] dispatch step: before detached handleRun", {
+      console.info("[taskguard] dispatch step: before detached handleRun", {
         actionWorkflowId: action.workflowId,
         sessionKey,
         startAsync,
@@ -2740,11 +2743,11 @@ async function dispatchWorkflowCommand(params: {
           ? `流程已启动并转入后台执行，避免 workflow_engine_dispatch 同步等待 embedded-agent 节点造成死锁 (workflow: ${action.workflowId}, flowId: ${flowId})`
           : `流程已异步启动 (workflow: ${action.workflowId}, flowId: ${flowId})`,
       };
-      console.info("[clawmind] dispatch step: after detached handleRun", payload);
+      console.info("[taskguard] dispatch step: after detached handleRun", payload);
       return JSON.stringify(payload, null, 2);
     }
 
-    console.info("[clawmind] dispatch step: before executeAction", { action: action.action, actionWorkflowId, sessionKey });
+    console.info("[taskguard] dispatch step: before executeAction", { action: action.action, actionWorkflowId, sessionKey });
     const depsBuilders: DispatchDepsBuilders = {
       buildScheduleDeps: getScheduleCommandDeps,
       buildWebhookDeps: getWebhookCommandDeps,
@@ -2754,7 +2757,7 @@ async function dispatchWorkflowCommand(params: {
       action.action,
       sessionKey,
     );
-    console.info("[clawmind] dispatch step: after executeAction", { result: typeof result === "string" ? result.substring(0, 200) : String(result) });
+    console.info("[taskguard] dispatch step: after executeAction", { result: typeof result === "string" ? result.substring(0, 200) : String(result) });
     return result;
   } finally {
     unregisterActiveAbortRun(activeAbortRun);
@@ -3075,7 +3078,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
     try {
       extensions.registerExecutors(undefined);
     } catch (err) {
-      console.warn("[clawmind] registerExecutions extension failed:", err instanceof Error ? err.message : String(err));
+      console.warn("[taskguard] registerExecutions extension failed:", err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -3084,7 +3087,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
     try {
       _corpAuthMethods = extensions.registerAuthMethods(undefined);
     } catch (err) {
-      console.warn("[clawmind] registerAuthMethods extension failed:", err instanceof Error ? err.message : String(err));
+      console.warn("[taskguard] registerAuthMethods extension failed:", err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -3110,10 +3113,10 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
           if (_runLogUploader) {
             // buildDeps() already created uploader with its own repo;
             // register() callback's repo is identical, no need to swap.
-            console.log("[clawmind] Run log uploader: already created by buildDeps (API mode)");
+            console.log("[taskguard] Run log uploader: already created by buildDeps (API mode)");
           } else {
             _pendingRunLogRepo = runLogApiRepo;
-            console.log("[clawmind] Run log uploader: repository deferred (buildDeps not yet called)");
+            console.log("[taskguard] Run log uploader: repository deferred (buildDeps not yet called)");
           }
         } else if (db && db.dbType !== "noop") {
           const runLogRepo = new RunLogRepository(db);
@@ -3121,7 +3124,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
           _runLogUploader = uploader;
           setRunLogUploader(uploader);
           uploader.start();
-          console.log("[clawmind] Run log uploader: created from register() callback (direct DB mode)");
+          console.log("[taskguard] Run log uploader: created from register() callback (direct DB mode)");
           if (!_runArchiveBuilder) {
             _runArchiveBuilder = new RunArchiveBuilder(db, runLogRepo);
           }
@@ -3133,11 +3136,11 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
           _runLogUploader = uploader;
           setRunLogUploader(uploader);
           uploader.start();
-          console.log("[clawmind] Run log uploader: created from register() callback (API mode, deferred repo)");
+          console.log("[taskguard] Run log uploader: created from register() callback (API mode, deferred repo)");
         }
       } catch (uploaderErr) {
         console.error(
-          "[clawmind] RunLogUploader init FAILED:",
+          "[taskguard] RunLogUploader init FAILED:",
           uploaderErr instanceof Error ? uploaderErr.message : String(uploaderErr),
         );
       }
@@ -3146,17 +3149,17 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
         // API mode: create ApiClient and API-backed repositories
         const apiConfig = dbConfig.api!;
         if (!apiConfig.privateKeyB64) {
-          console.warn("[clawmind] API mode enabled but CLAWMIND_PRIVATE_KEY not set — API writes will fail");
+          console.warn("[taskguard] API mode enabled but CLAWMIND_PRIVATE_KEY not set — API writes will fail");
         }
         const apiClient = createApiClient(apiConfig);
-        console.log(`[clawmind] API mode: using clawweb at ${apiConfig.baseUrl}`);
+        console.log(`[taskguard] API mode: using clawweb at ${apiConfig.baseUrl}`);
 
         setEventRepository(new FlowEventApiRepository(apiClient));
 
         // Set up run archive builder for API mode (queries clawweb via API)
         if (!_runArchiveBuilder) {
           _runArchiveBuilder = new RunArchiveApiBuilder(apiClient, _runLogApiRepoForBuilder!) as unknown as RunArchiveBuilder;
-          console.log("[clawmind] Run archive builder: API mode initialized");
+          console.log("[taskguard] Run archive builder: API mode initialized");
         }
 
         let statePersistenceEnabled = true;
@@ -3197,7 +3200,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
           setNodeStepTraceRepository(new NodeStepTraceRepository(db));
           setHallucinationCheckRepository(new HallucinationCheckRepository(db));
         } else {
-          console.warn("[clawmind] statePersistence is disabled — flow runs will not be persisted to engine DB");
+          console.warn("[taskguard] statePersistence is disabled — flow runs will not be persisted to engine DB");
         }
         if (recordMetrics) {
           setMetricsRepository(new FlowMetricsRepository(db));
@@ -3531,11 +3534,11 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
               if (!parsed.prompt) return null;
               return parsed;
             } catch {
-              console.error(`[clawmind] Validation template ${templateId}: invalid JSON content`);
+              console.error(`[taskguard] Validation template ${templateId}: invalid JSON content`);
               return null;
             }
           });
-          console.info("[clawmind] Validation template resolver initialized (API mode)");
+          console.info("[taskguard] Validation template resolver initialized (API mode)");
         } else if (db && db.dbType !== "noop") {
           const vtRepo = new ValidationTemplateRepository(db);
           setValidationTemplateResolver(async (templateId: string) => {
@@ -3546,11 +3549,11 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
               if (!parsed.prompt) return null;
               return parsed;
             } catch {
-              console.error(`[clawmind] Validation template ${templateId}: invalid JSON content`);
+              console.error(`[taskguard] Validation template ${templateId}: invalid JSON content`);
               return null;
             }
           });
-          console.info("[clawmind] Validation template resolver initialized");
+          console.info("[taskguard] Validation template resolver initialized");
         }
       } catch { /* validation template init is best-effort */ }
 
@@ -3607,7 +3610,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
             setHttpCallbackRepositories(httpCallbackConfigRepo);
           }
         } catch (err) {
-          console.warn("[clawmind] HTTP callback config repository init failed (non-fatal):", err instanceof Error ? err.message : String(err));
+          console.warn("[taskguard] HTTP callback config repository init failed (non-fatal):", err instanceof Error ? err.message : String(err));
         }
 
         // Load HTTP callback configs from DB + YAML into dispatcher cache
@@ -3619,9 +3622,9 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
               if (wf.spec?.id) yamlSpecs.set(wf.spec.id, wf.spec);
             }
             await reloadHttpCallbackConfigs(yamlSpecs);
-            console.info("[clawmind] HTTP callback configs loaded from DB + YAML");
+            console.info("[taskguard] HTTP callback configs loaded from DB + YAML");
           } catch (err) {
-            console.warn("[clawmind] HTTP callback config reload failed (non-fatal):", err instanceof Error ? err.message : String(err));
+            console.warn("[taskguard] HTTP callback config reload failed (non-fatal):", err instanceof Error ? err.message : String(err));
           }
         })();
 
@@ -3637,7 +3640,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
               _webhookTriggerStore = new WebhookTriggerRepository(db);
               _webhookEventStore = new WebhookEventRepository(db);
             }
-            console.info("[clawmind] Webhook triggers enabled");
+            console.info("[taskguard] Webhook triggers enabled");
           }
         } catch { /* webhook init is best-effort */ }
 
@@ -3690,7 +3693,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
           if (isApiMode) {
             const apiClient = createApiClient(dbConfig.api!);
             _triggerStore = new ScheduledTriggerApiRepository(apiClient) as unknown as ScheduledTriggerRepository;
-            console.info("[clawmind] Scheduler enabled (API mode)");
+            console.info("[taskguard] Scheduler enabled (API mode)");
           } else {
             _triggerStore = new ScheduledTriggerRepository(db);
           }
@@ -3719,7 +3722,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
           });
           _scheduler.start().catch((err) => {
             const msg = err instanceof Error ? err.message : String(err);
-            console.error(`[clawmind] Scheduler start failed: ${msg}`);
+            console.error(`[taskguard] Scheduler start failed: ${msg}`);
           });
         }
       } catch { /* scheduler init is best-effort */ }
@@ -3941,7 +3944,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
       }
     }).catch((err) => {
       console.error(
-        "[clawmind] register() DB init FAILED:",
+        "[taskguard] register() DB init FAILED:",
         err instanceof Error ? err.message : String(err),
         "— RunLogUploader and other DB-dependent features will NOT be available.",
       );
@@ -3954,7 +3957,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
       try {
         const cleaned = cleanupExpiredApprovalCards(APPROVAL_CARD_MAX_AGE);
         if (cleaned > 0) {
-          console.info(`[clawmind] Cleaned up ${cleaned} expired approval cards`);
+          console.info(`[taskguard] Cleaned up ${cleaned} expired approval cards`);
         }
       } catch { /* best-effort */ }
     }, APPROVAL_CARD_CLEANUP_INTERVAL);
@@ -3975,7 +3978,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
     const FLOW_REAP_INTERVAL_MS = loadConfig().app.execution.flowReapIntervalSecs * 1000;
     if (loadConfig().app.execution.flowTimeoutMinutes > 0) {
       console.info(
-        `[clawmind] flow-timeout watchdog: timeout=${loadConfig().app.execution.flowTimeoutMinutes}min ` +
+        `[taskguard] flow-timeout watchdog: timeout=${loadConfig().app.execution.flowTimeoutMinutes}min ` +
         `interval=${loadConfig().app.execution.flowReapIntervalSecs}s`,
       );
       // DB-first spec resolver for the watchdog, mirroring runtime `resolveWorkflow`.
@@ -4063,13 +4066,13 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
           }
         })
           .then((n) => {
-            if (n > 0) console.warn(`[clawmind] flow-timeout watchdog reaped ${n} stuck flow(s) → failed`);
+            if (n > 0) console.warn(`[taskguard] flow-timeout watchdog reaped ${n} stuck flow(s) → failed`);
           })
-          .catch((e) => { console.error(`[clawmind] flow-timeout watchdog error: ${e?.message ?? e}`); });
+          .catch((e) => { console.error(`[taskguard] flow-timeout watchdog error: ${e?.message ?? e}`); });
       }, FLOW_REAP_INTERVAL_MS);
       _flowTimeoutTimer.unref?.(); // don't prevent process exit
     } else {
-      console.info("[clawmind] flow-timeout watchdog: disabled (execution.flowTimeoutMinutes=0) — flows may run to completion");
+      console.info("[taskguard] flow-timeout watchdog: disabled (execution.flowTimeoutMinutes=0) — flows may run to completion");
     }
 
     // ── Orphaned flow recovery is deferred to buildDeps() which runs when
@@ -4081,7 +4084,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
     // Graceful shutdown: stop scheduler and clean up webhook on process signals
     const shutdownScheduler = async () => {
       if (_scheduler?.isRunning()) {
-        console.info("[clawmind] Shutting down scheduler...");
+        console.info("[taskguard] Shutting down scheduler...");
         await _scheduler.stop();
       }
     };
@@ -4110,7 +4113,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
       const abortedAsync = abortAsyncExecutionsForSession(event.sessionKey);
       const aborted = abortedSync + abortedAsync;
       if (aborted > 0) {
-        console.log("[clawmind] command:stop aborted active runs", {
+        console.log("[taskguard] command:stop aborted active runs", {
           sessionKey: event.sessionKey,
           sync: abortedSync,
           async: abortedAsync,
@@ -5435,7 +5438,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
     // Hook path: BCS callbacks are handled first; wrapped slash fallback then reuses the same dispatchWorkflowCommand path.
     api.on("before_agent_reply", async (event, ctx) => {
       const body = event.cleanedBody;
-      console.log("[clawmind] before_agent_reply FIRED", {
+      console.log("[taskguard] before_agent_reply FIRED", {
         hasBody: !!body,
         bodyLength: typeof body === "string" ? body.length : 0,
         bodyPreview: typeof body === "string" ? body.substring(0, 150) : `(type: ${typeof body})`,
@@ -5574,7 +5577,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
       try {
         const workflowCatalog = loadWorkflowPackCatalog();
         _hookWorkflowIds = workflowCatalog.workflows.map((w: any) => w.id).filter(Boolean);
-        console.log("[clawmind] pack catalog loaded", { packCount: workflowCatalog.packs.length, packIds: workflowCatalog.packs.map((p: any) => p.manifest?.id), workflowCount: workflowCatalog.workflows.length });
+        console.log("[taskguard] pack catalog loaded", { packCount: workflowCatalog.packs.length, packIds: workflowCatalog.packs.map((p: any) => p.manifest?.id), workflowCount: workflowCatalog.workflows.length });
         const _db = getDatabase();
         const _cfg = loadDatabaseConfig();
         const _isApi = _cfg.type === "api";
@@ -5584,9 +5587,9 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
           _dbBindings = await loadDbFacadeBindings(_db);
         }
         facadeRegistry = buildFacadeRegistry(workflowCatalog.packs, _dbBindings);
-        console.log("[clawmind] facade registry built", { commands: facadeRegistry.commands(), dbBindings: _dbBindings.length });
+        console.log("[taskguard] facade registry built", { commands: facadeRegistry.commands(), dbBindings: _dbBindings.length });
       } catch (err) {
-        console.log("[clawmind] CAUGHT ERROR in facade registry build, falling back to DB-only facades", {
+        console.log("[taskguard] CAUGHT ERROR in facade registry build, falling back to DB-only facades", {
           errorMessage: (err as any)?.message,
           errorName: (err as any)?.name,
           errorStack: (err as any)?.stack?.substring(0, 800),
@@ -5595,17 +5598,17 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
         if (_dbBindings.length > 0) {
           try {
             facadeRegistry = buildFacadeRegistry([], _dbBindings);
-            console.log("[clawmind] fallback to DB-only facade registry", { commands: facadeRegistry.commands(), dbBindings: _dbBindings.length });
+            console.log("[taskguard] fallback to DB-only facade registry", { commands: facadeRegistry.commands(), dbBindings: _dbBindings.length });
           } catch (fallbackErr) {
-            console.log("[clawmind] DB-only fallback also failed", { errorMessage: (fallbackErr as any)?.message });
+            console.log("[taskguard] DB-only fallback also failed", { errorMessage: (fallbackErr as any)?.message });
           }
         }
       }
       const specRepo = buildHookSpecRepo();
       const allowedCommands = ["workflow", ...facadeRegistry.commands(), ..._hookWorkflowIds];
-      console.log("[clawmind] facade interception debug", { allowedCommands, bodyPreview: typeof body === "string" ? body.substring(0, 200) : "(no body)" });
+      console.log("[taskguard] facade interception debug", { allowedCommands, bodyPreview: typeof body === "string" ? body.substring(0, 200) : "(no body)" });
       const wrapped = extractWrappedWorkflowSlashCommand(body, { allowedCommands });
-      console.log("[clawmind] extractWrappedWorkflowSlashCommand result", { kind: wrapped.kind, commandName: (wrapped as any).commandName, raw: (wrapped as any).raw?.substring(0, 100) });
+      console.log("[taskguard] extractWrappedWorkflowSlashCommand result", { kind: wrapped.kind, commandName: (wrapped as any).commandName, raw: (wrapped as any).raw?.substring(0, 100) });
       if (wrapped.kind === "ambiguous") {
         return {
           handled: true,
@@ -5748,7 +5751,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
                       const oldest = nlHintSentSet.values().next().value;
                       if (oldest) nlHintSentSet.delete(oldest);
                     }
-                    console.log("[clawmind] L1 hint injected via chatInject", { waitingNodeId, workflowId: state.workflowId });
+                    console.log("[taskguard] L1 hint injected via chatInject", { waitingNodeId, workflowId: state.workflowId });
                     const idempotencyKey = `nl-hint:${hintKey}`;
                     await injectChatMessage(api, ctx.sessionKey, hint, idempotencyKey).catch(() => {
                       // chatInject failure MUST NOT block the message — fall through to Agent
@@ -5782,7 +5785,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
                 if (runs.length > 0) {
                   flowId = runs[0].flow_id;
                   const text = body.trim().toLowerCase();
-                  console.log("[clawmind] L1 API fallback: found waiting/blocked run", { flowId, textPreview: text.substring(0, 80) });
+                  console.log("[taskguard] L1 API fallback: found waiting/blocked run", { flowId, textPreview: text.substring(0, 80) });
 
                   // isExactMatch keyword matching (no FlowState available)
                   if (isExactMatch(text, REJECT_KEYWORDS)) {
@@ -5803,17 +5806,17 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
                   }
 
                   if (intent) {
-                    console.log("[clawmind] L1 API fallback intent detected", { command: intent.command, matchedValue: intent.matchedValue, flowId });
+                    console.log("[taskguard] L1 API fallback intent detected", { command: intent.command, matchedValue: intent.matchedValue, flowId });
                   }
                 }
               } catch (err) {
-                console.log("[clawmind] L1 API fallback query failed", { error: (err as any)?.message });
+                console.log("[taskguard] L1 API fallback query failed", { error: (err as any)?.message });
               }
             }
           }
 
           if (intent && flowId) {
-            console.log("[clawmind] L1 intent detected", { command: intent.command, matchedValue: intent.matchedValue, source: flow ? "local" : "api-fallback" });
+            console.log("[taskguard] L1 intent detected", { command: intent.command, matchedValue: intent.matchedValue, source: flow ? "local" : "api-fallback" });
             // For choice-based intents, use workflow_choice; for confirm/reject, use the standard command
             let dispatchRaw: string;
             if (intent.matchedValue) {
@@ -5837,12 +5840,12 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
               });
               return { handled: true, reason: "clawmind-l1-intent", reply: { text: result } };
             } catch (err) {
-              console.log("[clawmind] L1 dispatch failed, falling through to Agent", { error: (err as any)?.message });
+              console.log("[taskguard] L1 dispatch failed, falling through to Agent", { error: (err as any)?.message });
             }
           }
         } catch (err) {
           // L1 detection failure MUST NOT block the message — fall through to Agent
-          console.log("[clawmind] L1 intent detection error, falling through to Agent", { error: (err as any)?.message });
+          console.log("[taskguard] L1 intent detection error, falling through to Agent", { error: (err as any)?.message });
         }
       }
 
@@ -5854,7 +5857,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
       const prompt = (event as { prompt?: string }).prompt ?? "";
       if (!prompt) return;
 
-      console.log("[clawmind] before_agent_run FIRED", {
+      console.log("[taskguard] before_agent_run FIRED", {
         promptPreview: prompt.substring(0, 150),
         promptFull: prompt.substring(0, 2000),
         promptLen: prompt.length,
@@ -5875,7 +5878,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
       const strippedPrompt = prompt.replace(TIMESTAMP_PREFIX_RE, "");
       const firstLine = strippedPrompt.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
       if (!firstLine.startsWith("/")) {
-        console.log("[clawmind] before_agent_run SKIP: first line does not start with /", {
+        console.log("[taskguard] before_agent_run SKIP: first line does not start with /", {
           firstLine: firstLine.substring(0, 100),
           firstLineHex: Buffer.from(firstLine.substring(0, 200)).toString("hex"),
           originalPromptTop: prompt.substring(0, 150),
@@ -5900,13 +5903,13 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
           }
           facadeRegistry = buildFacadeRegistry(workflowCatalog.packs, _dbBindings);
         } catch (err) {
-          console.log("[clawmind] before_agent_run facade registry build failed", { error: (err as any)?.message });
+          console.log("[taskguard] before_agent_run facade registry build failed", { error: (err as any)?.message });
         }
 
         const specRepo = buildHookSpecRepo();
         const allowedCommands = ["workflow", ...facadeRegistry.commands(), ..._hookWorkflowIds];
         const wrapped = extractWrappedWorkflowSlashCommand(prompt, { allowedCommands });
-        console.log("[clawmind] before_agent_run extractWrappedWorkflowSlashCommand result", {
+        console.log("[taskguard] before_agent_run extractWrappedWorkflowSlashCommand result", {
           kind: wrapped.kind,
           commandName: (wrapped as any).commandName,
           raw: (wrapped as any).raw?.substring(0, 100),
@@ -5914,7 +5917,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
 
         if (wrapped.kind === "command") {
           if (!ctx.sessionKey) {
-            console.log("[clawmind] before_agent_run: missing sessionKey, skipping");
+            console.log("[taskguard] before_agent_run: missing sessionKey, skipping");
             return;
           }
 
@@ -5938,7 +5941,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
             });
             return { outcome: "block", reason: result };
           } catch (err) {
-            console.log("[clawmind] before_agent_run dispatch failed", { error: (err as any)?.message });
+            console.log("[taskguard] before_agent_run dispatch failed", { error: (err as any)?.message });
             return { outcome: "block", reason: formatWorkflowCommandDispatchError(err) };
           }
         }
@@ -5966,13 +5969,13 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
               });
               return { outcome: "block", reason: result };
             } catch (err) {
-              console.log("[clawmind] before_agent_run bare-workflow dispatch failed", { error: (err as any)?.message });
+              console.log("[taskguard] before_agent_run bare-workflow dispatch failed", { error: (err as any)?.message });
               return { outcome: "block", reason: formatWorkflowCommandDispatchError(err) };
             }
           }
         }
       } catch (err) {
-        console.log("[clawmind] before_agent_run error, falling through", { error: (err as any)?.message });
+        console.log("[taskguard] before_agent_run error, falling through", { error: (err as any)?.message });
       }
     });
 }

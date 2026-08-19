@@ -352,9 +352,9 @@ fi
 info "Generating package.json..."
 cat > "$PKG_DIR/package.json" << PKG_JSON
 {
-  "name": "@alipay/clawmind-claudecode",
+  "name": "@avernet/taskguard-claudecode",
   "version": "${VERSION}",
-  "description": "ClawMind — YAML-based DAG workflow orchestration engine for Claude Code",
+  "description": "taskguard — YAML-based DAG workflow orchestration engine for Claude Code",
   "type": "module",
   "main": "./dist/esm/index.js",
   "module": "./dist/esm/index.js",

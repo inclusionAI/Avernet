@@ -55,7 +55,7 @@ async function main(): Promise<void> {
   console.log(`Test query: "${TEST_QUERY}"\n`);
 
   const yuqueToken = process.env.YUQUE_TOKEN ?? "";
-  const yuqueBaseUrl = process.env.YUQUE_BASE_URL ?? "https://yuque.antfin.com";
+  const yuqueBaseUrl = process.env.YUQUE_BASE_URL ?? "https://yuque.example.com";
   const amToken = process.env.AGENTMIND_TOKEN ?? "";
   const amApiUrl = process.env.AGENTMIND_API_URL ?? "https://agentmind.example.com/api";
 

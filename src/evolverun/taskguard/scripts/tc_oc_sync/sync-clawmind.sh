@@ -26,11 +26,11 @@
 set -euo pipefail
 
 # ── 配置 ──────────────────────────────────────────────────────────
-GIT_REPO="https://code.alipay.com/ClawMind/ClawMind.git"
+GIT_REPO="${TASKGUARD_GIT_REPO:-https://github.com/avernet/taskguard.git}"
 BRANCH="master"
-WORKSPACE_DIR="/home/admin/.openclaw/workspace"
-CLAWMIND_SRC="${WORKSPACE_DIR}/clawmind"
-EXT_DIR="/home/admin/openclawExt/clawmind"
+WORKSPACE_DIR="${HOME}/.openclaw/workspace"
+CLAWMIND_SRC="${WORKSPACE_DIR}/taskguard"
+EXT_DIR="${OPENCLAW_EXTENSION_DIR:-${HOME}/openclawExt/taskguard}"
 
 # ── 参数解析 ──────────────────────────────────────────────────────
 SKIP_BUILD=false

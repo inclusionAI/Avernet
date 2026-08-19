@@ -890,7 +890,7 @@ function launchAsyncExecution(
       // 2. Try to notify the user via chatInject
       try {
         await deps.chatInject(
-          `[clawmind] ❌ 工作流异常终止 (flowId: ${flowId})\n错误: ${errorMsg}\n请使用 /workflow inspect 查看详情。`,
+          `[taskguard] ❌ 工作流异常终止 (flowId: ${flowId})\n错误: ${errorMsg}\n请使用 /workflow inspect 查看详情。`,
           `${flowId}:flow:error:crash`,
         );
       } catch (chatErr) {
@@ -1714,7 +1714,7 @@ function emitNodeEvent(event: NodeLifecycleEvent, payload: NodeLifecyclePayload)
         { callerId: "incrementNodeCount(succeeded)", flowId: payload.flowId, nodeId: payload.nodeId },
         (e) => {
           const errMsg = e instanceof Error ? e.message : String(e);
-          console.error("[clawflow] incrementNodeCount succeeded failed after retries:", errMsg);
+          console.error("[taskguard] incrementNodeCount succeeded failed after retries:", errMsg);
           enqueueRunLog({
             flow_id: payload.flowId,
             level: "error",
@@ -1732,7 +1732,7 @@ function emitNodeEvent(event: NodeLifecycleEvent, payload: NodeLifecyclePayload)
         { callerId: "incrementNodeCount(failed)", flowId: payload.flowId, nodeId: payload.nodeId },
         (e) => {
           const errMsg = e instanceof Error ? e.message : String(e);
-          console.error("[clawflow] incrementNodeCount failed failed after retries:", errMsg);
+          console.error("[taskguard] incrementNodeCount failed failed after retries:", errMsg);
           enqueueRunLog({
             flow_id: payload.flowId,
             level: "error",
@@ -1864,14 +1864,14 @@ export function reportNodeProgress(
 
 /** Best-effort sync of flow_runs.current_phase and status to the engine DB. */
 function syncFlowRunPhase(flowId: string, currentPhase: string, status?: string): void {
-  if (!_flowRunRepository) { console.warn(`[clawflow] syncFlowRunPhase: _flowRunRepository is null, skipping flowId=${flowId}`); return; }
-  console.log(`[clawflow] syncFlowRunPhase flowId=${flowId} currentPhase=${currentPhase} status=${status ?? "(none)"}`);
+  if (!_flowRunRepository) { console.warn(`[taskguard] syncFlowRunPhase: _flowRunRepository is null, skipping flowId=${flowId}`); return; }
+  console.log(`[taskguard] syncFlowRunPhase flowId=${flowId} currentPhase=${currentPhase} status=${status ?? "(none)"}`);
   void withRetry(
     () => _flowRunRepository!.updateCurrentPhase(flowId, currentPhase),
     { callerId: "updateCurrentPhase", flowId },
     (e) => {
       const errMsg = e instanceof Error ? e.message : String(e);
-      console.error("[clawflow] updateCurrentPhase failed after retries:", errMsg);
+      console.error("[taskguard] updateCurrentPhase failed after retries:", errMsg);
       enqueueRunLog({
         flow_id: flowId,
         level: "error",
@@ -1881,14 +1881,14 @@ function syncFlowRunPhase(flowId: string, currentPhase: string, status?: string)
       });
       recordFailure("syncFlowRunPhase.updateCurrentPhase", flowId, undefined, e, "error");
     },
-  ).then(() => { console.log(`[clawflow] updateCurrentPhase OK flowId=${flowId}`); }).catch(() => { /* handled in onExhausted */ });
+  ).then(() => { console.log(`[taskguard] updateCurrentPhase OK flowId=${flowId}`); }).catch(() => { /* handled in onExhausted */ });
   if (status) {
     void withRetry(
       () => _flowRunRepository!.updateStatus(flowId, status),
       { callerId: "updateStatus", flowId },
       (e) => {
         const errMsg = e instanceof Error ? e.message : String(e);
-        console.error("[clawflow] updateStatus failed after retries:", errMsg);
+        console.error("[taskguard] updateStatus failed after retries:", errMsg);
         enqueueRunLog({
           flow_id: flowId,
           level: "error",
@@ -1898,7 +1898,7 @@ function syncFlowRunPhase(flowId: string, currentPhase: string, status?: string)
         });
         recordFailure("syncFlowRunPhase.updateStatus", flowId, undefined, e, "error");
       },
-    ).then(() => { console.log(`[clawflow] updateStatus OK flowId=${flowId} status=${status}`); }).catch(() => { /* handled in onExhausted */ });
+    ).then(() => { console.log(`[taskguard] updateStatus OK flowId=${flowId} status=${status}`); }).catch(() => { /* handled in onExhausted */ });
   }
 }
 
@@ -2170,7 +2170,7 @@ function completeFlowRun(flowId: string, status: string, currentPhase: string, r
       completedAt: Math.min(Math.floor(Date.now() / 1000), Number.MAX_SAFE_INTEGER),
     }).catch((e) => {
       const errMsg = e instanceof Error ? e.message : String(e);
-      console.error("[clawflow] updateCompletion failed:", errMsg);
+      console.error("[taskguard] updateCompletion failed:", errMsg);
       enqueueRunLog({
         flow_id: flowId,
         level: "error",
@@ -2194,7 +2194,7 @@ function completeFlowRun(flowId: string, status: string, currentPhase: string, r
         { callerId: "reconcileStaleRunning", flowId, maxRetries: 3, baseDelayMs: 500 },
         (e) => {
           const errMsg = e instanceof Error ? e.message : String(e);
-          console.error("[clawflow] reconcileStaleRunning failed after retries:", errMsg);
+          console.error("[taskguard] reconcileStaleRunning failed after retries:", errMsg);
           enqueueRunLog({
             flow_id: flowId,
             level: "error",
@@ -2215,7 +2215,7 @@ function completeFlowRun(flowId: string, status: string, currentPhase: string, r
       _pendingCompletionPromises.set(flowId, completionPromise);
     }
   } else {
-    console.warn(`[clawmind] completeFlowRun: _flowRunRepository is null — DB persist skipped for flowId=${flowId}`);
+    console.warn(`[taskguard] completeFlowRun: _flowRunRepository is null — DB persist skipped for flowId=${flowId}`);
   }
 
   // (New) Aggregated workflow failure notification via enterprise DingTalk
@@ -4144,27 +4144,27 @@ async function findWorkflowLookup(deps: ControllerDeps, workflowId: string, debu
         const specRepo = new WorkflowSpecRepository(deps.db);
         const resolved = await resolveWorkflow(workflowId, specRepo, deps.resolvedWorkflows ?? []);
         if (resolved && resolved.source.kind === "db") {
-          console.info("[clawmind] findWorkflowLookup: resolved from DB", { workflowId });
+          console.info("[taskguard] findWorkflowLookup: resolved from DB", { workflowId });
           return { workflow: resolved.spec, resolved };
         }
       } catch (err) {
         // DB lookup failed, fall through to registry/packs
-        console.warn("[clawmind] findWorkflowLookup: DB spec resolution failed", { workflowId, error: err instanceof Error ? err.message : String(err) });
+        console.warn("[taskguard] findWorkflowLookup: DB spec resolution failed", { workflowId, error: err instanceof Error ? err.message : String(err) });
       }
     }
     // API mode: check if there's an API-based spec repo available
     if (deps.workflowSpecApiRepo) {
       try {
-        console.info("[clawmind] findWorkflowLookup: resolving from API spec repo", { workflowId });
+        console.info("[taskguard] findWorkflowLookup: resolving from API spec repo", { workflowId });
         const resolved = await resolveWorkflow(workflowId, deps.workflowSpecApiRepo, deps.resolvedWorkflows ?? []);
         if (resolved && resolved.source.kind === "db") {
-          console.info("[clawmind] findWorkflowLookup: resolved from API", { workflowId });
+          console.info("[taskguard] findWorkflowLookup: resolved from API", { workflowId });
           return { workflow: resolved.spec, resolved };
         }
-        console.info("[clawmind] findWorkflowLookup: API returned non-db source, falling through", { workflowId, sourceKind: resolved?.source?.kind });
+        console.info("[taskguard] findWorkflowLookup: API returned non-db source, falling through", { workflowId, sourceKind: resolved?.source?.kind });
       } catch (err) {
         // API lookup failed, fall through to registry/packs
-        console.warn("[clawmind] findWorkflowLookup: API spec resolution failed", { workflowId, error: err instanceof Error ? err.message : String(err) });
+        console.warn("[taskguard] findWorkflowLookup: API spec resolution failed", { workflowId, error: err instanceof Error ? err.message : String(err) });
       }
     }
   }
@@ -4710,7 +4710,7 @@ async function startWorkflowAfterPreflight(
       engine: _engineName,
     }).catch((err) => {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("[clawflow] flowRunRepo.insert failed:", errMsg);
+      console.error("[taskguard] flowRunRepo.insert failed:", errMsg);
       enqueueRunLog({
         flow_id: flowId,
         level: "error",
@@ -4720,7 +4720,7 @@ async function startWorkflowAfterPreflight(
       });
     });
   } else {
-    console.warn(`[clawmind] flowRunRepository not initialized — flow run not persisted (flowId=${flowId})`);
+    console.warn(`[taskguard] flowRunRepository not initialized — flow run not persisted (flowId=${flowId})`);
   }
 
   // ── HTTP callback notification for workflow started ──
@@ -5049,9 +5049,9 @@ export async function handleRun(
     campaignId?: string;
   },
 ): Promise<string> {
-  console.info("[clawmind] handleRun entry", { workflowId: options.workflowId, executionMode: options.executionMode, commandSurface: options.commandSurface, campaignId: options.campaignId });
+  console.info("[taskguard] handleRun entry", { workflowId: options.workflowId, executionMode: options.executionMode, commandSurface: options.commandSurface, campaignId: options.campaignId });
   const { workflow, resolved } = await requireWorkflowLookup(deps, options.workflowId, options.debug);
-  console.info("[clawmind] handleRun after requireWorkflowLookup", { workflowId: options.workflowId, workflowFound: !!workflow, resolvedSource: resolved?.source?.kind });
+  console.info("[taskguard] handleRun after requireWorkflowLookup", { workflowId: options.workflowId, workflowFound: !!workflow, resolvedSource: resolved?.source?.kind });
   _currentWorkflowSpec = workflow;
 
   // Campaign quota check (before any work is done)
@@ -14104,7 +14104,7 @@ export async function handleSynthesize(
     maxCorrections?: number;
   },
 ): Promise<string> {
-  console.info("[clawmind] handleSynthesize entry", { goal: goal.slice(0, 100), validateOnly: options?.validateOnly });
+  console.info("[taskguard] handleSynthesize entry", { goal: goal.slice(0, 100), validateOnly: options?.validateOnly });
 
   const { synthesize: synthesizeCore } = await import("./synthesis/synthesizer.js");
   const { loadSynthesisConfig } = await import("./synthesis/config.js");
@@ -14134,7 +14134,7 @@ export async function handleSynthesize(
       }
     },
     recordTokens: (count: number) => {
-      console.info("[clawmind] synthesis token usage:", count);
+      console.info("[taskguard] synthesis token usage:", count);
     },
   });
 
@@ -14182,7 +14182,7 @@ export async function handleSynthesize(
 
   // 6. No approval needed — execute the synthesized workflow
   // The synthesized spec is passed to handleRun as a dynamically resolved workflow
-  console.info("[clawmind] handleSynthesize: proceeding to execution", {
+  console.info("[taskguard] handleSynthesize: proceeding to execution", {
     workflowId: spec.id,
     nodeCount: spec.nodes.length,
   });

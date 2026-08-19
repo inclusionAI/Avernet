@@ -28,6 +28,7 @@ import {
   statSync,
 } from "node:fs";
 import { join, basename, relative } from "node:path";
+import { copyCommunityPacks } from "./community-packs.mjs";
 
 // ── Config ──
 
@@ -158,7 +159,7 @@ function packOpenClaw(platformDir) {
   console.log("  Copied openclaw.plugin.json");
 
   // Packs, configs, skills
-  copyDirIfExists(join(ROOT_DIR, "packs"), join(pkgDir, "packs"), "packs/");
+  copyCommunityPacks(ROOT_DIR, join(pkgDir, "packs"));
   copyDirIfExists(join(ROOT_DIR, "configs"), join(pkgDir, "configs"), "configs/");
   copyDirIfExists(join(ROOT_DIR, "skills"), join(pkgDir, "skills"), "skills/");
 
@@ -289,7 +290,7 @@ function packClaudeCode(platformDir) {
   console.log("  Generated install.sh");
 
   // Packs & configs (needed for workflow definitions)
-  copyDirIfExists(join(ROOT_DIR, "packs"), join(pkgDir, "packs"), "packs/");
+  copyCommunityPacks(ROOT_DIR, join(pkgDir, "packs"));
   copyDirIfExists(join(ROOT_DIR, "configs"), join(pkgDir, "configs"), "configs/");
 
   // install-clawmind.sh — needed by the `clawmind update` tool at runtime
@@ -445,10 +446,10 @@ if [[ "$MODE" == "plugin" ]]; then
 {
   "name": "clawmind",
   "version": "${version}",
-  "description": "ClawMind — YAML-based DAG workflow orchestration engine for Claude Code",
-  "author": "ClawFlow Team",
-  "homepage": "https://clawweb.antgroup-inc.cn/",
-  "license": "UNLICENSED"
+  "description": "taskguard — YAML-based DAG workflow orchestration engine for Claude Code",
+  "author": "taskguard contributors",
+  "homepage": "https://github.com/avernet/taskguard",
+  "license": "Apache-2.0"
 }
 PLUGIN_JSON
 
@@ -597,7 +598,7 @@ function packHermes(platformDir) {
   console.log("  Generated hermes-config.json");
 
   // Packs & configs
-  copyDirIfExists(join(ROOT_DIR, "packs"), join(pkgDir, "packs"), "packs/");
+  copyCommunityPacks(ROOT_DIR, join(pkgDir, "packs"));
   copyDirIfExists(join(ROOT_DIR, "configs"), join(pkgDir, "configs"), "configs/");
 
   // install-clawmind.sh — needed by the `clawmind update` tool at runtime
@@ -683,7 +684,7 @@ function packTeClaw(platformDir) {
   console.log("  Generated teclaw-config.json");
 
   // Packs & configs
-  copyDirIfExists(join(ROOT_DIR, "packs"), join(pkgDir, "packs"), "packs/");
+  copyCommunityPacks(ROOT_DIR, join(pkgDir, "packs"));
   copyDirIfExists(join(ROOT_DIR, "configs"), join(pkgDir, "configs"), "configs/");
 
   // install-clawmind.sh — needed by the `clawmind update` tool at runtime

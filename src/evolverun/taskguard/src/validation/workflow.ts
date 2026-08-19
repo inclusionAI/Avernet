@@ -1076,7 +1076,7 @@ function normalizeExecutorByType(raw: unknown, nodeId: string): NodeExecutor {
           botId: botId ?? undefined,
           message: requireString(obj, "message", `node ${nodeId}`),
           apiKeyRef: optionalString(obj, "apiKeyRef") ?? "BAAS_API_KEY",
-          baseUrl: optionalString(obj, "baseUrl") ?? "https://secbaas-prod.alipay.com",
+          baseUrl: optionalString(obj, "baseUrl") ?? process.env.BAAS_BASE_URL ?? "",
           iamToken: optionalString(obj, "iamToken") ?? undefined,
           timeoutMs: typeof obj.timeoutMs === "number" ? obj.timeoutMs : 120_000,
           timeoutSeconds: typeof obj.timeoutSeconds === "number" ? obj.timeoutSeconds : undefined,

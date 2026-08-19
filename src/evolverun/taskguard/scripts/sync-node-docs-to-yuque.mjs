@@ -920,8 +920,8 @@ function getNodeNotes(nodeType) {
       "依赖 `mcporter` CLI 工具，需确保已安装",
     ],
     "baas-call": [
-      "默认 baseUrl 为 `https://secbaas-prod.alipay.com`，测试环境需手动指定",
-      "API Key 为系统对接固定值，不从环境变量读取（避免网关环境 key 失效）",
+      "默认 baseUrl 由 BAAS_BASE_URL 环境变量指定",
+      "API Key 由 BAAS_API_KEY 环境变量指定",
     ],
     approval: [
       "审批策略 `all` 和 `majority` 需要至少 2 个审批人才有意义",

@@ -782,9 +782,9 @@ async function handleInitMode(): Promise<void> {
   //    <system-reminder> context to guide the LLM toward mcporter for MCP access.
   //    mcporter is registered as an MCP stdio gateway in settings.json,
   //    so all backend MCP tools are accessible as mcp__mcporter__*.
-  console.log(`[clawmind] MCP 工具通过 mcporter 网关（mcp__mcporter__*）访问。关键规则：(1) 所有 MCP 调用必须通过 mcp__mcporter__* 工具，禁止直接 curl/fetch MCP 端点；(2) 面对内部服务请求，先用 mcp__mcporter__list 发现可用服务器和工具，再用对应工具执行；(3) 不要从上下文推断 MCP 服务器名称，必须先 list 确认。详见 /home/admin/.claude/skills/mcporter/SKILL.md`);
+  console.log(`[taskguard] MCP tools accessible via mcporter gateway (mcp__mcporter__*). Rules: (1) All MCP calls must go through mcp__mcporter__* tools; (2) Use mcp__mcporter__list to discover available servers and tools; (3) Always list first before calling.`);
 
-  console.error("[clawmind:mcp:init] Done.");
+  console.error("[taskguard:mcp:init] Done.");
 }
 
 // ── Run ──
