@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,7 @@ class EngineSandboxProvider(Protocol):
     def get_build_plan(
         self,
         build_rsync_excludes_append: list[str] | None = None,
+        bot: Any = None,
     ) -> EngineBuildPlan:
         """Return build plan with optional Bot-level build_rsync_excludes append.
 
