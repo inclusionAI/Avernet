@@ -27,10 +27,10 @@ from pathlib import Path
 
 from injector import inject
 
-from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     create_default_service,
 )
+from agentclaw.community.core.task.task_discovery.protocols import BotServiceProtocol
 from agentclaw.community.core.task.task_discovery.session_creator import (
     HttpSessionCreator,
 )
