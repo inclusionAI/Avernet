@@ -186,3 +186,63 @@ class TestSkillSetServiceEngineTypeThreading:
         mock_skill_set_repo.get_all_active_skill_sets.assert_called_once()
         call_kwargs = mock_skill_set_repo.get_all_active_skill_sets.call_args.kwargs
         assert call_kwargs.get("engine_type") == "claude-code"
+
+
+def _make_skill_set_service_for_default_selection(
+    tmp_path, *, engine_type, runtime_engine_type, default_skill_set_selection_policy=None
+):
+    from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
+
+    return SkillSetService(
+        skill_repo=MagicMock(),
+        skill_set_repo=MagicMock(),
+        mcp_center=MagicMock(),
+        mcp_config_service=MagicMock(),
+        skill_service=MagicMock(),
+        skills_dir=tmp_path / "skills",
+        repo_dir=tmp_path / "skills-repo",
+        local_dir=tmp_path / "skills-local",
+        engine_type=engine_type,
+        runtime_engine_type=runtime_engine_type,
+        bot_repo=MagicMock(),
+        default_skill_set_selection_policy=default_skill_set_selection_policy,
+        path_factory=MagicMock(),
+    )
+
+
+def test_default_skill_set_query_kwargs_keeps_openclaw_query_shape(tmp_path):
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="openclaw",
+        runtime_engine_type="openclaw",
+    )
+
+    assert service._default_skill_set_query_kwargs() == {}
+
+
+def test_default_skill_set_query_kwargs_keeps_normal_claude_code_query_shape(tmp_path):
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="claude_code",
+        runtime_engine_type="claude_code",
+    )
+
+    assert service._default_skill_set_query_kwargs() == {}
+
+
+def test_default_skill_set_query_kwargs_routes_claude_code_default_to_aicoding(tmp_path):
+    from agentclaw.community.core.bot_management.engines.registry import (
+        get_default_skill_set_selection_policy,
+    )
+
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="claude_code",
+        runtime_engine_type="aicoding",
+        default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
+    )
+
+    assert service._default_skill_set_query_kwargs() == {
+        "default_skill_set_bolt_id": "default",
+        "default_skill_set_engine_type": "aicoding",
+    }

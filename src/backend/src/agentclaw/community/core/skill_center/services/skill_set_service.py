@@ -32,6 +32,10 @@ from agentclaw.community.core.mcp.services.config_service import MCPConfigServic
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
+from agentclaw.community.core.skill_center.policies.default_skill_set_selection import (
+    DefaultSkillSetSelection,
+    DefaultSkillSetSelectionPolicy,
+)
 from agentclaw.community.core.skill_center.path_resolution import (
     canonical_pool_local_path,
 )
@@ -158,6 +162,7 @@ class SkillSetService:
         mcp_sync_service=None,
         device_plugin: DeviceAccessor | None = None,
         ext_info_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
+        default_skill_set_selection_policy: DefaultSkillSetSelectionPolicy | None = None,
         *,
         path_factory: WorkspacePathFactory,
         pool_layout_paths: Callable[
@@ -263,6 +268,35 @@ class SkillSetService:
         self._resolver = resolver
         self._device_sync_dispatcher = device_sync_dispatcher
         self._mcp_sync_service = mcp_sync_service
+        self._default_skill_set_selection_policy = (
+            default_skill_set_selection_policy or DefaultSkillSetSelectionPolicy()
+        )
+
+    def _default_skill_set_selection(
+        self, engine_type: str | None = None
+    ) -> DefaultSkillSetSelection:
+        return self._default_skill_set_selection_policy.resolve(
+            persisted_engine_type=self.engine_type if engine_type is None else engine_type,
+            runtime_engine_type=self.runtime_engine_type,
+        )
+
+    def _default_skill_set_query_kwargs(
+        self, engine_type: str | None = None
+    ) -> dict[str, str | None]:
+        """Return repository kwargs only when compatibility needs them.
+
+        OpenClaw and ordinary Claude Code keep the exact historical query shape.
+        Routed Claude Code needs a different default SkillSet lookup key because
+        online global default rows were created under the runtime engine.
+        """
+        persisted_engine = self.engine_type if engine_type is None else engine_type
+        selection = self._default_skill_set_selection(persisted_engine)
+        if selection.bolt_id is None and selection.engine_type == persisted_engine:
+            return {}
+        return {
+            "default_skill_set_bolt_id": selection.bolt_id,
+            "default_skill_set_engine_type": selection.engine_type,
+        }
 
     def _get_default_capabilities_ext_info(
         self,
@@ -487,7 +521,12 @@ class SkillSetService:
             List of SkillSet dicts
         """
         effective_bolt_id = bolt_id if bolt_id else self.bot_id
-        return self.skill_set_repo.list_all(user_id, bolt_id=effective_bolt_id, engine_type=self.engine_type)
+        return self.skill_set_repo.list_all(
+            user_id,
+            bolt_id=effective_bolt_id,
+            engine_type=self.engine_type,
+            **self._default_skill_set_query_kwargs(),
+        )
 
     def update_skill_set(
         self,
@@ -951,7 +990,10 @@ class SkillSetService:
         current_active_ids = {
             str(s.get('id'))
             for s in self.skill_set_repo.get_all_active_skill_sets(
-                user_id=self.entity_id, bolt_id=self.bot_id, engine_type=self.engine_type
+                user_id=self.entity_id,
+                bolt_id=self.bot_id,
+                engine_type=self.engine_type,
+                **self._default_skill_set_query_kwargs(),
             )
         }
         logger.info(
@@ -1115,7 +1157,8 @@ class SkillSetService:
         skill_sets = self.skill_set_repo.list_all(
             user_id=effective_user_id,
             bolt_id=effective_bolt_id,
-            engine_type=self.engine_type
+            engine_type=self.engine_type,
+            **self._default_skill_set_query_kwargs(),
         )
 
         logger.info(f"[get_all_skill_sets_with_skills] 找到 {len(skill_sets)} 个能力集")
@@ -1180,7 +1223,8 @@ class SkillSetService:
         skill_sets = self.skill_set_repo.list_all(
             user_id=effective_user_id,
             bolt_id=effective_bolt_id,
-            engine_type=self.engine_type
+            engine_type=self.engine_type,
+            **self._default_skill_set_query_kwargs(),
         )
 
         # 排序：默认能力集在前，然后按创建时间排序
@@ -1199,6 +1243,30 @@ class SkillSetService:
             logger.debug(f"[get_all_skill_sets_with_mcps] 能力集 {skill_set.get('name')} 包含 {len(mcps)} 个 MCP")
 
         return skill_sets
+
+
+    def list_active_skill_sets(
+        self,
+        *,
+        user_id: str | None = None,
+        bolt_id: str | None = None,
+        engine_type: str | None = None,
+    ) -> list[dict]:
+        """Return active SkillSets using the service-owned default lookup policy.
+
+        This keeps delivery adapters from re-deriving default SkillSet
+        compatibility kwargs while preserving historical query shape for engines
+        that do not need a compatibility override.
+        """
+        effective_user_id = user_id if user_id is not None else self.entity_id
+        effective_bolt_id = bolt_id if bolt_id is not None else self.bot_id
+        effective_engine = engine_type if engine_type is not None else self.engine_type
+        return self.skill_set_repo.get_all_active_skill_sets(
+            user_id=effective_user_id,
+            bolt_id=effective_bolt_id,
+            engine_type=effective_engine,
+            **self._default_skill_set_query_kwargs(effective_engine),
+        )
 
     def get_active_skills(
         self,
@@ -1221,10 +1289,9 @@ class SkillSetService:
         effective_user_id = user_id if user_id else self.entity_id
 
         # 1. 查询所有激活的技能集（包含默认能力集）
-        active_skill_sets = self.skill_set_repo.get_all_active_skill_sets(
+        active_skill_sets = self.list_active_skill_sets(
             user_id=effective_user_id,
             bolt_id=effective_bolt_id,
-            engine_type=self.engine_type
         )
         if not active_skill_sets:
             logger.warning(f"[get_active_skills] 未找到激活的技能集: user_id={effective_user_id}, bolt_id={effective_bolt_id}")
@@ -1854,6 +1921,7 @@ class SkillSetService:
             user_id=entity_id,
             bolt_id=bot_id,
             engine_type=effective_engine,
+            **self._default_skill_set_query_kwargs(effective_engine),
         )
 
         active_mcps = []
@@ -2030,6 +2098,7 @@ class SkillSetService:
             bolt_id=bot_id,
             engine_type=effective_engine,
             env=target_env,
+            **self._default_skill_set_query_kwargs(effective_engine),
         )
 
         codes: list[str] = []
@@ -2086,6 +2155,7 @@ class SkillSetService:
             user_id=entity_id,
             bolt_id=bot_id,
             engine_type=effective_engine,
+            **self._default_skill_set_query_kwargs(effective_engine),
         )
         active_skill_sets_info = []
         seen = set()

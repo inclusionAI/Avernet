@@ -206,6 +206,8 @@ class SkillSetRepository(Protocol):
         user_id: str | None = None,
         bolt_id: str | None = None,
         engine_type: str | None = None,
+        default_skill_set_bolt_id: str | None = None,
+        default_skill_set_engine_type: str | None = None,
     ) -> list[dict]:
         ...
 
@@ -324,6 +326,8 @@ class SkillSetRepository(Protocol):
         user_id: str | None = None,
         bolt_id: str | None = None,
         engine_type: str | None = None,
+        default_skill_set_bolt_id: str | None = None,
+        default_skill_set_engine_type: str | None = None,
     ) -> list[dict]:
         ...
 
@@ -335,6 +339,8 @@ class SkillSetRepository(Protocol):
         bolt_id: str | None = None,
         engine_type: str | None = None,
         env: str,
+        default_skill_set_bolt_id: str | None = None,
+        default_skill_set_engine_type: str | None = None,
     ) -> list[dict]:
         """Return active sets using an explicit environment, never runtime env."""
         ...
@@ -369,6 +375,8 @@ class SkillSetRepository(Protocol):
         user_id: str | None = None,
         bolt_id: str | None = None,
         engine_type: str | None = None,
+        default_skill_set_bolt_id: str | None = None,
+        default_skill_set_engine_type: str | None = None,
     ) -> list[dict]:
         """列出所有技能集（排除已删除 Bot 的），用于重名检查避免误判。"""
         ...
