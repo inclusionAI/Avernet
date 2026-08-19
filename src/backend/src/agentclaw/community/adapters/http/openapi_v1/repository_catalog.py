@@ -32,7 +32,8 @@ async def list_repository_skills(
     service: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
 ) -> Envelope[Page[dict[str, Any]]]:
     # Existing `hotest` is the persisted installation-count ordering; do not invent one.
-    total, items = service.list_page(
+    total, items = await asyncio.to_thread(
+        service.list_page,
         path=path,
         orderby="hotest" if sort == "hottest" else "latest",
         keyword=keyword,
@@ -46,13 +47,13 @@ async def list_repository_skills(
 @envelope_errors
 async def repository_tree(request: Request, _actor_id: UserIdDep, service: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol)) -> Envelope[list[dict[str, Any]]]:
     # Preserve the legacy filesystem + market-tree-cache wire representation.
-    return envelope(service.tree(), request)
+    return envelope(await asyncio.to_thread(service.tree), request)
 
 
 @router.get("/{skill_id}", response_model=Envelope[dict[str, Any]])
 @envelope_errors
 async def get_repository_skill(skill_id: Annotated[str, Path(description="Decimal public identifier of the shared Repo Skill.")], request: Request, _actor_id: UserIdDep, service: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol)) -> Envelope[dict[str, Any]]:
-    skill = service.detail(skill_id)
+    skill = await asyncio.to_thread(service.detail, skill_id)
     if skill is None:
         raise RepositoryCatalogNotFoundError()
     return envelope(skill, request)

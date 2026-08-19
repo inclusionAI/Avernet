@@ -463,7 +463,24 @@ async def test_repo_direct_accepts_shared_scanner_sentinel_and_reconciles():
     assert result["active"] is True
     assert result["changed"] is True
     assert installations.events == ["install:pre:bot:9"]
-    assert runtime.calls == 1
+    assert runtime.calls == 0
+    assert len(runtime.publish_calls) == len(runtime.verify_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_repo_deactivate_publishes_complete_projection_with_retired_repo_link():
+    service, _skills, installations, runtime = _repo_service(active=True)
+
+    result = await service.set_repo_skill_active(
+        skill_id="9", bot_id="bot", actor_id="owner", active=False
+    )
+
+    assert result["active"] is False
+    assert installations.events == ["uninstall:pre:bot:9"]
+    assert runtime.calls == 0
+    assert [mapping.to_dict() for mapping in runtime.publish_calls[0]["retired_mappings"]] == [
+        {"corpus": "repo", "relative_path": "tools/repo", "link_name": "repo"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -516,6 +533,7 @@ async def test_repo_direct_idempotent_runtime_failure_preserves_old_installation
     service, skills, installations, runtime = _repo_service(
         active=True, sync_success=False
     )
+    runtime.publish_results = [False]
 
     with pytest.raises(LocalSkillRuntimeSyncError):
         await service.set_repo_skill_active(
@@ -524,7 +542,7 @@ async def test_repo_direct_idempotent_runtime_failure_preserves_old_installation
 
     assert skills.active is True
     assert installations.events == ["install:pre:bot:9"]
-    assert runtime.calls == 1
+    assert runtime.calls == 0
 
 
 @pytest.mark.asyncio

@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+import threading
+
+import pytest
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
-from agentclaw.community.adapters.http.openapi_v1.repository_catalog import router
+from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
+from agentclaw.community.adapters.http.openapi_v1.repository_catalog import (
+    get_repository_skill,
+    list_repository_skills,
+    repository_tree,
+    router,
+)
 from agentclaw.community.api.repository_catalog_service import (
     RepositoryCatalogServiceProtocol,
 )
@@ -116,3 +125,42 @@ def test_repository_sync_conflict_and_failure_do_not_leak_http_exception_detail(
     assert failed.status_code == 502
     assert failed.json()["code"] == 502103
     assert failed.json()["message"] == "Repository synchronization failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("handler", "kwargs"),
+    [
+        (list_repository_skills, {"page": PageParams(), "keyword": "", "path": None, "sort": "latest"}),
+        (repository_tree, {}),
+        (get_repository_skill, {"skill_id": "1"}),
+    ],
+)
+async def test_repository_read_operations_offload_blocking_service_work(
+    handler, kwargs
+) -> None:
+    class BlockingCatalog(_Catalog):
+        def __init__(self) -> None:
+            super().__init__()
+            self.thread_ids: set[int] = set()
+
+        def list_page(self, **kwargs):
+            self.thread_ids.add(threading.get_ident())
+            return super().list_page(**kwargs)
+
+        def tree(self):
+            self.thread_ids.add(threading.get_ident())
+            return super().tree()
+
+        def detail(self, skill_id):
+            self.thread_ids.add(threading.get_ident())
+            return super().detail(skill_id)
+
+    catalog = BlockingCatalog()
+    request = Request({"type": "http", "headers": []})
+    event_loop_thread = threading.get_ident()
+
+    await handler(request=request, _actor_id="actor", service=catalog, **kwargs)
+
+    assert catalog.thread_ids
+    assert catalog.thread_ids.isdisjoint({event_loop_thread})

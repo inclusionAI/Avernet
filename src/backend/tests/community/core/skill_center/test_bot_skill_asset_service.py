@@ -20,6 +20,10 @@ class _Skills:
             "bolt_id": "bot",
         }
 
+    def list_bot_installed_skills(self, *, env: str, bot_id: str):
+        assert (env, bot_id) == ("pre", "bot")
+        return [{"id": "42"}]
+
 
 class _Bots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str):
@@ -30,6 +34,7 @@ class _Bots:
             "entity_type": "staff",
             "active_engine": "openclaw",
             "bot_type": "personal",
+            "env": "pre",
         }
 
 
@@ -134,3 +139,9 @@ config:
 """,
         {"enabled": False, "retries": 0},
     )
+
+
+def test_resolved_bot_skill_uses_installation_projection_for_active_state() -> None:
+    service, _parameters = _service()
+
+    assert service.get_skill(skill_id="42", bot_id="bot", actor_id="owner")["active"] is True

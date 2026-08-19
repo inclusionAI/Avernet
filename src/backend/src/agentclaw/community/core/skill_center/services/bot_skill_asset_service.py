@@ -87,10 +87,57 @@ class BotSkillAssetService:
         self, *, skill_id: str, bot_id: str, actor_id: str
     ) -> dict[str, Any]:
         """Resolve the item once at the Bot-facing control-plane boundary."""
-        skill, _bot, _owner_id = self._resolve(
+        skill, bot, _owner_id = self._resolve(
             skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
         )
-        return skill
+        installed = self._skill_repo.list_bot_installed_skills(
+            env=str(bot["env"]), bot_id=bot_id
+        )
+        # ``active`` is a desired-state projection, never an asset attribute.
+        # This keeps shared Repo detail aligned with the same Installation fact
+        # that Direct activate/deactivate write.
+        return {
+            **skill,
+            "active": any(str(item.get("id")) == skill_id for item in installed),
+        }
+
+    def resolve_legacy_skill_id(
+        self,
+        *,
+        skill_reference: str,
+        source_path: str,
+        bot_id: str,
+        actor_id: str,
+    ) -> str:
+        """Translate Legacy path/link references to the decimal public id.
+
+        Legacy adapters retain their published route shape, but they cannot
+        mutate their own path-based state after P1-01.  Resolve the historical
+        reference once, then prove it is addressable through this control plane.
+        """
+        references = [skill_reference, source_path]
+        for reference in references:
+            if not reference:
+                continue
+            if reference.isdecimal():
+                self.get_skill(skill_id=reference, bot_id=bot_id, actor_id=actor_id)
+                return reference
+            candidates = [reference]
+            if not reference.startswith(("git://", "local://", "center://")):
+                candidates.append(f"git://{reference.lstrip('/')}")
+            for candidate in candidates:
+                skill = self._skill_repo.get_by_git_path(candidate)
+                if skill is not None:
+                    skill_id = str(skill["id"])
+                    self.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+                    return skill_id
+            link_name = reference.rsplit("://", 1)[-1].strip("/").replace("/", "_")
+            skill = self._skill_repo.get_by_link_name(link_name, bolt_id=bot_id)
+            if skill is not None:
+                skill_id = str(skill["id"])
+                self.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+                return skill_id
+        raise LocalSkillNotFoundError()
 
     async def set_active(
         self, *, skill_id: str, bot_id: str, actor_id: str, active: bool

@@ -379,6 +379,43 @@ def _require_pool_runtime_sync_success(
         raise HTTPException(status_code=502, detail=detail)
 
 
+async def _set_legacy_asset_active_if_resolved(
+    *,
+    asset_service: BotSkillAssetServiceProtocol,
+    skill_reference: str,
+    source_path: str,
+    bot_id: str,
+    actor_id: str,
+    active: bool,
+) -> dict[str, Any] | None:
+    """Adapt historical path/link references to the one Installation command."""
+    if not skill_reference.isdecimal() and not callable(
+        getattr(asset_service, "resolve_legacy_skill_id", None)
+    ):
+        # Transitional compatibility fixtures and deployments that have not
+        # bound the additive control plane retain the old adapter path.  Once
+        # the control plane is bound, a non-decimal reference may never fall
+        # through to a second mutation model.
+        return None
+    try:
+        skill_id = (
+            skill_reference
+            if skill_reference.isdecimal()
+            else asset_service.resolve_legacy_skill_id(
+                skill_reference=skill_reference,
+                source_path=source_path,
+                bot_id=bot_id,
+                actor_id=actor_id,
+            )
+        )
+        asset_service.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+        return await asset_service.set_active(
+            skill_id=skill_id, bot_id=bot_id, actor_id=actor_id, active=active
+        )
+    except LocalSkillNotFoundError:
+        return None
+
+
 # ==================== Core CRUD APIs ====================
 
 @router.post("/upload", response_model=UploadSkillResponse)
@@ -1041,28 +1078,24 @@ async def activate_skill(
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    # Keep the published BFF response shape, but hand numeric Local Skill IDs
-    # to the same desired-state control plane as canonical OpenAPI.  Repo/Space
-    # fall through to their still-legacy Catalog implementation until P1-02.
-    if skill_id.isdecimal():
-        try:
-            item = asset_service.get_skill(
-                skill_id=skill_id, bot_id=effective_bot_id, actor_id=ctx.user_id
-            )
-        except LocalSkillNotFoundError:
-            item = None
-        if item is not None:
-            result = await asset_service.set_active(
-                skill_id=skill_id,
-                bot_id=effective_bot_id,
-                actor_id=ctx.user_id,
-                active=True,
-            )
-            return ActivateResponse(
-                success=True,
-                message="Skill activated successfully",
-                link_name=str(result["name"]),
-            )
+    # Keep the published BFF response shape, but translate every reference that
+    # now resolves to an ``ac_skill.id`` through the unified desired-state
+    # control plane.  Non-decimal relative paths/link names are legacy wire,
+    # not a second activation model.
+    result = await _set_legacy_asset_active_if_resolved(
+        asset_service=asset_service,
+        skill_reference=request.relative_path or skill_id,
+        source_path=request.source_path,
+        bot_id=effective_bot_id,
+        actor_id=ctx.user_id,
+        active=True,
+    )
+    if result is not None:
+        return ActivateResponse(
+            success=True,
+            message="Skill activated successfully",
+            link_name=str(result["name"]),
+        )
 
     # Get user-specific paths using new directory structure
     skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
@@ -1157,25 +1190,16 @@ async def deactivate_skill(
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    # See ``activate_skill``: Local IDs share canonical Installation desired
-    # state; unsupported asset adapters retain their published BFF behavior.
-    if skill_id.isdecimal():
-        try:
-            item = asset_service.get_skill(
-                skill_id=skill_id, bot_id=effective_bot_id, actor_id=ctx.user_id
-            )
-        except LocalSkillNotFoundError:
-            item = None
-        if item is not None:
-            await asset_service.set_active(
-                skill_id=skill_id,
-                bot_id=effective_bot_id,
-                actor_id=ctx.user_id,
-                active=False,
-            )
-            return DeactivateResponse(
-                success=True, message="Skill deactivated successfully"
-            )
+    result = await _set_legacy_asset_active_if_resolved(
+        asset_service=asset_service,
+        skill_reference=skill_id,
+        source_path="",
+        bot_id=effective_bot_id,
+        actor_id=ctx.user_id,
+        active=False,
+    )
+    if result is not None:
+        return DeactivateResponse(success=True, message="Skill deactivated successfully")
 
     # Get user-specific paths using new directory structure
     skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
@@ -1708,9 +1732,24 @@ async def sync_market(
     if result["status"] == "in_progress":
         return SyncStatusResponse(success=True, data={"synced": False, "message": "同步进行中，请稍后再试"})
     if result["status"] == "failed":
+        sync_result = result.get("result") or {}
+        # The pre-Gateway response published the completed DB scan verbatim in
+        # ``data.db_sync``.  Keep that diagnostic wire for partial scans even
+        # though canonical sync now correctly fails as one operation.
+        if isinstance(sync_result.get("database"), dict):
+            return SyncStatusResponse(
+                success=True,
+                data={
+                    "synced": False,
+                    "last_sync": sync_result.get("last_sync"),
+                    "next_sync_in": sync_result.get("next_sync_in", 0),
+                    "db_sync": sync_result["database"],
+                },
+                message=result["message"],
+            )
         raise HTTPException(status_code=500, detail=result["message"])
     sync_result = result["result"]
-    return SyncStatusResponse(success=True, data={"synced": bool(sync_result.get("synced")), "last_sync": sync_result.get("last_sync"), "next_sync_in": sync_result.get("next_sync_in", 0)}, message=sync_result.get("message", "Sync completed"))
+    return SyncStatusResponse(success=True, data={"synced": bool(sync_result.get("synced")), "last_sync": sync_result.get("last_sync"), "next_sync_in": sync_result.get("next_sync_in", 0), "db_sync": sync_result.get("database")}, message=sync_result.get("message", "Sync completed"))
 
 
 @router.get("/market/sync-status", response_model=SyncStatusResponse)

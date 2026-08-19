@@ -37,6 +37,15 @@ class _Assets:
         self.calls.append(("get", None))
         return {"name": "local-seven"}
 
+    def resolve_legacy_skill_id(
+        self, *, skill_reference: str, source_path: str, bot_id: str, actor_id: str
+    ):
+        assert (skill_reference, source_path, bot_id, actor_id) in {
+            ("legacy/path", "legacy", "bot", "owner"),
+            ("legacy-link", "legacy/path", "bot", "owner"),
+        }
+        return "7"
+
     async def set_active(self, *, skill_id: str, bot_id: str, actor_id: str, active: bool):
         assert (skill_id, bot_id, actor_id) == ("7", "bot", "owner")
         self.calls.append(("set", active))
@@ -64,7 +73,10 @@ class _Catalog:
         self.calls.append(("sync", None))
         if self.sync_status == "failed":
             return {"status": "failed", "message": "private failure"}
-        return {"status": "completed", "result": {"synced": True}}
+        return {
+            "status": "completed",
+            "result": {"synced": True, "database": {"failed": 0}},
+        }
 
 
 
@@ -98,6 +110,19 @@ async def test_legacy_activate_with_relative_path_still_uses_control_plane() -> 
     assets = _Assets()
     await activate_skill(
         "7", ActivateRequest(source_path="legacy", relative_path="legacy/path"),
+        bot_id="bot", ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+        bot_repo=_Bots(), path_factory=object(), skill_service_factory=object(),
+        skill_set_service_factory=object(), resolver=object(),
+        device_sync_dispatcher=object(), asset_service=assets,
+    )
+    assert assets.calls == [("get", None), ("set", True)]
+
+
+@pytest.mark.asyncio
+async def test_legacy_activate_with_link_name_resolves_decimal_id_before_control_plane() -> None:
+    assets = _Assets()
+    await activate_skill(
+        "legacy-link", ActivateRequest(source_path="legacy/path"),
         bot_id="bot", ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
         bot_repo=_Bots(), path_factory=object(), skill_service_factory=object(),
         skill_set_service_factory=object(), resolver=object(),
@@ -157,6 +182,7 @@ async def test_legacy_repo_catalog_accepts_historical_bot_query_wire() -> None:
     assert listed.data == [{"id": "1"}]
     assert searched.data == [{"id": "1"}]
     assert synced.data["synced"] is True
+    assert synced.data["db_sync"] == {"failed": 0}
     assert catalog.calls == [
         ("list", (None, None)),
         ("tree", None),
@@ -180,6 +206,28 @@ async def test_legacy_market_list_rejects_invalid_orderby_and_sync_keeps_failure
         await sync_market(repository_catalog=_Catalog(sync_status="failed"), ctx=ctx)
     assert sync_failure.value.status_code == 500
     assert sync_failure.value.detail == "private failure"
+
+
+@pytest.mark.asyncio
+async def test_legacy_sync_exposes_partial_database_failure_in_historical_db_sync_field():
+    class _PartialCatalog(_Catalog):
+        def sync(self):
+            return {
+                "status": "failed",
+                "message": "Database scan failed",
+                "result": {
+                    "synced": True,
+                    "database": {"created": 1, "failed": 1, "errors": ["row"]},
+                },
+            }
+
+    response = await sync_market(
+        repository_catalog=_PartialCatalog(),
+        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+    )
+    assert response.success is True
+    assert response.data["synced"] is False
+    assert response.data["db_sync"]["failed"] == 1
 
 
 def test_legacy_repo_catalog_routes_retain_request_context_auth_dependency() -> None:
