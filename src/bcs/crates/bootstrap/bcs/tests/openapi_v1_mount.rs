@@ -131,6 +131,55 @@ async fn mounted_session_file_routes_use_the_real_facade_and_public_token_bounda
 }
 
 #[tokio::test]
+async fn mounted_internal_attributes_route_fails_closed_without_trusted_provider_config() {
+    let bots_dir = helpers::create_temp_bots_dir();
+    let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
+    config.metrics.enabled = false;
+    assert!(
+        config
+            .internal_api
+            .trusted_backend_provider_id
+            .is_none()
+    );
+    let (addr, handle) = helpers::start_test_server_with_config(config).await;
+    let client = reqwest::Client::new();
+    let provider: serde_json::Value = client
+        .post(format!("http://{addr}/providers"))
+        .header("x-mock-user-id", "staff-1")
+        .json(&json!({
+            "name": "Backend Provider",
+            "webhook_url": "https://provider.example.com/bcs/webhook",
+            "auth": {"mode": "provider_admin"}
+        }))
+        .send()
+        .await
+        .expect("register Provider")
+        .json()
+        .await
+        .expect("Provider response");
+    let provider_id = provider["provider_id"].as_str().expect("provider id");
+    let provider_admin_token = provider["provider_admin_token"]
+        .as_str()
+        .expect("provider admin token");
+
+    let response = client
+        .get(format!(
+            "http://{addr}/internal/v1/bots/missing-bot/attributes"
+        ))
+        .bearer_auth(provider_admin_token)
+        .header("x-bcn-provider-id", provider_id)
+        .send()
+        .await
+        .expect("internal request");
+
+    assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
+    let envelope: serde_json::Value = response.json().await.expect("JSON envelope");
+    assert_eq!(envelope["data"]["error_code"], "forbidden");
+
+    handle.abort();
+}
+
+#[tokio::test]
 async fn mounted_session_token_route_authenticates_before_reaching_the_application() {
     let bots_dir = helpers::create_temp_bots_dir();
     let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());

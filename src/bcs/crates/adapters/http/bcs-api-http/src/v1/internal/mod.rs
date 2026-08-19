@@ -1,3 +1,7 @@
+mod auth;
+#[path = "routes.rs"]
+mod bot_attributes_routes;
+mod dto;
 mod routes;
 
 use axum::Router;
@@ -20,4 +24,13 @@ pub fn public_router() -> Router<ApiState> {
 
 pub fn router() -> Router<ApiState> {
     protected_router().merge(public_router())
+}
+
+pub use auth::{InternalProviderAuthError, InternalProviderAuthenticator};
+
+pub fn bot_attributes_router(
+    service: std::sync::Arc<dyn bcs_service_api::application::v1::InternalBotAttributesService>,
+    authenticator: std::sync::Arc<dyn InternalProviderAuthenticator>,
+) -> Router {
+    bot_attributes_routes::router(service, authenticator)
 }
