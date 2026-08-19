@@ -18,12 +18,15 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 
 
 class FakeResolver:
-    def __init__(self) -> None:
+    def __init__(self, provider: str = "local") -> None:
         self.calls: list[tuple[str, str]] = []
+        self.provider = provider
 
     def resolve_for_bot(self, bot_id: str, user_id: str):
         self.calls.append((bot_id, user_id))
-        return SimpleNamespace(conn_info={"binding": len(self.calls)})
+        return SimpleNamespace(
+            conn_info={"binding": len(self.calls), "provider": self.provider}
+        )
 
 
 class FakeTransport:
@@ -192,6 +195,41 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
         assert transport.calls[index]["body"]["mappings"] == [logical_mapping]
     for index in (2, 3):
         assert transport.calls[index]["body"]["retired_mappings"] == [logical_mapping]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["local", "baas"])
+async def test_repo_retirement_projection_reaches_each_device_provider(provider: str) -> None:
+    """Repo Direct deactivate clears the old entry for Local and BaaS engines."""
+    transport = FakeTransport()
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(provider),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+    retired = PoolSkillMapping(
+        corpus="repo", relative_path="tools/repo", link_name="repo"
+    )
+
+    assert await runtime.publish_mappings(
+        bot_id="bot-1",
+        user_id="owner-1",
+        mappings=[],
+        retired_mappings=[retired],
+    )
+    assert await runtime.verify_mappings(
+        bot_id="bot-1",
+        user_id="owner-1",
+        mappings=[],
+        retired_mappings=[retired],
+    )
+
+    for call in transport.calls:
+        assert call["conn_info"]["provider"] == provider
+        assert call["body"]["mappings"] == []
+        assert call["body"]["retired_mappings"] == [
+            {"corpus": "repo", "relative_path": "tools/repo", "link_name": "repo"}
+        ]
 
 
 @pytest.mark.asyncio

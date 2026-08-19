@@ -43,7 +43,6 @@ from agentclaw.community.core.skills_pool.edit_guard import (
 )
 from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
-    local_skill_name,
 )
 from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
@@ -205,7 +204,19 @@ class LocalSkillStateService:
                 )
             except Exception as exc:
                 raise LocalSkillStorageError() from exc
-            if self._sync_runtime(bot=bot, owner_id=owner_id, bot_id=bot_id):
+            if active:
+                synced = await self._publish_current_mappings(
+                    scope=scope, bot=bot, owner_id=owner_id, bot_id=bot_id
+                )
+            else:
+                synced = await self._reconcile_deactivation(
+                    scope=scope,
+                    bot=bot,
+                    skill=raw,
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                )
+            if synced:
                 return {
                     **raw,
                     "bolt_id": bot_id,
@@ -223,7 +234,9 @@ class LocalSkillStateService:
                     )
                 except Exception as exc:
                     raise LocalSkillStorageError() from exc
-                if not self._sync_runtime(bot=bot, owner_id=owner_id, bot_id=bot_id):
+                if not await self._publish_current_mappings(
+                    scope=scope, bot=bot, owner_id=owner_id, bot_id=bot_id
+                ):
                     raise LocalSkillRuntimeSyncError()
             raise LocalSkillRuntimeSyncError()
         finally:
@@ -394,15 +407,24 @@ class LocalSkillStateService:
         bot_id: str,
     ) -> bool:
         try:
-            retired = RegisteredSkillAsset(
-                skill_id=int(skill["id"]),
-                name=str(skill["name"]),
-                git_path=str(skill["git_path"]),
-            )
-            retired_mapping = PoolSkillMapping(
-                corpus="local",
-                relative_path=local_skill_name(retired),
-                link_name=local_skill_name(retired),
+            retired_mapping = build_logical_skill_mappings(
+                [
+                    RegisteredSkillAsset(
+                        skill_id=int(skill["id"]),
+                        name=str(skill["name"]),
+                        git_path=str(skill["git_path"]),
+                        skill_uuid=(
+                            str(skill["skill_uuid"])
+                            if skill.get("skill_uuid") is not None
+                            else None
+                        ),
+                        sc_version_number=(
+                            str(skill["sc_version_number"])
+                            if skill.get("sc_version_number") is not None
+                            else None
+                        ),
+                    )
+                ]
             )
         except (KeyError, TypeError, ValueError):
             return False
@@ -411,7 +433,7 @@ class LocalSkillStateService:
             bot=bot,
             owner_id=owner_id,
             bot_id=bot_id,
-            retired_mappings=[retired_mapping],
+            retired_mappings=retired_mapping,
         )
 
     async def _publish_current_mappings(

@@ -16,8 +16,21 @@ class RepositoryCatalogService:
     def __init__(self, factory: SkillServiceFactory) -> None:
         self._factory = factory
 
+    @staticmethod
+    def _repo_only(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Never let stale Center rows escape the governed Repo catalog."""
+        return [
+            item
+            for item in items
+            if str(item.get("git_path") or "").startswith("git://")
+        ]
+
     def list(self, *, path: str | None = None, orderby: str | None = None) -> list[dict[str, Any]]:
-        return self._factory.create().list_git_skills(path=path, bolt_id=None, orderby=orderby)
+        return self._repo_only(
+            self._factory.create().list_git_skills(
+                path=path, bolt_id=None, orderby=orderby
+            )
+        )
 
     def list_page(
         self,
@@ -45,7 +58,9 @@ class RepositoryCatalogService:
         return len(items), list(items[start : start + page_size])
 
     def search(self, *, keyword: str, limit: int = 100) -> list[dict[str, Any]]:
-        return self._factory.create().search_market_skills(keyword, limit=limit)
+        return self._repo_only(
+            self._factory.create().search_market_skills(keyword, limit=limit)
+        )[:limit]
 
     def tree(self) -> list[dict[str, Any]]:
         return self._factory.create().get_market_tree()
@@ -60,5 +75,9 @@ class RepositoryCatalogService:
         if result.get("error") in LOCK_HELD_ERRORS:
             return {"status": "in_progress"}
         if not result.get("success"):
-            return {"status": "failed", "message": result.get("message", "Sync failed")}
+            return {
+                "status": "failed",
+                "message": result.get("message") or result.get("error") or "Sync failed",
+                "result": result,
+            }
         return {"status": "completed", "result": result}
