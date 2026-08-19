@@ -119,11 +119,15 @@ pub async fn handle_connection(
                     }
                     Err(e) => {
                         warn!(error = %e, "Frame dispatch error");
-                        let error_kind = if matches!(&e, BotWsDispatchError::BotConnectError(_)) {
-                            WsErrorKind::RegisterRejected
-                        } else {
-                            WsErrorKind::DispatchError
-                        };
+                        let error_kind =
+                            if let BotWsDispatchError::BotConnectError { bot_uuid, .. } = &e {
+                                if observed_bot_uuid.is_none() {
+                                    observed_bot_uuid = bot_uuid.clone();
+                                }
+                                WsErrorKind::RegisterRejected
+                            } else {
+                                WsErrorKind::DispatchError
+                            };
                         metrics_hook
                             .error(WsPeer::Bot, crate::bot::BOT_WS_ENDPOINT, error_kind)
                             .await;
