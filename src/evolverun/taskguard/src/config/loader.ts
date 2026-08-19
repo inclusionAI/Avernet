@@ -45,7 +45,7 @@ import { defaults } from "./types.js";
 // ── YAML shape types ──
 
 type YamlDatabaseConfig = {
-  /** Deprecated alias: use "mode" instead. Supported for backward compatibility with application.community.yaml. */
+  /** Deprecated alias: use "mode" instead. */
   type?: "sqlite" | "prod" | "api";
   mode?: "sqlite" | "prod" | "api";
   sqlite?: { path?: string };
@@ -285,9 +285,6 @@ const CONFIG_FILENAME = "application.yaml";
 /** Plugin ID as defined in openclaw.plugin.json */
 const PLUGIN_ID = "clawmind";
 
-/** Community config filename — used as fallback when application.yaml is absent. */
-const COMMUNITY_CONFIG_FILENAME = "application.community.yaml";
-
 /**
  * Known OpenClaw extension directories (local dev + production).
  * The loader probes each in order until it finds a config file.
@@ -301,10 +298,6 @@ const KNOWN_EXTENSION_DIRS = [
 
 /**
  * Find the plugin's own config file.
- *
- * Search order (per directory):
- * 1. application.yaml (corp/internal deployments)
- * 2. application.community.yaml (open-source / community deployments)
  *
  * Full traversal order:
  * 1. Explicit path (if provided)
@@ -329,17 +322,14 @@ function findConfigFile(explicitPath?: string): string | null {
     return envPath;
   }
 
-  // Helper: try a directory for either config filename, preferring application.yaml
+  // Helper: try a directory for the config filename
   function tryConfigDir(dir: string): string | null {
-    const priority = [CONFIG_FILENAME, COMMUNITY_CONFIG_FILENAME];
-    for (const name of priority) {
-      const candidate = join(dir, "configs", name);
-      if (existsSync(candidate)) {
-        console.error(`[config] findConfigFile: found ${name} at ${candidate}`);
-        return candidate;
-      }
-      console.error(`[config] findConfigFile: ${name} at ${candidate} not found`);
+    const candidate = join(dir, "configs", CONFIG_FILENAME);
+    if (existsSync(candidate)) {
+      console.error(`[config] findConfigFile: found ${CONFIG_FILENAME} at ${candidate}`);
+      return candidate;
     }
+    console.error(`[config] findConfigFile: ${CONFIG_FILENAME} at ${candidate} not found`);
     return null;
   }
 
@@ -361,7 +351,7 @@ function findConfigFile(explicitPath?: string): string | null {
   // 4. Fallback: walk up from this file's location to find package.json + configs/
   //    NOTE: dist/ and dist/esm/ may contain a stub package.json (e.g. {"type":"module"}),
   //    so we do NOT stop at the first package.json — we continue walking up until we find
-  //    a directory that has BOTH package.json AND configs/application.yaml (or community).
+  //    a directory that has BOTH package.json AND configs/application.yaml.
   let thisDir: string;
   try {
     thisDir = import.meta.dirname;
@@ -375,9 +365,8 @@ function findConfigFile(explicitPath?: string): string | null {
     if (hasPackageJson) {
       const found = tryConfigDir(dir);
       if (found) return found;
-      const hasEither = existsSync(join(dir, "configs", CONFIG_FILENAME))
-        || existsSync(join(dir, "configs", COMMUNITY_CONFIG_FILENAME));
-      console.error(`[config] findConfigFile: walk-up dir=${dir}, package.json=exists, configs/has=${hasEither ? "exists" : "MISSING"}`);
+      const hasConfig = existsSync(join(dir, "configs", CONFIG_FILENAME));
+      console.error(`[config] findConfigFile: walk-up dir=${dir}, package.json=exists, configs/${CONFIG_FILENAME}=${hasConfig ? "exists" : "MISSING"}`);
       // Do NOT break — keep walking up; dist/esm/package.json is a stub without configs/.
     }
     const parent = join(dir, "..");

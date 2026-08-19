@@ -14,7 +14,7 @@ import type { DatabaseConfig, MySqlConfig, ApiConfig } from "./types.js";
 // ── Types ──
 
 type YamlDatabaseConfig = {
-  /** Deprecated alias: use "mode" instead. Supported for backward compatibility with application.community.yaml. */
+  /** Deprecated alias: use "mode" instead. */
   type?: "sqlite" | "prod" | "api";
   mode?: "sqlite" | "prod" | "api";
   api?: {
@@ -55,7 +55,6 @@ type YamlAppConfig = {
 // ── Config search paths ──
 
 const CONFIG_FILENAME = "application.yaml";
-const COMMUNITY_CONFIG_FILENAME = "application.community.yaml";
 
 /** Plugin ID as defined in openclaw.plugin.json */
 const PLUGIN_ID = "clawmind";
@@ -73,10 +72,6 @@ const KNOWN_EXTENSION_DIRS = [
 
 /**
  * Find the plugin's own config file.
- *
- * Search order (per directory):
- * 1. application.yaml (corp/internal deployments)
- * 2. application.community.yaml (open-source / community deployments)
  *
  * Full traversal order:
  * 1. Explicit path (if provided)
@@ -96,13 +91,10 @@ function findConfigFile(explicitPath?: string): string | null {
     return envPath;
   }
 
-  // Helper: try a directory for either config filename, preferring application.yaml
+  // Helper: try a directory for the config filename
   function tryConfigDir(dir: string): string | null {
-    const priority = [CONFIG_FILENAME, COMMUNITY_CONFIG_FILENAME];
-    for (const name of priority) {
-      const candidate = join(dir, "configs", name);
-      if (existsSync(candidate)) return candidate;
-    }
+    const candidate = join(dir, "configs", CONFIG_FILENAME);
+    if (existsSync(candidate)) return candidate;
     return null;
   }
 

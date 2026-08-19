@@ -145,16 +145,16 @@ describe("Open-source hygiene: no hardcoded secrets or internal info", () => {
     );
   });
 
-  it("configs/application.community.yaml must not enable internal integrations", async () => {
+  it("configs/application.yaml must not enable internal integrations", async () => {
     const cfg = await readFile(
-      path.join(PROJECT_ROOT, "configs/application.community.yaml"),
+      path.join(PROJECT_ROOT, "configs/application.yaml"),
       "utf-8",
     );
     // Community config must not reference BaaS / IAM / corp / ZDAS credentials.
     for (const pattern of [/baas/i, /iamtoken/i, /zdas/i, /corpId/i, /privateKeyB64/i]) {
       assert.ok(
         !pattern.test(cfg.replace(/#.*$/gm, "")), // ignore comment lines
-        `application.community.yaml should not configure internal integration "${pattern}"`,
+        `application.yaml should not configure internal integration "${pattern}"`,
       );
     }
   });
