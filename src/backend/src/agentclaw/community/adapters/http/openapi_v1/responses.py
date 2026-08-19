@@ -609,6 +609,19 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillEngineNotSupportedError: 409107,
     RepositoryCatalogSyncInProgressError: 409108,
     RepositoryCatalogSyncFailedError: 502103,
+    SkillSetManagedResourceError: 409202,
+    SkillSetControlPlaneLockUnavailableError: 503201,
+}
+
+_SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
+    "RESOURCE_DIRECT_ACTIVE": (409201, "Resource is directly active"),
+    "RESOURCE_MANAGED_BY_SKILL_SET": (409202, "Resource is managed by a SkillSet"),
+    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": (409203, "Resource belongs to another SkillSet"),
+    "SYSTEM_DEFAULT_IMMUTABLE": (409204, "System Default SkillSet is immutable"),
+    "SKILL_SET_ACTIVE": (409205, "Active SkillSet cannot be deleted"),
+    "SKILL_SET_NAME_CONFLICT": (409206, "SkillSet name already exists"),
+    "IDEMPOTENCY_KEY_REUSED": (409207, "Idempotency key was reused with a different request"),
+    "BOT_MUTATION_BUSY": (409208, "Another SkillSet mutation is in progress"),
 }
 
 
@@ -779,6 +792,11 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
     Returns on the first ``isinstance`` match in insertion order, so a specific
     leaf listed before its base class still wins.
     """
+    if isinstance(exc, SkillSetControlPlaneConflictError):
+        code, message = _SKILL_SET_CONFLICT_CODES.get(
+            str(exc), (409000, "SkillSet state conflicts with this operation")
+        )
+        return _error_response(409, message, request, code=code)
     for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
         if isinstance(exc, error_type):
             return _error_response(
