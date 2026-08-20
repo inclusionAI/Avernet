@@ -69,6 +69,37 @@ class PrincipalSignerPluginConfig(BaseModel):
     ttl_seconds: int = 60
 
 
+class CorsConfig(BaseModel):
+    """Browser CORS allow-list for the gateway's own edge (``user_config.cors``).
+
+    The gateway is the origin a browser actually talks to, so it is the only hop
+    that can answer a preflight: the request that carries no credential and must
+    never reach authentication. An upstream's own allow-list governs callers that
+    reach *it* directly and says nothing about the gateway's address, which is
+    why this list lives here rather than being inherited from a component.
+
+    Neutral default = localhost origins only, so a single-box UI works out of the
+    box; every deployment adds its own frontend origin through the ``cors`` block
+    of its ``application-<env>.yaml`` overlay. Because the edge answers with
+    ``Access-Control-Allow-Credentials: true`` — the session cookie and the
+    ``Authorization`` header are exactly what a browser call carries — a ``"*"``
+    wildcard is not accepted by browsers: origins must be enumerated exactly or
+    matched by one of ``allow_origin_regex``.
+    """
+
+    model_config = {"extra": "allow"}
+    allow_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost",
+            "http://localhost:3000",
+            "http://localhost:8000",
+            "http://localhost:8080",
+            "http://localhost:8888",
+        ]
+    )
+    allow_origin_regex: list[str] = Field(default_factory=list)
+
+
 class PluginConfig(BaseSettings):
     """Plugin selection config for gateway DI container.
 
@@ -101,6 +132,7 @@ class UserConfig(BaseModel):
     upstream_vars: dict[str, str] = Field(default_factory=dict)
     identity_strategies: dict[str, list[str]] = Field(default_factory=dict)
     route_security: dict[str, dict[str, str]] = Field(default_factory=dict)
+    cors: CorsConfig = Field(default_factory=CorsConfig)
     upstreams: dict[str, Any] = Field(default_factory=dict)
 
     def get(self, key: str, default: Any = None) -> Any:

@@ -102,6 +102,43 @@ user_config:
     engine_proxy_server_url: https://engineproxy.sample.com
     bcsfuse_server_url: http://127.0.0.1:8765
 
+  # Browser CORS allow-list for the gateway's own edge.
+  #
+  # A page on another origin cannot call the gateway without it: the browser
+  # sends a credential-less `OPTIONS` preflight first and refuses to send the
+  # real request unless the answer carries `Access-Control-Allow-Origin`. That
+  # preflight is answered by the gateway itself, before routing and before
+  # `route_security` — an upstream's own allow-list governs callers that reach
+  # that component directly and cannot speak for this address.
+  #
+  # The gateway answers with `Access-Control-Allow-Credentials: true`, because a
+  # browser call through it carries the cookie or `Authorization` header it
+  # authenticates with. Browsers refuse a `"*"` origin on such a response, so
+  # every origin must be listed exactly or matched by `allow_origin_regex`
+  # (Python regex, matched against the whole origin — scheme, host and port).
+  #
+  # Neutral default = localhost only, so a single-box UI works out of the box.
+  # A deployment adds its own frontend origins in its `application-<env>.yaml`
+  # overlay (selected by `SERVER_ENV`), e.g.:
+  #
+  #   user_config:
+  #     cors:
+  #       allow_origins:
+  #         - "https://your-frontend.example.com"
+  #       allow_origin_regex:
+  #         - "https://[a-z0-9-]+\\.preview\\.example\\.com"
+  #
+  # An overlay REPLACES a list rather than extending it, so repeat any localhost
+  # origin the environment still needs.
+  cors:
+    allow_origins:
+      - "http://localhost"
+      - "http://localhost:3000"
+      - "http://localhost:8000"
+      - "http://localhost:8080"
+      - "http://localhost:8888"
+    allow_origin_regex: []
+
   # Per-identity strategy chain (system-level config).
   # Each identity type runs its strategies in order; the first to recognise the
   # credential wins (design §5). Flavor-specific verification backends are wired
