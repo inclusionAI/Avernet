@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, call
+
+import pytest
 
 from agentclaw.community.core.events.types import DeviceActivatedEvent
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
@@ -36,6 +39,7 @@ def _make_listener(
     bot_query=None,
     layout_repository=None,
     skills_pool_wakeup=None,
+    runtime_reconcile=None,
 ):
     factory = MagicMock()
     if skill_set_service is not None:
@@ -73,6 +77,7 @@ def _make_listener(
             if skills_pool_wakeup is not None
             else None
         ),
+        runtime_reconcile=runtime_reconcile,
     )
     return listener, factory, dispatcher, resolver
 
@@ -97,6 +102,27 @@ def _layout_state(
 
 
 class TestHandleDeviceActivated:
+    @pytest.mark.asyncio
+    async def test_runtime_reconcile_blocks_even_inside_a_running_loop(self):
+        completed = []
+
+        async def reconcile(bot_id, owner_id):
+            await asyncio.sleep(0)
+            completed.append((bot_id, owner_id))
+
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "default", "owner_id": "u001"
+        }
+        listener, _, dispatcher, _ = _make_listener(
+            bot_query=bot_query, runtime_reconcile=reconcile
+        )
+
+        listener.handle(_make_event())
+
+        assert completed == [("default", "u001")]
+        dispatcher.dispatch.assert_not_called()
+
     def test_happy_path_syncs_symlinks(self):
         event = _make_event()
 

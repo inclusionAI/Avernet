@@ -11,9 +11,10 @@ just the event payload.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
 import asyncio
-from typing import TYPE_CHECKING
+import threading
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.events.types import DeviceActivatedEvent
@@ -29,6 +30,26 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 _TRANSITION_AUTHORITY = "transition"
+
+
+def _run_reconcile_blocking(coro: Any) -> Any:
+    """Run an async reconcile while synchronously handling a lifecycle event."""
+    from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
+
+    box: dict[str, Any] = {}
+
+    def runner() -> None:
+        try:
+            box["result"] = asyncio.run(coro)
+        except BaseException as error:  # noqa: BLE001 - preserve failure semantics
+            box["error"] = error
+
+    thread = threading.Thread(target=bind_current_avernet_tenant(runner), daemon=True)
+    thread.start()
+    thread.join()
+    if "error" in box:
+        raise box["error"]
+    return box.get("result")
 
 
 class SkillSymlinkListener(LifecycleBase):
@@ -143,7 +164,7 @@ class SkillSymlinkListener(LifecycleBase):
                 # a legacy Default-exclusion mapping in this listener.
                 outcome = self._runtime_reconcile(str(bot_id), str(owner_id))
                 if asyncio.iscoroutine(outcome):
-                    asyncio.run(outcome)
+                    _run_reconcile_blocking(outcome)
                 return
 
             from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
