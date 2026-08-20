@@ -28,6 +28,8 @@ class BotRunInteractionPayloadPatch:
 
     decision: str | None = None
     client_req: JsonObject | None = None
+    resolution: JsonObject | None = None
+    idempotency_key: str | None = None
     engine_req: JsonObject | None = None
     engine_res: JsonObject | None = None
     resolved: JsonObject | None = None
@@ -45,10 +47,12 @@ class BotRunInteractionPayload:
     """
 
     requested: JsonObject
-    allowed_decisions: tuple[str, ...] = ()
+    allowed_decisions: tuple[str, ...] | None = None
     expires_at_ms: int | None = None
     decision: str | None = None
     client_req: JsonObject | None = None
+    resolution: JsonObject | None = None
+    idempotency_key: str | None = None
     engine_req: JsonObject | None = None
     engine_res: JsonObject | None = None
     resolved: JsonObject | None = None
@@ -64,6 +68,8 @@ class BotRunInteractionPayload:
             expires_at_ms=_optional_int(value, "expiresAtMs"),
             decision=_optional_str(value, "decision"),
             client_req=_optional_object(value, "clientReq"),
+            resolution=_optional_object(value, "resolution"),
+            idempotency_key=_optional_str(value, "idempotencyKey"),
             engine_req=_optional_object(value, "engineReq"),
             engine_res=_optional_object(value, "engineRes"),
             resolved=_optional_object(value, "resolved"),
@@ -75,11 +81,15 @@ class BotRunInteractionPayload:
         values: JsonObject = {
             "requested": self.requested,
             "allowedDecisions": (
-                list(self.allowed_decisions) if self.allowed_decisions else None
+                list(self.allowed_decisions)
+                if self.allowed_decisions is not None
+                else None
             ),
             "expiresAtMs": self.expires_at_ms,
             "decision": self.decision,
             "clientReq": self.client_req,
+            "resolution": self.resolution,
+            "idempotencyKey": self.idempotency_key,
             "engineReq": self.engine_req,
             "engineRes": self.engine_res,
             "resolved": self.resolved,
@@ -94,6 +104,8 @@ class BotRunInteractionPayload:
             for field, item in (
                 ("decision", patch.decision),
                 ("client_req", patch.client_req),
+                ("resolution", patch.resolution),
+                ("idempotency_key", patch.idempotency_key),
                 ("engine_req", patch.engine_req),
                 ("engine_res", patch.engine_res),
                 ("resolved", patch.resolved),
@@ -158,9 +170,9 @@ def _optional_int(value: JsonObject, key: str) -> int | None:
     return item
 
 
-def _optional_str_tuple(value: JsonObject, key: str) -> tuple[str, ...]:
+def _optional_str_tuple(value: JsonObject, key: str) -> tuple[str, ...] | None:
     if key not in value:
-        return ()
+        return None
     item = value[key]
     if not isinstance(item, list) or any(
         not isinstance(decision, str) or not decision for decision in item

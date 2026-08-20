@@ -9,7 +9,7 @@
   - chunk.type == "aborted"   → SSE event: chat (中止)
   - chunk.type == "agent"     → SSE event: agent (引擎事件)
   - chunk.type == "heartbeat" → SSE 注释帧: : heartbeat
-  - chunk.type == "interaction" → SSE event: interaction.requested / interaction.resolved
+  - chunk.type == "interaction" → SSE event: interaction (扁平 BCN 数据)
   - chunk.type == "usage"     → 无独立事件（忽略）
 """
 
@@ -20,6 +20,21 @@ import time
 from typing import Any
 
 from secbaas.community.api.sse import SseEvent, StreamChunk
+from secbaas.community.logger import get_logger
+
+logger = get_logger("core-service")
+
+_INTERACTION_EVENT_PHASES = {
+    "interaction.requested": "requested",
+    "interaction.resolved": "resolved",
+    "mode_transition.resolved": "resolved",
+}
+_INTERACTION_KINDS = {"ask_user", "exec", "mode_switch"}
+_DEFAULT_EXEC_OPTIONS = (
+    {"label": "Allow once", "decision": "allow-once"},
+    {"label": "Allow always", "decision": "allow-always"},
+    {"label": "Deny", "decision": "deny"},
+)
 
 
 class DefaultStreamConverter:
@@ -47,7 +62,7 @@ class DefaultStreamConverter:
         return "default"
 
     def convert(self, chunk: StreamChunk, *, run_id: str) -> SseEvent | None:
-        converted = _transform_chunk(chunk, _engine_name(chunk))
+        converted = _transform_chunk(chunk, _engine_name(chunk), run_id)
         if converted is None:
             return None
         if converted["event"].startswith(":"):
@@ -101,7 +116,11 @@ def _agent_payload(chunk: StreamChunk) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _transform_chunk(chunk: StreamChunk, engine: str) -> dict[str, Any] | None:
+def _transform_chunk(
+    chunk: StreamChunk,
+    engine: str,
+    run_id: str,
+) -> dict[str, Any] | None:
     """Route by StreamChunk.type. delta/final/error are chat events built from
     the chunk's own fields; agent events read the raw engine payload."""
     ctype = chunk.type
@@ -146,7 +165,7 @@ def _transform_chunk(chunk: StreamChunk, engine: str) -> dict[str, Any] | None:
         return _transform_agent(_agent_payload(chunk), engine)
 
     if ctype == "interaction":
-        return _transform_interaction(chunk)
+        return _transform_interaction(chunk, run_id)
 
     if ctype == "heartbeat":
         return {"event": ": heartbeat", "data": {}}
@@ -155,17 +174,711 @@ def _transform_chunk(chunk: StreamChunk, engine: str) -> dict[str, Any] | None:
     return None
 
 
-def _transform_interaction(chunk: StreamChunk) -> dict[str, Any] | None:
+def _transform_interaction(
+    chunk: StreamChunk,
+    run_id: str,
+) -> dict[str, Any] | None:
     metadata = chunk.metadata or {}
     event = metadata.get("event")
-    if event not in {"interaction.requested", "interaction.resolved"}:
+    if event not in _INTERACTION_EVENT_PHASES:
+        _warn_interaction(
+            run_id=run_id,
+            field_path="metadata.event",
+            error_type="unsupported_event",
+        )
         return None
-    payload = metadata.get("payload")
+
+    envelope = metadata.get("payload")
+    if not isinstance(envelope, dict):
+        _warn_interaction(
+            run_id=run_id,
+            field_path="metadata.payload",
+            error_type="invalid_envelope",
+        )
+        return None
+    if envelope.get("type") != "event" or envelope.get("event") != event:
+        _warn_interaction(
+            run_id=run_id,
+            field_path="metadata.payload",
+            error_type="invalid_envelope",
+        )
+        return None
+
+    payload = envelope.get("payload")
     if not isinstance(payload, dict):
+        _warn_interaction(
+            run_id=run_id,
+            field_path="metadata.payload.payload",
+            error_type="invalid_envelope",
+        )
         return None
-    # Payload is already the public protocol envelope. The generic builder will
-    # only set missing runId/ts and assign the SSE seq/id.
-    return {"event": event, "data": payload}
+
+    phase = _INTERACTION_EVENT_PHASES[event]
+    data = _common_interaction_data(payload, phase=phase, run_id=run_id)
+    if data is None:
+        return None
+
+    if phase == "resolved":
+        _copy_present(
+            payload,
+            data,
+            ("decision", "action", "answers", "idempotencyKey"),
+        )
+        return {"event": "interaction", "data": data}
+
+    try:
+        if data["kind"] == "ask_user":
+            converted = _transform_ask_user_requested(
+                payload,
+                data,
+                run_id=run_id,
+            )
+        elif data["kind"] == "exec":
+            converted = _transform_exec_requested(
+                payload,
+                data,
+                run_id=run_id,
+            )
+        elif data["kind"] == "mode_switch":
+            converted = _transform_mode_switch_requested(
+                payload,
+                data,
+                run_id=run_id,
+            )
+        else:
+            # Kind-specific requested mappings are added independently. Dropping an
+            # unsupported requested shape is safer than leaking the Engine payload.
+            return None
+        if not converted:
+            return None
+        return {"event": "interaction", "data": data}
+    except Exception as exc:
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=data["interactionId"],
+            kind=data["kind"],
+            field_path="kind_converter",
+            error_type=type(exc).__name__,
+        )
+        return None
+
+
+def _transform_ask_user_requested(
+    payload: dict[str, Any],
+    data: dict[str, Any],
+    *,
+    run_id: str,
+) -> bool:
+    raw_questions = payload.get("questions")
+    if isinstance(raw_questions, list):
+        for index, question in enumerate(raw_questions):
+            if not isinstance(question, dict):
+                continue
+            for key in ("secret", "isSecret"):
+                if key in question:
+                    _warn_interaction(
+                        run_id=run_id,
+                        interaction_id=data["interactionId"],
+                        kind=data["kind"],
+                        field_path=f"payload.questions[{index}].{key}",
+                        error_type="secret_question_unsupported",
+                    )
+                    return False
+
+    questions = _convert_ask_user_questions(
+        raw_questions,
+        run_id=run_id,
+        interaction_id=data["interactionId"],
+        kind=data["kind"],
+    )
+    if not questions:
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=data["interactionId"],
+            kind=data["kind"],
+            field_path="payload.questions",
+            error_type="no_valid_questions",
+        )
+        return False
+    data["questions"] = questions
+    return True
+
+
+def _convert_ask_user_questions(
+    value: Any,
+    *,
+    run_id: str,
+    interaction_id: str,
+    kind: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=interaction_id,
+            kind=kind,
+            field_path="payload.questions",
+            error_type="invalid_type",
+        )
+        return []
+
+    converted: list[dict[str, Any]] = []
+    seen_headers: set[str] = set()
+    for index, question in enumerate(value):
+        field_path = f"payload.questions[{index}]"
+        if not isinstance(question, dict):
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=field_path,
+                error_type="invalid_type",
+            )
+            continue
+
+        question_text = _non_empty_str(question.get("question"))
+        if question_text is None:
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=f"{field_path}.question",
+                error_type="missing_required_field",
+            )
+            continue
+
+        header = _non_empty_str(question.get("header"))
+        if header is None:
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=f"{field_path}.header",
+                error_type="invalid_header",
+            )
+            return []
+
+        converted_question: dict[str, Any] = {
+            "questionId": f"question_{index + 1}",
+            "question": question_text,
+            "header": header,
+        }
+        has_options = "options" in question
+        if has_options:
+            options = _convert_ask_user_options(
+                question.get("options"),
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=f"{field_path}.options",
+            )
+            if not options:
+                continue
+            converted_question["options"] = options
+
+        _copy_optional_bool(
+            question,
+            converted_question,
+            "multiSelect",
+            run_id=run_id,
+            interaction_id=interaction_id,
+            kind=kind,
+            field_path=f"{field_path}.multiSelect",
+        )
+        if has_options:
+            _copy_optional_bool(
+                question,
+                converted_question,
+                "allowOther",
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=f"{field_path}.allowOther",
+            )
+        elif question.get("allowOther") is not None:
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=f"{field_path}.allowOther",
+                error_type="unsupported_without_options",
+            )
+
+        if header in seen_headers:
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=f"{field_path}.header",
+                error_type="duplicate_header",
+            )
+        if len(converted) >= 4:
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=field_path,
+                error_type="max_items_exceeded",
+            )
+            continue
+        seen_headers.add(header)
+        converted.append(converted_question)
+    return converted
+
+
+def _convert_ask_user_options(
+    value: Any,
+    *,
+    run_id: str,
+    interaction_id: str,
+    kind: str,
+    field_path: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=interaction_id,
+            kind=kind,
+            field_path=field_path,
+            error_type="invalid_type",
+        )
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=interaction_id,
+            kind=kind,
+            field_path=field_path,
+            error_type="no_valid_options",
+        )
+        return []
+
+    converted: list[dict[str, Any]] = []
+    option_positions: dict[str, int] = {}
+    for index, option in enumerate(value):
+        option_path = f"{field_path}[{index}]"
+        if not isinstance(option, dict):
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=option_path,
+                error_type="invalid_type",
+            )
+            continue
+
+        label = _non_empty_str(option.get("label"))
+        option_value = _non_empty_str(option.get("decision")) or _non_empty_str(
+            option.get("value")
+        )
+        if label is None:
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=option_path,
+                error_type="missing_required_field",
+            )
+            continue
+        if option_value is None:
+            option_value = label
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=option_path,
+                error_type="legacy_label_fallback",
+            )
+
+        converted_option: dict[str, Any] = {
+            "label": label,
+            "value": option_value,
+        }
+        _copy_present(option, converted_option, ("description",))
+        existing_position = option_positions.get(option_value)
+        if existing_position is not None:
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=f"{option_path}.value",
+                error_type="duplicate_option_value",
+            )
+            converted[existing_position] = converted_option
+            continue
+        if len(converted) >= 4:
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=option_path,
+                error_type="max_items_exceeded",
+            )
+            continue
+        option_positions[option_value] = len(converted)
+        converted.append(converted_option)
+    if not converted:
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=interaction_id,
+            kind=kind,
+            field_path=field_path,
+            error_type="no_valid_options",
+        )
+    return converted
+
+
+def _copy_optional_bool(
+    source: dict[str, Any],
+    target: dict[str, Any],
+    key: str,
+    *,
+    run_id: str,
+    interaction_id: str,
+    kind: str,
+    field_path: str,
+) -> None:
+    value = source.get(key)
+    if value is None:
+        return
+    if isinstance(value, bool):
+        target[key] = value
+        return
+    _warn_interaction(
+        run_id=run_id,
+        interaction_id=interaction_id,
+        kind=kind,
+        field_path=field_path,
+        error_type="invalid_type",
+    )
+
+
+def _transform_exec_requested(
+    payload: dict[str, Any],
+    data: dict[str, Any],
+    *,
+    run_id: str,
+) -> bool:
+    command = _non_empty_str(payload.get("command"))
+    if command is None:
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=data["interactionId"],
+            kind=data["kind"],
+            field_path="payload.command",
+            error_type="missing_required_field",
+        )
+        return False
+    data["command"] = command
+    _copy_present(payload, data, ("cwd",))
+
+    if "options" not in payload:
+        data["options"] = [dict(option) for option in _DEFAULT_EXEC_OPTIONS]
+        return True
+
+    options = _convert_decision_options(
+        payload.get("options"),
+        run_id=run_id,
+        interaction_id=data["interactionId"],
+        kind=data["kind"],
+    )
+    if not options:
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=data["interactionId"],
+            kind=data["kind"],
+            field_path="payload.options",
+            error_type="no_valid_options",
+        )
+        return False
+    data["options"] = options
+    return True
+
+
+def _transform_mode_switch_requested(
+    payload: dict[str, Any],
+    data: dict[str, Any],
+    *,
+    run_id: str,
+) -> bool:
+    subject = payload.get("subject")
+    subject = subject if isinstance(subject, dict) else {}
+    _copy_first_present(
+        data,
+        "fromMode",
+        _non_empty_str(payload.get("fromMode")),
+        _non_empty_str(subject.get("fromMode")),
+    )
+    _copy_first_present(
+        data,
+        "targetMode",
+        _non_empty_str(payload.get("toMode")),
+        _non_empty_str(subject.get("toMode")),
+    )
+
+    options = _convert_mode_switch_options(
+        payload.get("options"),
+        run_id=run_id,
+        interaction_id=data["interactionId"],
+        kind=data["kind"],
+    )
+    if not options:
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=data["interactionId"],
+            kind=data["kind"],
+            field_path="payload.options",
+            error_type="no_valid_options",
+        )
+        return False
+    data["options"] = options
+    return True
+
+
+def _common_interaction_data(
+    payload: dict[str, Any],
+    *,
+    phase: str,
+    run_id: str,
+) -> dict[str, Any] | None:
+    interaction_id = _non_empty_str(payload.get("interactionId")) or _non_empty_str(
+        payload.get("id")
+    )
+    kind = _non_empty_str(payload.get("kind"))
+    if interaction_id is None:
+        _warn_interaction(
+            run_id=run_id,
+            kind=kind or "",
+            field_path="interactionId",
+            error_type="missing_required_field",
+        )
+        return None
+    if kind is None:
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=interaction_id,
+            field_path="kind",
+            error_type="missing_required_field",
+        )
+        return None
+    if kind not in _INTERACTION_KINDS:
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=interaction_id,
+            kind=kind,
+            field_path="payload.kind",
+            error_type="unsupported_kind",
+        )
+        return None
+
+    payload_phase = payload.get("phase")
+    if payload_phase is not None and payload_phase != phase:
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=interaction_id,
+            kind=kind,
+            field_path="phase",
+            error_type="phase_conflict",
+        )
+
+    data: dict[str, Any] = {
+        "interactionId": interaction_id,
+        "kind": kind,
+        "phase": phase,
+    }
+    _copy_first_present(data, "title", payload.get("title"))
+    _copy_first_present(data, "description", payload.get("description"))
+
+    subject = payload.get("subject")
+    subject_tool_call_id = (
+        subject.get("toolCallId") if isinstance(subject, dict) else None
+    )
+    _copy_first_present(
+        data,
+        "toolCallId",
+        _non_empty_str(payload.get("toolCallId")),
+        _non_empty_str(subject_tool_call_id),
+    )
+    return data
+
+
+def _convert_decision_options(
+    value: Any,
+    *,
+    run_id: str,
+    interaction_id: str,
+    kind: str,
+) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=interaction_id,
+            kind=kind,
+            field_path="payload.options",
+            error_type="invalid_type",
+        )
+        return []
+
+    converted: list[dict[str, str]] = []
+    decision_positions: dict[str, int] = {}
+    for index, option in enumerate(value):
+        field_path = f"payload.options[{index}]"
+        if not isinstance(option, dict):
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=field_path,
+                error_type="invalid_type",
+            )
+            continue
+
+        label = _non_empty_str(option.get("label"))
+        decision = _non_empty_str(option.get("decision")) or _non_empty_str(
+            option.get("value")
+        )
+        if label is None or decision is None:
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=field_path,
+                error_type="missing_required_field",
+            )
+            continue
+        converted_option = {"label": label, "decision": decision}
+        existing_position = decision_positions.get(decision)
+        if existing_position is not None:
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=f"{field_path}.decision",
+                error_type="duplicate_option_decision",
+            )
+            converted[existing_position] = converted_option
+            continue
+        decision_positions[decision] = len(converted)
+        converted.append(converted_option)
+    return converted
+
+
+def _convert_mode_switch_options(
+    value: Any,
+    *,
+    run_id: str,
+    interaction_id: str,
+    kind: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        _warn_interaction(
+            run_id=run_id,
+            interaction_id=interaction_id,
+            kind=kind,
+            field_path="payload.options",
+            error_type="invalid_type",
+        )
+        return []
+
+    converted: list[dict[str, Any]] = []
+    decision_positions: dict[str, int] = {}
+    for index, option in enumerate(value):
+        field_path = f"payload.options[{index}]"
+        if not isinstance(option, dict):
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=field_path,
+                error_type="invalid_type",
+            )
+            continue
+
+        label = _non_empty_str(option.get("label"))
+        decision = _non_empty_str(option.get("decision")) or _non_empty_str(
+            option.get("value")
+        )
+        if label is None or decision is None:
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=field_path,
+                error_type="missing_required_field",
+            )
+            continue
+
+        converted_option: dict[str, Any] = {
+            "label": label,
+            "decision": decision,
+        }
+        if "targetMode" in option:
+            target_mode = _non_empty_str(option.get("targetMode"))
+            if target_mode is None:
+                _warn_interaction(
+                    run_id=run_id,
+                    interaction_id=interaction_id,
+                    kind=kind,
+                    field_path=f"{field_path}.targetMode",
+                    error_type="invalid_type",
+                )
+            else:
+                converted_option["targetMode"] = target_mode
+        _copy_optional_bool(
+            option,
+            converted_option,
+            "recommended",
+            run_id=run_id,
+            interaction_id=interaction_id,
+            kind=kind,
+            field_path=f"{field_path}.recommended",
+        )
+
+        existing_position = decision_positions.get(decision)
+        if existing_position is not None:
+            _warn_interaction(
+                run_id=run_id,
+                interaction_id=interaction_id,
+                kind=kind,
+                field_path=f"{field_path}.decision",
+                error_type="duplicate_option_decision",
+            )
+            converted[existing_position] = converted_option
+            continue
+        decision_positions[decision] = len(converted)
+        converted.append(converted_option)
+    return converted
+
+
+def _non_empty_str(value: Any) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _copy_first_present(
+    target: dict[str, Any],
+    key: str,
+    *values: Any,
+) -> None:
+    for value in values:
+        if value is not None:
+            target[key] = value
+            return
+
+
+def _warn_interaction(
+    *,
+    run_id: str,
+    interaction_id: str = "",
+    kind: str = "",
+    field_path: str,
+    error_type: str,
+) -> None:
+    logger.warning(
+        "Interaction conversion warning: run_id=%s interaction_id=%s "
+        "kind=%s field_path=%s error_type=%s",
+        run_id,
+        interaction_id,
+        kind,
+        field_path,
+        error_type,
+    )
 
 
 def _transform_agent(payload: dict[str, Any], engine: str) -> dict[str, Any] | None:

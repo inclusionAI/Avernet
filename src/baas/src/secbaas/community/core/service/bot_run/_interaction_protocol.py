@@ -6,8 +6,16 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
+from secbaas.community.api.bot_interaction import InteractionResolution
+
 JsonObject = dict[str, object]
-InteractionEventName = Literal["interaction.requested", "interaction.resolved"]
+InteractionEventName = Literal[
+    "interaction.requested",
+    "interaction.resolved",
+    "mode_transition.resolved",
+]
+
+_DEFAULT_EXEC_DECISIONS = ("allow-once", "allow-always", "deny")
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +65,21 @@ class EngineInteractionResolvedEvent:
             envelope=_event_envelope("interaction.resolved", payload),
         )
 
+    @classmethod
+    def from_mode_transition_payload(
+        cls,
+        *,
+        session_key: str,
+        payload: JsonObject,
+    ) -> EngineInteractionResolvedEvent:
+        if payload.get("kind") != "mode_switch":
+            raise ValueError("mode transition resolved kind must be mode_switch")
+        return cls(
+            session_key=_required_identity(session_key, "sessionKey"),
+            interaction_id=_interaction_id(payload),
+            envelope=_event_envelope("mode_transition.resolved", payload),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class EngineInteractionResolveExchange:
@@ -94,17 +117,39 @@ def build_interaction_resolve_request(
     *,
     request_id: str,
     interaction_id: str,
-    decision: str,
+    resolution: InteractionResolution,
 ) -> JsonObject:
     """Build the exact engine request frame sent over websocket."""
+    identity_key = (
+        "transitionId" if resolution.kind == "mode_switch" else "interactionId"
+    )
+    method = (
+        "mode_transition.resolve"
+        if resolution.kind == "mode_switch"
+        else "interaction.resolve"
+    )
+    params: JsonObject = {
+        identity_key: _required_identity(interaction_id, identity_key),
+        "decision": resolution.decision,
+    }
+    if resolution.kind == "ask_user":
+        if resolution.answer is not None:
+            params["answer"] = resolution.answer
+        if resolution.message is not None:
+            params["message"] = resolution.message
+        if resolution.values is not None:
+            params["values"] = dict(resolution.values)
+        if resolution.answers is not None:
+            params["answers"] = dict(resolution.answers)
+        if resolution.selected_options is not None:
+            params["selectedOptions"] = [
+                list(options) for options in resolution.selected_options
+            ]
     return {
         "type": "req",
         "id": _required_identity(request_id, "request id"),
-        "method": "interaction.resolve",
-        "params": {
-            "interactionId": _required_identity(interaction_id, "interactionId"),
-            "decision": _required_identity(decision, "decision"),
-        },
+        "method": method,
+        "params": params,
     }
 
 
@@ -125,24 +170,41 @@ def _event_envelope(event: InteractionEventName, payload: JsonObject) -> JsonObj
 
 
 def _allowed_decisions(payload: JsonObject) -> tuple[str, ...]:
+    kind = payload.get("kind")
+    if kind == "ask_user":
+        return ("submit", "cancel")
+    if kind not in {"exec", "mode_switch"}:
+        return ()
+
+    if "options" not in payload:
+        if kind == "exec":
+            return _DEFAULT_EXEC_DECISIONS
+        return ()
+
     options = payload.get("options")
     if options is None:
         return ()
     if not isinstance(options, list):
-        raise ValueError("interaction options must be an array")
+        return ()
 
     decisions: list[str] = []
     for option in options:
         if not isinstance(option, dict):
-            raise ValueError("interaction option must be an object")
-        value = option.get("decision")
+            continue
+        if _non_empty_str(option.get("label")) is None:
+            continue
+        value = _non_empty_str(option.get("decision")) or _non_empty_str(
+            option.get("value")
+        )
         if value is None:
-            value = option.get("value")
-        if not isinstance(value, str) or not value:
-            raise ValueError("interaction option is missing decision")
+            continue
         if value not in decisions:
             decisions.append(value)
     return tuple(decisions)
+
+
+def _non_empty_str(value: object) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _optional_int(payload: JsonObject, key: str) -> int | None:

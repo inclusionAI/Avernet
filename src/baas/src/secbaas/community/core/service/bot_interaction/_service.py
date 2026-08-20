@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 
+from secbaas.community.api.bot_interaction import (
+    BotInteractionService,
+    InteractionBadRequestError,
+    InteractionConflictError,
+    InteractionDispatch,
+    InteractionNotFoundError,
+    InteractionResolution,
+    InteractionResolveResult,
+    InteractionServiceError,
+)
 from secbaas.community.core.repository.bot_run_interaction import (
     BotRunInteractionPayload,
     BotRunInteractionPayloadPatch,
@@ -12,42 +21,18 @@ from secbaas.community.core.repository.bot_run_interaction import (
     JsonObject,
 )
 
-
-class InteractionServiceError(Exception):
-    """Base interaction service error."""
-
-    code = "INTERACTION_ERROR"
-
-
-class InteractionBadRequestError(InteractionServiceError):
-    code = "BAD_REQUEST"
-
-
-class InteractionNotFoundError(InteractionServiceError):
-    code = "NOT_FOUND"
+# Re-export the contract types so existing ``core.service.bot_interaction``
+# importers keep resolving them without touching the delivery layer.
+__all__ = [
+    "BotInteractionService",
+    "DefaultBotInteractionService",
+    "InteractionDispatch",
+    "InteractionResolveResult",
+    "InteractionServiceError",
+]
 
 
-class InteractionConflictError(InteractionServiceError):
-    code = "CONFLICT"
-
-
-@dataclass(frozen=True, slots=True)
-class InteractionDispatch:
-    """Validated command claimed by the websocket owner."""
-
-    session_key: str
-    interaction_id: str
-    decision: str
-
-
-@dataclass(frozen=True, slots=True)
-class InteractionResolveResult:
-    """Successful state transition returned to an uplink adapter."""
-
-    interaction_id: str
-
-
-class BotInteractionService:
+class DefaultBotInteractionService(BotInteractionService):
     """Transport-agnostic interaction state service.
 
     Transport adapters validate protocol shapes and pass identity explicitly.
@@ -83,20 +68,29 @@ class BotInteractionService:
         *,
         session_key: str,
         interaction_id: str,
-        decision: str,
+        resolution: InteractionResolution,
         request_envelope: JsonObject,
+        idempotency_key: str | None = None,
     ) -> InteractionResolveResult:
         record = self._repo.get(session_key=session_key, interaction_id=interaction_id)
         if record is None:
             raise InteractionNotFoundError("interaction not found")
+        resolution_payload = resolution.to_dict()
         if record.state != "requested":
+            if self._is_idempotent_replay(
+                record.payload,
+                idempotency_key=idempotency_key,
+                resolution_payload=resolution_payload,
+            ):
+                return InteractionResolveResult(interaction_id=interaction_id)
             raise InteractionConflictError(f"interaction state is {record.state}")
         if self._is_expired(record.payload.expires_at_ms):
             self.mark_expired(session_key=session_key, interaction_id=interaction_id)
             raise InteractionConflictError("interaction expired")
+        allowed_decisions = record.payload.allowed_decisions
         if (
-            record.payload.allowed_decisions
-            and decision not in record.payload.allowed_decisions
+            allowed_decisions is not None
+            and resolution.decision not in allowed_decisions
         ):
             raise InteractionBadRequestError(
                 "decision is not allowed by interaction options"
@@ -108,11 +102,23 @@ class BotInteractionService:
             from_states=frozenset({"requested"}),
             to_state="queued",
             patch=BotRunInteractionPayloadPatch(
-                decision=decision,
+                decision=resolution.decision,
                 client_req=request_envelope,
+                resolution=resolution_payload,
+                idempotency_key=idempotency_key,
             ),
         )
         if updated is None:
+            latest = self._repo.get(
+                session_key=session_key,
+                interaction_id=interaction_id,
+            )
+            if latest is not None and self._is_idempotent_replay(
+                latest.payload,
+                idempotency_key=idempotency_key,
+                resolution_payload=resolution_payload,
+            ):
+                return InteractionResolveResult(interaction_id=interaction_id)
             raise InteractionConflictError("interaction already resolved or queued")
         return InteractionResolveResult(interaction_id=interaction_id)
 
@@ -130,6 +136,26 @@ class BotInteractionService:
                 error="queued interaction has no decision",
             )
             return None
+        try:
+            resolution = (
+                InteractionResolution.from_dict(record.payload.resolution)
+                if record.payload.resolution is not None
+                else InteractionResolution(decision=decision)
+            )
+        except ValueError:
+            self.mark_failed(
+                session_key=session_key,
+                interaction_id=interaction_id,
+                error="queued interaction has invalid resolution",
+            )
+            return None
+        if resolution.decision != decision:
+            self.mark_failed(
+                session_key=session_key,
+                interaction_id=interaction_id,
+                error="queued interaction resolution decision does not match",
+            )
+            return None
         claimed = self._repo.transition(
             session_key=session_key,
             interaction_id=interaction_id,
@@ -142,7 +168,7 @@ class BotInteractionService:
         return InteractionDispatch(
             session_key=session_key,
             interaction_id=interaction_id,
-            decision=decision,
+            resolution=resolution,
         )
 
     def should_poll(self, *, session_key: str, interaction_id: str) -> bool:
@@ -213,6 +239,21 @@ class BotInteractionService:
             )
             is not None
         )
+
+    @staticmethod
+    def _is_idempotent_replay(
+        payload: BotRunInteractionPayload,
+        *,
+        idempotency_key: str | None,
+        resolution_payload: JsonObject,
+    ) -> bool:
+        if idempotency_key is None or payload.idempotency_key != idempotency_key:
+            return False
+        if payload.resolution != resolution_payload:
+            raise InteractionConflictError(
+                "idempotency key was reused with a different resolution"
+            )
+        return True
 
     @staticmethod
     def _is_expired(expires_at_ms: int | None) -> bool:

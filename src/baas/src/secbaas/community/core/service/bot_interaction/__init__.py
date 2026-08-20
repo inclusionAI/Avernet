@@ -1,6 +1,11 @@
-"""Bot interaction core service."""
+"""Bot interaction core service.
 
-from ._service import (
+The transport-agnostic contract lives in ``community.api.bot_interaction``;
+this module provides the concrete ``DefaultBotInteractionService`` that
+``core`` wires into the application container.
+"""
+
+from secbaas.community.api.bot_interaction import (
     BotInteractionService,
     InteractionBadRequestError,
     InteractionConflictError,
@@ -10,8 +15,11 @@ from ._service import (
     InteractionServiceError,
 )
 
+from ._service import DefaultBotInteractionService
+
 __all__ = [
     "BotInteractionService",
+    "DefaultBotInteractionService",
     "InteractionBadRequestError",
     "InteractionConflictError",
     "InteractionDispatch",

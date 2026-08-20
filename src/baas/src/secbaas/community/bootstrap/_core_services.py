@@ -12,7 +12,7 @@ from secbaas.community.core.service.bcn.uplink import (
     BcnUplinkClient,
     BcnUplinkConfig,
 )
-from secbaas.community.core.service.bot_interaction import BotInteractionService
+from secbaas.community.core.service.bot_interaction import DefaultBotInteractionService
 from secbaas.community.core.service.bot_manage import (
     DefaultBotCrudService,
     DefaultBotManagementService,
@@ -219,7 +219,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     )
 
     bot_interaction_service = providers.Singleton(
-        BotInteractionService,
+        DefaultBotInteractionService,
         repository=bot_run_interaction_repository,
     )
 
@@ -647,6 +647,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         bcn_api_key_prefix=config.bcn.api_key.prefix,
         uplink_client=bcn_uplink_client,
         run_repository=bot_run_repository,
+        interaction_service=bot_interaction_service,
     )
 
     # ── SSE stream converter factory ────────────────────────────────────────

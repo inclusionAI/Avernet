@@ -11,7 +11,7 @@ from secbaas.community.core.repository.bot_run_interaction import (
     BotRunInteractionPayloadPatch,
     OrmBotRunInteractionRepository,
 )
-from secbaas.community.plugins.database.stub.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 
 
 @pytest.fixture
@@ -61,6 +61,8 @@ def test_transition_merges_typed_payload(
         patch=BotRunInteractionPayloadPatch(
             decision="allow-once",
             client_req={"type": "req"},
+            resolution={"kind": "exec", "decision": "allow-once"},
+            idempotency_key="idem-1",
         ),
     )
 
@@ -69,6 +71,11 @@ def test_transition_merges_typed_payload(
     assert queued.payload.requested == {"type": "event"}
     assert queued.payload.decision == "allow-once"
     assert queued.payload.client_req == {"type": "req"}
+    assert queued.payload.resolution == {
+        "kind": "exec",
+        "decision": "allow-once",
+    }
+    assert queued.payload.idempotency_key == "idem-1"
 
 
 def test_late_payload_write_is_rejected_after_terminal_transition(

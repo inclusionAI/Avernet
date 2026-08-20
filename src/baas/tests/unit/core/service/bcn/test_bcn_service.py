@@ -7,6 +7,8 @@ import pytest
 
 from secbaas.community.api.bcn import (
     Attachment,
+    BcnInteractionAnswer,
+    BcnInteractionResolveInput,
     BotRef,
     ChatHistoryInput,
     ChatInjectInput,
@@ -14,6 +16,10 @@ from secbaas.community.api.bcn import (
     ContentBlock,
     DownlinkMessage,
     FromRef,
+)
+from secbaas.community.api.bot_interaction import (
+    InteractionResolution,
+    InteractionResolveResult,
 )
 from secbaas.community.core.service.bcn._bcn_service import (
     DefaultBcnDownlinkService,
@@ -95,13 +101,29 @@ def mock_run_repo():
 
 
 @pytest.fixture
-def service(mock_bot_runner, mock_api_key_repo, mock_uplink_client, mock_run_repo):
+def mock_interaction_service():
+    service = MagicMock()
+    service.resolve.return_value = InteractionResolveResult(
+        interaction_id="interaction-ask-1"
+    )
+    return service
+
+
+@pytest.fixture
+def service(
+    mock_bot_runner,
+    mock_api_key_repo,
+    mock_uplink_client,
+    mock_run_repo,
+    mock_interaction_service,
+):
     return DefaultBcnDownlinkService(
         bot_runner=mock_bot_runner,
         api_key_repository=mock_api_key_repo,
         bcn_api_key_prefix="baas-prefix",
         uplink_client=mock_uplink_client,
         run_repository=mock_run_repo,
+        interaction_service=mock_interaction_service,
     )
 
 
@@ -154,6 +176,182 @@ def _make_attachment(attachment_id="att_1", **overrides) -> Attachment:
         file_name="test.png",
         url=f"https://cdn.example.com/{attachment_id}",
         **overrides,
+    )
+
+
+def _make_interaction_resolve_input(**overrides) -> BcnInteractionResolveInput:
+    defaults = dict(
+        id="bcn-resolve-1",
+        session_id="session-1",
+        bcn_group_id="group-1",
+        interaction_id="interaction-ask-1",
+        kind="ask_user",
+        idempotency_key="idem-ask-1",
+        action="submit",
+        decision=None,
+        answers={
+            "deploy_target": BcnInteractionAnswer(
+                values=("staging",),
+                question="what's your deploy target?",
+                header="Deployment environment",
+            ),
+            "components": BcnInteractionAnswer(
+                values=("web", "worker"),
+                question="whats' the components?",
+                header="Components",
+            ),
+        },
+        request_envelope={
+            "type": "req",
+            "id": "bcn-resolve-1",
+            "method": "interaction.resolve",
+        },
+    )
+    defaults.update(overrides)
+    return BcnInteractionResolveInput(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_handle_ask_user_resolve_normalizes_all_values_as_ordinary(
+    service, mock_interaction_service
+) -> None:
+    result = await service.handle_interaction_resolve(
+        _make_interaction_resolve_input(
+            answers={
+                "deploy_target": BcnInteractionAnswer(
+                    values=("staging",),
+                    question="what's your deploy target?",
+                    header="Deployment environment",
+                ),
+                "components": BcnInteractionAnswer(
+                    values=("web", "worker", "custom raw value"),
+                    question="whats' the components?",
+                    header="Components",
+                ),
+            }
+        )
+    )
+
+    assert result.ok is True
+    mock_interaction_service.resolve.assert_called_once_with(
+        session_key="session-1",
+        interaction_id="interaction-ask-1",
+        resolution=InteractionResolution(
+            kind="ask_user",
+            decision="submit",
+            answer=(
+                "Deployment environment: staging；"
+                "Components: web，worker，custom raw value"
+            ),
+            message=(
+                "Deployment environment: staging；"
+                "Components: web，worker，custom raw value"
+            ),
+            values={
+                "Deployment environment": "staging",
+                "Components": "web，worker，custom raw value",
+            },
+            answers={
+                "what's your deploy target?": "staging",
+                "whats' the components?": "web，worker，custom raw value",
+            },
+            selected_options=(
+                ("staging",),
+                ("web", "worker", "custom raw value"),
+            ),
+        ),
+        request_envelope={
+            "type": "req",
+            "id": "bcn-resolve-1",
+            "method": "interaction.resolve",
+        },
+        idempotency_key="idem-ask-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_ask_user_resolve_duplicate_headers_last_write_wins_safely(
+    service, mock_interaction_service, caplog
+) -> None:
+    await service.handle_interaction_resolve(
+        _make_interaction_resolve_input(
+            answers={
+                "first_question_id": BcnInteractionAnswer(
+                    values=("first private value",),
+                    question="first private question",
+                    header="Shared private header",
+                ),
+                "second_question_id": BcnInteractionAnswer(
+                    values=("second private value",),
+                    question="second private question",
+                    header="Shared private header",
+                ),
+            }
+        )
+    )
+
+    resolution = mock_interaction_service.resolve.call_args.kwargs["resolution"]
+    assert resolution.answer == (
+        "Shared private header: first private value；"
+        "Shared private header: second private value"
+    )
+    assert resolution.message == resolution.answer
+    assert resolution.values == {"Shared private header": "second private value"}
+    assert resolution.answers == {
+        "first private question": "first private value",
+        "second private question": "second private value",
+    }
+    assert resolution.selected_options == (
+        ("first private value",),
+        ("second private value",),
+    )
+
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if "duplicate_answer_header" in record.getMessage()
+    ]
+    assert len(warnings) == 1
+    assert "Shared private header" not in warnings[0]
+    assert "first private question" not in warnings[0]
+    assert "second private value" not in warnings[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_ask_user_cancel_omits_answer_fields(
+    service, mock_interaction_service
+) -> None:
+    await service.handle_interaction_resolve(
+        _make_interaction_resolve_input(action="cancel", answers=None)
+    )
+
+    assert mock_interaction_service.resolve.call_args.kwargs["resolution"] == (
+        InteractionResolution(kind="ask_user", decision="cancel")
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "decision"),
+    [("exec", "allow-once"), ("exec", "deny"), ("mode_switch", "stay")],
+)
+async def test_handle_decision_resolve_preserves_kind_and_decision(
+    service,
+    mock_interaction_service,
+    kind,
+    decision,
+) -> None:
+    await service.handle_interaction_resolve(
+        _make_interaction_resolve_input(
+            kind=kind,
+            action=None,
+            decision=decision,
+            answers=None,
+        )
+    )
+
+    assert mock_interaction_service.resolve.call_args.kwargs["resolution"] == (
+        InteractionResolution(kind=kind, decision=decision)
     )
 
 
