@@ -8,8 +8,8 @@ CREATE TABLE IF NOT EXISTS ac_bot_mcp_installation (
     owner_id VARCHAR(128) NOT NULL,
     bot_id VARCHAR(100) NOT NULL,
     server_code VARCHAR(256) NOT NULL,
-    gmt_created DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    gmt_created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uk_bot_mcp_installation
       (avernet_tenant, env, owner_id, bot_id, server_code),

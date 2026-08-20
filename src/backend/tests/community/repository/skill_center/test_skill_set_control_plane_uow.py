@@ -335,9 +335,29 @@ def test_skill_set_control_plane_sql_only_adds_owner_scoped_mcp_installation():
     assert "CREATE TABLE IF NOT EXISTS ac_bot_mcp_installation" in sql
     assert "owner_id VARCHAR(128) NOT NULL" in sql
     assert "(avernet_tenant, env, owner_id, bot_id, server_code)" in sql
+    assert "DATETIME" not in sql
+    assert sql.count("TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP") == 2
     assert "ac_skill_set_create_idempotency" not in sql
     assert "ALTER TABLE ac_skill_set_skill" not in sql
     assert "ALTER TABLE ac_skill_set_mcp" not in sql
+
+
+def test_direct_installation_ddl_uses_standard_audit_columns_without_foreign_keys():
+    sql_path = (
+        Path(__file__).parents[4]
+        / "src"
+        / "agentclaw"
+        / "community"
+        / "core"
+        / "skill_center"
+        / "sql"
+        / "2026_08_20_bot_skill_installation.sql"
+    )
+    sql = sql_path.read_text(encoding="utf-8")
+
+    assert "FOREIGN KEY" not in sql
+    assert "DATETIME" not in sql
+    assert sql.count("TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP") == 2
 
 
 def test_skill_set_name_is_unique_for_bot_across_engines():
