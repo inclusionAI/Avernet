@@ -424,6 +424,7 @@ class SkillRepository(
                     BotSkillInstallation.avernet_tenant
                     == get_current_avernet_tenant(),
                     BotSkillInstallation.env == get_current_env(),
+                    BotSkillInstallation.owner_id == _normalize_user_id(user_id),
                     BotSkillInstallation.bot_id == bot_id,
                     BotSkillInstallation.skill_id == self.Skill.id,
                 )
@@ -471,6 +472,7 @@ class SkillRepository(
                     BotSkillInstallation.avernet_tenant
                     == get_current_avernet_tenant(),
                     BotSkillInstallation.env == get_current_env(),
+                    BotSkillInstallation.owner_id == _normalize_user_id(user_id),
                     BotSkillInstallation.bot_id == bot_id,
                     BotSkillInstallation.skill_id == self.Skill.id,
                 )
@@ -489,7 +491,9 @@ class SkillRepository(
             )
             return self._public_local_skill(*row) if row else None
 
-    def list_bot_installed_skills(self, *, env: str, bot_id: str) -> list[dict]:
+    def list_bot_installed_skills(
+        self, *, env: str, owner_id: str, bot_id: str
+    ) -> list[dict]:
         """Return assets selected by the active-only Installation fact."""
         from agentclaw.community.core.models.skill import BotSkillInstallation
 
@@ -504,6 +508,7 @@ class SkillRepository(
                     BotSkillInstallation.avernet_tenant
                     == get_current_avernet_tenant(),
                     BotSkillInstallation.env == env,
+                    BotSkillInstallation.owner_id == _normalize_user_id(owner_id),
                     BotSkillInstallation.bot_id == bot_id,
                     self.Skill.env == env,
                 )
@@ -516,6 +521,7 @@ class SkillRepository(
         self,
         *,
         env: str,
+        owner_id: str,
         bot_id: str,
     ):
         """列出精确 Bot 范围内的全部 local 来源行，不包含全局记录。"""
@@ -529,6 +535,7 @@ class SkillRepository(
                 db.query(self.Skill)
                 .filter(
                     self.Skill.env == env,
+                    self.Skill.user_id == _normalize_user_id(owner_id),
                     self.Skill.bolt_id == bot_id,
                     self.Skill.git_path.like("local://%"),
                 )
@@ -552,7 +559,7 @@ class SkillRepository(
         *,
         env: str,
         bot_id: str,
-        user_id: str,
+        owner_id: str,
         engine: str,
     ):
         """Return active SkillSet assets plus direct Installation assets.
@@ -569,7 +576,7 @@ class SkillRepository(
 
         skill_sets = SkillSetRepository(self._db)
         active_sets = skill_sets.get_all_active_skill_sets_for_env(
-            user_id=user_id,
+            user_id=owner_id,
             bolt_id=bot_id,
             engine_type=engine,
             env=env,
@@ -614,7 +621,9 @@ class SkillRepository(
                         mcp_dependencies=tuple(row.get("mcp_dependencies") or ()),
                     )
                 )
-        for row in self.list_bot_installed_skills(env=env, bot_id=bot_id):
+        for row in self.list_bot_installed_skills(
+            env=env, owner_id=owner_id, bot_id=bot_id
+        ):
             skill_id = int(row["id"])
             name = str(row["name"])
             git_path = str(row.get("git_path") or "")
@@ -1499,10 +1508,9 @@ class SkillSetRepository(
             )
             if skill_set is None or skill is None:
                 return False
-            # The F01 uniqueness migration makes an existing relation the
-            # successful, idempotent result required by the new control-plane
-            # contract.  Checking after both tenant-guarded parent lookups
-            # preserves the old cross-tenant false result.
+            # Existing membership remains the successful idempotent result.
+            # Canonical cross-Set uniqueness is enforced by the new control
+            # plane under its Bot mutation lease, not by this legacy writer.
             if (
                 db.query(self.SkillSetSkill)
                 .filter(
@@ -1518,9 +1526,6 @@ class SkillSetRepository(
                 self.SkillSetSkill(
                     skill_set_id=int(skill_set_id),
                     skill_id=int(skill_id),
-                    # System Default is a separate platform projection and is
-                    # deliberately excluded from ordinary-set uniqueness.
-                    bot_id=None if skill_set.is_default else skill_set.bolt_id,
                     user_id=_normalize_user_id(user_id),
                     env=get_current_env(),
                 )

@@ -405,8 +405,9 @@ class _TeclawRuntimeBots(_RuntimeBots):
 
 
 class _McpInstallations:
-    def list_installed_mcps(self, *, bot_id: str) -> set[str]:
+    def list_installed_mcps(self, *, bot_id: str, owner_id: str) -> set[str]:
         assert bot_id == "bot-1"
+        assert owner_id == "true-owner"
         return {"mcp.weather"}
 
 
@@ -415,7 +416,7 @@ class _RuntimeSkills:
         assert kwargs == {
             "env": "pre",
             "bot_id": "bot-1",
-            "user_id": "true-owner",
+            "owner_id": "true-owner",
             "engine": "openclaw",
         }
         return []
@@ -426,7 +427,7 @@ class _HistoricalAicodingRuntimeSkills(_RuntimeSkills):
         assert kwargs == {
             "env": "pre",
             "bot_id": "bot-1",
-            "user_id": "true-owner",
+            "owner_id": "true-owner",
             "engine": "aicoding",
         }
         return []
@@ -640,7 +641,6 @@ def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
             actor_id="actor",
             name="set",
             description=None,
-            idempotency_key="request-1",
         )
 
 
@@ -666,7 +666,6 @@ def test_legacy_create_retains_only_virtual_default_bot_compatibility():
         actor_id="actor",
         name="set",
         description=None,
-        idempotency_key="request-1",
     )
 
     assert result["bolt_id"] == "default"
@@ -719,6 +718,7 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
     assert repository.set_active_calls == [
         {
             "bot_id": "bot-1",
+            "owner_id": "true-owner",
             "set_id": "set-1",
             "active": True,
             "engine_type": "openclaw",
@@ -805,6 +805,7 @@ async def test_historical_bot_skill_set_deactivate_uses_cleanup_projection():
     assert repository.set_active_calls == [
         {
             "bot_id": "bot-1",
+            "owner_id": "true-owner",
             "set_id": "set-1",
             "active": False,
             "engine_type": "claude_code",
@@ -835,7 +836,6 @@ def test_skill_set_metadata_mutations_share_the_runtime_matrix_gate():
             user_id="true-owner",
             name="set",
             description=None,
-            idempotency_key="request-1",
         ),
         lambda: service.update_set(
             bot_id="bot-1",
@@ -985,7 +985,12 @@ async def test_mcp_direct_activation_checks_permission_before_writing_desired_st
 
     assert mcp_center.calls == [("true-owner", "mcp.weather")]
     assert repository.direct_calls == [
-        {"bot_id": "bot-1", "server_code": "mcp.weather", "engine_type": "openclaw"}
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "server_code": "mcp.weather",
+            "engine_type": "openclaw",
+        }
     ]
 
 

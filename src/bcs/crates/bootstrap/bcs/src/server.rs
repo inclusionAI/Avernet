@@ -37,7 +37,7 @@ use crate::plugins::{
     build_registered_llm_provider, build_registered_security_gateway,
     build_registered_user_directory,
 };
-use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
+use bcs_app_bot::{BotServiceConfig, BotServiceImpl, InternalBotAttributesServiceImpl};
 use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
 use bcs_app_invitation::{InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl};
 use bcs_app_session::{
@@ -974,6 +974,10 @@ pub struct BcsServerState {
     /// Completed V1 HTTP adapter state assembled from the same runtime services as legacy HTTP.
     pub openapi_v1: ApiState,
 
+    /// Bot attributes application service owned by the Provider-scoped HTTP adapter.
+    pub internal_bot_attributes_service:
+        Arc<dyn bcs_service_api::InternalBotAttributesService>,
+
     /// Configured secret source used for the session-bound Workbench credential.
     pub group_session_secret_access: Arc<dyn SecretAccessPort>,
 
@@ -1015,6 +1019,10 @@ impl std::fmt::Debug for BcsServerState {
             .field("gateway_principal_verifier", &"<PrincipalVerifier>")
             .field("invite_token_secret", &"<redacted>")
             .field("openapi_v1", &"<ApiState>")
+            .field(
+                "internal_bot_attributes_service",
+                &"<InternalBotAttributesService>",
+            )
             .field("group_session_secret_access", &"<SecretAccessPort>")
             .field("outbound_url_guard", &self.outbound_url_guard)
             .finish()
@@ -1414,7 +1422,10 @@ fn build_openapi_v1_state(
     session_files: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
     system_message: Arc<dyn SystemMessageService>,
     principal_verifier: Arc<dyn PrincipalVerifier>,
-) -> ApiState {
+) -> (
+    ApiState,
+    Arc<dyn bcs_service_api::InternalBotAttributesService>,
+) {
     let relation_env = crate::env::resolve_env();
     let control_plane = Arc::new(BotControlPlaneCore::new(
         control_plane_repo,
@@ -1422,10 +1433,16 @@ fn build_openapi_v1_state(
         provider_repos.provider_bindings.clone(),
     ));
     let bot_service = Arc::new(BotServiceImpl::new(
-        control_plane,
+        control_plane.clone(),
         registry.clone(),
         friends.clone(),
         candidate_search,
+        BotServiceConfig {
+            env: relation_env.clone(),
+        },
+    ));
+    let internal_bot_attributes_service = Arc::new(InternalBotAttributesServiceImpl::new(
+        control_plane,
         BotServiceConfig {
             env: relation_env.clone(),
         },
@@ -1495,16 +1512,19 @@ fn build_openapi_v1_state(
         },
     ));
 
-    ApiState::new(
-        group_service,
-        session_service.clone(),
-        session_service,
-        invitation_service.clone(),
-        invitation_service,
-        principal_verifier,
+    (
+        ApiState::new(
+            group_service,
+            session_service.clone(),
+            session_service,
+            invitation_service.clone(),
+            invitation_service,
+            principal_verifier,
+        )
+        .with_bot_service(bot_service)
+        .with_session_file_service(session_file_service, session_file_url_projector),
+        internal_bot_attributes_service,
     )
-    .with_bot_service(bot_service)
-    .with_session_file_service(session_file_service, session_file_url_projector)
 }
 
 pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifier> {
@@ -1984,7 +2004,7 @@ impl Default for BcsServerState {
                 candidate_search.legacy,
             ),
         );
-        let openapi_v1 = build_openapi_v1_state(
+        let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
             control_plane_repo,
@@ -2127,6 +2147,7 @@ impl Default for BcsServerState {
             gateway_principal_verifier,
             invite_token_secret,
             openapi_v1,
+            internal_bot_attributes_service,
             group_session_secret_access,
             user_identity_port,
             outbound_url_guard,
@@ -3378,7 +3399,7 @@ impl BcsServer {
                 collaboration_runtime.clone(),
             )),
         );
-        let openapi_v1 = build_openapi_v1_state(
+        let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
             control_plane_repo,
@@ -3526,6 +3547,7 @@ impl BcsServer {
             gateway_principal_verifier,
             invite_token_secret,
             openapi_v1,
+            internal_bot_attributes_service,
             group_session_secret_access,
             user_identity_port,
             outbound_url_guard: callback_url_guard,
@@ -3998,7 +4020,7 @@ impl BcsServer {
                 collaboration_runtime.clone(),
             )),
         );
-        let openapi_v1 = build_openapi_v1_state(
+        let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
             control_plane_repo,
@@ -4162,6 +4184,7 @@ impl BcsServer {
             gateway_principal_verifier,
             invite_token_secret,
             openapi_v1,
+            internal_bot_attributes_service,
             group_session_secret_access,
             user_identity_port,
             outbound_url_guard,

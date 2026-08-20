@@ -331,7 +331,7 @@ class SkillsPoolRollbackService:
 
         probe = await self._runtime.probe(
             bot_id=scope.bot_id,
-            user_id=user_id,
+            owner_id=user_id,
             engine=engine,
         )
         restoration_resume = is_trusted_aicoding_repo_restoration_resume(
@@ -360,12 +360,13 @@ class SkillsPoolRollbackService:
 
         local_assets = self._skills.list_bot_local_assets(
             env=scope.env,
+            owner_id=user_id,
             bot_id=scope.bot_id,
         )
         active_assets = self._skills.list_bot_active_assets(
             env=scope.env,
             bot_id=scope.bot_id,
-            user_id=user_id,
+            owner_id=user_id,
             engine=engine,
         )
         try:

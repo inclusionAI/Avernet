@@ -367,9 +367,10 @@ class FakeSkillRepository:
         ]
 
     def list_bot_local_assets(
-        self, *, env: str, bot_id: str
+        self, *, env: str, owner_id: str, bot_id: str
     ) -> list[RegisteredSkillAsset]:
         assert (env, bot_id) == (SCOPE.env, SCOPE.bot_id)
+        assert owner_id == "owner-1"
         return self.registered
 
     def list_bot_active_assets(
@@ -377,11 +378,11 @@ class FakeSkillRepository:
         *,
         env: str,
         bot_id: str,
-        user_id: str,
+        owner_id: str,
         engine: str,
     ) -> list[RegisteredSkillAsset]:
         assert (env, bot_id) == (SCOPE.env, SCOPE.bot_id)
-        assert (user_id, engine) == ("owner-1", self.engine)
+        assert (owner_id, engine) == ("owner-1", self.engine)
         return self.active
 
 

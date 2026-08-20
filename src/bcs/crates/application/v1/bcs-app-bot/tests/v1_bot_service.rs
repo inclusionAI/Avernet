@@ -296,6 +296,9 @@ async fn ownership_denial_precedes_provider_hydration() {
             task_dream_mode: false,
             created_at: 1,
             updated_at: 1,
+            user_visibility: Default::default(),
+            friend_ext: Default::default(),
+            friend_check_in_strategy: Default::default(),
         },
     });
     let service = BotServiceImpl::new(

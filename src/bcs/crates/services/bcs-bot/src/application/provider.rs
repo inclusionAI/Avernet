@@ -133,10 +133,11 @@ impl ProviderManagement {
             .get_provider(provider_id, provider_admin_token)
             .await?;
         if provider.disabled {
-            return Err(ServiceError::InvalidOperation {
-                message: format!("provider '{}' is disabled", provider.provider_id),
-                request_id: None,
-            });
+            tracing::warn!(
+                provider_id = %provider.provider_id,
+                "disabled provider admin access rejected"
+            );
+            return Err(ServiceError::Forbidden("provider_disabled".to_string()));
         }
         Ok(provider)
     }
@@ -184,6 +185,15 @@ impl ProviderManagementService for ProviderManagement {
     ) -> ServiceResult<ProviderRecord> {
         self.provider_core
             .get_provider(provider_id, provider_admin_token)
+            .await
+    }
+
+    async fn get_active_provider(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<ProviderRecord> {
+        self.ensure_provider_admin_active(provider_id, provider_admin_token)
             .await
     }
 

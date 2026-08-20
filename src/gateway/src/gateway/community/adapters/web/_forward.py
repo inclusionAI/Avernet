@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.requests import HTTPConnection
 from starlette.responses import Response
 
+from gateway.community.adapters.web._cors import CORS_RESPONSE_HEADERS
 from gateway.community.adapters.web._log_redaction import redact_credentials
 from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthError
@@ -303,7 +304,18 @@ async def forward_request(request: Request) -> Response:
         _request_id() or _ABSENT,
     )
     # Set raw headers directly so duplicate headers (Set-Cookie) survive verbatim.
+    #
+    # The one exception to verbatim relay is CORS. The browser talks to the
+    # gateway's origin, so the edge is what decides which page may read this
+    # response (``_cors.install_cors``); an upstream that also answers callers
+    # directly sends its own ``Access-Control-*`` headers, and letting those
+    # through would put two ``Access-Control-Allow-Origin`` values on the wire —
+    # which a browser rejects exactly as it rejects none — or admit an origin the
+    # edge does not. Dropped here rather than overwritten later so the middleware's
+    # copy is the only one, whatever the upstream said.
     response.raw_headers = [
-        (k.encode("latin-1"), v.encode("latin-1")) for k, v in upstream.headers
+        (k.encode("latin-1"), v.encode("latin-1"))
+        for k, v in upstream.headers
+        if k.lower() not in CORS_RESPONSE_HEADERS
     ]
     return response

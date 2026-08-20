@@ -131,6 +131,7 @@ class LocalSkillStateService:
                 changed = self._write_desired_state(
                     active=active,
                     env=str(bot["env"]),
+                    owner_id=owner_id,
                     bot_id=bot_id,
                     skill_id=skill_id,
                 )
@@ -159,6 +160,7 @@ class LocalSkillStateService:
                             self._write_desired_state(
                                 active=not active,
                                 env=str(bot["env"]),
+                                owner_id=owner_id,
                                 bot_id=bot_id,
                                 skill_id=skill_id,
                             )
@@ -253,6 +255,7 @@ class LocalSkillStateService:
                     changed = self._write_desired_state(
                         active=active,
                         env=str(bot["env"]),
+                        owner_id=owner_id,
                         bot_id=bot_id,
                         skill_id=skill_id,
                     )
@@ -289,6 +292,7 @@ class LocalSkillStateService:
                         self._write_desired_state(
                             active=not active,
                             env=str(bot["env"]),
+                            owner_id=owner_id,
                             bot_id=bot_id,
                             skill_id=skill_id,
                         )
@@ -376,14 +380,17 @@ class LocalSkillStateService:
         *,
         active: bool,
         env: str,
+        owner_id: str,
         bot_id: str,
         skill_id: str,
     ) -> bool:
         if active:
             return self._installations.install(
-                env=env, bot_id=bot_id, skill_id=skill_id
+                env=env, owner_id=owner_id, bot_id=bot_id, skill_id=skill_id
             )
-        return self._installations.uninstall(env=env, bot_id=bot_id, skill_id=skill_id)
+        return self._installations.uninstall(
+            env=env, owner_id=owner_id, bot_id=bot_id, skill_id=skill_id
+        )
 
     @staticmethod
     def _require_repo_runtime_command(
@@ -441,7 +448,7 @@ class LocalSkillStateService:
             assets = self._pool_skills.list_bot_active_assets(
                 env=str(bot["env"]),
                 bot_id=bot_id,
-                user_id=owner_id,
+                owner_id=owner_id,
                 engine=str(bot["active_engine"]),
             )
             candidate = RegisteredSkillAsset(

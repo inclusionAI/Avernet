@@ -10,13 +10,19 @@ class SkillInstallationRepositoryProtocol(Protocol):
     """Persist and query a Bot's desired active Skill set."""
 
     @abstractmethod
-    def install(self, *, env: str, bot_id: str, skill_id: str | int) -> bool:
+    def install(
+        self, *, env: str, owner_id: str, bot_id: str, skill_id: str | int
+    ) -> bool:
         """Create the active row; return false if it already existed."""
 
     @abstractmethod
-    def uninstall(self, *, env: str, bot_id: str, skill_id: str | int) -> bool:
+    def uninstall(
+        self, *, env: str, owner_id: str, bot_id: str, skill_id: str | int
+    ) -> bool:
         """Delete the active row; return false if it was already absent."""
 
     @abstractmethod
-    def list_installed_skill_ids(self, *, env: str, bot_id: str) -> set[int]:
+    def list_installed_skill_ids(
+        self, *, env: str, owner_id: str, bot_id: str
+    ) -> set[int]:
         """Return only active desired-state Skill ids for one Bot."""

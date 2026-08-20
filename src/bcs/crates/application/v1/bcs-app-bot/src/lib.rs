@@ -8,8 +8,8 @@ use bcs_service_api::application::v1::{
     ApplicationError, Bot, BotCandidate, BotCandidatePurpose, BotCandidateSearchItem,
     BotCandidateSearchMode, BotCandidateSearchResult, BotDescriptor, BotKind, BotProvider,
     BotReachability, BotService, BotSkill, BotStatus, BotVisibility, GetBot, HumanBot,
-    ListBotCandidates, ListMyBots, Page, PhysicalBot, QueryBots, SearchBotCandidates, UpdateBot,
-    require_authenticated_user,
+    InternalBotAttributesService, ListBotCandidates, ListMyBots, Page, PatchBotInternalAttributes,
+    PhysicalBot, QueryBots, SearchBotCandidates, UpdateBot, require_authenticated_user,
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateSearchCoreService,
@@ -30,6 +30,91 @@ pub struct BotServiceImpl {
     friends: Arc<dyn FriendCoreService>,
     candidate_search: Arc<dyn BotCandidateSearchCoreService>,
     config: BotServiceConfig,
+}
+
+pub struct InternalBotAttributesServiceImpl {
+    control_plane: Arc<dyn BotControlPlaneCoreService>,
+    config: BotServiceConfig,
+}
+
+impl InternalBotAttributesServiceImpl {
+    pub fn new(
+        control_plane: Arc<dyn BotControlPlaneCoreService>,
+        config: BotServiceConfig,
+    ) -> Self {
+        Self {
+            control_plane,
+            config,
+        }
+    }
+
+    fn validate_bot_id(bot_id: &str) -> Result<(), ApplicationError> {
+        if bot_id.trim().is_empty() {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "bot_id must not be empty",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn load_record(&self, bot_id: &str) -> Result<BotControlPlaneRecord, ApplicationError> {
+        self.control_plane
+            .get_record(bot_id, &self.config.env)
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "bot_not_found",
+                    format!("Bot '{bot_id}' was not found"),
+                )
+            })
+    }
+}
+
+#[async_trait]
+impl InternalBotAttributesService for InternalBotAttributesServiceImpl {
+    async fn get(
+        &self,
+        bot_id: String,
+    ) -> Result<bcs_service_api::BotInternalAttributes, ApplicationError> {
+        Self::validate_bot_id(&bot_id)?;
+        Ok(self.load_record(&bot_id).await?.internal_attributes())
+    }
+
+    async fn patch(
+        &self,
+        command: PatchBotInternalAttributes,
+    ) -> Result<bcs_service_api::BotInternalAttributes, ApplicationError> {
+        Self::validate_bot_id(&command.bot_id)?;
+        if command.is_empty() {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "Bot internal attributes patch must contain at least one field",
+            ));
+        }
+        let updated = self
+            .control_plane
+            .patch(
+                &command.bot_id,
+                &self.config.env,
+                BotControlPlanePatch {
+                    user_visibility: command.user_visibility,
+                    friend_ext: command.friend_ext,
+                    friend_check_in_strategy: command.friend_check_in_strategy,
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "bot_not_found",
+                    format!("Bot '{}' was not found", command.bot_id),
+                )
+            })?;
+        Ok(updated.record.internal_attributes())
+    }
 }
 
 impl BotServiceImpl {
@@ -466,6 +551,7 @@ impl BotService for BotServiceImpl {
                     descriptor,
                     task_claim_mode: command.patch.task_claim_mode,
                     task_dream_mode: command.patch.task_dream_mode,
+                    ..Default::default()
                 },
             )
             .await

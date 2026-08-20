@@ -4,6 +4,9 @@ use std::collections::HashSet;
 
 use bcs_domain::{ActorKind, ActorStatus, Skill};
 
+use crate::application::v1::{BotInternalAttributes, FriendCheckInStrategy, UserVisibility};
+use serde_json::{Map, Value};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BotControlPlaneDescriptor {
     pub summary: String,
@@ -27,6 +30,9 @@ pub struct BotControlPlaneRecord {
     pub task_dream_mode: bool,
     pub created_at: u64,
     pub updated_at: u64,
+    pub user_visibility: UserVisibility,
+    pub friend_ext: Map<String, Value>,
+    pub friend_check_in_strategy: FriendCheckInStrategy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,4 +102,17 @@ pub struct BotControlPlanePatch {
     pub descriptor: Option<BotControlPlaneDescriptorPatch>,
     pub task_claim_mode: Option<bool>,
     pub task_dream_mode: Option<bool>,
+    pub user_visibility: Option<UserVisibility>,
+    pub friend_ext: Option<Map<String, Value>>,
+    pub friend_check_in_strategy: Option<FriendCheckInStrategy>,
+}
+
+impl BotControlPlaneRecord {
+    pub fn internal_attributes(&self) -> BotInternalAttributes {
+        BotInternalAttributes {
+            user_visibility: self.user_visibility,
+            friend_ext: self.friend_ext.clone(),
+            friend_check_in_strategy: self.friend_check_in_strategy,
+        }
+    }
 }

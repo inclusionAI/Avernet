@@ -128,7 +128,6 @@ def _seed(world, *, member: bool = False) -> None:
             owner_id=_OWNER,
             name="Endpoint set",
             description=None,
-            idempotency_key="endpoint-set",
             engine_type="openclaw",
         )
         skill = world.get(SkillRepository).create(
@@ -147,6 +146,7 @@ def _seed(world, *, member: bool = False) -> None:
         if member:
             repository.add_skill(
                 bot_id=_BOT_ID,
+                owner_id=_OWNER,
                 set_id=str(skill_set["id"]),
                 skill_id=str(skill["id"]),
                 engine_type="openclaw",
@@ -178,7 +178,11 @@ def _seed_active(world) -> None:
     _seed_member(world)
     with avernet_tenant_scope(_TENANT):
         world.get(SkillSetControlPlaneRepositoryProtocol).set_active(
-            bot_id=_BOT_ID, set_id="1", active=True, engine_type="openclaw"
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            set_id="1",
+            active=True,
+            engine_type="openclaw",
         )
 
 
@@ -472,7 +476,11 @@ def _seed_mcp_member(world) -> None:
     _seed(world)
     with avernet_tenant_scope(_TENANT):
         world.get(SkillSetControlPlaneRepositoryProtocol).add_mcp(
-            bot_id=_BOT_ID, set_id="1", server_code="mcp.test", engine_type="openclaw"
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            set_id="1",
+            server_code="mcp.test",
+            engine_type="openclaw",
         )
 
 

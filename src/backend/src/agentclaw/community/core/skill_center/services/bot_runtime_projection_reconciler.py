@@ -203,7 +203,7 @@ class BotRuntimeProjectionReconciler:
             self._pool_skills.list_bot_active_assets(
                 env=str(bot["env"]),
                 bot_id=bot_id,
-                user_id=owner_id,
+                owner_id=owner_id,
                 engine=engine,
             )
         )
@@ -243,7 +243,9 @@ class BotRuntimeProjectionReconciler:
             RuntimeDesiredState(
                 skills=skill_assets,
                 installed_mcp_server_codes=frozenset(
-                    self._repository.list_installed_mcps(bot_id=bot_id)
+                    self._repository.list_installed_mcps(
+                        bot_id=bot_id, owner_id=owner_id
+                    )
                 ),
                 system_default_mcp_server_codes=effective_default_mcp_codes,
                 system_default_cli_commands=tuple(

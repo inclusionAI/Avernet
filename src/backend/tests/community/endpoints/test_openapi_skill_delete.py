@@ -179,7 +179,7 @@ def _seed_delete(world, *, active: bool) -> None:
         )
         if active:
             world.get(SkillInstallationRepositoryProtocol).install(
-                env="dev", bot_id=_BOT_ID, skill_id=skill["id"]
+                env="dev", owner_id=_OWNER, bot_id=_BOT_ID, skill_id=skill["id"]
             )
         else:
             world.get(SkillSetRepository).add_default_skill_exclusion(
