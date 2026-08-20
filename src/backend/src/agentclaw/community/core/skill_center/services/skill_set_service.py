@@ -1515,6 +1515,13 @@ class SkillSetService:
                     source = str(skills_local_dir / source_name)
                 target = str(base_skills_dir / link_name)
                 symlinks.append(SynlinkMappingInfo(source=source, target=target))
+            elif git_path.startswith('center://'):
+                # This legacy file adapter has no Center request contract. A
+                # caller must route such a projection through the mapping-v3
+                # Engine adapter; silently omitting it would be fail-open.
+                raise ValueError("center skill requires a Center-capable runtime adapter")
+            else:
+                raise ValueError("unsupported skill source in runtime projection")
 
         resolved_mappings = symlinks
         if requested_paths:

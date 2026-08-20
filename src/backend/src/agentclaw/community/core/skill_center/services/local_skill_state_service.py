@@ -445,6 +445,18 @@ class LocalSkillStateService:
 
     def _sync_runtime(self, *, bot: dict[str, Any], owner_id: str, bot_id: str) -> bool:
         try:
+            projection = RuntimeProjectionResolver().resolve(
+                RuntimeDesiredState(
+                    skills=tuple(
+                        self._pool_skills.list_bot_active_assets(
+                            env=str(bot["env"]),
+                            bot_id=bot_id,
+                            user_id=owner_id,
+                            engine=str(bot.get("active_engine") or "openclaw"),
+                        )
+                    )
+                )
+            )
             service = self._skill_set_service_factory.create(
                 user_id=owner_id,
                 entity_id=str(bot["entity_id"]),
@@ -452,7 +464,20 @@ class LocalSkillStateService:
                 engine_type=bot.get("active_engine"),
                 entity_type=bot.get("entity_type"),
             )
-            return bool(service.sync_runtime())
+            return bool(
+                service.sync_runtime(
+                    desired_skills=[
+                        {
+                            "id": str(asset.skill_id),
+                            "name": asset.name,
+                            "git_path": asset.git_path,
+                            "skill_uuid": asset.skill_uuid,
+                            "sc_version_number": asset.sc_version_number,
+                        }
+                        for asset in projection.skill_assets
+                    ]
+                )
+            )
         except Exception:
             return False
 

@@ -209,7 +209,7 @@ class _Runtime:
         self.publish_calls = []
         self.verify_calls = []
 
-    def sync_runtime(self):
+    def sync_runtime(self, *, desired_skills=None):
         self.calls += 1
         return self.success
 
@@ -688,7 +688,7 @@ async def test_deactivate_mapping_repository_failure_fails_closed_and_restores_s
     assert skills.active is True
     assert runtime.publish_calls == []
     assert runtime.verify_calls == []
-    assert runtime.calls == 1
+    assert runtime.calls == 0
 
 
 @pytest.mark.asyncio
@@ -717,7 +717,7 @@ async def test_deactivate_invalid_locator_fails_closed_and_restores_desired_stat
     assert sets.events == ["add", "remove"]
     assert skills.active is True
     assert runtime.publish_calls == []
-    assert runtime.calls == 1
+    assert runtime.calls == 0
 
 
 @pytest.mark.asyncio
@@ -777,7 +777,7 @@ async def test_runtime_failure_republishes_the_rolled_back_desired_state():
     service, skills, sets, _guard, runtime, _factory = _service(active=False)
     outcomes = iter([False, True])
 
-    def sync_with_recovery():
+    def sync_with_recovery(*, desired_skills=None):
         runtime.calls += 1
         return next(outcomes)
 
