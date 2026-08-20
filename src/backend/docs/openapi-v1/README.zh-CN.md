@@ -215,8 +215,8 @@ ALTER TABLE ac_bots
 -- 解释该状态，因此无需一次性回填历史行。回滚代码前可保留此兼容列；确认没有
 -- 旧版本/新版本代码再使用后，才可由平台单独评估 DROP COLUMN。
 ALTER TABLE ac_bots
-  ADD COLUMN space_id VARCHAR(128) NULL
-    COMMENT 'business-space ownership; NULL uses the owner personal-space fallback';
+  ADD COLUMN space_id BIGINT UNSIGNED NULL
+    COMMENT 'Bot owning space id, references ac_space.id; NULL uses the owner personal-space fallback';
 ```
 
 `space_id` 的平台执行记录必须随交付补充环境、变更单/版本、执行时间和回滚负责人；

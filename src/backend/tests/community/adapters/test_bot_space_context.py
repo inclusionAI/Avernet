@@ -135,7 +135,7 @@ def test_reassigned_bot_uses_current_team_without_extra_lookup() -> None:
     current = BusinessSpaceRef(space_id="42", name="Team", kind="team")
 
     result = context.bot_space(
-        bot={"bot_id": "b1", "space_id": "42"},
+        bot={"bot_id": "b1", "space_id": 42},
         owner_id="u1",
         current_space=current,
     )
@@ -151,7 +151,7 @@ def test_numeric_personal_assignment_is_visible_in_default_inventory() -> None:
     access.reset_mock()
 
     result = context.bot_space(
-        bot={"bot_id": "b1", "space_id": "8"},
+        bot={"bot_id": "b1", "space_id": 8},
         owner_id="u1",
         current_space=current,
     )

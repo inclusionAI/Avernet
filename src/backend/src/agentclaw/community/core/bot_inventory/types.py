@@ -63,6 +63,13 @@ class BusinessSpaceRef:
     name: str
     kind: str
 
+    @property
+    def numeric_id(self) -> int | None:
+        """Return the real Space id, or None for a synthetic personal fallback."""
+        if self.space_id.startswith("personal:"):
+            return None
+        return int(self.space_id, 10)
+
 
 @dataclass(frozen=True)
 class ServiceLifecycleCard:
