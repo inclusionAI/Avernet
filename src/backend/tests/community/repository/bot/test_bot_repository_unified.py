@@ -778,25 +778,25 @@ def test_list_by_conditions_treats_like_wildcards_literally(repo):
 
 
 def test_update_space_by_owner_persists_space_and_modifier(repo):
-    repo.insert(_data(bot_id="space-bot", space_id="7", modifier_id="creator"))
+    repo.insert(_data(bot_id="space-bot", space_id=7, modifier_id="creator"))
 
-    out = repo.update_space_by_owner(bot_id="space-bot", owner_id="emp1", space_id="42")
+    out = repo.update_space_by_owner(bot_id="space-bot", owner_id="emp1", space_id=42)
 
     assert out is not None
-    assert out["space_id"] == "42"
+    assert out["space_id"] == 42
     assert out["modifier_id"] == "emp1"
 
 
 def test_update_space_by_owner_missing_or_deleted_returns_none(repo):
     assert (
-        repo.update_space_by_owner(bot_id="missing", owner_id="emp1", space_id="42")
+        repo.update_space_by_owner(bot_id="missing", owner_id="emp1", space_id=42)
         is None
     )
 
-    repo.insert(_data(bot_id="deleted-space-bot", is_delete=1, space_id="7"))
+    repo.insert(_data(bot_id="deleted-space-bot", is_delete=1, space_id=7))
     assert (
         repo.update_space_by_owner(
-            bot_id="deleted-space-bot", owner_id="emp1", space_id="42"
+            bot_id="deleted-space-bot", owner_id="emp1", space_id=42
         )
         is None
     )

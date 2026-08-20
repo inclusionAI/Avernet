@@ -48,6 +48,7 @@ from agentclaw.community.core.bot_inventory.adapters.noop_business_space import 
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
+from agentclaw.community.core.bot_inventory.types import BusinessSpaceRef
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
@@ -103,7 +104,7 @@ def bot_repo():
 def bot_space():
     service = MagicMock()
     service.change_space.return_value = SimpleNamespace(
-        bot={**BOT, "space_id": "42"},
+        bot={**BOT, "space_id": 42},
         space=SimpleNamespace(
             id=42,
             space_code="spc-42",
@@ -442,6 +443,24 @@ def test_create_bot_201(client, svc, passport):
     assert body["code"] == 201000
     assert body["data"]["bot_id"] == "b1"
     svc.create_bot.assert_called_once()
+    assert svc.create_bot.call_args.kwargs["space_id"] is None
+
+
+def test_real_space_reference_exposes_numeric_id():
+    assert (
+        BusinessSpaceRef(space_id="42", name="Team", kind="team").numeric_id == 42
+    )
+
+
+def test_synthetic_personal_reference_has_no_numeric_id():
+    assert (
+        BusinessSpaceRef(
+            space_id="personal:u1",
+            name="Personal",
+            kind="personal",
+        ).numeric_id
+        is None
+    )
 
 
 def test_create_bot_owner_relationship_failure_is_enveloped_502(

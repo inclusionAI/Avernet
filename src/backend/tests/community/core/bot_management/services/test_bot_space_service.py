@@ -48,7 +48,7 @@ def _service(*, bot: dict | None = None, space: SpaceRecord | None = None):
     repository = MagicMock()
     repository.get_by_id_and_owner.return_value = bot
     repository.update_space_by_owner.return_value = (
-        {**bot, "space_id": str(space.id)}
+        {**bot, "space_id": space.id}
         if bot is not None and space is not None
         else None
     )
@@ -59,7 +59,7 @@ def _service(*, bot: dict | None = None, space: SpaceRecord | None = None):
 
 
 def test_moves_owned_cloud_bot_to_joined_team_space():
-    bot = {"bot_id": "b1", "bot_type": "personal", "space_id": "7"}
+    bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 7}
     target = _space(space_id=42)
     service, repository, access = _service(bot=bot, space=target)
 
@@ -67,15 +67,15 @@ def test_moves_owned_cloud_bot_to_joined_team_space():
 
     assert result.changed is True
     assert result.space == target
-    assert result.bot["space_id"] == "42"
+    assert result.bot["space_id"] == 42
     access.require_space_member.assert_called_once_with(space_id=42, user_id="u1")
     repository.update_space_by_owner.assert_called_once_with(
-        bot_id="b1", owner_id="u1", space_id="42"
+        bot_id="b1", owner_id="u1", space_id=42
     )
 
 
 def test_moves_bot_back_to_owners_numeric_personal_space():
-    bot = {"bot_id": "b1", "bot_type": "service", "space_id": "42"}
+    bot = {"bot_id": "b1", "bot_type": "service", "space_id": 42}
     target = _space(
         space_id=8,
         space_type=SpaceType.PERSONAL,
@@ -87,7 +87,7 @@ def test_moves_bot_back_to_owners_numeric_personal_space():
 
     assert result.changed is True
     repository.update_space_by_owner.assert_called_once_with(
-        bot_id="b1", owner_id="u1", space_id="8"
+        bot_id="b1", owner_id="u1", space_id=8
     )
 
 
@@ -141,7 +141,7 @@ def test_desktop_bot_cannot_move_to_team_space():
 
 
 def test_same_space_is_idempotent_and_skips_the_write():
-    bot = {"bot_id": "b1", "bot_type": "personal", "space_id": "42"}
+    bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 42}
     target = _space(space_id=42)
     service, repository, _access = _service(bot=bot, space=target)
 
@@ -153,7 +153,7 @@ def test_same_space_is_idempotent_and_skips_the_write():
 
 
 def test_bot_disappearing_during_write_is_masked_as_not_found():
-    bot = {"bot_id": "b1", "bot_type": "personal", "space_id": "7"}
+    bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 7}
     service, repository, _access = _service(bot=bot, space=_space())
     repository.update_space_by_owner.return_value = None
 
@@ -162,7 +162,7 @@ def test_bot_disappearing_during_write_is_masked_as_not_found():
 
 
 def test_persistence_failure_propagates_instead_of_returning_success():
-    bot = {"bot_id": "b1", "bot_type": "personal", "space_id": "7"}
+    bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 7}
     service, repository, _access = _service(bot=bot, space=_space())
     repository.update_space_by_owner.side_effect = RuntimeError("database unavailable")
 

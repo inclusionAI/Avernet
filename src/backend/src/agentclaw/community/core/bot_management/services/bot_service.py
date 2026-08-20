@@ -1246,7 +1246,7 @@ class BotService:
         template_type: Optional[str] = None,
         template_config: Optional[Dict[str, Any]] = None,
         cookie: Optional[str] = None,
-        space_id: Optional[str] = None,
+        space_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Create a new bot with async device allocation.
