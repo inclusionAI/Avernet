@@ -17,6 +17,10 @@ from agentclaw.community.core.models.skill import (
     SkillSet,
     SkillSetSkill,
 )
+from agentclaw.community.core.models.mcp import (
+    BotMCPInstallation,
+    SkillSetMCPServer,
+)
 from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
     SkillSetControlPlaneRepository,
 )
@@ -247,6 +251,60 @@ def test_database_allows_system_default_and_one_ordinary_membership():
                 ),
             ]
         )
+
+
+def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
+    db = _Database()
+    repository = SkillSetControlPlaneRepository(db)
+    with db.transactional_orm_session() as session:
+        skill_set = SkillSet(name="set", bolt_id="bot", is_active=True, env="dev")
+        session.add(skill_set)
+        session.flush()
+
+    added = repository.add_mcp(
+        bot_id="bot", set_id=str(skill_set.id), server_code="mcp.weather"
+    )
+    assert added.changed is True
+    with db.orm_session() as session:
+        assert session.query(SkillSetMCPServer).count() == 1
+        assert {
+            row.server_code for row in session.query(BotMCPInstallation).all()
+        } == {"mcp.weather"}
+
+    removed = repository.remove_mcp(
+        bot_id="bot", set_id=str(skill_set.id), server_code="mcp.weather"
+    )
+    assert removed.changed is True
+    with db.orm_session() as session:
+        assert session.query(SkillSetMCPServer).count() == 0
+        assert session.query(BotMCPInstallation).count() == 0
+
+
+def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
+    db = _Database()
+    repository = SkillSetControlPlaneRepository(db)
+    with db.transactional_orm_session() as session:
+        skill_set = SkillSet(name="set", bolt_id="bot", is_active=False, env="dev")
+        session.add(skill_set)
+        session.flush()
+
+    assert repository.activate_mcp_direct(bot_id="bot", server_code="mcp.weather").changed
+    with pytest.raises(
+        SkillSetControlPlaneConflictError, match="RESOURCE_DIRECT_ACTIVE"
+    ):
+        repository.add_mcp(
+            bot_id="bot", set_id=str(skill_set.id), server_code="mcp.weather"
+        )
+    assert repository.deactivate_mcp_direct(
+        bot_id="bot", server_code="mcp.weather"
+    ).changed
+    assert repository.add_mcp(
+        bot_id="bot", set_id=str(skill_set.id), server_code="mcp.weather"
+    ).changed
+    with pytest.raises(
+        SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_SKILL_SET"
+    ):
+        repository.activate_mcp_direct(bot_id="bot", server_code="mcp.weather")
 
 
 def test_skill_set_control_plane_sql_creates_before_upgrade_and_adds_bot_key():

@@ -182,6 +182,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetRuntimeReconcileError,
     SkillSetManagedResourceError,
     SkillSetAccessDeniedError,
+    McpPermissionDeniedError,
     LocalSkillTooLargeError,
 )
 from agentclaw.community.core.services.identity import (
@@ -426,6 +427,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillNotFoundError: (404, "Not found"),
     SkillSetControlPlaneNotFoundError: (404, "Not found"),
     SkillSetAccessDeniedError: (403, "Forbidden"),
+    McpPermissionDeniedError: (403, "Forbidden"),
     SkillSetControlPlaneConflictError: (
         409,
         "SkillSet state conflicts with this operation",
@@ -614,6 +616,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillSetManagedResourceError: 409202,
     SkillSetControlPlaneLockUnavailableError: 503201,
     SkillSetAccessDeniedError: 403201,
+    McpPermissionDeniedError: 403202,
 }
 
 _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {

@@ -18,6 +18,7 @@ from agentclaw.community.core.models.skill import (  # noqa: F401
     UserDefaultSkillSet,
 )
 from agentclaw.community.core.models.mcp import (  # noqa: F401
+    BotMCPInstallation,
     SkillSetMCPServer,
     UserMCPConfig,
 )

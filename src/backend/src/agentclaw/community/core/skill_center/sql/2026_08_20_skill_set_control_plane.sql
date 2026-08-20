@@ -47,3 +47,34 @@ WHERE relation.bot_id IS NULL
   AND skill_set.is_default = 0;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_bot_skill_set_skill
     ON ac_skill_set_skill (avernet_tenant, env, bot_id, skill_id);
+
+-- MCP uses the same active-only Installation and ordinary-SkillSet ownership
+-- semantics as Skill.  The existing association rows remain compatible:
+-- historical and System Default rows retain NULL bot_id.
+CREATE TABLE IF NOT EXISTS ac_bot_mcp_installation (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw',
+    env VARCHAR(50) NOT NULL,
+    bot_id VARCHAR(100) NOT NULL,
+    server_code VARCHAR(256) NOT NULL,
+    gmt_created DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_bot_mcp_installation
+      (avernet_tenant, env, bot_id, server_code)
+);
+
+ALTER TABLE ac_skill_set_mcp
+    ADD COLUMN IF NOT EXISTS bot_id VARCHAR(100) NULL;
+UPDATE ac_skill_set_mcp AS relation
+JOIN ac_skill_set AS skill_set
+ ON skill_set.id = relation.skill_set_id
+ AND skill_set.avernet_tenant = relation.avernet_tenant
+ AND skill_set.env = relation.env
+SET relation.bot_id = skill_set.bolt_id
+WHERE relation.bot_id IS NULL
+  AND skill_set.is_default = 0;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_skill_set_mcp
+    ON ac_skill_set_mcp (avernet_tenant, env, skill_set_id, server_code);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_bot_skill_set_mcp
+    ON ac_skill_set_mcp (avernet_tenant, env, bot_id, server_code);

@@ -73,6 +73,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.mcp_center
+  - agentclaw.community.plugin_api.mcp_auth
   - agentclaw.community.plugin_api.passport
   - agentclaw.community.plugin_api.object_storage
   - agentclaw.community.plugin_api.secret_resolver
@@ -92,6 +93,12 @@ Local Skill compatibility materializes active state in
 `ac_bot_skill_installation` and reads it through the Installation repository.
 HTTP and runtime adapters must not write that table or reconstruct Local active
 state from Default SkillSet exclusions.
+
+MCP Direct activation and ordinary SkillSet MCP membership share the same
+active-only desired-state and compensation boundary as Skills.  The MCP
+catalogue, user configuration, and permission grant remain separate facts;
+the control plane consults the MCP authorization Service API before any MCP
+membership or Direct-installation write.
 
 All Direct activation and canonical SkillSet mutations first acquire the
 layout-neutral `BotCapabilityMutationGuard`, keyed by `(tenant, env, entity_id, bot)`.
