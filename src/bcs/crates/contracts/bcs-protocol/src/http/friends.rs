@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateFriendRequestBody {
     /// Caller actor id (raw staff_no or bot_uuid; fallback when no Bearer).
-    #[serde(default)]
+    /// `alias = "from_bot"` for backward compat with old bcs-cli and old /friends/* path.
+    #[serde(default, alias = "from_bot")]
     pub from_actor: Option<String>,
     /// Caller actor kind: "human" → prefix `human_`, "bot" → use as-is.
     /// When omitted, the id is used as-is (backward compat with `human_` prefix).
