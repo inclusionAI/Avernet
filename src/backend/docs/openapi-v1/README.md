@@ -35,8 +35,8 @@ that file holds the inventory.
 **Goal:** implement the public `/openapi/v1` API, whose callers are **external
 registered tenants**. It lives under
 `src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`. The **bots**,
-**mcp**, and **skills** categories have implemented handlers; the remaining
-categories retain their independently tracked readiness states below.
+**mcp**, **channels**, and **skills** categories have implemented handlers; the
+remaining categories retain their independently tracked readiness states below.
 
 > 🔒 **The surface is still not callable end-to-end, but no longer because of a
 > stub.** `require_principal` now really verifies the gateway's signed
@@ -138,7 +138,7 @@ must implement._
 |---|---|---|---|---|---|
 | 1 | Bot records (`ac_bots` / `BotModel`) | totalfrank | P1 | ✅ **DONE — PR #456 merged 2026-07-27** | — |
 | 2 | Resources (`ac_resource`) | lucas-xzp | P1 | ✅ DONE — Phase 0 (branch `rongzhi_0727`) | column + guards + tests green; internal API unchanged — verified: `to_dict()` excludes tenant, guard uses direct expression not lambda |
-| 3 | Channels (`ac_channel_config`) | — | ❌ **DROPPED** | Stage never started; its Track B component was removed 2026-08-03 | n/a |
+| 3 | Channels (`ac_channel_config`) | Bot Workshop | P1 | ✅ **IMPLEMENTED 2026-08-19; DDL PENDING** | tenant column + tenant-leading index + guards + isolation tests; deploy DDL before code |
 | 4 | Skills (skill tables) | totalfrank + lucas-xzp | P3 | ⬜ TODO | same |
 | 5 | MCP configuration (`ac_user_mcp_config` + `ac_bot_mcp_call_config`) | totalfrank | P1 | ✅ DONE — **PR #564** | PR #564 merges |
 | 6 | Routines | lucas-xzp | P1 | ⬜ TODO | same |
@@ -154,7 +154,7 @@ _Ordered by priority tier._
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE — PR #610** (6/6 endpoints) | ~~Track A stage 5~~ ✅ (PR #564) |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 7 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 7 endpoints wired stub→service, files-only and path-addressed; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
-| channels | — | ❌ **REMOVED (2026-08-03)** | *(deleted)* | Router, schemas and both published paths deleted — see the channels section below | n/a |
+| channels | Bot Workshop | P1 | `openapi_v1/channels/router.py` | ✅ **IMPLEMENTED 2026-08-19** — 6/6 draft DingTalk Channel operations | Track A stage 3 code ✅; deploy-before-code DDL below; OCB/Sofapy schema copy remains independent |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | 🔧 **IMPLEMENTATION + CI COMPLETE; RELEASE PENDING** — six ratified Local Skill operations | #725 cleanup-work DDL must deploy before code; [pre-production acceptance runbook](skills-track-b-preprod-acceptance.md) remains **PRE-PROD PENDING** |
 
@@ -213,12 +213,13 @@ DDL. Full ruling and per-endpoint mapping in
 > that must be settled before a second tenant holds real data.
 | **Stage 5 unique-key swap on `ac_user_mcp_config`** | ⬜ TODO (DDL below) | **before a 2nd tenant writes MCP config** — not before deploy |
 
-> **❌ Channels removed (2026-08-03).** Parked since 2026-07-29 as a
-> deprioritization; now deleted outright. Parking was the wrong shape for it:
-> the component was *published*, so a parked stub was not a dormant row on a
-> board — it was six operations in the document the gateway serves, each
-> answering 500. The Track A stage was never started, so there is no data work
-> to unwind. See the channels section under **Endpoints** for what was removed.
+> **✅ Channels restored (2026-08-19).** The 2026-08-03 deletion remains in
+> the changelog as historical context: the old published stubs were correctly
+> removed because they returned 500. The component has now returned as a fully
+> implemented Bot-first API with tenant-isolated persistence, explicit caller
+> admission, safe secret projection, and tests. It is not deployable until the
+> Stage 3 DDL below has been applied; the OCB/Sofapy gateway schema is a separate
+> copy and must be synchronized independently.
 
 ---
 
@@ -250,6 +251,29 @@ ALTER TABLE ac_bots
 The delivery record for `space_id` must identify the environment, change/version
 record, execution time, rollback owner, and result. Team-space support is not
 release-ready until that evidence exists.
+
+**Stage 3 — Channels (`ac_channel_config`)**. Both statements must land
+**before deploying the Channels code**: the ORM selects `avernet_tenant`, so a
+code-first deployment breaks all Channel reads. The default backfills existing
+rows into the internal `teamclaw` tenant. The replacement index leads with the
+same tenant axis used by the ORM guard, preventing same-owner/same-Bot records
+from different tenants from sharing an unscoped lookup path.
+
+```sql
+ALTER TABLE ac_channel_config
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+
+ALTER TABLE ac_channel_config
+  DROP INDEX idx_type_id_d_bbi,
+  ADD INDEX idx_tenant_env_type_id_d_bbi
+    (avernet_tenant, env, type, identity_id, deleted, bind_bot_id);
+```
+
+Apply the column addition before the index replacement if the platform executes
+one statement at a time. A rollback may keep the additive tenant column, but
+must not deploy code that references it before the column exists. Record the
+environment, change/version record, execution time, result, and rollback owner.
 
 **Stage 5 — MCP configuration** (PR #564). Three statements, **two different
 deadlines**:
@@ -1054,8 +1078,8 @@ the `session_key` it never read.
 All responses use the `Envelope[T]` / `Page[T]` shapes from
 `openapi_v1/contracts.py` unless noted (binary streams bypass the envelope).
 
-### ✅ totalfrank · P1 — bots (17 endpoints) · `openapi_v1/bots/router.py` — **IMPLEMENTED (PR #494; startup script #926)**
-All 17 wired to the internal bot services. Kept here as the reference shape for
+### ✅ totalfrank · P1 — bots · `openapi_v1/bots/router.py` — **IMPLEMENTED (PR #494; startup script #926)**
+The Bot core routes are wired to internal services. Kept here as the reference shape for
 the other six: this is what "done" looks like per category.
 
 | Method | Path | Purpose | Success |
@@ -1066,6 +1090,7 @@ the other six: this is what "done" looks like per category.
 | GET | `/openapi/v1/bots/ceiling` | Bot-creation quota ceiling | `Envelope[Ceiling]` |
 | GET | `/openapi/v1/bots/{bot_id}` | Bot details | `Envelope[Bot]` |
 | PUT | `/openapi/v1/bots/{bot_id}` | Update bot (engine immutable) | `Envelope[Bot]` |
+| PUT | `/openapi/v1/bots/{bot_id}/space` | Change the Bot's owning Business Space | `Envelope[BotSpaceAssignment]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | Delete bot | `Envelope[Deleted]` |
 | POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device) | `Envelope[Bot]` |
 | GET | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth; completes creation when ISSUED | `Envelope[BotAuthStatus]` |
@@ -1076,6 +1101,38 @@ the other six: this is what "done" looks like per category.
 | GET | `/openapi/v1/bots/{bot_id}/startup-script` | Read the bot's startup script | `Envelope[StartupScript]` |
 | PUT | `/openapi/v1/bots/{bot_id}/startup-script` | Set/replace it; takes effect next start | `Envelope[StartupScript]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/startup-script` | Clear it | `Envelope[Deleted]` |
+
+#### Owning Business Space reassignment
+
+`PUT /openapi/v1/bots/{bot_id}/space` explicitly requires `user_id` and a JSON
+body containing one numeric `space_id >= 1`. The target id comes from
+`GET /openapi/v1/spaces`; moving a Bot back to personal ownership uses that
+user's numeric PERSONAL Space id rather than `null` or an implicit sentinel.
+Only the Bot owner may perform the mutation. The owner must still be a member
+of the target Space, and a PERSONAL target must belong to that owner. An
+application is admitted with `GRANT_CHECKED_OWN_BOT`, so it must hold a live
+grant from the acting user for that user's owned Bot. Desktop/local Bots cannot
+move to TEAM Spaces and return 409. Repeating the current assignment is a
+successful no-op with `changed=false`; a real persistence failure is propagated
+rather than reported as success.
+
+Production now binds `BusinessSpaceContextProtocol` to the Spaces
+Service-API-backed adapter. Bot creation and `/openapi/v1/bots/all` therefore
+resolve numeric PERSONAL/TEAM Space ids through the same membership-gated
+contract; accounts whose PERSONAL Space has not yet been initialized retain the
+legacy `personal:<user_id>` read fallback without creating data as a GET side
+effect.
+
+This operation is deliberately a **narrow assignment update**, not the full
+cross-space migration described by the Bot Workshop integration plan. It does
+not reconcile collaborators/editors or provide a multi-domain transaction and
+compensation workflow. Do not mark “Bot migrate” complete or use this operation
+where target-Space membership must replace existing collaborator grants; that
+requires the B-line migration Application Service owned jointly with the
+Business Space/collaboration team. Regenerate
+`src/gateway/configs/schemas/bots.openapi.json`, then copy the schema and matching
+route/security configuration to the independently managed OCB/Sofapy Gateway;
+Avernet's broad `/openapi/v1/bots/**` rule already covers this path.
 
 #### Startup script — the promises a caller cannot infer from the schema
 
@@ -1227,16 +1284,37 @@ registry widened to include the bot's own active engine; update's duplicate-name
 check compares owner **and** `bot_id` together; deleting the default bot raises
 `BotOperationNotAllowedError` (internal response shape unchanged, public → 409)._
 
-### ❌ channels — **REMOVED (2026-08-03)**
-The component is deleted: router, schemas, package, mounted entry and its two
-published paths. It was never implemented, and unlike an unwritten component it
-was **published** — an integrator reading the served document saw a channels API
-and got a 500 on every call. Parking it kept that cost with none of the benefit.
+### ✅ Bot Workshop · P1 — channels (6 endpoints) · `openapi_v1/channels/router.py` — **IMPLEMENTED (2026-08-19)**
+Bot-scoped draft DingTalk Channel configuration. Every operation requires an
+explicit `user_id`; `owner_id` is optional and addresses a Bot shared with the
+caller. Human and application callers are admitted through
+`GRANT_CHECKED_ADDRESSED_BOT`, so an application must hold a live grant for the
+addressed `(owner_id, bot_id)` pair. Reads allow the owner or an operable
+collaborator; writes additionally require `ADMIN` collaborator permission. If the
+Bot has collaborators, the caller must also hold its Bot edit lock; otherwise
+the write returns the standard `423 Edit lock required` envelope.
 
-Nothing was lost that a re-add would need: the six operations (DingTalk config
-CRUD + a status toggle) are recorded above in the `2026-07-27` history and in the
-PR that removed them. If channels come back, they come back as a designed
-component, not as a resurrected stub.
+Only `dingding` and the `draft` stage are public. `verify` and `online` remain
+publication outputs. Creates start `inactive`; status changes synchronize the
+runtime, and deleting an active Channel deactivates it first. `client_secret`
+is write-only and reads expose only `has_client_secret`; the internal
+`aix_preview_url` is never projected. The collection is intentionally
+unpaginated (`Envelope[list[Channel]]`) because the current product contract
+manages the Bot's small configured set rather than a tenant-wide inventory.
+
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/{bot_id}/channels` | List draft DingTalk Channels | `Envelope[list[Channel]]` |
+| POST | `/openapi/v1/bots/{bot_id}/channels` | Create an inactive Channel | `201 Envelope[Channel]` |
+| GET | `/openapi/v1/bots/{bot_id}/channels/{channel_id}` | Read one Channel | `Envelope[Channel]` |
+| PATCH | `/openapi/v1/bots/{bot_id}/channels/{channel_id}` | Partially update config | `Envelope[Channel]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/channels/{channel_id}` | Deactivate and delete | `Envelope[Deleted]` |
+| PUT | `/openapi/v1/bots/{bot_id}/channels/{channel_id}/status` | Activate or deactivate | `Envelope[Channel]` |
+
+**Release gates:** deploy the Stage 3 DDL before Backend code and copy the
+regenerated `bots.openapi.json` plus matching route/security configuration to
+the independently managed OCB/Sofapy Gateway. Avernet's broad
+`/openapi/v1/bots/**` forwarding/security rule already covers these paths.
 
 ### ✅ totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py` — **IMPLEMENTED (PR #610)**
 Marketplace + tenants + the caller's unified per-server config. All 6 wired to
@@ -1531,6 +1609,28 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 ---
 
 ## Changelog (append a dated line whenever you move the board)
+
+- **2026-08-19** — **Bot ownership-Space reassignment added.** Added
+  `PUT /openapi/v1/bots/{bot_id}/space` with explicit `user_id`, a numeric
+  target `space_id`, owner and target-membership enforcement,
+  `GRANT_CHECKED_OWN_BOT` application admission, desktop-to-TEAM refusal,
+  idempotent `changed=false` no-op behavior, and tenant/owner-scoped
+  persistence whose failures are not swallowed. Production Bot Inventory now
+  consumes numeric PERSONAL/TEAM Spaces through the membership-gated Spaces
+  Service API adapter. This remains a narrow assignment update; collaborator
+  reconciliation and rollback belong to the pending B-line migration workflow.
+
+- **2026-08-19** — **Bot Workshop Channels restored as a complete public API.**
+  Added six Bot-first DingTalk draft-configuration operations under
+  `/openapi/v1/bots/{bot_id}/channels`, with explicit `user_id`, optional
+  shared-Bot `owner_id`, `GRANT_CHECKED_ADDRESSED_BOT` application admission,
+  operable-collaborator reads, and ADMIN-gated writes that preserve the existing
+  Bot edit-lock rule (423 when a collaborative Bot is not locked by the caller).
+  Secrets are write-only; runtime synchronization failures normalize to 502.
+  Track A now adds an
+  `avernet_tenant` guard and tenant-leading Channel index, with four isolation
+  tests. The Stage 3 DDL is deploy-before-code. The 2026-08-03 deletion entry is
+  retained below because it records why the former published stubs were removed.
 
 - **2026-08-18** — **Data-init trigger/status contract completed.** The public
   trigger now forwards the `IAM_TOKEN` cookie through the HTTP boundary into a

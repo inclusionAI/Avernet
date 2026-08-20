@@ -178,6 +178,7 @@ from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
 from .bots.engine_config import router as engine_config_router
 from .caller import router as caller_router
+from .channels import router as channels_router
 from .containers import router as containers_router
 from .diagnostics import router as diagnostics_router
 from .deprecated import (
@@ -278,13 +279,18 @@ _SUBGROUPS = [
     # creation/authorization pair remains human-only. Dependencies are declared
     # per route in the local router.
     local_router,
-    # These groups resolve the addressed owner through OwnerIdDep, which also
-    # performs the application-grant check. Their handlers then enforce the
-    # live Bot collaborator relation at member level before any publication read.
+]
+
+# These groups may address a shared Bot. ``OwnerIdDep`` performs the same grant
+# check transitively while resolving the addressed owner, but the mount also
+# declares it explicitly so the admission rule is visible where the public
+# surface is assembled. FastAPI caches the shared dependency per request.
+_ADDRESSED_BOT_SUBGROUPS = [
     service_lifecycle_router,
     service_edit_lock_router,
     containers_router,
     diagnostics_router,
+    channels_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
@@ -413,6 +419,12 @@ def build_public_router() -> APIRouter:
             router,
             responses=USER_SCOPED_ERROR_RESPONSES,
             dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_OWN_BOT,
+        )
+    for router in _ADDRESSED_BOT_SUBGROUPS:
+        public.include_router(
+            router,
+            responses=USER_SCOPED_ERROR_RESPONSES,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_ADDRESSED_BOT,
         )
     # The engine-runtime groups already run this exact check transitively —
     # their `OwnerIdDep` consumes the owner it returns — so declaring it at the

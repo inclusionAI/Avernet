@@ -104,7 +104,11 @@ class BusinessSpaceContextProtocol(Protocol):
     ) -> BusinessSpaceRef: ...
 
     def bot_space(
-        self, *, bot: Mapping[str, Any], owner_id: str
+        self,
+        *,
+        bot: Mapping[str, Any],
+        owner_id: str,
+        current_space: BusinessSpaceRef | None = None,
     ) -> BusinessSpaceRef | None: ...
 
     def assert_bot_visible_in_current_space(

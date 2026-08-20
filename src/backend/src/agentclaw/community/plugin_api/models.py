@@ -266,18 +266,29 @@ class ChannelConfig(Base):
     # get_current_env() on insert and filters by it, so the column is
     # effectively populated though the DDL permits NULL.
     env = Column(String(20), default=get_current_env, nullable=True)
+    # Public OpenAPI callers are tenant-scoped by the gateway principal. The
+    # persisted Channel row needs the same axis: owner_id + bot_id are not
+    # globally unique ("default" is intentionally common across tenants).
+    # The shared guard stamps this value on writes and filters every ORM read,
+    # update and delete. It is deliberately not projected by ChannelRecord.
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     # stage: 配置阶段，可选值: draft(草稿)/verify(验证中)/online(已上线)，默认 NULL
     stage = Column(String(128), nullable=True)
 
     __table_args__ = (
         Index(
-            "idx_type_id_d_bbi",
+            "idx_tenant_env_type_id_d_bbi",
+            "avernet_tenant",
+            "env",
             "type",
             "identity_id",
             "deleted",
             "bind_bot_id",
         ),
     )
+
+
+register_avernet_tenant_guard(ChannelConfig)
 
 
 class OssToNasRecord(Base):

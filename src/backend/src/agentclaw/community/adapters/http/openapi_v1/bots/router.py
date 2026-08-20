@@ -59,6 +59,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
@@ -126,6 +127,8 @@ from .schemas import (
     BotInventoryItem,
     BotStatus,
     BotType,
+    BotSpaceAssignment,
+    BotSpaceUpdate,
     BotUpdate,
     Ceiling,
     DataInitRequest,
@@ -773,6 +776,43 @@ async def update_bot(
             engine_type=bot.get("active_engine"),
         )
     return envelope(_to_bot(bot), request)
+
+
+@router.put(
+    "/{bot_id}/space",
+    response_model=Envelope[BotSpaceAssignment],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
+)
+@envelope_errors
+async def change_bot_space(
+    bot_id: BotIdPath,
+    body: BotSpaceUpdate,
+    request: Request,
+    user_id: UserIdDep,
+    service: BotSpaceServiceProtocol = Injected(BotSpaceServiceProtocol),
+) -> Envelope[BotSpaceAssignment]:
+    """Change the Space that owns a Bot.
+
+    The Bot must be owned by `user_id` and that user must currently be a
+    member of the target Space. Applications may call this only for an owned
+    Bot explicitly delegated to them. A personal Space is selected by its
+    numeric id from the Spaces API; `null` is not an implicit shortcut.
+    """
+    result = service.change_space(
+        bot_id=bot_id, owner_id=user_id, space_id=body.space_id
+    )
+    return envelope(
+        BotSpaceAssignment(
+            bot_id=result.bot["bot_id"],
+            space_id=result.space.id,
+            space_code=result.space.space_code,
+            space_name=result.space.name,
+            space_type=result.space.space_type.value,
+            changed=result.changed,
+        ),
+        request,
+    )
 
 
 @router.delete(
