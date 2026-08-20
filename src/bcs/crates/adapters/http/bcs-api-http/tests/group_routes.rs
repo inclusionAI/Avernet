@@ -8,7 +8,7 @@ use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, rout
 use bcs_service_api::application::v1::{
     AddGroupParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
     BotFinalDelivery, ChatConfiguration, CollaborationConfiguration, CollaborationGroupDetail,
-    CreateGroup, CreateGroupOutcome,
+    CreateGroup, CreateGroupOutcome, CreateGroupSpec,
     DeleteGroup, DeleteGroupParticipant, DeleteResult, GetGroup, GroupDeliveryPolicy, GroupDetail,
     GroupService, GroupStatus, GroupStrategy, GroupVisibility, ListGroups, MembershipFilter, Page,
     Participant, UpdateGroup, UpdateGroupParticipant,
@@ -880,4 +880,64 @@ async fn add_group_participant_rejects_unknown_field() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = response_json(response).await;
     assert_eq!(body["data"]["error_code"], "invalid_request");
+}
+
+fn captured_originator(service: &FakeGroupService) -> Option<String> {
+    let created = service.created.lock().expect("create lock");
+    let created = created.as_ref().expect("create command");
+    let CreateGroupSpec::Collaboration(req) = &created.group else {
+        panic!("expected collaboration group, got {:?}", created.group);
+    };
+    req.originator.clone()
+}
+
+#[tokio::test]
+async fn create_group_accepts_originator_omitted() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service.clone());
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/groups",
+            json!({
+                "group_kind": "normal",
+                "name": "Planning",
+                "driver_bot_uuid": "bot-1",
+                "participants": [{"actor_id": "bot-1", "role": "driver"}],
+                "collaboration": {
+                    "strategy": "chat",
+                    "delivery_policy": {"bot_final_delivery": "send_to_driver"}
+                }
+            }),
+        ))
+        .await
+        .expect("create response");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(captured_originator(&service), None);
+}
+
+#[tokio::test]
+async fn create_group_threads_explicit_originator() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service.clone());
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/groups",
+            json!({
+                "group_kind": "normal",
+                "name": "Planning",
+                "driver_bot_uuid": "bot-1",
+                "originator": "human_staff-1",
+                "participants": [{"actor_id": "bot-1", "role": "driver"}],
+                "collaboration": {
+                    "strategy": "chat",
+                    "delivery_policy": {"bot_final_delivery": "send_to_driver"}
+                }
+            }),
+        ))
+        .await
+        .expect("create response");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(captured_originator(&service).as_deref(), Some("human_staff-1"));
 }

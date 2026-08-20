@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentclaw.community.adapters.http.task.schemas import (
-    CallbackResponse, TaskCallbackRequest, TaskNodeCallbackRequest,
+    TaskCallbackRequest, TaskNodeCallbackRequest,
 )
 
 
@@ -34,8 +34,3 @@ def test_workflow_source_literal():
 def test_required_fields_enforced():
     with pytest.raises(ValidationError):
         TaskCallbackRequest(task_id="t1", workflow_source="bcn")  # 缺必填
-
-
-def test_callback_response_defaults():
-    r = CallbackResponse(success=True)
-    assert r.code == 200 and r.message == "OK"

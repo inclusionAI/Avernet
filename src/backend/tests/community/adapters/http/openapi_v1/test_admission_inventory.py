@@ -253,13 +253,15 @@ def test_only_the_named_operations_check_their_own_grant():
         and not _depends_on(_dependant_of(ctx), require_granted_addressed_bot)
         and key not in LEGACY_ROUTES
     }
-    assert self_checking == SKILL_SCOPED_OPERATIONS, (
+    named = SKILL_SCOPED_OPERATIONS
+    assert self_checking == named, (
         "the set of operations checking their grant in a handler has changed. "
-        "Adding one is an edit to admission.SKILL_SCOPED_OPERATIONS and needs "
-        "the same justification the four there have — that the addressed bot's "
-        "owner cannot be known before the handler runs.\n"
-        f"  unexpected: {sorted(self_checking - SKILL_SCOPED_OPERATIONS)}\n"
-        f"  no longer:  {sorted(SKILL_SCOPED_OPERATIONS - self_checking)}"
+        "Adding one is an edit to admission.SKILL_SCOPED_OPERATIONS and "
+        "needs the same justification the named ones have — that the addressed "
+        "bot's owner cannot be known "
+        "before the handler runs.\n"
+        f"  unexpected: {sorted(self_checking - named)}\n"
+        f"  no longer:  {sorted(named - self_checking)}"
     )
 
 

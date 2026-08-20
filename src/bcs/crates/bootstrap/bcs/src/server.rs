@@ -1468,6 +1468,7 @@ fn build_openapi_v1_state(
         session_repo,
         group_message_history,
         collaboration_runtime,
+        system_message.clone(),
         SessionServiceConfig { relation_env },
     ));
     let session_file_service = Arc::new(SessionFileApplicationServiceImpl::new(
@@ -1766,7 +1767,8 @@ impl Default for BcsServerState {
         let frontend_run_channels = run_channels.clone();
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
-            bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone()),
+            bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone())
+                .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
@@ -1854,6 +1856,7 @@ impl Default for BcsServerState {
                 .with_delivery(bot_delivery.clone())
                 .with_frontend_delivery(frontend_delivery.clone())
                 .with_bot_run_context(bot_run_context.clone())
+                .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
                 .with_message_repo(message_repo.clone())
                 .with_provider_stream_gray_list(provider_stream_gray_list.clone())
                 .register(BotJoinedMessageProducer::new(group_message_history.clone()))
@@ -1896,6 +1899,7 @@ impl Default for BcsServerState {
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
             state_machine_terminal_observer.clone(),
+            config.provider_chat_run_timeout_ms,
         );
         let group_management_impl = Arc::new(GroupManagement::new(
             sessions.clone(),
@@ -1955,6 +1959,7 @@ impl Default for BcsServerState {
             )
             .with_bot_registry(bot_registry.clone())
             .with_bot_run_context(bot_run_context.clone())
+            .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_callback_url_guard(outbound_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(
@@ -1982,6 +1987,13 @@ impl Default for BcsServerState {
             &config,
             Arc::new(GroupManagementWithRuntimeCleanup::new(
                 group_management_impl.clone(),
+                collaboration_runtime.clone(),
+            )),
+        );
+        let group_management_v1 = maybe_wrap_group_management(
+            &config,
+            Arc::new(GroupManagementWithRuntimeCleanup::new(
+                Arc::new((*group_management_impl).clone().for_v1_openapi()),
                 collaboration_runtime.clone(),
             )),
         );
@@ -2013,7 +2025,7 @@ impl Default for BcsServerState {
             relation_store.clone(),
             session_management.clone(),
             session_launch.clone(),
-            group_management.clone(),
+            group_management_v1.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
             group_message_history.clone(),
@@ -2349,6 +2361,10 @@ struct UseCaseBundle {
     bot_runtime: Arc<dyn bcs_service_api::BotRuntimeConnectionService>,
     bot_discovery: Arc<dyn bcs_service_api::BotDiscoveryService>,
     group_management: Arc<dyn bcs_service_api::GroupManagementService>,
+    /// Dedicated `for_v1_openapi` twin of `group_management`, wired only into
+    /// the OpenAPI V1 facade so V1 create-group runs the driver-anchored
+    /// core branch while legacy HTTP keeps the legacy branch.
+    group_management_v1: Arc<dyn bcs_service_api::GroupManagementService>,
     group_query: Arc<dyn bcs_service_api::GroupQueryService>,
     workbench_sessions: Arc<dyn bcs_service_api::WorkbenchSessionService>,
     interaction_authorization: Arc<dyn CanResolveInteraction>,
@@ -2410,6 +2426,7 @@ fn build_use_case_bundle(
             .with_delivery(bot_delivery.clone())
             .with_frontend_delivery(frontend_delivery.clone())
             .with_bot_run_context(bot_run_context)
+            .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_provider_stream_gray_list(provider_stream_gray_list.clone())
             .register(BotJoinedMessageProducer::new(group_message_history.clone()))
             .register(HumanJoinedMessageProducer::new())
@@ -2446,6 +2463,8 @@ fn build_use_case_bundle(
     .with_channel_binding_cleanup(channel_binding_cleanup)
     .with_outbound_url_guard(callback_url_guard.clone())
     .with_bot_runtime(bot_use_cases.clone()));
+    let group_management_v1: Arc<dyn bcs_service_api::GroupManagementService> =
+        Arc::new((*group_management).clone().for_v1_openapi());
     let proposal_base_url = config
         .bcs_endpoint
         .clone()
@@ -2490,6 +2509,7 @@ fn build_use_case_bundle(
         bot_runtime: bot_use_cases.clone(),
         bot_discovery: bot_use_cases,
         group_management: group_management.clone(),
+        group_management_v1,
         group_query: group_management.clone(),
         workbench_sessions: group_management.clone(),
         interaction_authorization: group_management,
@@ -2598,6 +2618,7 @@ fn create_message_flow_services(
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
+    provider_chat_run_timeout_ms: u64,
 ) -> (Arc<dyn MessageFlowService>, ChannelSlot) {
     let mut message_flow = BcsMessageFlow::new(
         group,
@@ -2610,6 +2631,7 @@ fn create_message_flow_services(
     .with_interceptors(interceptors)
     .with_session_management(session_management)
     .with_bot_run_context(bot_run_context)
+    .with_provider_chat_run_timeout_ms(provider_chat_run_timeout_ms)
     .with_system_message(system_message)
     .with_provider_stream_gray_list(provider_stream_gray_list)
     .with_bot_terminal_observer(bot_terminal_observer);
@@ -3223,7 +3245,8 @@ impl BcsServer {
         let frontend_run_channels = run_channels.clone();
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
-            bcs_provider_http::HttpProviderTransport::with_url_guard(provider_request_url_guard),
+            bcs_provider_http::HttpProviderTransport::with_url_guard(provider_request_url_guard)
+                .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
@@ -3351,6 +3374,7 @@ impl BcsServer {
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
             state_machine_terminal_observer.clone(),
+            config.provider_chat_run_timeout_ms,
         );
 
         let collaboration_store = Arc::new(MemoryCollaborationStore::new());
@@ -3378,6 +3402,7 @@ impl BcsServer {
             )
             .with_bot_registry(bot_registry.clone())
             .with_bot_run_context(bot_run_context.clone())
+            .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_callback_url_guard(callback_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(
@@ -3408,6 +3433,13 @@ impl BcsServer {
                 collaboration_runtime.clone(),
             )),
         );
+        let group_management_v1 = maybe_wrap_group_management(
+            &config,
+            Arc::new(GroupManagementWithRuntimeCleanup::new(
+                use_cases.group_management_v1,
+                collaboration_runtime.clone(),
+            )),
+        );
         let openapi_v1 = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -3421,7 +3453,7 @@ impl BcsServer {
             relation_store.clone(),
             session_management.clone(),
             session_launch.clone(),
-            group_management.clone(),
+            group_management_v1.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
             group_message_history.clone(),
@@ -3809,7 +3841,8 @@ impl BcsServer {
         let frontend_run_channels = run_channels.clone();
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
-            bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone()),
+            bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone())
+                .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
@@ -3973,6 +4006,7 @@ impl BcsServer {
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
             state_machine_terminal_observer.clone(),
+            config.provider_chat_run_timeout_ms,
         );
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())
@@ -4011,6 +4045,7 @@ impl BcsServer {
                 )
                 .with_bot_registry(bot_registry.clone())
                 .with_bot_run_context(bot_run_context.clone())
+                .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
                 .with_callback_url_guard(outbound_url_guard.clone())
                 .with_session_channel_outbound(session_channel_outbound)
                 .with_result_publisher(Arc::new(
@@ -4042,6 +4077,13 @@ impl BcsServer {
                 collaboration_runtime.clone(),
             )),
         );
+        let group_management_v1 = maybe_wrap_group_management(
+            &config,
+            Arc::new(GroupManagementWithRuntimeCleanup::new(
+                use_cases.group_management_v1,
+                collaboration_runtime.clone(),
+            )),
+        );
         let openapi_v1 = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -4055,7 +4097,7 @@ impl BcsServer {
             relation_svc.clone(),
             session_management.clone(),
             session_launch.clone(),
-            group_management.clone(),
+            group_management_v1.clone(),
             collaboration_runtime.clone(),
             session_repo.clone(),
             group_message_history.clone(),

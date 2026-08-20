@@ -132,7 +132,9 @@ main() {
     fi
 
     # ── backend ────────────────────────────────────────────────────────────────
-    _dump_upstream backend
+    # bots domain — the harness operations sit under /openapi/v1/bots/{bot_id}/harness
+    # and are part of this dump; there is no separate harness artifact.
+    _dump_upstream backend --path-prefix /openapi/v1/bots
     if ! $DRY_RUN; then
         _gate_and_publish \
             backend \

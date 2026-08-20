@@ -21,6 +21,7 @@ use bcs_domain::{AttachmentType, MessageAttachment};
 use bcs_friend::FriendCore;
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_relation::RelationCore;
+use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
     AddSessionParticipant, AuthenticatedAppIdentity, AuthenticatedBotIdentity, AuthenticatedCaller,
     AuthenticatedUserIdentity, CollectSession, CompleteSession, CreateSession, DeleteSession,
@@ -37,9 +38,10 @@ use bcs_service_api::{
     GroupCoreService, GroupHistoryCommand, GroupHistoryResult, GroupMessage,
     GroupMessageHistoryService, GroupMessageType, GroupStrategy, GroupUseCaseError,
     HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanActor, MessageRole,
-    Participant, ParticipantMode, ParticipantRole, SessionCaller, SessionHistoryCommand,
-    SessionHistoryResult, SessionKind, StartStateMachineRunCommand, StartStateMachineRunOutcome,
-    StateMachineDeliveryCorrelation, StateMachineRun, StateMachineRunStatus, StateMachineRunView,
+    Participant, ParticipantMode, ParticipantRole, ServiceResult, SessionCaller,
+    SessionHistoryCommand, SessionHistoryResult, SessionKind, StartStateMachineRunCommand,
+    StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
+    StateMachineRunStatus, StateMachineRunView, SystemMessageEvent,
 };
 use bcs_session::{SessionLaunchApplication, SessionManagementServiceImpl};
 use bcs_session_store::MemorySessionRepo;
@@ -49,6 +51,41 @@ use bcs_test_support::NoopSystemMessageService;
 struct RecordingHistoryService {
     session_calls: Mutex<Vec<SessionHistoryCommand>>,
     messages: Mutex<Vec<GroupMessage>>,
+}
+
+/// Records every `SystemMessageService::notify` call so tests can assert that
+/// `SessionServiceImpl::update_participant` emits `ParticipantModeChanged`.
+#[derive(Default)]
+struct RecordingSystemMessageService {
+    events: Mutex<Vec<RecordedSystemMessage>>,
+}
+
+struct RecordedSystemMessage {
+    #[allow(dead_code)]
+    group_id: String,
+    session_id: String,
+    event: SystemMessageEvent,
+}
+
+#[async_trait]
+impl SystemMessageService for RecordingSystemMessageService {
+    async fn notify(
+        &self,
+        group_id: &str,
+        event: SystemMessageEvent,
+        session_id: &str,
+        _participants: &[Participant],
+    ) -> ServiceResult<usize> {
+        self.events
+            .lock()
+            .expect("sysmsg lock")
+            .push(RecordedSystemMessage {
+                group_id: group_id.to_string(),
+                session_id: session_id.to_string(),
+                event,
+            });
+        Ok(0)
+    }
 }
 
 #[async_trait]
@@ -221,6 +258,7 @@ struct Fixture {
     friends: Arc<FriendCore>,
     history: Arc<RecordingHistoryService>,
     runtime: Arc<RecordingRuntime>,
+    system_messages: Arc<RecordingSystemMessageService>,
     session_repo: Arc<dyn SessionRepoPort>,
 }
 
@@ -239,6 +277,7 @@ impl Fixture {
         let session_repo: Arc<dyn SessionRepoPort> = Arc::new(MemorySessionRepo::new());
         let history = Arc::new(RecordingHistoryService::default());
         let runtime = Arc::new(RecordingRuntime::default());
+        let system_messages = Arc::new(RecordingSystemMessageService::default());
         let sessions = Arc::new(SessionManagementServiceImpl::new(
             session_repo.clone(),
             group_repo,
@@ -260,6 +299,7 @@ impl Fixture {
             session_repo.clone(),
             history.clone(),
             runtime.clone(),
+            system_messages.clone(),
             SessionServiceConfig {
                 relation_env: "dev".to_string(),
             },
@@ -271,6 +311,7 @@ impl Fixture {
             friends: friends_handle,
             history,
             runtime,
+            system_messages,
             session_repo,
         }
     }
@@ -1861,6 +1902,103 @@ async fn participant_add_update_remove_lifecycle() {
         .await
         .expect("idempotent delete participant");
     assert!(!again.deleted);
+}
+
+#[tokio::test]
+async fn update_participant_emits_mode_changed_system_message_only_on_change() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    // Add expert (defaults to Auto) so its mode can be updated.
+    let added = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect("add expert");
+    assert_eq!(added.mode, ParticipantMode::Auto);
+
+    // Changing expert Auto -> Muted must emit ParticipantModeChanged.
+    fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+            mode: ParticipantMode::Muted,
+        })
+        .await
+        .expect("mute expert");
+
+    let mode_changes = recorded_mode_changes(&fixture, &session_id);
+    assert_eq!(mode_changes.len(), 1, "exactly one mode-change event");
+    assert_eq!(mode_changes[0].0, "expert");
+    assert_eq!(mode_changes[0].1, Some(ParticipantMode::Auto));
+    assert_eq!(mode_changes[0].2, ParticipantMode::Muted);
+
+    // Re-applying the same mode is a no-op and must NOT emit another event.
+    fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+            mode: ParticipantMode::Muted,
+        })
+        .await
+        .expect("re-mute expert is idempotent");
+
+    let mode_changes = recorded_mode_changes(&fixture, &session_id);
+    assert_eq!(
+        mode_changes.len(),
+        1,
+        "no new event when the mode is unchanged"
+    );
+}
+
+/// Collect `ParticipantModeChanged` events recorded for `session_id`.
+fn recorded_mode_changes(
+    fixture: &Fixture,
+    session_id: &str,
+) -> Vec<(String, Option<ParticipantMode>, ParticipantMode)> {
+    fixture
+        .system_messages
+        .events
+        .lock()
+        .expect("sysmsg lock")
+        .iter()
+        .filter(|recorded| recorded.session_id == session_id)
+        .filter_map(|recorded| {
+            if let SystemMessageEvent::ParticipantModeChanged {
+                actor_id,
+                from,
+                to,
+                ..
+            } = &recorded.event
+            {
+                Some((actor_id.clone(), *from, *to))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 #[tokio::test]

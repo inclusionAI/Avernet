@@ -12,6 +12,6 @@ engine 侧零改动 — 复用现有 WebSocket 端点 + chat.send 处理器。
 
 触发方式:
 A. 自动 — TaskDiscoveryScheduler 在 startup 后按 cron 表达式定时触发
-B. 手动 — HTTP POST /api/public/task-discovery/discover
-C. 外部调度 — HTTP POST /api/public/task-discovery/scheduled-trigger
+B. 手动 — HTTP POST /api/v1/collaboration/tasks/discovery/discover
+C. CLI  — scripts/task_discovery.sh discover → curl backend API
 """
