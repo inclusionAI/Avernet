@@ -13,6 +13,10 @@ MAPPING_CONTRACT_V2 = "skills-pool-mapping-v2"
 MAPPING_CONTRACT_V3 = "skills-pool-mapping-v3"
 
 
+class RuntimeMappingNameConflictError(ValueError):
+    """Different selected assets claim one canonical runtime entry name."""
+
+
 def mapping_contract_for(
     mappings: list[PoolSkillMapping],
     supported_versions: object,
@@ -65,11 +69,17 @@ def build_logical_skill_mappings(
             relative = None
             corpus = "center"
         else:
-            continue
+            # A complete projection is fail-closed.  Silently ignoring a
+            # selected asset would make the database desired state and the
+            # delivered runtime disagree.
+            raise ValueError(f"unsupported skill source: {asset.git_path}")
         # ``ac_skill.name`` is the single runtime-name policy for every shared
         # asset.  Repo paths are locators, not user-visible link identities:
         # two different directories can legitimately share the same tail.
-        link_name = asset.name if corpus in {"repo", "center"} else relative.name
+        # ``ac_skill.name`` is the only RuntimeNamePolicy input for every
+        # corpus.  ``local://`` and ``git://`` tails are locators, never the
+        # runtime identity exposed to an Engine.
+        link_name = asset.name
         identity = (
             f"center:{asset.skill_uuid}:{asset.sc_version_number}"
             if corpus == "center"
@@ -78,7 +88,9 @@ def build_logical_skill_mappings(
         if targets.get(link_name) == identity:
             continue
         if link_name in targets:
-            raise ValueError(f"duplicate managed target: {link_name}")
+            raise RuntimeMappingNameConflictError(
+                f"duplicate managed target: {link_name}"
+            )
         targets[link_name] = identity
         mappings.append(
             PoolSkillMapping(
@@ -185,7 +197,11 @@ def logical_skill_mappings_from_evidence(
             or path.is_absolute()
             or ".." in path.parts
             or path.as_posix() != relative_path
-            or path.name != link_name
+            or not link_name
+            or link_name.strip() != link_name
+            or "/" in link_name
+            or "\\" in link_name
+            or link_name in {".", ".."}
         ):
             raise ValueError("invalid retired mapping evidence")
         mapping = PoolSkillMapping(
@@ -237,4 +253,5 @@ __all__ = [
     "mapping_contract_for",
     "merge_retired_logical_skill_mappings",
     "retired_logical_skill_mappings",
+    "RuntimeMappingNameConflictError",
 ]

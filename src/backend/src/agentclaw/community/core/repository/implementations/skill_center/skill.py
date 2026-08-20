@@ -542,6 +542,7 @@ class SkillRepository(
                     git_path=row.git_path,
                     skill_uuid=getattr(row, "skill_uuid", None),
                     sc_version_number=getattr(row, "sc_version_number", None),
+                    mcp_dependencies=tuple(_skill_to_dict(row).get("mcp_dependencies") or ()),
                 )
                 for row in rows
             ]
@@ -562,26 +563,10 @@ class SkillRepository(
         reconciliation cannot disagree about whether a Local Skill is active.
         """
 
-        from agentclaw.community.core.models.skill import BotSkillInstallation
-        from agentclaw.community.core.skill_center.installation_compatibility import (
-            includes_default_skill_member,
-        )
         from agentclaw.community.core.skills_pool.models import (
             RegisteredSkillAsset,
         )
 
-        with self._db.orm_session() as db:
-            installed_ids = {
-                int(row[0])
-                for row in db.query(BotSkillInstallation.skill_id)
-                .filter(
-                    BotSkillInstallation.avernet_tenant
-                    == get_current_avernet_tenant(),
-                    BotSkillInstallation.env == env,
-                    BotSkillInstallation.bot_id == bot_id,
-                )
-                .all()
-            }
         skill_sets = SkillSetRepository(self._db)
         active_sets = skill_sets.get_all_active_skill_sets_for_env(
             user_id=user_id,
@@ -597,21 +582,14 @@ class SkillRepository(
                 env=env,
             )
             if skill_set.get("is_default"):
-                excluded_ids = set(
-                    skill_sets.get_excluded_skills(
-                        user_id=user_id,
-                        bot_id=bot_id,
-                        skill_set_id=int(skill_set["id"]),
-                    )
-                )
+                # System Default is an independent input to the Resolver.
+                # The historical per-Bot Local exclusion is migration-only
+                # compatibility data and must never decide a runtime entry.
+                # Bot-owned Local assets are selected solely by Installation.
                 rows = [
                     row
                     for row in rows
-                    if includes_default_skill_member(
-                        row,
-                        installed_ids=installed_ids,
-                        excluded_ids=excluded_ids,
-                    )
+                    if not str(row.get("git_path") or "").startswith("local://")
                 ]
             for row in rows:
                 git_path = str(row.get("git_path") or "")
@@ -633,6 +611,7 @@ class SkillRepository(
                             if row.get("sc_version_number") is not None
                             else None
                         ),
+                        mcp_dependencies=tuple(row.get("mcp_dependencies") or ()),
                     )
                 )
         for row in self.list_bot_installed_skills(env=env, bot_id=bot_id):
@@ -651,6 +630,7 @@ class SkillRepository(
                     git_path=git_path,
                     skill_uuid=skill_uuid,
                     sc_version_number=sc_version_number,
+                    mcp_dependencies=tuple(row.get("mcp_dependencies") or ()),
                 )
             )
         return assets

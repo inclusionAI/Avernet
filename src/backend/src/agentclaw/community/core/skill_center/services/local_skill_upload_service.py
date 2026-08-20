@@ -39,10 +39,12 @@ from agentclaw.community.core.skill_center.services.skill_parser import (
     SkillManifestError,
     SkillParser,
 )
+from agentclaw.community.core.skill_center.runtime_policy import (
+    require_supported_bot_skill_runtime,
+)
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
-    SkillSetServiceFactory,
 )
 from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 from agentclaw.community.core.skills_pool.edit_guard import (
@@ -53,6 +55,9 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    BotRuntimeProjectionReconcilerProtocol,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -77,22 +82,22 @@ class LocalSkillUploadService:
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
-        skill_set_service_factory: SkillSetServiceFactory,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
         cleanup_repo: LocalSkillCleanupRepository,
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
+        runtime_reconciler: BotRuntimeProjectionReconcilerProtocol,
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
         self._bot_repo = bot_repo
         self._collaborators = collaborator_service
         self._skill_service_factory = skill_service_factory
-        self._skill_set_service_factory = skill_set_service_factory
         self._audit_log_repo = audit_log_repo
         self._edit_guard = edit_guard
         self._cleanup_repo = cleanup_repo
         self._device_context_resolver_provider = device_context_resolver_provider
+        self._runtime_reconciler = runtime_reconciler
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
@@ -121,6 +126,7 @@ class LocalSkillUploadService:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
+            require_supported_bot_skill_runtime(bot)
             name, description, files = self._unpack(package)
             is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=owner_id)
             await self._retry_pending_cleanup(
@@ -370,7 +376,7 @@ class LocalSkillUploadService:
                 raise RuntimeError("Local Skill metadata switch failed")
             switched = True
             runtime_sync_attempted = True
-            if not self._sync_runtime(bot, owner_id, bot_id):
+            if not await self._sync_runtime(owner_id, bot_id):
                 raise LocalSkillRuntimeSyncError()
             self._audit_log_repo.insert(
                 {
@@ -468,7 +474,7 @@ class LocalSkillUploadService:
                 raise LocalSkillStorageError()
             if (
                 runtime_sync_attempted
-                and not self._sync_runtime(bot, owner_id, bot_id)
+                and not await self._sync_runtime(owner_id, bot_id)
             ):
                 # Runtime may have switched partway before reporting failure.
                 # Keep the complete staged package until a later serialized
@@ -572,8 +578,8 @@ class LocalSkillUploadService:
                     int(work["id"]), bot, owner_id, bot_id
                 )
                 continue
-            if bool(work.get("requires_runtime_restore")) and not self._sync_runtime(
-                bot, owner_id, bot_id
+            if bool(work.get("requires_runtime_restore")) and not await self._sync_runtime(
+                owner_id, bot_id
             ):
                 if not self._cleanup_repo.mark_failed(
                     work_id=int(work["id"]),
@@ -669,16 +675,13 @@ class LocalSkillUploadService:
             matches.append({**row, "active": bool(current["active"])})
         return matches
 
-    def _sync_runtime(self, bot: dict[str, Any], owner_id: str, bot_id: str) -> bool:
+    async def _sync_runtime(self, owner_id: str, bot_id: str) -> bool:
         try:
-            service = self._skill_set_service_factory.create(
-                user_id=owner_id,
-                entity_id=str(bot["entity_id"]),
+            await self._runtime_reconciler.reconcile(
                 bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-                entity_type=bot.get("entity_type"),
+                owner_id=owner_id,
             )
-            return bool(service.sync_runtime())
+            return True
         except Exception:
             return False
 

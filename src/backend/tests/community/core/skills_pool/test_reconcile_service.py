@@ -582,6 +582,38 @@ async def test_ready_claimed_bot_completes_pool_activation() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("template_type", ("personalCoding", "applicationCoding"))
+async def test_coding_template_probes_aicoding_pool_layout_but_reads_claude_assets(
+    template_type: str,
+) -> None:
+    """The runtime layout is AICoding while the Skill catalogue stays Claude."""
+
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime(engine="aicoding")
+    skills = FakeSkillRepository("claude_code")
+    service = build_service(
+        layouts,
+        runtime,
+        engine="claude_code",
+        skills=skills,
+    )
+    service._bots.bot["template_type"] = template_type
+
+    result = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "cutover", "mapping", "verify"]
+    assert layouts.committed_locators == {
+        11: (
+            "local:///home/admin/.aicoding/workspace/skills-pool/skills-local/local-a"
+        ),
+        12: (
+            "local:///home/admin/.aicoding/workspace/skills-pool/skills-local/local-b"
+        ),
+    }
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("engine", ["openclaw", "claude_code", "hermes"])
 async def test_product_deactivation_during_cutover_retires_stale_mapping(
     engine: str,

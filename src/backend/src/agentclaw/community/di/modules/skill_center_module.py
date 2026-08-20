@@ -1,31 +1,7 @@
-"""SkillCenterModule — production singletons & factories for skill_center.
+"""Production Skill Center DI bindings.
 
-Replaces the module-globals in
-``core/skill_center/dependencies/skills.py`` (``_skill_repo``,
-``_skill_set_repo``, ``_device_plugin``, ``_skill_repo_sync_plugin``,
-plus the legacy ``git_sync_service`` global at the bottom of
-``services/git_sync.py``).
-
-Production bindings are wired here. The ``test`` / ``singlebox`` profiles
-install :class:`TestingSkillCenterModule` (via ``modules_for``) to
-override these with the local stubs.
-
-Three categories of binding:
-
-- **Plugin / repo singletons**: ``SkillRepository``,
-  ``SkillSetRepository``, ``DeviceAccessor``, ``SkillRepoSyncPlugin``,
-  ``GitSyncService``. Each ``@singleton @provider``.
-- **Service factories**: ``SkillServiceFactory``,
-  ``SkillSetServiceFactory``, ``SkillParameterServiceFactory``. Each
-  factory holds the @inject-supplied singletons and mints a fresh
-  service per ``create()`` call with caller-supplied request-scoped
-  arguments (paths, IDs).
-- **Stateless services**: ``SkillAuthService`` is a clean singleton with
-  no per-call state — bound directly.
-
-This module never branches on mode. Local / test boots layer
-``TestingSkillCenterModule`` on top to override the database-mode-keyed
-plugin_api and repos.
+Test and singlebox profiles layer ``TestingSkillCenterModule`` on top of this
+module; request-scoped service factories remain here.
 """
 
 from __future__ import annotations
@@ -150,11 +126,13 @@ from agentclaw.community.core.repository.protocols.skills_pool import (
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolSkillRepositoryProtocol,
 )
-from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skills_pool.reconcile_task import (
     SkillsPoolReconcileWakeupListener,
 )
-from agentclaw.community.core.skills_pool.models import pool_paths_for_engine
+from agentclaw.community.core.workspace.skill_layout import (
+    pool_paths_for_engine,
+    runtime_layout_engine_for_bot,
+)
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
@@ -182,8 +160,15 @@ from agentclaw.community.core.skill_center.services.bot_skill_asset_service impo
 )
 from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
     SkillSetControlPlaneService,
-    SkillSetRuntimeReconciler,
-    SkillSetRuntimeReconcilerProtocol,
+)
+from agentclaw.community.api.bot_runtime_projection_reconciler import (
+    BotRuntimeProjectionReconcilerProtocol as ApiBotRuntimeProjectionReconcilerProtocol,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    BotRuntimeProjectionReconcilerProtocol as CoreBotRuntimeProjectionReconcilerProtocol,
+)
+from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
+    BotRuntimeProjectionReconciler,
 )
 from agentclaw.community.core.skill_center.authorization_hook import (
     BotCapabilityAuthorizationHookProtocol,
@@ -345,8 +330,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             scope=singleton,
         )
         binder.bind(
-            SkillSetRuntimeReconcilerProtocol,
-            to=SkillSetRuntimeReconciler,
+            BotRuntimeProjectionReconciler,
+            to=BotRuntimeProjectionReconciler,
             scope=singleton,
         )
         binder.bind(
@@ -364,6 +349,24 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             to=SkillPublishService,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    @inject
+    def core_runtime_projection_reconciler_protocol(
+        self, service: BotRuntimeProjectionReconciler
+    ) -> CoreBotRuntimeProjectionReconcilerProtocol:
+        """Expose the one reconciler singleton to Core consumers."""
+        return service
+
+    @singleton
+    @provider
+    @inject
+    def api_runtime_projection_reconciler_protocol(
+        self, service: BotRuntimeProjectionReconciler
+    ) -> ApiBotRuntimeProjectionReconcilerProtocol:
+        """Expose that same singleton through the public Service API."""
+        return service
 
     @singleton
     @provider
@@ -425,11 +428,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
-        skill_set_service_factory: SkillSetServiceFactory,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
         cleanup_repo: LocalSkillCleanupRepository,
         injector: Injector,
+        runtime_reconciler: CoreBotRuntimeProjectionReconcilerProtocol,
     ) -> LocalSkillUploadServiceProtocol:
         return LocalSkillUploadService(
             skill_repo,
@@ -437,11 +440,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             bot_repo,
             collaborator_service,
             skill_service_factory,
-            skill_set_service_factory,
             audit_log_repo,
             edit_guard,
             cleanup_repo,
             lambda: injector.get(DeviceContextResolver),
+            runtime_reconciler,
         )
 
     @singleton
@@ -465,9 +468,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         skill_set_service_factory: SkillSetServiceFactory,
         mutation_guard: BotCapabilityMutationGuard,
         edit_guard: SkillsPoolEditGuard,
-        pool_runtime: SkillsPoolRuntimeProtocol,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
-        pool_layouts: SkillsPoolLayoutRepositoryProtocol,
+        runtime_reconciler: CoreBotRuntimeProjectionReconcilerProtocol,
     ) -> LocalSkillStateServiceProtocol:
         return LocalSkillStateService(
             skill_repo,
@@ -477,10 +479,9 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             skill_set_service_factory,
             mutation_guard,
             edit_guard,
-            pool_runtime,
             pool_skills,
-            pool_layouts,
             skill_set_repo,
+            runtime_reconciler,
         )
 
     @singleton
@@ -714,7 +715,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             )
             if not runtime_uses_pool_paths(state):
                 return None
-            paths = pool_paths_for_engine(engine)
+            paths = pool_paths_for_engine(runtime_layout_engine_for_bot(bot))
             return paths.active, paths.pool_local, paths.pool_repo
 
         return SkillServiceFactory(
@@ -945,6 +946,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         device_sync_dispatcher: DeviceSyncDispatcher,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         skills_pool_wakeup: SkillsPoolReconcileWakeupListener,
+        runtime_reconciler: CoreBotRuntimeProjectionReconcilerProtocol,
     ) -> SkillSymlinkListener:
         def desktop_layout_authority(bot: dict) -> str | None:
             if bot.get("bot_type") != "desktop":
@@ -976,4 +978,13 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             device_sync_dispatcher=device_sync_dispatcher,
             desktop_layout_authority=desktop_layout_authority,
             desktop_reconcile_wakeup=skills_pool_wakeup.handle,
+            runtime_reconcile=lambda bot_id, owner_id: runtime_reconciler.reconcile(
+                bot_id=bot_id, owner_id=owner_id
+            ),
+            runtime_non_skill_reconcile=lambda bot_id, owner_id: (
+                runtime_reconciler.reconcile_non_skill_projection(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                )
+            ),
         )

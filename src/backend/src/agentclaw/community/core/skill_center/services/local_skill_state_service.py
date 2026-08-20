@@ -27,7 +27,16 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.skill_center.runtime_policy import (
-    require_supported_bot_skill_runtime,
+    BotSkillRuntimeCommand,
+    BotSkillRuntimeMutationMode,
+    require_bot_skill_runtime_command,
+)
+from agentclaw.community.core.skill_center.runtime_resolver import (
+    RuntimeDesiredState,
+    RuntimeProjectionResolver,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    BotRuntimeProjectionReconcilerProtocol,
 )
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationBusyError,
@@ -43,7 +52,6 @@ from agentclaw.community.core.repository.protocols.skill_installation import (
     SkillInstallationRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skills_pool import (
-    SkillsPoolLayoutRepositoryProtocol,
     SkillsPoolSkillRepositoryProtocol,
 )
 from agentclaw.community.core.skills_pool.edit_guard import (
@@ -57,15 +65,9 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
 )
 from agentclaw.community.core.skills_pool.models import (
-    PoolSkillMapping,
     RegisteredSkillAsset,
-    SkillMappingSourceLayout,
 )
-from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
-from agentclaw.community.core.skills_pool.types import (
-    BotSkillLayoutScope,
-    runtime_uses_pool_paths,
-)
+from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 
 
 class LocalSkillStateService:
@@ -81,10 +83,9 @@ class LocalSkillStateService:
         skill_set_service_factory: SkillSetServiceFactory,
         mutation_guard: BotCapabilityMutationGuard,
         edit_guard: SkillsPoolEditGuard,
-        pool_runtime: SkillsPoolRuntimeProtocol,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
-        pool_layouts: SkillsPoolLayoutRepositoryProtocol,
         skill_set_repo: SkillSetRepository,
+        runtime_reconciler: BotRuntimeProjectionReconcilerProtocol,
     ) -> None:
         self._skill_repo = skill_repo
         self._installations = installations
@@ -93,10 +94,9 @@ class LocalSkillStateService:
         self._skill_set_service_factory = skill_set_service_factory
         self._mutation_guard = mutation_guard
         self._edit_guard = edit_guard
-        self._pool_runtime = pool_runtime
         self._pool_skills = pool_skills
-        self._pool_layouts = pool_layouts
         self._skill_set_repo = skill_set_repo
+        self._runtime_reconciler = runtime_reconciler
 
     async def set_local_skill_active(
         self, *, skill_id: str, actor_id: str, active: bool
@@ -126,6 +126,8 @@ class LocalSkillStateService:
                     raise LocalSkillNotFoundError()
                 if not is_bot_ready(bot):
                     raise LocalSkillNotReadyError()
+                command = self._runtime_command(active=active)
+                mode = require_bot_skill_runtime_command(bot, command)
                 changed = self._write_desired_state(
                     active=active,
                     env=str(bot["env"]),
@@ -135,16 +137,19 @@ class LocalSkillStateService:
                 self._ensure_mutation_lease(mutation_lease)
 
                 if active:
-                    synced = self._sync_runtime(
-                        bot=bot, owner_id=owner_id, bot_id=bot_id
+                    synced = await self._reconcile_runtime(
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        command=command,
+                        mode=mode,
                     )
                 else:
                     synced = await self._reconcile_deactivation(
-                        scope=scope,
-                        bot=bot,
                         skill=skill,
                         owner_id=owner_id,
                         bot_id=bot_id,
+                        command=command,
+                        mode=mode,
                     )
                 self._ensure_mutation_lease(mutation_lease)
                 if not synced:
@@ -162,8 +167,11 @@ class LocalSkillStateService:
                         # Restore through the established runtime synchronizer.
                         # It owns each engine's actual active-root compatibility,
                         # including Claude Code's historical workspace root.
-                        restored = self._sync_runtime(
-                            bot=bot, owner_id=owner_id, bot_id=bot_id
+                        restored = await self._reconcile_runtime(
+                            bot_id=bot_id,
+                            owner_id=owner_id,
+                            command=command,
+                            mode=mode,
                         )
                         self._ensure_mutation_lease(mutation_lease)
                         if not restored:
@@ -201,7 +209,8 @@ class LocalSkillStateService:
                 raise LocalSkillNotFoundError()
         if not is_bot_ready(bot):
             raise LocalSkillNotReadyError()
-        self._require_supported_repo_runtime(bot)
+        command = self._runtime_command(active=active)
+        mode = self._require_repo_runtime_command(bot, command)
         scope = self._scope_for(bot, bot_id)
         try:
             mutation_lease = self._mutation_guard.acquire(scope=scope)
@@ -246,16 +255,19 @@ class LocalSkillStateService:
                     raise LocalSkillStorageError() from exc
                 self._ensure_mutation_lease(mutation_lease)
                 if active:
-                    synced = await self._publish_current_mappings(
-                        scope=scope, bot=bot, owner_id=owner_id, bot_id=bot_id
+                    synced = await self._reconcile_runtime(
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                        command=command,
+                        mode=mode,
                     )
                 else:
                     synced = await self._reconcile_deactivation(
-                        scope=scope,
-                        bot=bot,
                         skill=raw,
                         owner_id=owner_id,
                         bot_id=bot_id,
+                        command=command,
+                        mode=mode,
                     )
                 self._ensure_mutation_lease(mutation_lease)
                 if synced:
@@ -277,8 +289,11 @@ class LocalSkillStateService:
                         )
                     except Exception as exc:
                         raise LocalSkillStorageError() from exc
-                    if not await self._publish_current_mappings(
-                        scope=scope, bot=bot, owner_id=owner_id, bot_id=bot_id
+                    if not await self._reconcile_runtime(
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                        command=command,
+                        mode=mode,
                     ):
                         raise LocalSkillRuntimeSyncError()
                     self._ensure_mutation_lease(mutation_lease)
@@ -366,8 +381,18 @@ class LocalSkillStateService:
         return self._installations.uninstall(env=env, bot_id=bot_id, skill_id=skill_id)
 
     @staticmethod
-    def _require_supported_repo_runtime(bot: dict[str, Any]) -> None:
-        require_supported_bot_skill_runtime(bot)
+    def _require_repo_runtime_command(
+        bot: dict[str, Any], command: BotSkillRuntimeCommand
+    ) -> BotSkillRuntimeMutationMode:
+        return require_bot_skill_runtime_command(bot, command)
+
+    @staticmethod
+    def _runtime_command(*, active: bool) -> BotSkillRuntimeCommand:
+        return (
+            BotSkillRuntimeCommand.WRITE
+            if active
+            else BotSkillRuntimeCommand.CLEANUP
+        )
 
     def _require_no_normal_skill_set_membership(
         self,
@@ -439,96 +464,78 @@ class LocalSkillStateService:
             ):
                 raise SkillSetManagedResourceError()
 
-    def _sync_runtime(self, *, bot: dict[str, Any], owner_id: str, bot_id: str) -> bool:
+    async def _reconcile_runtime(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        retired_mappings=(),
+        command: BotSkillRuntimeCommand,
+        mode: BotSkillRuntimeMutationMode,
+    ) -> bool:
         try:
-            service = self._skill_set_service_factory.create(
-                user_id=owner_id,
-                entity_id=str(bot["entity_id"]),
-                bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-                entity_type=bot.get("entity_type"),
-            )
-            return bool(service.sync_runtime())
+            if mode is BotSkillRuntimeMutationMode.CLEANUP_ONLY:
+                await self._runtime_reconciler.reconcile_cleanup(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                )
+                return True
+            if retired_mappings:
+                await self._runtime_reconciler.reconcile(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    retired_mappings=retired_mappings,
+                )
+            else:
+                await self._runtime_reconciler.reconcile(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                )
+            return True
         except Exception:
             return False
 
     async def _reconcile_deactivation(
         self,
         *,
-        scope: BotSkillLayoutScope,
-        bot: dict[str, Any],
         skill: dict[str, Any],
         owner_id: str,
         bot_id: str,
+        command: BotSkillRuntimeCommand,
+        mode: BotSkillRuntimeMutationMode,
     ) -> bool:
         try:
-            retired_mapping = build_logical_skill_mappings(
-                [
-                    RegisteredSkillAsset(
-                        skill_id=int(skill["id"]),
-                        name=str(skill["name"]),
-                        git_path=str(skill["git_path"]),
-                        skill_uuid=(
-                            str(skill["skill_uuid"])
-                            if skill.get("skill_uuid") is not None
-                            else None
-                        ),
-                        sc_version_number=(
-                            str(skill["sc_version_number"])
-                            if skill.get("sc_version_number") is not None
-                            else None
-                        ),
+            retired_mapping = list(
+                RuntimeProjectionResolver()
+                .resolve(
+                    RuntimeDesiredState(
+                        skills=(
+                            RegisteredSkillAsset(
+                                skill_id=int(skill["id"]),
+                                name=str(skill["name"]),
+                                git_path=str(skill["git_path"]),
+                                skill_uuid=(
+                                    str(skill["skill_uuid"])
+                                    if skill.get("skill_uuid") is not None
+                                    else None
+                                ),
+                                sc_version_number=(
+                                    str(skill["sc_version_number"])
+                                    if skill.get("sc_version_number") is not None
+                                    else None
+                                ),
+                            ),
+                        )
                     )
-                ]
+                )
+                .skill_mappings
             )
         except (KeyError, TypeError, ValueError):
             return False
-        return await self._publish_current_mappings(
-            scope=scope,
-            bot=bot,
+        return await self._reconcile_runtime(
             owner_id=owner_id,
             bot_id=bot_id,
             retired_mappings=retired_mapping,
+            command=command,
+            mode=mode,
         )
-
-    async def _publish_current_mappings(
-        self,
-        *,
-        scope: BotSkillLayoutScope,
-        bot: dict[str, Any],
-        owner_id: str,
-        bot_id: str,
-        retired_mappings: list[PoolSkillMapping] | None = None,
-    ) -> bool:
-        try:
-            mappings = build_logical_skill_mappings(
-                self._pool_skills.list_bot_active_assets(
-                    env=scope.env,
-                    bot_id=bot_id,
-                    user_id=owner_id,
-                    engine=str(bot["active_engine"]),
-                )
-            )
-            source_layout = (
-                SkillMappingSourceLayout.POOL
-                if runtime_uses_pool_paths(self._pool_layouts.get(scope))
-                else SkillMappingSourceLayout.LEGACY
-            )
-            retired = retired_mappings or []
-            if not await self._pool_runtime.publish_mappings(
-                bot_id=bot_id,
-                user_id=owner_id,
-                mappings=mappings,
-                retired_mappings=retired,
-                source_layout=source_layout,
-            ):
-                return False
-            return await self._pool_runtime.verify_mappings(
-                bot_id=bot_id,
-                user_id=owner_id,
-                mappings=mappings,
-                retired_mappings=retired,
-                source_layout=source_layout,
-            )
-        except Exception:
-            return False

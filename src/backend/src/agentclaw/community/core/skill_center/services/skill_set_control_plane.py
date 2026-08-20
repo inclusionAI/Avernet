@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Protocol
-
 from injector import inject
 
 from agentclaw.community.core.skill_center.authorization_hook import (
@@ -35,9 +33,13 @@ from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
     LegacySkillSetCompatibilityFactoryProtocol,
 )
-from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.skill_center.runtime_policy import (
-    require_supported_bot_skill_runtime,
+    BotSkillRuntimeCommand,
+    BotSkillRuntimeMutationMode,
+    require_bot_skill_runtime_command,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    BotRuntimeProjectionReconcilerProtocol,
 )
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationBusyError,
@@ -57,54 +59,13 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
 
-class SkillSetRuntimeReconcilerProtocol(Protocol):
-    async def reconcile(self, *, bot_id: str, owner_id: str) -> None: ...
-
-
-class SkillSetRuntimeReconciler:
-    """Runtime adapter shared with the legacy compatibility surface.
-
-    The control-plane service deliberately calls this once after a successful
-    UoW; it never calls the legacy per-item activate/deactivate paths.
-    """
-
-    @inject
-    def __init__(
-        self,
-        factory: SkillSetServiceFactory,
-        bot_repo: BotRepository,
-        repository: SkillSetControlPlaneRepositoryProtocol,
-    ) -> None:
-        self._factory = factory
-        self._bot_repo = bot_repo
-        self._repository = repository
-
-    async def reconcile(self, *, bot_id: str, owner_id: str) -> None:
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            raise LocalSkillNotFoundError()
-        service = self._factory.create(
-            user_id=owner_id,
-            entity_id=str(bot.get("entity_id") or owner_id),
-            bot_id=bot_id,
-            engine_type=bot.get("active_engine"),
-            entity_type=bot.get("entity_type") or "staff",
-        )
-        if not service.sync_runtime():
-            raise SkillSetRuntimeReconcileError()
-        if not await service.sync_mcp_desired_state(
-            server_codes=self._repository.list_installed_mcps(bot_id=bot_id)
-        ):
-            raise SkillSetRuntimeReconcileError()
-
-
 class SkillSetControlPlaneService:
     @inject
     def __init__(
         self,
         repository: SkillSetControlPlaneRepositoryProtocol,
         bot_repo: BotRepository,
-        runtime: SkillSetRuntimeReconcilerProtocol,
+        runtime: BotRuntimeProjectionReconcilerProtocol,
         legacy_factory: LegacySkillSetCompatibilityFactoryProtocol,
         passport: PassportPlugin,
         authorization: BotCapabilityAuthorizationHookProtocol,
@@ -305,7 +266,15 @@ class SkillSetControlPlaneService:
 
     def delete_set(self, *, bot_id: str, actor_id: str, set_id: str) -> None:
         bot = self._bot(bot_id, actor_id)
-        self._require_mutable_bot(bot)
+        item = self._repository.get_set(
+            bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+        )
+        command = (
+            BotSkillRuntimeCommand.CLEANUP
+            if not item.get("is_active")
+            else BotSkillRuntimeCommand.WRITE
+        )
+        self._require_mutable_bot(bot, command)
         scope = self._scope(bot, bot_id)
         try:
             mutation_lease = self._mutation_guard.acquire(scope=scope)
@@ -394,6 +363,7 @@ class SkillSetControlPlaneService:
             bot_id=bot_id,
             actor_id=actor_id,
             action="skill_set_remove_skill",
+            command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.remove_skill(
                 bot_id=bot_id,
                 set_id=set_id,
@@ -465,6 +435,7 @@ class SkillSetControlPlaneService:
             bot_id=bot_id,
             actor_id=actor_id,
             action="skill_set_remove_mcp",
+            command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.remove_mcp(
                 bot_id=bot_id, set_id=set_id, server_code=server_code,
                 engine_type=self._engine(bot),
@@ -496,6 +467,7 @@ class SkillSetControlPlaneService:
             bot_id=bot_id,
             actor_id=actor_id,
             action="mcp_direct_deactivate",
+            command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.deactivate_mcp_direct(
                 bot_id=bot_id, server_code=server_code,
                 engine_type=self._engine(bot),
@@ -534,6 +506,7 @@ class SkillSetControlPlaneService:
             bot_id=bot_id,
             actor_id=actor_id,
             action="skill_set_deactivate",
+            command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.set_active(
                 bot_id=bot_id,
                 set_id=set_id,
@@ -609,7 +582,14 @@ class SkillSetControlPlaneService:
         ]
 
     async def _mutate(
-        self, *, bot: dict, bot_id: str, actor_id: str, action: str, mutation
+        self,
+        *,
+        bot: dict,
+        bot_id: str,
+        actor_id: str,
+        action: str,
+        mutation,
+        command: BotSkillRuntimeCommand = BotSkillRuntimeCommand.WRITE,
     ) -> dict:
         """Keep one Bot edit lease across UoW, projection and compensation.
 
@@ -637,7 +617,7 @@ class SkillSetControlPlaneService:
             except SkillsPoolEditLockUnavailableError as exc:
                 raise SkillSetControlPlaneLockUnavailableError() from exc
             try:
-                self._require_mutable_bot(bot)
+                mode = self._require_mutable_bot(bot, command)
                 self._ensure_mutation_lease(mutation_lease)
                 mutation_result = mutation()
                 self._ensure_mutation_lease(mutation_lease)
@@ -663,6 +643,8 @@ class SkillSetControlPlaneService:
                         actor_id=actor_id,
                         mutation=mutation_result,
                         mutation_lease=mutation_lease,
+                        command=command,
+                        mode=mode,
                     )
                 self._ensure_mutation_lease(mutation_lease)
                 self._audit(
@@ -685,10 +667,14 @@ class SkillSetControlPlaneService:
         actor_id: str,
         mutation: SkillSetMutation,
         mutation_lease: BotCapabilityMutationLease,
+        command: BotSkillRuntimeCommand,
+        mode: BotSkillRuntimeMutationMode,
     ) -> dict:
         owner_id = str(bot["owner_id"])
         try:
-            await self._runtime.reconcile(bot_id=bot_id, owner_id=owner_id)
+            await self._reconcile_runtime(
+                command=command, mode=mode, bot_id=bot_id, owner_id=owner_id
+            )
         except Exception as exc:
             # A stale holder must never compensate over a newer command.
             self._ensure_mutation_lease(mutation_lease)
@@ -698,7 +684,9 @@ class SkillSetControlPlaneService:
                 engine_type=self._engine(bot),
             )
             try:
-                await self._runtime.reconcile(bot_id=bot_id, owner_id=owner_id)
+                await self._reconcile_runtime(
+                    command=command, mode=mode, bot_id=bot_id, owner_id=owner_id
+                )
             except Exception as restore_error:
                 raise SkillSetRuntimeReconcileError() from restore_error
             self._ensure_mutation_lease(mutation_lease)
@@ -750,7 +738,22 @@ class SkillSetControlPlaneService:
         return str(bot["active_engine"])
 
     @staticmethod
-    def _require_mutable_bot(bot: dict) -> None:
+    def _require_mutable_bot(
+        bot: dict, command: BotSkillRuntimeCommand = BotSkillRuntimeCommand.WRITE
+    ) -> BotSkillRuntimeMutationMode:
         if not is_bot_ready(bot):
             raise LocalSkillNotReadyError()
-        require_supported_bot_skill_runtime(bot)
+        return require_bot_skill_runtime_command(bot, command)
+
+    async def _reconcile_runtime(
+        self,
+        *,
+        command: BotSkillRuntimeCommand,
+        mode: BotSkillRuntimeMutationMode,
+        bot_id: str,
+        owner_id: str,
+    ) -> None:
+        if mode is BotSkillRuntimeMutationMode.CLEANUP_ONLY:
+            await self._runtime.reconcile_cleanup(bot_id=bot_id, owner_id=owner_id)
+            return
+        await self._runtime.reconcile(bot_id=bot_id, owner_id=owner_id)
