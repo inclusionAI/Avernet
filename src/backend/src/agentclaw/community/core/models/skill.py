@@ -311,6 +311,7 @@ class BotSkillInstallation(Base):
         autoincrement=True,
     )
     bot_id = Column(String(100), nullable=False, index=True)
+    owner_id = Column(String(128), nullable=False, index=True)
     skill_id = Column(
         _UNSIGNED_BIGINT, ForeignKey("ac_skill.id"), nullable=False, index=True
     )
@@ -325,6 +326,7 @@ class BotSkillInstallation(Base):
         UniqueConstraint(
             "avernet_tenant",
             "env",
+            "owner_id",
             "bot_id",
             "skill_id",
             name="uk_bot_skill_installation",

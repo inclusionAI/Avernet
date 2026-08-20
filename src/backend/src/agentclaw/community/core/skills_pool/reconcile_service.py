@@ -314,12 +314,13 @@ class SkillsPoolReconcileService:
 
         local_assets = self._skills.list_bot_local_assets(
             env=scope.env,
+            owner_id=user_id,
             bot_id=scope.bot_id,
         )
         active_assets = self._skills.list_bot_active_assets(
             env=scope.env,
             bot_id=scope.bot_id,
-            user_id=user_id,
+            owner_id=user_id,
             engine=engine,
         )
         try:
@@ -850,7 +851,7 @@ class SkillsPoolReconcileService:
                     self._skills.list_bot_active_assets(
                         env=scope.env,
                         bot_id=scope.bot_id,
-                        user_id=str(owner_id),
+                        owner_id=str(owner_id),
                         engine=engine,
                     )
                 )

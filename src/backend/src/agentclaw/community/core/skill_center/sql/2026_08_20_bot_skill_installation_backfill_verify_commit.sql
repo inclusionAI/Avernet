@@ -1,12 +1,20 @@
--- Source immediately after the apply file in the SAME database session.
--- This is deliberately a separate explicit operator step: inspect the first
--- result, issue ROLLBACK if it is non-zero, otherwise execute COMMIT below.
-SELECT COUNT(*) AS missing_installations
-FROM ac_bot_skill_installation_backfill_audit audit
-LEFT JOIN ac_bot_skill_installation installation
- ON installation.avernet_tenant = audit.avernet_tenant AND installation.env = audit.env
- AND installation.bot_id = audit.bot_id AND installation.skill_id = audit.skill_id
-WHERE audit.run_id = @p1_01_installation_backfill_run_id AND installation.id IS NULL;
+-- Source immediately after apply in the SAME database session. This is a
+-- deliberately separate explicit operator step: ROLLBACK unless every row is
+-- apply_allowed, non-ambiguous, and has zero missing Installations.
+SELECT avernet_tenant,
+       env,
+       legacy_active_local,
+       live_exact_bot_candidates,
+       ambiguous_live_bot_candidates,
+       inserted_installations,
+       missing_installations,
+       CASE
+           WHEN ambiguous_live_bot_candidates = 0 AND missing_installations = 0
+           THEN 1 ELSE 0
+       END AS commit_allowed
+FROM ac_bot_skill_installation_backfill_run_audit
+WHERE run_id = @p1_01_installation_backfill_run_id
+ORDER BY avernet_tenant, env;
 
 -- Only run this statement after the preceding count is zero.
 COMMIT;

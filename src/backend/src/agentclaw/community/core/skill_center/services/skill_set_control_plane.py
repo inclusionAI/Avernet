@@ -376,6 +376,7 @@ class SkillSetControlPlaneService:
             action="skill_set_add_skill",
             mutation=lambda: self._repository.add_skill(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 skill_id=skill_id,
                 engine_type=self._engine(bot),
@@ -400,6 +401,7 @@ class SkillSetControlPlaneService:
             command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.remove_skill(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 skill_id=skill_id,
                 engine_type=self._engine(bot),
@@ -480,6 +482,7 @@ class SkillSetControlPlaneService:
             action="skill_set_add_mcp",
             mutation=lambda: self._repository.add_mcp(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 server_code=server_code,
                 engine_type=self._engine(bot),
@@ -504,6 +507,7 @@ class SkillSetControlPlaneService:
             command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.remove_mcp(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 server_code=server_code,
                 engine_type=self._engine(bot),
@@ -522,6 +526,7 @@ class SkillSetControlPlaneService:
             action="mcp_direct_activate",
             mutation=lambda: self._repository.activate_mcp_direct(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 server_code=server_code,
                 engine_type=self._engine(bot),
             ),
@@ -539,6 +544,7 @@ class SkillSetControlPlaneService:
             command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.deactivate_mcp_direct(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 server_code=server_code,
                 engine_type=self._engine(bot),
             ),
@@ -569,7 +575,11 @@ class SkillSetControlPlaneService:
             actor_id=user_id,
             action="skill_set_activate",
             mutation=lambda: self._repository.set_active(
-                bot_id=bot_id, set_id=set_id, active=True, engine_type=self._engine(bot)
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                set_id=set_id,
+                active=True,
+                engine_type=self._engine(bot),
             ),
         )
 
@@ -585,6 +595,7 @@ class SkillSetControlPlaneService:
             command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.set_active(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 active=False,
                 engine_type=self._engine(bot),
@@ -600,7 +611,10 @@ class SkillSetControlPlaneService:
             actor_id=actor_id,
             action="skill_set_switch",
             mutation=lambda: self._repository.replace_active_set(
-                bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                set_id=set_id,
+                engine_type=self._engine(bot),
             ),
         )
 
@@ -614,6 +628,7 @@ class SkillSetControlPlaneService:
             action="skill_set_sync",
             mutation=lambda: self._repository.set_active(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 active=True,
                 engine_type=self._engine(bot),
@@ -758,6 +773,7 @@ class SkillSetControlPlaneService:
             self._ensure_mutation_lease(mutation_lease)
             self._repository.restore_desired_state(
                 bot_id=bot_id,
+                owner_id=owner_id,
                 state=mutation.previous_state,
                 engine_type=self._engine(bot),
             )

@@ -105,7 +105,7 @@ class BotSkillAssetService:
             user_id=user_id,
         )
         installed = self._skill_repo.list_bot_installed_skills(
-            env=str(bot["env"]), bot_id=bot_id
+            env=str(bot["env"]), owner_id=_owner_id, bot_id=bot_id
         )
         # ``active`` is a desired-state projection, never an asset attribute.
         # This keeps shared Repo detail aligned with the same Installation fact

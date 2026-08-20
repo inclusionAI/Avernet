@@ -320,6 +320,12 @@ def _get_path_params(
     Raises:
         HTTPException 403: if entity_type is staff and entity_id does not match ctx.user_id (IDOR prevention).
     """
+    # Direct router-unit calls retain FastAPI's Query default objects instead
+    # of resolved ``None``. They are not caller-supplied identity values.
+    entity_id = entity_id if isinstance(entity_id, str) else None
+    entity_type = entity_type if isinstance(entity_type, str) else None
+    bot_id = bot_id if isinstance(bot_id, str) else None
+    engine_type = engine_type if isinstance(engine_type, str) else None
     effective_entity_type = entity_type if entity_type else "staff"
 
     # IDOR prevention: staff-type entity_id must match the authenticated user
@@ -433,6 +439,7 @@ async def _set_legacy_asset_active_if_resolved(
     skill_reference: str,
     source_path: str,
     bot_id: str,
+    owner_id: str,
     actor_id: str,
     active: bool,
 ) -> dict[str, Any] | None:
@@ -454,20 +461,20 @@ async def _set_legacy_asset_active_if_resolved(
                 skill_reference=skill_reference,
                 source_path=source_path,
                 bot_id=bot_id,
-                owner_id=actor_id,
+                owner_id=owner_id,
                 user_id=actor_id,
             )
         )
         asset_service.get_skill(
             skill_id=skill_id,
             bot_id=bot_id,
-            owner_id=actor_id,
+            owner_id=owner_id,
             user_id=actor_id,
         )
         return await asset_service.set_active(
             skill_id=skill_id,
             bot_id=bot_id,
-            owner_id=actor_id,
+            owner_id=owner_id,
             user_id=actor_id,
             active=active,
         )
@@ -1362,6 +1369,7 @@ async def activate_skill(
             skill_reference=request.relative_path or skill_id,
             source_path=request.source_path,
             bot_id=effective_bot_id,
+            owner_id=effective_entity_id,
             actor_id=ctx.user_id,
             active=True,
         )
@@ -1516,6 +1524,7 @@ async def deactivate_skill(
             skill_reference=skill_id,
             source_path="",
             bot_id=effective_bot_id,
+            owner_id=effective_entity_id,
             actor_id=ctx.user_id,
             active=False,
         )
@@ -2076,7 +2085,7 @@ async def activate_skills_batch(
     ),
 ) -> ActivateSkillsResponse:
     """Compatibility batch adapter over the canonical Direct control plane."""
-    _, effective_bot_id, _, _, _ = _get_path_params(
+    effective_owner_id, effective_bot_id, _, _, _ = _get_path_params(
         ctx,
         entity_id,
         entity_type,
@@ -2091,13 +2100,13 @@ async def activate_skills_batch(
                 skill_reference=path,
                 source_path=path,
                 bot_id=effective_bot_id,
-                owner_id=ctx.user_id,
+                owner_id=effective_owner_id,
                 user_id=ctx.user_id,
             )
             item = await asset_service.set_active(
                 skill_id=skill_id,
                 bot_id=effective_bot_id,
-                owner_id=ctx.user_id,
+                owner_id=effective_owner_id,
                 user_id=ctx.user_id,
                 active=True,
             )
