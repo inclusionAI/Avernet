@@ -11,11 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import os
-import tempfile
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from dataclasses import replace
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
-import pytest
 
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryResult,
@@ -192,6 +190,43 @@ class TestDiscoveryService:
         assert results[0].success
         assert results[0].session.session_id == "sess-123"
         assert results[0].notification_sent is True
+        assert svc.get_discovery_result(_TASK.task_id) is results[0]
+
+    def test_discover_all_bots_intersects_live_bots_and_deduplicates_owners(self):
+        pending = [
+            replace(_TASK, task_id="task-a1", bot_id="bot-a", owner_id="owner-1"),
+            replace(_TASK, task_id="task-a2", bot_id="bot-a", owner_id="owner-1"),
+            replace(_TASK, task_id="task-b", bot_id="bot-b", owner_id="owner-1"),
+            replace(_TASK, task_id="task-c", bot_id="bot-c", owner_id="owner-2"),
+            replace(_TASK, task_id="task-dead", bot_id="bot-dead", owner_id="owner-3"),
+        ]
+        reader = MagicMock()
+        reader.read_pending_tasks.return_value = pending
+        bot_service = MagicMock()
+        bot_service.list_bots.return_value = {
+            "items": [
+                {"bot_id": "bot-a"},
+                {"bot_id": "bot-b"},
+                {"bot_id": "bot-c"},
+            ]
+        }
+        svc = DiscoveryService(
+            reader=reader,
+            session_initiator=AsyncMock(),
+            notify_sender=MagicMock(spec=NotifySenderPlugin),
+            bot_service=bot_service,
+        )
+        result_a = DiscoveryResult(task=pending[0], session=_SESSION)
+        result_c = DiscoveryResult(task=pending[3], session=_SESSION)
+        svc.discover = AsyncMock(side_effect=[[result_a], [result_c]])
+
+        results = asyncio.run(svc.discover_all_bots())
+
+        assert results == [result_a, result_c]
+        assert svc.discover.await_args_list == [
+            call(bot_id="bot-a", owner_id="owner-1", agent_id="bot-a"),
+            call(bot_id="bot-c", owner_id="owner-2", agent_id="bot-c"),
+        ]
 
     def test_discover_notification_failure(self):
         svc = self._make_service([_TASK], notify_ok=False)
