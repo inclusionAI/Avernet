@@ -1,34 +1,37 @@
-"""DeviceSyncPlugin -- push configuration to a device runtime.
+"""DeviceSync -- Core Protocol owning the six-method device-sync contract.
 
-Abstracts the difference between local no-op and
-remote agentclawproxy HTTP calls for symlink/bot-config synchronization.
+This is the non-Plugin Core contract for pushing symlink/bot-config/MCP
+changes to a device runtime. It deliberately does NOT inherit ``Plugin`` nor
+use ``@plugin_impl`` -- it is a plain ``Protocol`` consumed by Core callers and
+returned by the Plugin Protocol :class:`DeviceSyncDispatcher` (see
+``plugin_api/device_sync_dispatcher.py``). Concrete behavior lives in Core
+services (Community/Local under the community tree, Arca/BaaS/Teclaw under the
+corp tree) and is selected by the dispatcher implementations.
 
-Current implementations:
-- ``plugins.local.device_sync.LocalDeviceSyncPlugin``
-- ``plugins.prod.device_sync.ArcaDeviceSyncPlugin``
-
-Construction of a per-bot ``DeviceSyncPlugin`` instance goes through the
-``DeviceSyncDispatcher`` (in ``plugins.prod.device_sync``, re-exported via
-``di.modules.skill_center_module``). The dispatcher selects an impl by
-``DeviceContext.provider`` — Phase 2 收口后入口由 dispatcher 单源，不再
-经历旧 ``DeviceSyncPluginSupplier.for_bot`` 闭包。
+``DeviceSyncUnavailableError`` is relocated here from the former
+``plugin_api.device_sync`` module; it is part of the Core contract surface.
 """
+from __future__ import annotations
 
 from typing import Any, Optional, Protocol, runtime_checkable
-from agentclaw.community.plugin_api.base import Plugin
 
-# ``DeviceSyncUnavailableError`` is relocated to the Core ``device_sync``
-# module (CHG-1); re-exported here so existing importers keep a single class
-# identity during the transient migration window. The old ``DeviceSyncPlugin``
-# below is removed by CHG-17 (Task 14) once all callers migrate.
-from agentclaw.community.core.devices.services.device_sync import (  # noqa: E402,F401
-    DeviceSyncUnavailableError,
-)
+
+class DeviceSyncUnavailableError(RuntimeError):
+    """Raised by the device-sync dispatcher when the requested bot has
+    no syncable device (no binding, wrong provider, missing sandbox in
+    prod, …). Callers typically catch this and return a
+    ``{"success": False, "message": ...}`` result.
+    """
 
 
 @runtime_checkable
-class DeviceSyncPlugin(Plugin, Protocol):
-    """Push symlink configuration or other payloads to a device."""
+class DeviceSync(Protocol):
+    """Push symlink configuration or other payloads to a device.
+
+    The six methods are synchronous (callers wrap them in
+    ``asyncio.to_thread``). Result dicts carry at least
+    ``{"success": bool, "message": str}``; the MCP methods return ``bool``.
+    """
 
     def sync_symlinks(
         self,
@@ -54,14 +57,6 @@ class DeviceSyncPlugin(Plugin, Protocol):
         nick_name: str,
     ) -> dict[str, Any]:
         """Sync bot ROLE/VISIBILITY configuration to the device.
-
-        Prod impl: POSTs ``{role, visibility}`` to
-        ``<device_url>/api/bot/config`` using the connection info
-        captured at plugin construction.
-
-        Local impl: noop. Returns
-        ``{"success": False, "message": "local mode — device sync skipped"}``
-        so callers can treat it uniformly.
 
         Args:
             bot_id: Bot ID (logged for traceability).

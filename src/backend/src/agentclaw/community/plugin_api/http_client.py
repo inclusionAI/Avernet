@@ -137,6 +137,22 @@ class HttpClient(Plugin, Protocol):
         ...
 
 
+# ── Transport-neutral exception aliases ─────────────────────────────────────
+# Stable boundary-level names for the three httpx exception types Core services
+# (and the moved Core MCP delivery helper) classify HTTP failures with. Core
+# services must not import ``httpx`` directly; they import these aliases from
+# ``plugin_api.http_client`` instead. The aliases map 1:1 to the existing
+# exception branches so result-dict branches and messages are preserved verbatim.
+HttpClientStatusError = httpx.HTTPStatusError
+HttpClientRequestError = httpx.RequestError
+HttpClientTimeoutError = httpx.TimeoutException
+"""Transport-neutral HTTP exception aliases (re-exports of the ``httpx``
+exception types under stable boundary names). Importing these from
+``plugin_api.http_client`` keeps Core DeviceSync services and the moved Core
+MCP delivery helper free of any ``import httpx`` while preserving the exact
+status / request-failure / generic-failure classification branches."""
+
+
 # ── Injector qualifiers (Guice @Named-style) ─────────────────────────────────
 # The SAME ``HttpClient`` Protocol, bound once per upstream. Bind/inject as
 # ``Annotated[HttpClient, QUALIFIER_BAAS]`` — never the bare ``HttpClient``.
