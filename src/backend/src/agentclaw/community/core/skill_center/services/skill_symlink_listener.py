@@ -12,6 +12,7 @@ just the event payload.
 from __future__ import annotations
 
 from collections.abc import Callable
+import asyncio
 from typing import TYPE_CHECKING
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -47,6 +48,7 @@ class SkillSymlinkListener(LifecycleBase):
         desktop_reconcile_wakeup: (
             Callable[[DeviceActivatedEvent], None] | None
         ) = None,
+        runtime_reconcile: Callable[[str, str], object] | None = None,
     ) -> None:
         self._bot_repo = bot_repo
         self._skill_set_factory = skill_set_factory
@@ -54,6 +56,7 @@ class SkillSymlinkListener(LifecycleBase):
         self._device_sync_dispatcher = device_sync_dispatcher
         self._desktop_layout_authority = desktop_layout_authority
         self._desktop_reconcile_wakeup = desktop_reconcile_wakeup
+        self._runtime_reconcile = runtime_reconcile
 
     async def startup(self) -> None:
         """Lifecycle hook — subscribe ``self.handle`` to DeviceActivatedEvent.
@@ -131,6 +134,16 @@ class SkillSymlinkListener(LifecycleBase):
                     event.binding_id,
                     ctx.binding_id,
                 )
+                return
+
+            if self._runtime_reconcile is not None:
+                # DeviceActivatedEvent is emitted after a restart/ready
+                # transition.  Rebuild the complete DB desired state through
+                # the same Reconciler as explicit mutations; do not rebuild
+                # a legacy Default-exclusion mapping in this listener.
+                outcome = self._runtime_reconcile(str(bot_id), str(owner_id))
+                if asyncio.iscoroutine(outcome):
+                    asyncio.run(outcome)
                 return
 
             from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE

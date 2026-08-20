@@ -945,6 +945,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         device_sync_dispatcher: DeviceSyncDispatcher,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         skills_pool_wakeup: SkillsPoolReconcileWakeupListener,
+        runtime_reconciler: SkillSetRuntimeReconcilerProtocol,
     ) -> SkillSymlinkListener:
         def desktop_layout_authority(bot: dict) -> str | None:
             if bot.get("bot_type") != "desktop":
@@ -976,4 +977,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             device_sync_dispatcher=device_sync_dispatcher,
             desktop_layout_authority=desktop_layout_authority,
             desktop_reconcile_wakeup=skills_pool_wakeup.handle,
+            runtime_reconcile=lambda bot_id, owner_id: runtime_reconciler.reconcile(
+                bot_id=bot_id, owner_id=owner_id
+            ),
         )
