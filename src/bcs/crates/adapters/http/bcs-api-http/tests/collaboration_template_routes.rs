@@ -300,14 +300,16 @@ async fn list_templates_returns_envelope_and_forwards_filters() {
     let service = Arc::new(FakeTemplateService::default());
     let app = test_router(service.clone());
 
-    let response = app
-        .oneshot(request(
-            "GET",
-            "/api/v1/collaboration/templates?lang=zh-CN&tags=review%2Cgeneral",
-            Value::Null,
-        ))
-        .await
-        .expect("list response");
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/v1/collaboration/templates?lang=zh-CN&tags=review%2Cgeneral")
+        .header("content-type", "application/json")
+        .header("x-test-auth", "yes")
+        .header("x-request-id", "request-template")
+        .header("accept-language", "zh-CN")
+        .body(Body::from(Value::Null.to_string()))
+        .expect("request");
+    let response = app.oneshot(request).await.expect("list response");
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = response_json(response).await;
@@ -324,6 +326,7 @@ async fn list_templates_returns_envelope_and_forwards_filters() {
         .clone()
         .expect("list command recorded");
     assert_eq!(recorded.requested_language.as_deref(), Some("zh-CN"));
+    assert_eq!(recorded.accept_language.as_deref(), Some("zh-CN"));
     assert_eq!(recorded.tags, vec!["review".to_string(), "general".to_string()]);
 }
 
