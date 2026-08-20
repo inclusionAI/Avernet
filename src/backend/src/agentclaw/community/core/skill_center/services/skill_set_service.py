@@ -38,9 +38,6 @@ from agentclaw.community.core.skill_center.services.skill_service import SkillSe
 from agentclaw.community.core.skill_center.path_resolution import (
     canonical_pool_local_path,
 )
-from agentclaw.community.core.skill_center.installation_compatibility import (
-    includes_default_skill_member,
-)
 from agentclaw.community.core.skill_center.utils.skill_metadata_writer import SkillSetMetadataWriter
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE  # noqa: E402
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
@@ -338,7 +335,9 @@ class SkillSetService:
             logger.warning(f"Error getting current active skill set: {e}")
         return None
 
-    def _sync_symlinks_to_device_if_needed(self, user_id: str | None = None) -> bool:
+    def _sync_symlinks_to_device_if_needed(
+        self, user_id: str | None = None, desired_skills: list[dict] | None = None
+    ) -> bool:
         """如果需要，同步软链配置到设备。
 
         将当前激活技能集的软链配置同步到远程设备或本地文件系统。
@@ -352,10 +351,10 @@ class SkillSetService:
         """
         try:
             # 获取当前激活技能集的软链配置（包括空列表，表示清空）
-            symlinks = self.get_symlink_mappings(
-                user_id=user_id,
-                bolt_id=self.bot_id
-            )
+            mapping_kwargs = {"user_id": user_id, "bolt_id": self.bot_id}
+            if desired_skills is not None:
+                mapping_kwargs["desired_skills"] = desired_skills
+            symlinks = self.get_symlink_mappings(**mapping_kwargs)
 
             # 通过 DeviceSyncPlugin 同步到设备 — 经 resolver + dispatcher 收口
             effective_user_id = user_id or self.entity_id or "default"
@@ -378,9 +377,11 @@ class SkillSetService:
             logger.warning(f"[_sync_symlinks_to_device_if_needed] Failed to sync symlinks: {e}", exc_info=True)
             return False
 
-    def sync_runtime(self) -> bool:
-        """Reconcile this Bot's desired Skill mapping to its runtime."""
-        return self._sync_symlinks_to_device_if_needed(self.user_id or self.entity_id)
+    def sync_runtime(self, *, desired_skills: list[dict] | None = None) -> bool:
+        """Apply one complete resolver-owned skill snapshot to the runtime."""
+        return self._sync_symlinks_to_device_if_needed(
+            self.user_id or self.entity_id, desired_skills
+        )
 
     async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
         """Project the complete MCP desired state to the Bot runtime.
@@ -1307,8 +1308,6 @@ class SkillSetService:
         installed_skills = self.skill_repo.list_bot_installed_skills(
             env=get_current_env(), bot_id=effective_bolt_id
         )
-        installed_ids = {int(skill["id"]) for skill in installed_skills}
-
         # 1. 查询所有激活的技能集（包含默认能力集）
         active_skill_sets = self.skill_set_repo.get_all_active_skill_sets(
             user_id=effective_user_id,
@@ -1325,27 +1324,13 @@ class SkillSetService:
             skill_set_id = skill_set.get('id')
             skills = self.skill_set_repo.get_skills_in_set(str(skill_set_id))
 
-            # Compatibility adapter: historical Local inactivity used a
-            # Default-SkillSet exclusion.  New desired state is Installation;
-            # leave non-Local Default membership untouched and accept a Local
-            # member only when its Installation exists.
-            if skill_set.get('is_default') and effective_user_id and effective_bolt_id:
-                excluded_ids = {
-                    int(skill_id)
-                    for skill_id in self.skill_set_repo.get_excluded_skills(
-                        user_id=effective_user_id,
-                        bot_id=effective_bolt_id,
-                        skill_set_id=int(skill_set_id),
-                    )
-                }
+            if skill_set.get('is_default'):
+                # Desired Local state is the active-only Installation fact.
+                # Never recover it from the legacy Default exclusion table.
                 skills = [
                     skill
                     for skill in skills
-                    if includes_default_skill_member(
-                        skill,
-                        installed_ids=installed_ids,
-                        excluded_ids=excluded_ids,
-                    )
+                    if not str(skill.get("git_path") or "").startswith("local://")
                 ]
             all_skills.extend(skills)
         all_skills.extend(installed_skills)
@@ -1367,6 +1352,7 @@ class SkillSetService:
         user_id: str | None = None,
         bolt_id: str | None = None,
         additional_skill_paths: list[str] | None = None,
+        desired_skills: list[dict] | None = None,
     ) -> list[SynlinkMappingInfo]:
         """生成技能激活软链配置（支持多能力集激活）
 
@@ -1383,7 +1369,11 @@ class SkillSetService:
         Returns:
             List[SynlinkMappingInfo]: 软链配置列表（已去重）
         """
-        unique_skills = self.get_active_skills(user_id=user_id, bolt_id=bolt_id)
+        unique_skills = (
+            list(desired_skills)
+            if desired_skills is not None
+            else self.get_active_skills(user_id=user_id, bolt_id=bolt_id)
+        )
 
         # Direct Skill CRUD is intentionally orthogonal to SkillSet membership.
         # The device boundary accepts a complete mapping publish, so the current
@@ -1525,6 +1515,13 @@ class SkillSetService:
                     source = str(skills_local_dir / source_name)
                 target = str(base_skills_dir / link_name)
                 symlinks.append(SynlinkMappingInfo(source=source, target=target))
+            elif git_path.startswith('center://'):
+                # This legacy file adapter has no Center request contract. A
+                # caller must route such a projection through the mapping-v3
+                # Engine adapter; silently omitting it would be fail-open.
+                raise ValueError("center skill requires a Center-capable runtime adapter")
+            else:
+                raise ValueError("unsupported skill source in runtime projection")
 
         resolved_mappings = symlinks
         if requested_paths:

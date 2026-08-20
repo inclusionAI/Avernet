@@ -651,7 +651,7 @@ def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
     }
 
 
-def test_skills_pool_active_assets_include_default_set_and_exclusions(
+def test_skills_pool_active_assets_include_system_default_without_exclusion_state(
     skills, sets
 ):
     default_enabled = skills.create(
@@ -690,8 +690,11 @@ def test_skills_pool_active_assets_include_default_set_and_exclusions(
         engine="openclaw",
     )
 
+    # System Default is an unconditional Resolver input.  Its historical
+    # exclusion table is migration-only compatibility data, not desired state.
     assert [asset.git_path for asset in assets] == [
-        "git://defaults/enabled"
+        "git://defaults/enabled",
+        "git://defaults/excluded",
     ]
 
 

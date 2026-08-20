@@ -19,6 +19,10 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.services.local_skill_state_service import (
     LocalSkillStateService,
 )
+from agentclaw.community.core.skill_center.runtime_resolver import (
+    RuntimeDesiredState,
+    RuntimeProjectionResolver,
+)
 from agentclaw.community.core.skills_pool.models import (
     RegisteredSkillAsset,
     SkillMappingSourceLayout,
@@ -146,17 +150,26 @@ class _Installations:
 
 
 class _Bots:
-    def __init__(self, status: str, entity_id: str = "owner") -> None:
+    def __init__(
+        self,
+        status: str,
+        entity_id: str = "owner",
+        engine: str = "openclaw",
+        bot_type: str | None = None,
+    ) -> None:
         self.status = status
         self.entity_id = entity_id
+        self.engine = engine
+        self.bot_type = bot_type
 
     def get_by_id_and_owner(self, *_args):
         return {
             "status": self.status,
-            "active_engine": "openclaw",
+            "active_engine": self.engine,
             "env": "pre",
             "entity_id": self.entity_id,
             "entity_type": "staff",
+            **({"bot_type": self.bot_type} if self.bot_type is not None else {}),
         }
 
 
@@ -209,7 +222,7 @@ class _Runtime:
         self.publish_calls = []
         self.verify_calls = []
 
-    def sync_runtime(self):
+    def sync_runtime(self, *, desired_skills=None):
         self.calls += 1
         return self.success
 
@@ -220,6 +233,94 @@ class _Runtime:
     async def verify_mappings(self, **kwargs):
         self.verify_calls.append(kwargs)
         return self.verify_results.pop(0)
+
+
+class _RuntimeReconciler:
+    def __init__(self, runtime: _Runtime, skills, *, pool_layout: bool = False) -> None:
+        self.runtime = runtime
+        self.skills = skills
+        self.pool_layout = pool_layout
+        self.calls: list[dict] = []
+        self.cleanup_calls: list[dict] = []
+
+    async def reconcile(self, **kwargs) -> None:
+        self.calls.append(kwargs)
+        projection = RuntimeProjectionResolver().resolve(
+            RuntimeDesiredState(
+                skills=tuple(
+                    self.skills.list_bot_active_assets(
+                        env="pre",
+                        bot_id=kwargs["bot_id"],
+                        user_id=kwargs["owner_id"],
+                        engine="openclaw",
+                    )
+                )
+            )
+        )
+        retired = list(kwargs.get("retired_mappings") or ())
+        if (
+            self.pool_layout
+            or retired
+            or any(mapping.corpus == "repo" for mapping in projection.skill_mappings)
+        ):
+            contract_mappings = [*projection.skill_mappings, *retired]
+            contract = (
+                "skills-pool-mapping-v3"
+                if any(mapping.corpus == "center" for mapping in contract_mappings)
+                else "skills-pool-mapping-v2"
+            )
+            published = await self.runtime.publish_mappings(
+                mappings=list(projection.skill_mappings),
+                retired_mappings=retired,
+                source_layout=(
+                    SkillMappingSourceLayout.POOL
+                    if self.pool_layout
+                    else SkillMappingSourceLayout.LEGACY
+                ),
+                mapping_contract_version=contract,
+            )
+            if not published or not await self.runtime.verify_mappings(
+                mappings=list(projection.skill_mappings),
+                retired_mappings=retired,
+                source_layout=(
+                    SkillMappingSourceLayout.POOL
+                    if self.pool_layout
+                    else SkillMappingSourceLayout.LEGACY
+                ),
+                mapping_contract_version=contract,
+            ):
+                raise RuntimeError("runtime reconcile failed")
+            return
+        if not self.runtime.sync_runtime(
+            desired_skills=[
+                {
+                    "id": str(asset.skill_id),
+                    "name": asset.name,
+                    "git_path": asset.git_path,
+                }
+                for asset in projection.skill_assets
+            ]
+        ):
+            raise RuntimeError("runtime reconcile failed")
+
+    async def reconcile_cleanup(self, **kwargs) -> None:
+        self.cleanup_calls.append(kwargs)
+        if not self.runtime.sync_runtime(
+            desired_skills=[
+                {
+                    "id": str(asset.skill_id),
+                    "name": asset.name,
+                    "git_path": asset.git_path,
+                }
+                for asset in self.skills.list_bot_active_assets(
+                    env="pre",
+                    bot_id=kwargs["bot_id"],
+                    user_id=kwargs["owner_id"],
+                    engine="aicoding",
+                )
+            ]
+        ):
+            raise RuntimeError("runtime cleanup failed")
 
 
 class _Layouts:
@@ -272,6 +373,8 @@ def _service(
     guard_error=None,
     guard_release_error: Exception | None = None,
     mutation_guard=None,
+    engine: str = "openclaw",
+    bot_type: str | None = None,
 ):
     skills = _Skills(active=active, git_path=git_path)
     sets = _Sets(skills, associated=associated)
@@ -284,19 +387,21 @@ def _service(
 
         guard.acquire_for_edit = fail_acquire
     runtime = _Runtime(sync_success)
+    runtime_reconciler = _RuntimeReconciler(
+        runtime, skills, pool_layout=pool_layout
+    )
     factory = _Factory(runtime)
     service = LocalSkillStateService(
         skills,
         sets,
-        _Bots(status, entity_id),
+        _Bots(status, entity_id, engine=engine, bot_type=bot_type),
         collaborators or _Collaborators(),
         factory,
         mutation_guard,
         guard,
-        runtime,
         skills,
-        _Layouts(pool=pool_layout),
         sets,
+        runtime_reconciler,
     )
     return service, skills, sets, guard, runtime, factory
 
@@ -356,13 +461,9 @@ async def test_activate_changes_desired_state_then_reconciles_under_bot_layout_l
     assert sets.events == ["remove"]
     assert runtime.calls == 1
     assert guard.events == ["acquire:pre:owner:bot", "release"]
-    assert factory.kwargs == {
-        "user_id": "owner",
-        "entity_id": "owner",
-        "bot_id": "bot",
-        "engine_type": "openclaw",
-        "entity_type": "staff",
-    }
+    assert service._runtime_reconciler.calls == [
+        {"bot_id": "bot", "owner_id": "owner"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -481,6 +582,7 @@ def _repo_service(
     skills = _RepoSkills(active=active, references=references)
     installations = _Installations(skills)
     runtime = _Runtime(sync_success)
+    runtime_reconciler = _RuntimeReconciler(runtime, skills)
     factory = _RepoFactory(runtime, normal_member=bool(references))
     guard = _Guard()
     if active_assets is not None:
@@ -493,10 +595,9 @@ def _repo_service(
         factory,
         _MutationGuard(),
         guard,
-        runtime,
         skills,
-        _Layouts(),
         factory.set_service,
+        runtime_reconciler,
     )
     return service, skills, installations, runtime
 
@@ -562,6 +663,55 @@ async def test_repo_direct_fails_closed_for_unsupported_bot_engine_pair():
 
 
 @pytest.mark.asyncio
+async def test_historical_aicoding_local_skill_can_deactivate_but_cannot_activate():
+    service, skills, installations, _guard, runtime, _factory = _service(
+        active=True,
+        engine="aicoding",
+        bot_type="personal",
+    )
+
+    result = await service.set_local_skill_active(
+        skill_id="9", actor_id="owner", active=False
+    )
+
+    assert result["active"] is False
+    assert skills.active is False
+    assert installations.events == ["add"]
+    assert service._runtime_reconciler.cleanup_calls == [
+        {"bot_id": "bot", "owner_id": "owner"}
+    ]
+    assert runtime.publish_calls == []
+
+    with pytest.raises(SkillEngineNotSupportedError):
+        await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
+    assert installations.events == ["add"]
+
+
+@pytest.mark.asyncio
+async def test_historical_aicoding_repo_skill_can_deactivate_but_cannot_activate():
+    service, _skills, installations, runtime = _repo_service(
+        active=True,
+        engine="aicoding",
+    )
+
+    result = await service.set_repo_skill_active(
+        skill_id="9", bot_id="bot", actor_id="owner", active=False
+    )
+
+    assert result["active"] is False
+    assert installations.events == ["uninstall:pre:bot:9"]
+    assert service._runtime_reconciler.cleanup_calls == [
+        {"bot_id": "bot", "owner_id": "owner"}
+    ]
+    assert runtime.publish_calls == []
+
+    with pytest.raises(SkillEngineNotSupportedError):
+        await service.set_repo_skill_active(
+            skill_id="9", bot_id="bot", actor_id="owner", active=True
+        )
+
+
+@pytest.mark.asyncio
 async def test_repo_direct_rejects_runtime_name_conflict_before_writing_state():
     conflicting = RegisteredSkillAsset(
         skill_id=10, name="repo", git_path="git://other/repo"
@@ -596,14 +746,16 @@ async def test_repo_direct_idempotent_runtime_failure_preserves_old_installation
 
 
 @pytest.mark.asyncio
-async def test_runtime_sync_uses_the_bot_entity_for_skill_paths():
+async def test_runtime_sync_delegates_the_stable_bot_identity():
     service, _skills, _sets, _guard, _runtime, factory = _service(
         entity_id="project-entity"
     )
 
     await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
 
-    assert factory.kwargs["entity_id"] == "project-entity"
+    assert service._runtime_reconciler.calls == [
+        {"bot_id": "bot", "owner_id": "owner"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -688,7 +840,7 @@ async def test_deactivate_mapping_repository_failure_fails_closed_and_restores_s
     assert skills.active is True
     assert runtime.publish_calls == []
     assert runtime.verify_calls == []
-    assert runtime.calls == 1
+    assert runtime.calls == 0
 
 
 @pytest.mark.asyncio
@@ -701,6 +853,31 @@ async def test_deactivate_selects_pool_source_layout_after_cutover():
 
     assert runtime.publish_calls[0]["source_layout"] is SkillMappingSourceLayout.POOL
     assert runtime.verify_calls[0]["source_layout"] is SkillMappingSourceLayout.POOL
+
+
+@pytest.mark.asyncio
+async def test_center_projection_uses_v3_adapter_contract_without_current_locator():
+    service, skills, _sets, _guard, runtime, _factory = _service(active=True)
+    skills.list_bot_active_assets = lambda **_kwargs: [
+        RegisteredSkillAsset(
+            skill_id=9,
+            name="center-skill",
+            git_path="center://skill-uuid",
+            skill_uuid="skill-uuid",
+            sc_version_number="42",
+        )
+    ]
+
+    await service.set_local_skill_active(skill_id="9", actor_id="owner", active=False)
+
+    assert runtime.publish_calls[0]["mapping_contract_version"] == "skills-pool-mapping-v3"
+    assert runtime.verify_calls[0]["mapping_contract_version"] == "skills-pool-mapping-v3"
+    assert runtime.publish_calls[0]["mappings"][0].to_dict() == {
+        "corpus": "center",
+        "skill_uuid": "skill-uuid",
+        "sc_version_number": "42",
+        "link_name": "center-skill",
+    }
 
 
 @pytest.mark.asyncio
@@ -717,7 +894,7 @@ async def test_deactivate_invalid_locator_fails_closed_and_restores_desired_stat
     assert sets.events == ["add", "remove"]
     assert skills.active is True
     assert runtime.publish_calls == []
-    assert runtime.calls == 1
+    assert runtime.calls == 0
 
 
 @pytest.mark.asyncio
@@ -777,7 +954,7 @@ async def test_runtime_failure_republishes_the_rolled_back_desired_state():
     service, skills, sets, _guard, runtime, _factory = _service(active=False)
     outcomes = iter([False, True])
 
-    def sync_with_recovery():
+    def sync_with_recovery(*, desired_skills=None):
         runtime.calls += 1
         return next(outcomes)
 
@@ -793,15 +970,15 @@ async def test_runtime_failure_republishes_the_rolled_back_desired_state():
 
 
 @pytest.mark.asyncio
-async def test_runtime_factory_failure_also_compensates_before_fixed_failure():
-    service, skills, sets, _guard, _runtime, factory = _service(
+async def test_runtime_reconciler_failure_also_compensates_before_fixed_failure():
+    service, skills, sets, _guard, _runtime, _factory = _service(
         active=False, sync_success=True
     )
 
-    def fail_create(**_kwargs):
+    async def fail_reconcile(**_kwargs):
         raise RuntimeError("private runtime resolution")
 
-    factory.create = fail_create
+    service._runtime_reconciler.reconcile = fail_reconcile
     with pytest.raises(LocalSkillRuntimeSyncError):
         await service.set_local_skill_active(
             skill_id="9", actor_id="owner", active=True

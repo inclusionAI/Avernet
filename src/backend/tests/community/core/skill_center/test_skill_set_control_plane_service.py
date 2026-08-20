@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,13 +21,16 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
     SkillSetControlPlaneService,
-    SkillSetRuntimeReconciler,
+)
+from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
+    BotRuntimeProjectionReconciler,
 )
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationGuard,
     BotCapabilityMutationLockUnavailableError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
@@ -86,6 +90,9 @@ class _Repository:
 
     def get_set(self, **_kwargs):
         return {"is_default": False}
+
+    def delete_set(self, **_kwargs) -> None:
+        return None
 
 
 class _CreateRepository(_Repository):
@@ -171,6 +178,9 @@ class _Runtime:
         if len(self.owners) == 1:
             raise RuntimeError("runtime failed")
 
+    async def reconcile_cleanup(self, *, bot_id: str, owner_id: str) -> None:
+        await self.reconcile(bot_id=bot_id, owner_id=owner_id)
+
 
 class _Audit:
     def insert(self, _data) -> None:
@@ -206,10 +216,27 @@ class _BlockingRuntime:
         self._started.set()
         await self._unblock.wait()
 
+    async def reconcile_cleanup(self, **kwargs) -> None:
+        await self.reconcile(**kwargs)
+
 
 class _SuccessfulRuntime:
     async def reconcile(self, **_kwargs) -> None:
         return None
+
+    async def reconcile_cleanup(self, **_kwargs) -> None:
+        return None
+
+
+class _CleanupRuntime(_SuccessfulRuntime):
+    def __init__(self) -> None:
+        self.cleanup_calls: list[dict] = []
+
+    async def reconcile(self, **_kwargs) -> None:
+        raise AssertionError("cleanup-only Bot must not receive a full projection")
+
+    async def reconcile_cleanup(self, **kwargs) -> None:
+        self.cleanup_calls.append(kwargs)
 
 
 class _FailingReleaseGuard(_Guard):
@@ -295,33 +322,199 @@ class _McpCenter:
 class _RuntimeFactoryService:
     def __init__(self) -> None:
         self.mcp_codes: set[str] | None = None
+        self.collect_calls: list[dict] = []
+        self.desired_skills: list[dict] | None = None
 
-    def sync_runtime(self) -> bool:
+    def sync_runtime(self, *, desired_skills: list[dict]) -> bool:
+        self.desired_skills = desired_skills
         return True
 
     async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
         self.mcp_codes = server_codes
         return True
 
+    def collect_bot_active_mcps(self, **kwargs) -> list[dict]:
+        self.collect_calls.append(kwargs)
+        # ``hitl`` is a real LOCAL/stdio default: it belongs in the runtime
+        # projection but must never be declared to AgentPass.
+        return [
+            {"server_code": "mcp.template-preset"},
+            {"server_code": "hitl", "source": "local"},
+        ]
+
 
 class _RuntimeFactory:
     def __init__(self) -> None:
         self.service = _RuntimeFactoryService()
+        self.kwargs: dict | None = None
 
-    def create(self, **_kwargs):
+    def create(self, **kwargs):
+        self.kwargs = kwargs
         return self.service
 
 
 class _RuntimeBots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
         assert (bot_id, owner_id) == ("bot-1", "true-owner")
-        return {"entity_id": "entity-1", "active_engine": "openclaw", "entity_type": "staff"}
+        return {
+            "entity_id": "entity-1",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+            "entity_type": "staff",
+            "env": "pre",
+        }
+
+
+class _UnsupportedRuntimeBots(_RuntimeBots):
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
+        return {
+            **super().get_by_id_and_owner(bot_id, owner_id),
+            "bot_type": "desktop",
+            "active_engine": "claude_code",
+        }
+
+
+class _AicodingImageRuntimeBots(_RuntimeBots):
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
+        return {
+            **super().get_by_id_and_owner(bot_id, owner_id),
+            "active_engine": "claude_code",
+            "template_type": "personalCoding",
+        }
+
+
+class _HistoricalAicodingRuntimeBots(_RuntimeBots):
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
+        return {
+            **super().get_by_id_and_owner(bot_id, owner_id),
+            "active_engine": "aicoding",
+        }
+
+
+class _TeclawRuntimeBots(_RuntimeBots):
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
+        return {
+            **super().get_by_id_and_owner(bot_id, owner_id),
+            "bot_type": "personal",
+            "active_engine": "teclaw",
+        }
 
 
 class _McpInstallations:
     def list_installed_mcps(self, *, bot_id: str) -> set[str]:
         assert bot_id == "bot-1"
         return {"mcp.weather"}
+
+
+class _RuntimeSkills:
+    def list_bot_active_assets(self, **kwargs):
+        assert kwargs == {
+            "env": "pre",
+            "bot_id": "bot-1",
+            "user_id": "true-owner",
+            "engine": "openclaw",
+        }
+        return []
+
+
+class _HistoricalAicodingRuntimeSkills(_RuntimeSkills):
+    def list_bot_active_assets(self, **kwargs):
+        assert kwargs == {
+            "env": "pre",
+            "bot_id": "bot-1",
+            "user_id": "true-owner",
+            "engine": "aicoding",
+        }
+        return []
+
+
+class _RuntimePool:
+    def __init__(self) -> None:
+        self.publish_calls: list[dict] = []
+        self.verify_calls: list[dict] = []
+
+    async def probe(self, **_kwargs):
+        raise AssertionError("non-Center projection must keep the legacy adapter")
+
+    async def publish_mappings(self, **kwargs):
+        self.publish_calls.append(kwargs)
+        return True
+
+    async def verify_mappings(self, **kwargs):
+        self.verify_calls.append(kwargs)
+        return True
+
+
+class _CenterRuntimePool(_RuntimePool):
+    def __init__(self) -> None:
+        super().__init__()
+        self.probe_calls: list[dict] = []
+
+    async def probe(self, **_kwargs):
+        self.probe_calls.append(_kwargs)
+        return SimpleNamespace(
+            evidence={
+                "supported_mapping_contract_versions": [
+                    "skills-pool-mapping-v2",
+                    "skills-pool-mapping-v3",
+                ]
+            }
+        )
+
+
+class _CenterRuntimeSkills:
+    def list_bot_active_assets(self, **_kwargs):
+        return [
+            RegisteredSkillAsset(
+                skill_id=7,
+                name="center-skill",
+                git_path="center://stable-skill-uuid",
+                skill_uuid="stable-skill-uuid",
+                sc_version_number="3.0.0",
+            )
+        ]
+
+
+class _AicodingImageCenterRuntimeSkills(_CenterRuntimeSkills):
+    def list_bot_active_assets(self, **kwargs):
+        assert kwargs["engine"] == "claude_code"
+        return super().list_bot_active_assets(**kwargs)
+
+
+class _TeclawRuntimeSkills:
+    def list_bot_active_assets(self, **_kwargs):
+        return [
+            RegisteredSkillAsset(
+                skill_id=8,
+                name="repo-skill",
+                git_path="git://team/repo-skill",
+            )
+        ]
+
+
+class _RuntimeLayouts:
+    def get(self, _scope):
+        return None
+
+
+class _RuntimePassport:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def update_passport(self, **kwargs) -> None:
+        self.calls.append(kwargs)
+
+    def query_passport_clis(self, bot_id: str, owner_id: str) -> list[dict]:
+        assert (bot_id, owner_id) == ("bot-1", "true-owner")
+        # This is the effective Default CLI scope after a user removed a
+        # static default. A reconcile must preserve it exactly, not revive the
+        # engine's static list.
+        return [{"cli_code": "kept-cli", "cli_name": "Kept"}]
+
+
+class _FailingRuntimePassport(_RuntimePassport):
+    def query_passport_clis(self, bot_id: str, owner_id: str) -> list[dict]:
+        raise RuntimeError("passport unavailable")
 
 
 @pytest.mark.asyncio
@@ -559,6 +752,37 @@ async def test_skill_set_mutation_fails_closed_for_unsupported_bot_engine_pair()
     assert repository.set_active_calls == []
 
 
+@pytest.mark.asyncio
+async def test_historical_bot_skill_set_deactivate_uses_cleanup_projection():
+    repository = _Repository()
+    runtime = _CleanupRuntime()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_UnsupportedBots(),
+        runtime=runtime,
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    await service.deactivate(bot_id="bot-1", actor_id="true-owner", set_id="set-1")
+
+    assert repository.set_active_calls == [
+        {
+            "bot_id": "bot-1",
+            "set_id": "set-1",
+            "active": False,
+            "engine_type": "claude_code",
+        }
+    ]
+    assert runtime.cleanup_calls == [{"bot_id": "bot-1", "owner_id": "true-owner"}]
+
+
 def test_skill_set_metadata_mutations_share_the_runtime_matrix_gate():
     service = SkillSetControlPlaneService(
         repository=_Repository(),
@@ -589,14 +813,29 @@ def test_skill_set_metadata_mutations_share_the_runtime_matrix_gate():
             name="new-name",
             description=None,
         ),
-        lambda: service.delete_set(
-            bot_id="bot-1", actor_id="true-owner", set_id="set-1"
-        ),
     ]
 
     for operation in operations:
         with pytest.raises(SkillEngineNotSupportedError):
             operation()
+
+
+def test_historical_bot_may_delete_an_inactive_skill_set_without_new_runtime_write():
+    service = SkillSetControlPlaneService(
+        repository=_Repository(),
+        bot_repo=_UnsupportedBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    service.delete_set(bot_id="bot-1", actor_id="true-owner", set_id="set-1")
 
 
 def test_mutation_guard_heartbeat_fails_closed_and_stops_on_release(monkeypatch):
@@ -732,12 +971,257 @@ async def test_mcp_direct_activation_denies_before_writing_desired_state():
 @pytest.mark.asyncio
 async def test_runtime_reconcile_projects_full_mcp_desired_state():
     factory = _RuntimeFactory()
-    runtime = SkillSetRuntimeReconciler(
+    passport = _RuntimePassport()
+    runtime = BotRuntimeProjectionReconciler(
         factory=factory,
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
+        pool_skills=_RuntimeSkills(),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=passport,
     )
 
     await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
 
-    assert factory.service.mcp_codes == {"mcp.weather"}
+    assert factory.kwargs == {
+        "user_id": "true-owner",
+        "entity_id": "entity-1",
+        "bot_id": "bot-1",
+        "engine_type": "openclaw",
+        "entity_type": "staff",
+    }
+    assert factory.service.mcp_codes == {
+        "mcp.weather",
+        "mcp.template-preset",
+        "hitl",
+    }
+    assert factory.service.collect_calls == [
+        {
+            "entity_id": "entity-1",
+            "bot_id": "bot-1",
+            "user_id": "true-owner",
+            "entity_type": "staff",
+            "engine_type": "openclaw",
+        }
+    ]
+    assert passport.calls == [
+        {
+            "bot_id": "bot-1",
+            "user_id": "true-owner",
+            "engine_type": "openclaw",
+            "resource_scope": {
+                "mcp_codes": ["mcp.template-preset", "mcp.weather"],
+                "cli_items": [{"cli_code": "kept-cli", "cli_name": "Kept"}],
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_reconcile_fails_closed_when_effective_cli_scope_cannot_be_read():
+    factory = _RuntimeFactory()
+    passport = _FailingRuntimePassport()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_RuntimeSkills(),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=passport,
+    )
+
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+    assert passport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_reconcile_requires_and_uses_mapping_v3_for_center():
+    factory = _RuntimeFactory()
+    pool = _CenterRuntimePool()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_CenterRuntimeSkills(),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+    assert factory.service.mcp_codes is not None
+    assert len(pool.publish_calls) == len(pool.verify_calls) == 1
+    assert pool.publish_calls[0]["mapping_contract_version"] == (
+        "skills-pool-mapping-v3"
+    )
+    assert pool.publish_calls[0]["mappings"][0].to_dict() == {
+        "corpus": "center",
+        "link_name": "center-skill",
+        "skill_uuid": "stable-skill-uuid",
+        "sc_version_number": "3.0.0",
+    }
+
+
+@pytest.mark.asyncio
+async def test_coding_template_uses_aicoding_for_center_probe_but_keeps_logical_engine():
+    factory = _RuntimeFactory()
+    pool = _CenterRuntimePool()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=factory,
+        bot_repo=_AicodingImageRuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_AicodingImageCenterRuntimeSkills(),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+    assert factory.kwargs["engine_type"] == "claude_code"
+    assert pool.probe_calls == [
+        {"bot_id": "bot-1", "user_id": "true-owner", "engine": "aicoding"}
+    ]
+    assert len(pool.publish_calls) == len(pool.verify_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_historical_aicoding_cleanup_uses_legacy_runtime_not_pool_mapping():
+    factory = _RuntimeFactory()
+    pool = _RuntimePool()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=factory,
+        bot_repo=_HistoricalAicodingRuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_HistoricalAicodingRuntimeSkills(),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    await runtime.reconcile_cleanup(bot_id="bot-1", owner_id="true-owner")
+
+    assert factory.kwargs["engine_type"] == "aicoding"
+    assert factory.service.desired_skills == []
+    assert factory.service.mcp_codes is not None
+    assert pool.publish_calls == []
+    assert pool.verify_calls == []
+
+
+@pytest.mark.asyncio
+async def test_historical_cleanup_rejects_center_before_runtime_or_mcp_delivery():
+    factory = _RuntimeFactory()
+    pool = _CenterRuntimePool()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=factory,
+        bot_repo=_HistoricalAicodingRuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_CenterRuntimeSkills(),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await runtime.reconcile_cleanup(bot_id="bot-1", owner_id="true-owner")
+
+    assert factory.service.desired_skills is None
+    assert factory.service.mcp_codes is None
+    assert pool.probe_calls == []
+    assert pool.publish_calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_reconcile_fails_closed_for_unsupported_bot_engine_pair():
+    runtime = BotRuntimeProjectionReconciler(
+        factory=_RuntimeFactory(),
+        bot_repo=_UnsupportedRuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_RuntimeSkills(),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    with pytest.raises(SkillEngineNotSupportedError):
+        await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+
+@pytest.mark.asyncio
+async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
+    pool = _CenterRuntimePool()
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=factory,
+        bot_repo=_TeclawRuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_CenterRuntimeSkills(),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+    assert pool.probe_calls == []
+    assert pool.publish_calls == []
+    assert factory.service.collect_calls == []
+
+
+@pytest.mark.asyncio
+async def test_teclaw_v4_repo_projection_uses_artifact_runtime_not_pool_mapping():
+    pool = _RuntimePool()
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=factory,
+        bot_repo=_TeclawRuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_TeclawRuntimeSkills(),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+    assert factory.service.desired_skills == [
+        {
+            "id": "8",
+            "name": "repo-skill",
+            "git_path": "git://team/repo-skill",
+            "skill_uuid": None,
+            "sc_version_number": None,
+        }
+    ]
+    assert pool.publish_calls == []
+    assert pool.verify_calls == []
+
+
+@pytest.mark.asyncio
+async def test_non_skill_projection_never_writes_skill_mappings():
+    pool = _RuntimePool()
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_RuntimeSkills(),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    await runtime.reconcile_non_skill_projection(
+        bot_id="bot-1", owner_id="true-owner"
+    )
+
+    assert factory.service.desired_skills is None
+    assert factory.service.mcp_codes is not None
+    assert pool.publish_calls == []
+    assert pool.verify_calls == []

@@ -24,6 +24,9 @@ provides:
   - "SkillSetControlPlaneService"
   - "SkillInstallationRepositoryProtocol"
   - "BotSkillAssetService"
+  - "RuntimeProjectionResolver"
+  - "BotRuntimeProjectionReconciler"
+  - "BotRuntimeProjectionReconcilerProtocol"
   - "LocalSkillCleanupWorkModel"
 consumes:
   - "BotRepository"
@@ -42,6 +45,7 @@ consumes:
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
+  - "BotRuntimeProjectionReconcilerProtocol"
 internal_dependencies:
   - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service
@@ -102,6 +106,12 @@ active-only desired-state and compensation boundary as Skills.  The MCP
 catalogue, user configuration, and permission grant remain separate facts;
 the control plane consults the MCP authorization Service API before any MCP
 membership or Direct-installation write.
+
+`RuntimeProjectionResolver` is the only source of a mutation/restart runtime
+snapshot. It receives Installation, active ordinary SkillSet membership,
+System Default assets and required configuration, then produces a complete
+Local/Repo/Center/MCP/CLI projection. Engine adapters receive that snapshot;
+they do not reconstruct it from Default exclusions or BFF state.
 
 All Direct activation and canonical SkillSet mutations first acquire the
 layout-neutral `BotCapabilityMutationGuard`, keyed by `(tenant, env, entity_id, bot)`.
