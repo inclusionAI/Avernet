@@ -30,6 +30,7 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
     UserIdDep,
     require_granted_addressed_bot,
 )
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -66,7 +67,11 @@ from .schemas import (
     SkillUpload,
 )
 
-publish_status_router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["skills"])
+publish_status_router = APIRouter(
+    prefix="/openapi/v1/bots/skills",
+    tags=["skills"],
+    dependencies=[Depends(require_principal)],
+)
 
 
 @publish_status_router.get(
@@ -87,7 +92,7 @@ async def get_skill_publish_status(
     """Query a Skill's publish status from Skill Center.
 
     This is the new Skill Workbench entry point. It deliberately does not
-    consult or mutate OCB's legacy local Skill state machine.
+    consult or mutate the legacy local Skill state machine.
     """
     upstream = client.query_publish_status(skill_code)
     if not isinstance(upstream, dict) or upstream.get("success") is not True:

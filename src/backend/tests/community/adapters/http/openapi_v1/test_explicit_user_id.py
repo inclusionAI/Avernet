@@ -286,6 +286,7 @@ _NO_USER_DIMENSION = {
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/skills"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/tags"),
     # Publish status is tenant-identical Skill Center workflow state.
     ("get", f"{PUBLIC_API_PREFIX}/bots/skills/{{skill_code}}/publish/status"),
     # The load-test endpoint answers a constant. It reads nothing and writes
@@ -451,7 +452,7 @@ def test_the_pinned_number_of_operations_take_it():
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
     # MCP adds eight operations. The Skill Center tag read adds one more
     # user-scoped operation; publish status is tenant-identical and exempt.
-    assert len(taking) == 165
+    assert len(taking) == 164
 
 
 def test_the_exempt_operations_take_none():
