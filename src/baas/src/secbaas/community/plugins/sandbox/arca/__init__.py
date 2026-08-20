@@ -1,6 +1,6 @@
 """Arca sandbox plugin — stub, local, and Aliyun ACK implementations.
 
-ArcaSdkSandbox and ArcaSdkSandboxPlugin are in secbaas.enterprise.
+ArcaSdkSandbox and ArcaSdkSandboxPlugin live in the enterprise bundle.
 """
 
 from ._stub import StubArcaSandbox, StubArcaSandboxPlugin

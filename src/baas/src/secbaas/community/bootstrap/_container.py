@@ -1,20 +1,9 @@
 from dependency_injector import containers, providers
 
 from secbaas.community.api.publish_manage import PublishService
-from secbaas.community.core.database import db_manager as _db_manager
 from secbaas.community.core.service.paas import DeviceCallbackHandler
 from secbaas.community.core.service.paas.desktop import ConnectionManager
 from secbaas.community.logger import get_logger
-
-# ── Enterprise-only optional imports ─────────────────────────────────────
-try:
-    from secbaas.enterprise.core.arca_ttl_renewal import (
-        TtlRenewalScheduleRepository,
-    )
-
-    _HAS_ENTERPRISE_RENEWAL = True
-except ImportError:
-    _HAS_ENTERPRISE_RENEWAL = False
 
 from ._configs import ConfigError, ConfigKey, DatabaseConfig, _read_config
 from ._core_repository import CoreRepositoryContainer
@@ -137,13 +126,39 @@ def _select_renewal_task(engine, legacy_task, deadline_task):
 
     Per D-04: if/else branch (not Plugin Selector).  When engine="legacy"
     (the default), DeviceTtlTimerTask is registered as before.  When
-    engine="deadline", DeadlineRenewalScheduler replaces it in the cron list.
+    engine="deadline", the registered deadline task (resolved through the
+    generic task registry) replaces it in the cron list.
+
+    None defense: a community-only build has no registered deadline task;
+    engine="deadline" then falls back to legacy with a warning instead of
+    mounting None into the AppScheduler.
 
     Phase 7 cleanup will delete this function and the legacy branch.
     """
     if engine == "deadline":
+        if deadline_task is None:
+            logger.warning(
+                "renewal_scheduler.engine='deadline' but no deadline task "
+                "registered — falling back to legacy"
+            )
+            return legacy_task
         return deadline_task
     return legacy_task
+
+
+def _resolve_registered_task(name: str) -> object | None:
+    """Resolve a registered cron task factory by name, lazily.
+
+    Reads the generic task registry at container resolution time (via
+    ``providers.Callable``), never at import / class-body time: extensions
+    register factories only after this module has been imported.
+
+    Returns the factory product, or None when nothing is registered.
+    """
+    from secbaas.community.task_registry import get_cron_task_factories
+
+    factory = get_cron_task_factories().get(name)
+    return factory() if factory else None
 
 
 class ApplicationContainer(containers.DeclarativeContainer):
@@ -161,13 +176,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
         config=config,
         connection_management=connection_management,
         ws_relay_session_repository=repository.ws_relay_session_repository,
-    )
-
-    # ── Shared enterprise repository (used by both services and tasks) ──
-    ttl_renewal_schedule_repo = (
-        providers.Singleton(TtlRenewalScheduleRepository, database=_db_manager)
-        if _HAS_ENTERPRISE_RENEWAL
-        else providers.Object(None)
     )
 
     services = providers.Container(
@@ -213,7 +221,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
             DeviceCallbackHandler,
             publish_service_factory=_lazy_publish_service,
         ),
-        ttl_renewal_schedule_repository=ttl_renewal_schedule_repo,
     )
 
     tasks = providers.Container(
@@ -226,7 +233,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ticket_repository=repository.ticket_repository,
         paas_service_facade=services.paas_facade,
         file_transfer_backend=services.file_transfer_backend,
-        ttl_renewal_schedule_repository=ttl_renewal_schedule_repo,
     )
 
     cron_lifecycle = providers.Singleton(
@@ -237,7 +243,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
                 _select_renewal_task,
                 config.renewal_scheduler.engine,
                 tasks.device_ttl_timer_task,
-                tasks.deadline_renewal_scheduler,
+                providers.Callable(
+                    _resolve_registered_task, "deadline_renewal_scheduler"
+                ),
             ),
             tasks.bot_run_recovery_task,
             tasks.file_transfer_poller_task,
@@ -376,3 +384,17 @@ def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
             inject_into_plugin_container(container)
     except ImportError:
         pass
+
+    # ── Device-service overlay (registered deferred factories) ─────────────
+    # Extensions register device-service factories at import time; apply
+    # each as an instance-level provider override so every consumer baked
+    # with the device_service provider reference (publish_service, router
+    # Provide chains) sees the wrapped service. Instance-level only — the
+    # class-level variant does not exist at runtime. Must run here, before
+    # initialize_services resolves providers — never after.
+    from secbaas.community.task_registry import get_device_service_factories
+
+    for factory in get_device_service_factories():
+        container.services().override_providers(
+            device_service=providers.Factory(factory)
+        )
