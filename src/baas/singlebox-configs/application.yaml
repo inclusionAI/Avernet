@@ -102,6 +102,10 @@ user_config:
   oauth:
     base_url: "https://oauth.example.com"
 
+  # 续期调度器引擎选择（"legacy" 用 DeviceTtlTimerTask，"deadline" 用 DeadlineRenewalScheduler）
+  renewal_scheduler:
+    engine: "legacy"
+
   # 设备 TTL 定时器配置（每 30 分钟扫描整个到期队列并续期+探活）
   device_ttl_timer:
     enabled: true  # 是否启用定时任务
