@@ -55,147 +55,147 @@ class CoreRepositoryContainer(containers.DeclarativeContainer):
     db_manager = _db_provider
 
     ac_bot_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmAcBotRepository),
-        SQLITE_ORM=_orm_repo(OrmAcBotRepository),
-        MARIADB_ORM=_orm_repo(OrmAcBotRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmAcBotRepository),
+        sqlite=_orm_repo(OrmAcBotRepository),
+        mariadb=_orm_repo(OrmAcBotRepository),
     )
     ac_bot_publish_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmAcBotPublishRepository),
-        SQLITE_ORM=_orm_repo(OrmAcBotPublishRepository),
-        MARIADB_ORM=_orm_repo(OrmAcBotPublishRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmAcBotPublishRepository),
+        sqlite=_orm_repo(OrmAcBotPublishRepository),
+        mariadb=_orm_repo(OrmAcBotPublishRepository),
     )
     api_gateway_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmAPIKeyRepository),
-        SQLITE_ORM=_orm_repo(OrmAPIKeyRepository),
-        MARIADB_ORM=_orm_repo(OrmAPIKeyRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmAPIKeyRepository),
+        sqlite=_orm_repo(OrmAPIKeyRepository),
+        mariadb=_orm_repo(OrmAPIKeyRepository),
     )
     bot_device_rel_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmBotDeviceRelRepository),
-        SQLITE_ORM=_orm_repo(OrmBotDeviceRelRepository),
-        MARIADB_ORM=_orm_repo(OrmBotDeviceRelRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmBotDeviceRelRepository),
+        sqlite=_orm_repo(OrmBotDeviceRelRepository),
+        mariadb=_orm_repo(OrmBotDeviceRelRepository),
     )
     bot_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmBotRepository, rel_repo=bot_device_rel_repository),
-        SQLITE_ORM=_orm_repo(OrmBotRepository, rel_repo=bot_device_rel_repository),
-        MARIADB_ORM=_orm_repo(OrmBotRepository, rel_repo=bot_device_rel_repository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmBotRepository, rel_repo=bot_device_rel_repository),
+        sqlite=_orm_repo(OrmBotRepository, rel_repo=bot_device_rel_repository),
+        mariadb=_orm_repo(OrmBotRepository, rel_repo=bot_device_rel_repository),
     )
     bot_run_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmBotRunRepository),
-        SQLITE_ORM=_orm_repo(OrmBotRunRepository),
-        MARIADB_ORM=_orm_repo(OrmBotRunRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmBotRunRepository),
+        sqlite=_orm_repo(OrmBotRunRepository),
+        mariadb=_orm_repo(OrmBotRunRepository),
     )
     bot_qpm_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmBotQpmRepository),
-        SQLITE_ORM=_orm_repo(OrmBotQpmRepository),
-        MARIADB_ORM=_orm_repo(OrmBotQpmRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmBotQpmRepository),
+        sqlite=_orm_repo(OrmBotQpmRepository),
+        mariadb=_orm_repo(OrmBotQpmRepository),
     )
     bot_run_queue_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmBotRunQueueRepository),
-        SQLITE_ORM=_orm_repo(OrmBotRunQueueRepository),
-        MARIADB_ORM=_orm_repo(OrmBotRunQueueRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmBotRunQueueRepository),
+        sqlite=_orm_repo(OrmBotRunQueueRepository),
+        mariadb=_orm_repo(OrmBotRunQueueRepository),
     )
     bot_run_queue_chunk_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmBotRunQueueChunkRepository),
-        SQLITE_ORM=_orm_repo(OrmBotRunQueueChunkRepository),
-        MARIADB_ORM=_orm_repo(OrmBotRunQueueChunkRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmBotRunQueueChunkRepository),
+        sqlite=_orm_repo(OrmBotRunQueueChunkRepository),
+        mariadb=_orm_repo(OrmBotRunQueueChunkRepository),
     )
     bot_session_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmBotSessionRepository),
-        SQLITE_ORM=_orm_repo(OrmBotSessionRepository),
-        MARIADB_ORM=_orm_repo(OrmBotSessionRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmBotSessionRepository),
+        sqlite=_orm_repo(OrmBotSessionRepository),
+        mariadb=_orm_repo(OrmBotSessionRepository),
     )
     device_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmDeviceRepository),
-        SQLITE_ORM=_orm_repo(OrmDeviceRepository),
-        MARIADB_ORM=_orm_repo(OrmDeviceRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmDeviceRepository),
+        sqlite=_orm_repo(OrmDeviceRepository),
+        mariadb=_orm_repo(OrmDeviceRepository),
     )
     device_binding_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmDeviceBindingRepository),
-        SQLITE_ORM=_orm_repo(OrmDeviceBindingRepository),
-        MARIADB_ORM=_orm_repo(OrmDeviceBindingRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmDeviceBindingRepository),
+        sqlite=_orm_repo(OrmDeviceBindingRepository),
+        mariadb=_orm_repo(OrmDeviceBindingRepository),
     )
     device_template_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmDeviceTemplateRepository),
-        SQLITE_ORM=_orm_repo(OrmDeviceTemplateRepository),
-        MARIADB_ORM=_orm_repo(OrmDeviceTemplateRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmDeviceTemplateRepository),
+        sqlite=_orm_repo(OrmDeviceTemplateRepository),
+        mariadb=_orm_repo(OrmDeviceTemplateRepository),
     )
     distributed_lock_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmDistributedLockRepository),
-        SQLITE_ORM=_orm_repo(OrmDistributedLockRepository),
-        MARIADB_ORM=_orm_repo(OrmDistributedLockRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmDistributedLockRepository),
+        sqlite=_orm_repo(OrmDistributedLockRepository),
+        mariadb=_orm_repo(OrmDistributedLockRepository),
     )
     local_user_machine_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmLocalUserMachineRepository),
-        SQLITE_ORM=_orm_repo(OrmLocalUserMachineRepository),
-        MARIADB_ORM=_orm_repo(OrmLocalUserMachineRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmLocalUserMachineRepository),
+        sqlite=_orm_repo(OrmLocalUserMachineRepository),
+        mariadb=_orm_repo(OrmLocalUserMachineRepository),
     )
     publish_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmPublishRepository),
-        SQLITE_ORM=_orm_repo(OrmPublishRepository),
-        MARIADB_ORM=_orm_repo(OrmPublishRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmPublishRepository),
+        sqlite=_orm_repo(OrmPublishRepository),
+        mariadb=_orm_repo(OrmPublishRepository),
     )
     publish_batch_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmPublishBatchRepository),
-        SQLITE_ORM=_orm_repo(OrmPublishBatchRepository),
-        MARIADB_ORM=_orm_repo(OrmPublishBatchRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmPublishBatchRepository),
+        sqlite=_orm_repo(OrmPublishBatchRepository),
+        mariadb=_orm_repo(OrmPublishBatchRepository),
     )
     publish_record_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmPublishRecordRepository),
-        SQLITE_ORM=_orm_repo(OrmPublishRecordRepository),
-        MARIADB_ORM=_orm_repo(OrmPublishRecordRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmPublishRecordRepository),
+        sqlite=_orm_repo(OrmPublishRecordRepository),
+        mariadb=_orm_repo(OrmPublishRecordRepository),
     )
     resource_key_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmResourceKeyRepository),
-        SQLITE_ORM=_orm_repo(OrmResourceKeyRepository),
-        MARIADB_ORM=_orm_repo(OrmResourceKeyRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmResourceKeyRepository),
+        sqlite=_orm_repo(OrmResourceKeyRepository),
+        mariadb=_orm_repo(OrmResourceKeyRepository),
     )
     system_config_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmSystemConfigRepository),
-        SQLITE_ORM=_orm_repo(OrmSystemConfigRepository),
-        MARIADB_ORM=_orm_repo(OrmSystemConfigRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmSystemConfigRepository),
+        sqlite=_orm_repo(OrmSystemConfigRepository),
+        mariadb=_orm_repo(OrmSystemConfigRepository),
     )
     tenant_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmTenantRepository),
-        SQLITE_ORM=_orm_repo(OrmTenantRepository),
-        MARIADB_ORM=_orm_repo(OrmTenantRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmTenantRepository),
+        sqlite=_orm_repo(OrmTenantRepository),
+        mariadb=_orm_repo(OrmTenantRepository),
     )
     ws_relay_session_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmWsRelaySessionRepository),
-        SQLITE_ORM=_orm_repo(OrmWsRelaySessionRepository),
-        MARIADB_ORM=_orm_repo(OrmWsRelaySessionRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmWsRelaySessionRepository),
+        sqlite=_orm_repo(OrmWsRelaySessionRepository),
+        mariadb=_orm_repo(OrmWsRelaySessionRepository),
     )
     ticket_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmTicketRepository),
-        SQLITE_ORM=_orm_repo(OrmTicketRepository),
-        MARIADB_ORM=_orm_repo(OrmTicketRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmTicketRepository),
+        sqlite=_orm_repo(OrmTicketRepository),
+        mariadb=_orm_repo(OrmTicketRepository),
     )
 
     session_ticket_repository = providers.Selector(
-        config.plugins.database.plugin_database,
-        ZDAS_ORM=_orm_repo(OrmSessionTicketRepository),
-        SQLITE_ORM=_orm_repo(OrmSessionTicketRepository),
-        MARIADB_ORM=_orm_repo(OrmSessionTicketRepository),
+        config.plugins.database,
+        zdas=_orm_repo(OrmSessionTicketRepository),
+        sqlite=_orm_repo(OrmSessionTicketRepository),
+        mariadb=_orm_repo(OrmSessionTicketRepository),
     )

@@ -16,39 +16,26 @@ user_config:
   # 插件配置
   plugins:
     auth: "stub"
-    crypto: "stub"          # stub | real
-    secret: "stub"          # stub | real | aliyun_kms
-    scheduler: "stub"       # stub | real
-    cache: "stub"           # stub | real | redis
-    # cache_redis:
-    #   host: "127.0.0.1"
-    #   port: 6379
-    #   db: 0
-    #   ssl: false
-    #   password: "@redis_password"   # plain value or secret reference
+    secret: "stub"          # stub | real
+    cache: "stub"           # stub | redis
     bot_service: "stub"  # real | local | stub
     engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
-    file_transfer: "stub"  # stub | real（默认关闭；启用需企业包真实 OSS 后端并配置 file_transfer_oss）
-    database:
-      plugin_database: "SQLITE_ORM"    # ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
-      database_url: "sqlite:////tmp/secbaas.db"
-      create_schema: true
-      seed_data: true
+    file_transfer: "stub"  # stub | real
+    database: "sqlite"        # sqlite | mariadb
     sandbox:
       arca: stub #  arca_sdk or stub
       desktop: stub # real or stub
-      teclaw: stub # real or stub
       k8s: stub # real or stub
       docker: stub # real or stub
       poolab: stub # real or stub
-  # Arca 沙箱配置（用于定时任务续期）
-  arca:
-    enabled: true  # 设置为 true 启用沙箱续期定时任务
-    base_url: "http://arca.example.com:8080"
-    template_id: "ARCA-TEMPLATE-000000"
-    oss_mount_id: "dummy_mount_id"
-    api_key: "@dummy_api_key"
-    default_ttl_minutes: 1440 # 分钟 => 1 天
+    bot:
+      teclaw: stub # real or stub
+
+  # 数据库连接配置
+  database:
+    database_url: "sqlite:////tmp/secbaas.db"
+    create_schema: true
+    seed_data: true
 
   # Aliyun ACK 沙箱模板配置（第二类模板，用于 plugins.sandbox.arca = "aliyun_ack"）
   # 默认使用 dummy 值，启用该后端时才需填充 cluster 与 pod 真实值，无需新增配置键。
@@ -135,10 +122,8 @@ user_config:
     dry_run: false  # 测试模式：只打印日志
 
   # 文件传输轮询器配置（定期检测 OSS 上传完成并触发 device 下载）
-  # 默认关闭：社区版仅提供 no-op 后端，必须选择真实后端
-  # （plugins.file_transfer = "real"，企业包提供）并配置 file_transfer_oss 后才能启用。
   file_transfer_poller:
-    enabled: false  # 是否启用定时任务（默认关闭；启用需配置真实 OSS 后端）
+    enabled: false  # 是否启用定时任务
     cron_interval_seconds: 10  # 执行间隔（秒），默认: 10
     upload_timeout_seconds: 3600  # 上传超时（秒），超时未完成写入的 ticket 标记 FAILED
     lock_expire_seconds: 300  # per-ticket 分布式锁过期时间（秒），默认: 300

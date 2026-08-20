@@ -10,8 +10,6 @@ from typing import Protocol, runtime_checkable
 
 from secbaas.community.logger import get_logger
 
-from ._configs import DatabaseConfig
-
 logger = get_logger("bootstrap")
 
 
@@ -63,15 +61,12 @@ class DatabaseManagerLifecycle:
     ``stop()`` calls ``db_manager.close()`` to dispose connection pools.
     """
 
-    def __init__(self, db_config: DatabaseConfig) -> None:
-        self._db_config = db_config
-
     async def start(self) -> None:
         """Initialise database engine from the provided config."""
         from secbaas.community.bootstrap import get_container
 
         plugin = get_container().plugins.plugin_database()
-        plugin.init_database(self._db_config)
+        plugin.init_database()
 
     async def stop(self) -> None:
         """Close the database manager (dispose async & sync engines)."""

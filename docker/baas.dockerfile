@@ -71,7 +71,7 @@ FROM python:3.12-slim-bookworm AS runtime
 ARG USE_CN_MIRROR=
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    HOME=/home/baas \
+    HOME=/home/admin \
     PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -84,8 +84,8 @@ RUN if [ "${USE_CN_MIRROR}" = "1" ]; then \
     && apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 10001 baas \
-    && useradd --uid 10001 --gid baas --create-home --shell /usr/sbin/nologin baas
+    && groupadd --gid 10001 admin \
+    && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin
 
 COPY --from=builder /app/.venv /app/.venv
 COPY src/baas/src /app/src
@@ -95,10 +95,10 @@ COPY src/baas/singlebox-configs /app/singlebox-configs
 # tmp/: scratch space used by scripts/app.sh conventions.
 # ~/logs/: default SOFAPy-style log location ($HOME/logs/secbaas).
 # SQLite default (sqlite:////tmp/secbaas.db) lives in /tmp and is world-writable.
-RUN mkdir -p /app/tmp /home/baas/logs \
-    && chown -R baas:baas /app /home/baas
+RUN mkdir -p /app/tmp /home/admin/logs \
+    && chown -R admin:admin /app /home/admin
 
-USER baas
+USER admin
 
 EXPOSE 8888
 

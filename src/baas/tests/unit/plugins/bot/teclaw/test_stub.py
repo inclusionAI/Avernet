@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from secbaas.community.plugins.sandbox.teclaw._stub import StubTeClawBotPlugin
+from secbaas.community.plugins.bot.teclaw._stub import StubTeClawBotPlugin
 from secbaas.community.spi.bot.teclaw._types import (
     BotCreateResult,
     BotDestroyResult,

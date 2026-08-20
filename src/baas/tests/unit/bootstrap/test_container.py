@@ -9,7 +9,6 @@ import pytest
 from dependency_injector.containers import Container
 
 from secbaas.community.bootstrap import ApplicationContainer, get_container
-from secbaas.community.bootstrap._configs import DatabaseConfig
 from secbaas.community.core.repository.ac_bot import (
     AcBotRepository,
 )
@@ -64,7 +63,6 @@ from secbaas.community.core.repository.system_config import (
 from secbaas.community.core.repository.tenant import (
     OrmTenantRepository as OrmTenantRepositoryType,
 )
-from secbaas.community.spi.database import PluginDatabaseType
 from tests.utils import load_web_port
 
 # ── 17 repositories with their expected ORM types ─────────────────────────
@@ -108,11 +106,7 @@ class TestContainerSingleton:
     def test_singleton_persists_after_init(self):
         """Calling plugin.init_database does not invalidate the singleton."""
         c1 = get_container()
-        c1.plugins.plugin_database().init_database(
-            DatabaseConfig(
-                plugin_type=PluginDatabaseType.SQLITE_ORM, db_url="sqlite:///:memory:"
-            )
-        )
+        c1.plugins.plugin_database().init_database()
         c2 = get_container()
         assert c1 is c2
 
@@ -285,8 +279,10 @@ class TestSandboxDeviceRouterFullChain:
                         "desktop": "stub",
                         "docker": "stub",
                         "k8s": "stub",
-                        "teclaw": "stub",
                         "poolab": "stub",
+                    },
+                    "bot": {
+                        "teclaw": "stub",
                     },
                 },
             }
@@ -318,8 +314,10 @@ class TestSandboxDeviceRouterFullChain:
                         "desktop": "stub",
                         "docker": "stub",
                         "k8s": "stub",
-                        "teclaw": "stub",
                         "poolab": "stub",
+                    },
+                    "bot": {
+                        "teclaw": "stub",
                     },
                 },
             }
@@ -347,8 +345,10 @@ class TestSandboxDeviceRouterFullChain:
                         "desktop": "stub",
                         "docker": "stub",
                         "k8s": "stub",
-                        "teclaw": "stub",
                         "poolab": "stub",
+                    },
+                    "bot": {
+                        "teclaw": "stub",
                     },
                 },
             }
@@ -372,72 +372,3 @@ class TestInjectEnterprisePluginsImportError:
         container = object()
         with patch.dict(sys.modules, {"secbaas.community.plugin_registry": None}):
             _inject_enterprise_plugins(container)
-
-
-class TestBuildDbConfig:
-    """Unit tests for ``_build_db_config`` in ``bootstrap/_container.py``."""
-
-    def _build(self, database_cfg: dict) -> DatabaseConfig:
-        from secbaas.community.bootstrap._container import _build_db_config
-
-        container = get_container()
-        container.config.from_dict({"plugins": {"database": database_cfg}})
-        return _build_db_config(container.config)
-
-    def test_mariadb_populates_all_fields(self) -> None:
-        cfg = self._build(
-            {
-                "plugin_database": "MARIADB_ORM",
-                "create_schema": True,
-                "seed_data": True,
-                "mariadb_host": "db.internal",
-                "mariadb_port": 3307,
-                "mariadb_database": "secbaas",
-                "mariadb_user": "app",
-                "mariadb_password": "secret",
-            }
-        )
-        assert cfg.plugin_type == PluginDatabaseType.MARIADB_ORM
-        assert cfg.create_schema is True
-        assert cfg.seed_data is True
-        assert cfg.mariadb_host == "db.internal"
-        assert cfg.mariadb_port == 3307
-        assert cfg.mariadb_database == "secbaas"
-        assert cfg.mariadb_user == "app"
-        assert cfg.mariadb_password == "secret"
-
-    def test_missing_opt_keys_use_defaults(self) -> None:
-        cfg = self._build({"plugin_database": "MARIADB_ORM"})
-        assert cfg.create_schema is False
-        assert cfg.seed_data is False
-        assert cfg.mariadb_host == "127.0.0.1"
-        assert cfg.mariadb_port == 3306
-        assert cfg.mariadb_database == ""
-        assert cfg.mariadb_user == ""
-        assert cfg.mariadb_password == ""
-
-    def test_bool_parsing_accepts_string_true(self) -> None:
-        cfg = self._build(
-            {
-                "plugin_database": "MARIADB_ORM",
-                "create_schema": "true",
-                "seed_data": "on",
-            }
-        )
-        assert cfg.create_schema is True
-        assert cfg.seed_data is True
-
-    def test_sqlite_requires_database_url(self) -> None:
-        container = get_container()
-        container.config.from_dict(
-            {"plugins": {"database": {"plugin_database": "SQLITE_ORM"}}}
-        )
-        from secbaas.community.bootstrap._configs import ConfigError
-        from secbaas.community.bootstrap._container import _build_db_config
-
-        with pytest.raises(ConfigError):
-            _build_db_config(container.config)
-
-    def test_non_sqlite_allows_missing_database_url(self) -> None:
-        cfg = self._build({"plugin_database": "MARIADB_ORM"})
-        assert cfg.db_url == ""
