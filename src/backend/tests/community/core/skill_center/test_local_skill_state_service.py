@@ -134,14 +134,14 @@ class _Installations:
         self.skills = skills
         self.events: list[str] = []
 
-    def install(self, *, env: str, bot_id: str, skill_id: str) -> bool:
+    def install(self, *, env: str, owner_id: str, bot_id: str, skill_id: str) -> bool:
         self.events.append(f"install:{env}:{bot_id}:{skill_id}")
         if self.skills.active:
             return False
         self.skills.active = True
         return True
 
-    def uninstall(self, *, env: str, bot_id: str, skill_id: str) -> bool:
+    def uninstall(self, *, env: str, owner_id: str, bot_id: str, skill_id: str) -> bool:
         self.events.append(f"uninstall:{env}:{bot_id}:{skill_id}")
         if not self.skills.active:
             return False

@@ -415,7 +415,7 @@ class _RuntimeSkills:
         assert kwargs == {
             "env": "pre",
             "bot_id": "bot-1",
-            "user_id": "true-owner",
+            "owner_id": "true-owner",
             "engine": "openclaw",
         }
         return []
@@ -426,7 +426,7 @@ class _HistoricalAicodingRuntimeSkills(_RuntimeSkills):
         assert kwargs == {
             "env": "pre",
             "bot_id": "bot-1",
-            "user_id": "true-owner",
+            "owner_id": "true-owner",
             "engine": "aicoding",
         }
         return []
@@ -719,6 +719,7 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
     assert repository.set_active_calls == [
         {
             "bot_id": "bot-1",
+            "owner_id": "true-owner",
             "set_id": "set-1",
             "active": True,
             "engine_type": "openclaw",
@@ -805,6 +806,7 @@ async def test_historical_bot_skill_set_deactivate_uses_cleanup_projection():
     assert repository.set_active_calls == [
         {
             "bot_id": "bot-1",
+            "owner_id": "true-owner",
             "set_id": "set-1",
             "active": False,
             "engine_type": "claude_code",
@@ -985,7 +987,12 @@ async def test_mcp_direct_activation_checks_permission_before_writing_desired_st
 
     assert mcp_center.calls == [("true-owner", "mcp.weather")]
     assert repository.direct_calls == [
-        {"bot_id": "bot-1", "server_code": "mcp.weather", "engine_type": "openclaw"}
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "server_code": "mcp.weather",
+            "engine_type": "openclaw",
+        }
     ]
 
 

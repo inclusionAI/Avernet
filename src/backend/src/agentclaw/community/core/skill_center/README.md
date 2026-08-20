@@ -97,7 +97,8 @@ internal_dependencies:
 Skill-set switching is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
 
 Local Skill compatibility materializes active state in
-`ac_bot_skill_installation` and reads it through the Installation repository.
+`ac_bot_skill_installation`, whose identity is `(tenant, env, owner_id, bot_id,
+skill_id)`, and reads it through the Installation repository.
 HTTP and runtime adapters must not write that table or reconstruct Local active
 state from Default SkillSet exclusions.
 
@@ -127,7 +128,13 @@ The P1-01 Local migration is a two-step operation: run the read-only
 complete result, then explicitly approve and run
 `sql/2026_08_20_bot_skill_installation_backfill_apply.sql` under the same
 Local-writer freeze. Its selector mirrors the legacy rule that *any* matching
-Default exclusion is inactive, including a stale former-default exclusion.
+Default exclusion is inactive, including a stale former-default exclusion; it
+does not require a Default SkillSet membership. It only migrates a `local://`
+asset when its `(env, owner_id, bot_id)` resolves to a live, non-deleted Bot.
+Multiple live Bot rows for the same identity are a fail-closed exception. The
+dry-run reports the exception and the apply script records per-environment
+`legacy_active_local`, `live_exact_bot_candidates`, `ambiguous`, `inserted`,
+and `missing` counts in the run audit before an operator decides to commit.
 The apply script leaves its transaction open; source the paired
 `backfill_verify_commit.sql` in that same session and issue `COMMIT` only after
 its missing-installations count is zero (otherwise `ROLLBACK`).

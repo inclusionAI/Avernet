@@ -319,7 +319,13 @@ class SkillSetControlPlaneRepository(
             return str(skill.id)
 
     def add_skill(
-        self, *, bot_id: str, set_id: str, skill_id: str, engine_type: str | None = None
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        set_id: str,
+        skill_id: str,
+        engine_type: str | None = None,
     ) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(
@@ -341,7 +347,9 @@ class SkillSetControlPlaneRepository(
                 and skill.bolt_id != bot_id
             ):
                 raise SkillSetControlPlaneNotFoundError()
-            old = self._snapshot(session, bot_id, engine_type=engine_type)
+            old = self._snapshot(
+                session, bot_id, owner_id, engine_type=engine_type
+            )
             current = (
                 self._scope(session.query(SkillSetSkill), SkillSetSkill)
                 .filter(
@@ -371,7 +379,10 @@ class SkillSetControlPlaneRepository(
                 )
             if row.is_active:
                 self._require_unique_runtime_names(
-                    session, bot_id=bot_id, candidate_ids={int(skill.id)}
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    candidate_ids={int(skill.id)},
                 )
             session.add(
                 SkillSetSkill(
@@ -387,6 +398,7 @@ class SkillSetControlPlaneRepository(
                 session.add(
                     BotSkillInstallation(
                         bot_id=bot_id,
+                        owner_id=owner_id,
                         skill_id=skill.id,
                         env=get_current_env(),
                         avernet_tenant=get_current_avernet_tenant(),
@@ -396,7 +408,13 @@ class SkillSetControlPlaneRepository(
             return SkillSetMutation(_item(row), True, old)
 
     def remove_skill(
-        self, *, bot_id: str, set_id: str, skill_id: str, engine_type: str | None = None
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        set_id: str,
+        skill_id: str,
+        engine_type: str | None = None,
     ) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(
@@ -407,7 +425,9 @@ class SkillSetControlPlaneRepository(
                 locked=True,
             )
             self._ordinary(row)
-            old = self._snapshot(session, bot_id, engine_type=engine_type)
+            old = self._snapshot(
+                session, bot_id, owner_id, engine_type=engine_type
+            )
             membership = (
                 self._scope(session.query(SkillSetSkill), SkillSetSkill)
                 .filter(
@@ -423,6 +443,7 @@ class SkillSetControlPlaneRepository(
                 self._scope(
                     session.query(BotSkillInstallation), BotSkillInstallation
                 ).filter(
+                    BotSkillInstallation.owner_id == owner_id,
                     BotSkillInstallation.bot_id == bot_id,
                     BotSkillInstallation.skill_id == int(skill_id),
                 ).delete(synchronize_session=False)
@@ -430,7 +451,13 @@ class SkillSetControlPlaneRepository(
             return SkillSetMutation(_item(row), True, old)
 
     def set_active(
-        self, *, bot_id: str, set_id: str, active: bool, engine_type: str | None = None
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        set_id: str,
+        active: bool,
+        engine_type: str | None = None,
     ) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(
@@ -446,9 +473,13 @@ class SkillSetControlPlaneRepository(
                 return SkillSetMutation(
                     _item(row),
                     False,
-                    self._snapshot(session, bot_id, engine_type=engine_type),
+                    self._snapshot(
+                        session, bot_id, owner_id, engine_type=engine_type
+                    ),
                 )
-            old = self._snapshot(session, bot_id, engine_type=engine_type)
+            old = self._snapshot(
+                session, bot_id, owner_id, engine_type=engine_type
+            )
             members = (
                 self._scope(session.query(SkillSetSkill), SkillSetSkill)
                 .filter(SkillSetSkill.skill_set_id == row.id)
@@ -469,13 +500,14 @@ class SkillSetControlPlaneRepository(
             row.is_active = active
             if active:
                 self._require_unique_runtime_names(
-                    session, bot_id=bot_id, candidate_ids=ids
+                    session, bot_id=bot_id, owner_id=owner_id, candidate_ids=ids
                 )
-                existing = self._installations(session, bot_id)
+                existing = self._installations(session, bot_id, owner_id)
                 for skill_id in ids - existing:
                     session.add(
                         BotSkillInstallation(
                             bot_id=bot_id,
+                            owner_id=owner_id,
                             skill_id=skill_id,
                             env=get_current_env(),
                             avernet_tenant=get_current_avernet_tenant(),
@@ -495,6 +527,7 @@ class SkillSetControlPlaneRepository(
                 self._scope(
                     session.query(BotSkillInstallation), BotSkillInstallation
                 ).filter(
+                    BotSkillInstallation.owner_id == owner_id,
                     BotSkillInstallation.bot_id == bot_id,
                     BotSkillInstallation.skill_id.in_(ids),
                 ).delete(synchronize_session=False)
@@ -509,7 +542,12 @@ class SkillSetControlPlaneRepository(
             return SkillSetMutation(_item(row), changed, old)
 
     def replace_active_set(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        set_id: str,
+        engine_type: str | None = None,
     ) -> SkillSetMutation:
         """Atomically replace all ordinary active sets with ``set_id``.
 
@@ -527,7 +565,9 @@ class SkillSetControlPlaneRepository(
                 locked=True,
             )
             self._ordinary(target)
-            old = self._snapshot(session, bot_id, engine_type=engine_type)
+            old = self._snapshot(
+                session, bot_id, owner_id, engine_type=engine_type
+            )
             query = self._scope(session.query(SkillSet), SkillSet).filter(
                 SkillSet.bolt_id == bot_id, SkillSet.is_default.is_(False)
             )
@@ -578,6 +618,7 @@ class SkillSetControlPlaneRepository(
             self._require_unique_runtime_names(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 candidate_ids=target_member_ids,
                 retired_ids=active_member_ids,
             )
@@ -585,14 +626,16 @@ class SkillSetControlPlaneRepository(
                 self._scope(
                     session.query(BotSkillInstallation), BotSkillInstallation
                 ).filter(
+                    BotSkillInstallation.owner_id == owner_id,
                     BotSkillInstallation.bot_id == bot_id,
                     BotSkillInstallation.skill_id.in_(active_member_ids),
                 ).delete(synchronize_session=False)
-            existing = self._installations(session, bot_id)
+            existing = self._installations(session, bot_id, owner_id)
             for skill_id in target_member_ids - existing:
                 session.add(
                     BotSkillInstallation(
                         bot_id=bot_id,
+                        owner_id=owner_id,
                         skill_id=skill_id,
                         env=get_current_env(),
                         avernet_tenant=get_current_avernet_tenant(),
@@ -643,6 +686,7 @@ class SkillSetControlPlaneRepository(
         self,
         *,
         bot_id: str,
+        owner_id: str,
         state: SkillSetDesiredState,
         engine_type: str | None = None,
     ) -> None:
@@ -697,7 +741,10 @@ class SkillSetControlPlaneRepository(
                     )
             self._scope(
                 session.query(BotSkillInstallation), BotSkillInstallation
-            ).filter(BotSkillInstallation.bot_id == bot_id).delete(
+            ).filter(
+                BotSkillInstallation.owner_id == owner_id,
+                BotSkillInstallation.bot_id == bot_id,
+            ).delete(
                 synchronize_session=False
             )
             session.flush()
@@ -705,6 +752,7 @@ class SkillSetControlPlaneRepository(
                 session.add(
                     BotSkillInstallation(
                         bot_id=bot_id,
+                        owner_id=owner_id,
                         skill_id=skill_id,
                         env=get_current_env(),
                         avernet_tenant=get_current_avernet_tenant(),
@@ -727,10 +775,12 @@ class SkillSetControlPlaneRepository(
             session.flush()
 
     def snapshot_desired_state(
-        self, *, bot_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, engine_type: str | None = None
     ) -> SkillSetDesiredState:
         with self._db.orm_session() as session:
-            return self._snapshot(session, bot_id, engine_type=engine_type)
+            return self._snapshot(
+                session, bot_id, owner_id, engine_type=engine_type
+            )
 
     def _set(
         self,
@@ -810,13 +860,16 @@ class SkillSetControlPlaneRepository(
         if row.is_default:
             raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
 
-    def _installations(self, session, bot_id: str) -> set[int]:
+    def _installations(self, session, bot_id: str, owner_id: str) -> set[int]:
         return {
             int(value[0])
             for value in self._scope(
                 session.query(BotSkillInstallation.skill_id), BotSkillInstallation
             )
-            .filter(BotSkillInstallation.bot_id == bot_id)
+            .filter(
+                BotSkillInstallation.owner_id == owner_id,
+                BotSkillInstallation.bot_id == bot_id,
+            )
             .all()
         }
 
@@ -848,12 +901,13 @@ class SkillSetControlPlaneRepository(
         session,
         *,
         bot_id: str,
+        owner_id: str,
         candidate_ids: set[int],
         retired_ids: set[int] | None = None,
     ) -> None:
         """Validate the complete post-command projection before any write."""
         selected_ids = (
-            self._installations(session, bot_id) - (retired_ids or set())
+            self._installations(session, bot_id, owner_id) - (retired_ids or set())
         ) | candidate_ids
         if not selected_ids:
             return
@@ -871,7 +925,12 @@ class SkillSetControlPlaneRepository(
             owner_by_name[runtime_name] = int(skill_id)
 
     def _snapshot(
-        self, session, bot_id: str, *, engine_type: str | None = None
+        self,
+        session,
+        bot_id: str,
+        owner_id: str,
+        *,
+        engine_type: str | None = None,
     ) -> SkillSetDesiredState:
         """Lock and capture every ordinary-set desired fact for this Bot."""
         query = self._scope(session.query(SkillSet), SkillSet).filter(
@@ -910,7 +969,7 @@ class SkillSetControlPlaneRepository(
                     str(member.server_code)
                 )
         return SkillSetDesiredState(
-            installations=self._installations(session, bot_id),
+            installations=self._installations(session, bot_id, owner_id),
             set_active={int(row.id): bool(row.is_active) for row in sets},
             memberships={set_id: tuple(items) for set_id, items in memberships.items()},
             mcp_installations=self._mcp_installations(session, bot_id),

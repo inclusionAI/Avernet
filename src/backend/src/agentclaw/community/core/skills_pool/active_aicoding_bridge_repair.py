@@ -75,6 +75,7 @@ async def request_active_aicoding_bridge_repair(
             local_skill_name(asset)
             for asset in skills.list_bot_local_assets(
                 env=scope.env,
+                owner_id=user_id,
                 bot_id=scope.bot_id,
             )
         ]
@@ -82,7 +83,7 @@ async def request_active_aicoding_bridge_repair(
             skills.list_bot_active_assets(
                 env=scope.env,
                 bot_id=scope.bot_id,
-                user_id=user_id,
+                owner_id=user_id,
                 engine=logical_engine,
             )
         )

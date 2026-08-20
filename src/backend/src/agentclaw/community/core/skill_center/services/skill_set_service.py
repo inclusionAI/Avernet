@@ -935,7 +935,10 @@ class SkillSetService:
                 and self._installations is not None
             ):
                 changed = self._installations.uninstall(
-                    env=str(skill["env"]), bot_id=self.bot_id, skill_id=skill_id
+                    env=str(skill["env"]),
+                    owner_id=self.entity_id,
+                    bot_id=self.bot_id,
+                    skill_id=skill_id,
                 )
                 synced = await self._sync_symlinks_to_device_if_needed(
                     user_id or self.entity_id
@@ -943,6 +946,7 @@ class SkillSetService:
                 if not synced and changed:
                     self._installations.install(
                         env=str(skill["env"]),
+                        owner_id=self.entity_id,
                         bot_id=self.bot_id,
                         skill_id=skill_id,
                     )
@@ -1256,7 +1260,10 @@ class SkillSetService:
             ]
         """
         effective_bolt_id = bolt_id if bolt_id else self.bot_id
-        effective_user_id = user_id if user_id else self.entity_id
+        # ``user_id`` is the caller in historical adapters. Installation and
+        # Default exclusion state belong to the Bot owner carried by the
+        # factory's entity_id, never to a collaborator acting on that Bot.
+        effective_user_id = self.entity_id
 
         logger.info(f"[get_all_skill_sets_with_mcps] user_id={effective_user_id}, bolt_id={effective_bolt_id}")
 
@@ -1306,7 +1313,9 @@ class SkillSetService:
         from agentclaw.community.utils.env_utils import get_current_env
 
         installed_skills = self.skill_repo.list_bot_installed_skills(
-            env=get_current_env(), bot_id=effective_bolt_id
+            env=get_current_env(),
+            owner_id=effective_user_id,
+            bot_id=effective_bolt_id,
         )
         # 1. 查询所有激活的技能集（包含默认能力集）
         active_skill_sets = self.skill_set_repo.get_all_active_skill_sets(

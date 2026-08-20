@@ -37,6 +37,10 @@ pub use core::{
     WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::SystemMessageService;
+pub use application::v1::{
+    BotInternalAttributes, FriendCheckInStrategy, InternalBotAttributesService,
+    PatchBotInternalAttributes, UserVisibility,
+};
 pub use application::system_message::resolve_session_topic;
 pub use application::interaction::{
     InteractionRequestedOutcome, InteractionService, InteractionServiceError,

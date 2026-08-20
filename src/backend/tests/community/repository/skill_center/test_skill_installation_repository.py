@@ -45,18 +45,37 @@ def test_skill_installation_is_active_only_idempotent_and_tenant_scoped(tmp_path
     installations = SkillInstallationRepository(_Database(engine))
 
     with avernet_tenant_scope("tenant-a"):
-        assert installations.install(env="pre", bot_id="bot-1", skill_id="42") is True
-        assert installations.install(env="pre", bot_id="bot-1", skill_id="42") is False
-        assert installations.list_installed_skill_ids(env="pre", bot_id="bot-1") == {42}
+        assert installations.install(
+            env="pre", owner_id="owner-a", bot_id="bot-1", skill_id="42"
+        ) is True
+        assert installations.install(
+            env="pre", owner_id="owner-a", bot_id="bot-1", skill_id="42"
+        ) is False
+        assert installations.list_installed_skill_ids(
+            env="pre", owner_id="owner-a", bot_id="bot-1"
+        ) == {42}
+        assert installations.list_installed_skill_ids(
+            env="pre", owner_id="owner-b", bot_id="bot-1"
+        ) == set()
 
     with avernet_tenant_scope("tenant-b"):
-        assert installations.list_installed_skill_ids(env="pre", bot_id="bot-1") == set()
-        assert installations.install(env="pre", bot_id="bot-1", skill_id="42") is True
+        assert installations.list_installed_skill_ids(
+            env="pre", owner_id="owner-a", bot_id="bot-1"
+        ) == set()
+        assert installations.install(
+            env="pre", owner_id="owner-a", bot_id="bot-1", skill_id="42"
+        ) is True
 
     with avernet_tenant_scope("tenant-a"):
-        assert installations.uninstall(env="pre", bot_id="bot-1", skill_id="42") is True
-        assert installations.uninstall(env="pre", bot_id="bot-1", skill_id="42") is False
-        assert installations.list_installed_skill_ids(env="pre", bot_id="bot-1") == set()
+        assert installations.uninstall(
+            env="pre", owner_id="owner-a", bot_id="bot-1", skill_id="42"
+        ) is True
+        assert installations.uninstall(
+            env="pre", owner_id="owner-a", bot_id="bot-1", skill_id="42"
+        ) is False
+        assert installations.list_installed_skill_ids(
+            env="pre", owner_id="owner-a", bot_id="bot-1"
+        ) == set()
 
 
 def test_direct_installation_is_included_in_the_existing_runtime_mapping_query(tmp_path) -> None:
@@ -76,10 +95,12 @@ def test_direct_installation_is_included_in_the_existing_runtime_mapping_query(t
                 "bolt_id": "bot-1",
             }
         )
-        assert installations.install(env="dev", bot_id="bot-1", skill_id=skill["id"])
+        assert installations.install(
+            env="dev", owner_id="owner", bot_id="bot-1", skill_id=skill["id"]
+        )
 
         projected = skills.list_bot_active_assets(
-            env="dev", bot_id="bot-1", user_id="owner", engine="openclaw"
+            env="dev", bot_id="bot-1", owner_id="owner", engine="openclaw"
         )
 
     assert [(asset.skill_id, asset.git_path) for asset in projected] == [
@@ -96,4 +117,5 @@ def test_skill_installation_fk_matches_production_unsigned_skill_identity() -> N
 
     assert "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT" in skill_ddl
     assert "skill_id BIGINT UNSIGNED NOT NULL" in installation_ddl
+    assert "owner_id VARCHAR(128) NOT NULL" in installation_ddl
     assert "FOREIGN KEY(skill_id) REFERENCES ac_skill (id)" in installation_ddl

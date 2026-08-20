@@ -203,7 +203,7 @@ class BotRuntimeProjectionReconciler:
             self._pool_skills.list_bot_active_assets(
                 env=str(bot["env"]),
                 bot_id=bot_id,
-                user_id=owner_id,
+                owner_id=owner_id,
                 engine=engine,
             )
         )
