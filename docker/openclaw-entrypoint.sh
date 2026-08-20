@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
 # docker/openclaw-entrypoint.sh
 #
-# Generates ~/.openclaw/openclaw.json from environment variables
-# (if not already provided via mount), then starts supervisord.
+# Container entrypoint for Avernet Engine + OpenClaw image.
+#
+# Runtime model (mirrors ocb/dockers/desktop-openclaw/entrypoint.sh):
+#   - supervisord is started as PID 1
+#   - [program:engine]   autostart=true  — starts on container boot
+#   - [program:openclaw]  autostart=false — started by engine on demand
+#     via `sudo supervisorctl start openclaw`
+#
+# This script:
+#   1. Creates runtime directories for openclaw and logs
+#   2. Generates ~/.openclaw/openclaw.json from environment variables
+#      (unless a config was already mounted)
+#   3. Launches supervisord
 
 set -euo pipefail
 
@@ -10,15 +21,41 @@ export HOME="${HOME:-/home/admin}"
 CONFIG_DIR="${HOME}/.openclaw"
 CONFIG_FILE="${CONFIG_DIR}/openclaw.json"
 WORKSPACE_DIR="${CONFIG_DIR}/workspace"
+LOG_DIR="${HOME}/logs"
 
-mkdir -p "${CONFIG_DIR}/extensions" "${WORKSPACE_DIR}" "${HOME}/logs"
+# --- 1. Create runtime directories —-
 
-# --- Generate default openclaw.json if none exists (user may mount their own).
+mkdir -p "${CONFIG_DIR}/extensions" "${WORKSPACE_DIR}" "${LOG_DIR}"
+
+# --- 2. Check that the engine venv + supervisor exist
+if [ ! -f "/opt/.venv/bin/activate" ]; then
+    echo "ERROR: engine venv not found at /opt/.venv" >&2
+    echo "Please rebuild the Docker image" >&2
+    exit 1
+fi
+if [ ! -x "/usr/local/bin/supervisord" ]; then
+    echo "ERROR: supervisord not found at /usr/local/bin/supervisord" >&2
+    echo "Please rebuild the Docker image" >&2
+    exit 1
+fi
+
+# --- Check openclaw is installed
+if command -v openclaw &>/dev/null; then
+    echo "===> OpenClaw: $(openclaw --version 2>&1 | head -1 || echo 'unknown')"
+else
+    echo "WARNING: OpenClaw not found in PATH" >&2
+fi
+
+echo "===> Environment:"
+echo "     Engine:   /opt/engine (port 20003)"
+echo "     OpenClaw: ${CONFIG_DIR} (port ${OPENCLAW_PORT:-18789})"
+echo "     Logs:     ${LOG_DIR}"
+
+# --- 3. Generate default openclaw.json if none exists (user may mount their own).
 if [ ! -f "${CONFIG_FILE}" ]; then
-    echo "==> generating default ${CONFIG_FILE}"
+    echo "===> generating default ${CONFIG_FILE}"
     node -e '
     const fs = require("fs");
-    const path = require("path");
 
     const port       = process.env.OPENCLAW_PORT || "18789";
     const providerId = process.env.OPENCLAW_OPENAI_PROVIDER_ID || "openai-compatible";
@@ -141,8 +178,8 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     '
     chown admin:admin "${CONFIG_FILE}" 2>/dev/null || true
 else
-    echo "==> using existing ${CONFIG_FILE} (mounted or pre-built)"
+    echo "===> using existing ${CONFIG_FILE} (mounted or pre-built)"
 fi
 
-echo "==> starting supervisord"
-exec /usr/bin/supervisord -n -c /etc/supervisor/supervisord.conf
+echo "===> starting supervisord (engine=autostart, openclaw=on-demand)"
+exec /usr/local/bin/supervisord -n -c /etc/supervisor/supervisord.conf
