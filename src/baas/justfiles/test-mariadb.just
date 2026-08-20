@@ -3,7 +3,7 @@
 # Defaults mirror configs/overlays/e2e-mariadb.yaml
 mariadb-container := 'baas-e2e-mariadb'
 mariadb-image := 'mariadb:11'
-mariadb-port := '33307'
+mariadb-port := '33306'
 mariadb-database := 'secbaas_test'
 mariadb-user := 'secbaas'
 mariadb-password := 'secbaaspass'
@@ -63,8 +63,5 @@ test-e2e-mariadb:
         i=$((i+1)); [ "$i" -ge 45 ] && { echo "test-e2e-mariadb: MariaDB did not become ready — skipping"; exit 0; }; \
         sleep 1; done
     echo "MariaDB ready ({{mariadb-container}} :{{mariadb-port}})"
-    MARIADB_HOST=127.0.0.1 MARIADB_PORT={{mariadb-port}} \
-    MARIADB_DATABASE={{mariadb-database}} MARIADB_USER={{mariadb-user}} \
-    MARIADB_PASSWORD={{mariadb-password}} \
     TEST_OVERLAY=e2e-mariadb \
         uv run pytest tests/e2e/asgi/ -v --tb=short --color=yes
