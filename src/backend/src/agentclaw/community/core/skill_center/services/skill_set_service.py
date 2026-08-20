@@ -335,7 +335,9 @@ class SkillSetService:
             logger.warning(f"Error getting current active skill set: {e}")
         return None
 
-    def _sync_symlinks_to_device_if_needed(self, user_id: str | None = None) -> bool:
+    def _sync_symlinks_to_device_if_needed(
+        self, user_id: str | None = None, desired_skills: list[dict] | None = None
+    ) -> bool:
         """如果需要，同步软链配置到设备。
 
         将当前激活技能集的软链配置同步到远程设备或本地文件系统。
@@ -351,7 +353,8 @@ class SkillSetService:
             # 获取当前激活技能集的软链配置（包括空列表，表示清空）
             symlinks = self.get_symlink_mappings(
                 user_id=user_id,
-                bolt_id=self.bot_id
+                bolt_id=self.bot_id,
+                desired_skills=desired_skills,
             )
 
             # 通过 DeviceSyncPlugin 同步到设备 — 经 resolver + dispatcher 收口
@@ -375,9 +378,11 @@ class SkillSetService:
             logger.warning(f"[_sync_symlinks_to_device_if_needed] Failed to sync symlinks: {e}", exc_info=True)
             return False
 
-    def sync_runtime(self) -> bool:
-        """Reconcile this Bot's desired Skill mapping to its runtime."""
-        return self._sync_symlinks_to_device_if_needed(self.user_id or self.entity_id)
+    def sync_runtime(self, *, desired_skills: list[dict] | None = None) -> bool:
+        """Apply one complete resolver-owned skill snapshot to the runtime."""
+        return self._sync_symlinks_to_device_if_needed(
+            self.user_id or self.entity_id, desired_skills
+        )
 
     async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
         """Project the complete MCP desired state to the Bot runtime.
@@ -1348,6 +1353,7 @@ class SkillSetService:
         user_id: str | None = None,
         bolt_id: str | None = None,
         additional_skill_paths: list[str] | None = None,
+        desired_skills: list[dict] | None = None,
     ) -> list[SynlinkMappingInfo]:
         """生成技能激活软链配置（支持多能力集激活）
 
@@ -1364,7 +1370,11 @@ class SkillSetService:
         Returns:
             List[SynlinkMappingInfo]: 软链配置列表（已去重）
         """
-        unique_skills = self.get_active_skills(user_id=user_id, bolt_id=bolt_id)
+        unique_skills = (
+            list(desired_skills)
+            if desired_skills is not None
+            else self.get_active_skills(user_id=user_id, bolt_id=bolt_id)
+        )
 
         # Direct Skill CRUD is intentionally orthogonal to SkillSet membership.
         # The device boundary accepts a complete mapping publish, so the current

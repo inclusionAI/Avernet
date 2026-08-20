@@ -13,6 +13,10 @@ MAPPING_CONTRACT_V2 = "skills-pool-mapping-v2"
 MAPPING_CONTRACT_V3 = "skills-pool-mapping-v3"
 
 
+class RuntimeMappingNameConflictError(ValueError):
+    """Different selected assets claim one canonical runtime entry name."""
+
+
 def mapping_contract_for(
     mappings: list[PoolSkillMapping],
     supported_versions: object,
@@ -84,7 +88,9 @@ def build_logical_skill_mappings(
         if targets.get(link_name) == identity:
             continue
         if link_name in targets:
-            raise ValueError(f"duplicate managed target: {link_name}")
+            raise RuntimeMappingNameConflictError(
+                f"duplicate managed target: {link_name}"
+            )
         targets[link_name] = identity
         mappings.append(
             PoolSkillMapping(
@@ -243,4 +249,5 @@ __all__ = [
     "mapping_contract_for",
     "merge_retired_logical_skill_mappings",
     "retired_logical_skill_mappings",
+    "RuntimeMappingNameConflictError",
 ]

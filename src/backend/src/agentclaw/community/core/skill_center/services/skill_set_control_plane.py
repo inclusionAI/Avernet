@@ -114,10 +114,22 @@ class SkillSetRuntimeReconciler:
                 ),
             )
         )
-        # The legacy Adapter still owns physical path translation, but gets a
-        # full reconciliation command only after the shared Resolver has
-        # validated the canonical desired-state snapshot.
-        if not service.sync_runtime():
+        # The Engine adapter owns physical translation, while the Resolver
+        # supplies its complete canonical asset snapshot.  It must not query
+        # Default exclusions or rebuild state from legacy BFF records.
+        if not service.sync_runtime(
+            desired_skills=[
+                {
+                    "id": str(asset.skill_id),
+                    "name": asset.name,
+                    "git_path": asset.git_path,
+                    "skill_uuid": asset.skill_uuid,
+                    "sc_version_number": asset.sc_version_number,
+                }
+                for asset in projection.skill_assets
+                if not asset.git_path.startswith("center://")
+            ]
+        ):
             raise SkillSetRuntimeReconcileError()
         if not await service.sync_mcp_desired_state(
             server_codes=set(projection.mcp_server_codes)

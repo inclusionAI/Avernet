@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agentclaw.community.core.skills_pool.mapping_intent import (
+    RuntimeMappingNameConflictError,
     build_logical_skill_mappings,
 )
 from agentclaw.community.core.skills_pool.models import (
@@ -38,6 +39,7 @@ class RuntimeProjection:
     """Engine-neutral full snapshot; adapters must apply it as a whole."""
 
     skill_mappings: tuple[PoolSkillMapping, ...]
+    skill_assets: tuple[RegisteredSkillAsset, ...]
     mcp_server_codes: tuple[str, ...]
     cli_commands: tuple[str, ...]
 
@@ -72,12 +74,11 @@ class RuntimeProjectionResolver:
                 raise ValueError("unsupported skill source in runtime projection")
         try:
             mappings = build_logical_skill_mappings(list(assets))
-        except ValueError as exc:
-            if "duplicate managed target" in str(exc):
-                raise RuntimeNameConflictError() from exc
-            raise
+        except RuntimeMappingNameConflictError as exc:
+            raise RuntimeNameConflictError() from exc
         return RuntimeProjection(
             skill_mappings=tuple(mappings),
+            skill_assets=assets,
             mcp_server_codes=tuple(sorted(state.installed_mcp_server_codes)),
             cli_commands=tuple(dict.fromkeys(state.system_default_cli_commands)),
         )

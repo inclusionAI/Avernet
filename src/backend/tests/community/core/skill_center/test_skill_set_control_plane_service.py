@@ -296,7 +296,8 @@ class _RuntimeFactoryService:
     def __init__(self) -> None:
         self.mcp_codes: set[str] | None = None
 
-    def sync_runtime(self) -> bool:
+    def sync_runtime(self, *, desired_skills: list[dict]) -> bool:
+        assert desired_skills == []
         return True
 
     async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
