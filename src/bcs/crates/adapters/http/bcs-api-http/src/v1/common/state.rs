@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use bcs_service_api::application::v1::{
-    BotService, FriendshipService, GroupService, InvitationService, SessionMessageService,
-    SessionFileApplicationService, SessionService,
+    BotService, CollaborationTemplateService, FriendshipService, GroupService, InvitationService,
+    SessionMessageService, SessionFileApplicationService, SessionService,
 };
 use bcs_service_api::application::channel::ChannelService;
 
@@ -25,6 +25,7 @@ pub struct ApiState {
     pub channel_service: Option<Arc<dyn ChannelService>>,
     pub session_file_service: Option<Arc<dyn SessionFileApplicationService>>,
     pub session_file_url_projector: Option<SessionFileUrlProjector>,
+    pub collaboration_template_service: Option<Arc<dyn CollaborationTemplateService>>,
     pub principal_verifier: Arc<dyn PrincipalVerifier>,
 }
 
@@ -47,6 +48,7 @@ impl ApiState {
             channel_service: None,
             session_file_service: None,
             session_file_url_projector: None,
+            collaboration_template_service: None,
             principal_verifier,
         }
     }
@@ -75,6 +77,18 @@ impl ApiState {
     ) -> Self {
         self.session_file_service = Some(service);
         self.session_file_url_projector = Some(url_projector);
+        self
+    }
+
+    /// Add the V1 collaboration-template catalog facade. Catalog reads are
+    /// read-only and not scoped to a Bot or Session; permission stays on the
+    /// protected boundary. Fail-closed (handler returns `internal` if None)
+    /// until bootstrap mounts it.
+    pub fn with_collaboration_template_service(
+        mut self,
+        service: Arc<dyn CollaborationTemplateService>,
+    ) -> Self {
+        self.collaboration_template_service = Some(service);
         self
     }
 }

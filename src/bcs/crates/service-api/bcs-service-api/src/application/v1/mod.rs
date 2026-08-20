@@ -6,6 +6,7 @@
 
 pub mod authorization;
 pub mod bot;
+pub mod collaboration_template;
 pub mod error;
 pub mod friendship;
 pub mod group;
@@ -22,6 +23,7 @@ pub use authorization::{
     require_human, select_principal,
 };
 pub use bot::*;
+pub use collaboration_template::*;
 pub use error::ApplicationError;
 pub use friendship::*;
 pub use group::*;

@@ -51,6 +51,7 @@ members = [
     "crates/services/bcs-session-store",
     "crates/application/v1/bcs-app-session",
     "crates/application/v1/bcs-app-invitation",
+    "crates/application/v1/bcs-app-collaboration-template",
     "crates/services/bcs-session-file",
     "crates/services/bcs-session-file-store",
     "crates/services/bcs-routing",
@@ -276,6 +277,7 @@ bcs-session                = { path = "crates/services/bcs-session" }
 bcs-session-store          = { path = "crates/services/bcs-session-store" }
 bcs-app-session             = { path = "crates/application/v1/bcs-app-session" }
 bcs-app-invitation = { path = "crates/application/v1/bcs-app-invitation" }
+bcs-app-collaboration-template = { path = "crates/application/v1/bcs-app-collaboration-template" }
 bcs-session-file-store     = { path = "crates/services/bcs-session-file-store" }
 bcs-session-file           = { path = "crates/services/bcs-session-file" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }
