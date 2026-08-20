@@ -1,31 +1,7 @@
-"""SkillCenterModule — production singletons & factories for skill_center.
+"""Production Skill Center DI bindings.
 
-Replaces the module-globals in
-``core/skill_center/dependencies/skills.py`` (``_skill_repo``,
-``_skill_set_repo``, ``_device_plugin``, ``_skill_repo_sync_plugin``,
-plus the legacy ``git_sync_service`` global at the bottom of
-``services/git_sync.py``).
-
-Production bindings are wired here. The ``test`` / ``singlebox`` profiles
-install :class:`TestingSkillCenterModule` (via ``modules_for``) to
-override these with the local stubs.
-
-Three categories of binding:
-
-- **Plugin / repo singletons**: ``SkillRepository``,
-  ``SkillSetRepository``, ``DeviceAccessor``, ``SkillRepoSyncPlugin``,
-  ``GitSyncService``. Each ``@singleton @provider``.
-- **Service factories**: ``SkillServiceFactory``,
-  ``SkillSetServiceFactory``, ``SkillParameterServiceFactory``. Each
-  factory holds the @inject-supplied singletons and mints a fresh
-  service per ``create()`` call with caller-supplied request-scoped
-  arguments (paths, IDs).
-- **Stateless services**: ``SkillAuthService`` is a clean singleton with
-  no per-call state — bound directly.
-
-This module never branches on mode. Local / test boots layer
-``TestingSkillCenterModule`` on top to override the database-mode-keyed
-plugin_api and repos.
+Test and singlebox profiles layer ``TestingSkillCenterModule`` on top of this
+module; request-scoped service factories remain here.
 """
 
 from __future__ import annotations
