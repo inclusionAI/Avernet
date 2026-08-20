@@ -32,6 +32,14 @@ log_warn() {
     echo -e "${YELLOW}[WARN]${NC} $1" | tee -a "$LOG_FILE"
 }
 
+start_detached() {
+    if command -v python3 >/dev/null 2>&1; then
+        nohup python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@" >> "$LOG_FILE" 2>&1 &
+    else
+        nohup "$@" >> "$LOG_FILE" 2>&1 &
+    fi
+}
+
 log_usage() {
     echo -e "${BLUE}Usage:${NC} $0 {start|stop|restart|status} [options]"
     echo ""
@@ -110,7 +118,7 @@ check_port() {
 
 do_start() {
     local debug_port=""
-    local env_name=""
+    local env_name="${SERVER_ENV:-}"
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -135,6 +143,9 @@ do_start() {
     local config_file="$CONFIG_DIR/application.yaml"
     if [[ -n "$env_name" ]]; then
         case "$env_name" in
+            local)
+                config_file="$CONFIG_DIR/application-local.yaml"
+                ;;
             dev)
                 config_file="$CONFIG_DIR/application-dev.yaml"
                 ;;
@@ -145,7 +156,7 @@ do_start() {
                 config_file="$CONFIG_DIR/application.yaml"
                 ;;
             *)
-                log_error "Unknown environment: $env_name (supported: dev/prepub/prod)"
+                log_error "Unknown environment: $env_name (supported: local/dev/prepub/prod)"
                 exit 1
                 ;;
         esac
@@ -174,6 +185,10 @@ do_start() {
         rm -f "$PID_FILE"
     fi
 
+    if [[ "$env_name" == "local" ]]; then
+        export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+    fi
+
     log_info "Starting gateway application..."
     log_info "Config file: $config_file"
     log_info "Log file: $LOG_FILE"
@@ -187,11 +202,11 @@ do_start() {
     # aren't installed.
     if [[ -n "$debug_port" ]]; then
         log_info "Debug port: $debug_port (app starts immediately without waiting for debugger)"
-        SERVER_ENV="$env_name" nohup "$VENV_DIR/bin/python" -m debugpy --listen "0.0.0.0:$debug_port" \
-            "$WORK_DIR/src/gateway/community/main.py" -c "$CONFIG_DIR" --mode "$APP_MODE" >> "$LOG_FILE" 2>&1 &
+        SERVER_ENV="$env_name" start_detached "$VENV_DIR/bin/python" -m debugpy --listen "0.0.0.0:$debug_port" \
+            "$WORK_DIR/src/gateway/community/main.py" -c "$CONFIG_DIR" --mode "$APP_MODE"
     else
-        SERVER_ENV="$env_name" nohup "$VENV_DIR/bin/python" \
-            "$WORK_DIR/src/gateway/community/main.py" -c "$CONFIG_DIR" --mode "$APP_MODE" >> "$LOG_FILE" 2>&1 &
+        SERVER_ENV="$env_name" start_detached "$VENV_DIR/bin/python" \
+            "$WORK_DIR/src/gateway/community/main.py" -c "$CONFIG_DIR" --mode "$APP_MODE"
     fi
 
     APP_PID=$!
