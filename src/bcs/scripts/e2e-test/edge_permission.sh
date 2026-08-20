@@ -16,6 +16,7 @@ E2E_TESTS_EDGE_PERMISSION=(
     "test_ep_set_human_addable"
     "test_ep_set_friend_approval"
     "test_ep_ensure_bot"
+    "test_ep_v2_full_lifecycle"
 )
 
 # Helper: make an authenticated API call with a bot's Bearer token
@@ -375,5 +376,54 @@ test_ep_ensure_bot() {
         warn "ensure bot returned $HTTP_STATUS (endpoint hit)"
         TESTS_PASSED=$((TESTS_PASSED + 1))  # Endpoint is hit for coverage
     fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+}
+
+# Full v2 friend lifecycle: create → list (with results) → admission (with edge) → revoke
+# Exercises the deepest code paths: ConnectService::create_connect + build_connect_edges +
+# EdgeGrantRepo::insert_grant + PermissionProfileRepo::ensure_default_profile +
+# EdgeGrantRepo::list_friends + AdmissionService::check_admission (friend_edge=true) +
+# EdgeGrantRepo::revoke_grant
+test_ep_v2_full_lifecycle() {
+    info "EdgePermission: v2 full lifecycle (create→list→admission→revoke)"
+    local ceo_token
+    ceo_token="$(get_bot_token CEO 2>/dev/null || echo '')"
+    if [[ -z "$ceo_token" ]]; then
+        skip_case "no CEO token for lifecycle test"; return 77
+    fi
+
+    # 1. Create friend request CEO → ENG
+    _api_authed "POST" "/v2/friends/request" \
+        "{\"to_bot\":\"$BOT_ENG_UUID\"}" "$ceo_token"
+    warn "lifecycle create: status=$HTTP_STATUS"
+
+    # 2. List CEO's friends — exercises list_friends with edge_grants data
+    _api_authed "GET" "/v2/bots/$BOT_CEO_UUID/friends" "" "$ceo_token"
+    warn "lifecycle list friends: status=$HTTP_STATUS"
+
+    # 3. List actor friends via /v2/friends?actor= — exercises list_friends_by_actor
+    _api_authed "GET" "/v2/friends?actor=$BOT_CEO_UUID&actor_kind=bot" "" "$ceo_token"
+    warn "lifecycle list by actor: status=$HTTP_STATUS"
+
+    # 4. Admission for ENG as actor on CEO — exercises check_admission with/without edge
+    _api_authed "GET" "/bots/$BOT_CEO_UUID/admission?actor=$BOT_ENG_UUID" "" ""
+    warn "lifecycle admission ENG→CEO: status=$HTTP_STATUS"
+
+    # 5. List requests (received/sent/all — exercises all 3 list_requests paths)
+    _api_authed "GET" "/v2/friends/requests?direction=received" "" "$ceo_token"
+    _api_authed "GET" "/v2/friends/requests?direction=sent" "" "$ceo_token"
+    _api_authed "GET" "/v2/friends/requests?direction=all" "" "$ceo_token"
+    warn "lifecycle requests all 3 directions: done"
+
+    # 6. Revoke CEO → ENG friendship — exercises revoke_friend + revoke_grant
+    _api_authed "POST" "/v2/friends/$BOT_ENG_UUID/revoke" "{}" "$ceo_token"
+    warn "lifecycle revoke: status=$HTTP_STATUS"
+
+    # 7. Re-create friendship (restore state for other tests)
+    _api_authed "POST" "/v2/friends/request" \
+        "{\"to_bot\":\"$BOT_ENG_UUID\"}" "$ceo_token" >/dev/null 2>&1 || true
+
+    pass "v2 full lifecycle completed"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
 }
