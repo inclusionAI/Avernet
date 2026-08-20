@@ -29,6 +29,10 @@ from agentclaw.community.core.skill_center.factories import SkillSetServiceFacto
 from agentclaw.community.core.skill_center.runtime_policy import (
     require_supported_bot_skill_runtime,
 )
+from agentclaw.community.core.skill_center.runtime_resolver import (
+    RuntimeDesiredState,
+    RuntimeProjectionResolver,
+)
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationBusyError,
     BotCapabilityMutationGuard,
@@ -462,24 +466,30 @@ class LocalSkillStateService:
         bot_id: str,
     ) -> bool:
         try:
-            retired_mapping = build_logical_skill_mappings(
-                [
-                    RegisteredSkillAsset(
-                        skill_id=int(skill["id"]),
-                        name=str(skill["name"]),
-                        git_path=str(skill["git_path"]),
-                        skill_uuid=(
-                            str(skill["skill_uuid"])
-                            if skill.get("skill_uuid") is not None
-                            else None
-                        ),
-                        sc_version_number=(
-                            str(skill["sc_version_number"])
-                            if skill.get("sc_version_number") is not None
-                            else None
-                        ),
+            retired_mapping = list(
+                RuntimeProjectionResolver()
+                .resolve(
+                    RuntimeDesiredState(
+                        skills=(
+                            RegisteredSkillAsset(
+                                skill_id=int(skill["id"]),
+                                name=str(skill["name"]),
+                                git_path=str(skill["git_path"]),
+                                skill_uuid=(
+                                    str(skill["skill_uuid"])
+                                    if skill.get("skill_uuid") is not None
+                                    else None
+                                ),
+                                sc_version_number=(
+                                    str(skill["sc_version_number"])
+                                    if skill.get("sc_version_number") is not None
+                                    else None
+                                ),
+                            ),
+                        )
                     )
-                ]
+                )
+                .skill_mappings
             )
         except (KeyError, TypeError, ValueError):
             return False
@@ -501,14 +511,19 @@ class LocalSkillStateService:
         retired_mappings: list[PoolSkillMapping] | None = None,
     ) -> bool:
         try:
-            mappings = build_logical_skill_mappings(
-                self._pool_skills.list_bot_active_assets(
-                    env=scope.env,
-                    bot_id=bot_id,
-                    user_id=owner_id,
-                    engine=str(bot["active_engine"]),
+            projection = RuntimeProjectionResolver().resolve(
+                RuntimeDesiredState(
+                    skills=tuple(
+                        self._pool_skills.list_bot_active_assets(
+                            env=scope.env,
+                            bot_id=bot_id,
+                            user_id=owner_id,
+                            engine=str(bot["active_engine"]),
+                        )
+                    )
                 )
             )
+            mappings = list(projection.skill_mappings)
             source_layout = (
                 SkillMappingSourceLayout.POOL
                 if runtime_uses_pool_paths(self._pool_layouts.get(scope))

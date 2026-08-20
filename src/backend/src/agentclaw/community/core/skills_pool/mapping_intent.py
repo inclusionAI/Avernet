@@ -65,11 +65,17 @@ def build_logical_skill_mappings(
             relative = None
             corpus = "center"
         else:
-            continue
+            # A complete projection is fail-closed.  Silently ignoring a
+            # selected asset would make the database desired state and the
+            # delivered runtime disagree.
+            raise ValueError(f"unsupported skill source: {asset.git_path}")
         # ``ac_skill.name`` is the single runtime-name policy for every shared
         # asset.  Repo paths are locators, not user-visible link identities:
         # two different directories can legitimately share the same tail.
-        link_name = asset.name if corpus in {"repo", "center"} else relative.name
+        # ``ac_skill.name`` is the only RuntimeNamePolicy input for every
+        # corpus.  ``local://`` and ``git://`` tails are locators, never the
+        # runtime identity exposed to an Engine.
+        link_name = asset.name
         identity = (
             f"center:{asset.skill_uuid}:{asset.sc_version_number}"
             if corpus == "center"

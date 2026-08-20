@@ -38,9 +38,6 @@ from agentclaw.community.core.skill_center.services.skill_service import SkillSe
 from agentclaw.community.core.skill_center.path_resolution import (
     canonical_pool_local_path,
 )
-from agentclaw.community.core.skill_center.installation_compatibility import (
-    includes_default_skill_member,
-)
 from agentclaw.community.core.skill_center.utils.skill_metadata_writer import SkillSetMetadataWriter
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE  # noqa: E402
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
@@ -1307,8 +1304,6 @@ class SkillSetService:
         installed_skills = self.skill_repo.list_bot_installed_skills(
             env=get_current_env(), bot_id=effective_bolt_id
         )
-        installed_ids = {int(skill["id"]) for skill in installed_skills}
-
         # 1. 查询所有激活的技能集（包含默认能力集）
         active_skill_sets = self.skill_set_repo.get_all_active_skill_sets(
             user_id=effective_user_id,
@@ -1325,27 +1320,13 @@ class SkillSetService:
             skill_set_id = skill_set.get('id')
             skills = self.skill_set_repo.get_skills_in_set(str(skill_set_id))
 
-            # Compatibility adapter: historical Local inactivity used a
-            # Default-SkillSet exclusion.  New desired state is Installation;
-            # leave non-Local Default membership untouched and accept a Local
-            # member only when its Installation exists.
-            if skill_set.get('is_default') and effective_user_id and effective_bolt_id:
-                excluded_ids = {
-                    int(skill_id)
-                    for skill_id in self.skill_set_repo.get_excluded_skills(
-                        user_id=effective_user_id,
-                        bot_id=effective_bolt_id,
-                        skill_set_id=int(skill_set_id),
-                    )
-                }
+            if skill_set.get('is_default'):
+                # Desired Local state is the active-only Installation fact.
+                # Never recover it from the legacy Default exclusion table.
                 skills = [
                     skill
                     for skill in skills
-                    if includes_default_skill_member(
-                        skill,
-                        installed_ids=installed_ids,
-                        excluded_ids=excluded_ids,
-                    )
+                    if not str(skill.get("git_path") or "").startswith("local://")
                 ]
             all_skills.extend(skills)
         all_skills.extend(installed_skills)

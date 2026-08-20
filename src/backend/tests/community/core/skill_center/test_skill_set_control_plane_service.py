@@ -315,13 +315,29 @@ class _RuntimeFactory:
 class _RuntimeBots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
         assert (bot_id, owner_id) == ("bot-1", "true-owner")
-        return {"entity_id": "entity-1", "active_engine": "openclaw", "entity_type": "staff"}
+        return {
+            "entity_id": "entity-1",
+            "active_engine": "openclaw",
+            "entity_type": "staff",
+            "env": "pre",
+        }
 
 
 class _McpInstallations:
     def list_installed_mcps(self, *, bot_id: str) -> set[str]:
         assert bot_id == "bot-1"
         return {"mcp.weather"}
+
+
+class _RuntimeSkills:
+    def list_bot_active_assets(self, **kwargs):
+        assert kwargs == {
+            "env": "pre",
+            "bot_id": "bot-1",
+            "user_id": "true-owner",
+            "engine": "openclaw",
+        }
+        return []
 
 
 @pytest.mark.asyncio
@@ -736,6 +752,7 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
         factory=factory,
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
+        pool_skills=_RuntimeSkills(),
     )
 
     await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")

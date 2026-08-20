@@ -39,6 +39,10 @@ from agentclaw.community.core.skill_center.factories import SkillSetServiceFacto
 from agentclaw.community.core.skill_center.runtime_policy import (
     require_supported_bot_skill_runtime,
 )
+from agentclaw.community.core.skill_center.runtime_resolver import (
+    RuntimeDesiredState,
+    RuntimeProjectionResolver,
+)
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationBusyError,
     BotCapabilityMutationGuard,
@@ -53,6 +57,9 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolSkillRepositoryProtocol,
+)
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -74,10 +81,12 @@ class SkillSetRuntimeReconciler:
         factory: SkillSetServiceFactory,
         bot_repo: BotRepository,
         repository: SkillSetControlPlaneRepositoryProtocol,
+        pool_skills: SkillsPoolSkillRepositoryProtocol,
     ) -> None:
         self._factory = factory
         self._bot_repo = bot_repo
         self._repository = repository
+        self._pool_skills = pool_skills
 
     async def reconcile(self, *, bot_id: str, owner_id: str) -> None:
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
@@ -90,10 +99,28 @@ class SkillSetRuntimeReconciler:
             engine_type=bot.get("active_engine"),
             entity_type=bot.get("entity_type") or "staff",
         )
+        projection = RuntimeProjectionResolver().resolve(
+            RuntimeDesiredState(
+                skills=tuple(
+                    self._pool_skills.list_bot_active_assets(
+                        env=str(bot["env"]),
+                        bot_id=bot_id,
+                        user_id=owner_id,
+                        engine=str(bot.get("active_engine") or "openclaw"),
+                    )
+                ),
+                installed_mcp_server_codes=frozenset(
+                    self._repository.list_installed_mcps(bot_id=bot_id)
+                ),
+            )
+        )
+        # The legacy Adapter still owns physical path translation, but gets a
+        # full reconciliation command only after the shared Resolver has
+        # validated the canonical desired-state snapshot.
         if not service.sync_runtime():
             raise SkillSetRuntimeReconcileError()
         if not await service.sync_mcp_desired_state(
-            server_codes=self._repository.list_installed_mcps(bot_id=bot_id)
+            server_codes=set(projection.mcp_server_codes)
         ):
             raise SkillSetRuntimeReconcileError()
 
