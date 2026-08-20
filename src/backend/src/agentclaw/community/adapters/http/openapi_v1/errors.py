@@ -75,6 +75,30 @@ class UserIdMismatchError(Exception):
     """
 
 
+class IamTokenUnavailableError(Exception):
+    """The authenticated browser request carried no usable IAM token."""
+
+
+class CallerIdentityOpenApiError(Exception):
+    """A stable Caller-identity failure safe to map at the HTTP boundary."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+class CallerIdentityInvalidError(CallerIdentityOpenApiError):
+    """Caller identity preparation was requested with an invalid target."""
+
+
+class CallerIdentityForbiddenError(CallerIdentityOpenApiError):
+    """The authenticated user may not perform this Caller operation."""
+
+
+class CallerIdentityConflictError(CallerIdentityOpenApiError):
+    """The Caller target cannot be resolved unambiguously."""
+
+
 class UnsupportedEngineError(Exception):
     """Raised when a request names an engine the platform does not support (→ 400).
 
@@ -92,4 +116,3 @@ class StartupScriptUnsupportedError(Exception):
     "my provisioning is in place". The *reason* is served by GET rather than in
     this refusal, because the surface's messages are fixed by contract.
     """
-

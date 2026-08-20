@@ -11,15 +11,17 @@ from agentclaw.community.adapters.http.openapi_v1 import (
     build_public_router,
 )
 
-#: sessions 7 + engine 4 (status, capabilities, available, restart) + models 2 + approvals 3 + connection 1
-_EXPECTED_ROUTE_COUNT = 17
+#: sessions 10 + engine 3 + models 2 + approvals 3 + connection 1
+_EXPECTED_ROUTE_COUNT = 20
 
 _BOTS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/"
 
 
 def _engine_runtime_routes() -> list[APIRoute]:
     """The current engine-runtime routes."""
-    return [r for g in _ENGINE_RUNTIME_GROUPS for r in g.routes if isinstance(r, APIRoute)]
+    return [
+        r for g in _ENGINE_RUNTIME_GROUPS for r in g.routes if isinstance(r, APIRoute)
+    ]
 
 
 def _all_engine_runtime_paths() -> set[str]:
@@ -136,7 +138,13 @@ def test_literal_groups_are_registered_before_the_bot_id_wildcard():
     """
     order = list(_document()["paths"])
     wildcard = order.index(f"{_BOTS_PREFIX}{{bot_id}}")
-    for literal in ("check-name", "ceiling", "authorized", "mcp/servers", "logs/traces"):
+    for literal in (
+        "check-name",
+        "ceiling",
+        "authorized",
+        "mcp/servers",
+        "logs/traces",
+    ):
         assert order.index(f"{_BOTS_PREFIX}{literal}") < wildcard, literal
 
 
@@ -150,7 +158,9 @@ def test_engine_runtime_routes_document_501_and_504():
             documented = set(operation["responses"])
             extras = {"501", "504"} & documented
             if path in runtime_paths:
-                assert extras == {"501", "504"}, f"{method.upper()} {path} missing {extras}"
+                assert extras == {"501", "504"}, (
+                    f"{method.upper()} {path} missing {extras}"
+                )
             else:
                 assert not extras, f"{method.upper()} {path} advertises {extras}"
 
