@@ -26,7 +26,7 @@
 | Job/指标 | 状态 | 证据 | 根因 | 修复/提交 | 验证 |
 |---|---|---|---|---|---|
 | BCS workspace test | PASS（本地） | `cargo test --workspace -q` | N/A | `efce88cf9` | exit 0 |
-| 私有属性 HTTP 路由 | PASS（本地） | route、公开路由隔离和 bootstrap fail-closed 定向测试 | N/A | `efce88cf9` | exit 0 |
+| Provider 属性 HTTP 路由 | PASS（本地） | allowlist、Provider Token、Bot 绑定和严格 PATCH 请求体定向测试 | N/A | 本次评论采纳改动 | `bcs-http` 定向测试通过 |
 | Git diff 校验 | PASS（本地） | `git diff --check` | N/A | 本分支 | 无输出 |
 | GitHub Actions（业务代码 head） | PASS | [#1277 checks](https://github.com/inclusionAI/Avernet/pull/1277/checks) | BCS e2e、Singlebox coverage、BCS/Backend/Engine/BaaS/Gateway unit tests 均为 `SUCCESS`。 | N/A | `7791508e` |
 | GitHub Actions（当前报告更新） | PENDING | [#1277 checks](https://github.com/inclusionAI/Avernet/pull/1277/checks) | 评论结论报告推送后重新触发检查；当前 BCS e2e、Singlebox coverage 和部分 unit tests 仍在运行。 | N/A | 等待当前文档更新 head 终态 |
@@ -35,13 +35,13 @@
 
 | 轮次 | 作者 | 链接 | 决定 | 理由 | 修改/提交 | 验证 |
 |---|---|---|---|---|---|---|
-| 2 | `vzvince` | [配置意见](https://github.com/inclusionAI/Avernet/pull/1277#discussion_r3819517890) | 不采纳 | `allowed_switch_provider_ids` 仅授权 Provider 切换 Bot 投递；复用它会把该较窄权限扩大为私有属性读写权限，且不能表达“唯一可信 Backend Provider”的失败关闭语义。 | N/A | `ProviderAdminInternalAuthenticator` 将 Token、请求头 Provider ID、启用状态和独立可信 ID 四项绑定校验。 |
-| 2 | `vzvince` | [模块位置意见](https://github.com/inclusionAI/Avernet/pull/1277#discussion_r3819522467) | 不采纳 | 路由为 `/internal/v1/...`，其 HTTP middleware 仅服务该私有路由，放在 `v1/internal` 能避免 Provider 路由 adapter 反向依赖 v1 私有 API；实际 Provider Admin 认证仍由 bootstrap 的 `ProviderCoreService` 完成。 | N/A | 公开路由隔离测试与私有路由测试通过。 |
+| 2 | `vzvince` | [配置意见](https://github.com/inclusionAI/Avernet/pull/1277#discussion_r3819517890) | 采纳 | 按 reviewer 和用户确认复用 `allowed_switch_provider_ids`；为防止权限扩大到任意 Bot，仍校验 Bearer Token 对应 Provider、Provider 启用状态、allowlist 和 Bot 绑定归属。 | 本次评论采纳改动 | Provider 属性合约测试覆盖 allowlist 失败关闭。 |
+| 2 | `vzvince` | [模块位置意见](https://github.com/inclusionAI/Avernet/pull/1277#discussion_r3819522467) | 采纳 | 接口迁至 `bcs-http` 的现有 Provider 路由组，路径为 `GET/PATCH /providers/{provider_id}/bots/{bot_uuid}/attributes`；路径参数提供 Provider ID，调用不再需要 `X-BCN-Provider-Id`。 | 本次评论采纳改动 | 路由挂载与属性读写合约测试通过。 |
 
 ## 当前结论
 
 - PR: OPEN（[#1277](https://github.com/inclusionAI/Avernet/pull/1277)）
 - 自动意见: CLEAR
 - ACI/CI: 业务代码 head PASS；当前文档更新 head PENDING
-- 人工意见: 已逐条评估；两条均不采纳，仍等待 GitHub 所需的人工批准。
-- 下一步: 等待 reviewer 的批准或新增意见；任何后续 push 都需要重新检查 Actions。
+- 人工意见: 按用户确认，两条均已采纳；未在 GitHub 回复或 resolve 线程。
+- 下一步: 推送后重新检查 Actions，并等待 reviewer 的批准或新增意见。

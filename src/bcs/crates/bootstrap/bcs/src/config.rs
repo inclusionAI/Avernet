@@ -455,31 +455,6 @@ fn default_gateway_principal_signing_key_env() -> String {
     "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE".to_string()
 }
 
-/// Trust configuration for private backend-to-BCS APIs.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct InternalApiConfig {
-    /// The only Provider identity permitted to call private backend routes.
-    /// Omission disables access while leaving the service available to start.
-    #[serde(default)]
-    pub trusted_backend_provider_id: Option<String>,
-}
-
-impl InternalApiConfig {
-    pub fn validate(&self) -> Result<(), String> {
-        if self
-            .trusted_backend_provider_id
-            .as_deref()
-            .is_some_and(|value| value.trim().is_empty())
-        {
-            return Err(
-                "internal_api.trusted_backend_provider_id must not be blank".to_string(),
-            );
-        }
-        Ok(())
-    }
-}
-
 /// Group-session WebSocket JWT signing-key lookup configuration.
 ///
 /// The signing key material is resolved through the configured SecretAccessPort
@@ -563,10 +538,6 @@ pub struct BcsConfig {
     /// Gateway-signed Principal verification trust configuration.
     #[serde(default)]
     pub gateway_principal: GatewayPrincipalConfig,
-
-    /// Private backend API trust configuration. Missing trust fails closed.
-    #[serde(default)]
-    pub internal_api: InternalApiConfig,
 
     /// Group-session WebSocket JWT signing-key lookup configuration.
     #[serde(default)]
@@ -769,8 +740,9 @@ pub struct BcsConfig {
     #[serde(default)]
     pub session_files: SessionFilesConfig,
 
-    /// Provider IDs allowed to call the switch-bot-delivery endpoint.
-    /// Empty list means no provider can switch bot delivery.
+    /// Provider IDs allowed to use backend-only Provider Bot operations,
+    /// including switch-bot-delivery and Bot attribute management.
+    /// Empty list means no Provider has either capability.
     #[serde(default)]
     pub allowed_switch_provider_ids: Vec<String>,
 
@@ -1017,7 +989,6 @@ impl Default for BcsConfig {
             dingtalk_accounts: Vec::new(),
             auth_token: None,
             gateway_principal: GatewayPrincipalConfig::default(),
-            internal_api: InternalApiConfig::default(),
             group_session_ws: GroupSessionWsConfig::default(),
             leader_election: None,
             cache: CacheConfig::default(),
@@ -1447,10 +1418,6 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
-    config.internal_api.validate().map_err(|e| {
-        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
-            as Box<dyn std::error::Error>
-    })?;
     config.group_session_ws.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -1522,47 +1489,6 @@ mod tests {
             config.group_session_ws.signing_key_secret,
             "bcn-group-session-ws-jwt"
         );
-        assert!(
-            config
-                .internal_api
-                .trusted_backend_provider_id
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn internal_api_trusted_provider_parses_and_blank_value_is_rejected() {
-        let configured: BcsConfig = toml::from_str(
-            r#"
-                bots_base_dir = "/bots"
-
-                [internal_api]
-                trusted_backend_provider_id = "backend-provider"
-            "#,
-        )
-        .expect("parse configured internal API trust");
-        assert_eq!(
-            configured
-                .internal_api
-                .trusted_backend_provider_id
-                .as_deref(),
-            Some("backend-provider")
-        );
-
-        let tmp = tempfile::TempDir::new().expect("temp config dir");
-        std::fs::write(
-            tmp.path().join("bcs-config.toml"),
-            r#"
-                bots_base_dir = "/bots"
-
-                [internal_api]
-                trusted_backend_provider_id = " "
-            "#,
-        )
-        .expect("write config");
-        let error = BcsConfig::try_load_with_env(Some(&tmp.path().to_path_buf()))
-            .expect_err("blank trusted provider must be rejected");
-        assert!(error.contains("internal_api.trusted_backend_provider_id must not be blank"));
     }
 
     #[test]

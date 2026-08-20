@@ -1,7 +1,3 @@
-mod auth;
-#[path = "routes.rs"]
-mod bot_attributes_routes;
-mod dto;
 #[path = "routes/mod.rs"]
 mod routes;
 
@@ -26,6 +22,3 @@ pub fn public_router() -> Router<ApiState> {
 pub fn router() -> Router<ApiState> {
     protected_router().merge(public_router())
 }
-
-pub use auth::{InternalProviderAuthError, InternalProviderAuthenticator};
-pub use bot_attributes_routes::router as bot_attributes_router;
