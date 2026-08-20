@@ -69,10 +69,11 @@ class RelationType(StrEnum):      DEPENDENCY    # 节点间依赖关系
 @dataclass RuntimeInfo:           # 持久运行面(所有 None 均合法域态)
     run_mode: str | None          # "single_bot"/"coop_group"/"bbs";无 collab_mode
     assignee: str | None          # 执行者(bot_id / group_id)
-    start_time: float | None; end_time: float | None
+    start_time: int | None; end_time: int | None  # 毫秒(int(time.time()*1000));秒级可换 float 但契约=int ms
     output: dict
     acceptance_result: AcceptanceResult | None
     extend_props: dict            # miss_events(list[str]) / 崩溃栈/超时
+    action_log: list[NodeActionEvent] # 动作级历史快照(append-only;NodeActionEvent.ts=int ms)
     # depth 核内派生(从 relations),非持久
 
 @dataclass Relation:              # 分解树边(一等公民);承载结构归属,单入(每非根节点恰好 1 入边=结构父)
@@ -93,7 +94,8 @@ class RelationType(StrEnum):      DEPENDENCY    # 节点间依赖关系
 
 @dataclass TaskExecutionGraph:    # 含 run_id/relations
     run_id: int                   # 运行实例唯一 ID
-    loop_round: int               # 外层 BBS 上升轮次(仅升 BBS 时++;达 BBS_MAX_DEPTH→STUCK→HUNG)
+    loop_round: int               # 图级升 BBS 总轮次(仅升 BBS 时++;达 MAX_LOOP→图 HUNG)。
+                                 # 注:v5 重规划产子由节点级 extend_props.plan_round 计(MAX_PLAN_ROUND)
     status: Status
     output: dict                  # 图的最终汇总输出
     tasks: list[TaskNode]
@@ -143,7 +145,7 @@ class RelationType(StrEnum):      DEPENDENCY    # 节点间依赖关系
     workflow_type: str              # "single_bot" | "bcn_coop_group" | "bbs" | ...
     workflow_id: int
     instance_id: int                # workflow 运行实例 id
-    result: dict                    # {"success": bool, "data": "..."} / {"fail_detail": "..."}
+    result: dict                    # 严格终态:{"success":bool,"data":Any,"gaps":list[str]};执行/回收异常用 exec_error
 ```
 
 ---
@@ -263,7 +265,9 @@ class TaskGraphService:
     def _node_depth(self, task_id: str, node_id: str) -> int:
         """从 relations 分解树递归自算深度(派生不持久)。内层深度闸门(MAX_DEPTH,升 BBS 阈值)读。"""
     def _execution_config(self, task_id: str) -> dict:
-        """读 MAX_DEPTH(内层升 BBS 阈值)/ BBS_MAX_DEPTH(外层 STUCK 阈值,默认 3)等(随图 extend_props/task_spec)。"""
+        """读 MAX_DEPTH(内层升 BBS 阈值)/ BBS_MAX_DEPTH(外层 STUCK 阈值,默认 3)/
+         MAX_LOOP(图级升 BBS 总轮次,默认 10)/ MAX_PLAN_ROUND(节点级重规划次数,默认 10)/
+         MAX_HARNESS(重试上限,默认 3)等(随图 extend_props/task_spec)。"""
 ```
 
 > 派生查询:`query_task_nodes`/`get_child_tasks`/`get_parent_task` 升为公开(跨模块依赖:dispatcher/runner/planner/传播);`_node_depth`/`_execution_config` 保持内部(仅编排核用,可从已返回查询/relations/dashboard 自算)。
@@ -390,7 +394,12 @@ class TaskRunner:
     async def form_coop_group(self, gf: "GroupFormation") -> str:
         """(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS 建群 → group_id。协程化:BCS 建群是网络 IO,`await`(由 engine 锁外 await 调用,不阻塞编排核)。
         CHAT/MANAGER_WORKER/STATE_MACHINE 三模式(group_strategy=collab_mode;state_machine 注入 workflow yaml)。
-        collab_mode 在 GroupFormation 内(内部参数),不进 RuntimeInfo 持久字段。"""
+        collab_mode 在 GroupFormation 内(内部参数),不进 RuntimeInfo 持久字段。
+        GroupFormation/SearchResult/TaskNode 只保存产品 Bot ID;调用 BCS 前由内部 BcsBotIdentityResolver
+        通过 BotService 权威 owner_id 转成 BCS UUID ``{product_bot_id}:{owner_id}``。driver_bot、originator、
+        participants[].bot_uuid、manager/worker、participant_bindings[*].bot_ids 均使用 BCS UUID;
+        state-machine participant_bindings 的 key 必须是 workflow 逻辑 binding 名,不得使用 Bot ID;
+        workflow binding 与 BCS ParticipantRole 分离,participants[].role 只使用 BCS 合法角色。"""
 ```
 
 #### 3.5.2 回调服务(供单 bot workflow / bcn 协作群,PUSH 回投)`TaskLoopCallback`
@@ -401,10 +410,11 @@ class TaskLoopCallback:
 
     async def start_run(self, data: TaskCallbackData) -> None:     # 任务开始执行(可选进度信号);协程化与 report_result 链路一致
         ...
-    async def report_result(self, data: TaskCallbackData) -> None: # 任务完成或失败(success/data or fail_detail)
+    async def report_result(self, data: TaskCallbackData) -> None: # 任务完成或失败(success/data/gaps or exec_error)
         # 框架适配层把 data 组装成 TaskNodePatch(task_id/node_id 从 loop_task_id 映射;
-        #              acceptance_result 从 result.success/data 映射;output_patch=fold data;
-        #              fail_detail → extend_props_patch)→ 编排核 on_report(patch)(await) → graph.update_task_node_info(patch) → 按 verdict 翻态/传播/补救
+        #              success=true→PASS;success=false+非空 gaps→FAIL;output_patch=fold data;
+        #              exec_error→Harness;非法/空终态→terminal_result_invalid→Harness)
+        #              → 编排核 on_report(patch)(await) → graph.update_task_node_info(patch) → 按 verdict 翻态/传播/补救
         # 协程化:on_report 是 async,await 不阻塞回投调用方(HTTP 适配层/外部 bot workflow)。
 ```
 
@@ -423,7 +433,18 @@ class TaskLoopCallback:
 - **验收模式**(有结构子,`get_child_tasks(task_id,node)` 非空):本节点已被分解委托子执行 → 聚合【结构子(子树)run_info.output + 本节点 `task_spec.goal/acceptances`】→ 组装**验证 prompt**,经 `source_channel` 派给 owner/master bot 用 skill 验收 → bot 回投 verdict 直接落该节点。(根节点的终验即此模式:结构子=全图非根,聚合得全图 DONE 产出;**非根 PLANNING 节点**:本批结构子全 PASS 后由编排核委托 `decompose` 判定——decompose 返 [](gap 已闭)→ 自动传播该节点 DONE,不另起验收 skill;返新子 → 继续下一批。)
 - **执行模式**(无结构子):本节点是叶执行节点 → 取结构父 `P = get_parent_task(task_id,node)` → 聚合【P 的聚合上下文 = `P.task_spec`/`P.goal` + P 的已 DONE 结构子(本节点的已完工兄弟,即 `get_child_tasks(task_id,P.node_id)` 中 status=DONE 且非本节点者)的 `run_info.output` + 本节点 `task_spec`】→ 组装**执行 prompt** 注入执行主体(单 bot/协作群/BBS)。数据流一律经结构父 P 这一层中转,不建跨兄弟直接数据边。
 
-bot/群据 `node.task_spec.goal` + 该上下文产出 → 经 `TaskCallbackData.result` 回投 → 框架适配层按 success/data 映射成 `AcceptanceResult` 落该节点。`TaskGraphService` 不提供 `compute_output_projection`;上下文聚合由 Runner 内部 helper `_build_context(task_id, node)` 用 `get_child_tasks`/`get_parent_task` 组合收口,验收/执行模式自动切换(无 scope 入参)。`form_coop_group` 复用现有 BCS(`crates/contracts/bcs-domain` `GroupStrategy`/`CollaborationRuntimeDefinition`),群自闭环持 `SubDagRef(bcs_run_id)` 收终态回投。
+bot/群据 `node.task_spec.goal` + 验收标准 + 该上下文产出,最终返回严格 JSON:
+`{"success":true,"data":...,"gaps":[]}` 或 `{"success":false,"data":...,"gaps":[...]}`。
+框架适配层按 success/data/gaps 映射成 `AcceptanceResult` 落该节点;`success` 必须是 bool,FAIL 必须含非空 gaps。
+空内容、非法 JSON、缺字段或非法类型不默认 PASS,统一转 `exec_error=terminal_result_invalid` 进入 Harness。
+旧 `fail_detail` 仅作过渡兼容并归一为单条 gap。`TaskGraphService` 不提供 `compute_output_projection`;上下文聚合由 Runner 内部 helper `_build_context(task_id, node)` 用 `get_child_tasks`/`get_parent_task` 组合收口,验收/执行模式自动切换(无 scope 入参)。`form_coop_group` 复用现有 BCS(`crates/contracts/bcs-domain` `GroupStrategy`/`CollaborationRuntimeDefinition`),群自闭环持 `SubDagRef(bcs_run_id)` 收终态回投。
+
+#### 3.5.5 执行结果回收与 SLA 所有权
+
+- `SingleboxEngineAdapter` 只负责连接/握手/chat.send ACK/明确 chat error 等传输失败;worker fire-and-poll 路径不设置独立业务执行超时。
+- `TaskExecutorResultPoller` 是 single_bot/coop_group 结果回收业务 SLA 的唯一所有者(默认 300s);SLA 到期或连续轮询耗尽统一回投 `exec_error`,不得伪装成验收 FAIL。
+- Poller 超时后调用 `OpenApiBotPort.cancel_run(run_id)` 做 best-effort 清理并注销 handle;Singlebox 实现真实取消后台 WebSocket collector,避免超时 collector 泄漏和晚到结果二次回投。
+- planning/search 的 `send_and_wait_async(timeout=...)` 是同步等待型调用自己的 SLA,与 worker 执行 fire-and-poll SLA 分开。
 
 ### 3.6 `TaskHarness`(旁路常驻)
 
@@ -432,7 +453,7 @@ class TaskHarness:
     """旁路常驻:周期巡检 SLA 超时/崩溃,经 graph.update_task_node_info 复位回 PENDING,不抢正向驱动。
     超时阈值从 execution_config / extend_props 读(SLA 不在 TaskSpec)。"""
     def run_poll_loop(self) -> None:
-        # 周期:graph.query_task_nodes(status=RUNNING) → 比对 start_time + sla_timeout → 超时/崩溃
+        # 周期:graph.query_task_nodes(status=RUNNING) → 比对 harness 自持 monotonic 计时(_dispatched_at) + sla_timeout → 超时/崩溃(不读 node.start_time,故 ms 化无影响)
         #   → graph.update_task_node_info(TaskNodePatch{status=PENDING, extend_props_patch={崩溃栈/超时}})复位 → 正常 dispatch 重投
         # 不调编排核正向;主链下一轮事件自然续驱。RUNNING 复位不直接写 HUNG(STUCK 走 on_miss 升 BBS 链路上限判)
 ```

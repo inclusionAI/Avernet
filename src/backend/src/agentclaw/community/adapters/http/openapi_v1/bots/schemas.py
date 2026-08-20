@@ -100,8 +100,7 @@ class Bot(BaseModel):
     )
     status: str = Field(description=_BOT_STATUS_DESC)
     owner_entity_id: str = Field(
-        description="The user who owns the bot — echoes the user_id the "
-        "request named."
+        description="The user who owns the bot — echoes the user_id the request named."
     )
 
 
@@ -141,6 +140,38 @@ class BotCreate(BaseModel):
     # here, unchanged in shape, once ``create_bot`` reads the bag; until then
     # ``extra="forbid"`` names it in the error rather than the schema promising
     # something untrue.
+
+
+class BotSpaceUpdate(BaseModel):
+    """Change the Space that owns a Bot."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"space_id": 42}},
+    )
+
+    space_id: int = Field(
+        ge=1,
+        description=(
+            "Target Space identifier from GET /openapi/v1/spaces. Use the "
+            "numeric personal-Space id to move the Bot back to personal space."
+        ),
+    )
+
+
+class BotSpaceAssignment(BaseModel):
+    """Persisted Bot ownership-Space assignment."""
+
+    bot_id: str = Field(description="Bot whose owning Space was changed.")
+    space_id: int = Field(description="Numeric identifier of the owning Space.")
+    space_code: str = Field(description="Stable external code of the owning Space.")
+    space_name: str = Field(description="Display name of the owning Space.")
+    space_type: str = Field(
+        description="Ownership model of the Space: PERSONAL or TEAM."
+    )
+    changed: bool = Field(
+        description="False when the Bot already belonged to the requested Space."
+    )
 
 
 class BotUpdate(BaseModel):
@@ -325,6 +356,7 @@ class Passport(BaseModel):
         default=None, description="License certificate URL when reported."
     )
 
+
 class StartupScriptWrite(BaseModel):
     """PUT body for a bot's startup script — the script is the only field.
 
@@ -427,6 +459,7 @@ class DataInitResult(BaseModel):
         description="Initialization start time, when a running attempt recorded one.",
     )
 
+
 # ── Bot inventory card surface ─────────────────────────────────────────────
 # Card list returned by ``/openapi/v1/bots/all``. Action affordances are
 # embedded in each item; there is no rich-card detail or standalone actions route.
@@ -437,15 +470,39 @@ class DataInitResult(BaseModel):
 DeployMode = Literal["cloud", "local"]
 BotInventoryKind = Literal["personal_cloud", "local", "service"]
 DisplayState = Literal[
-    "running", "pending", "failed", "dormant",
-    "local_running", "local_offline", "local_pending", "local_failed",
-    "service_draft", "service_deploying", "service_prestable",
-    "service_staging", "service_online", "service_offline",
+    "running",
+    "pending",
+    "failed",
+    "dormant",
+    "local_running",
+    "local_offline",
+    "local_pending",
+    "local_failed",
+    "service_draft",
+    "service_deploying",
+    "service_prestable",
+    "service_staging",
+    "service_online",
+    "service_offline",
 ]
 BotAction = Literal[
-    "view", "chat", "edit", "delete", "restart", "data_init", "activate",
-    "open_folder", "passport", "engine_config", "runtime_logs", "engine_restart",
-    "publish_staging", "publish_online", "cancel_staging", "offline", "retry",
+    "view",
+    "chat",
+    "edit",
+    "delete",
+    "restart",
+    "data_init",
+    "activate",
+    "open_folder",
+    "passport",
+    "engine_config",
+    "runtime_logs",
+    "engine_restart",
+    "publish_staging",
+    "publish_online",
+    "cancel_staging",
+    "offline",
+    "retry",
 ]
 
 
@@ -461,29 +518,70 @@ class BotInventoryItem(BaseModel):
     """Unified card for a personal cloud, local, or service bot."""
 
     bot_id: str = Field(description="Unique identifier of the bot.")
-    card_id: str = Field(description="Stable card identity; service cards include the publication id.")
-    bot_name: str = Field(description="Display name of the bot.")
-    bot_desc: str = Field(description="Description of what the bot is for; may be empty.")
-    engine: str = Field(description="Engine currently assigned to the bot.")
-    bot_type: str = Field(description="Underlying bot type reported by the bot service.")
-    kind: BotInventoryKind = Field(description="Inventory category used to render the bot card.")
-    deploy_mode: DeployMode = Field(description="Whether the bot runs in the cloud or on a local device.")
-    display_state: DisplayState = Field(description="Normalized lifecycle state used by the inventory view.")
-    status: str = Field(description="Lifecycle status used by the owning view. Service cards expose draft/deploying/prestable/running/offline; other cards retain their owning service's status.")
-    internal_status: str | None = Field(
-        default=None, description="Stored service-publication status for diagnostics; null for non-service cards."
+    card_id: str = Field(
+        description="Stable card identity; service cards include the publication id."
     )
-    publication_id: int | None = Field(default=None, description="Service publication id represented by this card; otherwise null.")
-    publication_version: int | None = Field(default=None, description="Service publication version represented by this card; otherwise null.")
-    live_version: int | None = Field(default=None, description="Currently running service version, when one exists.")
+    bot_name: str = Field(description="Display name of the bot.")
+    bot_desc: str = Field(
+        description="Description of what the bot is for; may be empty."
+    )
+    engine: str = Field(description="Engine currently assigned to the bot.")
+    bot_type: str = Field(
+        description="Underlying bot type reported by the bot service."
+    )
+    kind: BotInventoryKind = Field(
+        description="Inventory category used to render the bot card."
+    )
+    deploy_mode: DeployMode = Field(
+        description="Whether the bot runs in the cloud or on a local device."
+    )
+    display_state: DisplayState = Field(
+        description="Normalized lifecycle state used by the inventory view."
+    )
+    status: str = Field(
+        description="Lifecycle status used by the owning view. Service cards expose draft/deploying/prestable/running/offline; other cards retain their owning service's status."
+    )
+    internal_status: str | None = Field(
+        default=None,
+        description="Stored service-publication status for diagnostics; null for non-service cards.",
+    )
+    publication_id: int | None = Field(
+        default=None,
+        description="Service publication id represented by this card; otherwise null.",
+    )
+    publication_version: int | None = Field(
+        default=None,
+        description="Service publication version represented by this card; otherwise null.",
+    )
+    live_version: int | None = Field(
+        default=None, description="Currently running service version, when one exists."
+    )
     owner_entity_id: str = Field(description="User who owns the bot.")
-    space: BusinessSpace | None = Field(default=None, description="Business space containing the bot, when resolved.")
-    avatar_url: str | None = Field(default=None, description="Avatar URL for the bot, when configured.")
-    machine_id: str | None = Field(default=None, description="Host device identifier for a local bot; otherwise null.")
-    mount_path: str | None = Field(default=None, description="Mounted workspace path for a local bot; otherwise null.")
-    passport_id: str | None = Field(default=None, description="Platform identity credential identifier, when issued.")
-    actions: list[BotAction] = Field(default_factory=list, description="Actions currently available for this bot.")
-    disabled_actions: dict[str, str] | None = Field(default=None, description="Unavailable actions mapped to caller-facing reasons, when any.")
+    space: BusinessSpace | None = Field(
+        default=None, description="Business space containing the bot, when resolved."
+    )
+    avatar_url: str | None = Field(
+        default=None, description="Avatar URL for the bot, when configured."
+    )
+    machine_id: str | None = Field(
+        default=None,
+        description="Host device identifier for a local bot; otherwise null.",
+    )
+    mount_path: str | None = Field(
+        default=None,
+        description="Mounted workspace path for a local bot; otherwise null.",
+    )
+    passport_id: str | None = Field(
+        default=None,
+        description="Platform identity credential identifier, when issued.",
+    )
+    actions: list[BotAction] = Field(
+        default_factory=list, description="Actions currently available for this bot."
+    )
+    disabled_actions: dict[str, str] | None = Field(
+        default=None,
+        description="Unavailable actions mapped to caller-facing reasons, when any.",
+    )
 
 
 class BotActivateResult(BaseModel):
@@ -491,4 +589,6 @@ class BotActivateResult(BaseModel):
 
     bot_id: str = Field(description="Bot whose reactivation was started.")
     status: str = Field(description="Current reactivation status.")
-    message: str | None = Field(default=None, description="Additional reactivation detail, when available.")
+    message: str | None = Field(
+        default=None, description="Additional reactivation detail, when available."
+    )

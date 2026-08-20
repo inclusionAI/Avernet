@@ -45,6 +45,7 @@ from agentclaw.community.api.bot_inventory_service import BotInventoryServicePro
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
 )
+from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
@@ -56,7 +57,9 @@ from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayPro
 from agentclaw.community.api.health_diagnosis_service import (
     HealthDiagnosisServiceProtocol,
 )
-from agentclaw.community.api.local_bot_workflow_service import LocalBotWorkflowServiceProtocol
+from agentclaw.community.api.local_bot_workflow_service import (
+    LocalBotWorkflowServiceProtocol,
+)
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
@@ -76,6 +79,7 @@ from agentclaw.community.api.service_publication_facade import (
     ServicePublicationFacadeProtocol,
 )
 from agentclaw.community.api.space_service import (
+    SpaceAccessServiceProtocol,
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
@@ -91,6 +95,9 @@ from agentclaw.community.core.bot_inventory.services.local_bot_workflow import (
     LocalBotWorkflowService,
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.services.bot_space_service import (
+    BotSpaceService,
+)
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     BotStartupScriptService,
 )
@@ -120,7 +127,11 @@ from agentclaw.community.core.market_favorites.services import MarketFavoriteSer
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
 )
-from agentclaw.community.core.spaces.services import SpaceMemberService, SpaceService
+from agentclaw.community.core.spaces.services import (
+    SpaceAccessService,
+    SpaceMemberService,
+    SpaceService,
+)
 
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
@@ -128,6 +139,7 @@ _PAIRS = [
     (BotAppGrantServiceProtocol, BotAppGrantService),
     (BotInventoryServiceProtocol, BotInventoryService),
     (BotStartupScriptServiceProtocol, BotStartupScriptService),
+    (BotSpaceServiceProtocol, BotSpaceService),
     (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),
     (BotDormantActivateServiceProtocol, ActivateBotService),
     (BotInventoryBotPort, BotService),
@@ -141,6 +153,7 @@ _PAIRS = [
     (LocalSkillStateServiceProtocol, LocalSkillStateService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),
     (SpaceServiceProtocol, SpaceService),
+    (SpaceAccessServiceProtocol, SpaceAccessService),
     (SpaceMemberServiceProtocol, SpaceMemberService),
     (MarketFavoriteServiceProtocol, MarketFavoriteService),
     (ServicePublicationFacadeProtocol, ServicePublicationFacade),
