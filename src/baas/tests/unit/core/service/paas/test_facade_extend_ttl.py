@@ -79,9 +79,7 @@ class TestExtendTtl:
         facade._device_template_service.get_by_template_id.return_value = None
 
         with pytest.raises(DeviceFacadeException) as exc:
-            await facade.extend_ttl(
-                paas_device_id="sandbox-abc@99", ttl_minutes=720
-            )
+            await facade.extend_ttl(paas_device_id="sandbox-abc@99", ttl_minutes=720)
 
         assert exc.value.operation == "extend_ttl"
 
@@ -98,9 +96,7 @@ class TestExtendTtl:
         facade._factory.create.return_value = mock_service
 
         with pytest.raises(DeviceFacadeException) as exc:
-            await facade.extend_ttl(
-                paas_device_id="sandbox-abc@42", ttl_minutes=720
-            )
+            await facade.extend_ttl(paas_device_id="sandbox-abc@42", ttl_minutes=720)
 
         assert exc.value.operation == "extend_ttl"
 
@@ -117,9 +113,7 @@ class TestExtendTtl:
         facade._factory.create.return_value = mock_service
 
         with pytest.raises(DeviceFacadeException) as exc:
-            await facade.extend_ttl(
-                paas_device_id="sandbox-abc@42", ttl_minutes=720
-            )
+            await facade.extend_ttl(paas_device_id="sandbox-abc@42", ttl_minutes=720)
 
         assert exc.value.operation == "extend_ttl"
 
@@ -131,9 +125,7 @@ class TestExtendTtl:
         )
         facade._factory.create.return_value = mock_service
 
-        result = await facade.extend_ttl(
-            paas_device_id="sandbox-abc", ttl_minutes=720
-        )
+        result = await facade.extend_ttl(paas_device_id="sandbox-abc", ttl_minutes=720)
 
         assert result is True
         mock_service.extend_ttl.assert_awaited_once_with("sandbox-abc", 720)
