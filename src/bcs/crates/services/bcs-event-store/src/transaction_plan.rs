@@ -399,7 +399,7 @@ impl EventAppendTransactionPlan {
                 ],
             )));
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-                causal_dependency_update_sql(),
+                causal_dependency_update_sql(flavor),
                 vec![
                     DbValue::from(cause_event_id),
                     DbValue::from(command.env.as_str()),
@@ -545,7 +545,7 @@ fn target_snapshot_sql(flavor: DbSqlFlavor) -> &'static str {
                     OR EXISTS (SELECT 1 FROM JSON_TABLE(r.event_filters_json, '$[*]' \
                        COLUMNS(filter_value VARCHAR(128) PATH '$')) filters \
                        WHERE RIGHT(filters.filter_value, 2) = '.*' \
-                         AND ? LIKE CONCAT(LEFT(filters.filter_value, \
+                         AND BINARY ? LIKE CONCAT(LEFT(BINARY filters.filter_value, \
                              CHAR_LENGTH(filters.filter_value) - 1), '%'))) \
                AND s.scope_type = 'group' AND s.scope_id = ?"
         }
@@ -600,7 +600,7 @@ fn causal_target_snapshot_sql(flavor: DbSqlFlavor) -> &'static str {
                     OR EXISTS (SELECT 1 FROM JSON_TABLE(revision.event_filters_json, '$[*]' \
                        COLUMNS(filter_value VARCHAR(128) PATH '$')) filters \
                        WHERE RIGHT(filters.filter_value, 2) = '.*' \
-                         AND cause.event_type LIKE CONCAT(LEFT(filters.filter_value, \
+                         AND BINARY cause.event_type LIKE CONCAT(LEFT(BINARY filters.filter_value, \
                              CHAR_LENGTH(filters.filter_value) - 1), '%'))) \
                AND NOT EXISTS (SELECT 1 FROM bcs_event_fanout_targets existing \
                  WHERE existing.env = effect.env AND existing.event_id = cause.event_id \
@@ -639,16 +639,31 @@ fn causal_target_snapshot_sql(flavor: DbSqlFlavor) -> &'static str {
     }
 }
 
-fn causal_dependency_update_sql() -> &'static str {
-    "UPDATE bcs_event_fanout_targets AS effect SET depends_on_target_id = (\
-       SELECT cause_target.target_id FROM bcs_event_fanout_targets cause_target \
-       WHERE cause_target.env = effect.env AND cause_target.event_id = ? \
-         AND cause_target.subscription_id = effect.subscription_id \
-         AND cause_target.subscription_revision = effect.subscription_revision \
-         AND cause_target.purpose IN ('normal', 'causal_prerequisite') \
-         AND cause_target.status <> 'cancelled' \
-       ORDER BY CASE cause_target.purpose WHEN 'normal' THEN 0 ELSE 1 END LIMIT 1\
-     ) WHERE effect.env = ? AND effect.event_id = ? AND effect.purpose = 'normal'"
+fn causal_dependency_update_sql(flavor: DbSqlFlavor) -> &'static str {
+    match flavor {
+        DbSqlFlavor::Mysql => {
+            "UPDATE bcs_event_fanout_targets AS effect \
+             JOIN bcs_event_fanout_targets AS cause_target \
+               ON cause_target.env = effect.env AND cause_target.event_id = ? \
+              AND cause_target.subscription_id = effect.subscription_id \
+              AND cause_target.subscription_revision = effect.subscription_revision \
+              AND cause_target.purpose IN ('normal', 'causal_prerequisite') \
+              AND cause_target.status <> 'cancelled' \
+             SET effect.depends_on_target_id = cause_target.target_id \
+             WHERE effect.env = ? AND effect.event_id = ? AND effect.purpose = 'normal'"
+        }
+        DbSqlFlavor::Sqlite => {
+            "UPDATE bcs_event_fanout_targets AS effect SET depends_on_target_id = (\
+               SELECT cause_target.target_id FROM bcs_event_fanout_targets cause_target \
+               WHERE cause_target.env = effect.env AND cause_target.event_id = ? \
+                 AND cause_target.subscription_id = effect.subscription_id \
+                 AND cause_target.subscription_revision = effect.subscription_revision \
+                 AND cause_target.purpose IN ('normal', 'causal_prerequisite') \
+                 AND cause_target.status <> 'cancelled' \
+               ORDER BY CASE cause_target.purpose WHEN 'normal' THEN 0 ELSE 1 END LIMIT 1\
+             ) WHERE effect.env = ? AND effect.event_id = ? AND effect.purpose = 'normal'"
+        }
+    }
 }
 
 fn db_timestamp_from_rfc3339(timestamp: &str) -> Result<String, EventRepoError> {
@@ -749,6 +764,17 @@ mod tests {
             EventAppendTransactionPlan::build(&command, DbSqlFlavor::Sqlite, 0),
             Err(EventRepoError::CausationViolation(_))
         ));
+    }
+
+    #[test]
+    fn causal_dependency_update_uses_backend_compatible_sql() {
+        let mysql = causal_dependency_update_sql(DbSqlFlavor::Mysql);
+        assert!(mysql.contains("JOIN bcs_event_fanout_targets AS cause_target"));
+        assert!(!mysql.contains("SET depends_on_target_id = ("));
+
+        let sqlite = causal_dependency_update_sql(DbSqlFlavor::Sqlite);
+        assert!(sqlite.contains("SET depends_on_target_id = ("));
+        assert!(!sqlite.contains("JOIN bcs_event_fanout_targets AS cause_target"));
     }
 
     fn command() -> AppendEventRecord {

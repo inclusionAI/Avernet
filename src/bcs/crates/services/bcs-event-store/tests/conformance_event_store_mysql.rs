@@ -51,12 +51,12 @@ async fn mysql_event_store_passes_contract() {
         common::append("evt-mysql-contract", "mysql:group:created", "group.created"),
     )
     .await;
-    event_delivery_repo_port_contract_tests(
-        &repo,
-        common::subscription("sub-mysql-delivery"),
-        common::append("evt-mysql-delivery", "mysql:delivery", "group.created"),
-    )
-    .await;
+    let mut delivery_subscription = common::subscription("sub-mysql-delivery");
+    delivery_subscription.subscription.env = "contract-delivery-mysql".to_string();
+    let mut delivery_append =
+        common::append("evt-mysql-delivery", "mysql:delivery", "group.created");
+    delivery_append.env = delivery_subscription.subscription.env.clone();
+    event_delivery_repo_port_contract_tests(&repo, delivery_subscription, delivery_append).await;
     manager.close().await;
 }
 
