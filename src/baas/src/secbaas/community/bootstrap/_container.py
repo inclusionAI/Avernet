@@ -1,9 +1,9 @@
 from dependency_injector import containers, providers
 
 from secbaas.community.api.publish_manage import PublishService
+from secbaas.community.core.database import db_manager as _db_manager
 from secbaas.community.core.service.paas import DeviceCallbackHandler
 from secbaas.community.core.service.paas.desktop import ConnectionManager
-from secbaas.community.core.database import db_manager as _db_manager
 from secbaas.community.logger import get_logger
 
 # ── Enterprise-only optional imports ─────────────────────────────────────
