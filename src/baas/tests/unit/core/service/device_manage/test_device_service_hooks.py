@@ -166,7 +166,9 @@ class TestStartDeviceHook:
             _make_arca_template()
         )
         arca_result = ArcaCreationResult(
-            platform="ARCA", status="ACTIVE", template_id="tpl-1",
+            platform="ARCA",
+            status="ACTIVE",
+            template_id="tpl-1",
             sandbox_id="sandbox-abc123",
         )
         mock_paas_facade.create_device = AsyncMock(return_value=arca_result)
@@ -191,9 +193,7 @@ class TestStartDeviceHook:
             "ttl_expiration_time": 1750000000000,
         }
         with patch.object(ArcaCreationResult, "model_dump", return_value=_ttl_dump):
-            await svc.start_device(
-                tenant="test-tenant", device_uuid="DEVICE-test-001"
-            )
+            await svc.start_device(tenant="test-tenant", device_uuid="DEVICE-test-001")
 
         mock_schedule_repo.register.assert_called_once()
         call_args = mock_schedule_repo.register.call_args
@@ -267,8 +267,8 @@ class TestStartDeviceHook:
         mock_template_svc.get_default_or_explicit_template.return_value = local_template
         mock_paas_facade.create_device = AsyncMock(
             return_value=LocalCreationResult(
-            platform="LOCAL", status="ACTIVE", container_id="container-001"
-        )
+                platform="LOCAL", status="ACTIVE", container_id="container-001"
+            )
         )
 
         svc = DefaultDeviceService(
@@ -339,7 +339,9 @@ class TestStartDeviceHook:
             _make_arca_template()
         )
         arca_result = ArcaCreationResult(
-            platform="ARCA", status="ACTIVE", template_id="tpl-1",
+            platform="ARCA",
+            status="ACTIVE",
+            template_id="tpl-1",
             sandbox_id="sandbox-abc123",
         )
         mock_paas_facade.create_device = AsyncMock(return_value=arca_result)
