@@ -47,7 +47,7 @@ from agentclaw.community.core.skill_center.factories import SkillSetServiceFacto
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository as UnifiedUserMCPConfigRepository
 
 

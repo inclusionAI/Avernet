@@ -78,9 +78,7 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
-from agentclaw.community.core.devices.services.device_sync_dispatcher import (
-    DeviceSyncDispatcher,
-)
+from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.log import get_logger
 

@@ -51,7 +51,7 @@ from agentclaw.community.core.devices.services.device_filesystem_dispatcher impo
     DeviceFilesystemDispatcher,
     DeviceFileSystemResolver,
 )
-from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+from agentclaw.community.plugin_api.device_sync_dispatcher import (
     DeviceSyncDispatcher,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService

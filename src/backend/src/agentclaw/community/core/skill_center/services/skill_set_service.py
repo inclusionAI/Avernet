@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from agentclaw.community.di.modules.skill_center_module import (
         DeviceFilesystemDispatcher,
     )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+    from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.core.mcp.services._defaults import (
     get_default_mcp_config,
     get_default_mcp_server_codes,
