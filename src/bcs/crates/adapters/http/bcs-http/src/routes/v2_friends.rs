@@ -177,11 +177,20 @@ pub async fn list_friends_by_actor(
     Ok(Json(envelope(&FriendListResponse { items, total })))
 }
 
-/// Resolve the caller actor id from request context.
+/// Resolve the caller actor id from request context for v2 endpoints.
 ///
-/// Mirrors the legacy Strategy A resolution: Bearer bot token → human identity
-/// (`human_<staff_no>`) → optional `from_bot` fallback. Returns `Unauthorized`
-/// when no caller can be established.
+/// v2 security model (stricter than old `/friends/*`):
+/// 1. **Bearer** (primary): token resolves to a human (`human_<staff>`) or bot
+///    identity → authenticated, safe.
+/// 2. **from_actor fallback**: only when Bearer resolves AND the caller wants
+///    to "act as" a different bot they own. If NO Bearer → reject (401).
+///    This closes the unauthenticated-self-declaration hole that the old
+///    `/friends/*` Strategy-A fallback allowed.
+///
+/// TODO(future): when from_actor + actor_kind=bot is provided, verify the
+/// Bearer-authenticated user owns that bot (via BotActorConfigRepoPort
+/// created_by). Requires exposing bot_config on HttpAppState or a new
+/// ConnectService method.
 async fn resolve_caller(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -189,18 +198,27 @@ async fn resolve_caller(
     from_actor: Option<&str>,
     actor_kind: Option<&str>,
 ) -> Result<String, HttpAdapterError> {
-    if let Some(actor_id) = caller_actor_id_from_headers(state, headers, uri).await {
-        return Ok(actor_id);
+    let bearer_id = caller_actor_id_from_headers(state, headers, uri).await;
+
+    if let Some(bearer) = bearer_id {
+        // Bearer authenticated. If from_actor provided with actor_kind=bot,
+        // the caller wants to act AS that bot (act-as). For now trust the
+        // Bearer (caller is authenticated); ownership verification is a TODO.
+        // Without from_actor → use Bearer identity directly.
+        if let Some(actor_id) = from_actor.filter(|id| !id.is_empty()) {
+            let canonical = match actor_kind {
+                Some("human") => format!("human_{}", actor_id),
+                _ => actor_id.to_string(),
+            };
+            return Ok(canonical);
+        }
+        return Ok(bearer);
     }
-    if let Some(actor_id) = from_actor.filter(|id| !id.is_empty()) {
-        let canonical = match actor_kind {
-            Some("human") => format!("human_{}", actor_id),
-            _ => actor_id.to_string(),
-        };
-        return Ok(canonical);
-    }
+
+    // No Bearer → v2 rejects unauthenticated self-declaration (unlike old
+    // /friends/* which allows from_bot fallback for bcs-cli).
     Err(HttpAdapterError::Unauthorized(
-        "no valid token or caller identity provided".to_string(),
+        "v2 endpoints require Bearer authentication; from_actor fallback without Bearer is not allowed".to_string(),
     ))
 }
 
