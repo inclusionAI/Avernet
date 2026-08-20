@@ -110,7 +110,8 @@ PR head `e595d27ef` 的首次 Backend unit tests 失败已收敛为三个测试�
 ## BCS 元信息端口后续（2026-08-20）
 
 - GitHub 已确认 PR #1238 为 `MERGED`，合并 head 为 `c41c927020070a5828fd3e0c84376f252750642b`；远端 `feat/openapi-bot-public-catalog` 已删除，因此本次后续不能追加到原 PR。
-- 本地主题分支仅保留新增后续提交，并重放到最新 `origin/dev_refactory_collaboration@efa0b7da3`：`f717ebd5d`（BCS metadata port）和 `50434a1b6`（固定 502 OpenAPI 契约）。唯一冲突为英文 OpenAPI changelog，已保留 base 的 Editors/Spaces/Render Screen 内容并叠加本功能说明。
+- 本地主题分支仅保留新增后续提交，并重放到最新 `origin/dev_refactory_collaboration@efa0b7da3`：`f717ebd5d`（BCS metadata port）、`50434a1b6`（固定 502 OpenAPI 契约）、`7621f0dc3`（交付状态）、`52af6f506`（稳定顺序断言）和 `dfdbebd93`（Core 内部端口分层）。唯一冲突为英文 OpenAPI changelog，已保留 base 的 Editors/Spaces/Render Screen 内容并叠加本功能说明。
 - 当前实现不调用或猜测 BCS HTTP API；production/local/test 均绑定 fail-closed unavailable service，Catalog Search 固定返回 `502000`。Legacy Search 与 Discover 保持原行为。
-- 本地最终验证：Backend 184 passed；Gateway schema/auth/forwarding 222 passed；Ruff、JSON、OpenAPI 重生成和 `git diff --check` 通过。仅存在既有依赖弃用和 schema 生成告警。
+- 本地最终验证：Backend 全量 `13149 passed, 21 skipped`；Gateway schema/auth/forwarding `228 passed`；全部改动 Python 文件 Ruff、JSON、OpenAPI 重生成一致性和 `git diff --check` 通过。Gateway 项目级全量另有 12 个非本分支失败：10 个 live/baseline E2E 因未启动 Gateway 而连接失败，2 个项目级 Ruff 门禁命中三个相对 base 未改动的文件；未越界修改这些基线问题。
+- 整分支 Review 为 Ready，安全审查无 high/medium 候选；顺序测试与 Core 分层修复的 scoped rereview 为 PASS（Critical/Important/Minor 均为 0）。
 - 当前结论：后续 PR `NOT_CREATED`。创建新的远端分支/PR 需要用户确认；未强推、未合并、未回复或 resolve review thread。
