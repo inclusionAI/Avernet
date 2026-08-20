@@ -135,13 +135,13 @@ async def _authorize(
     *,
     relay: EngineRuntimeRelayProtocol,
     bot_id: str,
-    actor_id: str,
+    user_id: str,
     owner_id: str,
 ) -> str:
     facts = await resolve_operable_bot(
         relay,
         bot_id,
-        caller_id=actor_id,
+        caller_id=user_id,
         owner_id=owner_id,
         stage="draft",
         surface="channels",
@@ -154,12 +154,12 @@ def _require_admin(
     *,
     bot_id: str,
     owner_id: str,
-    actor_id: str,
+    user_id: str,
 ) -> None:
     result = collaborators.check_collaborator_permission(
         bot_id=bot_id,
         owner_id=owner_id,
-        user_id=actor_id,
+        user_id=user_id,
         required_level=PermissionLevel.ADMIN,
     )
     if not bool(result.get("has_permission")):
@@ -173,17 +173,17 @@ def _require_edit_lock(
     *,
     bot_id: str,
     owner_id: str,
-    actor_id: str,
+    user_id: str,
 ) -> None:
     """Match the internal mutation policy for Bots that have collaborators."""
     info = locks.get_lock_info(
         bot_id=bot_id,
         owner_id=owner_id,
-        user_id=actor_id,
+        user_id=user_id,
     )
     if not info.has_collaborators:
         return
-    if info.lock is None or info.lock.holder_user_id != actor_id:
+    if info.lock is None or info.lock.holder_user_id != user_id:
         raise ChannelEditLockedError("Bot edit lock is not held by the caller")
 
 
@@ -237,7 +237,7 @@ async def _set_status(
 async def list_channels(
     bot_id: BotIdPath,
     request: Request,
-    actor_id: UserIdDep,
+    user_id: UserIdDep,
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
@@ -246,7 +246,7 @@ async def list_channels(
     resolved_owner = await _authorize(
         relay=relay,
         bot_id=bot_id,
-        actor_id=actor_id,
+        user_id=user_id,
         owner_id=owner_id,
     )
     records = service.list_channels(
@@ -280,7 +280,7 @@ async def create_channel(
     bot_id: BotIdPath,
     body: ChannelCreate,
     request: Request,
-    actor_id: UserIdDep,
+    user_id: UserIdDep,
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
@@ -292,20 +292,20 @@ async def create_channel(
     resolved_owner = await _authorize(
         relay=relay,
         bot_id=bot_id,
-        actor_id=actor_id,
+        user_id=user_id,
         owner_id=owner_id,
     )
     _require_admin(
         collaborators,
         bot_id=bot_id,
         owner_id=resolved_owner,
-        actor_id=actor_id,
+        user_id=user_id,
     )
     _require_edit_lock(
         locks,
         bot_id=bot_id,
         owner_id=resolved_owner,
-        actor_id=actor_id,
+        user_id=user_id,
     )
     config = body.config.model_dump()
     config["aix_preview_url"] = aix_config.preview_url
@@ -337,7 +337,7 @@ async def get_channel(
     bot_id: BotIdPath,
     channel_id: ChannelIdPath,
     request: Request,
-    actor_id: UserIdDep,
+    user_id: UserIdDep,
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
@@ -346,7 +346,7 @@ async def get_channel(
     resolved_owner = await _authorize(
         relay=relay,
         bot_id=bot_id,
-        actor_id=actor_id,
+        user_id=user_id,
         owner_id=owner_id,
     )
     return envelope(
@@ -374,7 +374,7 @@ async def update_channel(
     channel_id: ChannelIdPath,
     body: ChannelUpdate,
     request: Request,
-    actor_id: UserIdDep,
+    user_id: UserIdDep,
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
@@ -386,20 +386,20 @@ async def update_channel(
     resolved_owner = await _authorize(
         relay=relay,
         bot_id=bot_id,
-        actor_id=actor_id,
+        user_id=user_id,
         owner_id=owner_id,
     )
     _require_admin(
         collaborators,
         bot_id=bot_id,
         owner_id=resolved_owner,
-        actor_id=actor_id,
+        user_id=user_id,
     )
     _require_edit_lock(
         locks,
         bot_id=bot_id,
         owner_id=resolved_owner,
-        actor_id=actor_id,
+        user_id=user_id,
     )
     record = _owned_channel(
         service,
@@ -452,7 +452,7 @@ async def update_channel_status(
     channel_id: ChannelIdPath,
     body: ChannelStatusUpdate,
     request: Request,
-    actor_id: UserIdDep,
+    user_id: UserIdDep,
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
@@ -463,20 +463,20 @@ async def update_channel_status(
     resolved_owner = await _authorize(
         relay=relay,
         bot_id=bot_id,
-        actor_id=actor_id,
+        user_id=user_id,
         owner_id=owner_id,
     )
     _require_admin(
         collaborators,
         bot_id=bot_id,
         owner_id=resolved_owner,
-        actor_id=actor_id,
+        user_id=user_id,
     )
     _require_edit_lock(
         locks,
         bot_id=bot_id,
         owner_id=resolved_owner,
-        actor_id=actor_id,
+        user_id=user_id,
     )
     _owned_channel(
         service,
@@ -505,7 +505,7 @@ async def delete_channel(
     bot_id: BotIdPath,
     channel_id: ChannelIdPath,
     request: Request,
-    actor_id: UserIdDep,
+    user_id: UserIdDep,
     owner_id: OwnerIdDep,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
@@ -516,20 +516,20 @@ async def delete_channel(
     resolved_owner = await _authorize(
         relay=relay,
         bot_id=bot_id,
-        actor_id=actor_id,
+        user_id=user_id,
         owner_id=owner_id,
     )
     _require_admin(
         collaborators,
         bot_id=bot_id,
         owner_id=resolved_owner,
-        actor_id=actor_id,
+        user_id=user_id,
     )
     _require_edit_lock(
         locks,
         bot_id=bot_id,
         owner_id=resolved_owner,
-        actor_id=actor_id,
+        user_id=user_id,
     )
     record = _owned_channel(
         service,
