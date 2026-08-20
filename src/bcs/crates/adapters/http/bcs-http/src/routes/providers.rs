@@ -11,8 +11,8 @@ use bcs_protocol::{
     RegisterProviderBotResponse, RegisterProviderRequest, RegisterProviderResponse,
 };
 use bcs_service_api::application::v1::{
-    ApplicationError, BotInternalAttributes, FriendCheckInStrategy, PatchBotInternalAttributes,
-    InternalBotAttributesService, UserVisibility,
+    ApplicationError, BotInternalAttributes, FriendCheckInStrategy, InternalBotAttributesService,
+    PatchBotInternalAttributes, UserVisibility,
 };
 use bcs_service_api::{
     BotUseCaseError, CoordinationMode, DeleteProviderBotCommand, ProviderAuthMode,
@@ -275,7 +275,10 @@ pub async fn get_provider_bot_attributes(
         .get(bot_uuid.clone())
         .await
         .map_err(internal_attributes_error)?;
-    info!(provider_id, bot_uuid, "Provider Bot attributes read completed");
+    info!(
+        provider_id,
+        bot_uuid, "Provider Bot attributes read completed"
+    );
     Ok(Json(attributes))
 }
 
@@ -313,7 +316,10 @@ pub async fn patch_provider_bot_attributes(
         .patch(body.into_command(bot_uuid.clone()))
         .await
         .map_err(internal_attributes_error)?;
-    info!(provider_id, bot_uuid, "Provider Bot attributes patch completed");
+    info!(
+        provider_id,
+        bot_uuid, "Provider Bot attributes patch completed"
+    );
     Ok(Json(attributes))
 }
 
@@ -863,5 +869,67 @@ fn switch_delivery_error(error: BotUseCaseError) -> ProviderRouteError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: other.to_string(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_attribute_application_errors_keep_their_http_status() {
+        let cases = vec![
+            (
+                ApplicationError::invalid("invalid", "invalid"),
+                StatusCode::BAD_REQUEST,
+            ),
+            (ApplicationError::Unauthenticated, StatusCode::UNAUTHORIZED),
+            (
+                ApplicationError::forbidden("forbidden"),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                ApplicationError::not_found("missing", "missing"),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                ApplicationError::conflict("conflict", "conflict"),
+                StatusCode::CONFLICT,
+            ),
+            (
+                ApplicationError::Gone {
+                    code: "gone".into(),
+                    message: "gone".into(),
+                },
+                StatusCode::GONE,
+            ),
+            (
+                ApplicationError::QuotaExceeded {
+                    code: "quota".into(),
+                    message: "quota".into(),
+                },
+                StatusCode::TOO_MANY_REQUESTS,
+            ),
+            (
+                ApplicationError::payload_too_large("large", "large"),
+                StatusCode::PAYLOAD_TOO_LARGE,
+            ),
+            (
+                ApplicationError::unprocessable("unprocessable", "unprocessable"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                ApplicationError::bad_gateway("upstream", "upstream"),
+                StatusCode::BAD_GATEWAY,
+            ),
+            (
+                ApplicationError::internal("internal"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+
+        for (error, expected_status) in cases {
+            assert_eq!(internal_attributes_error(error).status, expected_status);
+        }
     }
 }

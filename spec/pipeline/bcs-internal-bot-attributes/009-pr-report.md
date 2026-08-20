@@ -33,6 +33,8 @@
 | Bot store | PASS（本地） | `cargo test -p bcs-bot-store` | N/A | 迁移后分支 | 75 passed；5 个需要外部 Cache/DB 的既有集成测试忽略 |
 | Git diff 校验 | PASS（本地） | `git diff --check` | N/A | 迁移后分支 | 无输出 |
 | GitHub Actions | PENDING | [#1283 checks](https://github.com/inclusionAI/Avernet/pull/1283/checks) | BCS e2e、Singlebox coverage 与 BCS/Backend/Engine/BaaS/Gateway unit tests 已为当前 head 触发，尚未终态。 | N/A | 持续观察新 head |
+| BCS e2e / Singlebox coverage（初始 head） | FAIL | [E2E job](https://github.com/inclusionAI/Avernet/actions/runs/32351175302/job/96370558981) / [Singlebox job](https://github.com/inclusionAI/Avernet/actions/runs/32351175270/job/96370533081) | 568 个 E2E 场景、行/方法覆盖均通过；新 GET/PATCH 属性路由未被命中，endpoint coverage 为 137/139，低于 100%。 | 在现有 Provider E2E 场景增加两个 fail-closed 403 请求。 | 本地完整 `e2e_coverage.sh` 运行中；Bash 语法通过。 |
+| BCS unit coverage（初始 head） | FAIL | [Unit job](https://github.com/inclusionAI/Avernet/actions/runs/32351175353/job/96370526612) | 3,483 个测试均通过、总行覆盖 80.27%，但 changed-line coverage 为 76.16%，低于 80%。 | 覆盖属性 application error 到 HTTP 状态的全部映射分支。 | 新单元测试及 Provider 属性合约测试通过。 |
 
 ## 人工意见
 
@@ -45,6 +47,6 @@
 
 - PR: OPEN（[#1283](https://github.com/inclusionAI/Avernet/pull/1283)）
 - 自动意见: CLEAR
-- ACI/CI: 本地 PASS；远端 PENDING
+- ACI/CI: 初始 head 的三项 BCS 门禁已定位并修复；新 head 的本地完整 E2E 运行中、远端 CI 待重新触发。
 - 人工意见: 原 PR 两条合理意见均已迁移并采纳；新 PR 创建后重新检查。
-- 下一步: 等待并检查当前 head 的远端门禁；若有确定性测试失败，最小修复后重新验证并推送。
+- 下一步: 推送覆盖修复，等待本地完整 E2E 及新 head 的远端门禁；若仍有确定性失败，最小修复后重试。
