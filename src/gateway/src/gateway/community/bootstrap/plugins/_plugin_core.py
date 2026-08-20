@@ -18,15 +18,26 @@ from gateway.community.plugins.forwarder.httpx import HttpxForwarder
 from gateway.community.plugins.schema_catalog.file import FileSchemaCatalog
 from gateway.community.plugins.schema_catalog.http import HttpSchemaCatalog
 from gateway.community.plugins.secret_resolver.community import CommunitySecretResolver
-from gateway.community.plugins.secret_resolver.kms import (
-    AliyunKmsSecretResolver,
-    KmsSecretResolverConfig,
-)
+from gateway.community.plugins.secret_resolver.env import EnvSecretResolver
 from gateway.community.spi.secret_resolver import SecretResolver
 
 
 def _default(value, fallback):
     return value if value not in (None, "") else fallback
+
+
+def _secret_value(material: object) -> str:
+    """Read the plaintext secret from either SecretResolver return shape.
+
+    ``get_secret`` returns either a plain ``str`` (the BaaS-aligned ``env``
+    flavor) or a duck-typed object exposing ``.secret_value``/``.secret_user``
+    (the ``community`` flavor), or ``None``. Normalise to the plain string.
+    """
+    if material is None:
+        return ""
+    if isinstance(material, str):
+        return material
+    return getattr(material, "secret_value", "") or ""
 
 
 def _resolve_secret_refs(
@@ -43,30 +54,18 @@ def _resolve_secret_refs(
     resolved = dict(raw_config)
     for key, value in resolved.items():
         if isinstance(value, str) and value.startswith("@"):
-            material = secret_resolver.get_secret(value[1:])
+            try:
+                material = secret_resolver.get_secret(value[1:])
+            except RuntimeError as exc:
+                raise ValueError(
+                    f"Unresolvable secret reference {value!r} for config field {key!r}"
+                ) from exc
             if material is None:
                 raise ValueError(
                     f"Unresolvable secret reference {value!r} for config field {key!r}"
                 )
-            resolved[key] = getattr(material, "secret_value", "") or ""
+            resolved[key] = _secret_value(material)
     return resolved
-
-
-def _build_kms_config(
-    raw_config: dict[str, Any], secret_resolver: SecretResolver
-) -> KmsSecretResolverConfig:
-    """Build a KMS resolver config, resolving secret references up front.
-
-    The KMS resolver's own access credentials are resolved via the passed
-    ``SecretResolver`` (the community/env resolver acting as the bootstrap
-    credential source for reaching the managed store).
-
-    Returns:
-        A :class:`KmsSecretResolverConfig` whose sensitive fields carry concrete
-        values, never secret references.
-    """
-    resolved = _resolve_secret_refs(raw_config, secret_resolver)
-    return KmsSecretResolverConfig(**resolved)
 
 
 def _build_redis_config(
@@ -102,25 +101,15 @@ class PluginContainer(containers.DeclarativeContainer):
     )
 
     # SecretResolver — community flavor reads signing keys (and other creds)
-    # from the process environment; ``aliyun_kms`` resolves them from Aliyun KMS
-    # and resolves its own access credentials (AK id/secret) via secret
-    # references from the community/env resolver acting as the bootstrap source.
-    # Enterprise may register further options via plugin_registry.
+    # from the process environment; the ``env`` flavor provides a BaaS-aligned
+    # env-backed resolver (BaaS ``EnvSecretStorePlugin`` contract). Enterprise
+    # may register further options via plugin_registry.
     secret_resolver = providers.Selector(
         config.plugins.secret,
         community=providers.Singleton(
             CommunitySecretResolver, env_prefix=config.secret.env_prefix
         ),
-        aliyun_kms=providers.Singleton(
-            AliyunKmsSecretResolver,
-            config=providers.Callable(
-                _build_kms_config,
-                raw_config=config.plugins.secret_aliyun_kms,
-                secret_resolver=providers.Singleton(
-                    CommunitySecretResolver, env_prefix=config.secret.env_prefix
-                ),
-            ),
-        ),
+        env=providers.Singleton(EnvSecretResolver, env_prefix=config.secret.env_prefix),
     )
 
     cache_plugin = providers.Selector(
