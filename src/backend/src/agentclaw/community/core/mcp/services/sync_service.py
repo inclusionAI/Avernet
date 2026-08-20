@@ -30,8 +30,8 @@ from agentclaw.community.core.mcp.services.passport_scope import (
     passport_mcp_items_from_entries,
 )
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
+from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository
-from agentclaw.community.plugin_api.device_sync import DeviceSyncPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import CliItem, PassportPlugin
 from agentclaw.community.log import get_logger
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+    from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 
 logger = get_logger()
 
@@ -796,7 +796,7 @@ class MCPSyncService:
     async def _sync_mcp_detail(
         self,
         *,
-        plugin: DeviceSyncPlugin,
+        plugin: DeviceSync,
         user_id: str,
         mcp_data: dict[str, Any],
         api_key: Optional[str] = None,

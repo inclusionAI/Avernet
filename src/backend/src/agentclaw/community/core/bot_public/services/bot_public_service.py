@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     # ``DeviceSyncDispatcher`` 类源头在 plugins/prod/,但 core/ 不得依赖
     # plugins/(arch lint)。镜像 ``ChannelService`` 借 ``DeviceFilesystemDispatcher``
     # 的解法:类型注解走 di/modules/ 转出口(di 是合法的 composition 层)。
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+    from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.bot_publish_approval import (
     BotPublishApprovalPlugin,
