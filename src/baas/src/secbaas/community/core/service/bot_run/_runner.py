@@ -264,6 +264,7 @@ class BotRunner:
             metadata=metadata,
         )
 
+        # TODO catch exception, update run status error
         route = await self._resolve_bot_route(bot_id, metadata)
 
         # 3. 创建会话

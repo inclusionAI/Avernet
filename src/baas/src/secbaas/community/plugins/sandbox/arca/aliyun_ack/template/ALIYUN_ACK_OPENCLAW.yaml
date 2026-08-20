@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${STORAGE_ID}
+  namespace: ${NAMESPACE}
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: alicloud-nas-subpath
+  resources:
+    requests:
+      storage: ${STORAGE_SIZE}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-key-proxy-config-${UID}
+  namespace: ${NAMESPACE}
+data:
+  default.conf: |
+    server {
+        listen 8080;
+        location / {
+            proxy_pass https://dashscope.aliyuncs.com/compatible-mode/v1;
+            proxy_set_header Authorization "Bearer sk-xxxxxxxxxxxxxxxxxxxxxxxx";
+            proxy_set_header Host "";
+            proxy_ssl_server_name on;
+            proxy_pass_request_headers on;
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openclaw-${UID}
+  namespace: ${NAMESPACE}
+  labels:
+    app: openclaw
+    biz-id: "${UID}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openclaw
+      biz-id: "${UID}"
+  template:
+    metadata:
+      labels:
+        app: openclaw
+        biz-id: "${UID}"
+    spec:
+      containers:
+      - name: openclaw
+        image: ${IMAGE}
+        ports:
+        - containerPort: 20003
+        env:
+        - name: LLM_API_BASE_URL
+          value: "http://127.0.0.1:8080"
+        volumeMounts:
+        - name: data
+          mountPath: ${MOUNT_PATH}
+        resources:
+          requests:
+            cpu: "${CPU_REQUEST}"
+            memory: "${MEMORY_REQUEST}"
+          limits:
+            cpu: "${CPU_LIMIT}"
+            memory: "${MEMORY_LIMIT}"
+      - name: api-key-proxy
+        image: nginx:alpine
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: proxy-config
+          mountPath: /etc/nginx/conf.d
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: ${STORAGE_ID}
+      - name: proxy-config
+        configMap:
+          name: api-key-proxy-config-${UID}

@@ -35,10 +35,6 @@ from secbaas.community.plugins.sandbox.arca import (
     AliyunAckSandboxPlugin,
     StubArcaSandboxPlugin,
 )
-from secbaas.community.plugins.sandbox.arca.aliyun_ack import (
-    AliyunAckTemplateConfig,
-    build_aliyun_ack_template,
-)
 from secbaas.community.plugins.sandbox.arca.local_proc import (
     LocalProcessArcaSandboxPlugin,
 )
@@ -59,17 +55,6 @@ from secbaas.community.plugins.sandbox.poolab import StubPoolabSandboxPlugin
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.plugins.secret.env import EnvSecretStorePlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
-
-
-def _build_aliyun_ack_templates(
-    raw_templates: dict | None,
-) -> dict[str, AliyunAckTemplateConfig]:
-    """Build the typed AliyunAckTemplateConfig map from the DI config dict."""
-    out = {}
-    for ack_id, raw in (raw_templates or {}).items():
-        if isinstance(raw, dict):
-            out[ack_id] = build_aliyun_ack_template(ack_id, raw)
-    return out
 
 
 class PluginContainer(containers.DeclarativeContainer):
@@ -121,18 +106,16 @@ class PluginContainer(containers.DeclarativeContainer):
         stub=providers.Singleton(StubAuthPlugin),
     )
 
-    arca_ack_templates_map = providers.Callable(
-        _build_aliyun_ack_templates,
-        raw_templates=config.aliyun_ack_template,
-    )
-
     arca_sandbox_plugin_factory = providers.Selector(
         config.plugins.sandbox.arca,
         stub=providers.Object(StubArcaSandboxPlugin),
         local_proc=providers.Object(LocalProcessArcaSandboxPlugin),
         aliyun_ack=providers.Factory(
             AliyunAckSandboxPlugin,
-            ack_templates=arca_ack_templates_map,
+            api_server=config.aliyun_ack_cluster.api_server,
+            token=config.aliyun_ack_cluster.token,
+            namespace=config.aliyun_ack_cluster.namespace,
+            default_images=config.aliyun_ack_cluster.default_images,
             arca_utils=arca_utils,
         ),
     )
