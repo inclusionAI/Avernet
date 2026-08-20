@@ -6,6 +6,11 @@ read only from the target publish record. Records created before the policy
 existed are lazily protected by the environment common-config and snapshot the
 configured image once.
 
+:class:`PublishImagePolicyResolver` is the single entry point for that: it owns
+the repository read and the CAS write. ``image_policy_from_ext`` beside it is
+only the pure decoder it uses internally — it reads a record's existing policy
+and never acquires one, so it is not a second way to "resolve" the policy.
+
 Which *provider* a bot runs on is deliberately NOT a publish-record fact. The
 container follows the bot (``resolve_container_provider``) and its device
 binding; callers pass the resolved ``device_provider`` in rather than having it
@@ -16,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord
@@ -64,9 +69,6 @@ class ServiceBotImagePin:
     def enabled(self) -> bool:
         """Backward-compatible pinned predicate."""
         return self.state == ImagePolicyState.PINNED
-
-
-PublishExtWriter = Callable[[dict[str, Any]], None]
 
 
 def resolve_current_arca_image(
@@ -159,27 +161,20 @@ def copy_image_policy_to_ext(
     return target or None
 
 
-def resolve_publish_image_pin(
-    publish_record: BotPublishRecord,
-    *,
-    common_config_service: CommonConfigService | None = None,
-    env: str | None = None,
-    persist_ext: PublishExtWriter | None = None,
-) -> ServiceBotImagePin:
-    """Resolve default/pinned/legacy policy from the target publish record.
+def image_policy_from_ext(publish_record: BotPublishRecord) -> ServiceBotImagePin:
+    """Decode the policy a publish record already carries on its ``ext``.
 
-    Explicit publish snapshots never consult common-config. A legacy record
-    consults it once; when enabled, the selected image is appended to ``ext``
-    through ``persist_ext`` before being used. Disabled/missing config leaves the
-    record legacy and uses the provider default for this operation.
+    Pure: no repository, no common-config, no writes. A record with no explicit
+    policy is LEGACY — deciding whether such a record should *acquire* one is the
+    persisted, CAS-backed job of :class:`PublishImagePolicyResolver`, which is the
+    only thing callers outside this module should use.
     """
     ext = dict(publish_record.ext or {})
     if ext.get(IMAGE_DEFAULT_KEY) is True:
         return ServiceBotImagePin(ImagePolicyState.DEFAULT, None)
 
-    pin_enabled = ext.get(IMAGE_PIN_ENABLED_KEY) is True
     image = read_image_pin_from_ext(ext)
-    if pin_enabled:
+    if ext.get(IMAGE_PIN_ENABLED_KEY) is True:
         if image is None:
             raise ImagePinConfigError(
                 f"Publish {publish_record.id} enables image Pin without a valid image"
@@ -192,24 +187,7 @@ def resolve_publish_image_pin(
             f"Publish {publish_record.id} has an inconsistent image policy snapshot"
         )
 
-    image = resolve_current_arca_image(
-        common_config_service,
-        env=env or publish_record.env,
-    )
-    if image is None:
-        return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
-
-    pinned_ext = apply_image_pin_to_ext(ext, image)
-    if persist_ext is not None:
-        persist_ext(pinned_ext)
-    publish_record.ext = pinned_ext
-    logger.info(
-        "[arca_image_pin] snapshotted legacy publish image: publish_id=%s env=%s image=%s",
-        publish_record.id,
-        env or publish_record.env,
-        image,
-    )
-    return ServiceBotImagePin(ImagePolicyState.PINNED, image)
+    return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
 
 
 def persist_default_image_policy(
@@ -324,7 +302,7 @@ class PublishImagePolicyResolver:
 
             if has_explicit_image_policy(latest.ext):
                 publish_record.ext = latest.ext
-                return resolve_publish_image_pin(latest)
+                return image_policy_from_ext(latest)
 
             image = resolve_current_arca_image(
                 self._common_config_service, env=latest.env
@@ -348,7 +326,7 @@ class PublishImagePolicyResolver:
                     updated.env,
                     image,
                 )
-                return resolve_publish_image_pin(updated)
+                return image_policy_from_ext(updated)
 
         raise ImagePinPersistenceError(
             f"Publish image policy CAS conflicted repeatedly: publish_id={publish_record.id}"
