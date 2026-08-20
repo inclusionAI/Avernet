@@ -8,6 +8,9 @@ from typing import Any
 from agentclaw.community.core.skill_center.errors import (
     SkillEngineNotSupportedError,
 )
+from agentclaw.community.core.workspace.skill_layout import (
+    runtime_layout_engine_for_bot,
+)
 
 
 _SUPPORTED_BOT_SKILL_RUNTIMES = {
@@ -40,25 +43,6 @@ class BotSkillRuntimeCommand(StrEnum):
 
     WRITE = "WRITE"
     CLEANUP = "CLEANUP"
-
-
-def runtime_layout_engine_for_bot(bot: dict[str, Any]) -> str:
-    """Return the physical engine used exclusively for filesystem Pool I/O.
-
-    Coding templates retain ``claude_code`` as their domain/catalogue engine,
-    but their active skill directory belongs to the AICoding image.  Only the
-    runtime layout probe must see that physical identity; factories, catalogues
-    and Passport remain keyed by the logical engine.
-    """
-
-    engine = str(bot.get("active_engine") or "")
-    if (
-        engine == "claude_code"
-        and str(bot.get("template_type") or "")
-        in _CLAUDE_CODE_WRITABLE_TEMPLATES
-    ):
-        return "aicoding"
-    return engine
 
 
 def bot_skill_runtime_mutation_mode(

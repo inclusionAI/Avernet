@@ -129,7 +129,10 @@ from agentclaw.community.core.repository.protocols.skills_pool import (
 from agentclaw.community.core.skills_pool.reconcile_task import (
     SkillsPoolReconcileWakeupListener,
 )
-from agentclaw.community.core.skills_pool.models import pool_paths_for_engine
+from agentclaw.community.core.workspace.skill_layout import (
+    pool_paths_for_engine,
+    runtime_layout_engine_for_bot,
+)
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
@@ -712,7 +715,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             )
             if not runtime_uses_pool_paths(state):
                 return None
-            paths = pool_paths_for_engine(engine)
+            paths = pool_paths_for_engine(runtime_layout_engine_for_bot(bot))
             return paths.active, paths.pool_local, paths.pool_repo
 
         return SkillServiceFactory(
