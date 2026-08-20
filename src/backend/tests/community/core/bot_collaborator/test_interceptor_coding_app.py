@@ -68,6 +68,20 @@ class TestIsCodingApp:
         assert result is True
         mock_bot_service.get_bot.assert_called_once_with("bot_123", "owner_001")
 
+    def test_personal_coding_claude_code_return_true(self):
+        """个人 Coding Bot (claude_code + personalCoding) -> True。"""
+        ctx = InterceptorContext(user=None, route_kwargs={})
+        mock_injector = MagicMock()
+        mock_bot_service = MagicMock()
+        mock_bot_service.get_bot.return_value = {
+            "active_engine": "claude_code",
+            "template_type": "personalCoding",
+        }
+        _wire_member_management_injector(mock_injector, mock_bot_service)
+        ctx.injector = mock_injector
+
+        assert self.interceptor._is_coding_app(ctx, "bot_123", "owner_001") is True
+
     def test_member_management_flag_return_true(self):
         """advanced_config.member_management=true -> True even when not coding app."""
         ctx = InterceptorContext(user=None, route_kwargs={})
