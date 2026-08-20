@@ -32,15 +32,12 @@ def db() -> DatabaseManager:
     plugin = SqliteOrmPlugin("sqlite:///:memory:")
     plugin.create_all()
     mgr = DatabaseManager()
-    orig_factory = mgr._sync_session_factory
-    orig_engine = mgr._sync_engine
-    mgr._sync_session_factory = plugin._sync_session_factory
-    mgr._sync_engine = plugin._sync_engine
+    orig_plugin = mgr._plugin
+    mgr.init_plugin(plugin)
     try:
         yield mgr
     finally:
-        mgr._sync_session_factory = orig_factory
-        mgr._sync_engine = orig_engine
+        mgr._plugin = orig_plugin
         plugin._sync_engine.dispose()
 
 

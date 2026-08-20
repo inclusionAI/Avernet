@@ -29,9 +29,9 @@ from secbaas.community.core.service.paas import PaasServiceFactory
 
 @pytest.fixture
 def factory():
+    from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
     from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin
     from secbaas.community.plugins.sandbox.desktop import StubDesktopSandboxPlugin
-    from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
     from secbaas.community.spi.sandbox import PaasSandboxPlugins
 
     return PaasServiceFactory(

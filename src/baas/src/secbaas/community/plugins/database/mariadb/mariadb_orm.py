@@ -98,7 +98,38 @@ class MariaDbOrmPlugin(DataSourcePlugin):
         logger.info("MariaDbOrmPlugin engines initialized")
 
     def create_all(self) -> None:
-        pass
+        """Create all ORM tables using native MySQL/MariaDB dialect."""
+        _orm_models = [
+            "secbaas.community.core.repository.ac_bot._orm_model",
+            "secbaas.community.core.repository.ac_bot_publish._orm_model",
+            "secbaas.community.core.repository.api_gateway._orm_model",
+            "secbaas.community.core.repository.bot._orm_model",
+            "secbaas.community.core.repository.bot_device_rel._orm_model",
+            "secbaas.community.core.repository.bot_run._orm_model",
+            "secbaas.community.core.repository.bot_session._orm_model",
+            "secbaas.community.core.repository.device._orm_model",
+            "secbaas.community.core.repository.device_binding._orm_model",
+            "secbaas.community.core.repository.device_template._orm_model",
+            "secbaas.community.core.repository.distributed_lock._orm_model",
+            "secbaas.community.core.repository.local_user_machine._orm_model",
+            "secbaas.community.core.repository.publish._orm_model",
+            "secbaas.community.core.repository.publish_batch._orm_model",
+            "secbaas.community.core.repository.publish_record._orm_model",
+            "secbaas.community.core.repository.system_config._orm_model",
+            "secbaas.community.core.repository.tenant._orm_model",
+            "secbaas.community.core.repository.ws_relay_session._orm_model",
+        ]
+        for _mod in _orm_models:
+            try:
+                __import__(_mod)
+            except Exception as _exc:
+                logger.error("Failed to import %s: %s", _mod, _exc)
+                raise
+
+        from secbaas.community.spi.database import Base
+
+        Base.metadata.create_all(self._sync_engine)
+        logger.info("MariaDbOrmPlugin: tables created")
 
     def sync_connection(self, datasource_name: str) -> AbstractContextManager[Any]:
         if self._sync_engine is None:
@@ -148,7 +179,10 @@ class MariaDbOrmPlugin(DataSourcePlugin):
             await session.close()
 
     def seed(self, session: Session) -> None:
-        pass
+        """Insert seed data (default tenant and ARCA device template)."""
+        from secbaas.community.plugins.database.seed import seed_database
+
+        seed_database(session)
 
     def init_database(self) -> None:
         """Build engines, create schema, seed data, and register with db_manager.

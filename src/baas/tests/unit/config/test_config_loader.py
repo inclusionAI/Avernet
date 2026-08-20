@@ -138,9 +138,7 @@ class TestEnvInterpolation:
         from secbaas.community.config import ConfigLoader
 
         monkeypatch.delenv("MISSING_VAR", raising=False)
-        out = ConfigLoader._expand_env_placeholders(
-            {"a": "${MISSING_VAR:-fallback}"}
-        )
+        out = ConfigLoader._expand_env_placeholders({"a": "${MISSING_VAR:-fallback}"})
         assert out == {"a": "fallback"}
 
     def test_empty_default_when_unset(self, monkeypatch):

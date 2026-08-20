@@ -116,9 +116,9 @@ def factory():
     Post-Plan-11-05: Includes docker_sandbox_plugin mock in PaasSandboxPlugins.
     No docker.from_env() patching needed — the factory uses DI plugin directly.
     """
+    from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
     from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin
     from secbaas.community.plugins.sandbox.desktop import StubDesktopSandboxPlugin
-    from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
 
     mock_docker_plugin = MagicMock()
 

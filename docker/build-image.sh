@@ -19,16 +19,13 @@
 #   docker/build-image.sh baas.dockerfile \
 #       --image reg.example.com/ns/baas --tag v1.0 --tag latest --push
 #
-#   # Bake environment variables into the image (visible at runtime)
-#   docker/build-image.sh baas.dockerfile --env PASSW=111 --env DEBUG=1
-#
-#   # Pass through build-args (e.g. baas.dockerfile's USE_CN_MIRROR)
-#   docker/build-image.sh baas.dockerfile --build-arg USE_CN_MIRROR=1
+#   # Pass through build-args (e.g. baas.dockerfile's UV_VERSION)
+#   docker/build-image.sh baas.dockerfile --build-arg UV_VERSION=0.8.14
 #
 #   # Combined
 #   docker/build-image.sh baas.dockerfile \
 #       --image reg.example.com/ns/baas --tag v1.0 --push \
-#       --env PASSW=111 --build-arg USE_CN_MIRROR=1 --no-cache
+#       --build-arg UV_VERSION=0.8.14 --no-cache
 #
 # Options:
 #   <dockerfile>  Filename under docker/ (e.g. baas.dockerfile), or a path
@@ -43,17 +40,8 @@
 #   --push        After building, docker push every <image>:<tag> reference.
 #                 Independent of --image (does not handle login; you must have
 #                 docker-logged-in to that registry already).
-#   --env K=V     Append K=V as an ENV instruction at the end of the Dockerfile
-#                 (runtime env var), repeatable. Values are double-quote escaped
-#                 into a temp Dockerfile; spaces/special chars are supported.
 #   --build-arg K=V   Forwarded to docker build as --build-arg, repeatable.
 #   --no-cache    Disable build cache.
-#
-# Security note:
-#   Values baked in via --env appear in `docker inspect` output and are visible
-#   to anyone who can pull the image. For sensitive data (keys/passwords),
-#   prefer runtime injection via `docker run -e` or a secret mount instead of
-#   baking them into image layers.
 
 set -uo pipefail
 
@@ -65,7 +53,6 @@ DOCKERFILE=""
 IMAGE=""
 PUSH=0
 TAGS=()
-ENVS=()
 BUILD_ARGS=()
 NO_CACHE=0
 
@@ -90,9 +77,6 @@ while [ $# -gt 0 ]; do
         --tag|-t)
             [ $# -ge 2 ] || { echo "error: $1 requires an argument" >&2; exit 2; }
             TAGS+=("$2"); shift 2 ;;
-        --env)
-            [ $# -ge 2 ] || { echo "error: $1 requires an argument" >&2; exit 2; }
-            ENVS+=("$2"); shift 2 ;;
         --build-arg)
             [ $# -ge 2 ] || { echo "error: $1 requires an argument" >&2; exit 2; }
             BUILD_ARGS+=("$2"); shift 2 ;;
@@ -110,11 +94,11 @@ done
 
 if [ -z "$DOCKERFILE" ]; then
     echo "error: missing <dockerfile> argument" >&2
-    echo "usage: docker/build-image.sh <dockerfile> [--image NAME] [--tag T] [--push] [--env K=V] [--build-arg K=V] [--no-cache]" >&2
+    echo "usage: docker/build-image.sh <dockerfile> [--image NAME] [--tag T] [--push] [--build-arg K=V] [--no-cache]" >&2
     exit 2
 fi
 
-# --- Validate --image / --env / --tag up front (before the docker check,
+# --- Validate --image / --tag up front (before the docker check,
 #     so argument errors surface even without docker installed)
 if [ -n "$IMAGE" ]; then
     case "$IMAGE" in
@@ -129,20 +113,6 @@ if [ "${#TAGS[@]}" -gt 0 ]; then
             "")  echo "error: --tag must not be empty" >&2; exit 2 ;;
             *:*) echo "error: --tag must not contain ':' (give the tag only; name/registry go via --image): ${t}" >&2; exit 2 ;;
         esac
-    done
-fi
-ENV_KEY_RE='^[A-Za-z_][A-Za-z0-9_]*$'
-if [ "${#ENVS[@]}" -gt 0 ]; then
-    for spec in "${ENVS[@]}"; do
-        if [ "$spec" = "${spec#*=}" ]; then
-            echo "error: --env requires KEY=VALUE form: ${spec}" >&2
-            exit 2
-        fi
-        k="${spec%%=*}"
-        if ! [[ "$k" =~ $ENV_KEY_RE ]]; then
-            echo "error: invalid --env KEY (letters/digits/underscore only, not starting with a digit): ${spec}" >&2
-            exit 2
-        fi
     done
 fi
 
@@ -174,38 +144,6 @@ for t in "${TAGS[@]}"; do
     REFS+=("${IMAGE}:${t}")
 done
 
-# --- Escape ENV value (inside double quotes: escape backslash and double quote)
-escape_env_value() {
-    local v="$1"
-    v="${v//\\/\\\\}"   # \ -> \\
-    v="${v//\"/\\\"}"   # " -> \"
-    printf '%s' "$v"
-}
-
-# --- If any --env, generate a temp Dockerfile: copy the original and append
-#     ENV instructions at the end. In a multi-stage Dockerfile, the appended
-#     ENV belongs to the last (runtime) stage.
-GEN_DOCKERFILE=""
-if [ "${#ENVS[@]}" -gt 0 ]; then
-    GEN_DOCKERFILE="$(mktemp 2>/dev/null || mktemp -t bi)" || { echo "error: failed to create temp file" >&2; exit 1; }
-    trap 'rm -f "${GEN_DOCKERFILE}"' EXIT
-
-    cp "${DOCKERFILE_PATH}" "${GEN_DOCKERFILE}"
-    {
-        echo ""
-        echo "# ===== ENV injected by docker/build-image.sh ($(date -u +%Y-%m-%dT%H:%M:%SZ)) ====="
-        for spec in "${ENVS[@]}"; do
-            k="${spec%%=*}"
-            v="${spec#*=}"
-            printf 'ENV %s="%s"\n' "$k" "$(escape_env_value "$v")"
-        done
-    } >> "${GEN_DOCKERFILE}"
-
-    BUILD_DOCKERFILE="${GEN_DOCKERFILE}"
-else
-    BUILD_DOCKERFILE="${DOCKERFILE_PATH}"
-fi
-
 # --- Assemble the docker build command
 BUILD_CMD=(docker build)
 for ref in "${REFS[@]}"; do
@@ -217,12 +155,11 @@ if [ "${#BUILD_ARGS[@]}" -gt 0 ]; then
         BUILD_CMD+=("--build-arg" "$ba")
     done
 fi
-BUILD_CMD+=("-f" "${BUILD_DOCKERFILE}" "${REPO_ROOT}")
+BUILD_CMD+=("-f" "${DOCKERFILE_PATH}" "${REPO_ROOT}")
 
 # --- Run the build
 echo "==> repo root:    ${REPO_ROOT}"
-echo "==> Dockerfile:   ${BUILD_DOCKERFILE}"
-[ -n "$GEN_DOCKERFILE" ] && echo "==> injected env: ${ENVS[*]}"
+echo "==> Dockerfile:   ${DOCKERFILE_PATH}"
 echo "==> image refs:   ${REFS[*]}"
 if [ "$PUSH" -eq 1 ]; then
     echo "==> push after build: yes (triggered by --push; docker login required)"

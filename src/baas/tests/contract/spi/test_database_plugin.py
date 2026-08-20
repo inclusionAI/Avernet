@@ -85,8 +85,13 @@ class TestMariaDbOrmPluginUrlResolution:
     """Unit tests for MariaDbOrmPlugin URL resolution (no live server needed)."""
 
     def test_stores_full_url(self) -> None:
-        plugin = MariaDbOrmPlugin("mysql+aiomysql://u:p@db.internal:3307/mydb?charset=utf8mb4")
-        assert plugin._database_url == "mysql+aiomysql://u:p@db.internal:3307/mydb?charset=utf8mb4"
+        plugin = MariaDbOrmPlugin(
+            "mysql+aiomysql://u:p@db.internal:3307/mydb?charset=utf8mb4"
+        )
+        assert (
+            plugin._database_url
+            == "mysql+aiomysql://u:p@db.internal:3307/mydb?charset=utf8mb4"
+        )
 
     def test_ormsession_raises_before_init(self) -> None:
         plugin = MariaDbOrmPlugin()
