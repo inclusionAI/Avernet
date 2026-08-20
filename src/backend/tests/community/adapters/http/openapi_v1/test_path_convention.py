@@ -106,6 +106,10 @@ _BOT_FREE = frozenset(
         "market",
         "mcp",
         "spaces",
+        # Repo catalog is tenant-wide but follows the Skill namespace as
+        # requested by its public contract: /bots/skills/repository/... .
+        # It therefore does not name one concrete Bot in this segment.
+        "skills",
         "work-order-notifications",
         "work-orders",
     }

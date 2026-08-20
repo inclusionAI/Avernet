@@ -68,6 +68,30 @@ class TestGetSymlinkMappings:
         assert symlinks[0].source.endswith("/skills-local/cct-zbb-instraction-query")
         assert symlinks[0].target.endswith("/skills/cct-zbb-instraction-query")
 
+    def test_local_installation_is_projected_without_a_default_set_membership(
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
+    ):
+        """The Local compatibility bridge reads Installation for runtime sync."""
+        mock_skill_set_repo.get_all_active_skill_sets.return_value = []
+        mock_skill_repo.list_bot_installed_skills.return_value = [
+            {
+                "id": "42",
+                "name": "direct-local",
+                "git_path": "local:///workspace/skills-local/direct-local",
+            }
+        ]
+
+        symlinks = skill_set_service.get_symlink_mappings(
+            user_id="100015", bolt_id="default"
+        )
+
+        assert len(symlinks) == 1
+        assert symlinks[0].source == "/workspace/skills-local/direct-local"
+        assert symlinks[0].target.endswith("/workspace/skills/direct-local")
+        mock_skill_repo.list_bot_installed_skills.assert_called_once_with(
+            env="dev", owner_id="100015", bot_id="default"
+        )
+
     def test_pool_locator_is_used_as_mapping_source_without_legacy_rewrite(
         self, skill_set_service, mock_skill_set_repo
     ):

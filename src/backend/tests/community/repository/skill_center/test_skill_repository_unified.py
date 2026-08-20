@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.models import Skill, SkillSet, SkillSetSkill
+from agentclaw.community.core.models import BotSkillInstallation, Skill, SkillSet, SkillSetSkill
 from agentclaw.community.core.skill_center.local_skill_cleanup import (
     LocalSkillCleanupWorkModel,
 )
@@ -67,6 +67,7 @@ def db(tmp_path):
         Skill,
         SkillSet,
         SkillSetSkill,
+        BotSkillInstallation,
         SkillSetMCPServer,
         DefaultSkillsetMcpExclusion,
         DefaultSkillsetSkillExclusion,
@@ -123,7 +124,15 @@ def test_delete_removes_all_associations_for_active_and_inactive_local_skills(
     inactive_set = sets.create({"name": "inactive", "is_active": False})
     extra_set = sets.create({"name": "extra", "is_active": True})
     sets.add_skill_to_set(active_set["id"], active_skill["id"])
-    sets.add_skill_to_set(extra_set["id"], active_skill["id"])
+    # Model a historical duplicate that predates the ordinary-set uniqueness rule.
+    with db.orm_session() as session:
+        session.add(
+            SkillSetSkill(
+                skill_set_id=int(extra_set["id"]),
+                skill_id=int(active_skill["id"]),
+                env="dev",
+            )
+        )
     sets.add_skill_to_set(inactive_set["id"], inactive_skill["id"])
 
     assert skills.delete(active_skill["id"]) is True
@@ -526,7 +535,7 @@ def test_delete_by_bot_id(skills):
 
 
 def test_list_skill_set_references_includes_active_and_inactive_sets(
-    skills, sets
+    skills, sets, db
 ):
     skill = skills.create({"name": "referenced", "bolt_id": "bot-x"})
     active_set = sets.create(
@@ -536,7 +545,15 @@ def test_list_skill_set_references_includes_active_and_inactive_sets(
         {"name": "inactive", "bolt_id": "bot-x", "is_active": False}
     )
     sets.add_skill_to_set(active_set["id"], skill["id"])
-    sets.add_skill_to_set(inactive_set["id"], skill["id"])
+    # Preserve coverage for legacy duplicate membership rows.
+    with db.orm_session() as session:
+        session.add(
+            SkillSetSkill(
+                skill_set_id=int(inactive_set["id"]),
+                skill_id=int(skill["id"]),
+                env="dev",
+            )
+        )
 
     assert skills.list_skill_set_references(skill["id"]) == [
         {"skill_set_id": active_set["id"]},
@@ -584,6 +601,7 @@ def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
             "name": "local-a",
             "git_path": "local:///legacy/local-a",
             "bolt_id": "bot-x",
+            "user_id": "owner-x",
         }
     )
     repo = skills.create(
@@ -598,6 +616,7 @@ def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
             "name": "other-local",
             "git_path": "local:///legacy/other-local",
             "bolt_id": "bot-y",
+            "user_id": "other-owner",
         }
     )
     skill_set = sets.create(
@@ -614,12 +633,13 @@ def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
 
     local_assets = skills.list_bot_local_assets(
         env=local["env"],
+        owner_id="owner-x",
         bot_id="bot-x",
     )
     active_assets = skills.list_bot_active_assets(
         env=local["env"],
         bot_id="bot-x",
-        user_id="owner-x",
+        owner_id="owner-x",
         engine="openclaw",
     )
 
@@ -632,7 +652,7 @@ def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
     }
 
 
-def test_skills_pool_active_assets_include_default_set_and_exclusions(
+def test_skills_pool_active_assets_include_system_default_without_exclusion_state(
     skills, sets
 ):
     default_enabled = skills.create(
@@ -667,12 +687,15 @@ def test_skills_pool_active_assets_include_default_set_and_exclusions(
     assets = skills.list_bot_active_assets(
         env=default_enabled["env"],
         bot_id="bot-x",
-        user_id="owner-x",
+        owner_id="owner-x",
         engine="openclaw",
     )
 
+    # System Default is an unconditional Resolver input.  Its historical
+    # exclusion table is migration-only compatibility data, not desired state.
     assert [asset.git_path for asset in assets] == [
-        "git://defaults/enabled"
+        "git://defaults/enabled",
+        "git://defaults/excluded",
     ]
 
 

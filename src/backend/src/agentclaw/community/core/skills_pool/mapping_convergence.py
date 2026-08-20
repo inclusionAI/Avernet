@@ -65,7 +65,7 @@ async def converge_post_cutover_mappings(
             skills.list_bot_active_assets(
                 env=scope.env,
                 bot_id=scope.bot_id,
-                user_id=user_id,
+                owner_id=user_id,
                 engine=engine,
             )
         )
@@ -122,7 +122,7 @@ async def converge_post_cutover_mappings(
                 skills.list_bot_active_assets(
                     env=scope.env,
                     bot_id=scope.bot_id,
-                    user_id=user_id,
+                    owner_id=user_id,
                     engine=engine,
                 )
             )

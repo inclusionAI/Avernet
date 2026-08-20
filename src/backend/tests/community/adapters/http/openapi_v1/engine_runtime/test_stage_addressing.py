@@ -138,6 +138,35 @@ _OWNER_ADDRESSED_ELSEWHERE = {
         "delete",
         "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}",
     ),
+    # Phase-1 Skill controls are all owner-addressed. The Set and MCP routes
+    # may operate on a collaborator's Bot, so their caller and target owner
+    # cannot be collapsed into one field.
+    ("get", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
+    ("post", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"),
+    ("post", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"),
+    ("get", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content"),
+    ("get", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"),
+    ("put", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"),
+    ("get", "/openapi/v1/bots/{bot_id}/skill-sets"),
+    ("post", "/openapi/v1/bots/{bot_id}/skill-sets"),
+    ("get", "/openapi/v1/bots/{bot_id}/skill-sets/resources"),
+    ("get", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
+    ("put", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
+    ("post", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"),
+    ("post", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/deactivate"),
+    ("get", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills"),
+    ("put", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"),
+    ("get", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps"),
+    ("put", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"),
+    ("get", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permissions"),
+    ("post", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permission-requests"),
+    ("get", "/openapi/v1/bots/{bot_id}/mcps"),
+    ("post", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"),
+    ("post", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"),
 }
 
 

@@ -282,6 +282,10 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
+    # Tenant-identical marketplace searches expose no user-scoped state.
+    ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
+    ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
+    ("post", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/skills"),
     # The load-test endpoint answers a constant. It reads nothing and writes
     # nothing, so there is no scope for a user id to name — and a synthetic
     # endpoint measuring the shared path must not be the one exception that
@@ -339,14 +343,16 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: 83/1/45. Channels adds six Bot-addressed operations, and the Bot Space
 #: reassignment endpoint adds one more, yielding 90/1/45. Session Favorites then
 #: adds three Bot-addressed operations, Caller preparation adds one more, and the
-
 #: account-level IAM-token read adds one operation with no ``bot_id``. The Space
 #: Skill list adds one more account-level operation. Editors and render screens
 #: add another nine Bot-addressed operations, while the Bot catalog contributes
 #: two account-level reads, and the read-only Node inventory adds one more
-#: Bot-addressed operation, yielding 104/1/49.
-_BOT_ID_PLACEMENT = {"path": 104, "query": 1, "none": 49}
-
+#: Bot-addressed operation, yielding 104/1/49. Skill Installation then adds
+#: three Bot-addressed operations. Repo Catalog then adds three more
+#: Bot-addressed plus eight account-level operations, yielding 110/1/57.
+#: The merged contract contains 126 path-addressed Bots, one legacy
+#: query-addressed operation, and 53 non-Bot operations.
+_BOT_ID_PLACEMENT = {"path": 126, "query": 1, "none": 53}
 
 
 def _schema() -> dict:
@@ -435,13 +441,13 @@ def test_the_pinned_number_of_operations_take_it():
     # for the Bot Chats operations. The combined Bot Workshop surface adds a
     # further net 32 user-scoped operations (27 bot-addressed and five
     # account-level operations), then +6 for Bot-scoped Channels CRUD/status,
-
     # then +1 for Bot Space reassignment, +3 for Session Favorites, +2 for
     # IAM-token retrieval and Caller preparation, +1 for Space Skill list, then
     # +5 for Editors and +4 for render screens. The read-only Node inventory adds
-    # the final operation.
-    assert len(taking) == 141
-
+    # the final operation. Skill Installation adds three further Bot-addressed
+    # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
+    # MCP adds eight operations.
+    assert len(taking) == 164
 
 
 def test_the_exempt_operations_take_none():

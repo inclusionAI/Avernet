@@ -14,6 +14,9 @@ from tests.community.adapters.http.openapi_v1.conftest import (
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
+)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -106,6 +109,12 @@ def test_every_skills_operation_is_guarded_from_another_tenant(
                 "user_id": _OWNER,
                 "bolt_id": _PRIVATE_BOT_ID,
             }
+        )
+        assert world.get(SkillInstallationRepositoryProtocol).install(
+            env="dev",
+            owner_id=_OWNER,
+            bot_id=_PRIVATE_BOT_ID,
+            skill_id=skill["id"],
         )
         world.get(BotRepository).insert(
             {

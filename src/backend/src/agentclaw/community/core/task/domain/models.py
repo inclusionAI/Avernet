@@ -37,6 +37,17 @@ class RelationType(StrEnum):
     DEPENDENCY = "DEPENDENCY"   # 分解树边(承载结构归属,单入)
 
 
+class NodeAction(StrEnum):
+    """节点动作级事件类型(append-only 历史快照;纯可观测,不入状态机驱动)。"""
+
+    PLAN = "plan"               # 规划(gap 计算 + 产子);payload: target/children/has_gap/gap_detail
+    DISPATCH = "dispatch"       # 搜推派发结果;payload: outcome(HIT_SINGLE|HIT_MULTI|MISS)/run_mode/assignee/miss_reason
+    EXECUTE = "execute"         # 执行产出(bot 回投 output/exec_error);payload: success/exec_error/output
+    VERIFY = "verify"           # 验收结论;payload: verdict/acceptances_metric/gaps
+    RESET = "reset"             # harness 复位重投;payload: reason/prev_status/harness_retries
+    TRANSITION = "transition"   # 框架直驱翻态(HUNG/传播 DONE);payload: reason
+
+
 # ===== 规格面(Task Specification)=====
 @dataclass
 class Metadata:
@@ -91,16 +102,39 @@ class AcceptanceResult:
 
 
 @dataclass
+class NodeActionEvent:
+    """节点动作级历史快照(append-only;纯可观测回溯/BBS 上下文聚合,不入驱动逻辑)。
+
+    单值字段(output/acceptance_result/start_time 等)是「当前态/最新态」,
+    编排核只读单值;``action_log`` 是「动作轨迹」,按动作发生顺序只增不覆盖。
+    """
+
+    seq: int                              # 节点内自增序号(1-based;由 SSOT 网关 append 时填)
+    ts: int                               # 动作发生时间戳(毫秒,由网关填 int(time.time()*1000))
+    action: NodeAction
+    loop_round: int = 0                   # 图级 loop_round 快照(定位第几轮)
+    attempt: int = 0                      # planning/执行重试序号(harness_retries 快照)
+    status_from: Status | None = None     # 动作发生前态
+    status_to: Status | None = None       # 动作发生后态(None=未翻态,如纯 plan)
+    payload: dict[str, Any] = field(default_factory=dict)  # 动作产出全量(按 action 类型)
+
+
+@dataclass
 class RuntimeInfo:
-    """节点运行时实时执行信息(所有 None 均合法域态)。"""
+    """节点运行时实时执行信息(所有 None 均合法域态)。
+
+    单值字段(output/acceptance_result/start_time 等)= 当前态/最新态(编排核只读驱动);
+    ``action_log`` = 动作级历史快照(append-only,默认不序列化,诊断页 include_action_log 开)。
+    """
 
     run_mode: str | None = None              # "single_bot"/"coop_group"/"bbs";无 collab_mode
     assignee: str | None = None              # 执行者(bot_id / group_id)
-    start_time: float | None = None
-    end_time: float | None = None
+    start_time: int | None = None         # 进 RUNNING 时写(毫秒,int(time.time()*1000))
+    end_time: int | None = None           # 进终态时写(毫秒,int(time.time()*1000))
     output: dict[str, Any] = field(default_factory=dict)
     acceptance_result: AcceptanceResult | None = None
     extend_props: dict[str, Any] = field(default_factory=dict)  # miss_events/崩溃栈/超时/hung_reason(stuck)
+    action_log: list[NodeActionEvent] = field(default_factory=list)  # 动作级历史快照(append-only)
 
 
 @dataclass
@@ -132,7 +166,7 @@ class TaskExecutionGraph:
     """任务运行时执行图。"""
 
     run_id: int                   # 运行实例唯一 ID
-    loop_round: int               # 外层 BBS 上升轮次(仅升 BBS 时 ++;达 BBS_MAX_DEPTH→STUCK→HUNG)
+    loop_round: int               # 图级总轮次(根 gap 不闭重 plan + 升 BBS 时 ++;达 MAX_LOOP→图 HUNG)
     status: Status
     output: dict[str, Any] = field(default_factory=dict)
     tasks: list[TaskNode] = field(default_factory=list)
@@ -141,10 +175,31 @@ class TaskExecutionGraph:
     # 派生不持久: depth / child_tasks / parent_task(均从 relations 分解树派生)
 
 
+
+@dataclass
+class TaskSummary:
+    """任务摘要(列表视图轻量投影;非完整图)。``list_task_summaries`` 返回项。"""
+
+    task_id: str
+    run_id: int
+    status: Status
+    title: str = ""              # 根节点 task_spec.metadata.title
+    node_count: int = 0          # 图中节点总数
+    loop_round: int = 0          # 图级轮次
+    bbs_mode: bool = False       # 图 extend_props["bbs_mode"] 投影(BBS-relay 升级标志)
+
 # ===== 中间类型(patch/criteria/op_result/callback)=====
 @dataclass
 class TaskNodePatch:
-    """节点级原子写(``update_task_node_info`` 入参)。"""
+    """节点级原子写(``update_task_node_info`` 入参)。
+
+    终态翻转三选一(互斥):　
+    ① ``acceptance_result`` 非空 → 验收驱动(RUNNING→DONE/FAILED):PASS→DONE / FAIL+gaps→FAILED;　
+    ② ``exec_error`` 非空 → 执行报错(bot 压根没跑通:run FAILED / SLA 超时 / poll 耗尽),
+       不翻终态,由编排核 on_harness 复位重投(计数,达上限→HUNG);　
+    ③ ``status`` 非空(无前两者)→ 框架直驱(PENDING→RUNNING 派发 / RUNNING→PENDING harness 复位 等)。　
+    三者全空 → 仅 fold 非状态字段(output/run_mode/assignee/extend_props)。
+    """
 
     task_id: str
     node_id: str
@@ -152,8 +207,24 @@ class TaskNodePatch:
     run_mode: str | None = None
     assignee: str | None = None
     output_patch: dict[str, Any] | None = None               # fold 到 run_info.output
-    acceptance_result: AcceptanceResult | None = None        # 唯一终态翻转依据
-    extend_props_patch: dict[str, Any] | None = None         # miss_events / hung_reason(stuck) / 崩溃栈
+    acceptance_result: AcceptanceResult | None = None        # 验收驱动终态翻转(PASS→DONE/FAIL+gaps→FAILED)
+    exec_error: str | None = None                            # 执行报错信号(非验收;→ on_harness 重投,)
+    extend_props_patch: dict[str, Any] | None = None         # miss_events / hung_reason(stuck) / harness_retries / 崩溃栈
+
+
+@dataclass
+class TaskGraphPatch:
+    """图级原子写(``update_task_graph_info`` 入参);收口图级终态(图 ``status``/``loop_round``/``output``/``extend_props``)。
+
+    所有字段可选(增量 patch):未给的字段不动。``loop_round_increment`` 非空时执行原子加(默认 +1);
+    ``status`` 非空时置图级终态;``output_patch`` 浅合并到图 ``output``;``extend_props_patch`` 浅合并到图
+    ``extend_props``(承载 ``bbs_mode``/``hung_reason`` 等)。
+    """
+
+    loop_round_increment: int | None = None
+    status: Status | None = None
+    output_patch: dict[str, Any] | None = None
+    extend_props_patch: dict[str, Any] | None = None
 
 
 @dataclass
@@ -195,4 +266,18 @@ class TaskCallbackData:
     workflow_type: str            # "single_bot" | "bcn_coop_group" | "bbs" | ...
     workflow_id: int
     instance_id: int              # workflow 运行实例 id
-    result: dict[str, Any]        # {"success": bool, "data": "..."} / {"fail_detail": "..."}
+    result: dict[str, Any]        # {"success":bool,"data":Any,"gaps":list[str]} / {"exec_error":str}
+
+
+@dataclass
+class PlanResult:
+    """规划产物(对齐 plan 返回契约)。四象限驱动编排:　
+
+    - ``children`` 非空 → gap 未闭,有可执行子任务:add_task_nodes + dispatch;　
+    - ``children`` 空 ∧ ``has_gap``=False → gap 已闭(验收通过):节点 DONE 上行 / 根 gap 闭→图终态;　
+    - ``children`` 空 ∧ ``has_gap``=True → 有 gap 但拆不出子(无规划能力):深度闸门判断(<MAX 升 BBS / ≥MAX HUNG)。
+    """
+
+    children: list["TaskNode"] = field(default_factory=list)
+    has_gap: bool = False
+    gap_detail: str = ""                # gap 描述(空+has_gap=True 时说明为何拆不出;has_gap=False 时可为 "done")

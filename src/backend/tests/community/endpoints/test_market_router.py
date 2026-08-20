@@ -50,9 +50,8 @@ def _enable_auth(_world) -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
 
 
-def _input(body: dict, *, user_id: str = _USER_ID) -> CaseInput:
+def _input(body: dict) -> CaseInput:
     return CaseInput(
-        query_params={"user_id": user_id},
         headers=_headers(),
         json_body=body,
     )
@@ -74,8 +73,8 @@ for _path, _body in (
     endpoint_test(
         method="POST",
         path=_path,
-        scenario="wrong_user",
+        scenario="invalid_request",
         seed=_enable_auth,
-        input=_input(_body, user_id="someone-else"),
-        expect=ExpectError(status=403),
+        input=_input({"page_num": "not-an-integer", "pageNum": "not-an-integer"}),
+        expect=ExpectError(status=422),
     )(lambda: None)

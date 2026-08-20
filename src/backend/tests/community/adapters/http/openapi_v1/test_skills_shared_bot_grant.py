@@ -41,6 +41,9 @@ from agentclaw.community.api.local_skill_state_service import (
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
+from agentclaw.community.api.bot_skill_asset_service import (
+    BotSkillAssetServiceProtocol,
+)
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
 from agentclaw.community.core.gateway_principal import (
     AppPrincipal,
@@ -121,7 +124,7 @@ class _Skills:
         assert (bot_id, owner_id) == (BOT, OWNER), (bot_id, owner_id)
         return 0, []
 
-    async def delete_local_skill(self, *, skill_id: str, actor_id: str):
+    async def delete_local_skill(self, *, skill_id: str, owner_id: str, user_id: str):
         return None
 
     async def set_local_skill_active(self, *, skill_id: str, actor_id: str, active):
@@ -129,6 +132,28 @@ class _Skills:
             **self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
             "changed": True,
         }
+
+    def get_skill(self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str):
+        assert (bot_id, owner_id) == (BOT, OWNER)
+        record = self.get_local_skill(skill_id=skill_id, actor_id=user_id)
+        return record
+
+    async def set_active(
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str, active
+    ):
+        assert (bot_id, owner_id) == (BOT, OWNER)
+        return await self.set_local_skill_active(
+            skill_id=skill_id, actor_id=user_id, active=active
+        )
+
+    async def get_content(self, **_kwargs):
+        return "---\nname: shared-skill\n---\n# Shared"
+
+    async def get_parameters(self, **_kwargs):
+        return {"enabled": False}
+
+    async def replace_parameters(self, *, parameters, **_kwargs):
+        return parameters
 
     async def upload_local_skill(self, *, bot_id, owner_id, actor_id, package):
         assert (bot_id, owner_id) == (BOT, OWNER), (bot_id, owner_id)
@@ -150,6 +175,7 @@ def client():
                 LocalSkillDeleteServiceProtocol,
                 LocalSkillStateServiceProtocol,
                 LocalSkillUploadServiceProtocol,
+                BotSkillAssetServiceProtocol,
             ):
                 binder.bind(protocol, to=skills)
 
@@ -177,25 +203,25 @@ PAIRS = [
     (
         "get",
         "GET",
-        f"/openapi/v1/bots/{BOT}/skills/{SKILL}?user_id={CALLER}",
+        f"/openapi/v1/bots/{BOT}/skills/{SKILL}?user_id={CALLER}&owner_id={OWNER}",
         f"/openapi/v1/bots/skills/{SKILL}?user_id={CALLER}",
     ),
     (
         "activate",
         "POST",
-        f"/openapi/v1/bots/{BOT}/skills/{SKILL}/activate?user_id={CALLER}",
+        f"/openapi/v1/bots/{BOT}/skills/{SKILL}/activate?user_id={CALLER}&owner_id={OWNER}",
         f"/openapi/v1/bots/skills/{SKILL}/activate?user_id={CALLER}",
     ),
     (
         "deactivate",
         "POST",
-        f"/openapi/v1/bots/{BOT}/skills/{SKILL}/deactivate?user_id={CALLER}",
+        f"/openapi/v1/bots/{BOT}/skills/{SKILL}/deactivate?user_id={CALLER}&owner_id={OWNER}",
         f"/openapi/v1/bots/skills/{SKILL}/deactivate?user_id={CALLER}",
     ),
     (
         "delete",
         "DELETE",
-        f"/openapi/v1/bots/{BOT}/skills/{SKILL}?user_id={CALLER}",
+        f"/openapi/v1/bots/{BOT}/skills/{SKILL}?user_id={CALLER}&owner_id={OWNER}",
         f"/openapi/v1/bots/skills/{SKILL}?user_id={CALLER}",
     ),
 ]
@@ -256,7 +282,33 @@ def test_a_skill_on_another_bot_is_not_reachable_through_this_address(client) ->
     naming a different bot is the case where the address and the record
     disagree — and it must be masked as absent.
     """
+    response = client.get(f"/openapi/v1/bots/b-other/skills/{SKILL}?user_id={CALLER}")
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("method", "suffix", "body"),
+    [
+        ("GET", "content", None),
+        ("GET", "parameters", None),
+        ("PUT", "parameters", {"parameters": {"enabled": False}}),
+    ],
+)
+def test_a_granted_application_reaches_the_unified_asset_operations(
+    client, method: str, suffix: str, body
+) -> None:
+    response = client.request(
+        method,
+        f"/openapi/v1/bots/{BOT}/skills/{SKILL}/{suffix}?user_id={CALLER}&owner_id={OWNER}",
+        json=body,
+    )
+    assert response.status_code == 200
+
+
+def test_a_granted_application_cannot_aim_asset_operations_at_another_bot(
+    client,
+) -> None:
     response = client.get(
-        f"/openapi/v1/bots/b-other/skills/{SKILL}?user_id={CALLER}"
+        f"/openapi/v1/bots/b-other/skills/{SKILL}/content?user_id={CALLER}"
     )
     assert response.status_code == 404

@@ -17,6 +17,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
+    SkillEngineNotSupportedError,
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
@@ -85,6 +86,17 @@ class _Repo:
         self.created.clear()
         return True
 
+    def list_bot_active_assets(self, **_kwargs):
+        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+
+        return [
+            RegisteredSkillAsset(
+                skill_id=int(row["id"]), name=row["name"], git_path=row["git_path"]
+            )
+            for row in self.created
+            if row.get("active")
+        ]
+
 
 class _Sets:
     def __init__(self, fail_at=None, default_exists=True):
@@ -135,14 +147,24 @@ class _Sets:
 
 
 class _Bot:
-    def __init__(self, status="ACTIVE", entity_id="owner"):
+    def __init__(
+        self,
+        status="ACTIVE",
+        entity_id="owner",
+        *,
+        bot_type="personal",
+        engine="openclaw",
+    ):
         self.status = status
         self.entity_id = entity_id
+        self.bot_type = bot_type
+        self.engine = engine
 
     def get_by_id_and_owner(self, *_):
         return {
             "status": self.status,
-            "active_engine": "moltis",
+            "active_engine": self.engine,
+            "bot_type": self.bot_type,
             "env": "test",
             "entity_id": self.entity_id,
         }
@@ -361,8 +383,11 @@ class _RuntimeFactory:
     def create(self, **kwargs):
         return self
 
-    def sync_runtime(self):
+    def sync_runtime(self, *, desired_skills=None):
         return True
+
+    async def reconcile(self, **_kwargs):
+        return None
 
 
 class _ReplacementRepo(_Repo):
@@ -372,6 +397,17 @@ class _ReplacementRepo(_Repo):
         self.updates = []
         self.atomic_replacements = []
         self.cleanup = None
+
+    def list_bot_active_assets(self, **_kwargs):
+        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+
+        return [
+            RegisteredSkillAsset(
+                skill_id=int(row["id"]), name=row["name"], git_path=row["git_path"]
+            )
+            for row in self.rows
+            if row.get("active")
+        ]
 
     def list_bot_local_by_name(self, **_kwargs):
         return self.rows
@@ -460,9 +496,14 @@ class _ReplacementRuntime:
     def create(self, **_kwargs):
         return self
 
-    def sync_runtime(self):
+    def sync_runtime(self, *, desired_skills=None):
         self.calls += 1
         return next(self.results)
+
+    async def reconcile(self, **_kwargs):
+        self.calls += 1
+        if not next(self.results):
+            raise RuntimeError("runtime reconcile failed")
 
 
 class _DeviceResolver:
@@ -484,11 +525,11 @@ def _replacement_service(
         _Bot(),
         _Collaborators(),
         _ReplacementFactory(filesystem),
-        runtime,
         _Audit(),
         guard or _Guard(),
         cleanup,
         lambda: _DeviceResolver(provider),
+        runtime,
     )
 
 
@@ -511,11 +552,11 @@ def _service(
         bot or _Bot(status),
         collaborators or _Collaborators(),
         factory or _Factory(filesystem),
-        _RuntimeFactory(),
         audit or _Audit(),
         guard or _Guard(),
         _Cleanup(),
         lambda: _DeviceResolver(provider),
+        _RuntimeFactory(),
     )
 
 
@@ -540,6 +581,22 @@ async def test_upload_maps_guard_failures_to_public_domain_errors(
     )
 
     with pytest.raises(expected_error):
+        await service.upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md()}),
+        )
+
+
+@pytest.mark.asyncio
+async def test_upload_fails_closed_for_unsupported_bot_engine_pair():
+    service = _service(
+        _Filesystem(),
+        bot=_Bot(bot_type="desktop", engine="claude_code"),
+    )
+
+    with pytest.raises(SkillEngineNotSupportedError):
         await service.upload_local_skill(
             bot_id="bot",
             owner_id="owner",
@@ -574,11 +631,7 @@ async def test_upload_keeps_bot_owner_when_collaborator_is_actor():
             "detail": '{"action": "local_skill_upload", "skill_id": "9"}',
         }
     ]
-    assert sets.default_args == {
-        "user_id": "owner",
-        "bolt_id": "bot",
-        "engine_type": "moltis",
-    }
+    assert sets.default_args is None
 
 
 @pytest.mark.asyncio
@@ -630,7 +683,7 @@ async def test_upload_resolves_package_storage_with_bot_entity():
             "entity_id": "project-entity",
             "owner_id": "owner",
             "bot_id": "bot",
-            "engine_type": "moltis",
+            "engine_type": "openclaw",
             "entity_type": "staff",
             "is_desktop": False,
             "is_teclaw": False,
@@ -641,7 +694,7 @@ async def test_upload_resolves_package_storage_with_bot_entity():
 
 
 @pytest.mark.asyncio
-async def test_upload_creates_missing_bot_default_set_before_association():
+async def test_upload_stays_inactive_without_creating_a_default_set_membership():
     filesystem = _Filesystem()
     sets = _Sets(default_exists=False)
     service = _service(filesystem, sets=sets)
@@ -654,25 +707,9 @@ async def test_upload_creates_missing_bot_default_set_before_association():
     )
 
     assert result["operation"] == "created"
-    assert sets.default_args == {
-        "user_id": "owner",
-        "bolt_id": "bot",
-        "engine_type": "moltis",
-    }
-    assert sets.created_sets == [
-        {
-            "id": "4",
-            "name": "默认技能集",
-            "description": "系统默认技能集，用户可以根据需要添加或移除技能",
-            "user_id": "owner",
-            "bolt_id": "bot",
-            "is_default": True,
-            "is_builtin": False,
-            "is_active": False,
-            "engine_type": "moltis",
-        }
-    ]
-    assert sets.associations == [("4", "9")]
+    assert sets.default_args is None
+    assert sets.created_sets == []
+    assert sets.associations == []
 
 
 @pytest.mark.asyncio
@@ -844,7 +881,7 @@ class _FailAudit(_Audit):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "stage", ["write", "create", "association", "exclusion", "audit"]
+    "stage", ["write", "create", "audit"]
 )
 async def test_each_creation_failure_compensates_and_never_returns_success(stage):
     package = _zip({"SKILL.md": _skill_md()})
@@ -949,7 +986,7 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     assert result["skill"]["user_id"] == "owner"
     assert result["skill"]["active"] is False
     assert result["skill"]["git_path"] != "local:///private/skills-local/upload-skill"
-    assert sets.exclusions == [("owner", "bot", 4, 9)]
+    assert sets.exclusions == []
     assert runtime.calls == 1
     assert "/private/skills-local/upload-skill" in filesystem.deleted
     assert any("replacement-" in path for path in filesystem.files)
@@ -1011,7 +1048,7 @@ async def test_replacement_reads_desired_state_from_exact_local_skill_query():
 
 
 @pytest.mark.asyncio
-async def test_active_replacement_repairs_missing_default_set_membership_before_sync():
+async def test_active_replacement_keeps_installation_owned_state_before_sync():
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
     repo = _ReplacementRepo([_existing_skill(active=True)])
@@ -1025,7 +1062,7 @@ async def test_active_replacement_repairs_missing_default_set_membership_before_
         package=_zip({"SKILL.md": _skill_md(description="new description")}),
     )
 
-    assert sets.associations == [("4", "9")]
+    assert sets.associations == []
     assert runtime.calls == 1
 
 

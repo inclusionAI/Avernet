@@ -45,6 +45,10 @@ class LocalSkillStorageError(Exception):
     """A package persistence or compensating cleanup operation failed."""
 
 
+class SkillParameterValidationError(Exception):
+    """The full Bot-level parameter object violates SKILL.md config."""
+
+
 class LocalSkillRuntimeSyncError(Exception):
     """The runtime projection could not match Local Skill desired state."""
 
@@ -67,3 +71,55 @@ class LocalSkillEditLockUnavailableError(LocalSkillEditPausedError):
 
 class ActiveSkillSetReferenceError(RuntimeError):
     """A Skill became referenced by an active custom SkillSet."""
+
+
+class SkillManagedBySkillSetError(Exception):
+    """A Direct command addressed a Skill owned by a normal SkillSet."""
+
+
+class SkillRuntimeNameConflictError(Exception):
+    """A Direct activation would create an ambiguous runtime entry name."""
+
+
+class SkillEngineNotSupportedError(Exception):
+    """The addressed Bot type and logical Engine cannot consume this Skill."""
+
+
+class RepositoryCatalogNotFoundError(Exception):
+    """A governed shared Repo Skill is not visible in this environment."""
+
+
+class RepositoryCatalogSyncInProgressError(Exception):
+    """The environment-wide governed Repo synchronization already has a holder."""
+
+
+class RepositoryCatalogSyncFailedError(Exception):
+    """The governed Repo synchronization could not finish successfully."""
+
+
+class SkillSetControlPlaneNotFoundError(Exception):
+    """A canonical SkillSet is absent from the addressed Bot scope."""
+
+
+class SkillSetAccessDeniedError(Exception):
+    """The authenticated principal cannot mutate the addressed Bot SkillSet."""
+
+
+class SkillSetControlPlaneConflictError(Exception):
+    """A canonical SkillSet command conflicts with desired state."""
+
+
+class SkillSetRuntimeReconcileError(Exception):
+    """Runtime reconciliation failed after desired-state compensation."""
+
+
+class SkillSetControlPlaneLockUnavailableError(Exception):
+    """The Bot capability mutation fence is unavailable; mutation failed closed."""
+
+
+class SkillSetManagedResourceError(Exception):
+    """A Direct command targets a resource managed by an ordinary SkillSet."""
+
+
+class McpPermissionDeniedError(Exception):
+    """The actor cannot install or activate the addressed MCP server."""

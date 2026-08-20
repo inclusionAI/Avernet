@@ -201,6 +201,13 @@ pub trait ProviderManagementService: Send + Sync {
         provider_admin_token: &str,
     ) -> ServiceResult<ProviderRecord>;
 
+    /// Authenticate a Provider admin token for an enabled Provider.
+    async fn get_active_provider(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<ProviderRecord>;
+
     async fn update_provider(
         &self,
         command: UpdateProviderCommand,

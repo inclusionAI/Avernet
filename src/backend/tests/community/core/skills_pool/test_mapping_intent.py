@@ -165,6 +165,74 @@ def test_rejects_duplicate_active_target() -> None:
         )
 
 
+def test_repo_runtime_name_uses_skill_name_not_path_tail() -> None:
+    with pytest.raises(ValueError, match="duplicate managed target"):
+        build_logical_skill_mappings(
+            [
+                RegisteredSkillAsset(
+                    skill_id=1,
+                    name="report",
+                    git_path="git://ops/weekly-report",
+                ),
+                RegisteredSkillAsset(
+                    skill_id=2,
+                    name="report",
+                    git_path="git://finance/monthly-report",
+                ),
+            ]
+        )
+
+
+def test_repo_retirement_evidence_round_trips_when_name_differs_from_locator_tail() -> None:
+    current = build_logical_skill_mappings(
+        [
+            RegisteredSkillAsset(
+                skill_id=1,
+                name="incident-review",
+                git_path="git://ops/weekly-report",
+            )
+        ]
+    )
+
+    assert logical_skill_mappings_from_evidence(
+        {"retired_mappings": [current[0].to_dict()]}
+    ) == current
+
+
+def test_retirement_evidence_rejects_same_runtime_name_with_different_identities() -> None:
+    with pytest.raises(ValueError, match="ambiguous retired mapping evidence"):
+        logical_skill_mappings_from_evidence(
+            {
+                "retired_mappings": [
+                    {
+                        "corpus": "repo",
+                        "relative_path": "ops/weekly-report",
+                        "link_name": "incident-review",
+                    },
+                    {
+                        "corpus": "repo",
+                        "relative_path": "finance/monthly-report",
+                        "link_name": "incident-review",
+                    },
+                ]
+            }
+        )
+
+
+def test_legacy_retirement_evidence_with_matching_tail_remains_compatible() -> None:
+    assert logical_skill_mappings_from_evidence(
+        {
+            "retired_mappings": [
+                {
+                    "corpus": "local",
+                    "relative_path": "writer",
+                    "link_name": "writer",
+                }
+            ]
+        }
+    ) == [PoolSkillMapping(corpus="local", relative_path="writer", link_name="writer")]
+
+
 def test_validates_and_keys_engine_returned_locator_evidence() -> None:
     assets = [
         RegisteredSkillAsset(

@@ -5,6 +5,9 @@ from __future__ import annotations
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.workspace.skill_layout import (
+    runtime_layout_engine_for_bot,
+)
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     CUTOVER_EVIDENCE_CONTRACT_VERSION,
     RuntimeLayoutProbeResult,
@@ -119,6 +122,13 @@ class SkillsPoolReconcileService:
         if engine not in FILESYSTEM_POOL_ENGINES:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
 
+        # ``engine`` is the logical control-plane identity.  Coding-template
+        # Bots retain Claude Code catalogue/asset semantics while their image
+        # exposes the AICoding filesystem layout to the Pool runtime.
+        layout_engine = runtime_layout_engine_for_bot(bot)
+        if layout_engine not in FILESYSTEM_POOL_ENGINES:
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
+
         owner_id = bot.get("owner_id")
         if not isinstance(owner_id, (str, int)) or isinstance(owner_id, bool):
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
@@ -133,7 +143,7 @@ class SkillsPoolReconcileService:
         probe = await self._runtime.probe(
             bot_id=scope.bot_id,
             user_id=user_id,
-            engine=engine,
+            engine=layout_engine,
         )
         logger.info(
             "[skills_pool.reconcile] runtime probe bot_id=%s generation=%s "
@@ -146,7 +156,7 @@ class SkillsPoolReconcileService:
         )
         finalizing_repo_retirement_resume = is_trusted_aicoding_repo_retirement_resume(
             state=state,
-            engine=engine,
+            engine=layout_engine,
             probe=probe,
         )
         if (
@@ -304,12 +314,13 @@ class SkillsPoolReconcileService:
 
         local_assets = self._skills.list_bot_local_assets(
             env=scope.env,
+            owner_id=user_id,
             bot_id=scope.bot_id,
         )
         active_assets = self._skills.list_bot_active_assets(
             env=scope.env,
             bot_id=scope.bot_id,
-            user_id=user_id,
+            owner_id=user_id,
             engine=engine,
         )
         try:
@@ -789,6 +800,9 @@ class SkillsPoolReconcileService:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
         if engine not in FILESYSTEM_POOL_ENGINES:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
+        layout_engine = runtime_layout_engine_for_bot(bot)
+        if layout_engine not in FILESYSTEM_POOL_ENGINES:
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
         owner_id = bot.get("owner_id")
         if not isinstance(owner_id, (str, int)) or isinstance(owner_id, bool):
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
@@ -796,11 +810,11 @@ class SkillsPoolReconcileService:
         probe = await self._runtime.probe(
             bot_id=scope.bot_id,
             user_id=str(owner_id),
-            engine=engine,
+            engine=layout_engine,
         )
         if is_aicoding_active_mapping_reconciliation_candidate(
             state=state,
-            engine=engine,
+            engine=layout_engine,
             probe=probe,
         ):
             return await self._reconcile_active_aicoding_repo_bridges(
@@ -808,7 +822,8 @@ class SkillsPoolReconcileService:
                 state=state,
                 bot_id=scope.bot_id,
                 user_id=str(owner_id),
-                engine=engine,
+                logical_engine=engine,
+                layout_engine=layout_engine,
                 initial_probe=probe,
             )
         if probe.status is not RuntimeLayoutProbeStatus.READY:
@@ -836,7 +851,7 @@ class SkillsPoolReconcileService:
                     self._skills.list_bot_active_assets(
                         env=scope.env,
                         bot_id=scope.bot_id,
-                        user_id=str(owner_id),
+                        owner_id=str(owner_id),
                         engine=engine,
                     )
                 )
@@ -887,7 +902,8 @@ class SkillsPoolReconcileService:
         state: BotSkillLayoutState,
         bot_id: str,
         user_id: str,
-        engine: str,
+        logical_engine: str,
+        layout_engine: str,
         initial_probe: RuntimeLayoutProbeResult,
     ) -> SkillsPoolReconcileResult:
         repair = await request_active_aicoding_bridge_repair(
@@ -897,7 +913,8 @@ class SkillsPoolReconcileService:
             state=state,
             bot_id=bot_id,
             user_id=user_id,
-            engine=engine,
+            logical_engine=logical_engine,
+            layout_engine=layout_engine,
             initial_probe=initial_probe,
         )
         if repair.status is ActiveAICodingBridgeRepairStatus.ENGINE_REJECTED:

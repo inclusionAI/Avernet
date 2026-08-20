@@ -591,6 +591,24 @@ def test_the_name_check_needs_no_delegation(make_client):
 #: *nothing*, and what the empty answer must look like. `assert_starved` gets
 #: the response; it must assert the app learned nothing.
 _UNGRANTED_APP_CASES = {
+    ("GET", "/openapi/v1/bots/skills/repository"): {
+        "request": lambda client: client.get("/openapi/v1/bots/skills/repository"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/skills/repository/tree"): {
+        "request": lambda client: client.get("/openapi/v1/bots/skills/repository/tree"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/skills/repository/{skill_id}"): {
+        "request": lambda client: client.get("/openapi/v1/bots/skills/repository/1"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/skills/repository/sync"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/skills/repository/sync"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("GET", "/openapi/v1/bots"): {
         "request": lambda client: client.get("/openapi/v1/bots"),
         "assert_starved": lambda response: (

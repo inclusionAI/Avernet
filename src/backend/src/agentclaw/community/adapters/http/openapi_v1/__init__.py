@@ -206,13 +206,16 @@ from .local import router as local_router
 from .loadtest import router as loadtest_router
 from .market import router as market_router
 from .mcp import router as mcp_router
+from .mcp.router import bot_mcp_router
 from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
 from .bot_public import router as bot_public_router
 from .resources import router as resources_router
 from .render_screens import router as render_screens_router
+from .repository_catalog import router as repository_catalog_router
 from .routines import router as routines_router
 from .skills import router as skills_router
+from .skill_sets import router as skill_sets_router
 from .service_publications import (
     edit_lock_router as service_edit_lock_router,
     router as service_lifecycle_router,
@@ -274,12 +277,8 @@ _SUBGROUPS = [
     # owner/collaborator adjudication. Their own route dependency checks an
     # app-only caller's grant against the addressed owner.
     chats_router,
-    # Mixed, like `bots`: its two collection operations declare the grant check
-    # per route, and its four `{skill_id}` operations resolve the bot's owner
-    # from the skill record and check it themselves. A group-level dependency
-    # here would refuse an application holding a valid grant on a *shared* bot,
-    # because it would look the grant up against the delegating user rather than
-    # the owner. See `skills/router.py` and `admission.SKILL_SCOPED_OPERATIONS`.
+    # Every current Skill operation carries the addressed owner at its public
+    # boundary, so collection and item operations share one grant model.
     skills_router,
     # Local workflows are mixed: listings filter grants, device discovery is
     # user-gated, existing Bot operations check the own-Bot grant, and only the
@@ -304,6 +303,8 @@ _ADDRESSED_BOT_SUBGROUPS = [
     containers_router,
     diagnostics_router,
     channels_router,
+    skill_sets_router,
+    bot_mcp_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
@@ -425,6 +426,11 @@ def build_public_router() -> APIRouter:
     public.include_router(
         bot_public_router,
         responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        repository_catalog_router,
+        responses=USER_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
     for router in _GROUPS_WITHOUT_CALLER_SCOPE + _MIXED_GROUPS:

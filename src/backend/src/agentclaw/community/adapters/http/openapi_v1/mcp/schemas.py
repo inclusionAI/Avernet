@@ -272,3 +272,10 @@ class McpConfigWrite(BaseModel):
         description="Replacement header map sent to the server on every "
         "call; omit to leave unchanged.",
     )
+
+
+class BotMcpItem(BaseModel):
+    """An MCP server in one Bot's desired-state projection."""
+
+    server_code: str = Field(description=_SERVER_CODE_DESC)
+    active: bool = Field(description="Whether the MCP has a desired-state installation.")

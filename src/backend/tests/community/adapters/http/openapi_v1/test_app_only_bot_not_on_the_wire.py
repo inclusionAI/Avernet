@@ -46,6 +46,7 @@ from agentclaw.community.api.local_skill_state_service import (
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
+from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
 from agentclaw.community.core.gateway_principal import (
     AppPrincipal,
@@ -137,24 +138,38 @@ class _Skills:
             "gmt_modified": datetime(2026, 8, 2),
         }
 
-    async def delete_local_skill(self, *, skill_id: str, actor_id: str):
+    async def delete_local_skill(self, *, skill_id: str, owner_id: str, user_id: str):
         self.deleted.append(skill_id)
 
     async def set_local_skill_active(self, *, skill_id: str, actor_id: str, active):
         self.activated.append(skill_id)
-        return {**self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
-                "changed": True}
+        return {
+            **self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
+            "changed": True,
+        }
 
-    def list_local_skills(self, *, bot_id, owner_id, actor_id, page, page_size,
-                          active=None, keyword=None):
+    def get_skill(self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str):
+        return self.get_local_skill(skill_id=skill_id, actor_id=user_id)
+
+    async def set_active(
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str, active
+    ):
+        return await self.set_local_skill_active(
+            skill_id=skill_id, actor_id=user_id, active=active
+        )
+
+    def list_local_skills(
+        self, *, bot_id, owner_id, actor_id, page, page_size, active=None, keyword=None
+    ):
         self.listed.append((bot_id, owner_id))
         return 0, []
 
     async def upload_local_skill(self, *, bot_id, owner_id, actor_id, package):
         self.uploaded.append((bot_id, owner_id))
-        return {"operation": "created",
-                "skill": self.get_local_skill(skill_id=GRANTED_SKILL,
-                                              actor_id=actor_id)}
+        return {
+            "operation": "created",
+            "skill": self.get_local_skill(skill_id=GRANTED_SKILL, actor_id=actor_id),
+        }
 
 
 class _Cron:
@@ -185,6 +200,7 @@ def client(skills, cron):
             binder.bind(LocalSkillDeleteServiceProtocol, to=skills)
             binder.bind(LocalSkillStateServiceProtocol, to=skills)
             binder.bind(LocalSkillUploadServiceProtocol, to=skills)
+            binder.bind(BotSkillAssetServiceProtocol, to=skills)
             binder.bind(CronRelayServiceProtocol, to=cron)
 
     # Mounted exactly as build_public_router mounts them, because this file is
@@ -197,9 +213,7 @@ def client(skills, cron):
     # skills here would assert against an assembly production does not have.
     app = FastAPI()
     app.include_router(skills_router)
-    app.include_router(
-        routines_router, dependencies=[Depends(require_granted_own_bot)]
-    )
+    app.include_router(routines_router, dependencies=[Depends(require_granted_own_bot)])
     app.dependency_overrides[require_principal] = _app_caller
     attach_injector(app, Injector([_M()]))
     mount_public_error_handlers(app)
