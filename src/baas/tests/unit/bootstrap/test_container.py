@@ -377,6 +377,14 @@ class TestSelectRenewalTask:
         deadline = object()
         assert _select_renewal_task("deadline", legacy, deadline) is deadline
 
+    def test_select_deadline_none_falls_back_to_legacy(self) -> None:
+        from secbaas.community.bootstrap._container import _select_renewal_task
+
+        legacy = object()
+        # None defense: a community-only build has no registered deadline
+        # task — engine="deadline" must fall back to legacy, never mount None.
+        assert _select_renewal_task("deadline", legacy, None) is legacy
+
 
 class TestInjectEnterprisePluginsImportError:
     def test_import_error_is_silently_caught(self) -> None:
