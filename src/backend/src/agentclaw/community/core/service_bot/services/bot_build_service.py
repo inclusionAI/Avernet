@@ -82,6 +82,14 @@ _BOT_GONE_ERROR_CODES = frozenset({"BOT_NOT_FOUND", "DEVICE_NOT_FOUND"})
 # whole operation, rather than granting each individual command a fresh timeout.
 _DRAFT_RESTORE_TIMEOUT_SECONDS = 30 * 60
 
+# Extra-include pre-flight runs a ``sudo -n test -f`` probe. The publish
+# path does not carry a per-command timeout (timeout_seconds=None), so
+# without an upper bound a misbehaving sudo (e.g. stuck PAM) could hang
+# the whole migrate/publish flow. Cap the probe independently of the
+# caller: worst case it times out and we degrade to skipping the file
+# (the pre-fix behavior), never to blocking the publish.
+_SUDO_PROBE_FALLBACK_TIMEOUT_SECONDS = 10.0
+
 
 class BotBuildServiceError(Exception):
     """Bot build service error."""
@@ -729,6 +737,50 @@ class BotBuildService:
             raise BotBuildMigrationError(f"invalid extra include file path: {rel_path}")
         return str(parsed)
 
+    def _sudo_is_file(
+        self,
+        path: Path,
+        timeout_seconds: float | None = None,
+    ) -> bool:
+        """Return whether ``path`` is a regular file, probed as root.
+
+        This mirrors the privileges of the ``sudo rsync`` copy used below:
+        in-process ``sudo`` is passwordless (the primary migration rsync
+        already relies on that), so probing with ``sudo -n test -f`` lets us
+        tell "exists & readable by root" from "missing" even when the
+        service's own uid cannot ``stat`` the file. It is used as a fallback
+        for the pre-flight check when ``Path.exists()`` raises
+        ``PermissionError`` on sandbox-owned NAS files.
+
+        The probe is always time-bounded: when the caller passes
+        ``timeout_seconds=None`` (the publish path), a module-level fallback
+        cap is used so a hung sudo can never stall migrate/publish. Any
+        subprocess failure -- including timeout, or an NFS path with
+        ``root_squash``/``all_squash`` where root is mapped to nobody --
+        yields ``False``, so the caller simply skips the file rather than
+        aborting the publish/restore.
+        """
+        # Always bound the probe: callers may pass timeout_seconds=None (the
+        # publish path). A hung sudo would otherwise stall migrate/publish
+        # indefinitely, which must never happen. On timeout the probe returns
+        # False and the caller degrades to skipping the file (pre-fix behavior).
+        effective_timeout = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else _SUDO_PROBE_FALLBACK_TIMEOUT_SECONDS
+        )
+        try:
+            completed = subprocess.run(
+                ["sudo", "-n", "test", "-f", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=effective_timeout,
+            )
+        except Exception:
+            return False
+        return completed.returncode == 0
+
     def _sync_extra_include_files(
         self,
         *,
@@ -747,14 +799,35 @@ class BotBuildService:
             try:
                 normalized = self._normalize_extra_include_file(rel_path)
                 source_file = source_dir / normalized
-                if not source_file.exists():
+                # The service runs as a non-root uid that cannot stat
+                # sandbox-owned files on the NAS merge area (e.g. uid 1000 /
+                # mode 0600): Path.exists()/is_file() then raise
+                # PermissionError instead of returning False, which previously
+                # skipped a file the ``sudo rsync`` copy (running as root,
+                # passwordless in-process) *could* have copied. Re-probe at
+                # root privilege on EACCES; only skip if root also cannot read.
+                try:
+                    admin_exists = source_file.exists()
+                    admin_is_file = source_file.is_file()
+                except PermissionError:
+                    if not self._sudo_is_file(source_file, timeout_seconds):
+                        logger.info(
+                            "[BotBuildService._sync_extra_include_files] "
+                            "Skip unreadable extra include file (admin cannot "
+                            "stat, root probe failed): %s",
+                            source_file,
+                        )
+                        continue
+                    admin_exists = True
+                    admin_is_file = True
+                if not admin_exists:
                     logger.info(
                         "[BotBuildService._sync_extra_include_files] "
                         "Skip missing extra include file: %s",
                         source_file,
                     )
                     continue
-                if not source_file.is_file():
+                if not admin_is_file:
                     logger.warning(
                         "[BotBuildService._sync_extra_include_files] "
                         "Skip non-file extra include path: %s",
