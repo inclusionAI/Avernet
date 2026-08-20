@@ -16158,7 +16158,7 @@
               "application/json": {
                 "example": {
                   "code": 502000,
-                  "message": "Bad Gateway",
+                  "message": "Catalog service unavailable",
                   "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
                 },
                 "schema": {
@@ -16166,7 +16166,7 @@
                 }
               }
             },
-            "description": "Upstream service error"
+            "description": "Catalog service unavailable"
           }
         },
         "summary": "Search Public Bots",

@@ -10,22 +10,24 @@
   / `code.alipay.com/mirrors/Avernet`
 - Head / base: `feat/openapi-bot-public-catalog` /
   `dev_refactory_collaboration` in both independent repositories.
-- Avernet PR: [#1238](https://github.com/inclusionAI/Avernet/pull/1238), OPEN.
+- Avernet PR: [#1293](https://github.com/inclusionAI/Avernet/pull/1293), OPEN;
+  follow-up to merged PR [#1238](https://github.com/inclusionAI/Avernet/pull/1238).
 - Conflict-resolution merge: `e9d4b4ed8` merges current
   `dev_refactory_collaboration` (`3d6531c5`) into the topic without rewriting
   or force-pushing branch history.
 - OCB mirror PR: BLOCKED; its topic-branch push was rejected by remote project
   authorization.
-- Planned titles:
-  - Avernet: `feat(openapi): add public bot catalog endpoints`
+- Final titles:
+  - Avernet follow-up: `feat(bot-catalog): add fail-closed BCS metadata port`
   - OCB mirror: `feat(gateway): expose public bot catalog routes`
-- PR description sections: Problem / Solution / Validation / Compatibility and risk / Spec
+- PR description sections: Problem / Solution / Validation / Compatibility and risk / Spec / Related issues
 - 人工意见模式: auto
 
 ## PR 判定
 
 | 结果 | 证据 | 说明 |
 |---|---|---|
+| Avernet follow-up PR | [#1293](https://github.com/inclusionAI/Avernet/pull/1293) | OPEN；CI 验证 head `2afea50c280c360f2b69611326d1f294e4a632c4`，base `dev_refactory_collaboration`。Title 使用语义化 outcome，body 含 Problem / Solution / Validation / Compatibility and risk / Spec / Related issues。 |
 | Avernet open PR | [#1238](https://github.com/inclusionAI/Avernet/pull/1238) | Created after verifying its base is `dev_refactory_collaboration`, head is `feat/openapi-bot-public-catalog`, and its title/body contain all required sections. Initial head: `70c54bdd5`. |
 | PR merge conflict | resolved | GitHub reported `CONFLICTING` after the base advanced to `3d6531c5`. The merge kept both the Bot Workshop/local additions and the public-catalog routes, regenerated `bots.openapi.json`, and did not touch `.superpowers/`. |
 | OCB mirror PR | BLOCKED | Its local gateway-sync commit is `e23bf4ff3`; `git push --no-verify -u origin feat/openapi-bot-public-catalog` was rejected because the current user has no access to `mirrors/Avernet`. |
@@ -105,3 +107,27 @@ PR head `e595d27ef` 的首次 Backend unit tests 失败已收敛为三个测试�
 - 本轮仅 `test_explicit_user_id.py` 发生内容冲突。保留 base 新增的 `94/1/46` operation 变化，并叠加 catalog 的两个无 Bot、无 user 维度读接口，最终 Bot ID placement 为 `94/1/48`；user-scoped operation 数保持 base 的 `130`。
 - 重新生成 Gateway `bots.openapi.json`，保留最新 base 的 token、session-favorites 等 schema，同时保留 catalog search/discover。
 - 验证：Backend catalog/admission/principal/path/coverage 合并回归 74 passed；Gateway route-security/served-schema/domain-map 184 passed；无新的 active review thread。
+
+## BCS 元信息端口后续（2026-08-20）
+
+- GitHub 已确认 PR #1238 为 `MERGED`，合并 head 为 `c41c927020070a5828fd3e0c84376f252750642b`；远端 `feat/openapi-bot-public-catalog` 已删除，因此本次后续不能追加到原 PR。
+- 本地主题分支仅保留新增后续提交，并重放到最新 `origin/dev_refactory_collaboration@efa0b7da3`：`f717ebd5d`（BCS metadata port）、`50434a1b6`（固定 502 OpenAPI 契约）、`7621f0dc3`（交付状态）、`52af6f506`（稳定顺序断言）和 `dfdbebd93`（Core 内部端口分层）。唯一冲突为英文 OpenAPI changelog，已保留 base 的 Editors/Spaces/Render Screen 内容并叠加本功能说明。
+- 当前实现不调用或猜测 BCS HTTP API；production/local/test 均绑定 fail-closed unavailable service，Catalog Search 固定返回 `502000`。Legacy Search 与 Discover 保持原行为。
+- 本地最终验证：Backend 全量 `13149 passed, 21 skipped`；Gateway schema/auth/forwarding `228 passed`；全部改动 Python 文件 Ruff、JSON、OpenAPI 重生成一致性和 `git diff --check` 通过。Gateway 项目级全量另有 12 个非本分支失败：10 个 live/baseline E2E 因未启动 Gateway 而连接失败，2 个项目级 Ruff 门禁命中三个相对 base 未改动的文件；未越界修改这些基线问题。
+- 整分支 Review 为 Ready，安全审查无 high/medium 候选；顺序测试与 Core 分层修复的 scoped rereview 为 PASS（Critical/Important/Minor 均为 0）。
+- 当前结论：后续 PR [#1293](https://github.com/inclusionAI/Avernet/pull/1293) 已创建且为 `OPEN`；未强推、未合并、未回复或 resolve review thread。
+
+### PR #1293 收敛状态
+
+- PR: OPEN，CI 验证 head `2afea50c280c360f2b69611326d1f294e4a632c4`，base `dev_refactory_collaboration`，metadata 已核验。GitHub 报告 `mergeable=MERGEABLE`、`mergeStateStatus=BLOCKED`；分支保护详情不可访问，不猜测具体仓库规则。
+- 自动意见: CLEAR；最终刷新未发现 BOT review、inline comment 或普通 comment。
+- ACI/CI: PASS；BCS E2E、Singlebox coverage、BCS/Backend/Engine/BaaS/Gateway unit tests 共 7 个 jobs 全部 SUCCESS，0 pending/failing/cancelled。Singlebox coverage 16m47s，Backend unit 9m30s。
+- 人工意见: CLEAR；最终刷新未发现人工 review 或 comment。
+- 下一步: 等待仓库侧必需条件或审批解除 `mergeStateStatus=BLOCKED`；未自动合并、回复或 resolve thread。本次终态报告提交只修改本报告，不改变已通过远端门禁的实现与测试代码。
+
+### PR #1293 最小差异复审（2026-08-20）
+
+- 按用户要求撤销本功能不需要的纯格式化、邻近清理和共享重构；legacy sanitizer、既有分页查询分支、DI 基线空行、测试基线 import 与旧 helper 约定均恢复为 base 形态。最终 reviewer 未发现纯格式化、推测性扩展或无关重构。
+- 首轮复审因本地 change-line coverage `91/103=88.35%` REJECT；只新增 3 个行为断言后，独立复审为 PASS。Fresh focused suite `157/157`，`report_check.py` 为 case pass `100%`、change-line coverage `103/103=100%`。
+- 改动 Python 文件的增量 Ruff、F401/F841、E203/E211/E265 与 `git diff --check` 通过。`test_sync_bot_config_uses_resolver.py` 的唯一 F401 与 base 完全相同，按最小变更要求保留，未作为本功能顺手清理。
+- 本节所述 diff 尚待形成新 head 并推送；此前 7/7 SUCCESS 属于旧 head，不作为新 head 的远端 ACI 证据。推送后重新监控全部远端检查与评论。
