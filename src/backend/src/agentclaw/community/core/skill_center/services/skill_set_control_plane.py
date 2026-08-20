@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Protocol
-
 from injector import inject
 
 from agentclaw.community.core.skill_center.authorization_hook import (
@@ -35,13 +33,11 @@ from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
     LegacySkillSetCompatibilityFactoryProtocol,
 )
-from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.skill_center.runtime_policy import (
     require_supported_bot_skill_runtime,
 )
-from agentclaw.community.core.skill_center.runtime_resolver import (
-    RuntimeDesiredState,
-    RuntimeProjectionResolver,
+from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
+    BotRuntimeProjectionReconcilerProtocol,
 )
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationBusyError,
@@ -57,104 +53,8 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
-from agentclaw.community.core.repository.protocols.skills_pool import (
-    SkillsPoolSkillRepositoryProtocol,
-)
 from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.core.mcp.services._defaults import (
-    get_default_cli_items,
-    get_default_mcp_servers,
-)
 from agentclaw.community.utils.env_utils import get_current_env
-
-
-class SkillSetRuntimeReconcilerProtocol(Protocol):
-    async def reconcile(self, *, bot_id: str, owner_id: str) -> None: ...
-
-
-class SkillSetRuntimeReconciler:
-    """Runtime adapter shared with the legacy compatibility surface.
-
-    The control-plane service deliberately calls this once after a successful
-    UoW; it never calls the legacy per-item activate/deactivate paths.
-    """
-
-    @inject
-    def __init__(
-        self,
-        factory: SkillSetServiceFactory,
-        bot_repo: BotRepository,
-        repository: SkillSetControlPlaneRepositoryProtocol,
-        pool_skills: SkillsPoolSkillRepositoryProtocol,
-    ) -> None:
-        self._factory = factory
-        self._bot_repo = bot_repo
-        self._repository = repository
-        self._pool_skills = pool_skills
-
-    async def reconcile(self, *, bot_id: str, owner_id: str) -> None:
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            raise LocalSkillNotFoundError()
-        service = self._factory.create(
-            user_id=owner_id,
-            entity_id=str(bot.get("entity_id") or owner_id),
-            bot_id=bot_id,
-            engine_type=bot.get("active_engine"),
-            entity_type=bot.get("entity_type") or "staff",
-        )
-        projection = RuntimeProjectionResolver().resolve(
-            RuntimeDesiredState(
-                skills=tuple(
-                    self._pool_skills.list_bot_active_assets(
-                        env=str(bot["env"]),
-                        bot_id=bot_id,
-                        user_id=owner_id,
-                        engine=str(bot.get("active_engine") or "openclaw"),
-                    )
-                ),
-                installed_mcp_server_codes=frozenset(
-                    self._repository.list_installed_mcps(bot_id=bot_id)
-                ),
-                system_default_mcp_server_codes=frozenset(
-                    str(item["server_code"])
-                    for item in get_default_mcp_servers(
-                        str(bot.get("active_engine") or "openclaw"),
-                        bot.get("template_type"),
-                    )
-                    if item.get("server_code")
-                ),
-                system_default_cli_commands=tuple(
-                    str(item["cli_code"])
-                    for item in get_default_cli_items(
-                        str(bot.get("active_engine") or "openclaw"),
-                        bot.get("template_type"),
-                    )
-                    if item.get("cli_code")
-                ),
-            )
-        )
-        # The Engine adapter owns physical translation, while the Resolver
-        # supplies its complete canonical asset snapshot.  It must not query
-        # Default exclusions or rebuild state from legacy BFF records.
-        if not service.sync_runtime(
-            desired_skills=[
-                {
-                    "id": str(asset.skill_id),
-                    "name": asset.name,
-                    "git_path": asset.git_path,
-                    "skill_uuid": asset.skill_uuid,
-                    "sc_version_number": asset.sc_version_number,
-                }
-                for asset in projection.skill_assets
-                if not asset.git_path.startswith("center://")
-            ]
-        ):
-            raise SkillSetRuntimeReconcileError()
-        if not await service.sync_mcp_desired_state(
-            server_codes=set(projection.mcp_server_codes)
-        ):
-            raise SkillSetRuntimeReconcileError()
 
 
 class SkillSetControlPlaneService:
@@ -163,7 +63,7 @@ class SkillSetControlPlaneService:
         self,
         repository: SkillSetControlPlaneRepositoryProtocol,
         bot_repo: BotRepository,
-        runtime: SkillSetRuntimeReconcilerProtocol,
+        runtime: BotRuntimeProjectionReconcilerProtocol,
         legacy_factory: LegacySkillSetCompatibilityFactoryProtocol,
         passport: PassportPlugin,
         authorization: BotCapabilityAuthorizationHookProtocol,

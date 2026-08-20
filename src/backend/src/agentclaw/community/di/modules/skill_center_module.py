@@ -182,8 +182,10 @@ from agentclaw.community.core.skill_center.services.bot_skill_asset_service impo
 )
 from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
     SkillSetControlPlaneService,
-    SkillSetRuntimeReconciler,
-    SkillSetRuntimeReconcilerProtocol,
+)
+from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
+    BotRuntimeProjectionReconciler,
+    BotRuntimeProjectionReconcilerProtocol,
 )
 from agentclaw.community.core.skill_center.authorization_hook import (
     BotCapabilityAuthorizationHookProtocol,
@@ -345,8 +347,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             scope=singleton,
         )
         binder.bind(
-            SkillSetRuntimeReconcilerProtocol,
-            to=SkillSetRuntimeReconciler,
+            BotRuntimeProjectionReconcilerProtocol,
+            to=BotRuntimeProjectionReconciler,
             scope=singleton,
         )
         binder.bind(
@@ -945,7 +947,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         device_sync_dispatcher: DeviceSyncDispatcher,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         skills_pool_wakeup: SkillsPoolReconcileWakeupListener,
-        runtime_reconciler: SkillSetRuntimeReconcilerProtocol,
+        runtime_reconciler: BotRuntimeProjectionReconcilerProtocol,
     ) -> SkillSymlinkListener:
         def desktop_layout_authority(bot: dict) -> str | None:
             if bot.get("bot_type") != "desktop":

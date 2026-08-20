@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,14 +21,20 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
     SkillSetControlPlaneService,
-    SkillSetRuntimeReconciler,
+)
+from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
+    BotRuntimeProjectionReconciler,
 )
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationGuard,
     BotCapabilityMutationLockUnavailableError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
-from agentclaw.community.core.mcp.services._defaults import get_default_mcp_servers
+from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+from agentclaw.community.core.mcp.services._defaults import (
+    get_default_cli_items,
+    get_default_mcp_servers,
+)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
@@ -340,6 +347,61 @@ class _RuntimeSkills:
             "engine": "openclaw",
         }
         return []
+
+
+class _RuntimePool:
+    def __init__(self) -> None:
+        self.publish_calls: list[dict] = []
+        self.verify_calls: list[dict] = []
+
+    async def probe(self, **_kwargs):
+        raise AssertionError("non-Center projection must keep the legacy adapter")
+
+    async def publish_mappings(self, **kwargs):
+        self.publish_calls.append(kwargs)
+        return True
+
+    async def verify_mappings(self, **kwargs):
+        self.verify_calls.append(kwargs)
+        return True
+
+
+class _CenterRuntimePool(_RuntimePool):
+    async def probe(self, **_kwargs):
+        return SimpleNamespace(
+            evidence={
+                "supported_mapping_contract_versions": [
+                    "skills-pool-mapping-v2",
+                    "skills-pool-mapping-v3",
+                ]
+            }
+        )
+
+
+class _CenterRuntimeSkills:
+    def list_bot_active_assets(self, **_kwargs):
+        return [
+            RegisteredSkillAsset(
+                skill_id=7,
+                name="center-skill",
+                git_path="center://stable-skill-uuid",
+                skill_uuid="stable-skill-uuid",
+                sc_version_number="3.0.0",
+            )
+        ]
+
+
+class _RuntimeLayouts:
+    def get(self, _scope):
+        return None
+
+
+class _RuntimePassport:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def update_passport(self, **kwargs) -> None:
+        self.calls.append(kwargs)
 
 
 @pytest.mark.asyncio
@@ -750,11 +812,15 @@ async def test_mcp_direct_activation_denies_before_writing_desired_state():
 @pytest.mark.asyncio
 async def test_runtime_reconcile_projects_full_mcp_desired_state():
     factory = _RuntimeFactory()
-    runtime = SkillSetRuntimeReconciler(
+    passport = _RuntimePassport()
+    runtime = BotRuntimeProjectionReconciler(
         factory=factory,
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         pool_skills=_RuntimeSkills(),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=passport,
     )
 
     await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
@@ -766,4 +832,44 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
             for item in get_default_mcp_servers("openclaw", None)
             if item.get("server_code")
         },
+    }
+    assert passport.calls == [
+        {
+            "bot_id": "bot-1",
+            "user_id": "true-owner",
+            "engine_type": "openclaw",
+            "resource_scope": {
+                "mcp_codes": sorted(factory.service.mcp_codes),
+                "cli_items": get_default_cli_items("openclaw", None),
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_reconcile_requires_and_uses_mapping_v3_for_center():
+    factory = _RuntimeFactory()
+    pool = _CenterRuntimePool()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_CenterRuntimeSkills(),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+    assert factory.service.mcp_codes is not None
+    assert len(pool.publish_calls) == len(pool.verify_calls) == 1
+    assert pool.publish_calls[0]["mapping_contract_version"] == (
+        "skills-pool-mapping-v3"
+    )
+    assert pool.publish_calls[0]["mappings"][0].to_dict() == {
+        "corpus": "center",
+        "link_name": "center-skill",
+        "skill_uuid": "stable-skill-uuid",
+        "sc_version_number": "3.0.0",
     }
