@@ -343,6 +343,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/skills",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/skills/upload-folder",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
         "GET",
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,

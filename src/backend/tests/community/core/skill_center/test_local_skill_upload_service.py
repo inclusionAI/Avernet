@@ -8,23 +8,22 @@ import zipfile
 from types import SimpleNamespace
 
 import pytest
-
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditBusyError,
     LocalSkillEditLockUnavailableError,
-    LocalSkillLayoutRollbackError,
     LocalSkillInvalidPackageError,
+    LocalSkillLayoutRollbackError,
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
     SkillEngineNotSupportedError,
 )
-from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
-    LocalSkillUploadService,
-)
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
 from agentclaw.community.core.skill_center.services import (
     local_skill_upload_service as upload_module,
+)
+from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
+    LocalSkillUploadService,
 )
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditBusyError,
@@ -713,6 +712,44 @@ async def test_upload_stays_inactive_without_creating_a_default_set_membership()
 
 
 @pytest.mark.asyncio
+async def test_directory_upload_uses_the_same_create_flow_as_raw_zip():
+    filesystem = _Filesystem()
+    result = await _service(filesystem).upload_local_skill_files(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        files=[
+            ("folder-skill/SKILL.md", _skill_md("folder-skill")),
+            ("folder-skill/scripts/main.py", b"print('ok')"),
+        ],
+    )
+
+    assert result["operation"] == "created"
+    assert filesystem.files == {
+        "/private/skills-local/folder-skill/SKILL.md": _skill_md("folder-skill"),
+        "/private/skills-local/folder-skill/scripts/main.py": b"print('ok')",
+    }
+
+
+@pytest.mark.asyncio
+async def test_multipart_single_zip_keeps_legacy_auto_extract_behavior():
+    filesystem = _Filesystem()
+    archive = _zip({"SKILL.md": _skill_md("archive-skill")})
+
+    result = await _service(filesystem).upload_local_skill_files(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        files=[("archive.zip", archive)],
+    )
+
+    assert result["skill"]["name"] == "archive-skill"
+    assert filesystem.files["/private/skills-local/archive-skill/SKILL.md"] == _skill_md(
+        "archive-skill"
+    )
+
+
+@pytest.mark.asyncio
 async def test_not_ready_and_storage_failure_leave_no_public_skill():
     package = _zip({"SKILL.md": _skill_md()})
     with pytest.raises(LocalSkillNotReadyError):
@@ -880,9 +917,7 @@ class _FailAudit(_Audit):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "stage", ["write", "create", "audit"]
-)
+@pytest.mark.parametrize("stage", ["write", "create", "audit"])
 async def test_each_creation_failure_compensates_and_never_returns_success(stage):
     package = _zip({"SKILL.md": _skill_md()})
     filesystem = _Filesystem(fail=stage == "write")
@@ -1421,3 +1456,28 @@ async def test_concurrent_same_name_uploads_serialize_then_converge_on_one_skill
     assert {first["operation"], second["operation"]} == {"created", "updated"}
     assert len(repo.rows) == 1
     assert first["skill"]["id"] == second["skill"]["id"] == "9"
+
+
+def test_directory_package_uses_the_same_wrapper_normalization_as_zip_upload():
+    package = LocalSkillUploadService._pack_directory(
+        [
+            ("weather/SKILL.md", _skill_md(name="weather")),
+            ("weather/scripts/fetch.py", b"print('weather')"),
+        ]
+    )
+
+    name, description, files = LocalSkillUploadService._unpack(package)
+
+    assert name == "weather"
+    assert description == "useful"
+    assert files == [
+        ("SKILL.md", _skill_md(name="weather")),
+        ("scripts/fetch.py", b"print('weather')"),
+    ]
+
+
+def test_directory_package_rejects_path_traversal_before_it_can_be_archived():
+    with pytest.raises(LocalSkillInvalidPackageError):
+        LocalSkillUploadService._pack_directory(
+            [("skill/../outside/SKILL.md", _skill_md())]
+        )

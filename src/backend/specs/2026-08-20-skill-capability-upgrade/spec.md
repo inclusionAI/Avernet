@@ -262,6 +262,7 @@ skills-local / skills-repo / skill-center / MCP projection
 | --- | --- | --- | --- |
 | GET | `/openapi/v1/bots/{bot_id}/skills` | Local Skill 列表 | 不传 `type` 时严格保持 Local-only |
 | POST | `/openapi/v1/bots/{bot_id}/skills` | raw ZIP 上传或同名替换 Local | 新建 inactive；替换保留 `skill_id` 和 active |
+| POST | `/openapi/v1/bots/{bot_id}/skills/upload-folder` | multipart 文件夹上传 | additive；复用旧 `/api/skills/upload` 的 `files + file_paths` 相对路径语义，结果与 raw ZIP 相同 |
 | GET | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Local 详情 | 旧 wire 不变 |
 | DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 删除 inactive Local 资产 | Repo/Space 不能复用为资产删除 |
 | POST | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate` | 激活 Skill | 旧 Local 不变；additive 支持 Repo/Space |
@@ -304,6 +305,30 @@ deactivate
 ```
 
 对 Repo/Space，Direct activate 即 runtime install，deactivate 即 runtime uninstall。Local deactivate 只删除 Installation，Local 资产保留。
+
+#### 5.3 Skill 添加来源与 Skill Center 懒物化
+
+添加弹窗读取三个独立目录：
+
+| 入口 | 接口 | 权威来源 |
+| --- | --- | --- |
+| TeamClaw 市场 | `GET /openapi/v1/bots/skills/repository` | aiworkbench 扫描得到的 `git://` Asset |
+| Skill Center 市场 | `POST /openapi/v1/bots/market/skill-center/skills` | Skill Center PUBLIC 市场；Gateway 固定 `team_id=None`、`access_level=PUBLIC` |
+| 工坊 Skill | `GET /openapi/v1/bots/spaces/{space_id}/skills/consumable` | 当前 Space 的 Published 且已物化 Version |
+
+旧 `POST /openapi/v1/bots/market/skills` 保留为 TeamClaw 市场兼容入口。Skill Center 的团队搜索不得作为工坊目录；TC 才是 Space、Grant、Draft 和消费状态的权威。
+
+Skill Center 市场有万级且持续增长的外部记录，禁止全量扫描/写入 `ac_skill`。用户确认引用时才按需物化，目标公开命令为：
+
+```text
+POST /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/market-skill-references
+{
+  market_source: SKILLCENTER,
+  skill_code: <SkillCenter stable code>
+}
+```
+
+该命令的后续实现必须完成 SC 授权、稳定 `skillCode` 解析、TeamClaw 可消费引用的幂等物化，并仅在成功取得 TeamClaw `skill_id` 后写 `ac_skill_set_skill`。当前阶段只冻结合同；不得提前发布为可成功调用的 Gateway 路由。
 
 ### 6. Phase 1：Repo Catalog
 

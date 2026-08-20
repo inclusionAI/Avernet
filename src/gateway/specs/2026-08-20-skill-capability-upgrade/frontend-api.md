@@ -85,6 +85,16 @@ Backend 真实路由自动生成并经过向前兼容检查，前端可据此查
 - 同 Bot 同名上传原地替换，保留 skill_id 和原 active。
 - 产品随后把它加入 SkillSet；若该 Set 当前 active，添加成功后立即生效。
 
+“添加本地文件夹”保持现有产品的 multipart 交互，不要求前端自行把文件夹压成 ZIP：
+
+`POST /openapi/v1/bots/{bot_id}/skills/upload-folder`
+
+- Content-Type：`multipart/form-data`。
+- `files`：重复字段，包含选中文件夹中的全部文件。
+- `file_paths`：可选 JSON 字符串数组，与 `files` 一一对应，保存相对目录结构；不传时退回每个文件名。
+- 与 raw ZIP 共用同一包校验、唯一 `SKILL.md`、同名替换、新建 inactive、大小/文件数限制和响应 Envelope。
+- 旧 `/api/skills/upload` 继续作为兼容 Adapter；其 `files + file_paths` 语义不得漂移。
+
 ### 4.3 Item 与内容
 
 | Method | Path | 前端用途 |
@@ -116,6 +126,30 @@ Backend 真实路由自动生成并经过向前兼容检查，前端可据此查
 
 Sync 是同步接口。前端 await 返回后刷新列表，不轮询新的 sync-status。并发同步返回
 `SYNC_IN_PROGRESS`。
+
+### 5.1 添加 Skill 弹窗的三个来源
+
+三个目录独立读取，不能把 Skill Center 团队搜索当作能力工坊搜索：
+
+| 产品入口 | 前端接口 | 结果来源 |
+| --- | --- | --- |
+| 引用市场 Skill / TeamClaw | `GET /openapi/v1/bots/skills/repository` | aiworkbench 扫描后的 `git://` Repo Skill |
+| 引用市场 Skill / Skill Center | `POST /openapi/v1/bots/market/skill-center/skills` | Skill Center PUBLIC 市场；服务端注入凭据，固定不传 `teamId` |
+| 引用工坊 Skill | `GET /openapi/v1/bots/spaces/{space_id}/skills/consumable` | 当前 Space 中已发布且运行时物化完成的 Skill |
+
+已发布兼容接口 `POST /openapi/v1/bots/market/skills` 同样读取 TeamClaw Git 市场；新产品页面优先使用 Repository Catalog。
+
+Skill Center Public Skill 不做全量扫描入 `ac_skill`。前端选中后，目标合同为：
+
+```text
+POST /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/market-skill-references
+{
+  "market_source": "SKILLCENTER",
+  "skill_code": "stable-skill-code"
+}
+```
+
+该命令后续负责按需解析/物化为 TeamClaw `skill_id`，再写普通 SkillSet Membership。当前仅冻结该接口合同，未实现物化前不得将其加入 Gateway 正式 OpenAPI artifact，也不得返回“已引用成功”的假结果。
 
 ## 6. Phase 1：SkillSet
 
