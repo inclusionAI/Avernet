@@ -244,8 +244,8 @@ ALTER TABLE ac_bots
 -- during code rollback; platform owners should assess DROP COLUMN only after no
 -- deployed version uses it.
 ALTER TABLE ac_bots
-  ADD COLUMN space_id VARCHAR(128) NULL
-    COMMENT 'business-space ownership; NULL uses the owner personal-space fallback';
+  ADD COLUMN space_id BIGINT UNSIGNED NULL
+    COMMENT 'Bot owning space id, references ac_space.id; NULL uses the owner personal-space fallback';
 ```
 
 The delivery record for `space_id` must identify the environment, change/version

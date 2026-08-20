@@ -64,8 +64,8 @@ class BotSpaceService:
                 "local bots can only belong to their owner's personal space"
             )
 
-        persisted_space_id = str(space.id)
-        changed = str(bot.get("space_id") or "") != persisted_space_id
+        persisted_space_id = space.id
+        changed = bot.get("space_id") != persisted_space_id
         if not changed:
             return BotSpaceAssignmentResult(bot=bot, space=space, changed=False)
 

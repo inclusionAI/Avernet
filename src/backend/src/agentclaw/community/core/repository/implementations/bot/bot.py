@@ -489,7 +489,7 @@ class BotRepository(
         return self.get_by_id_and_owner(bot_id, owner_id)
 
     def update_space_by_owner(
-        self, *, bot_id: str, owner_id: str, space_id: str
+        self, *, bot_id: str, owner_id: str, space_id: int
     ) -> Optional[Dict[str, Any]]:
         """Update only ``space_id`` without widening the generic allowlist.
 

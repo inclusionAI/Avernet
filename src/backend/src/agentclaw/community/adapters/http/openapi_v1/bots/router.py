@@ -141,6 +141,7 @@ from .schemas import (
 
 logger = get_logger()
 
+
 #: The bot authorization for an application caller, on the own-bot operations
 #: of this group.
 #:
@@ -404,7 +405,7 @@ async def create_bot(
             bot_type=body.bot_type,
             bot_name=body.bot_name,
             bot_desc=body.bot_desc,
-            space_id=current_space.space_id,
+            space_id=current_space.numeric_id,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
@@ -989,7 +990,7 @@ async def get_bot_auth_status(
             bot_type=bot_type or "personal",
             bot_name=bot_name,
             bot_desc=bot_desc,
-            space_id=current_space.space_id,
+            space_id=current_space.numeric_id,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,

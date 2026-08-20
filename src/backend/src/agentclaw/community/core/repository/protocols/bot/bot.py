@@ -235,7 +235,7 @@ class BotRepository(Protocol):
 
     @abstractmethod
     def update_space_by_owner(
-        self, *, bot_id: str, owner_id: str, space_id: str
+        self, *, bot_id: str, owner_id: str, space_id: int
     ) -> Optional[Dict[str, Any]]:
         """Atomically replace the structured Space assignment of an owned Bot."""
         ...
