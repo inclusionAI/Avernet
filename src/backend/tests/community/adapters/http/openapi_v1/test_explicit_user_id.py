@@ -282,6 +282,10 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
+    # Tenant-identical marketplace searches expose no user-scoped state.
+    ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
+    ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
+    ("post", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/skills"),
     # The load-test endpoint answers a constant. It reads nothing and writes
     # nothing, so there is no scope for a user id to name — and a synthetic
     # endpoint measuring the shared path must not be the one exception that
@@ -346,9 +350,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: Bot-addressed operation, yielding 104/1/49. Skill Installation then adds
 #: three Bot-addressed operations. Repo Catalog then adds three more
 #: Bot-addressed plus eight account-level operations, yielding 110/1/57.
-#: P1-03 then adds eleven Bot-scoped SkillSet operations, yielding 121/1/57.
-#: P1-04 adds eight Bot-scoped MCP operations, yielding 129/1/57.
-_BOT_ID_PLACEMENT = {"path": 129, "query": 1, "none": 57}
+#: The merged contract contains 126 path-addressed Bots, one legacy
+#: query-addressed operation, and 53 non-Bot operations.
+_BOT_ID_PLACEMENT = {"path": 126, "query": 1, "none": 53}
 
 
 def _schema() -> dict:
@@ -443,7 +447,7 @@ def test_the_pinned_number_of_operations_take_it():
     # the final operation. Skill Installation adds three further Bot-addressed
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
     # MCP adds eight operations.
-    assert len(taking) == 170
+    assert len(taking) == 164
 
 
 def test_the_exempt_operations_take_none():
