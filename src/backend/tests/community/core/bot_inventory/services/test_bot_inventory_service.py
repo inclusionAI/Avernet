@@ -6,11 +6,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
     NoopBusinessSpaceContext,
 )
 from agentclaw.community.core.bot_inventory.adapters.noop_service_lifecycle import (
     NoopServiceLifecyclePort,
+)
+from agentclaw.community.core.bot_inventory.protocols import (
+    BusinessSpaceContextProtocol,
 )
 from agentclaw.community.core.bot_inventory.services.bot_inventory_service import (
     BotInventoryService,
@@ -20,6 +24,7 @@ from agentclaw.community.core.bot_inventory.services.lifecycle_view import (
 )
 from agentclaw.community.core.bot_inventory.types import (
     BotAction,
+    BusinessSpaceRef,
     DeployMode,
     DisplayState,
     ServiceLifecycleCard,
@@ -27,6 +32,7 @@ from agentclaw.community.core.bot_inventory.types import (
 
 
 CLOUD = {
+    "id": 1,
     "bot_id": "c1",
     "bot_name": "Cloud",
     "bot_desc": "cloud bot",
@@ -36,6 +42,7 @@ CLOUD = {
     "owner_id": "u1",
 }
 LOCAL = {
+    "id": 2,
     "bot_id": "l1",
     "bot_name": "Local",
     "bot_desc": "local bot",
@@ -53,10 +60,15 @@ def service():
     bot.get_bot.return_value = CLOUD
     desktop = MagicMock()
     desktop.list_user_bots.return_value = [LOCAL]
+    access = MagicMock()
+    access.get_operable_permission_levels.side_effect = lambda **kwargs: {
+        int(bot["id"]): PermissionLevel.OWNER for bot in kwargs["bots"]
+    }
     return (
         BotInventoryService(
             bot_service=bot,
             desktop_service=desktop,
+            access_service=access,
             business_space=NoopBusinessSpaceContext(),
             lifecycle_view=BotLifecycleView(NoopServiceLifecyclePort()),
         ),
@@ -71,7 +83,9 @@ def test_list_items_combines_filters_and_paginates(service) -> None:
 
     items, total = inventory.list_items(
         owner_id="u1",
-        space=None,
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
         keyword=None,
         engine=None,
         deploy_mode=None,
@@ -105,7 +119,9 @@ def test_cloud_source_fetches_all_pages_for_exact_total(service) -> None:
 
     items, total = inventory.list_items(
         owner_id="u1",
-        space=None,
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
         keyword=None,
         engine=None,
         deploy_mode=DeployMode.CLOUD,
@@ -156,16 +172,24 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
             ),
         )
     }
+    access = MagicMock()
+    access.get_operable_permission_levels.return_value = {
+        1: PermissionLevel.OWNER,
+        10: PermissionLevel.OWNER,
+    }
     inventory = BotInventoryService(
         bot_service=bot,
         desktop_service=desktop,
+        access_service=access,
         business_space=NoopBusinessSpaceContext(),
         lifecycle_view=BotLifecycleView(lifecycle_port),
     )
 
     items, total = inventory.list_items(
         owner_id="u1",
-        space=None,
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
         keyword=None,
         engine=None,
         deploy_mode=DeployMode.CLOUD,
@@ -197,7 +221,9 @@ def test_grant_filter_is_applied_to_both_sources_before_total_and_pagination(
 
     items, total = inventory.list_items(
         owner_id="u1",
-        space=None,
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
         keyword=None,
         engine=None,
         deploy_mode=None,
@@ -234,7 +260,9 @@ def test_cloud_grant_filter_is_forwarded_to_every_upstream_page(service) -> None
 
     inventory.list_items(
         owner_id="u1",
-        space=None,
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
         keyword=None,
         engine=None,
         deploy_mode=DeployMode.CLOUD,
@@ -244,3 +272,113 @@ def test_cloud_grant_filter_is_forwarded_to_every_upstream_page(service) -> None
     )
 
     assert bot.list_bots_by_conditions.call_count == 2
+
+
+@pytest.mark.unit
+def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> None:
+    team_space = BusinessSpaceRef(
+        space_id="22",
+        name="Alpha",
+        kind="team",
+    )
+    owner_bot = {
+        **CLOUD,
+        "id": 10,
+        "bot_id": "service-owner",
+        "bot_name": "Owner Service",
+        "bot_type": "service",
+        "space_id": "22",
+    }
+    editor_bot = {
+        **owner_bot,
+        "id": 11,
+        "bot_id": "service-editor",
+        "bot_name": "Editor Service",
+        "owner_id": "other-owner",
+    }
+    viewer_bot = {
+        **owner_bot,
+        "id": 12,
+        "bot_id": "service-viewer",
+        "bot_name": "Viewer Service",
+        "owner_id": "third-owner",
+    }
+    rows = [owner_bot, editor_bot, viewer_bot]
+    bot = MagicMock()
+    bot.list_bots_by_conditions.return_value = {"total": 3, "items": rows}
+    desktop = MagicMock()
+    access = MagicMock()
+    access.get_operable_permission_levels.return_value = {
+        10: PermissionLevel.OWNER,
+        11: PermissionLevel.MEMBER,
+        12: PermissionLevel.NONE,
+    }
+    business_space = MagicMock(spec=BusinessSpaceContextProtocol)
+    business_space.bot_space.return_value = team_space
+    lifecycle_port = MagicMock()
+    lifecycle_port.cards_for_bots.return_value = {
+        row["bot_id"]: (
+            ServiceLifecycleCard(
+                publication_id=row["id"],
+                version=1,
+                display_state=DisplayState.SERVICE_ONLINE,
+                status="online",
+                actions=(BotAction.VIEW, BotAction.EDIT, BotAction.DELETE),
+            ),
+        )
+        for row in rows
+    }
+    inventory = BotInventoryService(
+        bot_service=bot,
+        desktop_service=desktop,
+        access_service=access,
+        business_space=business_space,
+        lifecycle_view=BotLifecycleView(lifecycle_port),
+    )
+
+    items, total = inventory.list_items(
+        owner_id="u1",
+        space=team_space,
+        keyword=None,
+        engine=None,
+        deploy_mode=None,
+        page=1,
+        page_size=10,
+    )
+
+    assert total == 3
+    assert {item.owner_entity_id for item in items} == {
+        "u1",
+        "other-owner",
+        "third-owner",
+    }
+    bot.list_bots_by_conditions.assert_called_once_with(
+        owner_id=None,
+        space_id="22",
+        bot_name=None,
+        engine=None,
+        status=None,
+        bot_ids=None,
+        page=1,
+        page_size=200,
+    )
+    desktop.list_user_bots.assert_not_called()
+    by_id = {item.bot_id: item for item in items}
+    assert by_id["service-owner"].actions == (
+        BotAction.VIEW,
+        BotAction.EDIT,
+        BotAction.DELETE,
+    )
+    assert by_id["service-editor"].actions == (
+        BotAction.VIEW,
+        BotAction.EDIT,
+    )
+    assert by_id["service-editor"].disabled_actions == {
+        "delete": "Bot Owner permission required"
+    }
+    assert by_id["service-viewer"].actions == (BotAction.VIEW,)
+    assert by_id["service-viewer"].disabled_actions == {
+        "edit": "Bot editor permission required",
+        "delete": "Bot editor permission required",
+    }
+    assert all(item.space == team_space for item in items)

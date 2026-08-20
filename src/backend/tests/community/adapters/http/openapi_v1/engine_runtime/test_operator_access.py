@@ -2,7 +2,7 @@
 
 Who may hold an operator channel is one rule (owner, or collaborator at
 member level or above — ``core/engine_runtime/gate.py``), and it must hold on
-all nineteen operations identically: a route that refused a session list but
+all twenty swept operations identically: a route that refused a session list but
 served an engine read would leak through the difference. The sweep asserts
 the matrix per route — owner served, collaborator served, anyone else
 answered byte-identically to a bot that does not exist.
@@ -37,7 +37,7 @@ STRANGER = "u-stranger"
 
 SESSION_ID = "session:abc:user:1"
 
-#: (method, path template, body) for all 19 routes — the same shape as the
+#: (method, path template, body) for all 20 swept routes — the same shape as the
 #: tenant-isolation sweep, kept separately because the two sweeps pin
 #: different halves (cross-tenant masking there, the operator matrix here)
 #: and must each fail on its own terms.
@@ -57,6 +57,7 @@ ROUTES = [
     ("get", "/{bot}/engine/available", None),
     ("get", "/{bot}/models", None),
     ("get", "/{bot}/models/openai/gpt-5.3", None),
+    ("get", "/{bot}/nodes", None),
     ("get", "/{bot}/approvals/mode?session_key=k", None),
     ("put", "/{bot}/approvals/mode?session_key=k", {"mode": "never"}),
     ("get", "/{bot}/approvals/modes", None),
@@ -112,7 +113,7 @@ def connections(relay) -> _Connections:
 
 @pytest.fixture
 def make_caller(relay, connections):
-    """A client for ``caller`` across all five engine-runtime groups."""
+    """A client for ``caller`` across all engine-runtime groups."""
 
     def _build(caller: str):
         class _M(Module):
@@ -134,16 +135,18 @@ def _url(suffix: str, bot: str = BOT) -> str:
     return f"/openapi/v1/bots{suffix.format(bot=bot)}"
 
 
-def test_all_nineteen_routes_are_covered():
+def test_all_twenty_routes_are_covered():
     """Guard the guard: a shrinking list would silently narrow this sweep."""
-    assert len(ROUTES) == 19
+    assert len(ROUTES) == 20
 
 
 @pytest.mark.parametrize(("method", "suffix", "body"), ROUTES, ids=lambda v: str(v))
-def test_the_owner_is_served_every_route(make_caller, method, suffix, body):
+def test_the_owner_is_served_every_route(make_caller, relay, method, suffix, body):
     """The case the expansion must not have closed: the owner, naming
     nothing extra."""
     client = make_caller(OWNER)
+    if suffix.endswith("/nodes"):
+        relay.results = [EngineResult(data=[])]
     kwargs = {"json": body} if body is not None else {}
     resp = getattr(client, method)(_url(suffix), **kwargs)
     assert resp.status_code in (200, 201), resp.json()
@@ -157,6 +160,8 @@ def test_a_collaborator_is_served_every_route(
     console on reads, writes and the socket alike, naming the owner they
     address."""
     relay.add_operator(COLLABORATOR)
+    if suffix.endswith("/nodes"):
+        relay.results = [EngineResult(data=[])]
     client = make_caller(COLLABORATOR)
     kwargs = {"json": body} if body is not None else {}
     kwargs["params"] = {"owner_id": OWNER}

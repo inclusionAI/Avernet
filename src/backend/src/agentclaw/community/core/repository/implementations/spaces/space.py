@@ -155,6 +155,19 @@ class SpaceRepository(SpaceRepositoryProtocol):
             )
             return row.to_record() if row is not None else None
 
+    def get_space_by_code(self, *, space_code: str, env: str):
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self._Space)
+                .filter(
+                    self._Space.space_code == space_code,
+                    self._Space.env == env,
+                    self._Space.deleted_at.is_(None),
+                )
+                .one_or_none()
+            )
+            return row.to_record() if row is not None else None
+
     def batch_query_personal(
         self, *, user_ids: list[str], env: str
     ) -> list[PersonalSpaceLookupRecord]:

@@ -15,6 +15,7 @@ from agentclaw.community.core.bot_inventory.adapters.service_lifecycle import (
     ServiceLifecycleView,
 )
 from agentclaw.community.core.bot_inventory.protocols import (
+    BotInventoryAccessPort,
     BotInventoryBotPort,
     BusinessSpaceContextProtocol,
     DesktopBotInventoryPort,
@@ -30,6 +31,9 @@ from agentclaw.community.core.bot_inventory.services.local_bot_workflow import (
     LocalBotWorkflowService,
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
+    CollaboratorService,
+)
 from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
     DesktopBotService,
 )
@@ -83,16 +87,26 @@ class BotInventoryModule(Module):
     @singleton
     @provider
     @inject
+    def inventory_access_port(
+        self, service: CollaboratorService
+    ) -> BotInventoryAccessPort:
+        return service
+
+    @singleton
+    @provider
+    @inject
     def bot_inventory_service(
         self,
         bot_service: BotInventoryBotPort,
         desktop_service: DesktopBotInventoryPort,
+        access_service: BotInventoryAccessPort,
         business_space: BusinessSpaceContextProtocol,
         lifecycle_view: BotLifecycleView,
     ) -> BotInventoryService:
         return BotInventoryService(
             bot_service=bot_service,
             desktop_service=desktop_service,
+            access_service=access_service,
             business_space=business_space,
             lifecycle_view=lifecycle_view,
         )

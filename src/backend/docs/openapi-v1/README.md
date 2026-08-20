@@ -70,7 +70,8 @@ The work therefore splits into **three tracks**:
 - **Track C — Engine (runtime) surface.** _Added 2026-07-30._ Wrap the engine
   adapter's client-facing HTTP behind `/openapi/v1/bots/{bot_id}/…`, and replace
   the `get_device_connection` hand-off with one sanitised socket-info endpoint.
-  **16 endpoints — implemented, PR #630.**
+  **18 endpoints across six groups — implemented** (PR #630 baseline; engine
+  restart and read-only nodes added later).
 
 > ⚠️ **The one confusion to avoid:** "isolation Stage N is done" does **not**
 > mean any API endpoint was implemented. A Track A stage is plumbing only (the
@@ -159,7 +160,7 @@ _Ordered by priority tier._
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | 🔧 **IMPLEMENTATION + CI COMPLETE; RELEASE PENDING** — six ratified Local Skill operations | #725 cleanup-work DDL must deploy before code; [pre-production acceptance runbook](skills-track-b-preprod-acceptance.md) remains **PRE-PROD PENDING** |
 
-### Track C — Engine (runtime) surface (5 of 5 groups implemented — PR #630)
+### Track C — Engine (runtime) surface (6 of 6 groups implemented)
 _All groups depend only on **bots isolation (Stage 1 ✅)** — no Track A stage, no
 DDL. Full ruling and per-endpoint mapping in
 **[`engine-surface.md`](engine-surface.md)**._
@@ -171,6 +172,7 @@ DDL. Full ruling and per-endpoint mapping in
 | connection | 1 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **IMPLEMENTED — PR #630** |
 | approvals | 3 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **IMPLEMENTED — PR #630** |
 | models | 2 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/models/` | ✅ **IMPLEMENTED — PR #630** |
+| nodes | 1 | joseph | P2 | `openapi_v1/engine_runtime/nodes/` | ✅ **IMPLEMENTED — 2026-08-19**; read-only list matching the frontend |
 
 > **Scope rule (why only these).** Wrap engine HTTP the frontend reaches
 > **directly** through proxypass (`src/frontend/src/requestConfig.ts:189-205`).
@@ -178,7 +180,9 @@ DDL. Full ruling and per-endpoint mapping in
 > the `routines` category), `/api/file`, `/api/skills`, `/api/mcp`,
 > `/api/resource-materializations`, `/api/bash`, `/api/bot/config`,
 > `/api/work-items` — are already fronted by a backend contract and stay out.
-> AICoding-only routes stay out. **WebSockets are not wrapped**: the new
+> The read-only `/api/nodes` inventory is wrapped because the current frontend
+> reaches it directly; no node write operations exist in either frontend or
+> Engine HTTP today. AICoding-only routes stay out. **WebSockets are not wrapped**: the new
 > `…/connection` endpoint returns one complete socket URL, credential included,
 > and the caller builds the connection itself.
 >
@@ -909,7 +913,7 @@ group's `owner_entity_id` locator predated `owner_id`; it was reconciled to
 addresses still publish the old name (spec Open Question 1, closed).
 
 `tests/…/openapi_v1/engine_runtime/test_operator_access.py` sweeps the
-operator matrix across all sixteen operations;
+operator matrix across all runtime operations covered by the shared sweep;
 `…/test_stage_addressing.py` pins the stage behaviour and asserts the two
 parameters sit on exactly the operations listed above — optional, in the query,
 and on no retiring address that did not already have them;
@@ -1479,7 +1483,7 @@ later falls outside it by construction.
 > a tenant-scoped read under the default tenant is a data-isolation failure
 > rather than a missing log.
 
-### ⬜ unassigned · Track C — engine runtime (16 endpoints)
+### Track C — engine runtime (18 endpoints)
 Not a Track B category — these wrap the **engine adapter** on the bot's device
 rather than a backend service. The per-endpoint checklist, the engine route each
 one maps to, and the ruling on the ~72 engine routes that are *not* wrapped live
@@ -1488,8 +1492,9 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 | Group | Endpoints | Public paths |
 |---|---|---|
 | sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` — owner/collaborator operators |
-| engine | 3 | `/openapi/v1/bots/{bot_id}/engine/{status,capabilities,available}` |
+| engine | 4 | `/openapi/v1/bots/{bot_id}/engine/{status,capabilities,available,restart}` |
 | models | 2 | `/openapi/v1/bots/{bot_id}/models`, `…/models/{model_id}` |
+| nodes | 1 | `/openapi/v1/bots/{bot_id}/nodes` — read-only node inventory |
 | approvals | 3 | `/openapi/v1/bots/{bot_id}/approvals/mode` (GET/PUT), `…/modes` |
 | connection | 1 | `/openapi/v1/bots/{bot_id}/connection` — complete WS URL, replaces `get_device_connection` |
 
@@ -1517,11 +1522,10 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 7. **Cross-tenant external identity settled ([#556](https://github.com/inclusionAI/Avernet/issues/556))** — Passport, auth
    relationships and BCN carry a tenant axis, so the BCN sync can be re-enabled
    on the public path. — _⬜ (added 2026-07-29; gates enabling multi-tenancy)._
-8. **Track C:** the five engine-runtime groups (16 endpoints) implemented,
+8. **Track C:** the six engine-runtime groups (18 endpoints) implemented,
    owner-scoped and capability-aware, and `…/connection` returning socket URLs
    so no external caller ever sees a proxypass target or a raw device token.
-   — _✅ 5 of 5 (PR #630). Like every other category it answers 401 until item 6
-   lands; the singlebox E2E flow is blocked on the same event._
+   — _✅ 6 of 6 (PR #630 baseline; later engine restart and nodes additions)._
 
 ---
 
@@ -1846,6 +1850,12 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   and on `route_security.yaml` admitting this surface's real callers; and `app` /
   `access_key` callers 401 until somebody rules on what they own. SDD:
   `src/backend/specs/2026-07-30-gateway-principal-verifier/`.
+- **2026-08-19** — **Read-only Node OpenAPI added.** The frontend and Engine
+  currently support only `GET /api/nodes`, so the public API adds exactly
+  `GET /openapi/v1/bots/{bot_id}/nodes`, with the same owner/editor, grant and
+  stage gates as the other runtime groups. It forwards `status`, `platform`,
+  `limit` and `offset`, publishes only stable node fields, and does not invent
+  register/unregister/status-write operations.
 - **2026-07-30** — **Track C implemented (PR #630)** — all 16 engine-runtime
   endpoints across five groups, plus `core/engine_runtime/` (the relay and the
   connection service) and its Service API Protocols. Seven things worth knowing
@@ -2078,9 +2088,53 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   `_SENSITIVE_NAME_PARTS`.** No status code, response body, or envelope shape
   changed.
 
-
 ## Changelog
 
 - **2026-08-20** — Added authenticated Bot catalog reads at
   `GET /openapi/v1/bots/catalog/search` and `/discover`. User and App
   principals see the same allowlisted public projection.
+
+- **2026-08-19 — Bot Editors CRUD.** The public surface now exposes
+  `GET/POST /openapi/v1/bots/{bot_id}/editors`,
+  `PATCH/DELETE /openapi/v1/bots/{bot_id}/editors/{editor_id}`, and
+  `DELETE /openapi/v1/bots/{bot_id}/editors/me`. All five operations admit an
+  application with a live grant on the addressed Bot; the App acts with the
+  delegating user's current permission, re-adjudicated on every request. The
+  acting user remains the required `user_id` query parameter, while a create body names its target as
+  `editor_user_id`. Roles are the closed `admin | member` enum. Reads require
+  Member access; mutations require Owner/Admin, and a non-owner Admin leaves
+  through `/me` rather than deleting their own record through the admin route.
+  Every `{editor_id}` mutation rebinds the record to the addressed Bot primary
+  key, Bot id, Owner and environment before writing; mismatches are the same
+  fixed 404 as absence. When a Bot carries a Team Space reference, adding or
+  promoting an editor requires that user to remain a live member of the Space;
+  unknown Space references fail closed. The Owner remains outside the editor
+  table, so this contract intentionally permits zero or multiple collaborator
+  Admins and does not couple membership changes to the draft edit lock.
+
+- **2026-08-19 — Bot Workshop adopts the canonical Spaces contract.** Bot
+  creation, local-workflow operations and `GET /openapi/v1/bots/all` now use a
+  numeric Space primary key for `space_id` / `X-Space-Id`; `space_code` remains
+  a separate stable external code. Inventory cards expose the same
+  `space_id`, `space_code`, `space_name`, `space_type` shape as the Spaces API,
+  replacing the provisional string `space_id`, `name`, `kind` shape. This is a
+  coordinated breaking schema correction and the Gateway artifact is published
+  through the compatibility gate with `--allow-breaking`. A Team Space view
+  includes every supported cloud Bot assigned to that Space across Bot Owners;
+  Space membership grants visibility only. Bot Owner/Editor relations still
+  decide actions, Team Editors must remain live Space members, Personal Spaces
+  allow Editors, and Bot Owners retain their Bot permissions after leaving a
+  Team Space.
+
+- **2026-08-19 — Render-screen configuration CRUD.** Added
+  `GET/POST /openapi/v1/bots/{bot_id}/render-screens` and
+  `PATCH/DELETE /openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}`.
+  The collection read returns the non-sensitive component-library name → UMD
+  CDN URL mappings needed to render a Bot's side panels. An authenticated human
+  may read an explicitly addressed Bot without being its Editor; an application
+  may call every operation only while a live grant covers that Bot. Mutations
+  require the delegating user's live effective Editor permission at `MEMBER` or
+  above, including the Team Space membership recheck. Every public record id is bound
+  back to the addressed Bot id, Owner and environment before update or delete;
+  mismatches use the same fixed 404 as absence. Request bodies are strict and
+  accept only HTTP(S) CDN URLs.

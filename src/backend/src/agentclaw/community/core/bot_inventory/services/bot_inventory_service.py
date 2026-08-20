@@ -5,8 +5,12 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping
 
-from agentclaw.community.core.bot_inventory.errors import BotInventoryUpstreamError
+from agentclaw.community.core.bot_inventory.errors import (
+    BotInventoryPermissionError,
+    BotInventoryUpstreamError,
+)
 from agentclaw.community.core.bot_inventory.protocols import (
+    BotInventoryAccessPort,
     BotInventoryBotPort,
     BusinessSpaceContextProtocol,
     DesktopBotInventoryPort,
@@ -15,12 +19,14 @@ from agentclaw.community.core.bot_inventory.services.lifecycle_view import (
     BotLifecycleView,
 )
 from agentclaw.community.core.bot_inventory.types import (
+    BotAction,
     BotInventoryItem,
     BotInventoryKind,
     BusinessSpaceRef,
     DeployMode,
     ServiceLifecycleCard,
 )
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
 
 class BotInventoryService:
@@ -29,11 +35,13 @@ class BotInventoryService:
         *,
         bot_service: BotInventoryBotPort,
         desktop_service: DesktopBotInventoryPort,
+        access_service: BotInventoryAccessPort,
         business_space: BusinessSpaceContextProtocol,
         lifecycle_view: BotLifecycleView,
     ) -> None:
         self._bot = bot_service
         self._desktop = desktop_service
+        self._access = access_service
         self._business_space = business_space
         self._lifecycle = lifecycle_view
 
@@ -41,7 +49,7 @@ class BotInventoryService:
         self,
         *,
         owner_id: str,
-        space: BusinessSpaceRef | None,
+        space: BusinessSpaceRef,
         keyword: str | None,
         engine: str | None,
         deploy_mode: DeployMode | None,
@@ -53,6 +61,7 @@ class BotInventoryService:
         if deploy_mode in (None, DeployMode.CLOUD):
             cloud_rows = self._list_cloud_rows(
                 owner_id=owner_id,
+                space=space,
                 keyword=keyword,
                 engine=engine,
                 bot_ids=bot_ids,
@@ -60,8 +69,16 @@ class BotInventoryService:
             service_rows = [
                 row for row in cloud_rows if row.get("bot_type") == "service"
             ]
+            levels = self._access.get_operable_permission_levels(
+                bots=cloud_rows, user_id=owner_id
+            )
             cards.extend(
-                self._to_item(row, owner_id, space)
+                self._to_item(
+                    row,
+                    owner_id,
+                    space,
+                    levels.get(int(row.get("id") or 0), PermissionLevel.NONE),
+                )
                 for row in cloud_rows
                 if row.get("bot_type") != "service"
             )
@@ -69,12 +86,20 @@ class BotInventoryService:
             for row in service_rows:
                 bot_id = str(row.get("bot_id") or "")
                 cards.extend(
-                    self._to_service_item(row, owner_id, lifecycle_card, space)
+                    self._to_service_item(
+                        row,
+                        owner_id,
+                        lifecycle_card,
+                        space,
+                        levels.get(int(row.get("id") or 0), PermissionLevel.NONE),
+                    )
                     for lifecycle_card in service_cards.get(bot_id, ())
                 )
-        if deploy_mode in (None, DeployMode.LOCAL):
+        if deploy_mode in (None, DeployMode.LOCAL) and (
+            space is None or space.kind == "personal"
+        ):
             cards.extend(
-                self._to_local_item(row, owner_id, space)
+                self._to_local_item(row, owner_id, space, PermissionLevel.OWNER)
                 for row in self._list_local_rows(
                     owner_id=owner_id,
                     keyword=keyword,
@@ -82,8 +107,6 @@ class BotInventoryService:
                     bot_ids=bot_ids,
                 )
             )
-        if space is not None:
-            cards = [c for c in cards if c.space and c.space.space_id == space.space_id]
         cards.sort(
             key=lambda c: (
                 c.deploy_mode.value,
@@ -100,6 +123,7 @@ class BotInventoryService:
         self,
         *,
         owner_id: str,
+        space: BusinessSpaceRef,
         keyword: str | None,
         engine: str | None,
         bot_ids: list[str] | None = None,
@@ -110,7 +134,8 @@ class BotInventoryService:
         total: int | None = None
         while True:
             result = self._bot.list_bots_by_conditions(
-                owner_id=owner_id,
+                owner_id=owner_id if space.kind == "personal" else None,
+                space_id=space.space_id if space.kind == "team" else None,
                 bot_name=keyword,
                 engine=engine,
                 status=None,
@@ -130,11 +155,20 @@ class BotInventoryService:
             if len(page_items) < fetch_size:
                 break
             page += 1
-        return [
-            row
-            for row in rows
-            if row.get("bot_type") in (None, "", "personal", "service")
-        ]
+        visible: list[Mapping[str, Any]] = []
+        for row in rows:
+            if row.get("bot_type") not in (None, "", "personal", "service"):
+                continue
+            try:
+                self._business_space.assert_bot_visible_in_current_space(
+                    bot=row,
+                    owner_id=str(row.get("owner_id") or owner_id),
+                    current_space=space,
+                )
+            except BotInventoryPermissionError:
+                continue
+            visible.append(row)
+        return visible
 
     def _list_local_rows(
         self,
@@ -168,21 +202,24 @@ class BotInventoryService:
         row: Mapping[str, Any],
         owner_id: str,
         current_space: BusinessSpaceRef | None,
+        level: PermissionLevel,
     ) -> BotInventoryItem:
         bot_type = str(row.get("bot_type") or "personal")
         if bot_type == "desktop":
-            return self._to_local_item(row, owner_id, current_space)
-        return self._to_cloud_item(row, owner_id, current_space)
+            return self._to_local_item(row, owner_id, current_space, level)
+        return self._to_cloud_item(row, owner_id, current_space, level)
 
     def _to_cloud_item(
         self,
         row: Mapping[str, Any],
         owner_id: str,
         current_space: BusinessSpaceRef | None,
+        level: PermissionLevel,
     ) -> BotInventoryItem:
         return self._build_item(
             row=row,
             owner_id=owner_id,
+            level=level,
             kind=BotInventoryKind.PERSONAL_CLOUD,
             deploy_mode=DeployMode.CLOUD,
             current_space=current_space,
@@ -193,10 +230,12 @@ class BotInventoryService:
         row: Mapping[str, Any],
         owner_id: str,
         current_space: BusinessSpaceRef | None,
+        level: PermissionLevel,
     ) -> BotInventoryItem:
         return self._build_item(
             row=row,
             owner_id=owner_id,
+            level=level,
             kind=BotInventoryKind.LOCAL,
             deploy_mode=DeployMode.LOCAL,
             current_space=current_space,
@@ -208,10 +247,12 @@ class BotInventoryService:
         owner_id: str,
         lifecycle_card: ServiceLifecycleCard,
         current_space: BusinessSpaceRef | None,
+        level: PermissionLevel,
     ) -> BotInventoryItem:
         return self._build_item(
             row=row,
             owner_id=owner_id,
+            level=level,
             kind=BotInventoryKind.SERVICE,
             deploy_mode=DeployMode.CLOUD,
             lifecycle_card=lifecycle_card,
@@ -223,6 +264,7 @@ class BotInventoryService:
         *,
         row: Mapping[str, Any],
         owner_id: str,
+        level: PermissionLevel,
         kind: BotInventoryKind,
         deploy_mode: DeployMode,
         lifecycle_card: ServiceLifecycleCard | None = None,
@@ -241,6 +283,12 @@ class BotInventoryService:
             actions = lifecycle_card.actions
             disabled = {}
             raw_status = lifecycle_card.status
+        actions, disabled = self._actions_for_level(
+            kind=kind,
+            actions=tuple(actions),
+            disabled=dict(disabled),
+            level=level,
+        )
         bot_id = str(row.get("bot_id") or "")
         publication_id = lifecycle_card.publication_id if lifecycle_card else None
         return BotInventoryItem(
@@ -284,6 +332,28 @@ class BotInventoryService:
                 lifecycle_card.internal_status if lifecycle_card else None
             ),
         )
+
+    @staticmethod
+    def _actions_for_level(
+        *,
+        kind: BotInventoryKind,
+        actions: tuple[BotAction, ...],
+        disabled: dict[str, str],
+        level: PermissionLevel,
+    ) -> tuple[tuple[BotAction, ...], dict[str, str]]:
+        if level >= PermissionLevel.OWNER:
+            return actions, disabled
+        if kind is BotInventoryKind.SERVICE and level >= PermissionLevel.MEMBER:
+            allowed = tuple(action for action in actions if action is not BotAction.DELETE)
+            if BotAction.DELETE in actions:
+                disabled.setdefault(
+                    BotAction.DELETE.value, "Bot Owner permission required"
+                )
+            return allowed, disabled
+        for action in actions:
+            if action is not BotAction.VIEW:
+                disabled.setdefault(action.value, "Bot editor permission required")
+        return (BotAction.VIEW,), disabled
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:

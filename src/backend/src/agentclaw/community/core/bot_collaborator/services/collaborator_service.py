@@ -2,8 +2,10 @@
 
 提供协作者的 CRUD 操作和权限检查功能。
 """
+
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, List, Optional, Dict, Any
 
 from agentclaw.community.core.bot_collaborator.models import (
@@ -11,11 +13,28 @@ from agentclaw.community.core.bot_collaborator.models import (
     CollaboratorRole,
     PermissionLevel,
 )
-from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.bot_collaborator.errors import (
+    BotNotFoundError,
+    BotNotServiceTypeError,
+    CannotRemoveSelfError,
+    CollaboratorAlreadyExistsError,
+    CollaboratorNotFoundError,
+    CollaboratorServiceError,
+    CollaboratorSpaceMembershipError,
+    InvalidCollaboratorRoleError,
+    PermissionDeniedError,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    CollaboratorRepositoryProtocol,
+)
 from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
     MemberManagementCapabilityService,
 )
+from agentclaw.community.core.bot_collaborator.services.editor_policy import (
+    EditorPolicy,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
@@ -27,48 +46,23 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
+__all__ = [
+    "BotNotFoundError",
+    "BotNotServiceTypeError",
+    "CannotRemoveSelfError",
+    "CollaboratorAlreadyExistsError",
+    "CollaboratorNotFoundError",
+    "CollaboratorService",
+    "CollaboratorServiceError",
+    "CollaboratorSpaceMembershipError",
+    "InvalidCollaboratorRoleError",
+    "PermissionDeniedError",
+]
+
 # 运行设备 .credentials 的 ADMINS= 同步由 ``DeviceCredentialsAdminsWriter`` 负责
 # (``core/bot_collaborator/services/credentials_admins_writer.py``):对 service bot 解析
 # 在线 binding (ext.binding.online)、对其它 bot 回退 resolve_for_bot,read-modify-write
 # 既有文件。本模块不再直接解析设备 / 读写 .credentials。
-
-
-# ============================================================================
-# 异常定义
-# ============================================================================
-class CollaboratorServiceError(Exception):
-    """协作者服务基础异常。"""
-    pass
-
-
-class PermissionDeniedError(CollaboratorServiceError):
-    """权限不足异常。"""
-    pass
-
-
-class CollaboratorNotFoundError(CollaboratorServiceError):
-    """协作者不存在异常。"""
-    pass
-
-
-class CollaboratorAlreadyExistsError(CollaboratorServiceError):
-    """协作者已存在异常。"""
-    pass
-
-
-class CannotRemoveSelfError(CollaboratorServiceError):
-    """不能移除自己异常。"""
-    pass
-
-
-class BotNotFoundError(CollaboratorServiceError):
-    """Bot 不存在异常。"""
-    pass
-
-
-class BotNotServiceTypeError(CollaboratorServiceError):
-    """Bot 不是服务型异常。"""
-    pass
 
 
 # ============================================================================
@@ -86,7 +80,9 @@ class CollaboratorService:
         bot_repo: BotRepository,
         passport_plugin: PassportPlugin,
         credentials_admins_writer: "DeviceCredentialsAdminsWriter",
-        member_management_capability_service: MemberManagementCapabilityService | None = None,
+        space_access_service: SpaceAccessServiceProtocol,
+        member_management_capability_service: MemberManagementCapabilityService
+        | None = None,
     ) -> None:
         """初始化服务。
 
@@ -97,6 +93,7 @@ class CollaboratorService:
             credentials_admins_writer: 把 admin 工号同步到运行设备 ``.credentials`` 的
                 写入器（对 service bot 解析在线 binding、对其它 bot 回退
                 ``resolve_for_bot``）。read-modify-write 既有文件，失败只 warning。
+            space_access_service: Team Space 解析和成员校验服务。
             member_management_capability_service: 成员管理能力服务，用于协调通用能力与各引擎定制逻辑。
         """
         self._collaborator_repo = collaborator_repo
@@ -106,6 +103,21 @@ class CollaboratorService:
         self._member_management_capability_service = (
             member_management_capability_service or MemberManagementCapabilityService()
         )
+        self._editor_policy = EditorPolicy(
+            bot_repo=bot_repo,
+            collaborator_repo=collaborator_repo,
+            space_access_service=space_access_service,
+            member_management_capability_service=(
+                self._member_management_capability_service
+            ),
+        )
+
+    @staticmethod
+    def _normalize_role(role: str | CollaboratorRole) -> str:
+        try:
+            return CollaboratorRole(role).value
+        except ValueError as exc:
+            raise InvalidCollaboratorRoleError("unsupported collaborator role") from exc
 
     # ========================================================================
     # 权限检查
@@ -145,6 +157,81 @@ class CollaboratorService:
 
         # 3. 无权限
         return PermissionLevel.NONE
+
+    def get_operable_permission_level(
+        self,
+        *,
+        bot: Mapping[str, Any],
+        user_id: str,
+        env: Optional[str] = None,
+    ) -> PermissionLevel:
+        """Return the effective Bot level after live Space membership policy."""
+        level = self.get_permission_level(
+            int(bot.get("id") or 0),
+            user_id,
+            str(bot.get("owner_id") or ""),
+            env,
+        )
+        if level in (PermissionLevel.NONE, PermissionLevel.OWNER):
+            return level
+        # COSEC: a Team Space editor relation is necessary but not sufficient.
+        # Removing the user from the Space revokes operation immediately, while
+        # Bot Owners intentionally retain ownership even after Space removal.
+        if not self._editor_policy.allows_editor(bot=bot, user_id=user_id):
+            return PermissionLevel.NONE
+        return level
+
+    def get_operable_permission_levels(
+        self,
+        *,
+        bots: Sequence[Mapping[str, Any]],
+        user_id: str,
+        env: Optional[str] = None,
+    ) -> Dict[int, PermissionLevel]:
+        """Resolve effective levels for an inventory page without N+1 role reads."""
+        resolved_env = env or get_current_env()
+        records = self._collaborator_repo.list_by_user(user_id, resolved_env)
+        roles = {record.bot_pk: record.role for record in records}
+        space_cache: dict[str, bool] = {}
+        result: Dict[int, PermissionLevel] = {}
+        for bot in bots:
+            bot_pk = int(bot.get("id") or 0)
+            if bot_pk <= 0:
+                continue
+            if user_id == str(bot.get("owner_id") or ""):
+                result[bot_pk] = PermissionLevel.OWNER
+                continue
+            role = roles.get(bot_pk)
+            level = (
+                PermissionLevel.ADMIN
+                if role == CollaboratorRole.ADMIN
+                else PermissionLevel.MEMBER
+                if role == CollaboratorRole.MEMBER
+                else PermissionLevel.NONE
+            )
+            if (
+                level is not PermissionLevel.NONE
+                and not self._editor_policy.allows_editor(
+                    bot=bot, user_id=user_id, cache=space_cache
+                )
+            ):
+                level = PermissionLevel.NONE
+            result[bot_pk] = level
+        return result
+
+    def _check_operable_permission(
+        self,
+        *,
+        bot: Mapping[str, Any],
+        user_id: str,
+        required_level: PermissionLevel,
+        env: Optional[str] = None,
+    ) -> None:
+        level = self.get_operable_permission_level(bot=bot, user_id=user_id, env=env)
+        if level < required_level:
+            raise PermissionDeniedError(
+                f"权限不足: 需要 {required_level.name} 权限，当前用户 {user_id} 权限为 {level.name}"
+            )
 
     def check_permission(
         self,
@@ -208,6 +295,7 @@ class CollaboratorService:
         """
         if env is None:
             env = get_current_env()
+        role = self._normalize_role(role)
 
         # 1. 查询 Bot 信息
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
@@ -219,7 +307,9 @@ class CollaboratorService:
         #    - service：Service Bot 协作者，走原逻辑；
         #    - 非 service：通过 MemberManagementCapabilityService 协调模板开关和
         #      各引擎自己的能力实现，避免在这里直接依赖某个 engine 的定制逻辑。
-        if not self._member_management_capability_service.can_manage_collaborators(bot, bot_id):
+        if not self._member_management_capability_service.can_manage_collaborators(
+            bot, bot_id
+        ):
             raise BotNotServiceTypeError(
                 f"Bot 不是服务型且未开启成员管理: bot_id={bot_id}"
             )
@@ -250,26 +340,183 @@ class CollaboratorService:
             )
 
         # 6. 创建协作者记录
-        record = self._collaborator_repo.insert({
-            "bot_pk": bot_pk,
-            "bot_id": bot_id,
-            "owner_id": owner_id_from_bot,
-            "user_id": user_id,
-            "user_name": user_name,
-            "role": role,
-            "operator_id": operator_id,
-            "env": env,
-        })
+        record = self._collaborator_repo.insert(
+            {
+                "bot_pk": bot_pk,
+                "bot_id": bot_id,
+                "owner_id": owner_id_from_bot,
+                "user_id": user_id,
+                "user_name": user_name,
+                "role": role,
+                "operator_id": operator_id,
+                "env": env,
+            }
+        )
 
         logger.info(
             "[add_collaborator] Added: bot_id=%s, user_id=%s, role=%s, operator=%s",
-            bot_id, user_id, role, operator_id
+            bot_id,
+            user_id,
+            role,
+            operator_id,
         )
 
         # 7. 触发协作关系变更回调
         self.on_collaboration_changed(bot_id, owner_id_from_bot, env)
 
         return record
+
+    # ========================================================================
+    # Public bot-first Editors API
+    # ========================================================================
+
+    def add_editor(
+        self,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        operator_id: str,
+        user_name: Optional[str] = None,
+        role: str = CollaboratorRole.MEMBER,
+        env: Optional[str] = None,
+    ) -> CollaboratorRecord:
+        """Add an editor after enforcing the public Team Space invariant."""
+        resolved_env = env or get_current_env()
+        bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
+        self._check_operable_permission(
+            bot=bot,
+            user_id=operator_id,
+            required_level=PermissionLevel.ADMIN,
+            env=resolved_env,
+        )
+        self._editor_policy.require_capability(bot=bot, bot_id=bot_id)
+        self._editor_policy.require_team_space_member(bot=bot, user_id=user_id)
+        return self.add_collaborator(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
+            operator_id=operator_id,
+            user_name=user_name,
+            role=self._normalize_role(role),
+            env=resolved_env,
+        )
+
+    def list_editors(
+        self,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        role: Optional[str] = None,
+        env: Optional[str] = None,
+    ) -> List[CollaboratorRecord]:
+        """List editors on an addressed Bot for a member-level caller."""
+        resolved_env = env or get_current_env()
+        bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
+        normalized_role = self._normalize_role(role) if role is not None else None
+        self._check_operable_permission(
+            bot=bot,
+            user_id=user_id,
+            required_level=PermissionLevel.MEMBER,
+            env=resolved_env,
+        )
+        self._editor_policy.require_capability(bot=bot, bot_id=bot_id)
+        return self._collaborator_repo.list_by_bot(
+            bot_id=bot_id,
+            owner_id=bot["owner_id"],
+            env=resolved_env,
+            role=normalized_role,
+        )
+
+    def update_editor(
+        self,
+        bot_id: str,
+        owner_id: str,
+        collaborator_id: int,
+        operator_id: str,
+        role: str,
+        env: Optional[str] = None,
+    ) -> CollaboratorRecord:
+        """Update one editor role after exact Bot/owner/env rebinding."""
+        resolved_env = env or get_current_env()
+        normalized_role = self._normalize_role(role)
+        bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
+        self._check_operable_permission(
+            bot=bot,
+            user_id=operator_id,
+            required_level=PermissionLevel.ADMIN,
+            env=resolved_env,
+        )
+        self._editor_policy.require_capability(bot=bot, bot_id=bot_id)
+        record = self._editor_policy.resolve_record(
+            bot=bot,
+            bot_id=bot_id,
+            collaborator_id=collaborator_id,
+            env=resolved_env,
+        )
+        self._editor_policy.require_team_space_member(bot=bot, user_id=record.user_id)
+        updated = self._collaborator_repo.update(
+            collaborator_id,
+            {"operator_id": operator_id, "role": normalized_role},
+        )
+        if updated is None:
+            raise CollaboratorNotFoundError(f"协作者不存在: id={collaborator_id}")
+        self.on_collaboration_changed(bot_id, bot["owner_id"], resolved_env)
+        return updated
+
+    def remove_editor(
+        self,
+        bot_id: str,
+        owner_id: str,
+        collaborator_id: int,
+        operator_id: str,
+        env: Optional[str] = None,
+    ) -> bool:
+        """Remove one editor after exact Bot/owner/env rebinding."""
+        resolved_env = env or get_current_env()
+        bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
+        operator_level = self.get_operable_permission_level(
+            bot=bot, user_id=operator_id, env=resolved_env
+        )
+        if operator_level < PermissionLevel.ADMIN:
+            raise PermissionDeniedError("权限不足: 需要 ADMIN 权限才能移除协作者")
+        self._editor_policy.require_capability(bot=bot, bot_id=bot_id)
+        record = self._editor_policy.resolve_record(
+            bot=bot,
+            bot_id=bot_id,
+            collaborator_id=collaborator_id,
+            env=resolved_env,
+        )
+        if record.user_id == operator_id and operator_level != PermissionLevel.OWNER:
+            raise CannotRemoveSelfError("不能移除自己")
+        if not self._collaborator_repo.delete(collaborator_id):
+            raise CollaboratorNotFoundError(f"协作者不存在: id={collaborator_id}")
+        self.on_collaboration_changed(bot_id, bot["owner_id"], resolved_env)
+        return True
+
+    def leave_editors(
+        self,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        env: Optional[str] = None,
+    ) -> bool:
+        """Leave the addressed Bot's editor set as the current member."""
+        resolved_env = env or get_current_env()
+        bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
+        self.check_permission(
+            bot_pk=bot["id"],
+            user_id=user_id,
+            owner_id=bot["owner_id"],
+            required_level=PermissionLevel.MEMBER,
+            env=resolved_env,
+        )
+        self._editor_policy.require_capability(bot=bot, bot_id=bot_id)
+        return self.leave_collaboration(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
+            env=resolved_env,
+        )
 
     # ========================================================================
     # 获取协作者列表
@@ -396,13 +643,16 @@ class CollaboratorService:
         if user_name is not None:
             update_data["user_name"] = user_name
         if role is not None:
-            update_data["role"] = role
+            update_data["role"] = self._normalize_role(role)
 
         record = self._collaborator_repo.update(collaborator_id, update_data)
+        if record is None:
+            raise CollaboratorNotFoundError(f"协作者不存在: id={collaborator_id}")
 
         logger.info(
             "[update_collaborator] Updated: id=%s, operator=%s",
-            collaborator_id, operator_id
+            collaborator_id,
+            operator_id,
         )
 
         # 6. 触发协作关系变更回调
@@ -456,16 +706,18 @@ class CollaboratorService:
 
         # 4. 需要管理员权限
         if operator_level < PermissionLevel.ADMIN:
-            raise PermissionDeniedError(
-                f"权限不足: 需要 ADMIN 权限才能移除协作者"
-            )
+            raise PermissionDeniedError("权限不足: 需要 ADMIN 权限才能移除协作者")
 
         # 5. 删除记录
         success = self._collaborator_repo.delete(collaborator_id)
+        if not success:
+            raise CollaboratorNotFoundError(f"协作者不存在: id={collaborator_id}")
 
         logger.info(
             "[remove_collaborator] Removed: id=%s, user_id=%s, operator=%s",
-            collaborator_id, user_id, operator_id
+            collaborator_id,
+            user_id,
+            operator_id,
         )
 
         # 6. 触发协作关系变更回调
@@ -526,8 +778,7 @@ class CollaboratorService:
         success = self._collaborator_repo.delete(collaborator.id)
 
         logger.info(
-            "[leave_collaboration] Left: bot_id=%s, user_id=%s",
-            bot_id, user_id
+            "[leave_collaboration] Left: bot_id=%s, user_id=%s", bot_id, user_id
         )
 
         # 4. 触发协作关系变更回调。
@@ -595,7 +846,11 @@ class CollaboratorService:
 
         logger.info(
             "[check_collaborator_permission] Start: bot_id=%s, owner_id=%s, user_id=%s, required_level=%s, env=%s",
-            bot_id, owner_id, user_id, required_level.name, env
+            bot_id,
+            owner_id,
+            user_id,
+            required_level.name,
+            env,
         )
 
         # 1. 查询 Bot 信息
@@ -616,7 +871,10 @@ class CollaboratorService:
         }
         logger.info(
             "[check_collaborator_permission] Result: has_permission=%s, level=%s, user_id=%s, bot_id=%s",
-            result["has_permission"], result["level"], user_id, bot_id
+            result["has_permission"],
+            result["level"],
+            user_id,
+            bot_id,
         )
 
         return result
@@ -666,7 +924,7 @@ class CollaboratorService:
         )
         logger.info(
             "[on_collaboration_changed] Collaborators: %s",
-            [{"user_id": c.user_id, "role": c.role} for c in collaborators]
+            [{"user_id": c.user_id, "role": c.role} for c in collaborators],
         )
 
         # 3. 通知所有协作者（TODO: 实现实际通知逻辑）
@@ -674,7 +932,9 @@ class CollaboratorService:
 
         logger.info(
             "[on_collaboration_changed] Results: %s, bot_id=%s, owner_id=%s",
-            results, bot_id, owner_id
+            results,
+            bot_id,
+            owner_id,
         )
 
         # 4. 同步 admin 协作者到 Passport 服务
@@ -689,12 +949,14 @@ class CollaboratorService:
             )
             logger.info(
                 "[on_collaboration_changed] Synced admins to the passport service: bot_id=%s, admins=%s",
-                bot_id, admins,
+                bot_id,
+                admins,
             )
         except Exception as e:
             logger.warning(
                 "[on_collaboration_changed] Failed to sync admins to the passport service: bot_id=%s, error=%s",
-                bot_id, e,
+                bot_id,
+                e,
             )
 
         # 5. 同步 admin 工号到运行设备的 .credentials 文件（ADMINS= 行）。

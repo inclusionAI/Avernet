@@ -145,6 +145,33 @@ def test_shipped_config_lets_an_application_discover_its_own_scope() -> None:
     assert req[PrincipalType.APP] is Presence.REQUIRED
 
 
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/openapi/v1/bots/bot-123/editors"),
+        ("POST", "/openapi/v1/bots/bot-123/editors"),
+        ("PATCH", "/openapi/v1/bots/bot-123/editors/7"),
+        ("DELETE", "/openapi/v1/bots/bot-123/editors/7"),
+        ("DELETE", "/openapi/v1/bots/bot-123/editors/me"),
+        ("GET", "/openapi/v1/bots/bot-123/render-screens"),
+        ("POST", "/openapi/v1/bots/bot-123/render-screens"),
+        ("PATCH", "/openapi/v1/bots/bot-123/render-screens/7"),
+        ("DELETE", "/openapi/v1/bots/bot-123/render-screens/7"),
+    ],
+)
+def test_shipped_config_allows_app_identity_for_bot_configuration(
+    method: str, path: str
+) -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    req = rs.resolve(method, path)
+
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.OPTIONAL
+    assert req[PrincipalType.APP] is Presence.OPTIONAL
+
+
 _SOCKET_PATH = "/openapi/v1/bots/messages/ws/ARCA_x@0:20003/api/openclaw/ws"
 _COLLABORATION_SOCKET_PATH = "/openapi/v1/collaboration/messages/ws"
 

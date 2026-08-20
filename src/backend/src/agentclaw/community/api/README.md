@@ -51,6 +51,7 @@ consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.bot_collaborator.models # Collaborator records, roles and permission levels — typed in collaborator_service.py
   - agentclaw.community.core.access.models            # UserInfoRecord — typed in user_service.py
   - agentclaw.community.core.bot_app_grant.models    # BotAppGrantRecord — typed in bot_app_grant_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.bot_chat.schemas        # ConversationDetail, HealthCheckData — typed in bot_chat_service.py

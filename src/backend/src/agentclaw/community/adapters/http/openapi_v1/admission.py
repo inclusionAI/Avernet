@@ -19,11 +19,11 @@ masked ``404``. A bot merely *shared* with the caller is unreachable here **for
 a human too**, so an application acting as that human inherits the same limit
 without anything being written to enforce it.
 
-**Engine-runtime groups** (``sessions``, ``engine``, ``models``, ``approvals``,
-``connection``) take ``user_id`` as the *caller* and a second ``owner_id``
-naming the *addressed bot's owner*, then adjudicate through the collaborator
-gate. This is where a shared bot is reachable, and therefore where a delegation
-actually pays off. For an app-only caller the addressed owner comes from the
+**Engine-runtime groups** (``sessions``, ``engine``, ``models``, ``nodes``,
+``approvals``, ``connection``) take ``user_id`` as the *caller* and a second
+``owner_id`` naming the *addressed bot's owner*, then adjudicate through the
+collaborator gate. This is where a shared bot is reachable, and therefore where
+a delegation actually pays off. For an app-only caller the addressed owner comes from the
 **grant record**, never from the request — see ``engine_runtime/params.py``.
 
 The invariant every mode below serves
@@ -392,6 +392,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
+        "/openapi/v1/bots/{bot_id}/nodes",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
         "/openapi/v1/bots/{bot_id}/connection",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
@@ -585,6 +589,46 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/local/open-folder",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    # A Bot grant lends the delegating user's live Bot permissions. Editor and
+    # render-screen operations therefore admit an application only after the
+    # addressed Bot/owner grant is proven; the domain services still enforce
+    # the delegator's effective Owner/Admin/Member level for the requested act.
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/editors",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/editors",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PATCH",
+        "/openapi/v1/bots/{bot_id}/editors/{editor_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/editors/{editor_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/editors/me",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/render-screens",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/render-screens",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PATCH",
+        "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # ── REFUSED — each for its own reason ────────────────────────────────────
     # The caller's own identity. An app-only caller names no end user, so there
     # is nothing to return — its scope question is answered by

@@ -2,7 +2,7 @@
 
 Two layers, because a 404 alone proves neither:
 
-1. **Endpoint layer** — parametrised over all 19 routes: a bot that is not the
+1. **Endpoint layer** — parametrised over all 20 swept routes: a bot that is not the
    caller's answers a masked 404 **and the transport is never invoked**. The
    Track A guard constrains SQL statements, not device calls, so a handler that
    forwarded first and filtered afterwards would still have reached someone
@@ -46,7 +46,7 @@ TENANT_B = "tenant-b"
 
 SESSION_ID = "session:abc:user:1"
 
-#: (method, path template, body) for all 19 routes. ``{bot}`` is substituted
+#: (method, path template, body) for all 20 swept routes. ``{bot}`` is substituted
 #: with the bot the sweep is probing, and it sits *after* the component name —
 #: the surface's addressing rule (see ``openapi_v1/__init__.py``).
 #:
@@ -69,6 +69,7 @@ ROUTES = [
     ("get", "/{bot}/engine/available", None),
     ("get", "/{bot}/models", None),
     ("get", "/{bot}/models/openai/gpt-5.3", None),
+    ("get", "/{bot}/nodes", None),
     ("get", "/{bot}/approvals/mode?session_key=k", None),
     ("put", "/{bot}/approvals/mode?session_key=k", {"mode": "never"}),
     ("get", "/{bot}/approvals/modes", None),
@@ -123,9 +124,9 @@ def client(relay: FakeRelay, connections: _FakeConnections):
     return user_scoped_client(app, OWNER)
 
 
-def test_all_nineteen_routes_are_covered():
+def test_all_twenty_routes_are_covered():
     """Guard the guard: a shrinking list would silently narrow this sweep."""
-    assert len(ROUTES) == 19
+    assert len(ROUTES) == 20
 
 
 @pytest.mark.parametrize(("method", "suffix", "body"), ROUTES, ids=lambda v: str(v))

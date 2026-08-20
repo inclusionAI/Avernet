@@ -41,6 +41,7 @@ import pytest
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
 )
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
@@ -84,6 +85,9 @@ from agentclaw.community.api.space_service import (
     SpaceServiceProtocol,
 )
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
+from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
+    CollaboratorService,
+)
 from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryBotPort,
     DesktopBotInventoryPort,
@@ -137,6 +141,7 @@ from agentclaw.community.core.spaces.services import (
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
     (BotAppGrantServiceProtocol, BotAppGrantService),
+    (CollaboratorServiceProtocol, CollaboratorService),
     (BotInventoryServiceProtocol, BotInventoryService),
     (BotStartupScriptServiceProtocol, BotStartupScriptService),
     (BotSpaceServiceProtocol, BotSpaceService),

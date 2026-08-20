@@ -16,6 +16,7 @@ provides:
   - SpaceService
   - SpaceMemberService
   - SpaceAccessService
+  - SpaceAccessServiceProtocol
   - SpaceModel
   - SpaceMemberModel
   - SpaceRecord
@@ -26,6 +27,7 @@ consumes:
 consumed_by:
   - "adapters/http/openapi_v1/spaces — public Space and member operations"
   - "core/market_favorites — Space membership authorization"
+  - "core/bot_collaborator — Team Space membership guard for public Bot editors"
 internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.repository
