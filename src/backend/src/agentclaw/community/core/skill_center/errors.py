@@ -95,3 +95,27 @@ class RepositoryCatalogSyncInProgressError(Exception):
 
 class RepositoryCatalogSyncFailedError(Exception):
     """The governed Repo synchronization could not finish successfully."""
+
+
+class SkillSetControlPlaneNotFoundError(Exception):
+    """A canonical SkillSet is absent from the addressed Bot scope."""
+
+
+class SkillSetAccessDeniedError(Exception):
+    """The authenticated principal cannot mutate the addressed Bot SkillSet."""
+
+
+class SkillSetControlPlaneConflictError(Exception):
+    """A canonical SkillSet command conflicts with desired state."""
+
+
+class SkillSetRuntimeReconcileError(Exception):
+    """Runtime reconciliation failed after desired-state compensation."""
+
+
+class SkillSetControlPlaneLockUnavailableError(Exception):
+    """The Bot capability mutation fence is unavailable; mutation failed closed."""
+
+
+class SkillSetManagedResourceError(Exception):
+    """A Direct command targets a resource managed by an ordinary SkillSet."""

@@ -55,7 +55,10 @@ from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
 from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
-from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository, SkillSetRepository
+from agentclaw.community.core.repository.implementations.skill_center.skill import (
+    SkillRepository,
+    SkillSetRepository,
+)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -152,7 +155,9 @@ class _Asset:
 
     async def set_active(self, **kwargs):
         return await self.state.set_local_skill_active(
-            skill_id=kwargs["skill_id"], actor_id=kwargs["actor_id"], active=kwargs["active"]
+            skill_id=kwargs["skill_id"],
+            actor_id=kwargs["actor_id"],
+            active=kwargs["active"],
         )
 
     async def get_content(self, **kwargs):
@@ -285,7 +290,9 @@ def test_activate_and_deactivate_derive_scope_from_id_and_return_desired_state()
 
 def test_delete_derives_scope_from_skill_id_and_returns_standard_deleted_payload():
     delete = _Delete()
-    response = _client(_Query(), delete=delete).delete("/openapi/v1/bots/bot-1/skills/8")
+    response = _client(_Query(), delete=delete).delete(
+        "/openapi/v1/bots/bot-1/skills/8"
+    )
 
     assert response.status_code == 200
     assert response.json()["code"] == 200000
@@ -377,8 +384,16 @@ def test_content_and_parameters_use_the_type_resolved_asset_service():
     assert content.json()["data"]["content"].endswith("# Weather")
     assert parameters.json()["data"] == {"parameters": {"region": "cn"}}
     assert replacement.json()["data"] == {"parameters": {"region": "us"}}
-    assert asset.content_args == {"skill_id": "7", "bot_id": "bot-1", "actor_id": "actor"}
-    assert asset.parameter_args == {"skill_id": "7", "bot_id": "bot-1", "actor_id": "actor"}
+    assert asset.content_args == {
+        "skill_id": "7",
+        "bot_id": "bot-1",
+        "actor_id": "actor",
+    }
+    assert asset.parameter_args == {
+        "skill_id": "7",
+        "bot_id": "bot-1",
+        "actor_id": "actor",
+    }
     assert asset.replace_args == {
         "skill_id": "7",
         "bot_id": "bot-1",
@@ -391,10 +406,7 @@ def test_list_requires_bot_id_and_shared_page_limits():
     client = _client(_Query())
     # No bot in the address means no such route, not a missing parameter.
     assert client.get("/openapi/v1/bots/skills").status_code == 404
-    assert (
-        client.get("/openapi/v1/bots/bot/skills?page_size=101").status_code
-        == 422
-    )
+    assert client.get("/openapi/v1/bots/bot/skills?page_size=101").status_code == 422
 
 
 def test_openapi_declares_local_compatibility_and_skill_asset_operations():
@@ -402,7 +414,8 @@ def test_openapi_declares_local_compatibility_and_skill_asset_operations():
     skill_paths = {
         path: operations
         for path, operations in schema["paths"].items()
-        if "/skills" in path and path.startswith("/openapi/v1/bots/{bot_id}")
+        if "/skills" in path
+        and path.startswith("/openapi/v1/bots/{bot_id}")
         or path.startswith("/openapi/v1/bots/{bot_id}/skills")
     }
     assert {path: set(operations) for path, operations in skill_paths.items()} == {
@@ -453,12 +466,12 @@ def test_openapi_declares_local_compatibility_and_skill_asset_operations():
             if path != "/openapi/v1/bots/{bot_id}/skills" or method != "post":
                 assert "413" not in operation.get("responses", {})
     for status in ("200", "201"):
-        assert upload["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith(
-            "Envelope_SkillUpload_"
-        )
-    assert schema["components"]["schemas"]["SkillUpload"]["properties"]["operation"]["enum"] == [
-        "created", "updated"
-    ]
+        assert upload["responses"][status]["content"]["application/json"]["schema"][
+            "$ref"
+        ].endswith("Envelope_SkillUpload_")
+    assert schema["components"]["schemas"]["SkillUpload"]["properties"]["operation"][
+        "enum"
+    ] == ["created", "updated"]
 
 
 class _Database:
@@ -532,11 +545,13 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
                     LocalSkillQueryServiceProtocol,
                     to=local_query,
                 )
+
                 class Assets:
                     def get_skill(self, *, skill_id, bot_id, actor_id):
                         return local_query.get_local_skill(
                             skill_id=skill_id, actor_id=actor_id
                         )
+
                 binder.bind(BotSkillAssetServiceProtocol, to=Assets())
 
     now = int(time.time())
@@ -719,6 +734,16 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
         def release(self, _lease):
             return True
 
+    class _MutationGuard:
+        def acquire(self, **_kwargs):
+            return object()
+
+        def release(self, _lease):
+            return True
+
+        def ensure_valid(self, _lease) -> None:
+            return None
+
     factory = _Factory()
     service = LocalSkillStateService(
         skills,
@@ -726,7 +751,9 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
         bots,
         object(),
         factory,
+        _MutationGuard(),
         _Guard(),
+        object(),
         object(),
         object(),
         object(),

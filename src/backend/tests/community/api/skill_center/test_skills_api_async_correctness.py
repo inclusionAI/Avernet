@@ -18,7 +18,7 @@ import json
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from fastapi import FastAPI
@@ -32,7 +32,10 @@ from agentclaw.community.api.runtime_layout_probe_service import (
     RuntimeLayoutProbeServiceProtocol,
 )
 from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
-from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
+from agentclaw.community.core.skill_center.errors import (
+    LocalSkillNotFoundError,
+    LocalSkillRuntimeSyncError,
+)
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     LAYOUT_CONTRACT_VERSION,
     RuntimeLayoutProbeResult,
@@ -81,6 +84,30 @@ def _skill_service_di_app(
     mock_skill_service.get_active_skills_from_device = AsyncMock(return_value=[])
     mock_skill_service.runtime_uses_pool_paths = runtime_uses_pool_paths
     mock_skill_service.active_dir = None
+
+    mock_asset_service = MagicMock()
+    def _resolve_legacy(**kwargs):
+        return {"git://path/a": "1", "git://path/b": "2"}.get(
+            kwargs["skill_reference"], "1"
+        )
+
+    mock_asset_service.resolve_legacy_skill_id.side_effect = _resolve_legacy
+    mock_asset_service.set_active = AsyncMock(
+        side_effect=(
+            LocalSkillRuntimeSyncError()
+            if runtime_uses_pool_paths
+            and device_sync_result
+            and not device_sync_result.get("success")
+            else None
+        ),
+        return_value={
+            "id": "1",
+            "name": "a",
+            "link_name": "a",
+            "git_path": "git://path/a",
+        },
+    )
+    mock_skill_service.asset_service = mock_asset_service
 
     # Factory that returns the mock service from create()
     mock_skill_service_factory = MagicMock()
@@ -189,11 +216,7 @@ def _skill_service_di_app(
                 RuntimeLayoutProbeServiceProtocol,
                 to=mock_runtime_layout_probe,
             )
-            class _UnavailableAsset:
-                def get_skill(self, **_kwargs):
-                    raise LocalSkillNotFoundError()
-
-            binder.bind(BotSkillAssetServiceProtocol, to=_UnavailableAsset())
+            binder.bind(BotSkillAssetServiceProtocol, to=mock_asset_service)
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
@@ -812,12 +835,8 @@ class TestActivateSkillAsyncAwait:
                 "/api/skills/my-skill-id/activate",
                 json={"source_path": "git://some/path"},
             )
-            # If the bug exists: mock await_count == 0
-            # After fix: mock await_count == 1
-            assert mock_svc.activate_skill.await_count == 1, (
-                f"activate_skill was not awaited! "
-                f"await_count={mock_svc.activate_skill.await_count}"
-            )
+            assert mock_svc.asset_service.set_active.await_count == 1
+            assert mock_svc.activate_skill.await_count == 0
 
     def test_activate_skill_passes_correct_args(self, mock_ctx):
         """user_id/bolt_id must be passed as kwargs (not positional).
@@ -834,24 +853,11 @@ class TestActivateSkillAsyncAwait:
                 "/api/skills/my-skill-id/activate",
                 json={"source_path": "git://some/path"},
             )
-            mock_svc.activate_skill.assert_called_once()
-            call = mock_svc.activate_skill.call_args
-            # user_id / bolt_id must be kwargs, not positional
-            assert "user_id" in call.kwargs, (
-                f"user_id must be a kwarg; got call={call}"
-            )
-            assert "bolt_id" in call.kwargs, (
-                f"bolt_id must be a kwarg; got call={call}"
-            )
-            # And user_id must NOT be source_path — regression guard for
-            # the position-arg-misalignment bug (see test docstring).
-            assert call.kwargs["user_id"] != "git://some/path", (
-                f"user_id was set to request.source_path ({call.kwargs['user_id']!r}) — "
-                "this is the position-arg-misalignment bug coming back."
-            )
-            assert call.kwargs["user_id"] == mock_ctx.user_id, (
-                f"user_id should be ctx.user_id ({mock_ctx.user_id!r}); "
-                f"got {call.kwargs['user_id']!r}"
+            mock_svc.asset_service.set_active.assert_awaited_once_with(
+                skill_id="1",
+                bot_id=mock_ctx.bot_id,
+                actor_id=mock_ctx.user_id,
+                active=True,
             )
 
     def test_pool_activate_merges_requested_locator_into_mapping_publish(
@@ -869,11 +875,7 @@ class TestActivateSkillAsyncAwait:
             )
 
             assert response.status_code == 200, response.text
-            assert mock_set_svc.get_symlink_mappings.call_args.kwargs == {
-                "user_id": mock_ctx.user_id,
-                "bolt_id": mock_ctx.bot_id,
-                "additional_skill_paths": ["local:///pool/direct-local"],
-            }
+            mock_set_svc.get_symlink_mappings.assert_not_called()
 
     def test_legacy_activate_keeps_existing_mapping_publish_contract(
         self, mock_ctx
@@ -888,10 +890,7 @@ class TestActivateSkillAsyncAwait:
             )
 
             assert response.status_code == 200, response.text
-            assert mock_set_svc.get_symlink_mappings.call_args.kwargs == {
-                "user_id": mock_ctx.user_id,
-                "bolt_id": mock_ctx.bot_id,
-            }
+            mock_set_svc.get_symlink_mappings.assert_not_called()
 
     def test_activate_skill_fails_when_runtime_mapping_sync_fails(self, mock_ctx):
         with _skill_service_di_app(
@@ -908,7 +907,7 @@ class TestActivateSkillAsyncAwait:
             assert response.json()["detail"] == (
                 "Failed to synchronize activated skills to runtime"
             )
-            mock_svc.activate_skill.assert_awaited_once()
+            mock_svc.asset_service.set_active.assert_awaited_once()
 
 
 # ── deactivate_skill ─────────────────────────────────────────────────────────
@@ -926,28 +925,18 @@ class TestDeactivateSkillAsyncAwait:
     def test_deactivate_skill_awaits_service_method(self, mock_ctx):
         with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             client.post("/api/skills/my-skill-id/deactivate")
-            # If the bug exists: mock await_count == 0 (missing await)
-            # After fix: mock await_count == 1
-            assert mock_svc.deactivate_skill.await_count == 1, (
-                f"deactivate_skill was not awaited! "
-                f"await_count={mock_svc.deactivate_skill.await_count}"
-            )
+            assert mock_svc.asset_service.set_active.await_count == 1
+            assert mock_svc.deactivate_skill.await_count == 0
 
     def test_deactivate_skill_passes_correct_skill_id(self, mock_ctx):
         """user_id/bolt_id must be passed as kwargs (not positional)."""
         with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             client.post("/api/skills/my-skill-id/deactivate")
-            mock_svc.deactivate_skill.assert_called_once()
-            call = mock_svc.deactivate_skill.call_args
-            assert "user_id" in call.kwargs, (
-                f"user_id must be a kwarg; got call={call}"
-            )
-            assert "bolt_id" in call.kwargs, (
-                f"bolt_id must be a kwarg; got call={call}"
-            )
-            assert call.kwargs["user_id"] == mock_ctx.user_id, (
-                f"user_id should be ctx.user_id ({mock_ctx.user_id!r}); "
-                f"got {call.kwargs['user_id']!r}"
+            mock_svc.asset_service.set_active.assert_awaited_once_with(
+                skill_id="1",
+                bot_id=mock_ctx.bot_id,
+                actor_id=mock_ctx.user_id,
+                active=False,
             )
 
     def test_deactivate_skill_fails_when_runtime_mapping_sync_fails(
@@ -964,20 +953,13 @@ class TestDeactivateSkillAsyncAwait:
             assert response.json()["detail"] == (
                 "Failed to synchronize deactivated skills to runtime"
             )
-            mock_svc.deactivate_skill.assert_awaited_once()
+            mock_svc.asset_service.set_active.assert_awaited_once()
 
 
 # ── activate_skills_batch ─────────────────────────────────────────────────────
 
 class TestActivateSkillsBatchAsyncAwait:
-    """Test that activate_skills_batch endpoint properly awaits service.activate_skills_batch.
-
-    BEFORE FIX: run_in_threadpool(service.activate_skills_batch, ...) has the same
-    bug as activate_skill. The mock's await_count will be 0.
-
-    AFTER FIX: await service.activate_skills_batch(...) is called directly.
-    The mock's await_count will be 1.
-    """
+    """The legacy batch wire delegates every item to Direct control plane."""
 
     def test_activate_skills_batch_awaits_service_method(self, mock_ctx):
         with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
@@ -985,12 +967,8 @@ class TestActivateSkillsBatchAsyncAwait:
                 "/api/skills/market/activate-batch",
                 json={"skill_paths": ["git://path/a", "git://path/b"]},
             )
-            # If the bug exists: mock await_count == 0
-            # After fix: mock await_count == 1
-            assert mock_svc.activate_skills_batch.await_count == 1, (
-                f"activate_skills_batch was not awaited! "
-                f"await_count={mock_svc.activate_skills_batch.await_count}"
-            )
+            assert mock_svc.asset_service.set_active.await_count == 2
+            assert mock_svc.activate_skills_batch.await_count == 0
 
     def test_activate_skills_batch_passes_correct_skill_paths(self, mock_ctx):
         """skill_paths must propagate; user_id/bolt_id must be kwargs."""
@@ -999,40 +977,33 @@ class TestActivateSkillsBatchAsyncAwait:
                 "/api/skills/market/activate-batch",
                 json={"skill_paths": ["git://path/a", "git://path/b"]},
             )
-            mock_svc.activate_skills_batch.assert_called_once()
-            call = mock_svc.activate_skills_batch.call_args
-            # skill_paths is the first positional arg
-            assert call.args and call.args[0] == ["git://path/a", "git://path/b"], (
-                f"skill_paths not propagated correctly; call={call}"
-            )
-            # user_id/bolt_id must be kwargs so SkillService.activate_skills_batch
-            # can forward them to each inner activate_skill() call.
-            assert "user_id" in call.kwargs, (
-                f"user_id must be a kwarg; got call={call}"
-            )
-            assert "bolt_id" in call.kwargs, (
-                f"bolt_id must be a kwarg; got call={call}"
-            )
-            assert call.kwargs["user_id"] == mock_ctx.user_id
+            assert mock_svc.asset_service.resolve_legacy_skill_id.call_args_list == [
+                call(
+                    skill_reference="git://path/a",
+                    source_path="git://path/a",
+                    bot_id="default",
+                    actor_id=mock_ctx.user_id,
+                ),
+                call(
+                    skill_reference="git://path/b",
+                    source_path="git://path/b",
+                    bot_id="default",
+                    actor_id=mock_ctx.user_id,
+                ),
+            ]
+            assert mock_svc.asset_service.set_active.await_args_list == [
+                call(skill_id="1", bot_id="default", actor_id=mock_ctx.user_id, active=True),
+                call(skill_id="2", bot_id="default", actor_id=mock_ctx.user_id, active=True),
+            ]
 
-    def test_pool_batch_merges_only_successful_locators_into_mapping_publish(
-        self, mock_ctx
-    ):
-        with _skill_service_di_app(
-            mock_ctx, runtime_uses_pool_paths=True
-        ) as (client, mock_svc, mock_set_svc):
-            mock_svc.activate_skills_batch.return_value = {
-                "success": [
-                    {
-                        "id": "a",
-                        "link_name": "a",
-                        "path": "git://path/a",
-                    }
-                ],
-                "failed": [
-                    {"path": "git://path/b", "error": "source missing"}
-                ],
-            }
+    def test_batch_keeps_missing_item_as_partial_success(self, mock_ctx):
+        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
+            def _resolve(**kwargs):
+                if kwargs["skill_reference"] == "git://path/b":
+                    raise LocalSkillNotFoundError()
+                return "1"
+
+            mock_svc.asset_service.resolve_legacy_skill_id.side_effect = _resolve
 
             response = client.post(
                 "/api/skills/market/activate-batch",
@@ -1040,9 +1011,9 @@ class TestActivateSkillsBatchAsyncAwait:
             )
 
             assert response.status_code == 200, response.text
-            assert mock_set_svc.get_symlink_mappings.call_args.kwargs[
-                "additional_skill_paths"
-            ] == ["git://path/a"]
+            assert len(response.json()["data"]["success"]) == 1
+            assert response.json()["data"]["failed"][0]["path"] == "git://path/b"
+            mock_svc.asset_service.set_active.assert_awaited_once()
 
     def test_activate_skills_batch_fails_when_runtime_mapping_sync_fails(
         self, mock_ctx
@@ -1061,4 +1032,4 @@ class TestActivateSkillsBatchAsyncAwait:
             assert response.json()["detail"] == (
                 "Failed to synchronize activated skills to runtime"
             )
-            mock_svc.activate_skills_batch.assert_awaited_once()
+            mock_svc.asset_service.set_active.assert_awaited_once()

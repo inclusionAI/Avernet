@@ -29,7 +29,9 @@ class MemoryCachePlugin(MockSeam, CachePlugin):
     def _cleanup_expired(self):
         """清理过期的缓存项（在锁内调用）。"""
         now = time.time()
-        expired = [k for k, (_, exp) in self._store.items() if exp is not None and now >= exp]
+        expired = [
+            k for k, (_, exp) in self._store.items() if exp is not None and now >= exp
+        ]
         for k in expired:
             del self._store[k]
 
@@ -84,6 +86,25 @@ class MemoryCachePlugin(MockSeam, CachePlugin):
                     del self._store[lock_storage_key]
                     return True
             return False
+
+    def renew_lock_strict(self, lock_key: str, lock_value: str, ttl: int = 30) -> bool:
+        """Extend the local lease only if the token still owns it."""
+        lock_storage_key = f"lock:{lock_key}"
+        with self._lock:
+            current = self._store.get(lock_storage_key)
+            if current is None:
+                return False
+            current_value, expiry = current
+            if expiry is not None and time.time() >= expiry:
+                del self._store[lock_storage_key]
+                return False
+            if current_value != lock_value:
+                return False
+            self._store[lock_storage_key] = (
+                current_value,
+                time.time() + ttl,
+            )
+            return True
 
     def get_json(self, key: str) -> Optional[Dict[str, Any]]:
         """获取 JSON 缓存值。"""
