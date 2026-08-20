@@ -49,12 +49,9 @@ with no live runtime.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
-
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
-    resolve_operable_permission_level,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
@@ -71,8 +68,7 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 #: The bot types an operator surface may serve. Necessary but **not**
-#: sufficient — the caller must also pass
-#: :func:`require_space_aware_bot_operator`.
+#: sufficient — the caller must also pass :func:`require_bot_operator`.
 SUPPORTED_BOT_TYPES = frozenset({"personal", SERVICE_BOT_TYPE})
 
 #: The least collaborator level that holds an operator channel. One bar for
@@ -149,61 +145,6 @@ def require_bot_operator(
         raise BotNotFoundError(f"bot {bot_id} not found")
 
 
-def resolve_space_aware_operator_level(
-    collaborators: CollaboratorServiceProtocol,
-    *,
-    bot: Mapping[str, Any],
-    caller_id: str,
-    owner_id: str,
-) -> PermissionLevel:
-    """Resolve an operator's effective level including live Space membership.
-
-    This is deliberately separate from :func:`resolve_operator_level`, whose
-    ``bot_pk`` contract predates Spaces and remains shared by existing surfaces.
-    Engine-runtime entry points opt into the stronger policy explicitly because
-    they already hold the resolved Bot row needed to evaluate ``space_id``.
-    """
-    try:
-        return resolve_operable_permission_level(
-            collaborators,
-            bot=bot,
-            user_id=caller_id,
-            owner_id=owner_id,
-        )
-    except Exception:
-        logger.exception(
-            "[engine_runtime] effective operator lookup failed for bot_pk=%s; "
-            "refusing the caller",
-            bot.get("id"),
-        )
-        return PermissionLevel.NONE
-
-
-def require_space_aware_bot_operator(
-    collaborators: CollaboratorServiceProtocol,
-    *,
-    bot: Mapping[str, Any],
-    bot_id: str,
-    caller_id: str,
-    owner_id: str,
-) -> None:
-    """Refuse a runtime operator without effective Bot and Space permission."""
-    level = resolve_space_aware_operator_level(
-        collaborators,
-        bot=bot,
-        caller_id=caller_id,
-        owner_id=owner_id,
-    )
-    if level < OPERATOR_LEVEL:
-        logger.warning(
-            "[engine_runtime] caller %r is not an operator of bot=%s owner=%s",
-            caller_id,
-            bot_id,
-            owner_id,
-        )
-        raise BotNotFoundError(f"bot {bot_id} not found")
-
-
 def require_operable_bot(bot_type: str, *, stage: str, surface: str) -> None:
     """Reject bot types and stages the operator surfaces do not serve.
 
@@ -232,7 +173,5 @@ __all__ = [
     "SUPPORTED_BOT_TYPES",
     "require_bot_operator",
     "require_operable_bot",
-    "require_space_aware_bot_operator",
     "resolve_operator_level",
-    "resolve_space_aware_operator_level",
 ]

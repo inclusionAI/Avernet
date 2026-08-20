@@ -50,9 +50,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineStageNotLiveError,
     EngineUpstreamError,
 )
-from agentclaw.community.core.engine_runtime.gate import (
-    require_space_aware_bot_operator,
-)
+from agentclaw.community.core.engine_runtime.gate import require_bot_operator
 from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
 from agentclaw.community.core.engine_runtime.stage import (
     SERVICE_BOT_TYPE,
@@ -115,8 +113,7 @@ class EngineRuntimeRelay:
         does not exist under that owner — or belongs to another tenant, which
         the Track A guard on ``BotModel`` filters out before ownership is even
         considered — raises ``BotNotFoundError``. Then
-        :func:`require_space_aware_bot_operator` decides whether *this caller*
-        may operate
+        :func:`require_bot_operator` decides whether *this caller* may operate
         the resolved bot: the owner, or a collaborator at member level or
         above; anyone else raises the same ``BotNotFoundError``, so a refused
         non-operator cannot tell a bot they may not operate from one that does
@@ -140,9 +137,9 @@ class EngineRuntimeRelay:
         """
         bot = self._bot_service.get_bot(bot_id, owner_id)
         facts = BotFacts.from_record(bot, bot_id=bot_id, owner_id=owner_id)
-        require_space_aware_bot_operator(
+        require_bot_operator(
             self._collaborators,
-            bot=bot,
+            bot_pk=int(bot.get("id") or 0),
             bot_id=facts.bot_id,
             caller_id=caller_id,
             owner_id=facts.owner_id,
