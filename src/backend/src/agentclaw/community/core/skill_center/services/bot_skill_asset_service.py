@@ -304,7 +304,7 @@ class _RepoAssetAdapter:
         # must be determined by the governed source scheme, never that column.
         if skill.get("user_id") or not str(skill.get("git_path") or "").startswith("git://"):
             raise LocalSkillNotFoundError()
-        bot = self._service._bot_repo.get_by_id(bot_id)
+        bot = self._service._bot_repo.get_unique_by_id(bot_id)
         if bot is None:
             raise LocalSkillNotFoundError()
         owner_id = str(bot.get("user_id") or bot.get("owner_id") or "")

@@ -19,6 +19,9 @@ provides:
   - "LocalSkillUploadService"
   - "LocalSkillStateService"
   - "LocalSkillDeleteService"
+  - "BotCapabilityMutationGuard"
+  - "BotCapabilityAuthorizationHookProtocol"
+  - "SkillSetControlPlaneService"
   - "SkillInstallationRepositoryProtocol"
   - "BotSkillAssetService"
   - "LocalSkillCleanupWorkModel"
@@ -46,6 +49,8 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skill_set_control_plane
+  - agentclaw.community.core.repository.skill_set_control_plane_types
   - agentclaw.community.core.access
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator
@@ -68,6 +73,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.mcp_center
+  - agentclaw.community.plugin_api.passport
   - agentclaw.community.plugin_api.object_storage
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.skill_center_client
@@ -86,6 +92,15 @@ Local Skill compatibility materializes active state in
 `ac_bot_skill_installation` and reads it through the Installation repository.
 HTTP and runtime adapters must not write that table or reconstruct Local active
 state from Default SkillSet exclusions.
+
+All Direct activation and canonical SkillSet mutations first acquire the
+layout-neutral `BotCapabilityMutationGuard`, keyed by `(tenant, env, entity_id, bot)`.
+It remains held through desired-state writes, runtime projection, and
+compensating restore; the existing `SkillsPoolEditGuard` is additionally held
+only to preserve Pool rollback exclusion. The cache lease uses compare-token
+release and a 600-second TTL. Runtime reconciliation must finish within that
+lease; a process pause beyond the TTL is recovered by the next full reconcile,
+not by treating the expired lease as an ownership proof.
 
 The P1-01 Local migration is a two-step operation: run the read-only
 `sql/2026_08_20_bot_skill_installation_backfill_dry_run.sql`, retain its

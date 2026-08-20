@@ -102,7 +102,6 @@ def _skills_router_app(mock_ctx, tmp_path):
         SkillSetServiceFactoryProtocol,
     )
     from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
-    from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 
     ctx = _make_ctx()
     resolver = _make_mock_resolver(ctx)
@@ -111,6 +110,21 @@ def _skills_router_app(mock_ctx, tmp_path):
     sync_plugin.sync_symlinks.return_value = {"success": True}
     dispatcher = MagicMock()
     dispatcher.dispatch.return_value = sync_plugin
+
+    asset_service = MagicMock()
+    def _resolve_legacy(**kwargs):
+        _ = kwargs
+        return "1"
+    asset_service.resolve_legacy_skill_id.side_effect = _resolve_legacy
+    asset_service.set_active = AsyncMock(
+        return_value={
+            "id": "1",
+            "name": "a",
+            "link_name": "a",
+            "git_path": "git://path/a",
+        }
+    )
+    resolver.asset_service = asset_service
 
     # ─── Other deps used by the endpoints ───
     skill_service = MagicMock()
@@ -158,11 +172,7 @@ def _skills_router_app(mock_ctx, tmp_path):
             binder.bind(SkillSetServiceFactory, to=skill_set_service_factory)
             binder.bind(DeviceContextResolver, to=resolver)
             binder.bind(DeviceSyncDispatcher, to=dispatcher)
-            class _UnavailableAsset:
-                def get_skill(self, **_kwargs):
-                    raise LocalSkillNotFoundError()
-
-            binder.bind(BotSkillAssetServiceProtocol, to=_UnavailableAsset())
+            binder.bind(BotSkillAssetServiceProtocol, to=asset_service)
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
@@ -252,9 +262,11 @@ class TestSkillsEndpointsUseResolver:
                 },
             )
             assert resp.status_code == 200, resp.text
-            resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
-            dispatcher.dispatch.assert_called_once()
-            assert dispatcher.dispatch.call_args[0][0] is resolver.resolve_for_bot.return_value
+            resolver.resolve_for_bot.assert_not_called()
+            dispatcher.dispatch.assert_not_called()
+            resolver.asset_service.set_active.assert_awaited_once_with(
+                skill_id="1", bot_id="bot-1", actor_id="user-1", active=True
+            )
 
     def test_deactivate_skill_endpoint_uses_resolver(self, mock_request_ctx, tmp_path):
         with _skills_router_app(mock_request_ctx, tmp_path) as (
@@ -273,8 +285,11 @@ class TestSkillsEndpointsUseResolver:
                 },
             )
             assert resp.status_code == 200, resp.text
-            resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
-            dispatcher.dispatch.assert_called_once()
+            resolver.resolve_for_bot.assert_not_called()
+            dispatcher.dispatch.assert_not_called()
+            resolver.asset_service.set_active.assert_awaited_once_with(
+                skill_id="1", bot_id="bot-1", actor_id="user-1", active=False
+            )
 
     def test_activate_skills_batch_endpoint_uses_resolver(self, mock_request_ctx, tmp_path):
         with _skills_router_app(mock_request_ctx, tmp_path) as (
@@ -285,7 +300,7 @@ class TestSkillsEndpointsUseResolver:
         ):
             client.post(
                 "/api/skills/market/activate-batch",
-                json={"skill_paths": ["sk-x"]},
+                json={"skill_paths": ["git://path/a"]},
                 params={
                     "entity_id": "user-1",
                     "entity_type": "staff",
@@ -293,11 +308,16 @@ class TestSkillsEndpointsUseResolver:
                     "engine_type": "openclaw",
                 },
             )
-            # Endpoint may end up 500 if response shape doesn't match the schema;
-            # what matters for this contract test is that resolver was called
-            # before any device sync.
-            resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
-            dispatcher.dispatch.assert_called_once()
+            # Batch is now a Compatibility Adapter over the canonical Direct
+            # control plane; that deep module owns runtime resolution.
+            resolver.resolve_for_bot.assert_not_called()
+            dispatcher.dispatch.assert_not_called()
+            resolver.asset_service.set_active.assert_awaited_once_with(
+                skill_id="1",
+                bot_id="bot-1",
+                actor_id="user-1",
+                active=True,
+            )
 
 
 class TestSkillsetsEndpointUsesResolver:
