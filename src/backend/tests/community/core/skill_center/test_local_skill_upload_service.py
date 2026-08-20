@@ -17,6 +17,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
+    SkillEngineNotSupportedError,
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
@@ -146,14 +147,24 @@ class _Sets:
 
 
 class _Bot:
-    def __init__(self, status="ACTIVE", entity_id="owner"):
+    def __init__(
+        self,
+        status="ACTIVE",
+        entity_id="owner",
+        *,
+        bot_type="personal",
+        engine="openclaw",
+    ):
         self.status = status
         self.entity_id = entity_id
+        self.bot_type = bot_type
+        self.engine = engine
 
     def get_by_id_and_owner(self, *_):
         return {
             "status": self.status,
-            "active_engine": "moltis",
+            "active_engine": self.engine,
+            "bot_type": self.bot_type,
             "env": "test",
             "entity_id": self.entity_id,
         }
@@ -579,6 +590,22 @@ async def test_upload_maps_guard_failures_to_public_domain_errors(
 
 
 @pytest.mark.asyncio
+async def test_upload_fails_closed_for_unsupported_bot_engine_pair():
+    service = _service(
+        _Filesystem(),
+        bot=_Bot(bot_type="desktop", engine="claude_code"),
+    )
+
+    with pytest.raises(SkillEngineNotSupportedError):
+        await service.upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md()}),
+        )
+
+
+@pytest.mark.asyncio
 async def test_upload_keeps_bot_owner_when_collaborator_is_actor():
     filesystem = _Filesystem()
     audit = _Audit()
@@ -656,7 +683,7 @@ async def test_upload_resolves_package_storage_with_bot_entity():
             "entity_id": "project-entity",
             "owner_id": "owner",
             "bot_id": "bot",
-            "engine_type": "moltis",
+            "engine_type": "openclaw",
             "entity_type": "staff",
             "is_desktop": False,
             "is_teclaw": False,

@@ -28,6 +28,9 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
     RuntimeProjectionResolver,
 )
+from agentclaw.community.core.skill_center.runtime_policy import (
+    require_supported_bot_skill_runtime,
+)
 from agentclaw.community.core.skills_pool.mapping_intent import mapping_contract_for
 from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
@@ -90,6 +93,7 @@ class BotRuntimeProjectionReconciler:
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
+        require_supported_bot_skill_runtime(bot)
 
         engine = str(bot.get("active_engine") or "openclaw")
         template_type = bot.get("template_type")
@@ -139,6 +143,13 @@ class BotRuntimeProjectionReconciler:
         )
         mappings = list(projection.skill_mappings)
         retired = list(retired_mappings)
+        if engine == "teclaw" and any(
+            mapping.corpus == "center" for mapping in [*mappings, *retired]
+        ):
+            # Teclaw v4 has no Center request contract. Phase 2 may add its
+            # OSS-backed Center store, but Phase 1 must not tunnel the Engine
+            # mapping-v3 protocol through the legacy Teclaw artifact path.
+            raise SkillSetRuntimeReconcileError()
         if (
             pool_owns_runtime
             or any(

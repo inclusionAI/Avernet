@@ -329,8 +329,27 @@ class _RuntimeBots:
         return {
             "entity_id": "entity-1",
             "active_engine": "openclaw",
+            "bot_type": "personal",
             "entity_type": "staff",
             "env": "pre",
+        }
+
+
+class _UnsupportedRuntimeBots(_RuntimeBots):
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
+        return {
+            **super().get_by_id_and_owner(bot_id, owner_id),
+            "bot_type": "desktop",
+            "active_engine": "claude_code",
+        }
+
+
+class _TeclawRuntimeBots(_RuntimeBots):
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict:
+        return {
+            **super().get_by_id_and_owner(bot_id, owner_id),
+            "bot_type": "personal",
+            "active_engine": "teclaw",
         }
 
 
@@ -369,7 +388,12 @@ class _RuntimePool:
 
 
 class _CenterRuntimePool(_RuntimePool):
+    def __init__(self) -> None:
+        super().__init__()
+        self.probe_calls: list[dict] = []
+
     async def probe(self, **_kwargs):
+        self.probe_calls.append(_kwargs)
         return SimpleNamespace(
             evidence={
                 "supported_mapping_contract_versions": [
@@ -882,3 +906,39 @@ async def test_runtime_reconcile_requires_and_uses_mapping_v3_for_center():
         "skill_uuid": "stable-skill-uuid",
         "sc_version_number": "3.0.0",
     }
+
+
+@pytest.mark.asyncio
+async def test_runtime_reconcile_fails_closed_for_unsupported_bot_engine_pair():
+    runtime = BotRuntimeProjectionReconciler(
+        factory=_RuntimeFactory(),
+        bot_repo=_UnsupportedRuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_RuntimeSkills(),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    with pytest.raises(SkillEngineNotSupportedError):
+        await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+
+@pytest.mark.asyncio
+async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
+    pool = _CenterRuntimePool()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=_RuntimeFactory(),
+        bot_repo=_TeclawRuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_CenterRuntimeSkills(),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+    assert pool.probe_calls == []
+    assert pool.publish_calls == []
