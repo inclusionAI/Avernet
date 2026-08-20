@@ -82,6 +82,9 @@ class _RuntimeFactory:
     def sync_runtime(self):
         return True
 
+    async def reconcile(self, **_kwargs):
+        return None
+
 
 class _DeviceContextResolverStub:
     def resolve_for_bot(self, _bot_id, _owner_id):
@@ -205,11 +208,11 @@ def _seed_uploadable_bot(world) -> None:
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             storage_factory,
-            _RuntimeFactory(),
             world.get(BotCollabLogRepositoryProtocol),
             world.get(SkillsPoolEditGuard),
             _Cleanup(),
             lambda: _DeviceContextResolverStub(),
+            _RuntimeFactory(),
         ),
         scope=None,
     )

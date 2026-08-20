@@ -375,6 +375,9 @@ class _RuntimeFactory:
     def sync_runtime(self, *, desired_skills=None):
         return True
 
+    async def reconcile(self, **_kwargs):
+        return None
+
 
 class _ReplacementRepo(_Repo):
     def __init__(self, rows):
@@ -486,6 +489,11 @@ class _ReplacementRuntime:
         self.calls += 1
         return next(self.results)
 
+    async def reconcile(self, **_kwargs):
+        self.calls += 1
+        if not next(self.results):
+            raise RuntimeError("runtime reconcile failed")
+
 
 class _DeviceResolver:
     def __init__(self, provider="local"):
@@ -506,11 +514,11 @@ def _replacement_service(
         _Bot(),
         _Collaborators(),
         _ReplacementFactory(filesystem),
-        runtime,
         _Audit(),
         guard or _Guard(),
         cleanup,
         lambda: _DeviceResolver(provider),
+        runtime,
     )
 
 
@@ -533,11 +541,11 @@ def _service(
         bot or _Bot(status),
         collaborators or _Collaborators(),
         factory or _Factory(filesystem),
-        _RuntimeFactory(),
         audit or _Audit(),
         guard or _Guard(),
         _Cleanup(),
         lambda: _DeviceResolver(provider),
+        _RuntimeFactory(),
     )
 
 

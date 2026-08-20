@@ -752,12 +752,11 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
         object(),
         factory,
         _MutationGuard(),
-        _Guard(),
-        object(),
-        object(),
-        object(),
-        object(),
-    )
+            _Guard(),
+            object(),
+            object(),
+            object(),
+        )
     with avernet_tenant_scope("tenant-b"):
         with pytest.raises(LocalSkillNotFoundError):
             await service.set_local_skill_active(

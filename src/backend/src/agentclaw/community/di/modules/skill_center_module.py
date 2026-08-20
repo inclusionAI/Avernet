@@ -150,7 +150,6 @@ from agentclaw.community.core.repository.protocols.skills_pool import (
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolSkillRepositoryProtocol,
 )
-from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skills_pool.reconcile_task import (
     SkillsPoolReconcileWakeupListener,
 )
@@ -427,11 +426,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
-        skill_set_service_factory: SkillSetServiceFactory,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
         cleanup_repo: LocalSkillCleanupRepository,
         injector: Injector,
+        runtime_reconciler: BotRuntimeProjectionReconcilerProtocol,
     ) -> LocalSkillUploadServiceProtocol:
         return LocalSkillUploadService(
             skill_repo,
@@ -439,11 +438,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             bot_repo,
             collaborator_service,
             skill_service_factory,
-            skill_set_service_factory,
             audit_log_repo,
             edit_guard,
             cleanup_repo,
             lambda: injector.get(DeviceContextResolver),
+            runtime_reconciler,
         )
 
     @singleton
@@ -467,9 +466,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         skill_set_service_factory: SkillSetServiceFactory,
         mutation_guard: BotCapabilityMutationGuard,
         edit_guard: SkillsPoolEditGuard,
-        pool_runtime: SkillsPoolRuntimeProtocol,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
-        pool_layouts: SkillsPoolLayoutRepositoryProtocol,
+        runtime_reconciler: BotRuntimeProjectionReconcilerProtocol,
     ) -> LocalSkillStateServiceProtocol:
         return LocalSkillStateService(
             skill_repo,
@@ -479,10 +477,9 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             skill_set_service_factory,
             mutation_guard,
             edit_guard,
-            pool_runtime,
             pool_skills,
-            pool_layouts,
             skill_set_repo,
+            runtime_reconciler,
         )
 
     @singleton

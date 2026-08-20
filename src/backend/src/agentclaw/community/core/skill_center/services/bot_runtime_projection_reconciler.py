@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from injector import inject
@@ -43,7 +44,13 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 class BotRuntimeProjectionReconcilerProtocol(Protocol):
     """Apply the complete database desired state for one Bot."""
 
-    async def reconcile(self, *, bot_id: str, owner_id: str) -> None: ...
+    async def reconcile(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+    ) -> None: ...
 
 
 class BotRuntimeProjectionReconciler:
@@ -73,7 +80,13 @@ class BotRuntimeProjectionReconciler:
         self._pool_layouts = pool_layouts
         self._passport = passport
 
-    async def reconcile(self, *, bot_id: str, owner_id: str) -> None:
+    async def reconcile(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+    ) -> None:
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
@@ -115,13 +128,36 @@ class BotRuntimeProjectionReconciler:
             )
         )
 
-        if any(mapping.corpus == "center" for mapping in projection.skill_mappings):
+        scope = BotSkillLayoutScope(
+            env=str(bot["env"]),
+            entity_id=str(bot.get("entity_id") or owner_id),
+            bot_id=bot_id,
+        )
+        layout_state = self._pool_layouts.get(scope)
+        pool_owns_runtime = layout_state is not None and runtime_uses_pool_paths(
+            layout_state
+        )
+        mappings = list(projection.skill_mappings)
+        retired = list(retired_mappings)
+        if (
+            pool_owns_runtime
+            or any(
+                mapping.corpus in {"repo", "center"}
+                for mapping in [*mappings, *retired]
+            )
+            or retired
+        ):
             await self._apply_pool_mappings(
-                bot=bot,
                 bot_id=bot_id,
                 owner_id=owner_id,
                 engine=engine,
-                mappings=list(projection.skill_mappings),
+                mappings=mappings,
+                retired_mappings=retired,
+                source_layout=(
+                    SkillMappingSourceLayout.POOL
+                    if pool_owns_runtime
+                    else SkillMappingSourceLayout.LEGACY
+                ),
             )
         elif not service.sync_runtime(
             desired_skills=[
@@ -158,37 +194,31 @@ class BotRuntimeProjectionReconciler:
     async def _apply_pool_mappings(
         self,
         *,
-        bot: dict,
         bot_id: str,
         owner_id: str,
         engine: str,
         mappings: list[PoolSkillMapping],
+        retired_mappings: list[PoolSkillMapping],
+        source_layout: SkillMappingSourceLayout,
     ) -> None:
-        scope = BotSkillLayoutScope(
-            env=str(bot["env"]),
-            entity_id=str(bot.get("entity_id") or owner_id),
-            bot_id=bot_id,
-        )
-        layout_state = self._pool_layouts.get(scope)
-        source_layout = (
-            SkillMappingSourceLayout.POOL
-            if layout_state is not None and runtime_uses_pool_paths(layout_state)
-            else SkillMappingSourceLayout.LEGACY
-        )
         try:
-            probe = await self._pool_runtime.probe(
-                bot_id=bot_id,
-                user_id=owner_id,
-                engine=engine,
-            )
-            contract = mapping_contract_for(
-                mappings,
-                probe.evidence.get("supported_mapping_contract_versions"),
-            )
+            contract_mappings = [*mappings, *retired_mappings]
+            supported_versions: object = None
+            if any(mapping.corpus == "center" for mapping in contract_mappings):
+                probe = await self._pool_runtime.probe(
+                    bot_id=bot_id,
+                    user_id=owner_id,
+                    engine=engine,
+                )
+                supported_versions = probe.evidence.get(
+                    "supported_mapping_contract_versions"
+                )
+            contract = mapping_contract_for(contract_mappings, supported_versions)
             published = await self._pool_runtime.publish_mappings(
                 bot_id=bot_id,
                 user_id=owner_id,
                 mappings=mappings,
+                retired_mappings=retired_mappings,
                 source_layout=source_layout,
                 mapping_contract_version=contract,
             )
@@ -196,6 +226,7 @@ class BotRuntimeProjectionReconciler:
                 bot_id=bot_id,
                 user_id=owner_id,
                 mappings=mappings,
+                retired_mappings=retired_mappings,
                 source_layout=source_layout,
                 mapping_contract_version=contract,
             )

@@ -316,8 +316,10 @@ class _RuntimeFactoryService:
 class _RuntimeFactory:
     def __init__(self) -> None:
         self.service = _RuntimeFactoryService()
+        self.kwargs: dict | None = None
 
-    def create(self, **_kwargs):
+    def create(self, **kwargs):
+        self.kwargs = kwargs
         return self.service
 
 
@@ -825,6 +827,13 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
 
     await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
 
+    assert factory.kwargs == {
+        "user_id": "true-owner",
+        "entity_id": "entity-1",
+        "bot_id": "bot-1",
+        "engine_type": "openclaw",
+        "entity_type": "staff",
+    }
     assert factory.service.mcp_codes == {
         "mcp.weather",
         *{

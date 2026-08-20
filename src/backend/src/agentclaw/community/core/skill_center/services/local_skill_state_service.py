@@ -33,6 +33,9 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
     RuntimeProjectionResolver,
 )
+from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
+    BotRuntimeProjectionReconcilerProtocol,
+)
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationBusyError,
     BotCapabilityMutationGuard,
@@ -47,7 +50,6 @@ from agentclaw.community.core.repository.protocols.skill_installation import (
     SkillInstallationRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skills_pool import (
-    SkillsPoolLayoutRepositoryProtocol,
     SkillsPoolSkillRepositoryProtocol,
 )
 from agentclaw.community.core.skills_pool.edit_guard import (
@@ -61,19 +63,9 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
 )
 from agentclaw.community.core.skills_pool.models import (
-    PoolSkillMapping,
     RegisteredSkillAsset,
-    SkillMappingSourceLayout,
 )
-from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
-from agentclaw.community.core.skills_pool.types import (
-    BotSkillLayoutScope,
-    runtime_uses_pool_paths,
-)
-from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
-    MAPPING_CONTRACT_VERSION,
-    MAPPING_V3_CONTRACT_VERSION,
-)
+from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 
 
 class LocalSkillStateService:
@@ -89,10 +81,9 @@ class LocalSkillStateService:
         skill_set_service_factory: SkillSetServiceFactory,
         mutation_guard: BotCapabilityMutationGuard,
         edit_guard: SkillsPoolEditGuard,
-        pool_runtime: SkillsPoolRuntimeProtocol,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
-        pool_layouts: SkillsPoolLayoutRepositoryProtocol,
         skill_set_repo: SkillSetRepository,
+        runtime_reconciler: BotRuntimeProjectionReconcilerProtocol,
     ) -> None:
         self._skill_repo = skill_repo
         self._installations = installations
@@ -101,10 +92,9 @@ class LocalSkillStateService:
         self._skill_set_service_factory = skill_set_service_factory
         self._mutation_guard = mutation_guard
         self._edit_guard = edit_guard
-        self._pool_runtime = pool_runtime
         self._pool_skills = pool_skills
-        self._pool_layouts = pool_layouts
         self._skill_set_repo = skill_set_repo
+        self._runtime_reconciler = runtime_reconciler
 
     async def set_local_skill_active(
         self, *, skill_id: str, actor_id: str, active: bool
@@ -143,13 +133,11 @@ class LocalSkillStateService:
                 self._ensure_mutation_lease(mutation_lease)
 
                 if active:
-                    synced = self._sync_runtime(
-                        bot=bot, owner_id=owner_id, bot_id=bot_id
+                    synced = await self._reconcile_runtime(
+                        bot_id=bot_id, owner_id=owner_id
                     )
                 else:
                     synced = await self._reconcile_deactivation(
-                        scope=scope,
-                        bot=bot,
                         skill=skill,
                         owner_id=owner_id,
                         bot_id=bot_id,
@@ -170,8 +158,8 @@ class LocalSkillStateService:
                         # Restore through the established runtime synchronizer.
                         # It owns each engine's actual active-root compatibility,
                         # including Claude Code's historical workspace root.
-                        restored = self._sync_runtime(
-                            bot=bot, owner_id=owner_id, bot_id=bot_id
+                        restored = await self._reconcile_runtime(
+                            bot_id=bot_id, owner_id=owner_id
                         )
                         self._ensure_mutation_lease(mutation_lease)
                         if not restored:
@@ -254,13 +242,11 @@ class LocalSkillStateService:
                     raise LocalSkillStorageError() from exc
                 self._ensure_mutation_lease(mutation_lease)
                 if active:
-                    synced = await self._publish_current_mappings(
-                        scope=scope, bot=bot, owner_id=owner_id, bot_id=bot_id
+                    synced = await self._reconcile_runtime(
+                        owner_id=owner_id, bot_id=bot_id
                     )
                 else:
                     synced = await self._reconcile_deactivation(
-                        scope=scope,
-                        bot=bot,
                         skill=raw,
                         owner_id=owner_id,
                         bot_id=bot_id,
@@ -285,8 +271,8 @@ class LocalSkillStateService:
                         )
                     except Exception as exc:
                         raise LocalSkillStorageError() from exc
-                    if not await self._publish_current_mappings(
-                        scope=scope, bot=bot, owner_id=owner_id, bot_id=bot_id
+                    if not await self._reconcile_runtime(
+                        owner_id=owner_id, bot_id=bot_id
                     ):
                         raise LocalSkillRuntimeSyncError()
                     self._ensure_mutation_lease(mutation_lease)
@@ -447,49 +433,32 @@ class LocalSkillStateService:
             ):
                 raise SkillSetManagedResourceError()
 
-    def _sync_runtime(self, *, bot: dict[str, Any], owner_id: str, bot_id: str) -> bool:
+    async def _reconcile_runtime(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        retired_mappings=(),
+    ) -> bool:
         try:
-            projection = RuntimeProjectionResolver().resolve(
-                RuntimeDesiredState(
-                    skills=tuple(
-                        self._pool_skills.list_bot_active_assets(
-                            env=str(bot["env"]),
-                            bot_id=bot_id,
-                            user_id=owner_id,
-                            engine=str(bot.get("active_engine") or "openclaw"),
-                        )
-                    )
+            if retired_mappings:
+                await self._runtime_reconciler.reconcile(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    retired_mappings=retired_mappings,
                 )
-            )
-            service = self._skill_set_service_factory.create(
-                user_id=owner_id,
-                entity_id=str(bot["entity_id"]),
-                bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-                entity_type=bot.get("entity_type"),
-            )
-            return bool(
-                service.sync_runtime(
-                    desired_skills=[
-                        {
-                            "id": str(asset.skill_id),
-                            "name": asset.name,
-                            "git_path": asset.git_path,
-                            "skill_uuid": asset.skill_uuid,
-                            "sc_version_number": asset.sc_version_number,
-                        }
-                        for asset in projection.skill_assets
-                    ]
+            else:
+                await self._runtime_reconciler.reconcile(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
                 )
-            )
+            return True
         except Exception:
             return False
 
     async def _reconcile_deactivation(
         self,
         *,
-        scope: BotSkillLayoutScope,
-        bot: dict[str, Any],
         skill: dict[str, Any],
         owner_id: str,
         bot_id: str,
@@ -522,64 +491,8 @@ class LocalSkillStateService:
             )
         except (KeyError, TypeError, ValueError):
             return False
-        return await self._publish_current_mappings(
-            scope=scope,
-            bot=bot,
+        return await self._reconcile_runtime(
             owner_id=owner_id,
             bot_id=bot_id,
             retired_mappings=retired_mapping,
         )
-
-    async def _publish_current_mappings(
-        self,
-        *,
-        scope: BotSkillLayoutScope,
-        bot: dict[str, Any],
-        owner_id: str,
-        bot_id: str,
-        retired_mappings: list[PoolSkillMapping] | None = None,
-    ) -> bool:
-        try:
-            projection = RuntimeProjectionResolver().resolve(
-                RuntimeDesiredState(
-                    skills=tuple(
-                        self._pool_skills.list_bot_active_assets(
-                            env=scope.env,
-                            bot_id=bot_id,
-                            user_id=owner_id,
-                            engine=str(bot["active_engine"]),
-                        )
-                    )
-                )
-            )
-            mappings = list(projection.skill_mappings)
-            source_layout = (
-                SkillMappingSourceLayout.POOL
-                if runtime_uses_pool_paths(self._pool_layouts.get(scope))
-                else SkillMappingSourceLayout.LEGACY
-            )
-            retired = retired_mappings or []
-            mapping_contract = (
-                MAPPING_V3_CONTRACT_VERSION
-                if any(mapping.corpus == "center" for mapping in mappings)
-                else MAPPING_CONTRACT_VERSION
-            )
-            if not await self._pool_runtime.publish_mappings(
-                bot_id=bot_id,
-                user_id=owner_id,
-                mappings=mappings,
-                retired_mappings=retired,
-                source_layout=source_layout,
-                mapping_contract_version=mapping_contract,
-            ):
-                return False
-            return await self._pool_runtime.verify_mappings(
-                bot_id=bot_id,
-                user_id=owner_id,
-                mappings=mappings,
-                retired_mappings=retired,
-                source_layout=source_layout,
-                mapping_contract_version=mapping_contract,
-            )
-        except Exception:
-            return False

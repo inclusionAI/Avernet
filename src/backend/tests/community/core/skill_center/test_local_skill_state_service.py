@@ -19,6 +19,10 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.services.local_skill_state_service import (
     LocalSkillStateService,
 )
+from agentclaw.community.core.skill_center.runtime_resolver import (
+    RuntimeDesiredState,
+    RuntimeProjectionResolver,
+)
 from agentclaw.community.core.skills_pool.models import (
     RegisteredSkillAsset,
     SkillMappingSourceLayout,
@@ -222,6 +226,74 @@ class _Runtime:
         return self.verify_results.pop(0)
 
 
+class _RuntimeReconciler:
+    def __init__(self, runtime: _Runtime, skills, *, pool_layout: bool = False) -> None:
+        self.runtime = runtime
+        self.skills = skills
+        self.pool_layout = pool_layout
+        self.calls: list[dict] = []
+
+    async def reconcile(self, **kwargs) -> None:
+        self.calls.append(kwargs)
+        projection = RuntimeProjectionResolver().resolve(
+            RuntimeDesiredState(
+                skills=tuple(
+                    self.skills.list_bot_active_assets(
+                        env="pre",
+                        bot_id=kwargs["bot_id"],
+                        user_id=kwargs["owner_id"],
+                        engine="openclaw",
+                    )
+                )
+            )
+        )
+        retired = list(kwargs.get("retired_mappings") or ())
+        if (
+            self.pool_layout
+            or retired
+            or any(mapping.corpus == "repo" for mapping in projection.skill_mappings)
+        ):
+            contract_mappings = [*projection.skill_mappings, *retired]
+            contract = (
+                "skills-pool-mapping-v3"
+                if any(mapping.corpus == "center" for mapping in contract_mappings)
+                else "skills-pool-mapping-v2"
+            )
+            published = await self.runtime.publish_mappings(
+                mappings=list(projection.skill_mappings),
+                retired_mappings=retired,
+                source_layout=(
+                    SkillMappingSourceLayout.POOL
+                    if self.pool_layout
+                    else SkillMappingSourceLayout.LEGACY
+                ),
+                mapping_contract_version=contract,
+            )
+            if not published or not await self.runtime.verify_mappings(
+                mappings=list(projection.skill_mappings),
+                retired_mappings=retired,
+                source_layout=(
+                    SkillMappingSourceLayout.POOL
+                    if self.pool_layout
+                    else SkillMappingSourceLayout.LEGACY
+                ),
+                mapping_contract_version=contract,
+            ):
+                raise RuntimeError("runtime reconcile failed")
+            return
+        if not self.runtime.sync_runtime(
+            desired_skills=[
+                {
+                    "id": str(asset.skill_id),
+                    "name": asset.name,
+                    "git_path": asset.git_path,
+                }
+                for asset in projection.skill_assets
+            ]
+        ):
+            raise RuntimeError("runtime reconcile failed")
+
+
 class _Layouts:
     def __init__(self, *, pool: bool = False) -> None:
         self.pool = pool
@@ -284,6 +356,9 @@ def _service(
 
         guard.acquire_for_edit = fail_acquire
     runtime = _Runtime(sync_success)
+    runtime_reconciler = _RuntimeReconciler(
+        runtime, skills, pool_layout=pool_layout
+    )
     factory = _Factory(runtime)
     service = LocalSkillStateService(
         skills,
@@ -293,10 +368,9 @@ def _service(
         factory,
         mutation_guard,
         guard,
-        runtime,
         skills,
-        _Layouts(pool=pool_layout),
         sets,
+        runtime_reconciler,
     )
     return service, skills, sets, guard, runtime, factory
 
@@ -356,13 +430,9 @@ async def test_activate_changes_desired_state_then_reconciles_under_bot_layout_l
     assert sets.events == ["remove"]
     assert runtime.calls == 1
     assert guard.events == ["acquire:pre:owner:bot", "release"]
-    assert factory.kwargs == {
-        "user_id": "owner",
-        "entity_id": "owner",
-        "bot_id": "bot",
-        "engine_type": "openclaw",
-        "entity_type": "staff",
-    }
+    assert service._runtime_reconciler.calls == [
+        {"bot_id": "bot", "owner_id": "owner"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -481,6 +551,7 @@ def _repo_service(
     skills = _RepoSkills(active=active, references=references)
     installations = _Installations(skills)
     runtime = _Runtime(sync_success)
+    runtime_reconciler = _RuntimeReconciler(runtime, skills)
     factory = _RepoFactory(runtime, normal_member=bool(references))
     guard = _Guard()
     if active_assets is not None:
@@ -493,10 +564,9 @@ def _repo_service(
         factory,
         _MutationGuard(),
         guard,
-        runtime,
         skills,
-        _Layouts(),
         factory.set_service,
+        runtime_reconciler,
     )
     return service, skills, installations, runtime
 
@@ -596,14 +666,16 @@ async def test_repo_direct_idempotent_runtime_failure_preserves_old_installation
 
 
 @pytest.mark.asyncio
-async def test_runtime_sync_uses_the_bot_entity_for_skill_paths():
+async def test_runtime_sync_delegates_the_stable_bot_identity():
     service, _skills, _sets, _guard, _runtime, factory = _service(
         entity_id="project-entity"
     )
 
     await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
 
-    assert factory.kwargs["entity_id"] == "project-entity"
+    assert service._runtime_reconciler.calls == [
+        {"bot_id": "bot", "owner_id": "owner"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -818,15 +890,15 @@ async def test_runtime_failure_republishes_the_rolled_back_desired_state():
 
 
 @pytest.mark.asyncio
-async def test_runtime_factory_failure_also_compensates_before_fixed_failure():
-    service, skills, sets, _guard, _runtime, factory = _service(
+async def test_runtime_reconciler_failure_also_compensates_before_fixed_failure():
+    service, skills, sets, _guard, _runtime, _factory = _service(
         active=False, sync_success=True
     )
 
-    def fail_create(**_kwargs):
+    async def fail_reconcile(**_kwargs):
         raise RuntimeError("private runtime resolution")
 
-    factory.create = fail_create
+    service._runtime_reconciler.reconcile = fail_reconcile
     with pytest.raises(LocalSkillRuntimeSyncError):
         await service.set_local_skill_active(
             skill_id="9", actor_id="owner", active=True
