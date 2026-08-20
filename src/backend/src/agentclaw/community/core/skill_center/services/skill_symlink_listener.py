@@ -70,6 +70,7 @@ class SkillSymlinkListener(LifecycleBase):
             Callable[[DeviceActivatedEvent], None] | None
         ) = None,
         runtime_reconcile: Callable[[str, str], object] | None = None,
+        runtime_non_skill_reconcile: Callable[[str, str], object] | None = None,
     ) -> None:
         self._bot_repo = bot_repo
         self._skill_set_factory = skill_set_factory
@@ -78,6 +79,7 @@ class SkillSymlinkListener(LifecycleBase):
         self._desktop_layout_authority = desktop_layout_authority
         self._desktop_reconcile_wakeup = desktop_reconcile_wakeup
         self._runtime_reconcile = runtime_reconcile
+        self._runtime_non_skill_reconcile = runtime_non_skill_reconcile
 
     async def startup(self) -> None:
         """Lifecycle hook — subscribe ``self.handle`` to DeviceActivatedEvent.
@@ -137,14 +139,6 @@ class SkillSymlinkListener(LifecycleBase):
                 is_desktop=is_desktop,
             )
             initial_authority = self._resolve_desktop_layout_authority(bot)
-            if initial_authority == _TRANSITION_AUTHORITY:
-                logger.info(
-                    "[skill_symlink_listener] Desktop transitional mapping "
-                    "is owned by durable reconciliation: bot_id=%s",
-                    bot_id,
-                )
-                return
-
             ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
             if ctx.binding_id != event.binding_id:
                 logger.info(
@@ -157,14 +151,35 @@ class SkillSymlinkListener(LifecycleBase):
                 )
                 return
 
+            if initial_authority == _TRANSITION_AUTHORITY:
+                logger.info(
+                    "[skill_symlink_listener] Desktop transitional mapping "
+                    "is owned by durable reconciliation: bot_id=%s",
+                    bot_id,
+                )
+                if self._runtime_non_skill_reconcile is not None:
+                    outcome = self._runtime_non_skill_reconcile(
+                        str(bot_id), str(owner_id)
+                    )
+                    if asyncio.iscoroutine(outcome):
+                        _run_reconcile_blocking(outcome)
+                return
+
             if self._runtime_reconcile is not None:
                 # DeviceActivatedEvent is emitted after a restart/ready
                 # transition.  Rebuild the complete DB desired state through
                 # the same Reconciler as explicit mutations; do not rebuild
                 # a legacy Default-exclusion mapping in this listener.
-                outcome = self._runtime_reconcile(str(bot_id), str(owner_id))
-                if asyncio.iscoroutine(outcome):
-                    _run_reconcile_blocking(outcome)
+                try:
+                    outcome = self._runtime_reconcile(str(bot_id), str(owner_id))
+                    if asyncio.iscoroutine(outcome):
+                        _run_reconcile_blocking(outcome)
+                finally:
+                    self._reenqueue_if_desktop_cutover_started(
+                        event=event,
+                        bot=bot if is_desktop else None,
+                        initial_authority=initial_authority,
+                    )
                 return
 
             from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE

@@ -20,5 +20,14 @@ class BotRuntimeProjectionReconcilerProtocol(Protocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None: ...
 
+    async def reconcile_non_skill_projection(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+    ) -> None:
+        """Project MCP/CLI while an external authority owns Skill mappings."""
+        ...
+
 
 __all__ = ["BotRuntimeProjectionReconcilerProtocol"]

@@ -19,7 +19,12 @@ class _RecordingReconciler:
         self.calls: list[dict] = []
 
     async def reconcile(self, **kwargs) -> None:
-        self.calls.append(kwargs)
+        self.calls.append({"operation": "full", **kwargs})
+        if self.error is not None:
+            raise self.error
+
+    async def reconcile_non_skill_projection(self, **kwargs) -> None:
+        self.calls.append({"operation": "non_skill", **kwargs})
         if self.error is not None:
             raise self.error
 
@@ -31,6 +36,11 @@ class _Consumer:
 
     async def refresh(self) -> None:
         await self._runtime.reconcile(bot_id="bot-1", owner_id="owner-1")
+
+    async def refresh_non_skill(self) -> None:
+        await self._runtime.reconcile_non_skill_projection(
+            bot_id="bot-1", owner_id="owner-1"
+        )
 
 
 def _consumer(world, runtime: _RecordingReconciler) -> _Consumer:
@@ -58,7 +68,21 @@ async def test_reconcile_service_api_success_reaches_the_bound_implementation(
 
     await consumer.refresh()
 
-    assert runtime.calls == [{"bot_id": "bot-1", "owner_id": "owner-1"}]
+    assert runtime.calls == [
+        {"operation": "full", "bot_id": "bot-1", "owner_id": "owner-1"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_non_skill_service_api_reaches_the_bound_implementation(world) -> None:
+    runtime = _RecordingReconciler()
+    consumer = _consumer(world, runtime)
+
+    await consumer.refresh_non_skill()
+
+    assert runtime.calls == [
+        {"operation": "non_skill", "bot_id": "bot-1", "owner_id": "owner-1"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -71,4 +95,6 @@ async def test_reconcile_service_api_propagates_failure_after_actual_invocation(
     with pytest.raises(RuntimeError, match="runtime unavailable"):
         await consumer.refresh()
 
-    assert runtime.calls == [{"bot_id": "bot-1", "owner_id": "owner-1"}]
+    assert runtime.calls == [
+        {"operation": "full", "bot_id": "bot-1", "owner_id": "owner-1"}
+    ]

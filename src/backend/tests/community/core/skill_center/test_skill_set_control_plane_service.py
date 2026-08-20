@@ -300,9 +300,10 @@ class _RuntimeFactoryService:
     def __init__(self) -> None:
         self.mcp_codes: set[str] | None = None
         self.collect_calls: list[dict] = []
+        self.desired_skills: list[dict] | None = None
 
     def sync_runtime(self, *, desired_skills: list[dict]) -> bool:
-        assert desired_skills == []
+        self.desired_skills = desired_skills
         return True
 
     async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
@@ -419,6 +420,17 @@ class _CenterRuntimeSkills:
                 git_path="center://stable-skill-uuid",
                 skill_uuid="stable-skill-uuid",
                 sc_version_number="3.0.0",
+            )
+        ]
+
+
+class _TeclawRuntimeSkills:
+    def list_bot_active_assets(self, **_kwargs):
+        return [
+            RegisteredSkillAsset(
+                skill_id=8,
+                name="repo-skill",
+                git_path="git://team/repo-skill",
             )
         ]
 
@@ -971,8 +983,9 @@ async def test_runtime_reconcile_fails_closed_for_unsupported_bot_engine_pair():
 @pytest.mark.asyncio
 async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
     pool = _CenterRuntimePool()
+    factory = _RuntimeFactory()
     runtime = BotRuntimeProjectionReconciler(
-        factory=_RuntimeFactory(),
+        factory=factory,
         bot_repo=_TeclawRuntimeBots(),
         repository=_McpInstallations(),
         pool_skills=_CenterRuntimeSkills(),
@@ -986,3 +999,57 @@ async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
 
     assert pool.probe_calls == []
     assert pool.publish_calls == []
+    assert factory.service.collect_calls == []
+
+
+@pytest.mark.asyncio
+async def test_teclaw_v4_repo_projection_uses_artifact_runtime_not_pool_mapping():
+    pool = _RuntimePool()
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=factory,
+        bot_repo=_TeclawRuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_TeclawRuntimeSkills(),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+    assert factory.service.desired_skills == [
+        {
+            "id": "8",
+            "name": "repo-skill",
+            "git_path": "git://team/repo-skill",
+            "skill_uuid": None,
+            "sc_version_number": None,
+        }
+    ]
+    assert pool.publish_calls == []
+    assert pool.verify_calls == []
+
+
+@pytest.mark.asyncio
+async def test_non_skill_projection_never_writes_skill_mappings():
+    pool = _RuntimePool()
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_RuntimeSkills(),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    await runtime.reconcile_non_skill_projection(
+        bot_id="bot-1", owner_id="true-owner"
+    )
+
+    assert factory.service.desired_skills is None
+    assert factory.service.mcp_codes is not None
+    assert pool.publish_calls == []
+    assert pool.verify_calls == []

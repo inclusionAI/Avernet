@@ -981,4 +981,10 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             runtime_reconcile=lambda bot_id, owner_id: runtime_reconciler.reconcile(
                 bot_id=bot_id, owner_id=owner_id
             ),
+            runtime_non_skill_reconcile=lambda bot_id, owner_id: (
+                runtime_reconciler.reconcile_non_skill_projection(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                )
+            ),
         )

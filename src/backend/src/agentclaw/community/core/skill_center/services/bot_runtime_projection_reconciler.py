@@ -24,6 +24,7 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
+    RuntimeProjection,
     RuntimeProjectionResolver,
 )
 from agentclaw.community.core.skill_center.runtime_policy import (
@@ -76,6 +77,56 @@ class BotRuntimeProjectionReconciler:
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
+        service, bot, engine, projection, effective_cli_items = self._resolve_plan(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            retired_mappings=retired_mappings,
+        )
+        await self._apply_skill_projection(
+            service=service,
+            bot=bot,
+            engine=engine,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            projection=projection,
+            retired_mappings=retired_mappings,
+        )
+        await self._apply_non_skill_projection(
+            service=service,
+            engine=engine,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            projection=projection,
+            effective_cli_items=effective_cli_items,
+        )
+
+    async def reconcile_non_skill_projection(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+    ) -> None:
+        """Rebuild MCP/CLI when a cutover task exclusively owns Skill mappings."""
+        service, _bot, engine, projection, effective_cli_items = self._resolve_plan(
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
+        await self._apply_non_skill_projection(
+            service=service,
+            engine=engine,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            projection=projection,
+            effective_cli_items=effective_cli_items,
+        )
+
+    def _resolve_plan(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+    ):
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
@@ -89,6 +140,21 @@ class BotRuntimeProjectionReconciler:
             engine_type=engine,
             entity_type=bot.get("entity_type") or "staff",
         )
+        skill_assets = tuple(
+            self._pool_skills.list_bot_active_assets(
+                env=str(bot["env"]),
+                bot_id=bot_id,
+                user_id=owner_id,
+                engine=engine,
+            )
+        )
+        if engine == "teclaw" and (
+            any(asset.git_path.startswith("center://") for asset in skill_assets)
+            or any(mapping.corpus == "center" for mapping in retired_mappings)
+        ):
+            # Reject before querying or writing any external MCP, Passport, or
+            # runtime boundary. Teclaw Center delivery belongs to Phase 2.
+            raise SkillSetRuntimeReconcileError()
         # The legacy SkillSet service remains the authority for effective
         # System Defaults during Phase 1.  It resolves template presets and
         # applies ac_default_skillset_mcp_exclusion; rebuilding defaults from
@@ -116,14 +182,7 @@ class BotRuntimeProjectionReconciler:
             raise SkillSetRuntimeReconcileError() from exc
         projection = RuntimeProjectionResolver().resolve(
             RuntimeDesiredState(
-                skills=tuple(
-                    self._pool_skills.list_bot_active_assets(
-                        env=str(bot["env"]),
-                        bot_id=bot_id,
-                        user_id=owner_id,
-                        engine=engine,
-                    )
-                ),
+                skills=skill_assets,
                 installed_mcp_server_codes=frozenset(
                     self._repository.list_installed_mcps(bot_id=bot_id)
                 ),
@@ -136,6 +195,47 @@ class BotRuntimeProjectionReconciler:
             )
         )
 
+        return service, bot, engine, projection, effective_cli_items
+
+    async def _apply_skill_projection(
+        self,
+        *,
+        service,
+        bot: dict,
+        engine: str,
+        bot_id: str,
+        owner_id: str,
+        projection: RuntimeProjection,
+        retired_mappings: Sequence[PoolSkillMapping],
+    ) -> None:
+        mappings = list(projection.skill_mappings)
+        retired = list(retired_mappings)
+        if engine == "teclaw" and any(
+            mapping.corpus == "center" for mapping in [*mappings, *retired]
+        ):
+            # Teclaw v4 has no Center request contract. Phase 2 adds its
+            # OSS-backed Center Store; Phase 1 must fail before any runtime,
+            # MCP, Passport, probe, or mapping request is emitted.
+            raise SkillSetRuntimeReconcileError()
+
+        desired_skills = [
+            {
+                "id": str(asset.skill_id),
+                "name": asset.name,
+                "git_path": asset.git_path,
+                "skill_uuid": asset.skill_uuid,
+                "sc_version_number": asset.sc_version_number,
+            }
+            for asset in projection.skill_assets
+        ]
+        if engine == "teclaw":
+            # Teclaw v4 consumes a complete Artifact projection through the
+            # existing DeviceSync dispatcher. It has no Skills Pool mapping
+            # endpoint; Repo/Local and their retirements must stay on v4.
+            if not service.sync_runtime(desired_skills=desired_skills):
+                raise SkillSetRuntimeReconcileError()
+            return
+
         scope = BotSkillLayoutScope(
             env=str(bot["env"]),
             entity_id=str(bot.get("entity_id") or owner_id),
@@ -145,15 +245,6 @@ class BotRuntimeProjectionReconciler:
         pool_owns_runtime = layout_state is not None and runtime_uses_pool_paths(
             layout_state
         )
-        mappings = list(projection.skill_mappings)
-        retired = list(retired_mappings)
-        if engine == "teclaw" and any(
-            mapping.corpus == "center" for mapping in [*mappings, *retired]
-        ):
-            # Teclaw v4 has no Center request contract. Phase 2 may add its
-            # OSS-backed Center store, but Phase 1 must not tunnel the Engine
-            # mapping-v3 protocol through the legacy Teclaw artifact path.
-            raise SkillSetRuntimeReconcileError()
         if (
             pool_owns_runtime
             or any(
@@ -174,20 +265,19 @@ class BotRuntimeProjectionReconciler:
                     else SkillMappingSourceLayout.LEGACY
                 ),
             )
-        elif not service.sync_runtime(
-            desired_skills=[
-                {
-                    "id": str(asset.skill_id),
-                    "name": asset.name,
-                    "git_path": asset.git_path,
-                    "skill_uuid": asset.skill_uuid,
-                    "sc_version_number": asset.sc_version_number,
-                }
-                for asset in projection.skill_assets
-            ]
-        ):
+        elif not service.sync_runtime(desired_skills=desired_skills):
             raise SkillSetRuntimeReconcileError()
 
+    async def _apply_non_skill_projection(
+        self,
+        *,
+        service,
+        engine: str,
+        bot_id: str,
+        owner_id: str,
+        projection: RuntimeProjection,
+        effective_cli_items: list[dict],
+    ) -> None:
         if not await service.sync_mcp_desired_state(
             server_codes=set(projection.mcp_server_codes)
         ):
