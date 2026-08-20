@@ -135,7 +135,9 @@ class SkillRepository(Protocol):
         ...
 
     @abstractmethod
-    def list_bot_installed_skills(self, *, env: str, bot_id: str) -> list[dict]:
+    def list_bot_installed_skills(
+        self, *, env: str, owner_id: str, bot_id: str
+    ) -> list[dict]:
         """Return active-only Installation assets for one Bot."""
         ...
 

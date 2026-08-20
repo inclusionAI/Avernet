@@ -82,7 +82,7 @@ def test_activation_rolls_back_all_membership_installations_when_nth_insert_fail
     try:
         with pytest.raises(RuntimeError, match="second installation"):
             SkillSetControlPlaneRepository(db).set_active(
-                bot_id="bot", set_id="1", active=True
+                bot_id="bot", owner_id="owner", set_id="1", active=True
             )
     finally:
         event.remove(BotSkillInstallation, "before_insert", fail_second_install)
@@ -103,7 +103,9 @@ def test_activation_rejects_runtime_name_conflict_before_installation_write():
         session.flush()
         session.add_all(
             [
-                BotSkillInstallation(bot_id="bot", skill_id=active.id, env="dev"),
+                BotSkillInstallation(
+                    bot_id="bot", owner_id="owner", skill_id=active.id, env="dev"
+                ),
                 SkillSetSkill(
                     skill_set_id=skill_set.id,
                     skill_id=candidate.id,
@@ -115,7 +117,7 @@ def test_activation_rejects_runtime_name_conflict_before_installation_write():
 
     with pytest.raises(SkillRuntimeNameConflictError):
         SkillSetControlPlaneRepository(db).set_active(
-            bot_id="bot", set_id="1", active=True
+            bot_id="bot", owner_id="owner", set_id="1", active=True
         )
 
     with db.orm_session() as session:
@@ -134,7 +136,9 @@ def test_legacy_switch_rejects_direct_runtime_name_conflict_before_writes():
         session.flush()
         session.add_all(
             [
-                BotSkillInstallation(bot_id="bot", skill_id=direct.id, env="dev"),
+                BotSkillInstallation(
+                    bot_id="bot", owner_id="owner", skill_id=direct.id, env="dev"
+                ),
                 SkillSetSkill(
                     skill_set_id=target.id,
                     skill_id=candidate.id,
@@ -146,7 +150,7 @@ def test_legacy_switch_rejects_direct_runtime_name_conflict_before_writes():
 
     with pytest.raises(SkillRuntimeNameConflictError):
         SkillSetControlPlaneRepository(db).replace_active_set(
-            bot_id="bot", set_id="1"
+            bot_id="bot", owner_id="owner", set_id="1"
         )
 
     with db.orm_session() as session:
@@ -194,7 +198,9 @@ def test_default_projection_is_always_active_even_for_historical_false_row():
 
     repository = SkillSetControlPlaneRepository(db)
     assert repository.list_sets(bot_id="bot")[0]["is_active"] is True
-    result = repository.set_active(bot_id="bot", set_id="1", active=True)
+    result = repository.set_active(
+        bot_id="bot", owner_id="owner", set_id="1", active=True
+    )
     assert result.item["is_active"] is True
 
 
@@ -262,7 +268,7 @@ def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
         session.flush()
 
     added = repository.add_mcp(
-        bot_id="bot", set_id=str(skill_set.id), server_code="mcp.weather"
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
     )
     assert added.changed is True
     with db.orm_session() as session:
@@ -272,7 +278,7 @@ def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
         } == {"mcp.weather"}
 
     removed = repository.remove_mcp(
-        bot_id="bot", set_id=str(skill_set.id), server_code="mcp.weather"
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
     )
     assert removed.changed is True
     with db.orm_session() as session:
@@ -288,23 +294,27 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
         session.add(skill_set)
         session.flush()
 
-    assert repository.activate_mcp_direct(bot_id="bot", server_code="mcp.weather").changed
+    assert repository.activate_mcp_direct(
+        bot_id="bot", owner_id="owner", server_code="mcp.weather"
+    ).changed
     with pytest.raises(
         SkillSetControlPlaneConflictError, match="RESOURCE_DIRECT_ACTIVE"
     ):
         repository.add_mcp(
-            bot_id="bot", set_id=str(skill_set.id), server_code="mcp.weather"
+            bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
         )
     assert repository.deactivate_mcp_direct(
-        bot_id="bot", server_code="mcp.weather"
+        bot_id="bot", owner_id="owner", server_code="mcp.weather"
     ).changed
     assert repository.add_mcp(
-        bot_id="bot", set_id=str(skill_set.id), server_code="mcp.weather"
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather"
     ).changed
     with pytest.raises(
         SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_SKILL_SET"
     ):
-        repository.activate_mcp_direct(bot_id="bot", server_code="mcp.weather")
+        repository.activate_mcp_direct(
+            bot_id="bot", owner_id="owner", server_code="mcp.weather"
+        )
 
 
 def test_skill_set_control_plane_sql_creates_before_upgrade_and_adds_bot_key():
@@ -422,12 +432,14 @@ def test_legacy_switch_replaces_all_ordinary_active_sets_in_one_uow():
                 SkillSetSkill(
                     skill_set_id=target_set.id, skill_id=target_skill.id, env="dev"
                 ),
-                BotSkillInstallation(bot_id="bot", skill_id=old_skill.id, env="dev"),
+                BotSkillInstallation(
+                    bot_id="bot", owner_id="owner", skill_id=old_skill.id, env="dev"
+                ),
             ]
         )
 
     result = SkillSetControlPlaneRepository(db).replace_active_set(
-        bot_id="bot", set_id="2"
+        bot_id="bot", owner_id="owner", set_id="2"
     )
 
     assert result.changed is True

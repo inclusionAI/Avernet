@@ -418,7 +418,7 @@ class SkillsPoolSkillRepositoryProtocol(Protocol):
 
     @abstractmethod
     def list_bot_local_assets(
-        self, *, env: str, bot_id: str
+        self, *, env: str, owner_id: str, bot_id: str
     ) -> list[RegisteredSkillAsset]: ...
 
     @abstractmethod
@@ -427,7 +427,7 @@ class SkillsPoolSkillRepositoryProtocol(Protocol):
         *,
         env: str,
         bot_id: str,
-        user_id: str,
+        owner_id: str,
         engine: str,
     ) -> list[RegisteredSkillAsset]: ...
 

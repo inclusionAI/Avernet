@@ -40,11 +40,11 @@ class McpSkillSetControlPlaneCommands:
                 for item in rows
             ]
 
-    def add_mcp(self, *, bot_id: str, set_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
+    def add_mcp(self, *, bot_id: str, owner_id: str, set_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(session, bot_id=bot_id, set_id=set_id, engine_type=engine_type, locked=True)
             self._ordinary(row)
-            old = self._snapshot(session, bot_id, engine_type=engine_type)
+            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             current = (
                 self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer)
                 .filter(SkillSetMCPServer.skill_set_id == row.id, SkillSetMCPServer.server_code == server_code)
@@ -75,11 +75,11 @@ class McpSkillSetControlPlaneCommands:
             session.flush()
             return SkillSetMutation(self._as_item(row), True, old)
 
-    def remove_mcp(self, *, bot_id: str, set_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
+    def remove_mcp(self, *, bot_id: str, owner_id: str, set_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(session, bot_id=bot_id, set_id=set_id, engine_type=engine_type, locked=True)
             self._ordinary(row)
-            old = self._snapshot(session, bot_id, engine_type=engine_type)
+            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             membership = (
                 self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer)
                 .filter(SkillSetMCPServer.skill_set_id == row.id, SkillSetMCPServer.server_code == server_code)
@@ -96,9 +96,9 @@ class McpSkillSetControlPlaneCommands:
             session.flush()
             return SkillSetMutation(self._as_item(row), True, old)
 
-    def activate_mcp_direct(self, *, bot_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
+    def activate_mcp_direct(self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
-            old = self._snapshot(session, bot_id, engine_type=engine_type)
+            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             if self._mcp_has_ordinary_membership(session, bot_id, server_code):
                 raise SkillSetControlPlaneConflictError("RESOURCE_MANAGED_BY_SKILL_SET")
             if server_code in old.mcp_installations:
@@ -110,9 +110,9 @@ class McpSkillSetControlPlaneCommands:
             session.flush()
             return SkillSetMutation({}, True, old)
 
-    def deactivate_mcp_direct(self, *, bot_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
+    def deactivate_mcp_direct(self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
-            old = self._snapshot(session, bot_id, engine_type=engine_type)
+            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             if self._mcp_has_ordinary_membership(session, bot_id, server_code):
                 raise SkillSetControlPlaneConflictError("RESOURCE_MANAGED_BY_SKILL_SET")
             changed = self._scope(session.query(BotMCPInstallation), BotMCPInstallation).filter(
