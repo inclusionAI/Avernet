@@ -96,6 +96,7 @@ class BotPublicModule(Module):
         skill_set_service_factory: SkillSetServiceFactory,
         device_context_resolver: DeviceContextResolver,
         device_sync_dispatcher: DeviceSyncDispatcher,
+        bcsfuse_config: cfg.BcsFuseConfig,
     ) -> BotPublicService:
         # Explicit provider (not ``binder.bind``): BotPublicService types
         # ``skill_set_service_factory`` under TYPE_CHECKING to avoid a
@@ -112,6 +113,7 @@ class BotPublicModule(Module):
             skill_set_service_factory=skill_set_service_factory,
             device_context_resolver=device_context_resolver,
             device_sync_dispatcher=device_sync_dispatcher,
+            bcsfuse_config=bcsfuse_config,
         )
 
     @singleton

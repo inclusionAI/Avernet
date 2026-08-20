@@ -29,6 +29,7 @@ def _make_service(
     *,
     resolver=None,
     device_sync_dispatcher=None,
+    bcsfuse_config=None,
 ):
     """构造 BotPublicService — 注入 resolver + dispatcher。
 
@@ -45,6 +46,7 @@ def _make_service(
         skill_set_service_factory=MagicMock(),
         device_context_resolver=resolver or MagicMock(),
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
+        bcsfuse_config=bcsfuse_config or MagicMock(base_url="", base_url_pre=""),
     )
 
 
