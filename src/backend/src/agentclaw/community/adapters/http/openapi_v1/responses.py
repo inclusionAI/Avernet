@@ -45,10 +45,15 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
-    GrantNotResolvableError,
+    CallerIdentityConflictError,
+    CallerIdentityForbiddenError,
+    CallerIdentityInvalidError,
+    CallerIdentityOpenApiError,
     ClusterMismatchError,
-    StartupScriptUnsupportedError,
+    GrantNotResolvableError,
+    IamTokenUnavailableError,
     MissingPrincipalError,
+    StartupScriptUnsupportedError,
     UnsupportedEngineError,
     UserIdMismatchError,
 )
@@ -255,6 +260,11 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # (b) the two 404-mapped errors are byte-for-byte identical — a caller cannot
 # tell "exists but not yours/other tenant" from "does not exist".
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
+    IamTokenUnavailableError: (401, "IAM credential is unavailable"),
+    CallerIdentityInvalidError: (400, "Invalid Caller identity request"),
+    CallerIdentityForbiddenError: (403, "Forbidden"),
+    CallerIdentityConflictError: (409, "Caller identity target is ambiguous"),
+    CallerIdentityOpenApiError: (502, "Caller identity operation failed"),
     MissingPrincipalError: (401, "Unauthorized"),
     # Byte-identical to the line above, deliberately. "You sent no principal" and
     # "your principal did not verify" must be indistinguishable, or the response
