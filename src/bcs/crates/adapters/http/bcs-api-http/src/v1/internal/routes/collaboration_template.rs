@@ -37,13 +37,14 @@ async fn list_templates(
     State(state): State<ApiState>,
     Extension(_caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
+    headers: HeaderMap,
     query: Result<Query<ListCollaborationTemplatesQuery>, QueryRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = service(&state, &request_id)?
         .list_templates(ListCollaborationTemplates {
             requested_language: query.lang,
-            accept_language: None,
+            accept_language: accept_language(&headers),
             tags: parse_tags(query.tags),
         })
         .await
