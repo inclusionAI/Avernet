@@ -197,7 +197,11 @@ def logical_skill_mappings_from_evidence(
             or path.is_absolute()
             or ".." in path.parts
             or path.as_posix() != relative_path
-            or path.name != link_name
+            or not link_name
+            or link_name.strip() != link_name
+            or "/" in link_name
+            or "\\" in link_name
+            or link_name in {".", ".."}
         ):
             raise ValueError("invalid retired mapping evidence")
         mapping = PoolSkillMapping(
