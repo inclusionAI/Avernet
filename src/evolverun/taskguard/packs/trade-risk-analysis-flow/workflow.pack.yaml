@@ -1,7 +1,0 @@
-id: trade-risk-analysis-flow
-version: 3.0.0
-title: 交易风险分析流程（v3 - 意图路由 + DIMA循环 + 能力迭代判断）
-description: 交易风险漏过分析全流程编排，v3版本重构为意图路由驱动，支持DIMA直通、风险分析双路径，新增DIMA循环补全和能力迭代判断
-workflows:
-  - id: "trade-risk-analysis-flow"
-    file: workflows/trade-risk-analysis-flow.yaml
