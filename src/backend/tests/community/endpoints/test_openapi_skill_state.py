@@ -27,9 +27,6 @@ from agentclaw.community.core.repository.protocols.skill_center import SkillRepo
 from agentclaw.community.core.repository.protocols.skill_installation import (
     SkillInstallationRepositoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.skills_pool import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -79,6 +76,10 @@ class _Runtime:
 
     async def verify_mappings(self, **_kwargs) -> bool:
         return self.success
+
+    async def reconcile(self, **_kwargs) -> None:
+        if not self.success:
+            raise RuntimeError("runtime reconcile failed")
 
 
 class _RuntimeFactory:
@@ -180,10 +181,9 @@ def _seed_state(world, *, runtime_success: bool) -> None:
             runtime_factory,
             world.get(BotCapabilityMutationGuard),
             _Guard(),
-            runtime_factory._runtime,
             world.get(SkillRepository),
-            world.get(SkillsPoolLayoutRepositoryProtocol),
             world.get(SkillSetRepository),
+            runtime_factory._runtime,
         ),
         scope=None,
     )
