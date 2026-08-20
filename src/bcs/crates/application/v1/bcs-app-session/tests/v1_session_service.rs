@@ -2218,6 +2218,89 @@ async fn delete_participant_emits_bot_left_system_message() {
     );
 }
 
+#[tokio::test]
+async fn delete_participant_allows_removing_group_originator() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    // Group whose originator is the human `human_owner-1` (distinct from the
+    // driver bot). The originator is a session participant and must be allowed
+    // to leave the session — only the driver/manager are structurally pinned.
+    fixture
+        .store_group_with_originator("g1", "driver", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_owner-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let removed = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: human_principal("owner-1"),
+            session_id: session.id.clone(),
+            bot_uuid: "human_owner-1".into(),
+        })
+        .await
+        .expect("originator can leave the session");
+    assert!(removed.deleted);
+    let left = recorded_bot_left(&fixture, &session.id);
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0], "human_owner-1");
+}
+
+#[tokio::test]
+async fn delete_participant_still_rejects_group_driver() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .store_group_with_originator("g1", "driver", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_owner-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let error = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: human_principal("owner-1"),
+            session_id: session.id.clone(),
+            bot_uuid: "driver".into(),
+        })
+        .await
+        .expect_err("driver remains pinned");
+    assert!(
+        matches!(error, bcs_service_api::application::v1::ApplicationError::InvalidInput { .. }),
+        "expected invalid_request, got {error:?}"
+    );
+    // No leave event when removal is rejected.
+    assert!(recorded_bot_left(&fixture, &session.id).is_empty());
+}
+
 /// Collect `ParticipantModeChanged` events recorded for `session_id`.
 fn recorded_mode_changes(
     fixture: &Fixture,
