@@ -27,7 +27,7 @@
 
 | 结果 | 证据 | 说明 |
 |---|---|---|
-| Avernet follow-up PR | [#1293](https://github.com/inclusionAI/Avernet/pull/1293) | OPEN；head `bcbe0c94a87770946e5ffbccabb5c9c43c612770`，base `dev_refactory_collaboration`。Title 使用语义化 outcome，body 含 Problem / Solution / Validation / Compatibility and risk / Spec / Related issues。 |
+| Avernet follow-up PR | [#1293](https://github.com/inclusionAI/Avernet/pull/1293) | OPEN；CI 验证 head `2afea50c280c360f2b69611326d1f294e4a632c4`，base `dev_refactory_collaboration`。Title 使用语义化 outcome，body 含 Problem / Solution / Validation / Compatibility and risk / Spec / Related issues。 |
 | Avernet open PR | [#1238](https://github.com/inclusionAI/Avernet/pull/1238) | Created after verifying its base is `dev_refactory_collaboration`, head is `feat/openapi-bot-public-catalog`, and its title/body contain all required sections. Initial head: `70c54bdd5`. |
 | PR merge conflict | resolved | GitHub reported `CONFLICTING` after the base advanced to `3d6531c5`. The merge kept both the Bot Workshop/local additions and the public-catalog routes, regenerated `bots.openapi.json`, and did not touch `.superpowers/`. |
 | OCB mirror PR | BLOCKED | Its local gateway-sync commit is `e23bf4ff3`; `git push --no-verify -u origin feat/openapi-bot-public-catalog` was rejected because the current user has no access to `mirrors/Avernet`. |
@@ -117,10 +117,10 @@ PR head `e595d27ef` 的首次 Backend unit tests 失败已收敛为三个测试�
 - 整分支 Review 为 Ready，安全审查无 high/medium 候选；顺序测试与 Core 分层修复的 scoped rereview 为 PASS（Critical/Important/Minor 均为 0）。
 - 当前结论：后续 PR [#1293](https://github.com/inclusionAI/Avernet/pull/1293) 已创建且为 `OPEN`；未强推、未合并、未回复或 resolve review thread。
 
-### PR #1293 初始收敛状态
+### PR #1293 收敛状态
 
-- PR: OPEN，head `bcbe0c94a87770946e5ffbccabb5c9c43c612770`，base `dev_refactory_collaboration`，metadata 已核验。
-- 自动意见: CLEAR；创建后未发现 review、inline comment 或普通 comment。
-- ACI/CI: PENDING；BCS E2E、Singlebox coverage、BCS/BaaS unit tests 为 QUEUED，Backend/Engine/Gateway unit tests 为 IN_PROGRESS，均未当作通过。
-- 人工意见: CLEAR；创建后未发现人工 review 或 comment。
-- 下一步: 等待当前 head 的远端 jobs 终态，再按实际评论与失败日志继续收敛。
+- PR: OPEN，CI 验证 head `2afea50c280c360f2b69611326d1f294e4a632c4`，base `dev_refactory_collaboration`，metadata 已核验。GitHub 报告 `mergeable=MERGEABLE`、`mergeStateStatus=BLOCKED`；分支保护详情不可访问，不猜测具体仓库规则。
+- 自动意见: CLEAR；最终刷新未发现 BOT review、inline comment 或普通 comment。
+- ACI/CI: PASS；BCS E2E、Singlebox coverage、BCS/Backend/Engine/BaaS/Gateway unit tests 共 7 个 jobs 全部 SUCCESS，0 pending/failing/cancelled。Singlebox coverage 16m47s，Backend unit 9m30s。
+- 人工意见: CLEAR；最终刷新未发现人工 review 或 comment。
+- 下一步: 等待仓库侧必需条件或审批解除 `mergeStateStatus=BLOCKED`；未自动合并、回复或 resolve thread。本次终态报告提交只修改本报告，不改变已通过远端门禁的实现与测试代码。
