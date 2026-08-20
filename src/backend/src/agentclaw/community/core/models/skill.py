@@ -239,13 +239,6 @@ class SkillSetSkill(Base):
             "skill_id",
             name="uk_skill_set_skill",
         ),
-        UniqueConstraint(
-            "avernet_tenant",
-            "env",
-            "bot_id",
-            "skill_id",
-            name="uk_bot_skill_set_skill",
-        ),
         {"extend_existing": True},
     )
 
@@ -259,10 +252,6 @@ class SkillSetSkill(Base):
     skill_uuid = Column(
         String(128), nullable=True, index=True, comment="技能唯一标识(跨版本不变)"
     )
-    # Additive denormalization used only to make the *ordinary* cross-SkillSet
-    # invariant database-expressible. System Default and historical rows keep
-    # NULL; writers for ordinary SkillSets persist the parent Bot id.
-    bot_id = Column(String(100), nullable=True, index=True)
     user_id = Column(String(128), nullable=True, index=True)
     gmt_created = Column(DateTime, default=func.now(), nullable=False)
     gmt_modified = Column(
@@ -336,39 +325,6 @@ class BotSkillInstallation(Base):
 
 
 register_avernet_tenant_guard(BotSkillInstallation)
-
-
-class SkillSetCreateIdempotency(Base):
-    """Durable replay record for canonical SkillSet create commands."""
-
-    __tablename__ = "ac_skill_set_create_idempotency"
-
-    id = Column(_UNSIGNED_BIGINT, primary_key=True, autoincrement=True)
-    bot_id = Column(String(100), nullable=False)
-    owner_id = Column(String(128), nullable=False)
-    idempotency_key = Column(String(190), nullable=False)
-    request_name = Column(String(100), nullable=False)
-    request_description = Column(Text, nullable=True)
-    request_hash = Column(String(64), nullable=False)
-    skill_set_id = Column(Integer, ForeignKey("ac_skill_set.id"), nullable=False)
-    env = Column(String(20), default=get_current_env, nullable=False)
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
-    gmt_created = Column(DateTime, default=func.now(), nullable=False)
-
-    __table_args__ = (
-        UniqueConstraint(
-            "avernet_tenant",
-            "env",
-            "bot_id",
-            "owner_id",
-            "idempotency_key",
-            name="uk_skill_set_create_idempotency",
-        ),
-        {"extend_existing": True},
-    )
-
-
-register_avernet_tenant_guard(SkillSetCreateIdempotency)
 
 
 class UserDefaultSkillSet(Base):

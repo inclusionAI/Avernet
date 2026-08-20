@@ -5,7 +5,6 @@ SkillSet router for managing capability sets and their skills.
 """
 
 from pathlib import Path
-from uuid import uuid4
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 
@@ -323,8 +322,6 @@ async def create_skill_set(
             actor_id=_legacy_actor(ctx, request.user_id),
             name=request.name,
             description=request.description,
-            # The historical wire has no idempotency field.
-            idempotency_key=f"legacy-{uuid4()}",
         )
         return SkillSetDetailResponse(success=True, data=_legacy_skill_set(skill_set))
     except Exception as e:

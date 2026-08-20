@@ -51932,18 +51932,6 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
-          },
-          {
-            "description": "Client key for idempotent SkillSet creation.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "description": "Client key for idempotent SkillSet creation.",
-              "minLength": 1,
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
           }
         ],
         "requestBody": {

@@ -129,7 +129,6 @@ class SkillSetControlPlaneService:
         user_id: str,
         name: str,
         description: str | None,
-        idempotency_key: str,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         self._require_mutable_bot(bot)
@@ -146,7 +145,6 @@ class SkillSetControlPlaneService:
                 owner_id=str(bot["owner_id"]),
                 name=name,
                 description=description,
-                idempotency_key=idempotency_key,
                 engine_type=self._engine(bot),
             )
             self._ensure_mutation_lease(mutation_lease)
@@ -167,7 +165,6 @@ class SkillSetControlPlaneService:
         actor_id: str,
         name: str,
         description: str | None,
-        idempotency_key: str,
     ) -> dict:
         """Preserve only the released virtual-Default compatibility case.
 
@@ -185,7 +182,6 @@ class SkillSetControlPlaneService:
                 user_id=actor_id,
                 name=name,
                 description=description,
-                idempotency_key=idempotency_key,
             )
 
         scope = BotSkillLayoutScope(
@@ -203,7 +199,6 @@ class SkillSetControlPlaneService:
                 owner_id=actor_id,
                 name=name,
                 description=description,
-                idempotency_key=idempotency_key,
                 engine_type="openclaw",
             )
             self._ensure_mutation_lease(mutation_lease)
@@ -555,7 +550,9 @@ class SkillSetControlPlaneService:
     ) -> set[str]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.list_installed_mcps(
-            bot_id=bot_id, engine_type=self._engine(bot)
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            engine_type=self._engine(bot),
         )
 
     async def activate(

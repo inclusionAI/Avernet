@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, event
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
@@ -109,7 +108,6 @@ def test_activation_rejects_runtime_name_conflict_before_installation_write():
                 SkillSetSkill(
                     skill_set_id=skill_set.id,
                     skill_id=candidate.id,
-                    bot_id="bot",
                     env="dev",
                 ),
             ]
@@ -142,7 +140,6 @@ def test_legacy_switch_rejects_direct_runtime_name_conflict_before_writes():
                 SkillSetSkill(
                     skill_set_id=target.id,
                     skill_id=candidate.id,
-                    bot_id="bot",
                     env="dev",
                 ),
             ]
@@ -159,7 +156,7 @@ def test_legacy_switch_rejects_direct_runtime_name_conflict_before_writes():
         assert [row.skill_id for row in installations] == [1]
 
 
-def test_create_idempotency_replays_the_original_set_without_a_second_row():
+def test_create_rejects_a_duplicate_name_without_a_durable_replay_record():
     db = _Database()
     repository = SkillSetControlPlaneRepository(db)
 
@@ -168,17 +165,12 @@ def test_create_idempotency_replays_the_original_set_without_a_second_row():
         owner_id="owner",
         name="set",
         description="description",
-        idempotency_key="request-1",
     )
-    replay = repository.create_set(
-        bot_id="bot",
-        owner_id="owner",
-        name="set",
-        description="description",
-        idempotency_key="request-1",
-    )
-
-    assert replay == first
+    assert first["name"] == "set"
+    with pytest.raises(SkillSetControlPlaneConflictError, match="SKILL_SET_NAME_CONFLICT"):
+        repository.create_set(
+            bot_id="bot", owner_id="owner", name="set", description="description"
+        )
     with db.orm_session() as session:
         assert session.query(SkillSet).count() == 1
 
@@ -204,7 +196,7 @@ def test_default_projection_is_always_active_even_for_historical_false_row():
     assert result.item["is_active"] is True
 
 
-def test_database_rejects_same_bot_skill_in_two_skill_sets():
+def test_database_keeps_historical_cross_skill_set_memberships_compatible():
     db = _Database()
     with db.transactional_orm_session() as session:
         first = SkillSet(name="first", bolt_id="bot", env="dev")
@@ -216,21 +208,12 @@ def test_database_rejects_same_bot_skill_in_two_skill_sets():
             SkillSetSkill(
                 skill_set_id=first.id,
                 skill_id=skill.id,
-                bot_id="bot",
                 env="dev",
             )
         )
 
-    with pytest.raises(IntegrityError):
-        with db.transactional_orm_session() as session:
-            session.add(
-                SkillSetSkill(
-                    skill_set_id=2,
-                    skill_id=1,
-                    bot_id="bot",
-                    env="dev",
-                )
-            )
+    with db.transactional_orm_session() as session:
+        session.add(SkillSetSkill(skill_set_id=2, skill_id=1, env="dev"))
 
 
 def test_database_allows_system_default_and_one_ordinary_membership():
@@ -246,13 +229,11 @@ def test_database_allows_system_default_and_one_ordinary_membership():
                 SkillSetSkill(
                     skill_set_id=default.id,
                     skill_id=skill.id,
-                    bot_id=None,
                     env="dev",
                 ),
                 SkillSetSkill(
                     skill_set_id=ordinary.id,
                     skill_id=skill.id,
-                    bot_id="bot",
                     env="dev",
                 ),
             ]
@@ -317,7 +298,28 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
         )
 
 
-def test_skill_set_control_plane_sql_creates_before_upgrade_and_adds_bot_key():
+def test_direct_mcp_installation_isolated_by_owner_for_shared_bot_id():
+    db = _Database()
+    repository = SkillSetControlPlaneRepository(db)
+
+    assert repository.activate_mcp_direct(
+        bot_id="default", owner_id="owner-a", server_code="mcp.weather"
+    ).changed
+    assert repository.activate_mcp_direct(
+        bot_id="default", owner_id="owner-b", server_code="mcp.weather"
+    ).changed
+    assert repository.deactivate_mcp_direct(
+        bot_id="default", owner_id="owner-a", server_code="mcp.weather"
+    ).changed
+
+    with db.orm_session() as session:
+        rows = session.query(BotMCPInstallation).all()
+        assert [(row.owner_id, row.bot_id, row.server_code) for row in rows] == [
+            ("owner-b", "default", "mcp.weather")
+        ]
+
+
+def test_skill_set_control_plane_sql_only_adds_owner_scoped_mcp_installation():
     sql_path = (
         Path(__file__).parents[4]
         / "src"
@@ -330,31 +332,12 @@ def test_skill_set_control_plane_sql_creates_before_upgrade_and_adds_bot_key():
     )
     sql = sql_path.read_text(encoding="utf-8")
 
-    assert sql.index("CREATE TABLE IF NOT EXISTS") < sql.index("ALTER TABLE")
-    assert "ADD COLUMN IF NOT EXISTS bot_id VARCHAR(100) NULL" in sql
-    assert "AND skill_set.is_default = 0" in sql
-    assert "CREATE UNIQUE INDEX IF NOT EXISTS uk_bot_skill_set_skill" in sql
-
-
-def test_create_idempotency_rejects_same_key_with_a_different_request_hash():
-    db = _Database()
-    repository = SkillSetControlPlaneRepository(db)
-    repository.create_set(
-        bot_id="bot",
-        owner_id="owner",
-        name="set",
-        description="first",
-        idempotency_key="request-1",
-    )
-
-    with pytest.raises(Exception, match="IDEMPOTENCY_KEY_REUSED"):
-        repository.create_set(
-            bot_id="bot",
-            owner_id="owner",
-            name="set",
-            description="second",
-            idempotency_key="request-1",
-        )
+    assert "CREATE TABLE IF NOT EXISTS ac_bot_mcp_installation" in sql
+    assert "owner_id VARCHAR(128) NOT NULL" in sql
+    assert "(avernet_tenant, env, owner_id, bot_id, server_code)" in sql
+    assert "ac_skill_set_create_idempotency" not in sql
+    assert "ALTER TABLE ac_skill_set_skill" not in sql
+    assert "ALTER TABLE ac_skill_set_mcp" not in sql
 
 
 def test_skill_set_name_is_unique_for_bot_across_engines():
@@ -365,7 +348,6 @@ def test_skill_set_name_is_unique_for_bot_across_engines():
         owner_id="owner",
         name="set",
         description=None,
-        idempotency_key="request-openclaw",
         engine_type="openclaw",
     )
 
@@ -377,7 +359,6 @@ def test_skill_set_name_is_unique_for_bot_across_engines():
             owner_id="owner",
             name="set",
             description=None,
-            idempotency_key="request-hermes",
             engine_type="hermes",
         )
 
@@ -390,7 +371,6 @@ def test_skill_set_rename_is_unique_for_bot_across_engines():
         owner_id="owner",
         name="openclaw-set",
         description=None,
-        idempotency_key="request-openclaw",
         engine_type="openclaw",
     )
     repository.create_set(
@@ -398,7 +378,6 @@ def test_skill_set_rename_is_unique_for_bot_across_engines():
         owner_id="owner",
         name="hermes-set",
         description=None,
-        idempotency_key="request-hermes",
         engine_type="hermes",
     )
 

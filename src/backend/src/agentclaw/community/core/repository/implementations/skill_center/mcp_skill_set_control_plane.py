@@ -57,19 +57,23 @@ class McpSkillSetControlPlaneCommands:
             owner = (
                 self._scope(session.query(SkillSet), SkillSet)
                 .join(SkillSetMCPServer, SkillSetMCPServer.skill_set_id == SkillSet.id)
-                .filter(SkillSet.bolt_id == bot_id, SkillSet.is_default.is_(False), SkillSetMCPServer.server_code == server_code)
+                .filter(
+                    SkillSet.bolt_id == bot_id,
+                    SkillSet.is_default.is_(False),
+                    SkillSetMCPServer.server_code == server_code,
+                )
                 .first()
             )
             if owner is not None:
                 raise SkillSetControlPlaneConflictError("RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET")
             session.add(SkillSetMCPServer(
                 skill_set_id=row.id, server_code=server_code, name=server_code,
-                bot_id=bot_id, user_id=row.user_id, env=get_current_env(),
+                user_id=row.user_id, env=get_current_env(),
                 avernet_tenant=get_current_avernet_tenant(),
             ))
             if row.is_active:
                 session.add(BotMCPInstallation(
-                    bot_id=bot_id, server_code=server_code, env=get_current_env(),
+                    bot_id=bot_id, owner_id=owner_id, server_code=server_code, env=get_current_env(),
                     avernet_tenant=get_current_avernet_tenant(),
                 ))
             session.flush()
@@ -91,6 +95,7 @@ class McpSkillSetControlPlaneCommands:
             if row.is_active:
                 self._scope(session.query(BotMCPInstallation), BotMCPInstallation).filter(
                     BotMCPInstallation.bot_id == bot_id,
+                    BotMCPInstallation.owner_id == owner_id,
                     BotMCPInstallation.server_code == server_code,
                 ).delete(synchronize_session=False)
             session.flush()
@@ -99,12 +104,14 @@ class McpSkillSetControlPlaneCommands:
     def activate_mcp_direct(self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
-            if self._mcp_has_ordinary_membership(session, bot_id, server_code):
+            if self._mcp_has_ordinary_membership(
+                session, bot_id, owner_id, server_code
+            ):
                 raise SkillSetControlPlaneConflictError("RESOURCE_MANAGED_BY_SKILL_SET")
             if server_code in old.mcp_installations:
                 return SkillSetMutation({}, False, old)
             session.add(BotMCPInstallation(
-                bot_id=bot_id, server_code=server_code, env=get_current_env(),
+                bot_id=bot_id, owner_id=owner_id, server_code=server_code, env=get_current_env(),
                 avernet_tenant=get_current_avernet_tenant(),
             ))
             session.flush()
@@ -113,15 +120,18 @@ class McpSkillSetControlPlaneCommands:
     def deactivate_mcp_direct(self, *, bot_id: str, owner_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
-            if self._mcp_has_ordinary_membership(session, bot_id, server_code):
+            if self._mcp_has_ordinary_membership(
+                session, bot_id, owner_id, server_code
+            ):
                 raise SkillSetControlPlaneConflictError("RESOURCE_MANAGED_BY_SKILL_SET")
             changed = self._scope(session.query(BotMCPInstallation), BotMCPInstallation).filter(
                 BotMCPInstallation.bot_id == bot_id,
+                BotMCPInstallation.owner_id == owner_id,
                 BotMCPInstallation.server_code == server_code,
             ).delete(synchronize_session=False) > 0
             session.flush()
             return SkillSetMutation({}, changed, old)
 
-    def list_installed_mcps(self, *, bot_id: str, engine_type: str | None = None) -> set[str]:
+    def list_installed_mcps(self, *, bot_id: str, owner_id: str, engine_type: str | None = None) -> set[str]:
         with self._db.orm_session() as session:
-            return self._mcp_installations(session, bot_id)
+            return self._mcp_installations(session, bot_id, owner_id)
