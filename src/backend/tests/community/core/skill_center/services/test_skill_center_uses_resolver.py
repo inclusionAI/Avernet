@@ -121,6 +121,48 @@ class TestSkillSetServiceUsesResolver:
         resolver.resolve_for_bot.assert_called_once_with("bot-1", "owner-1")
         bot_repo.get_by_id_and_owner.assert_called_once_with("bot-1", "owner-1")
 
+    def test_sync_runtime_teclaw_refreshes_without_file_symlink_mappings(self):
+        from agentclaw.community.core.skill_center.services.skill_set_service import (
+            SkillSetService,
+        )
+
+        ctx = DeviceContext(
+            provider="teclaw",
+            conn_info={},
+            binding_id=42,
+            bot_id="bot-1",
+            user_id="user-1",
+        )
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = ctx
+        sync_plugin = MagicMock()
+        sync_plugin.sync_symlinks.return_value = {"success": True, "message": "ok"}
+        dispatcher = MagicMock()
+        dispatcher.dispatch.return_value = sync_plugin
+
+        with patch(
+            "agentclaw.community.core.skill_center.services.skill_set_service."
+            "WorkspacePathFactory"
+        ):
+            svc = SkillSetService(
+                skill_repo=MagicMock(),
+                skill_set_repo=MagicMock(),
+                mcp_center=MagicMock(),
+                mcp_config_service=MagicMock(),
+                skill_service=MagicMock(),
+                bot_repo=MagicMock(),
+                bot_id="bot-1",
+                resolver=resolver,
+                device_sync_dispatcher=dispatcher,
+                path_factory=MagicMock(),
+            )
+
+        svc.get_symlink_mappings = MagicMock()
+
+        assert svc._sync_symlinks_to_device_if_needed(user_id="user-1") is True
+        svc.get_symlink_mappings.assert_not_called()
+        sync_plugin.sync_symlinks.assert_called_once_with([])
+
 
 # ── _DeviceSyncMixin via SkillSetSwitcher ────────────────────────────
 
@@ -169,6 +211,51 @@ class TestDeviceSyncMixinUsesResolver:
         assert result["success"] is True
         resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
         dispatcher.dispatch.assert_called_once_with(ctx)
+        sync_plugin.sync_symlinks.assert_called_once_with([])
+
+    def test_do_device_sync_teclaw_refreshes_without_file_symlink_mappings(self):
+        from agentclaw.community.core.skill_center.services.skill_set_service import (
+            SkillSetSwitcher,
+        )
+
+        ctx = DeviceContext(
+            provider="teclaw",
+            conn_info={},
+            binding_id=42,
+            bot_id="bot-1",
+            user_id="user-1",
+        )
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = ctx
+        sync_plugin = MagicMock()
+        sync_plugin.sync_symlinks.return_value = {"success": True, "message": "ok"}
+        dispatcher = MagicMock()
+        dispatcher.dispatch.return_value = sync_plugin
+
+        skill_set_factory = MagicMock()
+        fake_inner = MagicMock()
+        fake_inner.bot_id = "bot-1"
+        fake_inner.get_symlink_mappings = MagicMock()
+        skill_set_factory.create.return_value = fake_inner
+
+        switcher = SkillSetSwitcher(
+            skill_set_factory=skill_set_factory,
+            resolver=resolver,
+            device_sync_dispatcher=dispatcher,
+            device_plugin=MagicMock(),
+            path_factory=MagicMock(),
+            device_fs_dispatcher=MagicMock(),
+            edit_guard=MagicMock(),
+            user_id="user-1",
+            entity_id="user-1",
+            bot_id="bot-1",
+            engine_type="teclaw",
+        )
+
+        result = switcher._do_device_sync(user_id="user-1", caller="test")
+
+        assert result["success"] is True
+        fake_inner.get_symlink_mappings.assert_not_called()
         sync_plugin.sync_symlinks.assert_called_once_with([])
 
 
