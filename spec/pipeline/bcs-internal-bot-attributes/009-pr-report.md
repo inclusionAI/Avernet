@@ -4,7 +4,7 @@
 
 - Worktree / repo: `bcs-internal-bot-attributes-dev/ocb-public` / `inclusionAI/Avernet`
 - Head / base: `feat/bcs-internal-bot-attributes-dev-refactory` / `dev_refactory_collaboration`
-- PR: 本次创建
+- PR: https://github.com/inclusionAI/Avernet/pull/1283
 - PR title: `feat(bcs): add provider bot attributes API`
 - PR description sections: Problem / Solution / Validation / Compatibility and risk / Spec
 - 人工意见模式: auto
@@ -14,13 +14,13 @@
 | 结果 | 证据 | 说明 |
 |---|---|---|
 | CLOSED | [#1277](https://github.com/inclusionAI/Avernet/pull/1277) | 原 PR 的 head/base 为 `feat/bcs-internal-bot-attributes-dev` / `dev`，已于 2026-08-20 关闭，不能承接本次提交。 |
-| READY_TO_CREATE | 本分支相对 `origin/dev_refactory_collaboration` 仅领先 10 个本功能提交 | 不能直接以原分支向新基线提 PR，否则会带入大量无关 `dev` 历史；保留原分支不动，已在目标基线创建干净分支并迁移功能提交。 |
+| OPEN | [#1283](https://github.com/inclusionAI/Avernet/pull/1283) | 新分支相对 `dev_refactory_collaboration` 仅含本功能提交；当前 `mergeable=MERGEABLE`，但远端检查尚在运行。 |
 
 ## 自动意见
 
 | 轮次 | 来源 | 链接 | 决定 | 理由 | 修改/提交 | 验证 |
 |---|---|---|---|---|---|---|
-| 创建前 | 无 | N/A | CLEAR | 新 PR 尚未创建；无可处理的机器人意见。 | N/A | 将在 PR 创建后重新检查。 |
+| 1 | 无 | N/A | CLEAR | 新 PR 创建后未发现机器人 review、inline comment 或普通 comment。 | N/A | 初始 head 已复查。 |
 
 ## ACI/CI
 
@@ -32,7 +32,7 @@
 | Bot application | PASS（本地） | `cargo test -p bcs-app-bot` | N/A | 迁移后分支 | 20 passed |
 | Bot store | PASS（本地） | `cargo test -p bcs-bot-store` | N/A | 迁移后分支 | 75 passed；5 个需要外部 Cache/DB 的既有集成测试忽略 |
 | Git diff 校验 | PASS（本地） | `git diff --check` | N/A | 迁移后分支 | 无输出 |
-| GitHub Actions | PENDING | 新 PR 创建后检查 | 尚未创建 PR | N/A | 等待新 head 的实际远端终态 |
+| GitHub Actions | PENDING | [#1283 checks](https://github.com/inclusionAI/Avernet/pull/1283/checks) | BCS e2e、Singlebox coverage 与 BCS/Backend/Engine/BaaS/Gateway unit tests 已为当前 head 触发，尚未终态。 | N/A | 持续观察新 head |
 
 ## 人工意见
 
@@ -43,8 +43,8 @@
 
 ## 当前结论
 
-- PR: NOT_CREATED
+- PR: OPEN（[#1283](https://github.com/inclusionAI/Avernet/pull/1283)）
 - 自动意见: CLEAR
 - ACI/CI: 本地 PASS；远端 PENDING
 - 人工意见: 原 PR 两条合理意见均已迁移并采纳；新 PR 创建后重新检查。
-- 下一步: 推送新干净分支并向 `dev_refactory_collaboration` 创建 PR。
+- 下一步: 等待并检查当前 head 的远端门禁；若有确定性测试失败，最小修复后重新验证并推送。
