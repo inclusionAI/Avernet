@@ -53,7 +53,7 @@ class WorkOrderQueryType(_DocumentedEnum):
     __descriptions__ = {
         "PENDING_FOR_ME": "Pending work orders awaiting the current user's review.",
         "INITIATED_BY_ME": "Work orders submitted by the current user.",
-        "PROCESSED_BY_ME": "Work orders already reviewed by the current user.",
+        "PROCESSED_BY_ME": "Completed approvals and informational notices already read by the current user.",
     }
 
 
@@ -149,8 +149,12 @@ class SpaceJoinRequestCreated(BaseModel):
 class WorkOrderReviewRequest(BaseModel):
     """Review comment supplied with an approval or rejection."""
 
-    review_remark: str = Field(
-        min_length=1, max_length=512, description="Reviewer comment for the decision."
+    review_remark: str | None = Field(
+        default=None,
+        max_length=512,
+        description=(
+            "Optional approval comment. Rejection requires a non-blank comment."
+        ),
     )
 
 
@@ -160,8 +164,8 @@ class WorkOrderReviewResponse(_UtcResponseModel):
     work_order_id: int = Field(description="Identifier of the reviewed work order.")
     status: WorkOrderStatus = Field(description="Status after the review decision.")
     reviewer_user_id: str = Field(description="Identifier of the reviewer.")
-    review_remark: str = Field(
-        description="Reviewer comment recorded with the decision."
+    review_remark: str | None = Field(
+        description="Reviewer comment, or null for approval without a comment."
     )
     reviewed_at: datetime = Field(
         description="UTC time when the review decision was recorded."
@@ -289,9 +293,20 @@ class NotificationDetailResponse(BaseModel):
 
 
 class UnreadCountResponse(BaseModel):
-    """Unread notification total for the current user."""
+    """Notification and actionable approval badge totals for the current user."""
 
-    unread_count: int = Field(description="Number of unread notifications.")
+    unread_count: int = Field(
+        description="Number of unread notifications, retained for compatibility."
+    )
+    pending_approval_count: int = Field(
+        description="Number of pending work orders the current user can approve."
+    )
+    unread_notice_count: int = Field(
+        description="Number of unread informational notifications."
+    )
+    badge_count: int = Field(
+        description="Badge total: pending approvals plus unread notices."
+    )
 
 
 class NotificationReadResponse(_UtcResponseModel):

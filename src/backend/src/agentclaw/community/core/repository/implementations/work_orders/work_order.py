@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from injector import inject
-from sqlalchemy import and_, func, or_
+from sqlalchemy import BigInteger, and_, cast, func, or_
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.repository.protocols.work_orders import (
@@ -35,6 +35,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderMessageContent,
     WorkOrderMessageTitle,
     WorkOrderNotificationDetail,
+    WorkOrderNotificationBadgeSummary,
     WorkOrderNotificationDraft,
     WorkOrderQueryType,
     WorkOrderReviewResult,
@@ -206,13 +207,22 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                     )
                 else:
                     query = query.filter(
-                        self._Notification.notification_category
-                        == NotificationCategory.APPROVAL.value,
-                        self._WorkOrder.status.in_(
-                            [
-                                WorkOrderStatus.APPROVED.value,
-                                WorkOrderStatus.REJECTED.value,
-                            ]
+                        or_(
+                            and_(
+                                self._Notification.notification_category
+                                == NotificationCategory.APPROVAL.value,
+                                self._WorkOrder.status.in_(
+                                    [
+                                        WorkOrderStatus.APPROVED.value,
+                                        WorkOrderStatus.REJECTED.value,
+                                    ]
+                                ),
+                            ),
+                            and_(
+                                self._Notification.notification_category
+                                == NotificationCategory.NOTICE.value,
+                                self._Notification.is_read.is_(True),
+                            ),
                         ),
                     )
 
@@ -341,7 +351,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         *,
         work_order_id: int,
         reviewer_user_id: str,
-        review_remark: str,
+        review_remark: str | None,
         target_status: WorkOrderStatus,
         notification: WorkOrderNotificationDraft,
         env: str,
@@ -529,6 +539,68 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 )
                 .scalar()
                 or 0
+            )
+
+    def get_notification_badge_summary(
+        self, *, recipient_user_id: str, env: str
+    ) -> WorkOrderNotificationBadgeSummary:
+        with self._db.orm_session() as db:
+            unread_count = (
+                db.query(func.count(self._Notification.id))
+                .filter(
+                    self._Notification.recipient_user_id == recipient_user_id,
+                    self._Notification.is_read.is_(False),
+                    self._Notification.env == env,
+                )
+                .scalar()
+                or 0
+            )
+            unread_notice_count = (
+                db.query(func.count(self._Notification.id))
+                .filter(
+                    self._Notification.recipient_user_id == recipient_user_id,
+                    self._Notification.notification_category
+                    == NotificationCategory.NOTICE.value,
+                    self._Notification.is_read.is_(False),
+                    self._Notification.env == env,
+                )
+                .scalar()
+                or 0
+            )
+            pending_approval_count = (
+                db.query(func.count(func.distinct(self._WorkOrder.id)))
+                .join(
+                    self._Notification,
+                    self._Notification.work_order_id == self._WorkOrder.id,
+                )
+                .join(
+                    self._Member,
+                    and_(
+                        self._Member.space_id
+                        == cast(self._WorkOrder.biz_id, BigInteger),
+                        self._Member.user_id == recipient_user_id,
+                        self._Member.role == _ADMINISTRATOR_ROLE,
+                        self._Member.status == "ACTIVE",
+                        self._Member.env == env,
+                    ),
+                )
+                .filter(
+                    self._Notification.recipient_user_id == recipient_user_id,
+                    self._Notification.notification_category
+                    == NotificationCategory.APPROVAL.value,
+                    self._Notification.env == env,
+                    self._WorkOrder.biz_type == WorkOrderBizType.SPACE_JOIN.value,
+                    self._WorkOrder.status == WorkOrderStatus.PENDING.value,
+                    self._WorkOrder.env == env,
+                )
+                .scalar()
+                or 0
+            )
+            return WorkOrderNotificationBadgeSummary(
+                unread_count=unread_count,
+                pending_approval_count=pending_approval_count,
+                unread_notice_count=unread_notice_count,
+                badge_count=pending_approval_count + unread_notice_count,
             )
 
     def mark_notification_read(

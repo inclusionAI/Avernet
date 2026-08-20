@@ -3,9 +3,8 @@
 -- Existing installations may already have the original 2026-08-17 tables.
 -- Therefore CREATE TABLE is followed by explicit additive ALTER statements:
 -- CREATE TABLE IF NOT EXISTS alone is not a migration and must not be relied
--- upon to supply F01 columns. Before converting sc_team_id to BIGINT, run the
--- paired F01 verification query; any non-numeric existing mapping is a
--- fail-closed release blocker rather than data to coerce silently.
+-- upon to supply F01 columns. SkillCenter team identifiers are retained as
+-- opaque VARCHAR values and must not be coerced to numeric ids.
 
 CREATE TABLE IF NOT EXISTS ac_space (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -14,20 +13,20 @@ CREATE TABLE IF NOT EXISTS ac_space (
     name VARCHAR(256) NOT NULL,
     description TEXT NULL,
     personal_owner_id VARCHAR(128) NULL,
-    sc_team_id BIGINT NULL,
+    sc_team_id VARCHAR(64) DEFAULT NULL COMMENT 'SkillCenter团队ID，团队空间同步SC成功后写入',
     sc_mapping_status VARCHAR(24) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/ACTIVE/INACTIVE/CLEANUP_FAILED',
     created_by VARCHAR(128) NOT NULL,
     updated_by VARCHAR(256) NOT NULL,
     deleted_at TIMESTAMP NULL,
     deleted_by VARCHAR(128) NULL,
-    avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw',
     env VARCHAR(20) NOT NULL,
     gmt_created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_space_code (avernet_tenant, env, space_code),
-    UNIQUE KEY uk_personal_space (avernet_tenant, env, personal_owner_id),
-    KEY idx_space_sc_team (avernet_tenant, env, sc_team_id),
+    UNIQUE KEY uk_space_code (env, space_code),
+    UNIQUE KEY uk_personal_space (env, personal_owner_id),
+    UNIQUE KEY uk_sc_team_id_env (sc_team_id, env),
+    KEY idx_space_sc_team (env, sc_team_id),
     CONSTRAINT ck_space_type CHECK (space_type IN ('PERSONAL', 'TEAM')),
     CONSTRAINT ck_space_mapping_status CHECK (sc_mapping_status IN ('PENDING', 'ACTIVE', 'INACTIVE', 'CLEANUP_FAILED')),
     CONSTRAINT ck_space_env_not_empty CHECK (env <> '')
@@ -45,16 +44,16 @@ ALTER TABLE ac_space
     ADD COLUMN IF NOT EXISTS updated_by VARCHAR(256) NOT NULL DEFAULT '',
     MODIFY COLUMN env VARCHAR(20) NOT NULL;
 
--- Run only after the paired verification query proves every existing value is
--- numeric. The engine must stop when that query reports a nonzero count.
-ALTER TABLE ac_space MODIFY COLUMN sc_team_id BIGINT NULL;
+ALTER TABLE ac_space MODIFY COLUMN sc_team_id VARCHAR(64) DEFAULT NULL COMMENT 'SkillCenter团队ID，团队空间同步SC成功后写入';
 UPDATE ac_space SET sc_mapping_status = 'PENDING' WHERE sc_mapping_status IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_space_code
-    ON ac_space (avernet_tenant, env, space_code);
+    ON ac_space (env, space_code);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_personal_space
-    ON ac_space (avernet_tenant, env, personal_owner_id);
+    ON ac_space (env, personal_owner_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sc_team_id_env
+    ON ac_space (sc_team_id, env);
 CREATE INDEX IF NOT EXISTS idx_space_sc_team
-    ON ac_space (avernet_tenant, env, sc_team_id);
+    ON ac_space (env, sc_team_id);
 ALTER TABLE ac_space
     ADD CONSTRAINT IF NOT EXISTS ck_space_type CHECK (space_type IN ('PERSONAL', 'TEAM')),
     ADD CONSTRAINT IF NOT EXISTS ck_space_mapping_status CHECK (sc_mapping_status IN ('PENDING', 'ACTIVE', 'INACTIVE', 'CLEANUP_FAILED')),
@@ -69,13 +68,12 @@ CREATE TABLE IF NOT EXISTS ac_space_member (
     created_by VARCHAR(128) NOT NULL,
     removed_at TIMESTAMP NULL,
     removed_by VARCHAR(128) NULL,
-    avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw',
     env VARCHAR(20) NOT NULL,
     gmt_created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_space_member (avernet_tenant, env, space_id, user_id),
-    KEY idx_space_member_user (avernet_tenant, env, user_id, status),
+    UNIQUE KEY uk_space_member (env, space_id, user_id),
+    KEY idx_space_member_user (env, user_id, status),
     CONSTRAINT ck_space_member_role CHECK (role IN ('ADMINISTRATOR', 'MEMBER')),
     CONSTRAINT ck_space_member_status CHECK (status IN ('ACTIVE', 'INACTIVE')),
     CONSTRAINT ck_space_member_env_not_empty CHECK (env <> '')
@@ -91,9 +89,9 @@ ALTER TABLE ac_space_member
 UPDATE ac_space_member SET role = 'ADMINISTRATOR' WHERE role = 'OWNER';
 UPDATE ac_space_member SET status = 'ACTIVE' WHERE status IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_space_member
-    ON ac_space_member (avernet_tenant, env, space_id, user_id);
+    ON ac_space_member (env, space_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_space_member_user
-    ON ac_space_member (avernet_tenant, env, user_id, status);
+    ON ac_space_member (env, user_id, status);
 ALTER TABLE ac_space_member
     ADD CONSTRAINT IF NOT EXISTS ck_space_member_role CHECK (role IN ('ADMINISTRATOR', 'MEMBER')),
     ADD CONSTRAINT IF NOT EXISTS ck_space_member_status CHECK (status IN ('ACTIVE', 'INACTIVE')),

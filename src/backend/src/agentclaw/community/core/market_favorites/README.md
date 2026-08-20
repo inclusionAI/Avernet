@@ -1,8 +1,9 @@
 # `agentclaw.community.core.market_favorites`
 
-Stores a Space's favorite references as `(target_type, target_code)`. Adding an
-already-favorited target is idempotent; canceling requires an existing favorite
-and reports not found when there is nothing to remove.
+Stores a Space's favorite references as
+`(market_source, target_type, target_code)`. Supported sources are
+`SKILLCENTER` and `TEAMCLAW`. Adding or canceling an already-converged target is
+idempotent, and mutation responses expose whether persistence actually changed.
 This phase intentionally does not import Skill or MCP catalogue implementations.
 Catalogue names, descriptions, icons, versions and owners are not exposed at
 the HTTP boundary until a governed catalogue lookup contract is implemented.
@@ -15,12 +16,13 @@ provides:
   - MarketFavoriteService
   - MarketFavoriteModel
   - MarketFavoriteRecord
+  - MarketSource
   - FavoriteTargetType
 consumes:
   - "MarketFavoriteRepositoryProtocol (core.repository) — favorite persistence"
   - "SpaceAccessService (core.spaces) — membership authorization"
 consumed_by:
-  - "adapters/http/openapi_v1/spaces — favorite, cancel and search operations"
+  - "adapters/http/openapi_v1/spaces — favorite, cancel, search and batch status operations"
 internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.repository

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
+    SkillCenterMarketSearchRequest,
     SkillCenterTeamCreateRequest,
 )
 
@@ -52,3 +53,20 @@ def test_local_skill_center_client_create_team_records_plugin_hit(world) -> None
     assert len(calls) == 1
     assert calls[0].args == (request,)
     assert calls[0].kwargs == {}
+
+
+def test_local_skill_center_market_search_records_typed_request(world) -> None:
+    client = world.get(SkillCenterClient)
+    request = SkillCenterMarketSearchRequest(
+        keyword="assistant",
+        page_num=2,
+        page_size=10,
+        access_level="PUBLIC",
+    )
+
+    result = client.search_market_skills(request)
+
+    assert result.total == 0
+    assert result.items == ()
+    calls = client.calls_to("search_market_skills")
+    assert calls[-1].args == (request,)

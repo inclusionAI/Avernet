@@ -178,6 +178,7 @@ from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
 from .bots.engine_config import router as engine_config_router
 from .caller import router as caller_router
+from .channels import router as channels_router
 from .containers import router as containers_router
 from .diagnostics import router as diagnostics_router
 from .deprecated import (
@@ -201,6 +202,7 @@ from .engine_runtime.sessions import router as engine_sessions_router
 from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
+from .market import router as market_router
 from .mcp import router as mcp_router
 from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
@@ -262,8 +264,6 @@ _SUBGROUPS = [
     # claiming it.
     authorized_apps_router,
     authorized_bots_router,
-    # This literal must precede the generic ``/bots/{bot_id}`` router.
-    bot_public_router,
     # Product Bot Chat reads are bot-first and use the product service's
     # owner/collaborator adjudication. Their own route dependency checks an
     # app-only caller's grant against the addressed owner.
@@ -280,13 +280,18 @@ _SUBGROUPS = [
     # creation/authorization pair remains human-only. Dependencies are declared
     # per route in the local router.
     local_router,
-    # These groups resolve the addressed owner through OwnerIdDep, which also
-    # performs the application-grant check. Their handlers then enforce the
-    # live Bot collaborator relation at member level before any publication read.
+]
+
+# These groups may address a shared Bot. ``OwnerIdDep`` performs the same grant
+# check transitively while resolving the addressed owner, but the mount also
+# declares it explicitly so the admission rule is visible where the public
+# surface is assembled. FastAPI caches the shared dependency per request.
+_ADDRESSED_BOT_SUBGROUPS = [
     service_lifecycle_router,
     service_edit_lock_router,
     containers_router,
     diagnostics_router,
+    channels_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
@@ -375,15 +380,16 @@ def build_public_router() -> APIRouter:
     public = APIRouter()
     # The caller's own identity — the one operation whose answer IS the user,
     # so it takes no ``user_id`` and can answer no 403: it gets the base error
-    # table, not the user-scoped one. Top-level like ``spaces``, because the
-    # caller is not a bots resource.
+    # table, not the user-scoped one. The caller is the sole top-level public
+    # resource here because it describes the authenticated principal itself.
     public.include_router(
         caller_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
-    # Space APIs are user-only in the first phase. They are top-level
-    # resources, so they intentionally do not inherit any bot grant gate.
+    # Space and work-order APIs use literal groups under the common ``bots``
+    # namespace, but are not scoped to one bot and therefore do not inherit a
+    # bot grant gate.
     public.include_router(
         spaces_router,
         responses=SPACE_SCOPED_ERROR_RESPONSES,
@@ -392,6 +398,20 @@ def build_public_router() -> APIRouter:
     public.include_router(
         work_orders_router,
         responses=SPACE_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Tenant-identical marketplace queries. This literal group must be mounted
+    # before the ``{bot_id}`` wildcard router below.
+    public.include_router(
+        market_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Tenant-identical Bot catalog queries. The catalog has no user dimension,
+    # so it publishes the base error table and admits User or App principals.
+    public.include_router(
+        bot_public_router,
+        responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
     for router in _GROUPS_WITHOUT_CALLER_SCOPE + _MIXED_GROUPS:
@@ -407,6 +427,12 @@ def build_public_router() -> APIRouter:
             router,
             responses=USER_SCOPED_ERROR_RESPONSES,
             dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_OWN_BOT,
+        )
+    for router in _ADDRESSED_BOT_SUBGROUPS:
+        public.include_router(
+            router,
+            responses=USER_SCOPED_ERROR_RESPONSES,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_ADDRESSED_BOT,
         )
     # The engine-runtime groups already run this exact check transitively —
     # their `OwnerIdDep` consumes the owner it returns — so declaring it at the

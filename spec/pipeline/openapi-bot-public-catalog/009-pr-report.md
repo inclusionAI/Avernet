@@ -81,3 +81,20 @@ PR head `e595d27ef` 的首次 Backend unit tests 失败已收敛为三个测试�
 - 报告门禁：case pass rate 100.00%（12333/12333），line coverage 86.34%，change-line coverage 90.24%（111/123）。
 - 本机 `scripts/ci_test.sh` 末段因系统 `python` 指向 Python 2.7 解析 `report_check.py` 失败；使用同一 Backend `.venv/bin/python` 执行同一报告参数通过。GitHub runner 使用 Python 3.12，不受该本地解释器差异影响。
 - 远端 Backend CI：等待本次修复提交推送后重新触发。
+
+## Review 与二次冲突收敛（2026-08-20）
+
+- Reviewer `totalfrank` 的 8 条 inline comments 已统一按一个权限模型处理：目录改为 tenant-identical `OPEN`，Gateway 继承 `user/app optional`，删除目录专用 App-only 错误类型、`401001`、显式 `user_id` 与 `friendship` 投影；公共错误 helper 恢复 base 契约。
+- 路径从 `/openapi/v1/bots/public/*` 改为 `/openapi/v1/bots/catalog/*`。
+- 新增受限 `platform` query，格式 `^[a-z][a-z0-9_]{0,63}$`。部署默认值由 `BotCatalogConfig` 注入；singlebox 配置为 `team_claw`。当前只有默认平台路由到既有数据源，其他合法平台返回 `200000` 空页。
+- 合并最新 `dev_refactory_collaboration@423f66716`，保留 base 新增的 Channels、Spaces、Market 与 Bot Space 能力；冲突集中在 OpenAPI README、身份/路径测试、Gateway schema 和 route-security 测试，均以最新 base 为底手工合并后重新生成 schema。
+- 自动评论：无机器人评论。人工评论：8 个 thread 的代码诉求已处理；按 skill 边界未自动回复或 resolve thread，等待 reviewer 复查新 head。
+- 验证：Gateway unit 928 passed、4 skipped，E2E 27 passed，line coverage 95.38%；Backend 完整门禁运行中，结果补充到本节后再推送。
+
+- 用户最终决定暂时移除 `platform` 参数，因此未引入平台配置、默认值或未知平台分支；目录直接查询当前部署数据源。
+
+### 最终验证状态
+
+- Backend 全量在最终调整前：12441 passed、1 skipped，仅 `singlebox` 配置快照因临时 platform 配置失败；用户决定移除 platform 后，该配置、源码和旧测试均删除，配置快照/社区标识门禁及 catalog 相关回归 73 passed。
+- Gateway：unit 928 passed、4 skipped；E2E 27 passed；报告门禁 case pass 100%、line coverage 95.38%。
+- 最终完整 Backend 门禁交由本次 push 后的 GitHub CI 复跑，不把调整前的全量结果表述为最终全绿。

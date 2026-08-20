@@ -43,6 +43,14 @@ class SpaceServiceProtocol(Protocol):
 
 
 @runtime_checkable
+class SpaceAccessServiceProtocol(Protocol):
+    @abstractmethod
+    def require_space_member(
+        self, *, space_id: int, user_id: str
+    ) -> tuple[SpaceRecord, SpaceMemberRecord]: ...
+
+
+@runtime_checkable
 class SpaceMemberServiceProtocol(Protocol):
     @abstractmethod
     def list_members(

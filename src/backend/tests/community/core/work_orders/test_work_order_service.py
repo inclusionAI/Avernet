@@ -24,6 +24,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderItemType,
     WorkOrderNotificationDetail,
     WorkOrderNotificationDraft,
+    WorkOrderNotificationBadgeSummary,
     WorkOrderNotificationRecord,
     WorkOrderQueryType,
     WorkOrderRecord,
@@ -257,12 +258,59 @@ def test_review_requires_owner_and_delegates(
     )
 
 
-@pytest.mark.parametrize("value", ["", "   ", "x" * 513])
-def test_review_rejects_invalid_remark(value: str) -> None:
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_approve_accepts_missing_or_blank_remark(value: str | None) -> None:
+    service, repository, _, access, notifications = _service()
+    repository.get_detail.return_value = _detail()
+    notification = WorkOrderNotificationDraft(
+        recipient_user_id="applicant-1",
+        notification_category=NotificationCategory.NOTICE,
+        event_type=WorkOrderEventType.SPACE_JOIN_REVIEWED,
+        biz_type=WorkOrderBizType.SPACE_JOIN,
+        biz_id="7",
+        title="approved",
+        content="approved",
+    )
+    notifications.build_space_join_review_result.return_value = notification
+    expected = WorkOrderReviewResult(
+        work_order_id=11,
+        status=WorkOrderStatus.APPROVED,
+        reviewer_user_id="owner-1",
+        review_remark=None,
+        reviewed_at=NOW,
+    )
+    repository.review_space_join.return_value = expected
+
+    assert (
+        service.approve(work_order_id=11, actor_id="owner-1", review_remark=value)
+        == expected
+    )
+    access.require_space_owner.assert_called_once_with(space_id=7, user_id="owner-1")
+    repository.review_space_join.assert_called_once_with(
+        work_order_id=11,
+        reviewer_user_id="owner-1",
+        review_remark=None,
+        target_status=WorkOrderStatus.APPROVED,
+        notification=notification,
+        env="dev",
+    )
+
+
+def test_approve_rejects_oversized_remark() -> None:
+    service, repository, _, _, _ = _service()
+
+    with pytest.raises(WorkOrderInvalidRemarkError, match="512"):
+        service.approve(work_order_id=11, actor_id="owner-1", review_remark="x" * 513)
+
+    repository.get_detail.assert_not_called()
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", "x" * 513])
+def test_reject_requires_valid_remark(value: str | None) -> None:
     service, repository, _, _, _ = _service()
 
     with pytest.raises(WorkOrderInvalidRemarkError, match="1-512"):
-        service.approve(work_order_id=11, actor_id="owner-1", review_remark=value)
+        service.reject(work_order_id=11, actor_id="owner-1", review_remark=value)
 
     repository.get_detail.assert_not_called()
 
@@ -336,12 +384,20 @@ def test_notification_service_delegates_and_maps_missing_records() -> None:
     repository.get_notification.side_effect = [detail, None]
     repository.mark_notification_read.side_effect = [read, None]
     repository.count_unread.return_value = 3
+    badge_summary = WorkOrderNotificationBadgeSummary(
+        unread_count=3,
+        pending_approval_count=2,
+        unread_notice_count=1,
+        badge_count=3,
+    )
+    repository.get_notification_badge_summary.return_value = badge_summary
     repository.mark_all_notifications_read.return_value = 2
 
     assert service.get_detail(notification_id=21, actor_id="owner-1") == detail
     with pytest.raises(WorkOrderNotificationNotFoundError):
         service.get_detail(notification_id=22, actor_id="owner-1")
     assert service.unread_count(actor_id="owner-1") == 3
+    assert service.badge_summary(actor_id="owner-1") == badge_summary
     assert service.mark_read(notification_id=21, actor_id="owner-1") == read
     with pytest.raises(WorkOrderNotificationNotFoundError):
         service.mark_read(notification_id=22, actor_id="owner-1")
@@ -354,6 +410,9 @@ def test_notification_service_delegates_and_maps_missing_records() -> None:
         mark_read=True,
     )
     repository.count_unread.assert_called_once_with(
+        recipient_user_id="owner-1", env="dev"
+    )
+    repository.get_notification_badge_summary.assert_called_once_with(
         recipient_user_id="owner-1", env="dev"
     )
     repository.mark_all_notifications_read.assert_called_once_with(

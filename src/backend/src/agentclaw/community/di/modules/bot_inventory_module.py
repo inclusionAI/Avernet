@@ -8,8 +8,8 @@ from agentclaw.community.api.bot_inventory_service import BotInventoryServicePro
 from agentclaw.community.api.local_bot_workflow_service import (
     LocalBotWorkflowServiceProtocol,
 )
-from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
-    NoopBusinessSpaceContext,
+from agentclaw.community.adapters.bot_space_context import (
+    SpaceServiceBotSpaceContext,
 )
 from agentclaw.community.core.bot_inventory.adapters.service_lifecycle import (
     ServiceLifecycleView,
@@ -46,7 +46,7 @@ class BotInventoryModule(Module):
     def configure(self, binder: Binder) -> None:
         binder.bind(
             BusinessSpaceContextProtocol,
-            to=NoopBusinessSpaceContext,
+            to=SpaceServiceBotSpaceContext,
             scope=singleton,
         )
 

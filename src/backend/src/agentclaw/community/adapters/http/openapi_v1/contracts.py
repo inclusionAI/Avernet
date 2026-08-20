@@ -116,17 +116,18 @@ class ErrorEnvelope(BaseModel):
     )
 
 
-def error_example(status: int, message: str, *, code: int | None = None) -> dict[str, object]:
+def error_example(status: int, message: str) -> dict[str, object]:
     """A worked response sample for one documented failure status.
 
-    The code normally follows the status*1000 rule. A published business
-    subcode can override that default when runtime exposes one.
+    The code follows the status*1000 rule and the message is one the server
+    really emits for that status, so rendered samples show actual values
+    instead of type placeholders.
     """
     return {
         "content": {
             "application/json": {
                 "example": {
-                    "code": code if code is not None else status * 1000,
+                    "code": status * 1000,
                     "message": message,
                     "data": None,
                     "request_id": EXAMPLE_TRACE_ID,
@@ -202,7 +203,7 @@ USER_SCOPED_403: dict[int | str, dict[str, object]] = {
         "model": ErrorEnvelope,
         "description": "The user_id names a user the authenticated caller may "
         "not act for",
-        **error_example(403, "Forbidden", code=403001),
+        **error_example(403, "Forbidden"),
     },
 }
 

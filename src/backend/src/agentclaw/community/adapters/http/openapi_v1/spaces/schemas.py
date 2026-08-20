@@ -59,6 +59,18 @@ class FavoriteTargetType(_DocumentedEnum):
     }
 
 
+class MarketSource(_DocumentedEnum):
+    """Marketplace system that owns the target identifier."""
+
+    SKILLCENTER = "SKILLCENTER"
+    TEAMCLAW = "TEAMCLAW"
+
+    __descriptions__ = {
+        "SKILLCENTER": "SkillCenter marketplace.",
+        "TEAMCLAW": "TeamClaw marketplace.",
+    }
+
+
 def _utc_datetime(value: datetime) -> str:
     """Serialize persisted timestamps as explicit UTC on the public wire."""
     if value.tzinfo is None or value.utcoffset() is None:
@@ -200,6 +212,9 @@ class SpaceMemberDeletedResult(BaseModel):
 class FavoriteTargetRequest(BaseModel):
     """Marketplace target to add to or remove from favorites."""
 
+    market_source: MarketSource = Field(
+        description="Source marketplace for this target identifier."
+    )
     target_type: FavoriteTargetType = Field(
         description="Marketplace category of the target."
     )
@@ -213,6 +228,9 @@ class FavoriteTargetRequest(BaseModel):
 class SearchFavoritesRequest(BaseModel):
     """Filters and pagination for searching Space favorites."""
 
+    market_source: MarketSource | None = Field(
+        default=None, description="Marketplace source filter, or null for all sources."
+    )
     target_type: FavoriteTargetType | None = Field(
         default=None, description="Target category filter, or null for all categories."
     )
@@ -231,6 +249,9 @@ class FavoriteAddedResult(BaseModel):
     """Favorite state returned after a target is added."""
 
     favorite_id: int = Field(description="Identifier of the favorite record.")
+    market_source: MarketSource = Field(
+        description="Source marketplace for this target identifier."
+    )
     target_type: FavoriteTargetType = Field(
         description="Marketplace category of the target."
     )
@@ -238,11 +259,17 @@ class FavoriteAddedResult(BaseModel):
     is_favorited: bool = Field(
         default=True, description="Whether the target is now favorited."
     )
+    changed: bool = Field(
+        description="Whether this request created the favorite record."
+    )
 
 
 class FavoriteCanceledResult(BaseModel):
     """Favorite state returned after a target is removed."""
 
+    market_source: MarketSource = Field(
+        description="Source marketplace for this target identifier."
+    )
     target_type: FavoriteTargetType = Field(
         description="Marketplace category of the target."
     )
@@ -250,12 +277,18 @@ class FavoriteCanceledResult(BaseModel):
     is_favorited: bool = Field(
         default=False, description="Whether the target remains favorited."
     )
+    changed: bool = Field(
+        description="Whether this request removed an existing favorite record."
+    )
 
 
 class MarketFavoriteItem(_UtcResponseModel):
     """One marketplace favorite saved in a Space."""
 
     favorite_id: int = Field(description="Identifier of the favorite record.")
+    market_source: MarketSource = Field(
+        description="Source marketplace for this target identifier."
+    )
     target_type: FavoriteTargetType = Field(
         description="Marketplace category of the target."
     )
@@ -266,4 +299,34 @@ class MarketFavoriteItem(_UtcResponseModel):
     )
     is_favorited: bool = Field(
         default=True, description="Whether the target is currently favorited."
+    )
+
+
+class FavoriteStatusesRequest(BaseModel):
+    """Batch query for favorite state of marketplace targets in one Space."""
+
+    market_source: MarketSource = Field(
+        description="Source marketplace shared by all requested targets."
+    )
+    target_type: FavoriteTargetType = Field(
+        description="Marketplace category shared by every requested target."
+    )
+    target_codes: list[str] = Field(
+        min_length=1,
+        max_length=100,
+        description="One to 100 stable marketplace target codes.",
+    )
+
+
+class FavoriteStatusesResult(BaseModel):
+    """Targets currently favorited by any member of the selected Space."""
+
+    market_source: MarketSource = Field(
+        description="Source marketplace of the returned target identifiers."
+    )
+    target_type: FavoriteTargetType = Field(
+        description="Marketplace category of the target identifiers."
+    )
+    favorited_target_codes: list[str] = Field(
+        description="Requested target codes currently favorited in this Space."
     )

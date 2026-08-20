@@ -93,17 +93,13 @@ from typing import Annotated
 from fastapi import Depends, Query, Request
 from starlette.requests import HTTPConnection
 
-from agentclaw.community.adapters.http.openapi_v1.admission import (
-    APP_ONLY_SUBCODE_REFUSED,
-    ActingCaller,
-)
+from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     _refuse,
     require_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
-    AppOnlyCallerError,
     GrantNotResolvableError,
     MissingPrincipalError,
     UserIdMismatchError,
@@ -501,14 +497,4 @@ async def refuse_app_only_caller(
     """
     if caller_names_a_user(principal):
         return
-    route = connection.scope.get("route")
-    route_path = getattr(route, "path", None)
-    if (connection.scope.get("method"), route_path) in APP_ONLY_SUBCODE_REFUSED:
-        # COSEC: Preserve the catalog-only actionable subcode when this route
-        # dependency is exercised independently of the shared principal seam.
-        _refuse(
-            connection,
-            "this operation requires a caller naming an end user",
-            AppOnlyCallerError,
-        )
     _refuse(connection, "this operation requires a caller naming an end user")

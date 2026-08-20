@@ -56,6 +56,7 @@ from agentclaw.community.api.runtime_layout_probe_service import (
 )
 from agentclaw.community.api.skill_scan_service import SkillScanServiceProtocol
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
+from agentclaw.community.api.skill_market_service import SkillMarketServiceProtocol
 from agentclaw.community.api.skill_set_activator_factory import (
     SkillSetActivatorFactoryProtocol,
 )
@@ -105,6 +106,7 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     CurrentRuntimeLayoutProbeService,
 )
 from agentclaw.community.core.skill_center.services.market_sync import MarketSyncService
+from agentclaw.community.core.skill_center.services.skill_market_service import SkillMarketService
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
 from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
@@ -230,6 +232,7 @@ class SkillCenterModule(Module):
         # be shared across all consumers. Bind as a singleton so every
         # injection returns the same instance.
         binder.bind(MarketCache, to=MarketCache, scope=singleton)
+        binder.bind(SkillMarketService, to=SkillMarketService, scope=singleton)
         # ``GitSyncConfig.__init__`` reads YAML + env vars; bind as a
         # singleton so the file/env scan happens once.
         binder.bind(GitSyncConfig, to=GitSyncConfig, scope=singleton)
@@ -277,6 +280,14 @@ class SkillCenterModule(Module):
             to=SkillPublishService,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    @inject
+    def skill_market_service(
+        self, service: SkillMarketService
+    ) -> SkillMarketServiceProtocol:
+        return service
 
     @singleton
     @provider

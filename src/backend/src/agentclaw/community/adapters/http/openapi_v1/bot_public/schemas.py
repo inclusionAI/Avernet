@@ -6,19 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 RuntimeState = Literal["draft", "verify", "online"]
 PublicBotType = Literal["personal", "service", "desktop"]
-FriendshipStatus = Literal["PENDING", "ACCEPTED", "REJECTED", "CANCELLED"]
-
-
-class Friendship(BaseModel):
-    """The caller's relationship with a public Bot."""
-
-    status: FriendshipStatus = Field(description="Caller-specific friendship state.")
-    requires_approval: bool = Field(
-        description="Whether this friendship requires an approval workflow."
-    )
 
 
 class PublicBot(BaseModel):
@@ -32,9 +21,6 @@ class PublicBot(BaseModel):
     owner_name: str | None = Field(default=None, description="Optional public owner name.")
     engine: str = Field(description="Engine that runs the Bot.")
     status: str = Field(description="Public Bot lifecycle status.")
-    friendship: Friendship | None = Field(
-        default=None, description="Optional friendship state for the verified caller."
-    )
 
 
 class Recommendation(BaseModel):

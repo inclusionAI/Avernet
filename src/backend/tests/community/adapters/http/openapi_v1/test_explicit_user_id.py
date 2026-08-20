@@ -118,7 +118,7 @@ def test_naming_another_user_is_refused(client):
 
     assert response.status_code == 403
     body = response.json()
-    assert body["code"] == 403001
+    assert body["code"] == 403000
     assert body["message"] == "Forbidden"
     assert body["data"] is None
 
@@ -280,6 +280,8 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers/{{server_code}}"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
     # The load-test endpoint answers a constant. It reads nothing and writes
     # nothing, so there is no scope for a user id to name — and a synthetic
     # endpoint measuring the shared path must not be the one exception that
@@ -333,9 +335,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: The combined Bot Workshop surface then adds a net 27 bot-addressed operations
 #: and five account-level operations. The trace filter remains the sole query
-#: placement. The public catalog then adds two account-level reads. Together
-#: with the caller-identity read, the combined contract is 83/1/43.
-_BOT_ID_PLACEMENT = {"path": 83, "query": 1, "none": 43}
+#: placement. Together with the caller-identity read, the combined contract is
+#: 83/1/45. Channels adds six Bot-addressed operations, and the Bot Space
+#: reassignment endpoint adds one more, yielding 90/1/45.
+_BOT_ID_PLACEMENT = {"path": 90, "query": 1, "none": 47}
 
 
 def _schema() -> dict:
@@ -420,8 +423,9 @@ def test_the_pinned_number_of_operations_take_it():
     # recipient-notification operations added by the collaboration API, then +2
     # for the Bot Chats operations. The combined Bot Workshop surface adds a
     # further net 32 user-scoped operations (27 bot-addressed and five
-    # account-level operations), then the public Bot catalog adds two reads.
-    assert len(taking) == 116
+    # account-level operations), then +6 for Bot-scoped Channels CRUD/status,
+    # then +1 for Bot Space reassignment.
+    assert len(taking) == 125
 
 
 def test_the_exempt_operations_take_none():
@@ -492,20 +496,6 @@ def test_the_403_is_documented_on_exactly_the_user_scoped_operations():
     for path, method, operation in _operations(_schema()):
         documented = "403" in operation["responses"]
         assert documented is _user_scoped(path, method), f"{method.upper()} {path}"
-
-
-def test_user_id_mismatch_openapi_examples_use_the_runtime_subcode():
-    """Generated clients must see the same 403001 that the dependency emits."""
-    description = "The user_id names a user the authenticated caller may not act for"
-    documented = 0
-    for path, method, operation in _operations(_schema()):
-        response = operation["responses"].get("403")
-        if not response or response["description"] != description:
-            continue
-        documented += 1
-        example = response["content"]["application/json"]["example"]
-        assert example["code"] == 403001, f"{method.upper()} {path}"
-    assert documented
 
 
 def _request_body_models(schema: dict) -> set[str]:

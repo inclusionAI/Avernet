@@ -30,7 +30,7 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 
 **目标：** 实现公共 `/openapi/v1` API，其调用方是**外部注册租户**。它位于
 `src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`。其中 **bots**、
-**mcp** 与 **skills** 类别已有实现 handler；其余类别保留各自在下方看板中的 readiness 状态。
+**mcp**、**channels** 与 **skills** 类别已有实现 handler；其余类别保留各自在下方看板中的 readiness 状态。
 
 > 🔒 **这套界面端到端仍不可被真正调用，但原因已不再是"桩"。**
 > `require_principal` 现在会真正校验网关签发的 `X-Avernet-Principal` 令牌，
@@ -116,7 +116,7 @@ _具体每个切片要实现哪些端点，见下方的 **各组件端点清单*
 |---|---|---|---|---|---|
 | 1 | 机器人记录（`ac_bots` / `BotModel`） | totalfrank | P1 | ✅ **DONE —— PR #456 已于 2026-07-27 合并** | —— |
 | 2 | 资源（`ac_resource`） | lucas-xzp | P1 | ✅ DONE —— Phase 0（分支 `rongzhi_0727`） | 列 + 守卫 + 测试通过；内部 API 不变 — 已验：to_dict 不含 tenant、guard 直接表达式非 lambda、Changelog 见下 |
-| 3 | 渠道（`ac_channel_config`） | —— | ❌ **已放弃** | 该阶段从未开工；其 Track B 组件已于 2026-08-03 删除 | 不适用 |
+| 3 | 渠道（`ac_channel_config`） | Bot 工坊 | P1 | ✅ **2026-08-19 已实现；DDL 待执行** | tenant 列 + tenant 前导索引 + 守卫 + 隔离测试；DDL 必须先于代码部署 |
 | 4 | 技能（skill 相关表） | totalfrank + lucas-xzp | P3 | ⬜ TODO | 同上 |
 | 5 | MCP 配置（`ac_user_mcp_config` + `ac_bot_mcp_call_config`） | totalfrank | P1 | ✅ DONE —— **PR #564** | PR #564 合并后 |
 | 6 | 例程（Routines） | lucas-xzp | P1 | ⬜ TODO | 同上 |
@@ -132,14 +132,9 @@ _按优先级分层排序。_
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE —— PR #610**（6/6 端点） | ~~Track A 阶段 5~~ ✅（PR #564） |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0)，Track B 全 7 端点接通 stub→service，仅文件、按路径寻址；待 auth workstream(gateway principal seam) 落地 + DDL 部署后才可对外 |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 NOT PUBLIC-READY | Track A routines 无表靠 ac_bots 间接隔离；Track B 7 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
-| channels | —— | ❌ **已删除（2026-08-03）** | *(已删除)* | 路由、schema 与两条已发布路径均删除 —— 见下方 channels 小节 | 不适用 |
+| channels | Bot 工坊 | P1 | `openapi_v1/channels/router.py` | ✅ **2026-08-19 已实现**——6/6 个 draft 钉钉渠道操作 | Track A 阶段 3 代码 ✅；须先执行下方 DDL；OCB/Sofapy schema 副本独立同步 |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS（PARTIAL）— 3 handler 全接通但 NOT PUBLIC-READY | bots 隔离（Stage 1 ✅）；Track B 3 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | 🔧 **实现 + CI 完成；发布待定**——六个已定案 Local Skill 操作 | #725 cleanup-work DDL 必须先于代码部署；[预发验收 runbook](skills-track-b-preprod-acceptance.md) 仍为 **PRE-PROD PENDING** |
-
-**Bot 公开目录前端接入。** 新增的公开目录读接口
-`GET /openapi/v1/bots/public/search` 与
-`GET /openapi/v1/bots/public/discover` 的参数、错误码、数据模型、connection 跳转约定与前端检查清单见
-[`bot-public-catalog-api.zh-CN.md`](bot-public-catalog-api.zh-CN.md)。
 
 ### Track C —— Engine（运行时）面（5 组已全部实现 —— PR #630）
 _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶段，没有 DDL。
@@ -195,14 +190,10 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 > 第二个租户持有真实数据之前定下来。
 | **阶段 5 对 `ac_user_mcp_config` 的唯一键替换** | ⬜ TODO（DDL 见下文） | **在第二个租户写入 MCP 配置之前**完成 —— 不必赶在发布之前 |
 
-> **❌ 渠道已删除（2026-08-03）。** 自 2026-07-29 起以"降级"的形式搁置；现已整体删除。
-> 搁置对它并不合适：该组件是**已发布**的，所以一个被搁置的桩并不是看板上一行休眠的记录 ——
-> 它是网关所提供文档里的 6 个操作，每一个都回 500。Track A 阶段从未开工，因此没有数据层
-> 的工作需要回退。被删除的内容见**端点**部分的 channels 小节。
->
-> _（以下为 2026-07-29 的原始说明，保留作为历史。）_ 目前产品并不需要渠道，因此它不应再以"下一个该
-> 动手的事项"的形式出现在看板上。这是一次**降级，而不是取消** —— 两行都保留完整范围，
-> 可以原样重新启动。如果渠道确实被取消，应当删除这两行，而不是让它们停留在搁置状态。
+> **✅ 渠道已于 2026-08-19 恢复。** 2026-08-03 的删除记录仍保留在 Changelog 中作为
+> 历史背景：当时删除会返回 500 的已发布桩是正确的。现在恢复的是完整实现的 Bot-first API，
+> 包含租户隔离持久化、显式应用授权判定、机密安全投影与测试。阶段 3 DDL 未执行前不得部署；
+> OCB/Sofapy Gateway 的 schema 是独立副本，也必须另行同步。
 
 ---
 
@@ -230,6 +221,25 @@ ALTER TABLE ac_bots
 
 `space_id` 的平台执行记录必须随交付补充环境、变更单/版本、执行时间和回滚负责人；
 在这些证据齐全之前，团队空间能力不得标记为可上线。
+
+**阶段 3 —— 渠道（`ac_channel_config`）**。以下变更必须在 Channels 代码发布
+**之前**执行：ORM 查询会读取 `avernet_tenant`，因此先发代码会让全部渠道读取因缺列失败。
+默认值会把历史行回填到内部 `teamclaw` 租户。替换后的索引以 ORM 守卫使用的同一 tenant
+维度开头，避免不同租户中相同 owner/Bot 的记录共用无租户范围的查询路径。
+
+```sql
+ALTER TABLE ac_channel_config
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+
+ALTER TABLE ac_channel_config
+  DROP INDEX idx_type_id_d_bbi,
+  ADD INDEX idx_tenant_env_type_id_d_bbi
+    (avernet_tenant, env, type, identity_id, deleted, bind_bot_id);
+```
+
+若平台按单条语句执行，应先加列，再替换索引。代码回滚时可以保留这个新增列，但绝不能在列
+尚不存在时部署会读取它的代码。执行记录需包含环境、变更单/版本、执行时间、结果和回滚负责人。
 
 **阶段 5 —— MCP 配置**（PR #564）。三条语句，**两个不同的时间点**：
 
@@ -745,8 +755,8 @@ POST /openapi/v1/bots/skills/upload?bot_id=b-1   →  POST /openapi/v1/bots/b-1/
 除注明外，所有响应都使用 `openapi_v1/contracts.py` 里的 `Envelope[T]` / `Page[T]` 结构
 （二进制流不走信封）。
 
-### ✅ totalfrank · P1 —— bots（13 个端点）· `openapi_v1/bots/router.py` —— **已实现（PR #494）**
-13 个端点已全部接到内部 bot 服务上。这里保留下来，是作为其余六个类别的参照形态：
+### ✅ totalfrank · P1 —— bots· `openapi_v1/bots/router.py` —— **已实现（PR #494）**
+Bot 核心路由已接到内部服务上。这里保留下来，是作为其余六个类别的参照形态：
 一个类别"做完了"长什么样。
 
 | 方法 | 路径 | 用途 | 成功响应 |
@@ -757,6 +767,7 @@ POST /openapi/v1/bots/skills/upload?bot_id=b-1   →  POST /openapi/v1/bots/b-1/
 | GET | `/openapi/v1/bots/ceiling` | 创建配额上限 | `Envelope[Ceiling]` |
 | GET | `/openapi/v1/bots/{bot_id}` | 获取详情 | `Envelope[Bot]` |
 | PUT | `/openapi/v1/bots/{bot_id}` | 更新（`engine` 不可改） | `Envelope[Bot]` |
+| PUT | `/openapi/v1/bots/{bot_id}/space` | 变更 Bot 的归属业务空间 | `Envelope[BotSpaceAssignment]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | 删除 | `Envelope[Deleted]` |
 | POST | `/openapi/v1/bots/{bot_id}/restart` | 重启（重新置备设备） | `Envelope[Bot]` |
 | GET | `/openapi/v1/bots/{bot_id}/auth-status` | 轮询 Passport 授权；ISSUED 时完成创建 | `Envelope[BotAuthStatus]` |
@@ -764,6 +775,28 @@ POST /openapi/v1/bots/skills/upload?bot_id=b-1   →  POST /openapi/v1/bots/b-1/
 | GET | `/openapi/v1/bots/{bot_id}/passport` | 获取 Agent Passport | `Envelope[Passport]` |
 | GET | `/openapi/v1/bots/{bot_id}/engine/config` | 读取引擎配置（自由格式 JSON） | `Envelope[dict]` |
 | PUT | `/openapi/v1/bots/{bot_id}/engine/config` | 写入引擎配置（自由格式 JSON） | `Envelope[dict]` |
+
+#### 变更归属业务空间
+
+`PUT /openapi/v1/bots/{bot_id}/space` 显式要求查询参数 `user_id`，请求体必须包含
+数值型 `space_id >= 1`。目标 ID 从 `GET /openapi/v1/spaces` 获取；迁回个人空间时也必须
+传该用户 PERSONAL Space 的数值 ID，不接受 `null` 或隐式哨兵值。只有 Bot owner 可以变更，
+owner 必须仍是目标空间成员，PERSONAL 目标还必须确实属于该 owner。应用调用按
+`GRANT_CHECKED_OWN_BOT` 接纳，因此应用必须持有该用户针对其自有 Bot 的实时授权。桌面/本地
+Bot 不允许迁入 TEAM Space，返回 409。重复设置当前空间是成功的幂等空操作，返回
+`changed=false`；真实持久化失败会向上抛出，不会伪装成成功。
+
+生产 composition root 现在已将 `BusinessSpaceContextProtocol` 绑定到基于 Spaces
+Service API 的 adapter。Bot 创建与 `/openapi/v1/bots/all` 会通过同一套成员校验契约解析数值型
+PERSONAL/TEAM Space ID；尚未初始化 PERSONAL Space 的账户仍保留 `personal:<user_id>` 只读
+fallback，GET 不会产生创建空间的副作用。
+
+该接口刻意只是**窄范围归属字段更新**，不是 Bot 工坊集成方案中定义的完整跨空间迁移。它不负责
+清理/调整协作者和编辑者，也没有跨领域事务与补偿流程。因此不能把“Bot migrate”标记为完成，
+也不能在目标空间成员关系必须取代旧协作者授权的场景直接使用；完整能力仍需 B 线与 Business
+Space/协作团队共同建设 Migration Application Service。需重新生成
+`src/gateway/configs/schemas/bots.openapi.json`，并把 schema 与匹配的路由/鉴权配置同步到独立
+维护的 OCB/Sofapy Gateway；Avernet 现有宽泛的 `/openapi/v1/bots/**` 规则已覆盖该路径。
 
 _bots 上**刻意不暴露**的字段：创建时的 `engine_options`（下游目前没有任何代码会读
 `BotCreateSpec.extra_properties`，暴露它等于承诺一个服务端其实会忽略的东西），以及更新时的
@@ -776,17 +809,30 @@ _内部 `/api/bots` 也有变化，全部是有意为之，并由 #494 覆盖：
 `bot_id` 一起比较；删除默认 bot 会抛 `BotOperationNotAllowedError`（内部响应结构不变，
 公共界面映射为 409）。_
 
-### ❌ channels —— **已删除（2026-08-03）**
-该组件已整体删除：路由、schema、包、挂载项，以及它发布出去的两条路径。它从未被实现；
-而与"尚未动工的组件"不同，它是**已发布**的 —— 集成方在服务端文档里看到一套渠道 API，
-每次调用却得到 500。搁置保留了这份代价，却没有换来任何好处。
+### ✅ Bot 工坊 · P1 —— channels（6 个端点）· `openapi_v1/channels/router.py` —— **已实现（2026-08-19）**
+Bot 范围的 draft 钉钉渠道配置。每个操作都显式要求 `user_id`；`owner_id` 可选，用于寻址
+调用者有权限操作的共享 Bot。用户和应用调用方统一通过
+`GRANT_CHECKED_ADDRESSED_BOT` 接纳，因此应用必须持有被寻址 `(owner_id, bot_id)` 的有效
+授权。读取允许 owner 或可操作的协作者；写入还要求 `ADMIN` 协作者权限。若 Bot 已存在
+协作者，调用方还必须持有该 Bot 的编辑锁，否则统一返回 `423 Edit lock required` 信封。
 
-重新加回来所需要的东西并没有丢：那 6 个操作（钉钉渠道配置 CRUD + 状态切换）记录在本文
-2026-07-27 的历史与删除它的 PR 中。如果渠道要回来，它应当作为一个经过设计的组件回来，
-而不是复活一个桩。
+公共面只支持 `dingding` 和 `draft` 阶段；`verify`、`online` 仍是发布流程的产物。创建时默认
+`inactive`；状态变更会同步运行时，删除活动渠道前会先停用。`client_secret` 仅写入，读取只返回
+`has_client_secret`；内部 `aix_preview_url` 永不返回。列表按当前产品契约有意保持不分页，
+返回 `Envelope[list[Channel]]`，因为它管理的是单个 Bot 的少量已配置渠道，而不是租户级清单。
 
-_注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #363 里写的是
-`Page[Channel]`。接线时请确认用哪种。_
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/{bot_id}/channels` | 列出 draft 钉钉渠道 | `Envelope[list[Channel]]` |
+| POST | `/openapi/v1/bots/{bot_id}/channels` | 创建 inactive 渠道 | `201 Envelope[Channel]` |
+| GET | `/openapi/v1/bots/{bot_id}/channels/{channel_id}` | 读取单个渠道 | `Envelope[Channel]` |
+| PATCH | `/openapi/v1/bots/{bot_id}/channels/{channel_id}` | 部分更新配置 | `Envelope[Channel]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/channels/{channel_id}` | 停用并删除 | `Envelope[Deleted]` |
+| PUT | `/openapi/v1/bots/{bot_id}/channels/{channel_id}/status` | 启用或停用 | `Envelope[Channel]` |
+
+**发布闸口：** Backend 代码前先执行阶段 3 DDL；再把重新生成的 `bots.openapi.json` 与匹配
+的路由/鉴权配置同步到独立维护的 OCB/Sofapy Gateway。Avernet 现有宽泛
+`/openapi/v1/bots/**` 转发与鉴权规则已经覆盖这些路径。
 
 ### ✅ totalfrank · P1 —— mcp（6 个端点）· `openapi_v1/mcp/router.py` —— **已实现（PR #610）**
 市场 + 租户 + 调用者的统一 per-server 配置。6 个端点全部接到内部 MCP 服务，经由从内部
@@ -1032,11 +1078,26 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
-- **2026-08-19** —— **Bot 公开目录已提供前端接入文档。** 文档由已发布的
-  `bots.openapi.json` 契约整理，覆盖 `search` / `discover` 两个公开目录读接口的显式
-  `user_id`、`401000`/`401001`/`403001` 错误分流、白名单响应模型以及无 `binding_id` 的
-  connection 跳转方式。权威机器可读定义仍是 Gateway served schema；文档不改变任何接口或
-  runtime 行为。
+- **2026-08-20** —— **新增认证 Bot Catalog 查询。** 提供
+  `GET /openapi/v1/bots/catalog/search` 与 `/discover`；User 和 App 身份读取
+  相同的公开白名单投影，不再接受 `user_id` 或返回用户 `friendship`。
+
+- **2026-08-19** —— **新增 Bot 归属空间变更能力。** 新增
+  `PUT /openapi/v1/bots/{bot_id}/space`：显式传 `user_id` 和数值型目标
+  `space_id`；校验 Bot owner、目标空间成员关系，应用按
+  `GRANT_CHECKED_OWN_BOT` 判权；拒绝桌面 Bot 迁入 TEAM Space；重复设置返回
+  `changed=false`；持久化按 tenant/owner 限定且错误不会被吞掉。生产 Bot Inventory 已通过
+  成员校验的 Spaces Service API adapter 消费数值型 PERSONAL/TEAM Space。该接口仍只是窄范围
+  归属更新；协作者调整与回滚语义归待建设的 B 线 migration workflow。
+
+- **2026-08-19** —— **Bot 工坊 Channels 以完整公共 API 形式恢复。** 在
+  `/openapi/v1/bots/{bot_id}/channels` 下新增 6 个 Bot-first 的 draft 钉钉渠道操作；显式
+  `user_id`、可选共享 Bot `owner_id`、应用按 `GRANT_CHECKED_ADDRESSED_BOT` 判权，读取允许
+  可操作协作者，写入要求 ADMIN，并保留协作 Bot 的编辑锁约束（未由调用方持锁时返回 423）。
+  机密仅写入；运行时同步失败统一映射为 502。Track A 为 `ac_channel_config` 增加
+  `avernet_tenant` 守卫和 tenant 前导索引，并以 4 个隔离测试覆盖。
+  阶段 3 DDL 必须先于代码部署。下方保留 2026-08-03 的删除记录，因为它解释了为何当时应删除
+  已发布但只会返回 500 的旧桩。
 
 - **2026-08-19** —— **Bot 工作台应用准入按操作形状收敛。** `/bots/all` 与
   `/bots/local` 改为 `GRANT_FILTERED`，只把授权给调用应用、且由委托用户拥有的 Bot

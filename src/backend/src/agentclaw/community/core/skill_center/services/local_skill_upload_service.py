@@ -13,7 +13,6 @@ import zipfile
 from typing import Any, Callable, TYPE_CHECKING
 from uuid import uuid4
 
-import yaml
 from injector import inject
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
@@ -36,7 +35,10 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.services.skill_parser import (
+    SkillManifestError,
+    SkillParser,
+)
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
@@ -816,17 +818,17 @@ class LocalSkillUploadService:
         if wrapper is not None and len(roots) != 1:
             raise LocalSkillInvalidPackageError()
         try:
-            text = markdown.decode("utf-8", errors="strict")
-        except UnicodeDecodeError as exc:
-            raise LocalSkillInvalidPackageError() from exc
-        metadata = SkillParser.parse_content(text) or {}
-        if not metadata.get("name") or not metadata.get("description"):
+            text = SkillParser.decode_content(markdown)
             try:
-                raw_metadata = yaml.safe_load(text)
-            except yaml.YAMLError:
-                raw_metadata = None
-            if isinstance(raw_metadata, dict):
-                metadata = raw_metadata
+                metadata = SkillParser.parse_content(text) or {}
+            except SkillManifestError as exc:
+                if exc.code != "MISSING_FRONTMATTER":
+                    raise
+                # Keep packages accepted by the historical upload endpoints
+                # working while new frontmatter manifests remain strict.
+                metadata = SkillParser.parse_legacy_upload_content(text) or {}
+        except SkillManifestError as exc:
+            raise LocalSkillInvalidPackageError() from exc
         name = metadata.get("name")
         description = metadata.get("description")
         if not isinstance(name, str) or not isinstance(description, str):

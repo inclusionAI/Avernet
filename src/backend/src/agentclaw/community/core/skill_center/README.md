@@ -37,6 +37,7 @@ consumes:
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
 internal_dependencies:
+  - agentclaw.community.api.skill_market_service
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module

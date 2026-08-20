@@ -140,6 +140,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # acting as them can only reach the same ones.
     ("GET", "/openapi/v1/bots/{bot_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("PUT", "/openapi/v1/bots/{bot_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
+        "PUT",
+        "/openapi/v1/bots/{bot_id}/space",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("DELETE", "/openapi/v1/bots/{bot_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/restart"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     (
@@ -277,6 +281,33 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    # channels — collaborators may address a shared Bot, while every write
+    # additionally requires ADMIN permission in the handler. The application
+    # grant is still checked against the addressed owner at the shared seam.
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/channels",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/channels",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/channels/{channel_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PATCH",
+        "/openapi/v1/bots/{bot_id}/channels/{channel_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/channels/{channel_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PUT",
+        "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/sessions",
@@ -440,54 +471,75 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/mcp/servers"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/servers/{server_code}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/tenants"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/market/skill-center/skills"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/catalog/search"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/catalog/discover"): AdmissionMode.OPEN,
     # ── Space and work-order APIs ───────────────────────────────────────────
     # Read and self-service operations resolve an application-only caller to
     # its delegating user and continue enforcing live Space membership or
     # work-order recipient checks. Space ownership initialization, team/member
     # administration, and work-order review remain human-only.
-    ("GET", "/openapi/v1/spaces"): AdmissionMode.USER_GATED,
-    ("POST", "/openapi/v1/spaces/personal/initialize"): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/spaces/create"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/spaces/{space_id}/members"): AdmissionMode.USER_GATED,
-    ("POST", "/openapi/v1/spaces/{space_id}/members"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/spaces"): AdmissionMode.USER_GATED,
+    ("POST", "/openapi/v1/bots/spaces/personal/initialize"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/create"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.USER_GATED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.REFUSED,
     (
         "DELETE",
-        "/openapi/v1/spaces/{space_id}/members/{member_user_id}",
+        "/openapi/v1/bots/spaces/{space_id}/members/{member_user_id}",
     ): AdmissionMode.REFUSED,
     (
         "PUT",
-        "/openapi/v1/spaces/{space_id}/members/{member_user_id}/role",
+        "/openapi/v1/bots/spaces/{space_id}/members/{member_user_id}/role",
     ): AdmissionMode.REFUSED,
     (
         "POST",
-        "/openapi/v1/spaces/{space_id}/market-favorites",
+        "/openapi/v1/bots/spaces/{space_id}/market-favorites",
     ): AdmissionMode.USER_GATED,
     (
         "POST",
-        "/openapi/v1/spaces/{space_id}/market-favorites/cancel",
+        "/openapi/v1/bots/spaces/{space_id}/market-favorites/cancel",
     ): AdmissionMode.USER_GATED,
     (
         "POST",
-        "/openapi/v1/spaces/{space_id}/market-favorites/search",
+        "/openapi/v1/bots/spaces/{space_id}/market-favorites/search",
     ): AdmissionMode.USER_GATED,
-    ("POST", "/openapi/v1/spaces/{space_id}/join-requests"): AdmissionMode.USER_GATED,
-    ("GET", "/openapi/v1/work-orders"): AdmissionMode.USER_GATED,
-    ("GET", "/openapi/v1/work-orders/{work_order_id}"): AdmissionMode.USER_GATED,
-    ("POST", "/openapi/v1/work-orders/{work_order_id}/approve"): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/work-orders/{work_order_id}/reject"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/market-favorites/status",
+    ): AdmissionMode.USER_GATED,
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/join-requests",
+    ): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/work-orders"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/work-orders/{work_order_id}"): AdmissionMode.USER_GATED,
+    (
+        "POST",
+        "/openapi/v1/bots/work-orders/{work_order_id}/approve",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/work-orders/{work_order_id}/reject",
+    ): AdmissionMode.REFUSED,
     (
         "GET",
-        "/openapi/v1/work-order-notifications/{notification_id}",
+        "/openapi/v1/bots/work-order-notifications/{notification_id}",
     ): AdmissionMode.USER_GATED,
     (
         "GET",
-        "/openapi/v1/work-order-notifications/unread-count",
+        "/openapi/v1/bots/work-order-notifications/unread-count",
     ): AdmissionMode.USER_GATED,
     (
         "POST",
-        "/openapi/v1/work-order-notifications/{notification_id}/read",
+        "/openapi/v1/bots/work-order-notifications/{notification_id}/read",
     ): AdmissionMode.USER_GATED,
-    ("POST", "/openapi/v1/work-order-notifications/read-all"): AdmissionMode.USER_GATED,
+    (
+        "POST",
+        "/openapi/v1/bots/work-order-notifications/read-all",
+    ): AdmissionMode.USER_GATED,
     # ── Workshop/local admission follows the operation's shape ───────────────
     # Both listings are owner-scoped, so an application sees only the named
     # user's own bots that user delegated to it. The restriction is applied by
@@ -528,8 +580,6 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # No bot exists yet for a grant to cover, and creation spends the user's
     # quota. Auto-granting the new bot would invent consent nobody gave.
     ("POST", "/openapi/v1/bots"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/bots/public/search"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/bots/public/discover"): AdmissionMode.REFUSED,
     # Delegation is a human act. An application must not be able to widen its
     # own access, withdraw a competitor's, or enumerate what else reaches a bot.
     ("POST", "/openapi/v1/bots/{bot_id}/authorized-apps"): AdmissionMode.REFUSED,
@@ -566,15 +616,6 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/loadtest/hello"): AdmissionMode.REFUSED,
     ("WEBSOCKET", "/openapi/v1/bots/loadtest/ws/echo"): AdmissionMode.REFUSED,
 }
-
-# A verified app-only caller normally shares the same fixed 401000 response as
-# a missing or invalid credential.  The catalog is the sole published exception:
-# its contract exposes a distinct actionable subcode, so this closed set keeps
-# that compatibility boundary explicit and reviewable.
-APP_ONLY_SUBCODE_REFUSED = frozenset({
-    ("GET", "/openapi/v1/bots/public/search"),
-    ("GET", "/openapi/v1/bots/public/discover"),
-})
 
 #: The operations whose grant check runs in their **handler**, and the only ones.
 #:
@@ -762,7 +803,6 @@ class ActingCaller:
 __all__ = [
     "ADMISSION",
     "ADMITTING_MODES",
-    "APP_ONLY_SUBCODE_REFUSED",
     "SKILL_SCOPED_OPERATIONS",
     "ActingCaller",
     "AdmissionMode",

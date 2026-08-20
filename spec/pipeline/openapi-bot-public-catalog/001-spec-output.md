@@ -112,3 +112,15 @@ Bot multi-instance choice without exposing an instance or binding to callers.
   tests; no new binding API is introduced.
 - Generated OpenAPI and both gateway configurations expose the paths and exact
   identity requirements.
+
+## 2026-08-20 Review 收敛增量
+
+- 对外路径改为 `GET /openapi/v1/bots/catalog/search` 与 `GET /openapi/v1/bots/catalog/discover`。
+- 两个接口新增 `platform` query：默认 `team_claw`，格式为 `^[a-z][a-z0-9_]{0,63}$`；当前仅 `team_claw` 绑定现有 Bot 数据源，其他合法平台返回 `200000` 空页，非法格式返回统一 `422000`。
+- 目录改为租户内认证调用者一致的公开数据：Gateway 继承 `/openapi/v1/bots/**` 的 `user: optional`、`app: optional`，Backend admission 使用 `OPEN`；删除显式 `user_id`、用户态 `friendship` 和目录专用 `401001`。
+- 无 User/App 身份仍由 Backend `require_principal` 统一返回 `401000`。目录 DTO 继续严格白名单，不暴露 binding、设备、ext、凭据和环境字段。
+- `team_claw` 请求调用既有搜索/推荐服务；未知合法平台不得调用这些服务，直接返回空结果。诊断日志仅记录 platform、request_id、结果数或低敏失败类别，不记录关键词或认证信息。
+
+### 2026-08-20 最终调整
+
+- 按用户最终确认，暂不发布 `platform` 参数；前述 platform 设计作废。两个 catalog 接口直接查询当前部署的数据源。

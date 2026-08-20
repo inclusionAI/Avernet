@@ -34,22 +34,25 @@ def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
 
 
 @pytest.mark.parametrize(
-    "path",
-    (
-        "/openapi/v1/bots/public/search",
-        "/openapi/v1/bots/public/discover",
-    ),
+    ("method", "path"),
+    [
+        ("POST", "/openapi/v1/bots/market/skills"),
+        ("POST", "/openapi/v1/bots/market/mcp-servers"),
+        ("POST", "/openapi/v1/bots/market/skill-center/skills"),
+        ("GET", "/openapi/v1/bots/catalog/search"),
+        ("GET", "/openapi/v1/bots/catalog/discover"),
+    ],
 )
-def test_shipped_config_requires_a_user_for_public_catalog_reads(path: str) -> None:
-    """Catalog reads reject app-only callers instead of inheriting ``bots/**``."""
+def test_shipped_config_admits_app_only_market_queries(method: str, path: str) -> None:
+    """Market discovery accepts an application identity without a human."""
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
 
-    req = rs.resolve("GET", path)
+    requirement = rs.resolve(method, path)
 
-    assert req is not None
-    assert req[PrincipalType.USER] is Presence.REQUIRED
-    assert req[PrincipalType.APP] is Presence.OPTIONAL
+    assert requirement is not None
+    assert requirement[PrincipalType.USER] is Presence.OPTIONAL
+    assert requirement[PrincipalType.APP] is Presence.OPTIONAL
 
 
 #: The operations that still require a human on the wire. Mirrors Mode REFUSED
@@ -59,16 +62,16 @@ def test_shipped_config_requires_a_user_for_public_catalog_reads(path: str) -> N
 #: enumeration rather than by a shared import.
 _HUMAN_ONLY = [
     ("GET", "/openapi/v1/caller"),
-    ("GET", "/openapi/v1/spaces"),
-    ("POST", "/openapi/v1/spaces/personal/initialize"),
-    ("POST", "/openapi/v1/spaces/create"),
-    ("GET", "/openapi/v1/spaces/1/members"),
-    ("POST", "/openapi/v1/spaces/1/members"),
-    ("DELETE", "/openapi/v1/spaces/1/members/user-1"),
-    ("PUT", "/openapi/v1/spaces/1/members/user-1/role"),
-    ("POST", "/openapi/v1/spaces/1/market-favorites"),
-    ("POST", "/openapi/v1/spaces/1/market-favorites/cancel"),
-    ("POST", "/openapi/v1/spaces/1/market-favorites/search"),
+    ("GET", "/openapi/v1/bots/spaces"),
+    ("POST", "/openapi/v1/bots/spaces/personal/initialize"),
+    ("POST", "/openapi/v1/bots/spaces/create"),
+    ("GET", "/openapi/v1/bots/spaces/1/members"),
+    ("POST", "/openapi/v1/bots/spaces/1/members"),
+    ("DELETE", "/openapi/v1/bots/spaces/1/members/user-1"),
+    ("PUT", "/openapi/v1/bots/spaces/1/members/user-1/role"),
+    ("POST", "/openapi/v1/bots/spaces/1/market-favorites"),
+    ("POST", "/openapi/v1/bots/spaces/1/market-favorites/cancel"),
+    ("POST", "/openapi/v1/bots/spaces/1/market-favorites/search"),
     ("POST", "/openapi/v1/bots"),
     ("POST", "/openapi/v1/bots/local"),
     ("GET", "/openapi/v1/bots/bot-123/local/auth-status"),

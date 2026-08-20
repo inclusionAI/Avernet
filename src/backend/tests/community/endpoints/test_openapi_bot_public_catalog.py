@@ -1,10 +1,4 @@
-"""Endpoint-framework coverage for the public Bot catalog OpenAPI routes.
-
-The assembled application verifies a gateway-signed user principal. Search uses
-the real service boundary with a deterministic repository-shaped result;
-discovery replaces only the external BCSFuse boundary outcome. Both error cases
-prove that a signed caller cannot select another ``user_id``.
-"""
+"""Endpoint-framework coverage for the public Bot catalog OpenAPI routes."""
 
 from __future__ import annotations
 
@@ -26,8 +20,8 @@ from tests.community.framework import (
     endpoint_test,
 )
 
-_USER_ID = "public-catalog-user"
-_KEY = "public-catalog-endpoint-signing-key-at-least-32-bytes"
+_USER_ID = "catalog-user"
+_KEY = "catalog-endpoint-signing-key-at-least-32-bytes"
 
 
 class _Secret:
@@ -40,38 +34,46 @@ class _Resolver:
         return _Secret()
 
 
-def _principal() -> str:
+def _principal(*, app_only: bool = False) -> str:
     now = int(time.time())
+    principals = []
+    if not app_only:
+        principals.append(
+            {
+                "type": "user",
+                "subject": {
+                    "id": _USER_ID,
+                    "username": "catalog@example.test",
+                },
+            }
+        )
+    principals.append(
+        {
+            "type": "app",
+            "tenant": "test",
+            "app": {
+                "app_id": 1,
+                "app_name": "catalog-client",
+                "owners": "test",
+                "tenant": "test",
+            },
+        }
+    )
     return jwt.encode(
         {
             "iss": "gateway",
             "aud": "backend",
             "iat": now,
             "exp": now + 3600,
-            "principals": [
-                {
-                    "type": "user",
-                    "subject": {
-                        "id": _USER_ID,
-                        "username": "public-catalog@example.test",
-                    },
-                }
-            ],
+            "principals": principals,
         },
         _KEY,
         algorithm="HS256",
     )
 
 
-_HEADERS = {PRINCIPAL_HEADER: _principal()}
-
-
 def _boot_verifier() -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
-
-
-def _seed_auth_only(_world) -> None:
-    _boot_verifier()
 
 
 def _seed_search(world) -> None:
@@ -106,77 +108,59 @@ def _seed_discover(world) -> None:
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/bots/public/search",
-    scenario="empty_catalog",
+    path="/openapi/v1/bots/catalog/search",
+    scenario="catalog",
+    seed=_seed_search,
+    input=CaseInput(headers={PRINCIPAL_HEADER: _principal()}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"total": 0, "items": []}},
+    ),
+)
+def search_catalog():
+    """The default platform reads the current TeamClaw catalogue."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/catalog/search",
+    scenario="invalid_page",
     seed=_seed_search,
     input=CaseInput(
-        query_params={"user_id": _USER_ID},
-        headers=_HEADERS,
+        query_params={"page": 0},
+        headers={PRINCIPAL_HEADER: _principal()},
     ),
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={
-            "code": 200000,
-            "data": {"total": 0, "items": []},
-        },
-    ),
+    expect=ExpectError(status=422, json_contains={"code": 422000}),
 )
-def search_empty_catalog():
-    """An authenticated caller receives the public catalog envelope."""
+def search_invalid_page():
+    """Search pagination remains validated."""
 
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/bots/public/search",
-    scenario="wrong_user",
-    seed=_seed_auth_only,
-    input=CaseInput(
-        query_params={"user_id": "someone-else"},
-        headers=_HEADERS,
-    ),
-    expect=ExpectError(
-        status=403,
-        json_contains={"code": 403001, "message": "Forbidden", "data": None},
-    ),
-)
-def search_wrong_user():
-    """A caller cannot search under another user's identity."""
-
-
-@endpoint_test(
-    method="GET",
-    path="/openapi/v1/bots/public/discover",
-    scenario="empty_recommendations",
+    path="/openapi/v1/bots/catalog/discover",
+    scenario="app_only_catalog",
     seed=_seed_discover,
     input=CaseInput(
-        query_params={"user_id": _USER_ID, "keyword": "automation"},
-        headers=_HEADERS,
+        query_params={"keyword": "automation"},
+        headers={PRINCIPAL_HEADER: _principal(app_only=True)},
     ),
     expect=ExpectSuccess(
         status=200,
-        json_contains={
-            "code": 200000,
-            "data": {"total": 0, "items": []},
-        },
+        json_contains={"code": 200000, "data": {"total": 0, "items": []}},
     ),
 )
-def discover_empty_recommendations():
-    """A valid empty recommendation result remains a successful page."""
+def discover_app_only_catalog():
+    """An authenticated application sees the same public catalogue."""
 
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/bots/public/discover",
-    scenario="wrong_user",
-    seed=_seed_auth_only,
-    input=CaseInput(
-        query_params={"user_id": "someone-else", "keyword": "automation"},
-        headers=_HEADERS,
-    ),
-    expect=ExpectError(
-        status=403,
-        json_contains={"code": 403001, "message": "Forbidden", "data": None},
-    ),
+    path="/openapi/v1/bots/catalog/discover",
+    scenario="missing_keyword",
+    seed=_seed_discover,
+    input=CaseInput(headers={PRINCIPAL_HEADER: _principal()}),
+    expect=ExpectError(status=422, json_contains={"code": 422000}),
 )
-def discover_wrong_user():
-    """A caller cannot request recommendations as another user."""
+def discover_missing_keyword():
+    """Discovery still requires a non-empty keyword."""

@@ -56,7 +56,7 @@ def db() -> _Database:
     return _Database()
 
 
-def test_additive_schema_registers_every_space_skill_fact_with_tenant_env_scope(db):
+def test_additive_schema_registers_space_and_skill_fact_scope(db):
     tables = set(inspect(db.engine).get_table_names())
 
     assert {
@@ -71,9 +71,12 @@ def test_additive_schema_registers_every_space_skill_fact_with_tenant_env_scope(
     assert Space is SpaceModel
     assert SpaceMember is SpaceMemberModel
 
+    for model in (Space, SpaceMember):
+        columns = {column.name: column for column in model.__table__.columns}
+        assert "avernet_tenant" not in columns
+        assert columns["env"].nullable is False
+
     for model in (
-        Space,
-        SpaceMember,
         SkillSpaceBinding,
         SkillGrant,
         SkillVersion,
@@ -147,7 +150,7 @@ def test_space_repository_is_tenant_env_scoped_and_unique(db):
         )
 
 
-def test_space_repository_never_reads_another_tenant_row(db):
+def test_space_repository_scope_is_env_only(db):
     repo = SpaceSkillRepository(db)
     with avernet_tenant_scope("tenant-a"):
         created = repo.create_space(
@@ -161,9 +164,6 @@ def test_space_repository_never_reads_another_tenant_row(db):
         )
 
     with avernet_tenant_scope("tenant-b"):
-        assert repo.get_space(created["id"], env="dev") is None
-
-    with avernet_tenant_scope("tenant-a"):
         assert repo.get_space(created["id"], env="dev")["space_code"] == "isolated"
 
 

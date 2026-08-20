@@ -40,11 +40,6 @@ KEY = "refusal-test-shared-secret-at-least-32-bytes"
 TENANT = "acme-tenant"
 USER = "u-1"
 APP_ID = 42
-_CATALOG_OPERATIONS = {
-    ("GET", "/openapi/v1/bots/public/search"),
-    ("GET", "/openapi/v1/bots/public/discover"),
-}
-
 
 class _Secret:
     secret_user = "gateway"
@@ -163,8 +158,7 @@ def test_every_refused_operation_refuses_an_app_only_caller(client, method, path
     )
 
     assert response.status_code == 401, response.text
-    expected_code = 401001 if (method, path) in _CATALOG_OPERATIONS else 401000
-    assert response.json()["code"] == expected_code
+    assert response.json()["code"] == 401000
 
 
 def test_the_socket_plane_refuses_an_app_only_caller_too(client):

@@ -118,7 +118,10 @@ from agentclaw.community.core.devices.services.device_context import (
 )
 from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+from agentclaw.community.plugin_api.skill_center_client import (
+    SkillCenterClient,
+    SkillCenterMarketSearchRequest,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
@@ -2777,11 +2780,19 @@ async def search_market_center(
     """搜索 SkillCenter 公开市场技能（透传）"""
 
     try:
-        result = client.search_market_skills(keyword, tag, page, page_size)
+        result = client.search_market_skills(
+            SkillCenterMarketSearchRequest(
+                keyword=keyword,
+                tag_list=(tag,) if tag else (),
+                page_num=page,
+                page_size=page_size,
+                access_level="PUBLIC",
+            )
+        )
         return MarketSearchResponse(
-            success=result.get("success", False),
-            data=result.get("data", []),
-            total=result.get("total", 0),
+            success=True,
+            data=list(result.items),
+            total=result.total,
         )
     except Exception as e:
         logger.error("[search_market_center] Error: %s", e, exc_info=True)

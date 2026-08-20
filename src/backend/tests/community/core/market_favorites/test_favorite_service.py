@@ -7,13 +7,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.core.market_favorites.errors import (
-    FavoriteNotFoundError,
-    FavoriteTargetInvalidError,
-)
+from agentclaw.community.core.market_favorites.errors import FavoriteTargetInvalidError
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
+    MarketSource,
 )
 from agentclaw.community.core.market_favorites.services.favorite_service import (
     MarketFavoriteService,
@@ -25,6 +23,7 @@ def _record(*, target_code: str = "skill-1") -> MarketFavoriteRecord:
     return MarketFavoriteRecord(
         id=1,
         space_id=7,
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         target_code=target_code,
         created_by="member-1",
@@ -42,20 +41,20 @@ def _service():
 
 def test_add_requires_membership_and_normalizes_target_code() -> None:
     service, repository, access = _service()
-    repository.add.return_value = _record()
+    repository.add.return_value = (_record(), True)
 
     assert service.add(
         space_id=7,
         actor_id="member-1",
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         target_code=" skill-1 ",
-    ) == _record()
+    ) == (_record(), True)
 
-    access.require_space_member.assert_called_once_with(
-        space_id=7, user_id="member-1"
-    )
+    access.require_space_member.assert_called_once_with(space_id=7, user_id="member-1")
     repository.add.assert_called_once_with(
         space_id=7,
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         target_code="skill-1",
         created_by="member-1",
@@ -71,6 +70,7 @@ def test_add_rejects_invalid_target_code(target_code: str) -> None:
         service.add(
             space_id=7,
             actor_id="member-1",
+            market_source=MarketSource.TEAMCLAW,
             target_type=FavoriteTargetType.MCP,
             target_code=target_code,
         )
@@ -78,21 +78,22 @@ def test_add_rejects_invalid_target_code(target_code: str) -> None:
     repository.add.assert_not_called()
 
 
-def test_cancel_missing_favorite_is_not_reported_as_success() -> None:
+def test_cancel_missing_favorite_is_idempotent() -> None:
     service, repository, access = _service()
     repository.cancel.return_value = False
 
-    with pytest.raises(FavoriteNotFoundError, match="not found"):
+    assert (
         service.cancel(
             space_id=7,
             actor_id="member-1",
+            market_source=MarketSource.SKILLCENTER,
             target_type=FavoriteTargetType.SKILL,
             target_code=" skill-1 ",
         )
-
-    access.require_space_member.assert_called_once_with(
-        space_id=7, user_id="member-1"
+        is False
     )
+
+    access.require_space_member.assert_called_once_with(space_id=7, user_id="member-1")
     assert repository.cancel.call_args.kwargs["target_code"] == "skill-1"
 
 
@@ -100,12 +101,16 @@ def test_cancel_existing_favorite_returns_true() -> None:
     service, repository, _ = _service()
     repository.cancel.return_value = True
 
-    assert service.cancel(
-        space_id=7,
-        actor_id="member-1",
-        target_type=FavoriteTargetType.SKILL,
-        target_code="skill-1",
-    ) is True
+    assert (
+        service.cancel(
+            space_id=7,
+            actor_id="member-1",
+            market_source=MarketSource.SKILLCENTER,
+            target_type=FavoriteTargetType.SKILL,
+            target_code="skill-1",
+        )
+        is True
+    )
 
 
 def test_search_requires_membership_and_normalizes_filters() -> None:
@@ -115,6 +120,7 @@ def test_search_requires_membership_and_normalizes_filters() -> None:
     result = service.search(
         space_id=7,
         actor_id="member-1",
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         keyword="  skill  ",
         page_no=2,
@@ -122,11 +128,10 @@ def test_search_requires_membership_and_normalizes_filters() -> None:
     )
 
     assert result == (1, [_record()])
-    access.require_space_member.assert_called_once_with(
-        space_id=7, user_id="member-1"
-    )
+    access.require_space_member.assert_called_once_with(space_id=7, user_id="member-1")
     repository.search.assert_called_once_with(
         space_id=7,
+        market_source=MarketSource.SKILLCENTER,
         target_type=FavoriteTargetType.SKILL,
         keyword="skill",
         env="dev",
@@ -142,6 +147,7 @@ def test_search_turns_blank_keyword_into_none() -> None:
     service.search(
         space_id=7,
         actor_id="member-1",
+        market_source=None,
         target_type=None,
         keyword="  ",
         page_no=1,
@@ -149,3 +155,26 @@ def test_search_turns_blank_keyword_into_none() -> None:
     )
 
     assert repository.search.call_args.kwargs["keyword"] is None
+
+
+def test_find_favorited_codes_is_batched_normalized_and_ordered() -> None:
+    service, repository, access = _service()
+    repository.find_favorited_codes.return_value = {"skill-1", "skill-2"}
+
+    result = service.find_favorited_codes(
+        space_id=7,
+        actor_id="member-1",
+        market_source=MarketSource.TEAMCLAW,
+        target_type=FavoriteTargetType.SKILL,
+        target_codes=[" skill-2 ", "skill-1", "skill-2", "skill-3"],
+    )
+
+    assert result == ["skill-2", "skill-1"]
+    access.require_space_member.assert_called_once_with(space_id=7, user_id="member-1")
+    repository.find_favorited_codes.assert_called_once_with(
+        space_id=7,
+        market_source=MarketSource.TEAMCLAW,
+        target_type=FavoriteTargetType.SKILL,
+        target_codes=["skill-2", "skill-1", "skill-3"],
+        env="dev",
+    )

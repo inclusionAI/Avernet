@@ -12,13 +12,16 @@ from __future__ import annotations
 
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
+    SkillCenterMarketSearchError,
+    SkillCenterMarketSearchRequest,
+    SkillCenterMarketSearchResult,
     SkillCenterTeamCreateError,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamCreateResult,
 )
 
 
-class SkillCenterUnsupportedError(RuntimeError):
+class SkillCenterUnsupportedError(SkillCenterMarketSearchError):
     """Raised when a Skill Center marketplace operation is invoked in the
     community build, which has no Skill Center."""
 
@@ -44,13 +47,8 @@ class CommunitySkillCenterClient(SkillCenterClient):
         raise SkillCenterUnsupportedError(_MSG)
 
     def search_market_skills(
-        self,
-        keyword: str = "",
-        tag: str = "",
-        page: int = 1,
-        page_size: int = 20,
-        team_id: str | None = None,
-    ) -> dict:
+        self, request: SkillCenterMarketSearchRequest
+    ) -> SkillCenterMarketSearchResult:
         raise SkillCenterUnsupportedError(_MSG)
 
     def get_market_tags(self) -> list[dict]:

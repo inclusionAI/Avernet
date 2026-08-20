@@ -232,12 +232,12 @@ lifecycle 和 edit-lock；编辑页内核及运行治理仍有整块缺口。
 | Skill sets / 引用型 Skill / per-bot MCP | 全部缺失 | Skill Center、SkillSet Service、内部 `/api/skillsets` 和 MCP 关联能力已有 | `DOMAIN_EXISTS`；Skills 同学负责，不得把现有 Local Skills/MCP 目录误算为完成 |
 | ~~Container files~~(已并入 `/resources`) | 不再单独建设公开 `/files`;旧内部 `/api/service-bot/read-only/tree` 仍可作 legacy 保留 | 内部 `/api/service-bot/read-only/tree` 可读目录树,但仍依赖 Runtime layout 和内部响应规范 | `FOLDED_INTO_RESOURCES`(见 §3.1.1 / §6.7);B 线不再为此单开公开接口;落地仍需在 `ResourceFileService` 加 service-bot sandbox 分支、`read_only_rules` 接入 `is_readonly` 以及写操作 403 fail-closed |
 | Flow / runs | 全部缺失 | BCS 已实现 State Machine HTTP 路由，但正式 OpenAPI Contract 未覆盖工坊 Flow | `DOMAIN_EXISTS` / `CONTRACT_MISSING`；任务护航团队牵头，BCS Owner 提供状态机 Contract |
-| Channels | 全部缺失 | `ChannelServiceProtocol` 与内部 `/api/channels` CRUD 已有 | `DOMAIN_EXISTS`；B 线接入，Channel Owner 先收敛 tenant/owner/bot guard |
+| Channels | 6 个 Bot-scoped draft DingTalk OpenAPI、admission 与 Avernet Gateway schema 已具备 | `ChannelServiceProtocol` 已接入；tenant/owner/bot guard 与隔离测试已补，部署前仍需执行 `ac_channel_config.avernet_tenant` DDL | `IMPLEMENTED / RELEASE_GATED`；B 线已接入，OCB/Sofapy schema/config 与预发联调待完成 |
 | Nodes | 全部缺失 | Engine 有内部 `GET /api/nodes` 与 capability | `DOMAIN_EXISTS`；B 线接入，Engine Owner 提供字段 Contract/relay |
 | Render screens | 全部缺失 | `RenderScreenServiceProtocol` 与内部 `/api/bot-render-screens` CRUD 已有 | `DOMAIN_EXISTS`；B 线接入，Render Owner 明确公开读/写范围 |
 | Editors / 协作者 CRUD | 全部缺失 | edit-lock 已有，但成员来源、唯一管理员和空间权限 Contract 未完成 | `MISSING`；B 线后续批次 + Business Space/协作 Owner |
-| Spaces list | `/openapi/v1/spaces` 缺失 | 当前只有 `NoopBusinessSpaceContext` personal fallback，prod Service API 未接入 | `MISSING`；B 线接入 + Business Space Owner |
-| Bot 跨空间迁移 | `/{bot_id}/migrations` 或独立 migration resource 均缺失 | 跨域 Application Service、补偿和回滚语义缺失 | `MISSING`；B 线 + Business Space/协作 Owner |
+| Spaces list | `GET /openapi/v1/spaces` 已具备，显式 `user_id`，admission 与 Gateway schema 已同步 | Spaces Service API 已接入；应用调用受 `USER_GATED` 限制，但 Avernet Gateway 当前 `/spaces/**` 仍要求 human，应用端到端语义待统一 | `IMPLEMENTED / POLICY_REVIEW`；B 线 + Business Space Owner 核对 Gateway 与 admission 一致性 |
+| Bot 跨空间迁移 | 已新增 `PUT /openapi/v1/bots/{bot_id}/space` 窄范围归属更新；完整 `migrations` resource 仍缺失 | 现实现只更新 `ac_bots.space_id`，不清理协作者/编辑者，也无跨域补偿和回滚 | `PARTIAL / NOT_MIGRATION`；完整迁移仍由 B 线 + Business Space/协作 Owner 建设 |
 
 上述缺失路径在当前 `admission.py` 中没有注册项，在
 `src/gateway/configs/schemas/bots.openapi.json` 中也没有 operation；Gateway 的
@@ -298,10 +298,10 @@ Backend/上游 Contract 的接口变成已接入能力**。
 |---|---|---|---|
 | `data-init` 真实环境验证 | 本仓 API 闭环已完成：Cookie `IAM_TOKEN` 在 HTTP 边界解析并传入 typed Service API，新增安全状态查询；尚缺真实 IAM/Engine/下游环境的 E2E 证据 | 完成 singlebox/集成环境 trigger→poll→completed/failed 验证，并验证现有“读取后立即清除”临时凭证流程 | IAM、Engine 与数据初始化下游环境 |
 | `/all` service Bot 与富字段 | 是否统一聚合以及 health/version/container/lock 等字段的批量策略需收敛 | 只做 read model 编排，不能读取其他领域 Repository | Service lifecycle、Harness、BaaS、Lock 等 Service API |
-| Bot Inventory 空间上下文 | 当前只有 `NoopBusinessSpaceContext` personal fallback | A 线接入 Business Space Owner 的正式上下文 Service API，完成 `/all` 团队空间消费 | Business Space prod adapter |
+| Bot Inventory 空间上下文 | 生产已绑定 `SpaceServiceBotSpaceContext`；数值型 PERSONAL/TEAM Space 均通过成员校验解析，未初始化个人空间保留只读 fallback | 完成 `/all` 与创建路径的正式 Space Service API 消费，并补 adapter/清单测试 | OCB/Sofapy 与预发联调证据 |
 | `ac_bots.space_id` DDL | 已按本仓约定补入 OpenAPI README 的带外 DDL 权威记录；尚无平台执行证据 | 发布前取得环境、变更单/版本、执行时间、结果和回滚负责人 | 平台数据库变更流程 |
 
-独立 `GET /openapi/v1/spaces` 与 Bot 跨空间迁移归 B 线接入，见 §5.3。Bot 迁移推荐接口二选一：
+独立 `GET /openapi/v1/spaces` 已由 B 线接入；`PUT /openapi/v1/bots/{bot_id}/space` 仅提供窄范围归属字段更新，不能替代完整 Bot 跨空间迁移。完整迁移仍归 B 线，见 §5.3，推荐接口二选一：
 
 ```text
 POST /openapi/v1/bots/{bot_id}/migrations
@@ -374,11 +374,11 @@ POST /openapi/v1/bot-space-migrations
 | 单实例重启 | P0 | 未接入 | 提供 Bot-scoped 授权入口和错误规范化 | BaaS 提供幂等实例重启能力 |
 | Editors/协作者 CRUD | 后续批次 | 未接入 | 等统一协作契约后实现 Service Bot 工坊入口 | Business Space/协作 Owner 提供成员与权限规则 |
 | ~~Container files~~ | ~~P2~~ | 已并入 `/resources` | 不再单独建设 `/files`;落地仍在 `ResourceFileService` 内做 service-bot sandbox 分支与 `read_only_rules` 合并,写操作全路径 403 fail-closed。详见 §3.1.1 / §6.7 | Device Filesystem/Runtime Owner 提供内部 `read-only/tree` Contract 与路径规范 |
-| Channels | P2 | 未接入 | 建设 Bot-scoped 或独立领域公开入口、Gateway 和联调 | Channel Owner 补 tenant/owner/bot guard 与正式 Service API |
+| Channels | P2 | 已接入，发布门禁未完成 | 6 个 Bot-scoped draft DingTalk 接口、admission、Avernet schema 已完成；执行 DDL、同步 OCB/Sofapy 并联调 | Channel Owner 持续确认 runtime 与字段 Contract |
 | Nodes | P2 | 未接入 | 建设 authorized relay、501 capability 语义和 Gateway | Engine Owner 收敛 Node 字段与运行态 Contract |
 | Render screens | P2 | 未接入 | 明确读或 CRUD 范围并建设公开入口 | Render Screen Owner 提供领域权限与 Service API |
-| Spaces list | P3 | 未接入 | 建设独立 Spaces OpenAPI；与 A 线 `/all` 空间消费保持同一语义 | Business Space Owner 提供 prod Service API |
-| Bot migrate | P3 | 未接入 | 建设跨域 Application Service、公开契约和补偿/回滚语义 | Business Space/协作 Owner 提供成员与权限规则 |
+| Spaces list | P3 | 已接入，策略待核 | 独立 Spaces OpenAPI 与 A 线 `/all` 已使用正式 Service API；核对 Gateway human-only 与 Backend `USER_GATED` 的应用语义 | Business Space Owner 确认最终应用访问策略 |
+| Bot migrate | P3 | 部分：仅窄范围 `/space` 更新 | 建设完整跨域 Migration Application Service、协作者调整、公开契约和补偿/回滚语义 | Business Space/协作 Owner 提供成员与权限规则 |
 
 任务护航 Flow、Bot/容器 Runtime logs、Health、Evaluation 和 Skills/per-bot MCP 不在本表中作为 B 线实现项，统一按 §6 由其他团队或其他同学负责。
 
@@ -608,9 +608,9 @@ OCB/Sofapy 是独立部署副本，必须由对应 Gateway 团队按上述最终
 |---|---|---|---|---|---|
 | Personal/Local Bot | Bot Inventory/Desktop | A 线 | 已有 | 已实现 | `data-init` API 闭环完成，真实环境 E2E 待验证 |
 | Workshop `/all` | Bot Inventory 聚合 | A 线 | 已有 | 已实现 | 富字段批量策略待收敛 |
-| Inventory 空间消费 | Business Space + Bot Inventory | A 线接入 | Prod context adapter 缺失 | 部分实现 | `/all` 当前仅 personal fallback |
-| Spaces list | Business Space | B 线接入 + Business Space Owner | Prod Service API 缺失 | 未实现 | B 线 P3，A 线消费结果 |
-| Bot migrate | 跨域 Application Service | B 线接入 + Business Space/协作 Owner | Migration Service 缺失 | 未实现 | B 线 P3，需跨域设计 |
+| Inventory 空间消费 | Business Space + Bot Inventory | A 线接入 | Spaces Service API 已有 | 已实现 | 生产 adapter 已接入数值型 PERSONAL/TEAM；预发联调待验证 |
+| Spaces list | Business Space | B 线接入 + Business Space Owner | Service API 已有 | 已实现，策略待核 | Gateway human-only 与 Backend `USER_GATED` 需统一应用语义 |
+| Bot migrate | 跨域 Application Service | B 线接入 + Business Space/协作 Owner | 仅有窄范围 `PUT /space`，Migration Service 缺失 | 部分实现 | 不能标记完成；协作者调整、事务和补偿仍缺 |
 | Service lifecycle | Service Bot Publication | B 线 | 已有 | 已实现 | 需持续验证兼容性 |
 | Edit-lock | Collaboration Lock | B 线 | 已有 | 已实现 | 已接入 |
 | Containers summary/restart | BaaS/PaaS Runtime | B 线接入 + BaaS Owner | 部分缺失 | 未实现 | B 线 P0；实例日志归日志团队 |
@@ -621,7 +621,7 @@ OCB/Sofapy 是独立部署副本，必须由对应 Gateway 团队按上述最终
 | Skill sets/per-bot MCP | Skill Center/Skills Pool/MCP | Skills 相关同学 | 大量能力已有 | 未实现 | 其他同学实现 |
 | Flow | Harness/BCS | 任务护航团队 + BCS 团队 | State Machine 已有 | 未实现 | 其他团队实现，A/B 配合 |
 | Nodes | Engine Runtime | B 线接入 + Engine 团队 | Engine API 已有 | 未实现 | 等 Engine Contract/relay |
-| Channels | Channel | B 线接入 + Channel Owner | 内部 CRUD 已有 | 未实现 | 先补 tenant guard |
+| Channels | Channel | B 线接入 + Channel Owner | Service API 与 tenant guard 已有 | 已实现，发布受限 | DDL、OCB/Sofapy 同步与预发联调待完成 |
 | Render screens | Render Screen | B 线接入 + Render Owner | Protocol/CRUD 已有 | 未实现 | 产品公开范围待定 |
 | ~~Container files~~(已并入 `/resources`) | Device Filesystem/Runtime | 已并入 `/resources`(A 线 `/resources` owner + B 线 service-bot 协作);不再单开 `/files` 接口 | 内部 `read-only/tree` 已有;未做 facade 分支 + `read_only_rules` 合并 + 写 403 fail-closed | 部分归入 `/resources` backlog | 落地仍需在 `ResourceFileService` 补分支,不要硬编码 Engine 物理路径 |
 
