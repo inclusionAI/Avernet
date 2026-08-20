@@ -29,7 +29,7 @@
 | Provider 属性 HTTP 路由 | PASS（本地） | allowlist、Provider Token、Bot 绑定和严格 PATCH 请求体定向测试 | N/A | 本次评论采纳改动 | `bcs-http` 定向测试通过 |
 | Git diff 校验 | PASS（本地） | `git diff --check` | N/A | 本分支 | 无输出 |
 | GitHub Actions（业务代码 head） | PASS | [#1277 checks](https://github.com/inclusionAI/Avernet/pull/1277/checks) | BCS e2e、Singlebox coverage、BCS/Backend/Engine/BaaS/Gateway unit tests 均为 `SUCCESS`。 | N/A | `7791508e` |
-| GitHub Actions（当前报告更新） | PENDING | [#1277 checks](https://github.com/inclusionAI/Avernet/pull/1277/checks) | 评论结论报告推送后重新触发检查；当前 BCS e2e、Singlebox coverage 和部分 unit tests 仍在运行。 | N/A | 等待当前文档更新 head 终态 |
+| GitHub Actions（当前 Provider 路由改动） | PENDING | [#1277 checks](https://github.com/inclusionAI/Avernet/pull/1277/checks) | `2451ce44e` 推送后重新触发 BCS e2e、Singlebox coverage 及 BCS/Backend/Engine/BaaS/Gateway unit tests；尚未产生终态。 | `2451ce44e` | 等待当前 head 终态 |
 
 ## 人工意见
 
@@ -42,6 +42,6 @@
 
 - PR: OPEN（[#1277](https://github.com/inclusionAI/Avernet/pull/1277)）
 - 自动意见: CLEAR
-- ACI/CI: 业务代码 head PASS；当前文档更新 head PENDING
+- ACI/CI: 先前业务代码 head PASS；当前 Provider 路由改动 head PENDING
 - 人工意见: 按用户确认，两条均已采纳；未在 GitHub 回复或 resolve 线程。
 - 下一步: 推送后重新检查 Actions，并等待 reviewer 的批准或新增意见。
