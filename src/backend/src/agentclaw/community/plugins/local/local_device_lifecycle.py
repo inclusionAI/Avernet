@@ -23,11 +23,11 @@ B10 folds this into the local→baas device migration.
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Callable
 
 from injector import inject
 
+from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
@@ -50,6 +50,7 @@ class LocalDeviceLifecycle(LifecycleBase):
         skill_set_repo: SkillSetRepository,
         skill_set_factory_provider: Callable[[], SkillSetServiceFactory],
         bot_service_provider: Callable[[], BotService],
+        local_device_sync: DeviceSync,
     ) -> None:
         # database: route lifecycle DB work through the locked local plugin.
         # bot_repository: resolve per-bot engine type during symlink restore.
@@ -57,11 +58,15 @@ class LocalDeviceLifecycle(LifecycleBase):
         # skill_set_factory_provider / bot_service_provider: injected as lazy
         # ``Callable[[], …]`` because the eager type closes a construction cycle
         # through the skill-set service graph.
+        # local_device_sync: DI-injected Core ``DeviceSync`` (a pathlib-mode
+        # ``LocalDeviceSyncService`` under TEST/CORP_TEST) used to rebuild the
+        # symlink tree. ``skills_dir`` resolution lives inside the service.
         self._database = database
         self._bot_repository = bot_repository
         self._skill_set_repo = skill_set_repo
         self._skill_set_factory_provider = skill_set_factory_provider
         self._bot_service_provider = bot_service_provider
+        self._local_device_sync = local_device_sync
 
     async def startup(self) -> None:
         """Lifecycle hook — clean prior-session state and rebuild symlinks.
@@ -115,7 +120,6 @@ class LocalDeviceLifecycle(LifecycleBase):
             resolve_engine_for_bot,
             resolve_runtime_engine_for_bot,
         )
-        from agentclaw.community.plugins.local.device_sync import LocalDeviceSyncPlugin
 
         active_sets = self._skill_set_repo.get_all_active_skill_sets()
         if not active_sets:
@@ -177,8 +181,9 @@ class LocalDeviceLifecycle(LifecycleBase):
                     f"[restore_local_symlinks] Failed for skill_set_id={skill_set_id}: {e}"
                 )
 
-        # 一次性 full-sync 到 ~/.openclaw/workspace/skills/
-        openclaw_skills_dir = Path.home() / ".openclaw" / "workspace" / "skills"
-        plugin = LocalDeviceSyncPlugin(skills_dir=openclaw_skills_dir)
-        result = plugin.sync_symlinks(all_symlinks)
+        # 一次性 full-sync 到 ~/.openclaw/workspace/skills/ via the DI-injected
+        # Core ``DeviceSync`` service (pathlib-mode ``LocalDeviceSyncService``).
+        # The service owns the ``skills_dir``; no synthetic ``DeviceContext`` and
+        # no direct concrete construction here.
+        result = self._local_device_sync.sync_symlinks(all_symlinks)
         logger.info(f"[restore_local_symlinks] Done: {result}")
