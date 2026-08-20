@@ -11,11 +11,11 @@ import pytest
 
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.plugins.auth.stub import StubAuthPlugin
+from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.cache.stub import StubCachePlugin
 from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin
 from secbaas.community.plugins.sandbox.desktop import StubDesktopSandboxPlugin
 from secbaas.community.plugins.sandbox.k8s import StubK8sSandboxPlugin
-from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
 
 

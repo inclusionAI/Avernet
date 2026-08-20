@@ -76,7 +76,9 @@ class EnvSecretStorePlugin(SecretStorePlugin):
         )
         signing_input = f"{header_b64}.{payload_b64}"
         sig = _b64url(
-            hmac.new(secret_key.encode(), signing_input.encode(), hashlib.sha256).digest()
+            hmac.new(
+                secret_key.encode(), signing_input.encode(), hashlib.sha256
+            ).digest()
         )
         return f"{header_b64}.{payload_b64}.{sig}"
 

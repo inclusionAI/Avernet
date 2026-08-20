@@ -49,12 +49,22 @@ def _override_dep(app, mock_svc):
 @pytest.fixture(autouse=True)
 def mock_db_manager():
     """Mock db_manager to prevent database initialization errors."""
+    from contextlib import contextmanager
+    from unittest.mock import MagicMock
+
     from secbaas.community.core.database import db_manager
 
-    original = db_manager._connection_factory
-    db_manager._connection_factory = lambda ds: MagicMock()
+    mock_plugin = MagicMock()
+
+    @contextmanager
+    def _orm_session():
+        yield MagicMock()
+
+    mock_plugin.orm_session = _orm_session
+    original = db_manager._plugin
+    db_manager._plugin = mock_plugin
     yield
-    db_manager._connection_factory = original
+    db_manager._plugin = original
 
 
 @pytest.fixture
