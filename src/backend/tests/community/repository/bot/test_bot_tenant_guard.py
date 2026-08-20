@@ -178,13 +178,13 @@ def test_skip_option_sees_all_tenants(repo, db):
 
 def test_update_space_by_owner_cross_tenant_is_noop(repo):
     with avernet_tenant_scope("tenant-a"):
-        repo.insert(_data(bot_id="space-bot", owner_id="own-a", space_id="7"))
+        repo.insert(_data(bot_id="space-bot", owner_id="own-a", space_id=7))
     with avernet_tenant_scope("tenant-b"):
         assert (
             repo.update_space_by_owner(
-                bot_id="space-bot", owner_id="own-a", space_id="42"
+                bot_id="space-bot", owner_id="own-a", space_id=42
             )
             is None
         )
     with avernet_tenant_scope("tenant-a"):
-        assert repo.get_by_id("space-bot")["space_id"] == "7"
+        assert repo.get_by_id("space-bot")["space_id"] == 7

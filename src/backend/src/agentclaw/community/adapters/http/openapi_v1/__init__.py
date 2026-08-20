@@ -216,6 +216,7 @@ from .service_publications import (
 )
 from .spaces import router as spaces_router
 from .work_orders import router as work_orders_router
+from .token import caller_identity_router, token_router
 
 # Every public route lives under this prefix. Exported so app-level handlers can
 # tell a public request from an internal one (e.g. to envelope validation errors
@@ -257,6 +258,8 @@ _MIXED_GROUPS = [
 # about which *response table* each gets; it does not change that they all
 # precede `bots`.
 _SUBGROUPS = [
+    token_router,
+    caller_identity_router,
     # Both authorization groups precede `bots` below. `authorized_apps_router`
     # sits *under* `{bot_id}` so path shape already keeps it distinct, but
     # `authorized_bots_router` is a top-level literal and genuinely depends on

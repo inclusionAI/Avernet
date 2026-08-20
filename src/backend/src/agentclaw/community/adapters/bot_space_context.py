@@ -27,11 +27,11 @@ _PERSONAL_SPACE_ID_PREFIX = "personal:"
 class SpaceServiceBotSpaceContext(BusinessSpaceContextProtocol):
     """Resolve inventory space context through the owning Spaces module.
 
-    ``ac_bots.space_id`` is a legacy string column while public Space IDs are
-    integers.  This adapter is the canonicalization boundary between them.  It
-    also preserves the synthetic ``personal:<user>`` fallback for accounts
-    whose personal Space has not been initialized yet; reads must not create a
-    Space as a side effect.
+    ``ac_bots.space_id`` stores the numeric ``ac_space.id``. This adapter maps
+    it to the inventory contract's string identifier and preserves the
+    synthetic ``personal:<user>`` fallback for accounts whose personal Space
+    has not been initialized yet; reads must not create a Space as a side
+    effect.
     """
 
     @inject

@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base  # noqa: F401  — canonical registry lives in core/
@@ -39,6 +40,11 @@ from agentclaw.community.utils.env_utils import get_current_env  # noqa: E402
 # with_variant() makes SQLAlchemy use Integer (→ "INTEGER") on SQLite while
 # keeping BigInteger (→ "BIGINT") on MySQL/PostgreSQL.
 AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
+UnsignedBigInteger = (
+    BigInteger()
+    .with_variant(mysql.BIGINT(unsigned=True), "mysql")
+    .with_variant(Integer, "sqlite")
+)
 
 
 class BotModel(Base):
@@ -77,14 +83,12 @@ class BotModel(Base):
     ext = Column(Text, nullable=True)
     env = Column(String(20), default=get_current_env, nullable=False)
     bot_type = Column(String(128), default="personal", nullable=True)
-    # Business-space ownership (PRD §0.1 / 系分 §3-K). Single structured column —
-    # NOT a JSON ext field — so space filtering reads a real column, not
-    # ``ext.space_id``. Nullable because existing rows and any non-ORM insert
-    # predating the column have NULL here; the public surface falls back to the
-    # personal space ``personal:{owner_id}`` when NULL (matches the inventory
-    # ``NoopBusinessSpaceContext`` fallback). Name/kind live on the space owner,
-    # not duplicated on ac_bots.
-    space_id = Column(String(128), nullable=True)
+    # Business-space ownership (PRD §0.1 / 系分 §3-K). This mirrors
+    # ``ac_space.id BIGINT UNSIGNED``; NULL keeps the personal-space fallback
+    # for legacy rows and owners whose personal Space has not been initialized.
+    # Synthetic inventory ids such as ``personal:{owner_id}`` are presentation
+    # values and must never be persisted here.
+    space_id = Column(UnsignedBigInteger, nullable=True)
     template_type = Column(String(64), nullable=True)  # 模板类型，如 applicationCoding
     call_type = Column(String(16), default="owner", nullable=False)
     caller_config_revision = Column(BigInteger, default=0, nullable=False)

@@ -72,6 +72,8 @@ _HUMAN_ONLY = [
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites"),
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/cancel"),
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/search"),
+    ("GET", "/openapi/v1/org/user/iam-token"),
+    ("POST", "/openapi/v1/bots/bot-123/caller-identity"),
     ("POST", "/openapi/v1/bots"),
     ("POST", "/openapi/v1/bots/local"),
     ("GET", "/openapi/v1/bots/bot-123/local/auth-status"),
@@ -105,6 +107,25 @@ def test_shipped_config_still_requires_a_user_where_a_human_is_required(
 
     assert req is not None, (method, path)
     assert req[PrincipalType.USER] is Presence.REQUIRED, (method, path)
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/openapi/v1/org/user/iam-token"),
+        ("POST", "/openapi/v1/bots/bot-123/caller-identity"),
+    ],
+)
+def test_iam_operations_do_not_resolve_an_app_identity(
+    method: str, path: str
+) -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    req = RouteSecurity.from_table(raw["user_config"]["route_security"]).resolve(
+        method, path
+    )
+
+    assert req is not None
+    assert req == {PrincipalType.USER: Presence.REQUIRED}
 
 
 def test_shipped_config_lets_an_application_discover_its_own_scope() -> None:

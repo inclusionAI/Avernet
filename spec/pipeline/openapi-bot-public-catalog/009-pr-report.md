@@ -98,3 +98,10 @@ PR head `e595d27ef` 的首次 Backend unit tests 失败已收敛为三个测试�
 - Backend 全量在最终调整前：12441 passed、1 skipped，仅 `singlebox` 配置快照因临时 platform 配置失败；用户决定移除 platform 后，该配置、源码和旧测试均删除，配置快照/社区标识门禁及 catalog 相关回归 73 passed。
 - Gateway：unit 928 passed、4 skipped；E2E 27 passed；报告门禁 case pass 100%、line coverage 95.38%。
 - 最终完整 Backend 门禁交由本次 push 后的 GitHub CI 复跑，不把调整前的全量结果表述为最终全绿。
+
+## 第三次 base 冲突收敛（2026-08-20）
+
+- `dev_refactory_collaboration` 从 `423f66716` 前进到 `7af21f301`，新增 Session Favorites、IAM token/Caller preparation、Bot Space unsigned bigint 修正及任务发现/BBS 文档。
+- 本轮仅 `test_explicit_user_id.py` 发生内容冲突。保留 base 新增的 `94/1/46` operation 变化，并叠加 catalog 的两个无 Bot、无 user 维度读接口，最终 Bot ID placement 为 `94/1/48`；user-scoped operation 数保持 base 的 `130`。
+- 重新生成 Gateway `bots.openapi.json`，保留最新 base 的 token、session-favorites 等 schema，同时保留 catalog search/discover。
+- 验证：Backend catalog/admission/principal/path/coverage 合并回归 74 passed；Gateway route-security/served-schema/domain-map 184 passed；无新的 active review thread。

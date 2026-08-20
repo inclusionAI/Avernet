@@ -186,6 +186,15 @@ user_config:
     "GET /openapi/v1/bots/{bot_id}/local/auth-status":
       user: required
 
+    # The IAM token is a first-party browser credential and Caller preparation
+    # consumes that same user's HttpOnly cookie.  Do not declare `app` here:
+    # the auth runner resolves only identities named by the matched rule, so an
+    # application credential cannot reach either operation as a principal.
+    "GET /openapi/v1/org/user/iam-token":
+      user: required
+    "POST /openapi/v1/bots/{bot_id}/caller-identity":
+      user: required
+
     # Creating a bot. No bot exists yet for a grant to cover, and creation
     # spends the user's quota.
     "POST /openapi/v1/bots":
@@ -414,6 +423,14 @@ user_config:
     #     rule could never match and startup refuses it.
 
     domains:
+      org:
+        server: backend
+        # Backend publishes one public artifact; domain generation filters it
+        # to /openapi/v1/org before serving it through this route.
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
       bots:
         server: backend
         # Single-box default. A deployed edition overrides this with an object store:

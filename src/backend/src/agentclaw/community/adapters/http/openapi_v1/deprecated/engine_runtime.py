@@ -57,11 +57,23 @@ from ._shim import legacy_router
 _IDENTITY = "/openapi/v1/bots/{bot_id}/identity"
 _IDENTITY_FILE = f"{_IDENTITY}/{{file_type}}"
 
-_DROP_STAGE = drop_parameter("stage", {
-    ("GET", _IDENTITY): ("Every entry comes from the one runtime the stage parameter names, so a\nfile's presence is always reported for the runtime asked about.", "Every entry comes from the bot's own workspace."),
-    ("GET", _IDENTITY_FILE): ("Reads the runtime named by the stage parameter — the bot's own workspace\nunless a published one is asked for.", "Reads the bot's own workspace. Reaching a published runtime is offered at\nthe address that replaces this one."),
-    ("PUT", _IDENTITY_FILE): ("Writes the bot's own workspace. A published runtime is what a release\nproduced and is replaced by publishing again, never edited, so naming one is\nrefused and nothing is written.", "Writes the bot's own workspace."),
-})
+_DROP_STAGE = drop_parameter(
+    "stage",
+    {
+        ("GET", _IDENTITY): (
+            "Every entry comes from the one runtime the stage parameter names, so a\nfile's presence is always reported for the runtime asked about.",
+            "Every entry comes from the bot's own workspace.",
+        ),
+        ("GET", _IDENTITY_FILE): (
+            "Reads the runtime named by the stage parameter — the bot's own workspace\nunless a published one is asked for.",
+            "Reads the bot's own workspace. Reaching a published runtime is offered at\nthe address that replaces this one.",
+        ),
+        ("PUT", _IDENTITY_FILE): (
+            "Writes the bot's own workspace. A published runtime is what a release\nproduced and is replaced by publishing again, never edited, so naming one is\nrefused and nothing is written.",
+            "Writes the bot's own workspace.",
+        ),
+    },
+)
 
 connection: APIRouter = relocate(
     connection_router,
@@ -89,6 +101,12 @@ sessions: APIRouter = relocate(
     sessions_router,
     legacy_router("/openapi/v1/bots/sessions", "sessions"),
     bot_first_to_component_first("sessions"),
+    # The retiring component-first contract is frozen. Favorite operations
+    # were introduced after bot-first addressing and therefore have no legacy
+    # address to preserve.
+    skip=lambda _method, path: (
+        path.endswith("/favorites") or path.endswith("/favorite")
+    ),
 )
 
 #: The approvals reads. The write shares this address and differs only by
@@ -127,4 +145,3 @@ __all__ = [
 # A reword written for a route that no longer exists would be skipped in
 # silence, republishing the description it was written to remove.
 _DROP_STAGE.verify_all_applied()
-

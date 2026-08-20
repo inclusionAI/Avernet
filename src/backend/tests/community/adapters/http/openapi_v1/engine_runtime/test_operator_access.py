@@ -2,7 +2,7 @@
 
 Who may hold an operator channel is one rule (owner, or collaborator at
 member level or above — ``core/engine_runtime/gate.py``), and it must hold on
-all sixteen operations identically: a route that refused a session list but
+all nineteen operations identically: a route that refused a session list but
 served an engine read would leak through the difference. The sweep asserts
 the matrix per route — owner served, collaborator served, anyone else
 answered byte-identically to a bot that does not exist.
@@ -37,7 +37,7 @@ STRANGER = "u-stranger"
 
 SESSION_ID = "session:abc:user:1"
 
-#: (method, path template, body) for all 16 routes — the same shape as the
+#: (method, path template, body) for all 19 routes — the same shape as the
 #: tenant-isolation sweep, kept separately because the two sweeps pin
 #: different halves (cross-tenant masking there, the operator matrix here)
 #: and must each fail on its own terms.
@@ -49,6 +49,9 @@ ROUTES = [
     ("delete", f"/{{bot}}/sessions/{SESSION_ID}", None),
     ("get", f"/{{bot}}/sessions/{SESSION_ID}/messages", None),
     ("delete", f"/{{bot}}/sessions/{SESSION_ID}/messages", None),
+    ("get", "/{bot}/sessions/favorites", None),
+    ("put", f"/{{bot}}/sessions/{SESSION_ID}/favorite", None),
+    ("delete", f"/{{bot}}/sessions/{SESSION_ID}/favorite", None),
     ("get", "/{bot}/engine/status", None),
     ("get", "/{bot}/engine/capabilities", None),
     ("get", "/{bot}/engine/available", None),
@@ -81,8 +84,12 @@ class _Connections:
     def build(self, *, bot_id, owner_id, caller_id, stage) -> ConnectionResult:
         self._relay.resolve_bot(bot_id, owner_id, caller_id)
         self.builds.append(
-            {"bot_id": bot_id, "owner_id": owner_id, "caller_id": caller_id,
-             "stage": stage}
+            {
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "caller_id": caller_id,
+                "stage": stage,
+            }
         )
         return ConnectionResult(
             engine="openclaw",
@@ -127,9 +134,9 @@ def _url(suffix: str, bot: str = BOT) -> str:
     return f"/openapi/v1/bots{suffix.format(bot=bot)}"
 
 
-def test_all_sixteen_routes_are_covered():
+def test_all_nineteen_routes_are_covered():
     """Guard the guard: a shrinking list would silently narrow this sweep."""
-    assert len(ROUTES) == 16
+    assert len(ROUTES) == 19
 
 
 @pytest.mark.parametrize(("method", "suffix", "body"), ROUTES, ids=lambda v: str(v))

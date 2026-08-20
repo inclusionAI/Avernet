@@ -24,6 +24,9 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 **[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**
 （[English](engine-surface.md)）。本 README 仍是唯一的状态看板；清单在那个文件里。
 
+前端接入会话收藏能力时，请参考
+**[`session-favorites.zh-CN.md`](session-favorites.zh-CN.md)**。
+
 ---
 
 ## 全局视角（请先读这一节）
@@ -129,6 +132,7 @@ _按优先级分层排序。_
 | 类别 | 负责人 | 优先级 | 路由 | 状态 | 依赖 |
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE —— PR #494 已于 2026-07-29 合并**（13/13 端点） | ~~Track A 阶段 1~~ ✅ |
+| token / caller identity | liaoxianhao | P1 | `openapi_v1/token/router.py` | 🔧 IN PROGRESS —— 两种能力已迁移，待 OCB Gateway SOFA 配置同步 | 用户 Principal + 浏览器 HttpOnly `IAM_TOKEN` Cookie |
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE —— PR #610**（6/6 端点） | ~~Track A 阶段 5~~ ✅（PR #564） |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0)，Track B 全 7 端点接通 stub→service，仅文件、按路径寻址；待 auth workstream(gateway principal seam) 落地 + DDL 部署后才可对外 |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 NOT PUBLIC-READY | Track A routines 无表靠 ac_bots 间接隔离；Track B 7 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
@@ -215,8 +219,8 @@ ALTER TABLE ac_bots
 -- 解释该状态，因此无需一次性回填历史行。回滚代码前可保留此兼容列；确认没有
 -- 旧版本/新版本代码再使用后，才可由平台单独评估 DROP COLUMN。
 ALTER TABLE ac_bots
-  ADD COLUMN space_id VARCHAR(128) NULL
-    COMMENT 'business-space ownership; NULL uses the owner personal-space fallback';
+  ADD COLUMN space_id BIGINT UNSIGNED NULL
+    COMMENT 'Bot owning space id, references ac_space.id; NULL uses the owner personal-space fallback';
 ```
 
 `space_id` 的平台执行记录必须随交付补充环境、变更单/版本、执行时间和回滚负责人；
@@ -970,7 +974,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 > 不写数据 —— 但在本面上任何 socket 路由开始接触数据之前，这是第一件要修的事：在默认
 > 租户下执行按租户收敛的读取是数据隔离故障，而不只是少了一行日志。
 
-### ⬜ 未分配 · Track C —— engine 运行时（16 个端点）
+### ⬜ 未分配 · Track C —— engine 运行时（19 个端点）
 这不是一个 Track B 类别 —— 它们包装的是 Bot 设备上的 **engine adapter**，
 而不是某个后端服务。逐端点清单、每个端点对应的 engine 路由，以及那约 72 条
 *不*包装的 engine 路由的裁定，都在
@@ -978,7 +982,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 | 组 | 端点数 | 公共路径 |
 |---|---|---|
-| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` —— 拥有者/协作者运维 |
+| sessions | 10 | `/openapi/v1/bots/{bot_id}/sessions…` —— 拥有者/协作者运维，含收藏 |
 | engine | 3 | `/openapi/v1/bots/{bot_id}/engine/{status,capabilities,available}` |
 | models | 2 | `/openapi/v1/bots/{bot_id}/models`、`…/models/{model_id}` |
 | approvals | 3 | `/openapi/v1/bots/{bot_id}/approvals/mode`（GET/PUT）、`…/modes` |
@@ -1120,6 +1124,13 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   2026-08-19 的按操作形状准入规则取代。engine restart 只发布 bot-first
   地址，因为此前没有可供退役的公共路径。本次生成的 Gateway `bots.openapi.json` 是该公共面的
   发布产物，必须原样同步到独立 OCB Gateway。
+
+- **2026-08-18** —— 将旧 `/api/v1/token/iam` 的两种能力拆分迁移到 OpenAPI：
+  `GET /openapi/v1/org/user/iam-token` 返回第一方聊天所需 IAM Token，
+  `POST /openapi/v1/bots/{bot_id}/caller-identity` 为 Bot 准备 Caller 身份。两条操作均
+  要求 Gateway 用户身份并在 Backend 复核 `user_id`，应用单独调用按 `REFUSED` 拒绝；
+  响应统一使用 Envelope，敏感响应由统一中间件禁止缓存。Avernet Gateway 增加 `org` 转发域和
+  精确用户鉴权规则；实际发布前仍需同步 OCB Gateway SOFA 配置。
 
 - **2026-08-15** —— **Agent 在前的寻址。** 每个带 Agent 作用域的操作都迁到
   `/openapi/v1/bots/{bot_id}/<component>/…`，推翻了 2026-08-03 的组件在前规则。原先九个

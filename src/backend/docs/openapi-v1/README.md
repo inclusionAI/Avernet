@@ -151,6 +151,7 @@ _Ordered by priority tier._
 | Category | Owner | Pri | Router | State | Depends on |
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE — PR #494 merged 2026-07-29** (13/13 endpoints) | ~~Track A stage 1~~ ✅ |
+| token / caller identity | liaoxianhao | P1 | `openapi_v1/token/router.py` | 🔧 IN PROGRESS — both capabilities migrated; OCB Gateway SOFA sync pending | User principal + browser HttpOnly `IAM_TOKEN` cookie |
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE — PR #610** (6/6 endpoints) | ~~Track A stage 5~~ ✅ (PR #564) |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 7 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 7 endpoints wired stub→service, files-only and path-addressed; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
@@ -244,8 +245,8 @@ ALTER TABLE ac_bots
 -- during code rollback; platform owners should assess DROP COLUMN only after no
 -- deployed version uses it.
 ALTER TABLE ac_bots
-  ADD COLUMN space_id VARCHAR(128) NULL
-    COMMENT 'business-space ownership; NULL uses the owner personal-space fallback';
+  ADD COLUMN space_id BIGINT UNSIGNED NULL
+    COMMENT 'Bot owning space id, references ac_space.id; NULL uses the owner personal-space fallback';
 ```
 
 The delivery record for `space_id` must identify the environment, change/version
@@ -1651,6 +1652,15 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   engine restart has only its bot-first address because no earlier public route
   existed to retire. Regenerated Gateway `bots.openapi.json` is the release
   artifact for this surface and must be copied unchanged to the OCB Gateway.
+
+- **2026-08-18** — Split and migrated both legacy `/api/v1/token/iam`
+  capabilities: `GET /openapi/v1/org/user/iam-token` returns the first-party chat IAM
+  token, while `POST /openapi/v1/bots/{bot_id}/caller-identity` prepares Caller
+  identity for a Bot. Both require a Gateway user principal, re-check
+  `user_id` in Backend, refuse app-only callers, use the standard Envelope, and
+  disable response caching through shared middleware. Avernet Gateway now has the org forwarding domain
+  and exact user-only security rules; the OCB Gateway SOFA config still needs
+  the corresponding deployment-side update.
 
 - **2026-08-15** — **Bot-first addressing.** Every bot-scoped operation moved
   to `/openapi/v1/bots/{bot_id}/<component>/…`, reversing the component-first
