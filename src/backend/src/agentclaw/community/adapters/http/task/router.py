@@ -269,26 +269,55 @@ async def discover_tasks(
 
 @router.get("/discovery/status", response_model=Envelope[dict[str, Any]])
 @envelope_errors
-async def get_discovery_status(request: Request) -> Envelope[dict[str, Any]]:
-    """查看任务发现状态(从 SQLite db 读取)。db 读失败 → ``InternalError`` → 500。"""
+async def get_discovery_status(
+    request: Request,
+    service: DiscoveryService = Injected(DiscoveryService),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """查看任务发现状态。
+
+    返回 db 里的 task 列表 + 关联 ``_discoveries`` 内存中的 session 信息。
+    有 session_id 的 task 会标注 discover 已执行；没有的说明 discover 还没跑过。
+    db 读失败 → ``InternalError`` → 500。
+    """
     db_path = _resolve_db_path()
     try:
         reader = SqliteTaskReader(db_path)
         tasks = reader.read_discovered_tasks()
     except Exception as exc:
         raise InternalError("status read failed") from exc
+
+    task_list = []
+    for t in tasks:
+        entry: dict[str, Any] = {
+            "task_id": t.task_id,
+            "bot_id": t.bot_id,
+            "owner_id": t.owner_id,
+            "dt": t.dt,
+            "project_name": t.project_name,
+            "status": t.status,
+            "priority": t.priority,
+        }
+        # 关联 _discoveries 内存中的 discover 结果
+        result = service.get_discovery_result(t.task_id)
+        if result is not None:
+            entry["discovered"] = True
+            entry["session_id"] = result.session.session_id if result.session else None
+            entry["session_url"] = result.session.session_url if result.session else None
+            entry["notification_sent"] = result.notification_sent
+            entry["error"] = result.error
+        else:
+            entry["discovered"] = False
+            entry["session_id"] = None
+            entry["session_url"] = None
+            entry["notification_sent"] = False
+            entry["error"] = None
+        task_list.append(entry)
+
     return envelope(
         {
             "total": len(tasks),
-            "tasks": [
-                {
-                    "task_id": t.task_id,
-                    "project_name": t.project_name,
-                    "status": t.status,
-                    "priority": t.priority,
-                }
-                for t in tasks
-            ],
+            "discovered": sum(1 for e in task_list if e["discovered"]),
+            "tasks": task_list,
         },
         request,
     )
