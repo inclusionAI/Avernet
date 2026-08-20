@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import string
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
+
+import yaml
+from kubernetes.client import CoreV1Api
+from kubernetes.client.rest import ApiException
+from kubernetes.utils.create_from_yaml import create_from_yaml
 
 from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
 from secbaas.community.api.device_manage import (
@@ -20,31 +27,21 @@ from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
 
 from ._client_manager import AliyunAckClientManager
-from ._config_type import AliyunAckPodConfig, AliyunAckTemplateConfig
 from ._sandbox import AliyunAckSandbox
-
-if TYPE_CHECKING:
-    from kubernetes.client import CoreV1Api
-    from kubernetes.client.rest import ApiException
 
 logger = get_logger("plugin-sandbox")
 
 _BOLT_PORT = 20003
+_TEMPLATE_DIR = Path(__file__).parent / "template"
 
 
-def _import_k8s() -> None:
-    """Lazily bind Kubernetes SDK classes into this module namespace."""
-    import sys
+class _ClusterConfig:
+    """Minimal cluster config for AliyunAckClientManager."""
 
-    _mod = sys.modules[__name__]
-    if getattr(_mod, "_k8s_loaded", False):
-        return
-    from kubernetes.client import CoreV1Api as _CoreV1Api
-    from kubernetes.client.rest import ApiException as _ApiException
-
-    _mod.CoreV1Api = _CoreV1Api
-    _mod.ApiException = _ApiException
-    _mod._k8s_loaded = True
+    def __init__(self, api_server: str, token: str, namespace: str) -> None:
+        self.api_server = api_server
+        self.token = token
+        self.namespace = namespace
 
 
 def _sanitize_pod_name(name: str) -> str:
@@ -55,37 +52,73 @@ def _sanitize_pod_name(name: str) -> str:
 
 
 def _wait_for_ready(
-    core_api: Any, pod_name: str, namespace: str, ready_timeout_in_seconds: int
-) -> None:
+    core_api: Any, uid: str, namespace: str, ready_timeout_in_seconds: int
+) -> str:
+    """Poll the Pod created by the Deployment until Running.
+
+    Uses the ``biz-id`` label to find the Pod, since Deployment Pod names
+    include a random suffix. Returns the resolved Pod name.
+    """
+    label_selector = f"biz-id={uid}"
     deadline = time.monotonic() + ready_timeout_in_seconds
     while time.monotonic() < deadline:
         try:
-            pod = core_api.read_namespaced_pod(name=pod_name, namespace=namespace)
+            pods = core_api.list_namespaced_pod(
+                namespace=namespace, label_selector=label_selector
+            )
         except Exception as e:  # noqa: BLE001
-            raise RuntimeError(f"failed to read pod {pod_name}: {e}") from e
-        if pod.status and pod.status.phase == "Running":
-            return
+            raise RuntimeError(f"failed to list pods for uid={uid}: {e}") from e
+        if pods.items:
+            pod = pods.items[0]
+            if pod.status and pod.status.phase == "Running":
+                return pod.metadata.name
         time.sleep(1.0)
     raise RuntimeError(
-        f"ACK pod {pod_name} did not become ready within {ready_timeout_in_seconds}s"
+        f"ACK pod for uid={uid} did not become ready within {ready_timeout_in_seconds}s"
     )
 
 
-def _resource_manifest(pod: AliyunAckPodConfig) -> dict[str, Any] | None:
-    requests = {
-        k: v for k, v in (("cpu", pod.cpu_request), ("memory", pod.memory_request)) if v
+def _render_template(template_id: str, variables: dict[str, str]) -> str:
+    """Read ``template/{template_id}.yaml`` and substitute ``${VAR}`` placeholders."""
+    template_path = _TEMPLATE_DIR / f"{template_id}.yaml"
+    raw = template_path.read_text(encoding="utf-8")
+    return string.Template(raw).safe_substitute(variables)
+
+
+def _build_template_vars(
+    uid: str,
+    namespace: str,
+    image: str,
+    storage: Storage | None = None,
+    resource_spec: ResourceSpecification | None = None,
+) -> dict[str, str]:
+    """Build runtime variables for template rendering.
+
+    Static config (storage class, LLM endpoint) lives directly in the YAML
+    template file. Runtime values (uid, image, resources, storage) are
+    substituted from config and call parameters.
+    """
+    storage_id = (
+        _sanitize_pod_name(storage.storage_id)
+        if storage and storage.storage_id
+        else uid
+    )
+    mount_path = storage.path if storage and storage.path else "/home/admin"
+    storage_size = storage.quota if storage and storage.quota else "1Gi"
+    cpu = str(resource_spec.cpu) if resource_spec else "1"
+    memory = f"{resource_spec.memory}Gi" if resource_spec else "1Gi"
+    return {
+        "UID": uid,
+        "NAMESPACE": namespace,
+        "IMAGE": image,
+        "STORAGE_ID": storage_id,
+        "STORAGE_SIZE": storage_size,
+        "MOUNT_PATH": mount_path,
+        "CPU_REQUEST": cpu,
+        "CPU_LIMIT": cpu,
+        "MEMORY_REQUEST": memory,
+        "MEMORY_LIMIT": memory,
     }
-    limits = {
-        k: v for k, v in (("cpu", pod.cpu_limit), ("memory", pod.memory_limit)) if v
-    }
-    if not requests and not limits:
-        return None
-    manifest: dict[str, Any] = {}
-    if requests:
-        manifest["requests"] = requests
-    if limits:
-        manifest["limits"] = limits
-    return manifest
 
 
 class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
@@ -95,119 +128,86 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         self,
         config: ArcaCredentials | None = None,
         *,
-        ack_templates: dict[str, AliyunAckTemplateConfig] | None = None,
+        api_server: str = "",
+        token: str = "",
+        namespace: str = "default",
+        default_images: dict[str, str] | None = None,
         arca_utils: ArcaUtils | None = None,
     ) -> None:
         self._config = config
-        self._ack_templates = ack_templates or {}
+        self._api_server = api_server
+        self._token = token
+        self._namespace = namespace
+        self._default_images = default_images or {}
         self._arca_utils = arca_utils
+        self._client_manager: AliyunAckClientManager | None = None
 
-    def _resolve_template(self, template_id: str | None) -> AliyunAckTemplateConfig:
-        ack_id = template_id or (
-            self._config.arca_template_id if self._config else None
-        )
-        if not ack_id:
-            raise ValueError(
-                "AliyunAckSandboxPlugin requires an arca_template_id "
-                "(ALIYUN_ACK_TEMPLATE_xxx) to resolve the AliyunAckTemplate"
-            )
-        template = self._ack_templates.get(ack_id)
-        if template is None:
-            raise ValueError(
-                f"No AliyunAckTemplate found for arca_template_id={ack_id!r}"
-            )
-        return template
+    def _get_namespace(self) -> str:
+        return self._namespace
 
-    def _resolve_default_template(self) -> AliyunAckTemplateConfig:
+    def _get_template_id(self) -> str:
         ack_id = self._config.arca_template_id if self._config else None
         if not ack_id:
             raise ValueError(
-                "connect_sync_sandbox/delete_storage require an arca_template_id "
-                "(ALIYUN_ACK_TEMPLATE_xxx) to resolve the AliyunAckTemplate"
+                "AliyunAckSandboxPlugin requires an arca_template_id "
+                "to locate the YAML template file"
             )
-        template = self._ack_templates.get(ack_id)
-        if template is None:
-            raise ValueError(
-                f"No AliyunAckTemplate found for arca_template_id={ack_id!r}"
+        return ack_id
+
+    def _client(self) -> Any:
+        if self._client_manager is None:
+            self._client_manager = AliyunAckClientManager(
+                _ClusterConfig(self._api_server, self._token, self._namespace)
             )
-        return template
+            self._client_manager.validate()
+        return self._client_manager.get_client()
 
-    def _client_for(self, template: AliyunAckTemplateConfig) -> Any:
-        manager = AliyunAckClientManager(template.cluster)
-        manager.validate()
-        return manager.get_client()
-
-    def _create_pod_and_service(
+    def _create_deployment(
         self,
-        pod_name: str,
-        template: AliyunAckTemplateConfig,
-        envs: dict[str, str] | None,
-        metadata: dict[str, str] | None,
-        ttl_in_minutes: int | None,
-    ) -> None:
-        _import_k8s()
-        core_api = CoreV1Api(self._client_for(template))
-        namespace = template.pod.namespace or "default"
-        effective_envs = dict(template.pod.envs or {})
-        if envs:
-            effective_envs.update(envs)
+        uid: str,
+        template_id: str,
+        namespace: str,
+        storage: Storage | None,
+        resource_spec: ResourceSpecification | None,
+    ) -> tuple[str, str]:
+        """Render the template YAML and apply it to the cluster.
 
-        container: dict[str, Any] = {
-            "name": "sandbox",
-            "image": template.pod.image,
-            "ports": [{"container_port": _BOLT_PORT}],
-        }
-        resources = _resource_manifest(template.pod)
-        if resources:
-            container["resources"] = resources
-        if effective_envs:
-            container["env"] = [
-                {"name": k, "value": v} for k, v in effective_envs.items()
-            ]
+        Returns ``(deployment_name, container_name)`` extracted from the
+        rendered template so callers need not hard-code them.
+        """
+        image = self._default_images.get(template_id, "openclaw:latest")
+        variables = _build_template_vars(
+            uid, namespace, image, storage=storage,
+            resource_spec=resource_spec,
+        )
+        rendered = _render_template(template_id, variables)
 
-        labels = {
-            "app": "avernet-arca-sandbox",
-            "avernet.arcasandbox/template": template.template_id,
-        }
-        if metadata:
-            labels.update(metadata)
+        docs = list(yaml.safe_load_all(rendered))
+        deployment_name = ""
+        container_name = ""
+        for doc in docs:
+            if not doc:
+                continue
+            if doc.get("kind") == "Deployment":
+                deployment_name = doc["metadata"]["name"]
+                containers = doc["spec"]["template"]["spec"]["containers"]
+                container_name = containers[0]["name"]
+                break
 
-        annotations: dict[str, str] = {
-            "avernet.arcasandbox/image": template.pod.image,
-        }
-        if ttl_in_minutes is not None:
-            annotations["avernet.arcasandbox/ttl-minutes"] = str(ttl_in_minutes)
+        client = self._client()
+        create_from_yaml(
+            k8s_client=client,
+            yaml_objects=docs,
+            namespace=namespace,
+        )
 
-        pod_spec: dict[str, Any] = {
-            "containers": [container],
-            "restart_policy": "Never",
-        }
-        if template.pod.service_account:
-            pod_spec["service_account_name"] = template.pod.service_account
-
-        pod = {
-            "api_version": "v1",
-            "kind": "Pod",
-            "metadata": {
-                "name": pod_name,
-                "namespace": namespace,
-                "labels": labels,
-                "annotations": annotations,
-            },
-            "spec": pod_spec,
-        }
-        core_api.create_namespaced_pod(body=pod, namespace=namespace)
-
-        service = {
-            "api_version": "v1",
-            "kind": "Service",
-            "metadata": {"name": pod_name, "namespace": namespace, "labels": labels},
-            "spec": {
-                "selector": {"app": "avernet-arca-sandbox", "aliyun.ack.pod": pod_name},
-                "ports": [{"port": _BOLT_PORT, "targetPort": _BOLT_PORT}],
-            },
-        }
-        core_api.create_namespaced_service(body=service, namespace=namespace)
+        logger.info(
+            "[aliyun_ack] template applied uid=%s namespace=%s deployment=%s",
+            uid,
+            namespace,
+            deployment_name,
+        )
+        return deployment_name, container_name
 
     def create_sync_sandbox(
         self,
@@ -223,25 +223,23 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         timeout_in_millis: int = 60000,
         ready_timeout_in_seconds: int = 60,
     ) -> ArcaSandbox:
-        _import_k8s()
-        template = self._resolve_template(template_id)
-        namespace = template.pod.namespace or "default"
-        sandbox_id = f"aliyun-ack-{uuid.uuid4().hex[:12]}"
-        pod_name = _sanitize_pod_name(sandbox_id)
-        self._create_pod_and_service(
-            pod_name=pod_name,
-            template=template,
-            envs=envs,
-            metadata=metadata,
-            ttl_in_minutes=ttl_in_minutes,
+        namespace = self._get_namespace()
+        sandbox_id = f"{template_id}-{uuid.uuid4().hex[:12]}"
+        uid = _sanitize_pod_name(sandbox_id)
+        deployment_name, container_name = self._create_deployment(
+            uid, template_id, namespace, storage, resource_spec
         )
         try:
-            core_api = CoreV1Api(self._client_for(template))
-            _wait_for_ready(core_api, pod_name, namespace, ready_timeout_in_seconds)
+            core_api = CoreV1Api(self._client())
+            pod_name = _wait_for_ready(
+                core_api, uid, namespace, ready_timeout_in_seconds
+            )
         except Exception:
             try:
-                core_api = CoreV1Api(self._client_for(template))
-                core_api.delete_namespaced_pod(name=pod_name, namespace=namespace)
+                core_api = CoreV1Api(self._client())
+                core_api.delete_namespaced_deployment(
+                    name=deployment_name, namespace=namespace
+                )
             except Exception:
                 pass
             raise
@@ -249,38 +247,55 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         device = AliyunAckSandbox(
             sandbox_id=sandbox_id,
             namespace=namespace,
-            template_id=template.template_id,
-            client=self._client_for(template),
+            template_id=template_id,
+            client=self._client(),
             pod_name=pod_name,
-            image=image or template.pod.image,
+            deployment_name=deployment_name,
+            container_name=container_name,
+            image=image or "",
         )
         logger.info(
             "[aliyun_ack] sandbox created template=%s sandbox_id=%s pod=%s",
-            template.template_id,
+            template_id,
             sandbox_id,
             pod_name,
         )
         return device
 
     def connect_sync_sandbox(self, sandbox_id: str) -> ArcaSandbox:
-        _import_k8s()
-        pod_name = _sanitize_pod_name(sandbox_id)
-        template = self._resolve_default_template()
-        namespace = template.pod.namespace or "default"
-        client = self._client_for(template)
+        uid = _sanitize_pod_name(sandbox_id)
+        namespace = self._get_namespace()
+        client = self._client()
         try:
             core_api = CoreV1Api(client)
-            pod = core_api.read_namespaced_pod(name=pod_name, namespace=namespace)
+            pods = core_api.list_namespaced_pod(
+                namespace=namespace, label_selector=f"biz-id={uid}"
+            )
+            if not pods.items:
+                raise RuntimeError(
+                    f"Sandbox {sandbox_id} not found (no pod for biz-id={uid})"
+                )
+            pod = pods.items[0]
+            pod_name = pod.metadata.name
         except ApiException as e:
-            raise RuntimeError(
-                f"Sandbox {sandbox_id} not found (pod {pod_name}) ({e.status})"
-            ) from e
+            raise RuntimeError(f"Sandbox {sandbox_id} not found ({e.status})") from e
 
         template_id = "aliyun_ack"
         if pod.metadata and pod.metadata.labels:
             template_id = pod.metadata.labels.get(
                 "avernet.arcasandbox/template", "aliyun_ack"
             )
+
+        deployment_name = ""
+        if pod.metadata and pod.metadata.owner_references:
+            for ref in pod.metadata.owner_references:
+                if ref.kind == "ReplicaSet":
+                    deployment_name = ref.name.rsplit("-", 1)[0]
+                    break
+
+        container_name = ""
+        if pod.spec and pod.spec.containers:
+            container_name = pod.spec.containers[0].name
 
         logger.info("[aliyun_ack] sandbox connected sandbox_id=%s", sandbox_id)
         return AliyunAckSandbox(
@@ -289,7 +304,9 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             template_id=template_id,
             client=client,
             pod_name=pod_name,
-            image=template.pod.image,
+            deployment_name=deployment_name,
+            container_name=container_name,
+            image="",
         )
 
     def resolve_ws_conn_info(
@@ -335,9 +352,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         """Release any ACK clients."""
 
     def delete_storage(self, storage_id: str, tenant_name: str) -> bool:
-        _import_k8s()
-        template = self._resolve_default_template()
-        namespace = template.pod.namespace or "default"
+        namespace = self._get_namespace()
         pvc_name = _sanitize_pod_name(storage_id)
         logger.info(
             "[aliyun_ack] delete_storage storage_id=%s tenant_name=%s pvc=%s",
@@ -346,7 +361,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             pvc_name,
         )
         try:
-            core_api = CoreV1Api(self._client_for(template))
+            core_api = CoreV1Api(self._client())
             core_api.delete_namespaced_persistent_volume_claim(
                 name=pvc_name, namespace=namespace
             )

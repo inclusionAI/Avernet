@@ -56,7 +56,7 @@ class TestPluginContainerStandalone:
 class TestAliyunAckSelector:
     """The aliyun_ack option resolves to AliyunAckSandboxPlugin."""
 
-    def _container(self, with_templates: bool = True):
+    def _container(self, with_cluster: bool = True):
         from secbaas.community.bootstrap.plugins import PluginContainer
 
         container = PluginContainer()
@@ -66,16 +66,11 @@ class TestAliyunAckSelector:
                 "sandbox": {"arca": "aliyun_ack"},
             }
         }
-        if with_templates:
-            cfg["aliyun_ack_template"] = {
-                "ALIYUN_ACK_TEMPLATE_default": {
-                    "cluster": {
-                        "endpoint": "https://ack.example.com",
-                        "kubeconfig": "apiVersion: v1\nkind: Config\n",
-                        "region": "cn-hangzhou",
-                    },
-                    "pod": {"image": "test:latest"},
-                }
+        if with_cluster:
+            cfg["aliyun_ack_cluster"] = {
+                "api_server": "https://ack.example.com",
+                "token": "dummy-token",
+                "namespace": "default",
             }
         container.config.from_dict(cfg)
         return container
@@ -91,11 +86,10 @@ class TestAliyunAckSelector:
             template_uuid="u",
             base_url="http://x",
             api_key="k",
-            arca_template_id="ALIYUN_ACK_TEMPLATE_default",
+            arca_template_id="ALIYUN_ACK_OPENCLAW",
         )
         plugin = self._container().arca_sandbox_plugin_factory(creds)
         assert isinstance(plugin, AliyunAckSandboxPlugin)
-        assert "ALIYUN_ACK_TEMPLATE_default" in plugin._ack_templates
 
     def test_aliyun_ack_default_selector(self):
         from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin

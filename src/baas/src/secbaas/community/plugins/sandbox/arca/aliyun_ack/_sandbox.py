@@ -2,16 +2,16 @@
 
 Wraps an ACK (Aliyun managed Kubernetes) Pod behind the ``ArcaSandbox``
 protocol. All Kubernetes API calls go through the injected ApiClient.
-
-Kubernetes SDK classes are lazily bound to this module so unit tests can patch
-``_sandbox.CoreV1Api`` / ``_sandbox.ApiException`` via ``unittest.mock``.
 """
 
 from __future__ import annotations
 
-import sys
+import json
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+from kubernetes.client import ApiClient, AppsV1Api, CoreV1Api
+from kubernetes.client.rest import ApiException
 
 from secbaas.community.api.device_manage import (
     OutBoundOperationRule,
@@ -20,24 +20,7 @@ from secbaas.community.api.device_manage import (
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxInfo
 
-if TYPE_CHECKING:
-    from kubernetes.client import ApiClient, CoreV1Api
-    from kubernetes.client.rest import ApiException
-
 logger = get_logger("plugin-sandbox")
-
-
-def _import_k8s() -> None:
-    """Lazily bind Kubernetes SDK classes into this module namespace."""
-    _mod = sys.modules[__name__]
-    if getattr(_mod, "_k8s_loaded", False):
-        return
-    from kubernetes.client import CoreV1Api as _CoreV1Api
-    from kubernetes.client.rest import ApiException as _ApiException
-
-    _mod.CoreV1Api = _CoreV1Api
-    _mod.ApiException = _ApiException
-    _mod._k8s_loaded = True
 
 
 class _ExecResult:
@@ -65,14 +48,16 @@ class AliyunAckSandbox(ArcaSandbox):
         client: ApiClient,
         *,
         pod_name: str | None = None,
-        container_name: str = "sandbox",
-        image: str = "ubuntu:22.04",
+        deployment_name: str | None = None,
+        container_name: str | None = None,
+        image: str | None = None,
     ) -> None:
         self._sandbox_id = sandbox_id
         self._namespace = namespace
         self._template_id = template_id
         self._client = client
         self._pod_name = pod_name or sandbox_id
+        self._deployment_name = deployment_name or ""
         self._container_name = container_name
         self._image = image
 
@@ -91,7 +76,6 @@ class AliyunAckSandbox(ArcaSandbox):
 
     def get_info(self) -> ArcaSandboxInfo:
         """Extract Pod status into the unified ArcaSandboxInfo."""
-        _import_k8s()
         try:
             core_api = CoreV1Api(self._client)
             pod = core_api.read_namespaced_pod(
@@ -113,24 +97,28 @@ class AliyunAckSandbox(ArcaSandbox):
             ) from e
 
     def destroy(self) -> bool:
-        """Delete the backing Pod. Idempotent on 404."""
-        _import_k8s()
+        """Delete the backing Deployment. Idempotent on 404.
+
+        The PVC is NOT deleted here — it is an independent resource so data
+        survives Deployment deletion.
+        """
         logger.info(
-            "[aliyun_ack] destroy sandbox_id=%s pod=%s",
+            "[aliyun_ack] destroy sandbox_id=%s deployment=%s",
             self._sandbox_id,
-            self._pod_name,
+            self._deployment_name,
         )
         try:
-            core_api = CoreV1Api(self._client)
-            core_api.delete_namespaced_pod(
-                name=self._pod_name, namespace=self._namespace
+            apps_api = AppsV1Api(self._client)
+            apps_api.delete_namespaced_deployment(
+                name=self._deployment_name,
+                namespace=self._namespace,
             )
             return True
         except ApiException as e:
             if e.status == 404:
                 logger.info(
-                    "[aliyun_ack] destroy: pod %s already gone (404), idempotent",
-                    self._pod_name,
+                    "[aliyun_ack] destroy: deployment %s already gone (404), idempotent",
+                    self._deployment_name,
                 )
                 return True
             raise RuntimeError(f"destroy failed ({e.status})") from e
@@ -142,7 +130,6 @@ class AliyunAckSandbox(ArcaSandbox):
         envs: dict[str, str] | None = None,
     ) -> Any:
         """Execute a command inside the backing ACK Pod via exec."""
-        _import_k8s()
         logger.info(
             "[aliyun_ack] exec_command sandbox_id=%s timeout=%d cmd=%s",
             self._sandbox_id,
@@ -186,9 +173,6 @@ class AliyunAckSandbox(ArcaSandbox):
                 "ACK sandbox only supports REPLACE outbound rule updates, "
                 f"got {updated_mode}"
             )
-        _import_k8s()
-        import json
-
         annotations = {
             "avernet.arcasandbox/outbound-rule": json.dumps(
                 rule.model_dump(exclude_none=True)
@@ -211,7 +195,6 @@ class AliyunAckSandbox(ArcaSandbox):
 
     def extend_ttl(self, ttl_minutes: int) -> Any:
         """Extend the Pod TTL annotation by ``ttl_minutes``."""
-        _import_k8s()
         logger.info(
             "[aliyun_ack] extend_ttl sandbox_id=%s ttl_minutes=%d",
             self._sandbox_id,
