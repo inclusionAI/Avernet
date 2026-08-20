@@ -18,7 +18,7 @@ from httpx2 import Response
 
 from gateway.community.adapters.web._cors import EXPOSED_HEADERS, install_cors
 from gateway.community.adapters.web.app import create_app
-from gateway.community.config import CorsConfig
+from gateway.community.config import CorsConfig, UserConfig
 
 _ALLOWED = "https://frontend.example.com"
 _FOREIGN = "https://not-the-frontend.example.com"
@@ -136,3 +136,72 @@ def test_the_served_app_answers_a_preflight_from_the_shipped_allow_list() -> Non
 
     assert resp.status_code == 200
     assert resp.headers["access-control-allow-origin"] == "http://localhost:8000"
+
+
+def test_a_pattern_may_open_with_a_global_inline_flag() -> None:
+    """Each configured regex is compiled on its own, so its own flags survive.
+
+    ``(?i)`` is legal only at the very start of an expression; combining the
+    configured patterns into one alternation would move it and raise
+    ``re.error: global flags not at the start`` while Starlette builds the
+    middleware stack — the gateway would refuse to serve rather than refuse an
+    origin.
+    """
+    app, _ = _app(
+        CorsConfig(
+            allow_origins=[],
+            allow_origin_regex=[
+                r"(?i)https://frontend\.example\.com",
+                r"https://[a-z0-9-]+\.preview\.example\.com",
+            ],
+        )
+    )
+    client = TestClient(app)
+
+    assert (
+        _preflight(client, "https://FRONTEND.example.com").headers[
+            "access-control-allow-origin"
+        ]
+        == "https://FRONTEND.example.com"
+    )
+    # The second pattern keeps its own (case-sensitive) semantics.
+    assert (
+        "access-control-allow-origin"
+        not in _preflight(client, "https://TEAM.preview.example.com").headers
+    )
+
+
+def test_an_escaped_exception_still_answers_with_the_origin() -> None:
+    """``ServerErrorMiddleware`` writes its 500 outside every added middleware.
+
+    Without the handler ``install_cors`` registers, a browser sees that 500 only
+    as a CORS failure and cannot tell the request reached the gateway at all.
+    """
+    app = FastAPI()
+
+    @app.get("/openapi/v1/bots/boom")
+    async def _boom() -> None:
+        raise RuntimeError("upstream exploded")
+
+    install_cors(app, CorsConfig(allow_origins=[_ALLOWED], allow_origin_regex=[]))
+    client = TestClient(app, raise_server_exceptions=False)
+
+    resp = client.get("/openapi/v1/bots/boom", headers={"Origin": _ALLOWED})
+    assert resp.status_code == 500
+    assert resp.headers["access-control-allow-origin"] == _ALLOWED
+    assert resp.headers["access-control-allow-credentials"] == "true"
+
+    # An origin the edge does not admit learns nothing from the failure either.
+    foreign = client.get("/openapi/v1/bots/boom", headers={"Origin": _FOREIGN})
+    assert foreign.status_code == 500
+    assert "access-control-allow-origin" not in foreign.headers
+
+
+def test_wildcard_origin_is_refused_at_config_load() -> None:
+    """``"*"`` must not boot: with credentials on, Starlette echoes every origin."""
+    with pytest.raises(ValueError, match=r"must not contain"):
+        CorsConfig(allow_origins=["*"])
+
+    # And the refusal reaches a real config load, not just direct construction.
+    with pytest.raises(ValueError, match=r"must not contain"):
+        UserConfig.model_validate({"cors": {"allow_origins": ["*"]}})

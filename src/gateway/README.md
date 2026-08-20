@@ -159,10 +159,16 @@ user_config:
 
 Responses carry `Access-Control-Allow-Credentials: true`, because a browser call
 through the gateway carries the cookie or `Authorization` header it
-authenticates with. Browsers reject a `"*"` origin on such a response, so every
-origin must be listed exactly or matched by a regex (matched against the whole
-origin — scheme, host and port). An overlay replaces a list rather than
-extending it.
+authenticates with. Every origin must therefore be listed exactly or matched by a
+regex (matched against the whole origin — scheme, host and port; each pattern is
+compiled on its own, so a pattern's inline flags apply to that pattern alone).
+`allow_origins: ["*"]` is refused at load time — with credentials enabled a
+wildcard silently admits every origin rather than failing loudly. An overlay
+replaces a list rather than extending it.
+
+A 500 that escapes the app is answered by Starlette above every installed
+middleware, so `install_cors` also registers the handler that stamps the origin
+on it; otherwise a browser would report a server error as a CORS failure.
 
 ## CI & Testing
 

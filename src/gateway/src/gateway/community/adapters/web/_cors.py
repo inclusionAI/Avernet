@@ -21,22 +21,35 @@ Which is why this lives at the gateway rather than in an upstream:
   endpoints a browser could reach would depend on which component happens to
   serve them.
 
-The middleware is installed **outermost** (added last in ``create_app``), so a
-preflight is answered here and never reaches the forward route at all. The
-edge being the CORS authority also means an upstream's own CORS headers must
-not travel back through the gateway — two ``Access-Control-Allow-Origin``
-values in one response is an error a browser reports the same way as none.
-:data:`CORS_RESPONSE_HEADERS` is what the forwarder strips to keep that true.
+The middleware is installed **outermost** among the app's own middleware (added
+last in ``create_app``), so a preflight is answered here and never reaches the
+forward route at all. The edge being the CORS authority also means an upstream's
+own CORS headers must not travel back through the gateway — two
+``Access-Control-Allow-Origin`` values in one response is an error a browser
+reports the same way as none. :data:`CORS_RESPONSE_HEADERS` is what the
+forwarder strips to keep that true.
+
+One response is generated *outside* every middleware a FastAPI app installs: the
+500 that Starlette's ``ServerErrorMiddleware`` writes when an exception escapes
+the stack (``build_middleware_stack`` puts it outermost, above ``add_middleware``
+entries). Without a header it cannot get from here, a browser reports that 500 as
+a CORS failure and the page never learns the request even reached the gateway —
+so ``install_cors`` also registers the handler that answers it.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import re
+from typing import TYPE_CHECKING, Any
 
 from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import PlainTextResponse
+from starlette.types import ASGIApp
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
+    from starlette.requests import Request
+    from starlette.responses import Response
 
     from gateway.community.config import CorsConfig
 
@@ -66,18 +79,72 @@ CORS_RESPONSE_HEADERS = frozenset(
 )
 
 
-def _combined_origin_regex(patterns: list[str]) -> str | None:
-    """The configured patterns as one alternation, or ``None`` for an empty list.
+class _OriginAllowList:
+    """The configured origins, as one question: may this origin read a response?
 
-    Starlette takes a single regex and matches it with ``fullmatch``; the config
-    takes a list, because an environment's origins are several unrelated shapes
-    and one line per shape is what a reviewer can read. Each pattern is wrapped
-    in a non-capturing group so an alternation *inside* a pattern cannot swallow
-    the ones after it, and so ``fullmatch`` still anchors each alternative.
+    Each regex is compiled and matched **on its own**. Starlette takes a single
+    pattern string, and the obvious way to satisfy it — joining the configured
+    list into one alternation — silently changes what an operator wrote: a
+    pattern that opens with a global inline flag (``(?i)https://...``, legal and
+    useful for a host match) is only legal at the very start of an expression,
+    so wrapping or concatenating it raises ``re.error: global flags not at the
+    start``. That error would surface when Starlette builds the middleware
+    stack, i.e. the gateway would refuse to serve at all. Matching each pattern
+    separately keeps every entry's semantics its own.
+
+    ``fullmatch`` rather than ``match``, exactly as Starlette does: an origin
+    that merely *starts* with an allowed one — ``https://ui.example.com.evil.test``
+    against ``https://[a-z]+\\.example\\.com`` — is a different origin.
     """
-    if not patterns:
-        return None
-    return "|".join(f"(?:{pattern})" for pattern in patterns)
+
+    def __init__(self, origins: list[str], patterns: list[str]) -> None:
+        self._origins = frozenset(origins)
+        self._patterns = tuple(re.compile(pattern) for pattern in patterns)
+
+    def allows(self, origin: str) -> bool:
+        if origin in self._origins:
+            return True
+        return any(pattern.fullmatch(origin) for pattern in self._patterns)
+
+
+class _AllowListCORSMiddleware(CORSMiddleware):
+    """Starlette's CORS middleware, asking :class:`_OriginAllowList` instead.
+
+    Only the origin *decision* is replaced; preflight handling, header mirroring
+    and the response-header stamping stay Starlette's. ``is_allowed_origin`` is
+    the single seam both the preflight path and the simple-response path call,
+    so overriding it is enough for the list and the regexes to agree everywhere.
+    """
+
+    def __init__(
+        self, app: ASGIApp, *, allow_list: _OriginAllowList, **kwargs: Any
+    ) -> None:
+        self._allow_list = allow_list
+        super().__init__(app, **kwargs)
+
+    def is_allowed_origin(self, origin: str) -> bool:
+        return self._allow_list.allows(origin)
+
+
+def _install_server_error_handler(app: FastAPI, allow_list: _OriginAllowList) -> None:
+    """Give the outermost 500 the two headers a browser needs to read it.
+
+    ``ServerErrorMiddleware`` sits above every ``add_middleware`` entry, so the
+    response it writes for an escaped exception never passes through the CORS
+    middleware. The body stays what Starlette would have sent; the headers are
+    what turns an opaque "CORS error" in the console into a legible 500.
+    """
+
+    async def server_error(request: Request, exc: Exception) -> Response:
+        response = PlainTextResponse("Internal Server Error", status_code=500)
+        origin = request.headers.get("origin")
+        if origin and allow_list.allows(origin):
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Vary"] = "Origin"
+        return response
+
+    app.add_exception_handler(Exception, server_error)
 
 
 def install_cors(app: FastAPI, cors: CorsConfig) -> None:
@@ -85,8 +152,10 @@ def install_cors(app: FastAPI, cors: CorsConfig) -> None:
 
     ``allow_credentials=True`` because a browser call through this edge carries
     the session cookie or the ``Authorization`` header the gateway authenticates
-    with — and it forbids a ``"*"`` origin, so an origin is admitted only by
-    being listed in ``allow_origins`` or matching one of ``allow_origin_regex``.
+    with — and it is why ``CorsConfig`` refuses a ``"*"`` origin: with
+    credentials enabled Starlette answers a wildcard by echoing whichever origin
+    asked, so ``"*"`` would not fail loudly, it would quietly admit every site
+    on the internet to credentialed calls.
 
     Methods and request headers are unrestricted (``"*"``): the gateway forwards
     every method into every domain and does not know which headers an upstream
@@ -95,12 +164,21 @@ def install_cors(app: FastAPI, cors: CorsConfig) -> None:
     upstream's decision, on the real request; CORS decides only which origin's
     JavaScript may read the answer.
     """
+    allow_list = _OriginAllowList(
+        list(cors.allow_origins), list(cors.allow_origin_regex)
+    )
     app.add_middleware(
-        CORSMiddleware,
+        # ``add_middleware``'s factory protocol describes a class whose only
+        # extra arguments are the ones it forwards; a subclass taking a keyword
+        # of its own does not satisfy it, though it is the same ASGI app at
+        # runtime. The alternative — smuggling the allow-list in through a
+        # module global — would be worse than the ignore.
+        _AllowListCORSMiddleware,  # type: ignore[arg-type]
+        allow_list=allow_list,
         allow_origins=list(cors.allow_origins),
-        allow_origin_regex=_combined_origin_regex(list(cors.allow_origin_regex)),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=list(EXPOSED_HEADERS),
     )
+    _install_server_error_handler(app, allow_list)

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -80,11 +80,9 @@ class CorsConfig(BaseModel):
 
     Neutral default = localhost origins only, so a single-box UI works out of the
     box; every deployment adds its own frontend origin through the ``cors`` block
-    of its ``application-<env>.yaml`` overlay. Because the edge answers with
-    ``Access-Control-Allow-Credentials: true`` — the session cookie and the
-    ``Authorization`` header are exactly what a browser call carries — a ``"*"``
-    wildcard is not accepted by browsers: origins must be enumerated exactly or
-    matched by one of ``allow_origin_regex``.
+    of its ``application-<env>.yaml`` overlay. Origins are enumerated exactly or
+    matched by one of ``allow_origin_regex``; a ``"*"`` wildcard is REFUSED at
+    load time (see :meth:`_reject_wildcard_origin`).
     """
 
     model_config = {"extra": "allow"}
@@ -98,6 +96,29 @@ class CorsConfig(BaseModel):
         ]
     )
     allow_origin_regex: list[str] = Field(default_factory=list)
+
+    @field_validator("allow_origins")
+    @classmethod
+    def _reject_wildcard_origin(cls, origins: list[str]) -> list[str]:
+        """Refuse ``"*"`` at load time rather than serving it.
+
+        The edge always answers with ``Access-Control-Allow-Credentials: true``,
+        and a wildcard does not fail loudly under that setting: Starlette
+        replaces ``"*"`` with whichever origin asked (``CORSMiddleware.send``
+        takes the ``allow_all_origins and allow_credentials`` branch), so a
+        deployment that wrote the conventional ``allow_origins: ["*"]`` would
+        boot, look correct, and admit every site on the internet to credentialed
+        calls through the gateway. A config error a browser cannot catch for us
+        is one this boundary has to catch itself.
+        """
+        if any(origin.strip() == "*" for origin in origins):
+            raise ValueError(
+                'cors.allow_origins must not contain "*": the gateway sends '
+                "Access-Control-Allow-Credentials: true, so a wildcard admits "
+                "every origin to credentialed calls. List each origin, or match "
+                "them with cors.allow_origin_regex."
+            )
+        return origins
 
 
 class PluginConfig(BaseSettings):
