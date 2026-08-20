@@ -49,6 +49,7 @@ from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
 from agentclaw.community.di.modules.skills_pool_module import SkillsPoolModule
 from agentclaw.community.di.modules.system_config_module import SystemConfigModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
+from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.di.modules.economy_governance_module import EconomyGovernanceModule
 from agentclaw.community.di.modules.user_list_module import UserListModule
 from agentclaw.community.di.modules.work_orders_module import WorkOrdersModule
@@ -130,6 +131,7 @@ def build_injector(
         UserListModule(),
         BotDormantModule(),
         TaskQueueModule(),
+        TaskPersistenceModule(),
         QualityModule(),
         # HTTP transport (real httpx) — shared by every base profile. Only the
         # test/corp_test columns override these keys with LocalHttpClient;
