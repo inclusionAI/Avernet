@@ -136,6 +136,44 @@ The gateway starts on port 8888 by default and exposes:
 - `http://127.0.0.1:8888/docs` — OpenAPI documentation (when enabled)
 - `http://127.0.0.1:8888/api/test` — connectivity test endpoint
 
+## Browser Access (CORS)
+
+The gateway is the origin a browser talks to, so it answers CORS itself: a
+cross-origin page sends a credential-less `OPTIONS` preflight, and that request
+is answered by the edge middleware before routing, `route_security`, or any
+upstream sees it. An upstream's own CORS headers are stripped on the way back,
+so exactly one `Access-Control-Allow-Origin` reaches the browser — the edge's.
+
+Origins are configuration, not code. Add a deployment's frontend origins to the
+`user_config.cors` block of its `application-<env>.yaml` overlay (selected by
+`SERVER_ENV`); the shipped `configs/application.yaml` allows only localhost:
+
+```yaml
+user_config:
+  cors:
+    allow_origins:
+      - "https://your-frontend.example.com"
+    allow_origin_regex:
+      - "https://[a-z0-9-]+\\.preview\\.example\\.com"
+```
+
+Responses carry `Access-Control-Allow-Credentials: true`, because a browser call
+through the gateway carries the cookie or `Authorization` header it
+authenticates with. Every origin must therefore be listed exactly or matched by a
+regex (matched against the whole origin — scheme, host and port; each pattern is
+compiled on its own, so a pattern's inline flags apply to that pattern alone).
+`allow_origins: ["*"]` is refused at load time — with credentials enabled a
+wildcard silently admits every origin rather than failing loudly — and so is a
+catch-all regex, whichever scheme or port it names (`.*`, `https://.*`,
+`http://.*`, `https://.*:8443`), since all of them reach the same place. Pin the
+host: `http://localhost:[0-9]+` is accepted, `http://.*` is not. A malformed
+regex is refused there too, naming the entry, rather than taking the gateway
+down at boot. An overlay replaces a list rather than extending it.
+
+A 500 that escapes the app is answered by Starlette above every installed
+middleware, so `install_cors` also registers the handler that stamps the origin
+on it; otherwise a browser would report a server error as a CORS failure.
+
 ## CI & Testing
 
 ```bash
