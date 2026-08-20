@@ -352,6 +352,7 @@ _GRANT_CHECKED_SUBGROUPS = [
     # both. See ``bots/engine_config.py``.
     engine_config_router,
     skill_sets_router,
+    bot_mcp_router,
     identity_router,
     resources_router,
     routines_router,

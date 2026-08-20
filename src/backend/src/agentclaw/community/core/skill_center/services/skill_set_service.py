@@ -569,6 +569,44 @@ class SkillSetService:
             )
             return False
 
+    async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
+        """Project the complete MCP desired state to the Bot runtime.
+
+        ``sync_all_mcp_servers`` is deliberately called even for an empty
+        set: it is the device-level reconciliation command that clears stale
+        allow-list entries.  Per-server detail delivery precedes that full
+        declaration so all newly allowed MCPs have their configured payload.
+        """
+        try:
+            entries: list[dict[str, Any]] = []
+            for server_code in sorted(server_codes):
+                detail = self.mcp_center.get_mcp_detail(server_code)
+                if not detail:
+                    return False
+                entries.append(detail)
+                result = await self._mcp_sync_service.sync_mcp_detail(
+                    user_id=self.user_id or self.entity_id or "",
+                    mcp_data=detail,
+                    bot_id=self.bot_id,
+                    entity_id=self.entity_id,
+                    engine_type=self.engine_type,
+                )
+                if not result.get("success"):
+                    return False
+            ctx = self._resolver.resolve_for_bot(
+                self.bot_id, self.entity_id or self.user_id or ""
+            )
+            return bool(
+                self._device_sync_dispatcher.dispatch(ctx).sync_all_mcp_servers(entries)
+            )
+        except Exception:
+            logger.warning(
+                "[sync_mcp_desired_state] MCP projection failed for bot_id=%s",
+                self.bot_id,
+                exc_info=True,
+            )
+            return False
+
     def _validate_name(self, name: str) -> None:
         """Validate skill set name (cannot contain underscore)."""
         if "_" in name:
