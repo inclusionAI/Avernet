@@ -155,10 +155,10 @@ pub mod logging;
 // Re-exports
 pub use config::{
     AuthSdkConfig, BcsConfig, CacheConfig, DatabaseConfig, DatabaseType, DingTalkAccountConfig,
-    GatewayPrincipalConfig, InviteConfig, LlmConfig, LlmProviderType, LoggingConfig,
-    MessageHistoryConfig, MetricsConfig, MetricsMode, RedisCacheConfig,
-    SecurityGatewayProviderConfig,
-    StructuredOutputMode, TelemetryConfig, UserDirectoryConfig, UserDirectoryProviderConfig,
+    GatewayPrincipalConfig, InviteConfig, LlmConfig, LlmProviderType,
+    LoggingConfig, MessageHistoryConfig, MetricsConfig, MetricsMode, RedisCacheConfig,
+    SecurityGatewayProviderConfig, StructuredOutputMode, TelemetryConfig, UserDirectoryConfig,
+    UserDirectoryProviderConfig,
 };
 pub use error::{BcsError, Result};
 pub use plugins::{CachePluginKind, DbPluginKind, InfrastructurePlugins};

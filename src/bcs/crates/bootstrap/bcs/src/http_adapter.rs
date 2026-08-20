@@ -60,6 +60,7 @@ pub fn build_bot_runtime_token_resolver(
 pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppState {
     let config = state.config.clone();
     let session_file_application = state.openapi_v1.session_file_service.clone();
+    let internal_bot_attributes_service = state.internal_bot_attributes_service.clone();
     let invite_token_secret = state.invite_token_secret.clone();
     let max_group_messages = if config.max_group_messages > 0 {
         config.max_group_messages as u64
@@ -155,6 +156,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         .with_user_identity(Arc::new(
             ChainUserIdentityPort::new(state.auth_chain.clone()),
         ))
+        .with_internal_bot_attributes_service(internal_bot_attributes_service)
 }
 
 async fn build_secret_service(config: &crate::config::BcsConfig) -> crate::Result<Arc<dyn SecretService>> {
@@ -684,6 +686,7 @@ mod tests {
             gateway_principal_verifier: crate::server::gateway_principal_verifier_for_tests(),
             invite_token_secret: v1_state.invite_token_secret.clone(),
             group_session_secret_access: v1_state.group_session_secret_access.clone(),
+            internal_bot_attributes_service: v1_state.internal_bot_attributes_service.clone(),
             openapi_v1: v1_state.openapi_v1,
             user_identity_port: None,
             outbound_url_guard: OutboundUrlGuard::allowing_private_networks_for_tests(),
