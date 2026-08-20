@@ -32,6 +32,10 @@ def test_member_management_acceptance_allows_coding_app_bot_or_template_switch()
     assert service.uses_member_management_semantics(
         {"active_engine": "claude_code", "template_type": "applicationCoding"}
     ) is True
+    # 个人 Coding Bot（claude_code 引擎）使用成员管理语义
+    assert service.uses_member_management_semantics(
+        {"active_engine": "claude_code", "template_type": "personalCoding"}
+    ) is True
     assert service.uses_member_management_semantics(
         {
             "active_engine": "openclaw",
