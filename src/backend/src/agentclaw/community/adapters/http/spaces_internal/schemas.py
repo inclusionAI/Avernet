@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from agentclaw.community.core.spaces.models import SpaceScTeamRepairStatus
+
 
 class PersonalSpaceBatchQueryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -33,3 +35,11 @@ class PersonalSpaceBatchQueryItem(BaseModel):
 
 class PersonalSpaceBatchQueryResult(BaseModel):
     list: list[PersonalSpaceBatchQueryItem]
+
+
+class SpaceScTeamRepairResultResponse(BaseModel):
+    """Result of one idempotent historical SC Team binding repair."""
+
+    space_id: int
+    status: SpaceScTeamRepairStatus
+    sc_team_id: str

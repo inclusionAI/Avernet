@@ -24,6 +24,13 @@ class SpaceJoinStatus(StrEnum):
     NOT_JOINED = "NOT_JOINED"
 
 
+class SpaceScTeamRepairStatus(StrEnum):
+    """Successful outcomes of an idempotent SC Team binding repair."""
+
+    REPAIRED = "REPAIRED"
+    ALREADY_BOUND = "ALREADY_BOUND"
+
+
 class SpaceRecord(BaseModel):
     id: int
     space_code: str
@@ -68,3 +75,11 @@ class PersonalSpaceLookupRecord(BaseModel):
     user_id: str
     space_id: int | None
     found: bool
+
+
+class SpaceScTeamRepairResult(BaseModel):
+    """Confirmed SC Team binding after repair or an idempotent retry."""
+
+    space_id: int
+    status: SpaceScTeamRepairStatus
+    sc_team_id: str
