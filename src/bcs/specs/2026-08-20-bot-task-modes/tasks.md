@@ -55,19 +55,28 @@
   [verify] patching one toggle leaves the other and `bot_info` untouched.
 - [x] **10.** `lib.rs` INSERTs (:414 onboard, :1900 `ensure_human_actor`): leave the two columns **out** so
   DB `DEFAULT 0` applies. [verify] new bots persist with both toggles `false` without listing the columns.
-- [-] **11.** ~~`types/bot_control_plane.rs`: add `TaskModeMatch` + `BotTaskModesQuery`; repo port
-  `list_control_plane_by_task_modes`.~~ **Reverted** — the roster read does not belong in the BCS module
-  (see §E/§I). BCS keeps only the write-side types from task 4.
-- [-] **12.** ~~`PersistentBotRepo::list_control_plane_by_task_modes` SQL impl.~~ **Reverted** (read moved
-  to backend/task).
-- [-] **13.** ~~`memory.rs` in-memory `list_control_plane_by_task_modes`.~~ **Reverted** (read moved to
-  backend/task).
+- [x] **11–13.** Re-added (finalized 2026-08-20) — see §E for the control-plane read types/repo/core.
+  ~~Reverted~~ is superseded by plan.md §11.
 
-## E. BCS core read — reverted (read lives in backend/task, not BCS)
+## E. BCS core read — re-added (finalized 2026-08-20; see plan.md §11)
 
-- [-] **14.** ~~Core trait `list_by_task_modes` + core override.~~ **Reverted** — BCS hosts no roster read.
-  The read is implemented in the backend task module core (depends on BCS); see §I.
-- [~] **15.** **No BCS application/command layer** for the read — confirmed NA (read is not in BCS at all).
+The earlier revert is undone. BCS hosts the roster read as an **internal provider HTTP route**
+consumed by the backend `BcsHttpAdapter`. Items 11-15 below track the re-added BCS read; the
+internal provider route + handler + conformance test are tracked in §K.
+
+- [x] **11.** `types/bot_control_plane.rs`: `TaskModeMatch { Any, All }` + `BotTaskModesQuery
+  { env, task_claim_mode: Option<bool>, task_dream_mode: Option<bool>, match_mode }`; repo port
+  `list_control_plane_by_task_modes`. Re-exported from `bcs_service_api` root.
+  [verify] `cargo check --tests -p bcs-service-api`.
+- [x] **12.** `PersistentBotRepo::list_control_plane_by_task_modes` SQL (Any/All/single/none,
+  `env`+`is_deleted=0`+`actor_kind='bot'`, ordered) and `MemoryBotRepo` filter-loop impl.
+  [verify] covered by the route conformance test (§K) via the memory store.
+- [x] **13.** (merged into 11/12)
+- [x] **14.** Core `BotControlPlaneCoreService::list_by_task_modes` (default `Ok(vec![])`) +
+  `BotControlPlaneCore` override (delegate + `hydrate`).
+  [verify] compiles; conformance test exercises it end-to-end.
+- [x] **15.** BCS application layer: `ProviderManagementService::list_provider_bots_by_task_modes`
+  (validate admin token via `list_provider_bots`, intersect provider bindings, project). See §K.
 
 ## F. BCS delivery adapter (`bcs-api-http`) — write side only
 
@@ -107,20 +116,39 @@
   passes. No new HTTP endpoint, so the singlebox 100%-HTTP-endpoint coverage gate is unaffected; still
   cover the toggle PATCH in an E2E story if the singlebox suite exercises PATCH /bots/{id}.
 
-## I. Backend task-module roster read (transport decision blocks implementation)
+## I. Backend task-module roster read (transport decided 2026-08-20)
 
-- [ ] **25.** **Decide the transport** for "backend task core depends on BCS" given: `BcnService`
-  (`core/bot_management/services/bcn_service.py`) is currently **write-only** (onboard/register/switch/
-  delete); backend has no existing read path to BCS bots; `bcs_bots` is BCS-owned; no new BCS OpenAPI read
-  endpoint. Options: (a) reuse an existing BCS bot-read surface that returns the toggles + filter locally
-  in backend task core; (b) BCS syncs toggles into a backend-readable store + backend reads locally;
-  (c) another agreed channel. Block on the consumer/BCS owner.
-- [ ] **26.** Backend task core: add a roster Protocol/service (e.g. `TaskBotRosterProtocol`) with
-  `list_bots_by_task_modes(claim, dream, match)`, depending on BCS per task 25's transport; roster DTO
-  (`bot_id, name, env, task_claim_mode, task_dream_mode`, optional descriptor).
-- [ ] **27.** DI wiring: inject the BCS dependency into the task core; inject the roster into task
-  discovery so it iterates enabled bots. No backend HTTP route unless an external caller needs it.
-- [~] **28–29.** (reserved) backend HTTP route for the roster — deferred unless an external caller needs it.
+- [x] **25.** **Transport decided**: internal (non-OpenAPI) BCS provider route
+  `GET /providers/{provider_id}/bots/by-task-modes` (Bearer `provider_admin_token`, provider-scoped)
+  — see plan.md §11 and §K. Backend reuses the existing async `BcsClientPort` / `BcsHttpAdapter`
+  (already injected into task core as `bcs: BcsClientPort`), extending it with provider creds.
+- [ ] **26.** Backend `BcsClientPort` + `BcsHttpAdapter`: add
+  `list_bots_by_task_modes(provider_id, claim, dream, match)` returning a **local** roster DTO
+  (`bot_id, name, env, task_claim_mode, task_dream_mode`) — no reuse of existing backend domain
+  objects. provider creds (`provider_id`, `provider_admin_token`) on the token provider.
+- [ ] **27.** Consume the roster in task core dispatch (scope eligible bots by the two toggles);
+  doubles (`double_bcs_client.py`, `singlebox_bcs_adapter.py`) implement the new Port method.
+- [~] **28–29.** (reserved) a backend HTTP route exposing the roster — deferred unless an external
+  caller needs it.
+
+## K. BCS internal provider roster route (finalized 2026-08-20 — done)
+
+- [x] **K1.** `application/provider.rs`: `ProviderManagementService::list_provider_bots_by_task_modes`
+  + `ProviderBotRosterItem` + `ProviderBotTaskModesFilter`; `ProviderManagement.with_control_plane(..)`
+  (inject `BotControlPlaneCoreService`); impl validates admin token, intersects provider bindings,
+  projects. Noop `NoopProviderManagementService` stub updated.
+- [x] **K2.** Composition root `server.rs`: add `control_plane` param to
+  `build_provider_services_with_webhook_url_guard`; wire `BotControlPlaneCore` at all 3 call sites
+  (memory build, in-memory server, DB-backed server).
+- [x] **K3.** `adapters/http/bcs-http`: handler `list_provider_bots_by_task_modes` in `routes/providers.rs`
+  (Bearer admin token, lenient toggle parsing) + route registration in `router.rs` co-located with the
+  providers bot routes.
+- [x] **K4.** Conformance test
+  `provider_routes_contract.rs::list_provider_bots_by_task_modes_filters_and_scopes_to_provider`:
+  any/all/single/none filters + provider-scoping (cross-provider bot excluded) + 401 on missing/wrong
+  token. [verify] `cargo test -p bcs-http --test provider_routes_contract` (35 passed).
+- [ ] **K5.** (docs) plan.md §11 + this section written; BCS API endpoint registry updated if a served-path
+  list exists for internal routes.
 
 ## J. Gates & docs
 

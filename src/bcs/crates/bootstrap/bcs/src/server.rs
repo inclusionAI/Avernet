@@ -112,7 +112,8 @@ use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::port::{GroupSessionTokenPort, SecretAccessPort};
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, BotActor, BotCandidateSearchCoreService, BotDeliveryPort,
-    BotDeliveryTarget, BotControlPlaneRepoPort, BotRegistryCoreService, CallerContext,
+    BotDeliveryTarget, BotControlPlaneCoreService, BotControlPlaneRepoPort,
+    BotRegistryCoreService, CallerContext,
     BotMetricsSnapshotPort, BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort,
     BotTerminalState, ChannelBindingCleanupPort,
     ChannelService, CollaborationRuntimeService, CollaborationTemplateService,
@@ -1157,6 +1158,7 @@ fn build_provider_services_with_webhook_url_guard(
     relation: Arc<dyn bcs_service_api::RelationCoreService>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     webhook_url_guard: OutboundUrlGuard,
+    control_plane: Arc<dyn BotControlPlaneCoreService>,
 ) -> (
     Arc<dyn ProviderCoreService>,
     Arc<dyn ProviderBotCoreService>,
@@ -1180,6 +1182,7 @@ fn build_provider_services_with_webhook_url_guard(
     if let Some(user_directory) = user_directory {
         provider_management = provider_management.with_user_directory(user_directory);
     }
+    provider_management = provider_management.with_control_plane(control_plane);
     let provider_management: Arc<dyn ProviderManagementService> = Arc::new(provider_management);
     (provider_core, provider_bot_core, provider_management)
 }
@@ -1693,6 +1696,12 @@ impl Default for BcsServerState {
         let relation_store: Arc<RelationCore> = Arc::new(RelationCore::memory());
         let user_directory =
             create_user_directory_plugin(&config).expect("default user directory config is valid");
+        let provider_control_plane: Arc<dyn BotControlPlaneCoreService> =
+            Arc::new(BotControlPlaneCore::new(
+                control_plane_repo.clone(),
+                provider_repos.provider_repo.clone(),
+                provider_repos.provider_bindings.clone(),
+            ));
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -1700,6 +1709,7 @@ impl Default for BcsServerState {
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
                 user_directory.clone(),
                 outbound_url_guard.clone(),
+                provider_control_plane,
             );
         let (organization_core, organization_management) = memory_organization_services(
             &provider_repos,
@@ -3124,6 +3134,12 @@ impl BcsServer {
         let relation_store: Arc<RelationCore> = Arc::new(RelationCore::memory());
         let user_directory = create_user_directory_plugin(&config)
             .expect("user directory config is valid for in-memory server");
+        let provider_control_plane: Arc<dyn BotControlPlaneCoreService> =
+            Arc::new(BotControlPlaneCore::new(
+                control_plane_repo.clone(),
+                provider_repos.provider_repo.clone(),
+                provider_repos.provider_bindings.clone(),
+            ));
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -3131,6 +3147,7 @@ impl BcsServer {
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
                 user_directory.clone(),
                 provider_webhook_url_guard,
+                provider_control_plane,
             );
         let (organization_core, organization_management) = memory_organization_services(
             &provider_repos,
@@ -3671,6 +3688,12 @@ impl BcsServer {
         let relation_svc: Arc<dyn bcs_service_api::RelationCoreService> =
             Arc::new(RelationCore::with_repo(relation_repo));
 
+        let provider_control_plane: Arc<dyn BotControlPlaneCoreService> =
+            Arc::new(BotControlPlaneCore::new(
+                control_plane_repo.clone(),
+                provider_repos.provider_repo.clone(),
+                provider_repos.provider_bindings.clone(),
+            ));
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -3678,6 +3701,7 @@ impl BcsServer {
                 relation_svc.clone(),
                 user_directory.clone(),
                 outbound_url_guard.clone(),
+                provider_control_plane,
             );
         let (organization_core, organization_management) = db_organization_services(
             db_plugin.clone(),

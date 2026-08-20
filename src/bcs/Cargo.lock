@@ -1055,6 +1055,7 @@ dependencies = [
  "bcs-callback",
  "bcs-channel-api",
  "bcs-cli",
+ "bcs-config",
  "bcs-config-api",
  "bcs-domain",
  "bcs-friend",

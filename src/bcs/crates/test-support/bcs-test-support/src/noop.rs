@@ -483,6 +483,15 @@ impl ProviderManagementService for NoopProviderManagementService {
         Err(service_not_configured("provider management service"))
     }
 
+    async fn list_provider_bots_by_task_modes(
+        &self,
+        _provider_id: &str,
+        _provider_admin_token: &str,
+        _filter: ProviderBotTaskModesFilter,
+    ) -> ServiceResult<Vec<ProviderBotRosterItem>> {
+        Err(service_not_configured("provider management service"))
+    }
+
     async fn delete_provider_bot(
         &self,
         _command: DeleteProviderBotCommand,

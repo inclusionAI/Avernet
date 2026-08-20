@@ -1,12 +1,15 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::{
-    BotRegistryCoreService, DeleteProviderBotCommand, DeleteProviderBotOutcome, ProviderBotBinding,
-    ProviderBotCoreService, ProviderCoreService, ProviderManagementService, ProviderRecord,
-    RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderBotParams,
-    RegisterProviderCommand, RegisterProviderOutcome, RelationCoreService, ServiceError,
-    ServiceResult, UpdateProviderCommand,
+    BotControlPlaneCoreService, BotRegistryCoreService, BotTaskModesQuery,
+    DeleteProviderBotCommand, DeleteProviderBotOutcome, ProviderBotBinding, ProviderBotCoreService,
+    ProviderBotRosterItem, ProviderBotTaskModesFilter, ProviderCoreService,
+    ProviderManagementService, ProviderRecord, RegisterProviderBotCommand,
+    RegisterProviderBotOutcome, RegisterProviderBotParams, RegisterProviderCommand,
+    RegisterProviderOutcome, RelationCoreService, ServiceError, ServiceResult,
+    UpdateProviderCommand,
 };
 use bcs_user_directory_api::UserDirectoryPlugin;
 
@@ -17,6 +20,7 @@ pub struct ProviderManagement {
     registry: Arc<dyn BotRegistryCoreService>,
     relation: Arc<dyn RelationCoreService>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
+    control_plane: Option<Arc<dyn BotControlPlaneCoreService>>,
 }
 
 impl ProviderManagement {
@@ -32,11 +36,23 @@ impl ProviderManagement {
             registry,
             relation,
             user_directory: None,
+            control_plane: None,
         }
     }
 
     pub fn with_user_directory(mut self, user_directory: Arc<dyn UserDirectoryPlugin>) -> Self {
         self.user_directory = Some(user_directory);
+        self
+    }
+
+    /// Inject the bot control-plane core required by the task-mode roster
+    /// (`list_provider_bots_by_task_modes`). The composition root wires this for
+    /// the production/memory server paths; without it the roster method errors.
+    pub fn with_control_plane(
+        mut self,
+        control_plane: Arc<dyn BotControlPlaneCoreService>,
+    ) -> Self {
+        self.control_plane = Some(control_plane);
         self
     }
 
@@ -264,6 +280,48 @@ impl ProviderManagementService for ProviderManagement {
         self.provider_bot_core
             .list_provider_bots(provider_id, provider_admin_token)
             .await
+    }
+
+    async fn list_provider_bots_by_task_modes(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+        filter: ProviderBotTaskModesFilter,
+    ) -> ServiceResult<Vec<ProviderBotRosterItem>> {
+        let control_plane = self.control_plane.clone().ok_or_else(|| {
+            ServiceError::InternalError("control-plane core not configured".to_string())
+        })?;
+        // Reuse the same admin-token validation path as `list_provider_bots`.
+        // A bad/missing token surfaces as Unauthorized from the provider bot core.
+        let bindings = self
+            .provider_bot_core
+            .list_provider_bots(provider_id, provider_admin_token)
+            .await?;
+        let allowed_uuids: HashSet<String> = bindings
+            .into_iter()
+            .map(|binding| binding.bot_uuid)
+            .collect();
+        let env = bcs_config::resolve_env_str();
+        let views = control_plane
+            .list_by_task_modes(BotTaskModesQuery {
+                env,
+                task_claim_mode: filter.task_claim_mode,
+                task_dream_mode: filter.task_dream_mode,
+                match_mode: filter.match_mode,
+            })
+            .await?;
+        let items = views
+            .into_iter()
+            .filter(|view| allowed_uuids.contains(&view.record.bot_id))
+            .map(|view| ProviderBotRosterItem {
+                bot_id: view.record.bot_id,
+                name: view.record.name,
+                env: view.record.env,
+                task_claim_mode: view.record.task_claim_mode,
+                task_dream_mode: view.record.task_dream_mode,
+            })
+            .collect();
+        Ok(items)
     }
 
     async fn delete_provider_bot(

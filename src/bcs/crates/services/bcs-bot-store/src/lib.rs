@@ -30,7 +30,7 @@ use bcs_db_api::{
 use bcs_service_api::{
     BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRecord, BotControlPlaneRepoPort,
+    BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch,
     BotDynamicStatus, BotMetricCount,
     BotMetricsSnapshotPort, RegisteredBot, ServiceError, ServiceResult, Skill,
 };
@@ -2805,6 +2805,50 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
                 bcs_service_api::ActorStatus::Online => "online",
                 bcs_service_api::ActorStatus::Hidden => "hidden",
             }));
+        }
+        sql.push_str(" ORDER BY gmt_create DESC, bot_uuid ASC");
+        let rows = self
+            .db_query(&sql, params)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        rows.iter().map(control_plane_record_from_row).collect()
+    }
+
+    async fn list_control_plane_by_task_modes(
+        &self,
+        query: BotTaskModesQuery,
+    ) -> ServiceResult<Vec<BotControlPlaneRecord>> {
+        let mut sql = format!(
+            "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, \
+                    created_by, agent_code, task_claim_mode, task_dream_mode, \
+                    ({}) * 1000 AS gmt_create_ms, ({}) * 1000 AS gmt_modified_ms \
+             FROM bcs_bots \
+             WHERE env = ? AND COALESCE(is_deleted, 0) = 0 \
+             AND COALESCE(actor_kind, 'bot') = 'bot'",
+            self.flavor.unix_ts("gmt_create"),
+            self.flavor.unix_ts("gmt_modified")
+        );
+        let mut params = vec![Value::from(query.env.as_str())];
+        match (query.task_claim_mode, query.task_dream_mode, query.match_mode) {
+            (Some(claim), Some(dream), TaskModeMatch::All) => {
+                sql.push_str(" AND task_claim_mode = ? AND task_dream_mode = ?");
+                params.push(Value::from(if claim { 1 } else { 0 }));
+                params.push(Value::from(if dream { 1 } else { 0 }));
+            }
+            (Some(claim), Some(dream), TaskModeMatch::Any) => {
+                sql.push_str(" AND (task_claim_mode = ? OR task_dream_mode = ?)");
+                params.push(Value::from(if claim { 1 } else { 0 }));
+                params.push(Value::from(if dream { 1 } else { 0 }));
+            }
+            (Some(claim), None, _) => {
+                sql.push_str(" AND task_claim_mode = ?");
+                params.push(Value::from(if claim { 1 } else { 0 }));
+            }
+            (None, Some(dream), _) => {
+                sql.push_str(" AND task_dream_mode = ?");
+                params.push(Value::from(if dream { 1 } else { 0 }));
+            }
+            (None, None, _) => {}
         }
         sql.push_str(" ORDER BY gmt_create DESC, bot_uuid ASC");
         let rows = self

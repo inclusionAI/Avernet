@@ -61,6 +61,25 @@ pub struct BotControlPlaneOwnedQuery {
     pub status: Option<ActorStatus>,
 }
 
+/// How to combine `task_claim_mode` / `task_dream_mode` filters in a task-mode roster query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskModeMatch {
+    /// A bot qualifies if any listed mode matches (OR).
+    Any,
+    /// A bot qualifies only if every listed mode matches (AND).
+    All,
+}
+
+/// Roster query for physical bots by the task-mode toggles. Each mode is optional;
+/// when both are omitted the query returns all physical bots in the environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BotTaskModesQuery {
+    pub env: String,
+    pub task_claim_mode: Option<bool>,
+    pub task_dream_mode: Option<bool>,
+    pub match_mode: TaskModeMatch,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BotControlPlaneDescriptorPatch {
     pub summary: Option<String>,

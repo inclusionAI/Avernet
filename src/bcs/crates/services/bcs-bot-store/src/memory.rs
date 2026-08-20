@@ -17,6 +17,7 @@ use bcs_service_api::port::repo::BotRepoPort;
 use bcs_service_api::{
     BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotTaskModesQuery, TaskModeMatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotDynamicStatus, BotMetricCount,
     BotMetricsSnapshotPort, RegisteredBot, ServiceError, ServiceResult, Skill,
 };
@@ -1789,6 +1790,43 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
                 continue;
             }
             records.push(bot);
+        }
+        records.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| left.bot_id.cmp(&right.bot_id))
+        });
+        Ok(records)
+    }
+
+    async fn list_control_plane_by_task_modes(
+        &self,
+        query: BotTaskModesQuery,
+    ) -> ServiceResult<Vec<BotControlPlaneRecord>> {
+        let ids = self.bots.read().await.keys().cloned().collect::<Vec<_>>();
+        let mut records = Vec::new();
+        for bot_id in ids {
+            let Some(bot) = self.get_control_plane(&bot_id, &query.env).await? else {
+                continue;
+            };
+            if bot.kind != bcs_service_api::ActorKind::Bot {
+                continue;
+            }
+            let passes = match (query.task_claim_mode, query.task_dream_mode, query.match_mode) {
+                (Some(claim), Some(dream), TaskModeMatch::All) => {
+                    bot.task_claim_mode == claim && bot.task_dream_mode == dream
+                }
+                (Some(claim), Some(dream), TaskModeMatch::Any) => {
+                    bot.task_claim_mode == claim || bot.task_dream_mode == dream
+                }
+                (Some(claim), None, _) => bot.task_claim_mode == claim,
+                (None, Some(dream), _) => bot.task_dream_mode == dream,
+                (None, None, _) => true,
+            };
+            if passes {
+                records.push(bot);
+            }
         }
         records.sort_by(|left, right| {
             right

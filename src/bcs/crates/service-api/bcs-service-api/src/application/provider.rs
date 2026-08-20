@@ -3,9 +3,10 @@ use bcs_domain::{
     ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig,
     ProviderOrganizationManagementConfig, ProviderRecord, Skill,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::ServiceResult;
+use crate::{ServiceResult, TaskModeMatch};
 
 use super::message_flow::{BotEventOutcome, ChatEventState, ProviderEventIngestCommand};
 
@@ -188,6 +189,29 @@ pub enum ProviderBotEventError {
     Internal(String),
 }
 
+/// Provider-scoped roster item projected from the bot control-plane by the two
+/// task-mode toggles. Returned by the internal (non-OpenAPI) provider roster
+/// route consumed by backend task discovery/dispatch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderBotRosterItem {
+    pub bot_id: String,
+    pub name: String,
+    pub env: String,
+    pub task_claim_mode: bool,
+    pub task_dream_mode: bool,
+}
+
+/// Task-mode filter for the provider roster. `None` toggles mean "do not filter
+/// on this toggle"; `match_mode` selects whether a bot must match the non-`None`
+/// toggles on ANY (default) or ALL. Built by the handler from query params — not
+/// deserialized, so `TaskModeMatch` need not be serde-enabled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderBotTaskModesFilter {
+    pub task_claim_mode: Option<bool>,
+    pub task_dream_mode: Option<bool>,
+    pub match_mode: TaskModeMatch,
+}
+
 #[async_trait]
 pub trait ProviderManagementService: Send + Sync {
     async fn register_provider(
@@ -216,6 +240,16 @@ pub trait ProviderManagementService: Send + Sync {
         provider_id: &str,
         provider_admin_token: &str,
     ) -> ServiceResult<Vec<ProviderBotBinding>>;
+
+    /// List the provider's bots whose control-plane toggles satisfy `filter`.
+    /// Mirrors `list_provider_bots` admin-token validation, then intersects the
+    /// provider's bot bindings with the task-mode matches resolved server-side.
+    async fn list_provider_bots_by_task_modes(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+        filter: ProviderBotTaskModesFilter,
+    ) -> ServiceResult<Vec<ProviderBotRosterItem>>;
 
     async fn delete_provider_bot(
         &self,

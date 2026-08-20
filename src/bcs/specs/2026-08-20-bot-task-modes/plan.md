@@ -222,4 +222,60 @@ No backend HTTP route unless an external caller needs it. **Blocked on the trans
 - Task claim/dream execution, scheduling, dispatch logic.
 - Frontend implementation.
 - A backend HTTP route exposing the roster (only if an external caller needs it).
+
+---
+
+## 11. Read-side contract (finalized 2026-08-20 — supersedes §6 and the earlier revert)
+
+The earlier plan reverted a BCS-internal roster read and left the backend→BCS transport open
+(§6). After alignment with the BCS owner, the read side is now finalized as an **internal
+(non-OpenAPI) BCS provider HTTP route**, consumed by the backend task module over the existing
+`BcsHttpAdapter`. This section is authoritative for the read side.
+
+### Contract
+
+- **Route**: `GET /providers/{provider_id}/bots/by-task-modes` — registered in
+  `adapters/http/bcs-http/src/router.rs`, co-located with the `/providers/{provider_id}/bots`
+  group (NOT under `openapi_v1`).
+- **Auth**: `Authorization: Bearer <provider_admin_token>`, extracted via `bearer_token(&headers)`
+  and validated server-side by `provider_management` (mirrors `list_provider_bots` /
+  `switch_bot_delivery`). Missing/wrong token → `401`. NOT X-BCS-Service-Key, NOT X-ECB, NOT OpenAPI.
+- **Scope**: provider-scoped — only bots bound to `{provider_id}` are returned (intersect of the
+  provider's bot bindings with the task-mode matches).
+- **Query params**: `task_claim_mode` / `task_dream_mode` (optional `true|false`; absent/empty =
+  do not filter on that toggle); `match` (`any` default | `all`) — whether a bot must match the
+  supplied toggles on ANY or ALL.
+- **Response**: `{"items":[{"bot_id","name","env","task_claim_mode","task_dream_mode"}, ...]}` — same
+  envelope shape as `list_provider_bots`.
+
+### BCS implementation layers (done)
+
+1. `types/bot_control_plane.rs`: `TaskModeMatch { Any, All }` + `BotTaskModesQuery { env,
+   task_claim_mode: Option<bool>, task_dream_mode: Option<bool>, match_mode }` (re-added; was
+   reverted earlier). Re-exported from `bcs_service_api` root.
+2. `port/repo/bot_control_plane.rs`: `list_control_plane_by_task_modes(query)`; implemented by
+   `PersistentBotRepo` (SQL Any/All/single/none clause, `env` + `is_deleted=0` +
+   `actor_kind='bot'`, ordered) and `MemoryBotRepo` (filter loop).
+3. `core/bot_control_plane.rs`: `BotControlPlaneCoreService::list_by_task_modes` (default
+   `Ok(vec![])`); `BotControlPlaneCore` overrides to delegate + `hydrate`.
+4. `application/provider.rs`: `ProviderManagementService::list_provider_bots_by_task_modes` +
+   result type `ProviderBotRosterItem` + input `ProviderBotTaskModesFilter`. `ProviderManagement`
+   gains `control_plane: Option<Arc<dyn BotControlPlaneCoreService>>` + `with_control_plane(..)`
+   builder; the method validates the admin token via `list_provider_bots`, queries
+   `list_by_task_modes(env = resolve_env_str())`, intersects by `bot_uuid`, projects to roster
+   items. Composition root (`server.rs`) wires the control-plane core into all 3 provider-service
+   builders; noop stub updated.
+5. `routes/providers.rs` + `router.rs`: handler `list_provider_bots_by_task_modes` parses query
+   params leniently (empty/absent = no filter) and the route registration.
+6. Conformance test `provider_routes_contract.rs::list_provider_bots_by_task_modes_filters_and_scopes_to_provider`:
+   any/all/single/none filters + provider-scoping (cross-provider bot excluded) + 401 on
+   missing/wrong token.
+
+### Backend consumption (see tasks.md §K / §I)
+
+Backend reuses `BcsClientPort` / `BcsHttpAdapter` (async, already injected into task core as
+`bcs: BcsClientPort`): new method `list_bots_by_task_modes(provider_id, claim, dream, match)`
+sends `Authorization: Bearer {provider_admin_token}` (provider creds on the token provider) and
+maps `{items}` to a **local** DTO (no reuse of existing backend domain objects). Task core
+scopes task discovery/dispatch to the returned roster.
 - Gateway `bcs_bots` mirror changes (not needed; gateway reads 6 columns for token resolution).
