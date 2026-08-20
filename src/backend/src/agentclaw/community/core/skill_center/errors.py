@@ -24,6 +24,26 @@ class LocalSkillOwnerAmbiguousError(Exception):
 class LocalSkillInvalidPackageError(Exception):
     """A ZIP package is malformed or violates the Local Skill layout."""
 
+    _PUBLIC_MESSAGES = {
+        "invalid_package": "Invalid Skill package",
+        "invalid_zip": "Skill package must be a valid ZIP archive",
+        "unsafe_file_path": "Skill package contains an unsafe file path",
+        "duplicate_file_path": "Skill package contains duplicate file paths",
+        "unreadable_archive": "Skill package could not be read",
+        "missing_skill_file": "Skill package must contain one SKILL.md file",
+        "multiple_skill_files": "Skill package must contain exactly one SKILL.md file",
+        "invalid_wrapper": "Skill package files must be under one Skill directory",
+        "invalid_encoding": "SKILL.md must be UTF-8 encoded",
+        "invalid_metadata": "SKILL.md must define a valid name and description",
+        "wrapper_name_mismatch": "Skill directory name must match SKILL.md name",
+    }
+
+    def __init__(self, reason: str = "invalid_package") -> None:
+        super().__init__(reason)
+        self.public_message = self._PUBLIC_MESSAGES.get(
+            reason, self._PUBLIC_MESSAGES["invalid_package"]
+        )
+
 
 class LocalSkillTooLargeError(Exception):
     """A ZIP package exceeds a published upload limit."""
@@ -43,10 +63,6 @@ class LocalSkillDuplicateError(Exception):
 
 class LocalSkillStorageError(Exception):
     """A package persistence or compensating cleanup operation failed."""
-
-
-class SkillParameterValidationError(Exception):
-    """The full Bot-level parameter object violates SKILL.md config."""
 
 
 class LocalSkillRuntimeSyncError(Exception):
@@ -71,55 +87,3 @@ class LocalSkillEditLockUnavailableError(LocalSkillEditPausedError):
 
 class ActiveSkillSetReferenceError(RuntimeError):
     """A Skill became referenced by an active custom SkillSet."""
-
-
-class SkillManagedBySkillSetError(Exception):
-    """A Direct command addressed a Skill owned by a normal SkillSet."""
-
-
-class SkillRuntimeNameConflictError(Exception):
-    """A Direct activation would create an ambiguous runtime entry name."""
-
-
-class SkillEngineNotSupportedError(Exception):
-    """The addressed Bot type and logical Engine cannot consume this Skill."""
-
-
-class RepositoryCatalogNotFoundError(Exception):
-    """A governed shared Repo Skill is not visible in this environment."""
-
-
-class RepositoryCatalogSyncInProgressError(Exception):
-    """The environment-wide governed Repo synchronization already has a holder."""
-
-
-class RepositoryCatalogSyncFailedError(Exception):
-    """The governed Repo synchronization could not finish successfully."""
-
-
-class SkillSetControlPlaneNotFoundError(Exception):
-    """A canonical SkillSet is absent from the addressed Bot scope."""
-
-
-class SkillSetAccessDeniedError(Exception):
-    """The authenticated principal cannot mutate the addressed Bot SkillSet."""
-
-
-class SkillSetControlPlaneConflictError(Exception):
-    """A canonical SkillSet command conflicts with desired state."""
-
-
-class SkillSetRuntimeReconcileError(Exception):
-    """Runtime reconciliation failed after desired-state compensation."""
-
-
-class SkillSetControlPlaneLockUnavailableError(Exception):
-    """The Bot capability mutation fence is unavailable; mutation failed closed."""
-
-
-class SkillSetManagedResourceError(Exception):
-    """A Direct command targets a resource managed by an ordinary SkillSet."""
-
-
-class McpPermissionDeniedError(Exception):
-    """The actor cannot install or activate the addressed MCP server."""

@@ -5,10 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from engine.community.core.adapters.openclaw.skills import (
-    OpenClawSkillsAdapter,
-    _serialize_pool_mapping,
-)
+from engine.community.core.adapters.openclaw.skills import OpenClawSkillsAdapter
 from engine.community.core.skills.exceptions import (
     InvalidPoolMappingRequestError,
 )
@@ -245,51 +242,6 @@ async def test_openclaw_adapter_propagates_logical_mapping_version() -> None:
         "retired_mappings": [expected_retired_mapping],
         "source_layout": "pool",
     }
-
-
-@pytest.mark.asyncio
-async def test_openclaw_adapter_serializes_center_v3_for_full_lifecycle() -> None:
-    port = MagicMock()
-    port.activate_pool_layout = AsyncMock(return_value={"committed": True, "status": "COMMITTED", "evidence": {}})
-    port.publish_pool_mappings = AsyncMock(return_value={"published": True, "evidence": {}})
-    port.verify_pool_mappings = AsyncMock(return_value={"valid": True, "evidence": {}})
-    mapping = PoolSkillMappingIntent(
-        corpus="center", relative_path=None, link_name="risk-review",
-        skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a", sc_version_number="2026.8.19",
-    )
-    version = "skills-pool-mapping-v3"
-    adapter = OpenClawSkillsAdapter(port)
-
-    await adapter.activate_pool_layout(PoolLayoutActivateRequest(
-        migration_generation="generation-1", preparation_id="preparation-1",
-        mappings=[mapping], mapping_contract_version=version,
-    ))
-    await adapter.publish_pool_mappings([mapping], retired_mappings=[mapping], mapping_contract_version=version)
-    await adapter.verify_pool_mappings([mapping], retired_mappings=[mapping], mapping_contract_version=version)
-
-    expected = {"corpus": "center", "skill_uuid": mapping.skill_uuid, "sc_version_number": mapping.sc_version_number, "link_name": "risk-review"}
-    assert port.activate_pool_layout.await_args.args[0]["mapping_contract_version"] == version
-    assert port.publish_pool_mappings.await_args.args[0]["mapping_contract_version"] == version
-    assert port.verify_pool_mappings.await_args.args[0]["mapping_contract_version"] == version
-    assert port.activate_pool_layout.await_args.args[0]["mappings"] == [expected]
-    assert port.publish_pool_mappings.await_args.args[0]["mappings"] == [expected]
-    assert port.publish_pool_mappings.await_args.args[0]["retired_mappings"] == [expected]
-    assert port.verify_pool_mappings.await_args.args[0]["mappings"] == [expected]
-
-
-@pytest.mark.parametrize(
-    "mapping,message",
-    [
-        (PoolSkillMappingIntent(corpus="center", relative_path=None, link_name="a"), "structured identity"),
-        (PoolSkillMappingIntent(corpus="repo", relative_path=None, link_name="a"), "relative_path"),
-    ],
-)
-def test_openclaw_mapping_serializer_rejects_incomplete_intent(
-    mapping: PoolSkillMappingIntent,
-    message: str,
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        _serialize_pool_mapping(mapping)
 
 
 @pytest.mark.asyncio

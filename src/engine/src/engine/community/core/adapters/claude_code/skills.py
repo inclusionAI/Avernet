@@ -75,17 +75,6 @@ def _serialize_pool_mapping(
     item: PoolSkillMappingIntent | SymlinkItem,
 ) -> dict[str, str]:
     if isinstance(item, PoolSkillMappingIntent):
-        if item.corpus == "center":
-            if item.skill_uuid is None or item.sc_version_number is None:
-                raise ValueError("center mapping requires structured identity")
-            return {
-                "corpus": "center",
-                "skill_uuid": item.skill_uuid,
-                "sc_version_number": item.sc_version_number,
-                "link_name": item.link_name,
-            }
-        if item.relative_path is None:
-            raise ValueError("logical mapping requires relative_path")
         return {
             "corpus": item.corpus,
             "relative_path": item.relative_path,

@@ -232,18 +232,6 @@ USER_SCOPED_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     **USER_SCOPED_403,
 }
 
-# Space/member/favorite routes derive the actor from the verified principal and
-# can answer 403 for a valid caller lacking the required space role. This is a
-# different contract from USER_SCOPED_403: there is no caller-supplied user_id.
-SPACE_SCOPED_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
-    **ERROR_RESPONSES,
-    403: {
-        "model": ErrorEnvelope,
-        "description": "The authenticated user lacks the required space membership or role",
-        **error_example(403, "Forbidden"),
-    },
-}
-
 # Extra failures only the engine-runtime groups can produce. Attached to those
 # routers, NOT merged into ``ERROR_RESPONSES``: that dict is applied surface-wide
 # in ``build_public_router``, and ``test_openapi_error_schema`` asserts every

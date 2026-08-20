@@ -36,12 +36,10 @@ from agentclaw.community.api.local_skill_state_service import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import (
-    BotSkillAssetServiceProtocol,
-)
-from agentclaw.community.core.models.skill import BotSkillInstallation, Skill
+from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillActiveError,
+    LocalSkillInvalidPackageError,
     LocalSkillNotFoundError,
     LocalSkillOwnerAmbiguousError,
 )
@@ -55,10 +53,7 @@ from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
 from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
-from agentclaw.community.core.repository.implementations.skill_center.skill import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository, SkillSetRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -143,54 +138,18 @@ class _Delete:
         self.args = kwargs
 
 
-class _Asset:
-    def __init__(self) -> None:
-        self.query = None
-        self.state = None
-
-    def get_skill(self, **kwargs):
-        return self.query.get_local_skill(
-            skill_id=kwargs["skill_id"], actor_id=kwargs["user_id"]
-        )
-
-    async def set_active(self, **kwargs):
-        return await self.state.set_local_skill_active(
-            skill_id=kwargs["skill_id"],
-            actor_id=kwargs["user_id"],
-            active=kwargs["active"],
-        )
-
-    async def get_content(self, **kwargs):
-        self.content_args = kwargs
-        return "---\nname: weather\ndescription: Forecast\n---\n# Weather"
-
-    async def get_parameters(self, **kwargs):
-        self.parameter_args = kwargs
-        return {"region": "cn"}
-
-    async def replace_parameters(self, **kwargs):
-        self.replace_args = kwargs
-        return kwargs["parameters"]
-
-
 def _client(
     query: _Query,
     state: _State | None = None,
     delete: _Delete | None = None,
-    asset: _Asset | None = None,
+    upload: _Upload | None = None,
 ) -> TestClient:
-    state_service = state or _State()
-    asset_service = asset or _Asset()
-    asset_service.query = query
-    asset_service.state = state_service
-
     class Bindings(Module):
         def configure(self, binder):
             binder.bind(LocalSkillQueryServiceProtocol, to=query)
-            binder.bind(LocalSkillUploadServiceProtocol, to=_Upload())
-            binder.bind(LocalSkillStateServiceProtocol, to=state_service)
+            binder.bind(LocalSkillUploadServiceProtocol, to=upload or _Upload())
+            binder.bind(LocalSkillStateServiceProtocol, to=state or _State())
             binder.bind(LocalSkillDeleteServiceProtocol, to=delete or _Delete())
-            binder.bind(BotSkillAssetServiceProtocol, to=asset_service)
 
     app = FastAPI()
     app.include_router(router)
@@ -261,6 +220,24 @@ def test_upload_rejects_multipart_and_other_content_types_before_service_call():
         assert response.json()["code"] == 400101
 
 
+def test_upload_returns_a_safe_actionable_invalid_package_reason():
+    class _InvalidUpload(_Upload):
+        async def upload_local_skill(self, **kwargs):
+            raise LocalSkillInvalidPackageError("multiple_skill_files")
+
+    response = _client(_Query(), upload=_InvalidUpload()).post(
+        "/openapi/v1/bots/bot-1/skills",
+        content=b"PK\x03\x04",
+        headers={"content-type": "application/zip"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 400101
+    assert response.json()["message"] == (
+        "Skill package must contain exactly one SKILL.md file"
+    )
+
+
 def test_activate_and_deactivate_derive_scope_from_id_and_return_desired_state():
     state = _State()
     client = _client(_Query(), state)
@@ -290,18 +267,12 @@ def test_activate_and_deactivate_derive_scope_from_id_and_return_desired_state()
 
 def test_delete_derives_scope_from_skill_id_and_returns_standard_deleted_payload():
     delete = _Delete()
-    response = _client(_Query(), delete=delete).delete(
-        "/openapi/v1/bots/bot-1/skills/8"
-    )
+    response = _client(_Query(), delete=delete).delete("/openapi/v1/bots/bot-1/skills/8")
 
     assert response.status_code == 200
     assert response.json()["code"] == 200000
     assert response.json()["data"] == {"deleted": True}
-    assert delete.args == {
-        "skill_id": "8",
-        "owner_id": "actor",
-        "user_id": "actor",
-    }
+    assert delete.args == {"skill_id": "8", "actor_id": "actor"}
 
 
 def test_delete_active_error_uses_the_fixed_public_conflict_envelope():
@@ -374,55 +345,22 @@ def test_detail_derives_scope_from_skill_id_and_masks_invisible_rows():
     assert ambiguous.json()["code"] == 409104
 
 
-def test_content_and_parameters_use_the_type_resolved_asset_service():
-    asset = _Asset()
-    client = _client(_Query(), asset=asset)
-
-    content = client.get("/openapi/v1/bots/bot-1/skills/7/content")
-    parameters = client.get("/openapi/v1/bots/bot-1/skills/7/parameters")
-    replacement = client.put(
-        "/openapi/v1/bots/bot-1/skills/7/parameters",
-        json={"parameters": {"region": "us"}},
-    )
-
-    assert content.json()["data"]["content"].endswith("# Weather")
-    assert parameters.json()["data"] == {"parameters": {"region": "cn"}}
-    assert replacement.json()["data"] == {"parameters": {"region": "us"}}
-    assert asset.content_args == {
-        "skill_id": "7",
-        "bot_id": "bot-1",
-        "owner_id": "actor",
-        "user_id": "actor",
-    }
-    assert asset.parameter_args == {
-        "skill_id": "7",
-        "bot_id": "bot-1",
-        "owner_id": "actor",
-        "user_id": "actor",
-    }
-    assert asset.replace_args == {
-        "skill_id": "7",
-        "bot_id": "bot-1",
-        "owner_id": "actor",
-        "user_id": "actor",
-        "parameters": {"region": "us"},
-    }
-
-
 def test_list_requires_bot_id_and_shared_page_limits():
     client = _client(_Query())
     # No bot in the address means no such route, not a missing parameter.
     assert client.get("/openapi/v1/bots/skills").status_code == 404
-    assert client.get("/openapi/v1/bots/bot/skills?page_size=101").status_code == 422
+    assert (
+        client.get("/openapi/v1/bots/bot/skills?page_size=101").status_code
+        == 422
+    )
 
 
-def test_openapi_declares_local_compatibility_and_skill_asset_operations():
+def test_openapi_declares_exactly_the_six_ratified_skills_operations():
     schema = _client(_Query()).app.openapi()
     skill_paths = {
         path: operations
         for path, operations in schema["paths"].items()
-        if "/skills" in path
-        and path.startswith("/openapi/v1/bots/{bot_id}")
+        if "/skills" in path and path.startswith("/openapi/v1/bots/{bot_id}")
         or path.startswith("/openapi/v1/bots/{bot_id}/skills")
     }
     assert {path: set(operations) for path, operations in skill_paths.items()} == {
@@ -430,8 +368,6 @@ def test_openapi_declares_local_compatibility_and_skill_asset_operations():
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}": {"get", "delete"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate": {"post"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate": {"post"},
-        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content": {"get"},
-        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters": {"get", "put"},
     }
     for path in (
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",
@@ -473,12 +409,12 @@ def test_openapi_declares_local_compatibility_and_skill_asset_operations():
             if path != "/openapi/v1/bots/{bot_id}/skills" or method != "post":
                 assert "413" not in operation.get("responses", {})
     for status in ("200", "201"):
-        assert upload["responses"][status]["content"]["application/json"]["schema"][
-            "$ref"
-        ].endswith("Envelope_SkillUpload_")
-    assert schema["components"]["schemas"]["SkillUpload"]["properties"]["operation"][
-        "enum"
-    ] == ["created", "updated"]
+        assert upload["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "Envelope_SkillUpload_"
+        )
+    assert schema["components"]["schemas"]["SkillUpload"]["properties"]["operation"]["enum"] == [
+        "created", "updated"
+    ]
 
 
 class _Database:
@@ -514,7 +450,7 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
         _Resolver(), "gateway_principal_signing_key", strict=False
     )
     engine = create_engine(f"sqlite:///{tmp_path / 'skills-router.db'}")
-    for model in (BotModel, Skill, BotSkillInstallation, DefaultSkillsetSkillExclusion):
+    for model in (BotModel, Skill, DefaultSkillsetSkillExclusion):
         model.__table__.create(engine)
     db = _Database(engine)
     bots, skills = BotRepository(db), SkillRepository(db)
@@ -545,21 +481,12 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
             }
         )
 
-        class Bindings(Module):
-            def configure(self, binder):
-                local_query = LocalSkillQueryService(skills, bots, object())
-                binder.bind(
-                    LocalSkillQueryServiceProtocol,
-                    to=local_query,
-                )
-
-                class Assets:
-                    def get_skill(self, *, skill_id, bot_id, owner_id, user_id):
-                        return local_query.get_local_skill(
-                            skill_id=skill_id, actor_id=user_id
-                        )
-
-                binder.bind(BotSkillAssetServiceProtocol, to=Assets())
+    class Bindings(Module):
+        def configure(self, binder):
+            binder.bind(
+                LocalSkillQueryServiceProtocol,
+                to=LocalSkillQueryService(skills, bots, object()),
+            )
 
     now = int(time.time())
 
@@ -623,7 +550,7 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
 def test_default_bot_scope_is_owner_distinguished(tmp_path):
     """Two valid legacy ``default`` Bots must not make either owner ambiguous."""
     engine = create_engine(f"sqlite:///{tmp_path / 'default-owner.db'}")
-    for model in (BotModel, Skill, BotSkillInstallation, DefaultSkillsetSkillExclusion):
+    for model in (BotModel, Skill, DefaultSkillsetSkillExclusion):
         model.__table__.create(engine)
     db = _Database(engine)
     bots, skills = BotRepository(db), SkillRepository(db)
@@ -741,28 +668,9 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
         def release(self, _lease):
             return True
 
-    class _MutationGuard:
-        def acquire(self, **_kwargs):
-            return object()
-
-        def release(self, _lease):
-            return True
-
-        def ensure_valid(self, _lease) -> None:
-            return None
-
     factory = _Factory()
     service = LocalSkillStateService(
-        skills,
-        object(),
-        bots,
-        object(),
-        factory,
-        _MutationGuard(),
-        _Guard(),
-        object(),
-        object(),
-        object(),
+        skills, sets, bots, object(), factory, _Guard(), object(), object(), object()
     )
     with avernet_tenant_scope("tenant-b"):
         with pytest.raises(LocalSkillNotFoundError):

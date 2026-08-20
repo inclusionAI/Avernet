@@ -21,7 +21,6 @@ internal_dependencies:
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.workspace
   - agentclaw.community.di.config
-  - agentclaw.community.log
   - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.mcp_center
   - agentclaw.community.plugin_api.models

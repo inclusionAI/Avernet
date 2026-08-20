@@ -21,37 +21,14 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
-    SkillManagedBySkillSetError,
-    SkillRuntimeNameConflictError,
-    SkillSetManagedResourceError,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.core.skill_center.runtime_policy import (
-    BotSkillRuntimeCommand,
-    BotSkillRuntimeMutationMode,
-    require_bot_skill_runtime_command,
-)
-from agentclaw.community.core.skill_center.runtime_resolver import (
-    RuntimeDesiredState,
-    RuntimeProjectionResolver,
-)
-from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectionReconcilerProtocol,
-)
-from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
-    BotCapabilityMutationBusyError,
-    BotCapabilityMutationGuard,
-    BotCapabilityMutationLease,
-    BotCapabilityMutationLockUnavailableError,
-)
-from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
 )
-from agentclaw.community.core.repository.protocols.skill_installation import (
-    SkillInstallationRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
     SkillsPoolSkillRepositoryProtocol,
 )
 from agentclaw.community.core.skills_pool.edit_guard import (
@@ -63,11 +40,18 @@ from agentclaw.community.core.skills_pool.edit_guard import (
 )
 from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
+    local_skill_name,
 )
 from agentclaw.community.core.skills_pool.models import (
+    PoolSkillMapping,
     RegisteredSkillAsset,
+    SkillMappingSourceLayout,
 )
-from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
+from agentclaw.community.core.skills_pool.types import (
+    BotSkillLayoutScope,
+    runtime_uses_pool_paths,
+)
 
 
 class LocalSkillStateService:
@@ -77,236 +61,114 @@ class LocalSkillStateService:
     def __init__(
         self,
         skill_repo: SkillRepository,
-        installations: SkillInstallationRepositoryProtocol,
+        skill_set_repo: SkillSetRepository,
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_set_service_factory: SkillSetServiceFactory,
-        mutation_guard: BotCapabilityMutationGuard,
         edit_guard: SkillsPoolEditGuard,
+        pool_runtime: SkillsPoolRuntimeProtocol,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
-        skill_set_repo: SkillSetRepository,
-        runtime_reconciler: BotRuntimeProjectionReconcilerProtocol,
+        pool_layouts: SkillsPoolLayoutRepositoryProtocol,
     ) -> None:
         self._skill_repo = skill_repo
-        self._installations = installations
+        self._skill_set_repo = skill_set_repo
         self._bot_repo = bot_repo
         self._collaborators = collaborator_service
         self._skill_set_service_factory = skill_set_service_factory
-        self._mutation_guard = mutation_guard
         self._edit_guard = edit_guard
+        self._pool_runtime = pool_runtime
         self._pool_skills = pool_skills
-        self._skill_set_repo = skill_set_repo
-        self._runtime_reconciler = runtime_reconciler
+        self._pool_layouts = pool_layouts
 
     async def set_local_skill_active(
         self, *, skill_id: str, actor_id: str, active: bool
     ) -> dict[str, Any]:
         scope = self._discover_scope(skill_id)
         try:
-            mutation_lease = self._mutation_guard.acquire(scope=scope)
-        except BotCapabilityMutationBusyError as exc:
+            lease = self._edit_guard.acquire_for_edit(scope=scope)
+        except SkillsPoolEditBusyError as exc:
             raise LocalSkillEditBusyError() from exc
-        except BotCapabilityMutationLockUnavailableError as exc:
+        except SkillsPoolEditRollbackError as exc:
+            raise LocalSkillLayoutRollbackError() from exc
+        except SkillsPoolEditLockUnavailableError as exc:
             raise LocalSkillEditLockUnavailableError() from exc
+        except SkillsPoolEditPausedError as exc:
+            raise LocalSkillEditPausedError() from exc
         try:
-            try:
-                lease = self._edit_guard.acquire_for_edit(scope=scope)
-            except SkillsPoolEditBusyError as exc:
-                raise LocalSkillEditBusyError() from exc
-            except SkillsPoolEditRollbackError as exc:
-                raise LocalSkillLayoutRollbackError() from exc
-            except SkillsPoolEditLockUnavailableError as exc:
-                raise LocalSkillEditLockUnavailableError() from exc
-            except SkillsPoolEditPausedError as exc:
-                raise LocalSkillEditPausedError() from exc
-            try:
-                skill, bot, owner_id, bot_id = self._authorize(skill_id, actor_id)
-                self._reject_ordinary_skill_set_member(skill_id=skill_id, bot_id=bot_id)
-                if self._scope_for(bot, bot_id) != scope:
-                    raise LocalSkillNotFoundError()
-                if not is_bot_ready(bot):
-                    raise LocalSkillNotReadyError()
-                command = self._runtime_command(active=active)
-                mode = require_bot_skill_runtime_command(bot, command)
-                changed = self._write_desired_state(
-                    active=active,
-                    env=str(bot["env"]),
-                    bot_id=bot_id,
-                    skill_id=skill_id,
-                )
-                self._ensure_mutation_lease(mutation_lease)
-
-                if active:
-                    synced = await self._reconcile_runtime(
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        command=command,
-                        mode=mode,
-                    )
-                else:
-                    synced = await self._reconcile_deactivation(
-                        skill=skill,
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        command=command,
-                        mode=mode,
-                    )
-                self._ensure_mutation_lease(mutation_lease)
-                if not synced:
-                    if changed:
-                        self._ensure_mutation_lease(mutation_lease)
-                        try:
-                            self._write_desired_state(
-                                active=not active,
-                                env=str(bot["env"]),
-                                bot_id=bot_id,
-                                skill_id=skill_id,
-                            )
-                        except Exception as exc:
-                            raise LocalSkillStorageError() from exc
-                        # Restore through the established runtime synchronizer.
-                        # It owns each engine's actual active-root compatibility,
-                        # including Claude Code's historical workspace root.
-                        restored = await self._reconcile_runtime(
-                            bot_id=bot_id,
-                            owner_id=owner_id,
-                            command=command,
-                            mode=mode,
-                        )
-                        self._ensure_mutation_lease(mutation_lease)
-                        if not restored:
-                            raise LocalSkillRuntimeSyncError()
-                    raise LocalSkillRuntimeSyncError()
-                return {**skill, "active": active, "changed": changed}
-            finally:
-                self._edit_guard.release(lease)
-        finally:
-            self._mutation_guard.release(mutation_lease)
-
-    async def set_repo_skill_active(
-        self,
-        *,
-        skill_id: str,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        active: bool,
-    ) -> dict[str, Any]:
-        """Apply the same Installation/reconcile transaction to shared Repo assets."""
-        raw = self._skill_repo.get_by_id(skill_id) if skill_id.isdecimal() else None
-        # Repo records are globally governed assets.  The old scanner persisted
-        # ``bolt_id=default`` on some rows; it is a storage sentinel, never
-        # ownership, and must not make a shared asset unreadable or inactive.
-        if (
-            not raw
-            or raw.get("user_id")
-            or not str(raw.get("git_path") or "").startswith("git://")
-        ):
-            raise LocalSkillNotFoundError()
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if not bot:
-            raise LocalSkillNotFoundError()
-        if actor_id != owner_id:
-            permission = self._collaborators.check_collaborator_permission(
-                bot_id, owner_id, actor_id, PermissionLevel.MEMBER
-            )
-            if not permission.get("has_permission"):
+            skill, bot, owner_id, bot_id = self._authorize(skill_id, actor_id)
+            if self._scope_for(bot, bot_id) != scope:
                 raise LocalSkillNotFoundError()
-        if not is_bot_ready(bot):
-            raise LocalSkillNotReadyError()
-        command = self._runtime_command(active=active)
-        mode = self._require_repo_runtime_command(bot, command)
-        scope = self._scope_for(bot, bot_id)
-        try:
-            mutation_lease = self._mutation_guard.acquire(scope=scope)
-        except BotCapabilityMutationBusyError as exc:
-            raise LocalSkillEditBusyError() from exc
-        except BotCapabilityMutationLockUnavailableError as exc:
-            raise LocalSkillEditLockUnavailableError() from exc
-        try:
-            try:
-                lease = self._edit_guard.acquire_for_edit(scope=scope)
-            except SkillsPoolEditBusyError as exc:
-                raise LocalSkillEditBusyError() from exc
-            except SkillsPoolEditRollbackError as exc:
-                raise LocalSkillLayoutRollbackError() from exc
-            except SkillsPoolEditLockUnavailableError as exc:
-                raise LocalSkillEditLockUnavailableError() from exc
-            except SkillsPoolEditPausedError as exc:
-                raise LocalSkillEditPausedError() from exc
-            try:
-                # Membership and Installation are guarded by the same Bot
-                # mutation lease.  Rechecking below avoids accepting stale
-                # Direct state while a SkillSet command changes the Resolver
-                # input for this Bot.
-                self._require_no_normal_skill_set_membership(
+            if not is_bot_ready(bot):
+                raise LocalSkillNotReadyError()
+            default_set = self._skill_set_repo.get_default(
+                user_id=owner_id,
+                bolt_id=bot_id,
+                engine_type=bot.get("active_engine"),
+            )
+            if default_set is None:
+                raise LocalSkillNotFoundError()
+            if active:
+                self._ensure_default_set_membership(
+                    default_set=default_set,
                     skill_id=skill_id,
+                    owner_id=owner_id,
+                )
+            changed = bool(skill["active"]) != active
+            if changed:
+                self._write_desired_state(
+                    active=active,
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    skill_set_id=int(default_set["id"]),
+                    skill_id=int(skill_id),
+                )
+            elif not active:
+                # ``get_bot_local_skill`` treats an exclusion from any former
+                # default set as inactive, while runtime mapping filters the
+                # current default set. Mirror that inactive desired state into
+                # the current set before publishing an idempotent deactivate.
+                self._write_desired_state(
+                    active=False,
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    skill_set_id=int(default_set["id"]),
+                    skill_id=int(skill_id),
+                )
+
+            if active:
+                synced = self._sync_runtime(bot=bot, owner_id=owner_id, bot_id=bot_id)
+            else:
+                synced = await self._reconcile_deactivation(
+                    scope=scope,
                     bot=bot,
+                    skill=skill,
                     owner_id=owner_id,
                     bot_id=bot_id,
                 )
-                if active:
-                    self._require_no_runtime_name_conflict(
-                        skill=raw, bot=bot, owner_id=owner_id, bot_id=bot_id
-                    )
-                try:
-                    changed = self._write_desired_state(
-                        active=active,
-                        env=str(bot["env"]),
-                        bot_id=bot_id,
-                        skill_id=skill_id,
-                    )
-                except Exception as exc:
-                    raise LocalSkillStorageError() from exc
-                self._ensure_mutation_lease(mutation_lease)
-                if active:
-                    synced = await self._reconcile_runtime(
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        command=command,
-                        mode=mode,
-                    )
-                else:
-                    synced = await self._reconcile_deactivation(
-                        skill=raw,
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        command=command,
-                        mode=mode,
-                    )
-                self._ensure_mutation_lease(mutation_lease)
-                if synced:
-                    return {
-                        **raw,
-                        "bolt_id": bot_id,
-                        "user_id": owner_id,
-                        "active": active,
-                        "changed": changed,
-                    }
+            if not synced:
                 if changed:
-                    self._ensure_mutation_lease(mutation_lease)
                     try:
                         self._write_desired_state(
                             active=not active,
-                            env=str(bot["env"]),
+                            owner_id=owner_id,
                             bot_id=bot_id,
-                            skill_id=skill_id,
+                            skill_set_id=int(default_set["id"]),
+                            skill_id=int(skill_id),
                         )
                     except Exception as exc:
                         raise LocalSkillStorageError() from exc
-                    if not await self._reconcile_runtime(
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        command=command,
-                        mode=mode,
-                    ):
+                    # Restore through the established runtime synchronizer.
+                    # It owns each engine's actual active-root compatibility,
+                    # including Claude Code's historical workspace root.
+                    restored = self._sync_runtime(
+                        bot=bot, owner_id=owner_id, bot_id=bot_id
+                    )
+                    if not restored:
                         raise LocalSkillRuntimeSyncError()
-                    self._ensure_mutation_lease(mutation_lease)
                 raise LocalSkillRuntimeSyncError()
-            finally:
-                self._edit_guard.release(lease)
+            return {**skill, "active": active, "changed": changed}
         finally:
-            self._mutation_guard.release(mutation_lease)
+            self._edit_guard.release(lease)
 
     def _discover_scope(self, skill_id: str) -> BotSkillLayoutScope:
         """Find only the lock identity before serializing the authoritative read."""
@@ -321,12 +183,6 @@ class LocalSkillStateService:
         if bot is None:
             raise LocalSkillNotFoundError()
         return self._scope_for(bot, bot_id)
-
-    def _ensure_mutation_lease(self, lease: BotCapabilityMutationLease) -> None:
-        try:
-            self._mutation_guard.ensure_valid(lease)
-        except BotCapabilityMutationLockUnavailableError as exc:
-            raise LocalSkillEditLockUnavailableError() from exc
 
     def _authorize(
         self, skill_id: str, actor_id: str
@@ -375,170 +231,120 @@ class LocalSkillStateService:
         self,
         *,
         active: bool,
-        env: str,
+        owner_id: str,
         bot_id: str,
-        skill_id: str,
-    ) -> bool:
+        skill_set_id: int,
+        skill_id: int,
+    ) -> None:
         if active:
-            return self._installations.install(
-                env=env, bot_id=bot_id, skill_id=skill_id
+            changed = self._skill_set_repo.remove_all_default_skill_exclusions(
+                owner_id, bot_id, skill_id
             )
-        return self._installations.uninstall(env=env, bot_id=bot_id, skill_id=skill_id)
+        else:
+            changed = self._skill_set_repo.add_default_skill_exclusion(
+                owner_id, bot_id, skill_set_id, skill_id
+            )
+        if not changed:
+            raise LocalSkillStorageError()
 
-    @staticmethod
-    def _require_repo_runtime_command(
-        bot: dict[str, Any], command: BotSkillRuntimeCommand
-    ) -> BotSkillRuntimeMutationMode:
-        return require_bot_skill_runtime_command(bot, command)
-
-    @staticmethod
-    def _runtime_command(*, active: bool) -> BotSkillRuntimeCommand:
-        return (
-            BotSkillRuntimeCommand.WRITE if active else BotSkillRuntimeCommand.CLEANUP
-        )
-
-    def _require_no_normal_skill_set_membership(
+    def _ensure_default_set_membership(
         self,
         *,
+        default_set: dict[str, Any],
         skill_id: str,
-        bot: dict[str, Any],
         owner_id: str,
-        bot_id: str,
     ) -> None:
-        """Direct and normal-SkillSet sources are mutually exclusive."""
-        references = self._skill_repo.list_skill_set_references(skill_id)
-        if not references:
+        """Repair legacy Local Skills before making an active state visible."""
+        default_set_id = str(default_set["id"])
+        members = self._skill_set_repo.get_skills_in_set(default_set_id)
+        if any(str(member.get("id")) == skill_id for member in members):
             return
-        service = self._skill_set_service_factory.create(
-            user_id=owner_id,
-            entity_id=str(bot["entity_id"]),
-            bot_id=bot_id,
-            engine_type=bot.get("active_engine"),
-            entity_type=bot.get("entity_type"),
-        )
-        for reference in references:
-            set_id = str(reference.get("skill_set_id") or "")
-            if not set_id:
-                continue
-            skill_set = service.get_skill_set(set_id, user_id=owner_id)
-            if (
-                skill_set
-                and not skill_set.get("is_default")
-                and str(skill_set.get("bolt_id") or bot_id) == bot_id
-            ):
-                raise SkillManagedBySkillSetError()
-
-    def _require_no_runtime_name_conflict(
-        self,
-        *,
-        skill: dict[str, Any],
-        bot: dict[str, Any],
-        owner_id: str,
-        bot_id: str,
-    ) -> None:
-        """Validate the resolver's one-name-per-active-entry invariant first."""
-        try:
-            assets = self._pool_skills.list_bot_active_assets(
-                env=str(bot["env"]),
-                bot_id=bot_id,
-                user_id=owner_id,
-                engine=str(bot["active_engine"]),
-            )
-            candidate = RegisteredSkillAsset(
-                skill_id=int(skill["id"]),
-                name=str(skill["name"]),
-                git_path=str(skill["git_path"]),
-            )
-            build_logical_skill_mappings([*assets, candidate])
-        except ValueError as exc:
-            raise SkillRuntimeNameConflictError() from exc
-
-    def _reject_ordinary_skill_set_member(self, *, skill_id: str, bot_id: str) -> None:
-        """Direct state is forbidden once ordinary SkillSet owns the Skill."""
-        skill = self._skill_repo.get_by_id(skill_id)
-        for reference in self._skill_repo.list_skill_set_references(
-            skill_id, skill.get("skill_uuid") if skill else None
+        if not self._skill_set_repo.add_skill_to_set(
+            default_set_id, skill_id, user_id=owner_id
         ):
-            skill_set = self._skill_set_repo.get_by_id(reference["skill_set_id"])
-            if (
-                skill_set is not None
-                and not skill_set.get("is_default")
-                and str(skill_set.get("bolt_id")) == bot_id
-            ):
-                raise SkillSetManagedResourceError()
+            raise LocalSkillStorageError()
 
-    async def _reconcile_runtime(
-        self,
-        *,
-        owner_id: str,
-        bot_id: str,
-        retired_mappings=(),
-        command: BotSkillRuntimeCommand,
-        mode: BotSkillRuntimeMutationMode,
-    ) -> bool:
+    def _sync_runtime(self, *, bot: dict[str, Any], owner_id: str, bot_id: str) -> bool:
         try:
-            if mode is BotSkillRuntimeMutationMode.CLEANUP_ONLY:
-                await self._runtime_reconciler.reconcile_cleanup(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                )
-                return True
-            if retired_mappings:
-                await self._runtime_reconciler.reconcile(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    retired_mappings=retired_mappings,
-                )
-            else:
-                await self._runtime_reconciler.reconcile(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                )
-            return True
+            service = self._skill_set_service_factory.create(
+                user_id=owner_id,
+                entity_id=str(bot["entity_id"]),
+                bot_id=bot_id,
+                engine_type=bot.get("active_engine"),
+                entity_type=bot.get("entity_type"),
+            )
+            return bool(service.sync_runtime())
         except Exception:
             return False
 
     async def _reconcile_deactivation(
         self,
         *,
+        scope: BotSkillLayoutScope,
+        bot: dict[str, Any],
         skill: dict[str, Any],
         owner_id: str,
         bot_id: str,
-        command: BotSkillRuntimeCommand,
-        mode: BotSkillRuntimeMutationMode,
     ) -> bool:
         try:
-            retired_mapping = list(
-                RuntimeProjectionResolver()
-                .resolve(
-                    RuntimeDesiredState(
-                        skills=(
-                            RegisteredSkillAsset(
-                                skill_id=int(skill["id"]),
-                                name=str(skill["name"]),
-                                git_path=str(skill["git_path"]),
-                                skill_uuid=(
-                                    str(skill["skill_uuid"])
-                                    if skill.get("skill_uuid") is not None
-                                    else None
-                                ),
-                                sc_version_number=(
-                                    str(skill["sc_version_number"])
-                                    if skill.get("sc_version_number") is not None
-                                    else None
-                                ),
-                            ),
-                        )
-                    )
-                )
-                .skill_mappings
+            retired = RegisteredSkillAsset(
+                skill_id=int(skill["id"]),
+                name=str(skill["name"]),
+                git_path=str(skill["git_path"]),
+            )
+            retired_mapping = PoolSkillMapping(
+                corpus="local",
+                relative_path=local_skill_name(retired),
+                link_name=local_skill_name(retired),
             )
         except (KeyError, TypeError, ValueError):
             return False
-        return await self._reconcile_runtime(
+        return await self._publish_current_mappings(
+            scope=scope,
+            bot=bot,
             owner_id=owner_id,
             bot_id=bot_id,
-            retired_mappings=retired_mapping,
-            command=command,
-            mode=mode,
+            retired_mappings=[retired_mapping],
         )
+
+    async def _publish_current_mappings(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        bot: dict[str, Any],
+        owner_id: str,
+        bot_id: str,
+        retired_mappings: list[PoolSkillMapping] | None = None,
+    ) -> bool:
+        try:
+            mappings = build_logical_skill_mappings(
+                self._pool_skills.list_bot_active_assets(
+                    env=scope.env,
+                    bot_id=bot_id,
+                    user_id=owner_id,
+                    engine=str(bot["active_engine"]),
+                )
+            )
+            source_layout = (
+                SkillMappingSourceLayout.POOL
+                if runtime_uses_pool_paths(self._pool_layouts.get(scope))
+                else SkillMappingSourceLayout.LEGACY
+            )
+            retired = retired_mappings or []
+            if not await self._pool_runtime.publish_mappings(
+                bot_id=bot_id,
+                user_id=owner_id,
+                mappings=mappings,
+                retired_mappings=retired,
+                source_layout=source_layout,
+            ):
+                return False
+            return await self._pool_runtime.verify_mappings(
+                bot_id=bot_id,
+                user_id=owner_id,
+                mappings=mappings,
+                retired_mappings=retired,
+                source_layout=source_layout,
+            )
+        except Exception:
+            return False

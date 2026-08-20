@@ -3,7 +3,6 @@
 Parametrized over both backends: a high-fidelity ``fakeredis`` (exercises the
 SET NX / Lua-or-fallback lock path) and the in-process fallback.
 """
-
 from __future__ import annotations
 
 import fakeredis
@@ -20,12 +19,13 @@ def cache(request, monkeypatch) -> CommunityCache:
     if request.param == "inproc":
         return CommunityCache("")
     fake = fakeredis.FakeStrictRedis()
-    monkeypatch.setattr(real_redis.Redis, "from_url", lambda url, **kw: fake)
+    monkeypatch.setattr(
+        real_redis.Redis, "from_url", lambda url, **kw: fake
+    )
     return CommunityCache("redis://fake")
 
 
 # ── KV ───────────────────────────────────────────────────────────────────────
-
 
 def test_set_get_roundtrip(cache):
     assert cache.set("k", "v") is True
@@ -54,7 +54,6 @@ def test_get_json_on_corrupt_value_returns_none(cache):
 
 # ── Lock ─────────────────────────────────────────────────────────────────────
 
-
 def test_acquire_then_held_returns_none(cache):
     token = cache.acquire_lock("L")
     assert token is not None
@@ -77,44 +76,7 @@ def test_release_with_wrong_token_fails_and_keeps_lock(cache):
     assert cache.release_lock("L", token) is True
 
 
-def test_in_proc_renew_with_correct_token_keeps_lock():
-    cache = CommunityCache("")
-    token = cache.acquire_lock_strict("L", ttl=30)
-    assert token is not None
-    assert cache.renew_lock_strict("L", token, ttl=60) is True
-    assert cache.renew_lock_strict("L", "wrong-token", ttl=60) is False
-    assert cache.acquire_lock("L") is None
-    assert cache.release_lock("L", token) is True
-
-
-def test_redis_renew_uses_atomic_compare_and_expire(monkeypatch):
-    class _EvalCapableFake:
-        def __init__(self) -> None:
-            self._fake = fakeredis.FakeStrictRedis()
-
-        def __getattr__(self, name):
-            return getattr(self._fake, name)
-
-        def eval(self, script, _numkeys, key, token, ttl):
-            assert 'redis.call("get", KEYS[1]) == ARGV[1]' in script
-            assert 'redis.call("expire", KEYS[1], ARGV[2])' in script
-            current = self._fake.get(key)
-            expected = token.encode() if isinstance(token, str) else token
-            if current != expected:
-                return 0
-            return self._fake.expire(key, ttl)
-
-    fake = _EvalCapableFake()
-    monkeypatch.setattr(real_redis.Redis, "from_url", lambda url, **kw: fake)
-    cache = CommunityCache("redis://fake")
-    token = cache.acquire_lock_strict("L", ttl=30)
-    assert token is not None
-    assert cache.renew_lock_strict("L", token, ttl=60) is True
-    assert cache.renew_lock_strict("L", "wrong-token", ttl=60) is False
-
-
 # ── In-process TTL (deterministic clock) ─────────────────────────────────────
-
 
 def test_in_proc_ttl_expiry(monkeypatch):
     clock = {"t": 1000.0}
@@ -137,7 +99,6 @@ def test_in_proc_lock_ttl_expiry(monkeypatch):
 
 
 # ── Redis infrastructure failure ─────────────────────────────────────────────
-
 
 def test_redis_unreachable_degrades_without_raising(monkeypatch):
     class _Broken:
@@ -166,8 +127,6 @@ def test_redis_unreachable_degrades_without_raising(monkeypatch):
     assert cache.set_json("k", {"a": 1}) is False
     with pytest.raises(CacheLockInfrastructureError):
         cache.acquire_lock_strict("L")
-    with pytest.raises(CacheLockInfrastructureError):
-        cache.renew_lock_strict("L", "token")
 
 
 def test_set_json_non_serializable_returns_false(cache):
@@ -182,6 +141,6 @@ def test_redis_release_lock_paths(monkeypatch):
     cache = CommunityCache("redis://fake")
     token = cache.acquire_lock("L")
     assert cache.release_lock("L", "wrong-token") is False  # mismatch → kept
-    assert cache.acquire_lock("L") is None  # still held
-    assert cache.release_lock("L", token) is True  # holder releases
-    assert cache.acquire_lock("L") is not None  # now free
+    assert cache.acquire_lock("L") is None                  # still held
+    assert cache.release_lock("L", token) is True           # holder releases
+    assert cache.acquire_lock("L") is not None              # now free

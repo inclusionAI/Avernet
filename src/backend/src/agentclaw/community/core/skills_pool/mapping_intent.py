@@ -9,26 +9,6 @@ from agentclaw.community.core.skills_pool.models import (
     RegisteredSkillAsset,
 )
 
-MAPPING_CONTRACT_V2 = "skills-pool-mapping-v2"
-MAPPING_CONTRACT_V3 = "skills-pool-mapping-v3"
-
-
-class RuntimeMappingNameConflictError(ValueError):
-    """Different selected assets claim one canonical runtime entry name."""
-
-
-def mapping_contract_for(
-    mappings: list[PoolSkillMapping],
-    supported_versions: object,
-) -> str:
-    """Select the newest contract required by a complete mapping snapshot."""
-
-    if not any(mapping.corpus == "center" for mapping in mappings):
-        return MAPPING_CONTRACT_V2
-    if not isinstance(supported_versions, list) or MAPPING_CONTRACT_V3 not in supported_versions:
-        raise ValueError("runtime does not explicitly support mapping v3")
-    return MAPPING_CONTRACT_V3
-
 
 def _source_tail(git_path: str, prefix: str) -> PurePosixPath:
     raw = git_path[len(prefix) :]
@@ -63,42 +43,20 @@ def build_logical_skill_mappings(
         elif asset.git_path.startswith("git://"):
             relative = _source_tail(asset.git_path, "git://")
             corpus = "repo"
-        elif asset.git_path.startswith("center://"):
-            if not asset.skill_uuid or not asset.sc_version_number:
-                raise ValueError("center mapping requires structured identity")
-            relative = None
-            corpus = "center"
         else:
-            # A complete projection is fail-closed.  Silently ignoring a
-            # selected asset would make the database desired state and the
-            # delivered runtime disagree.
-            raise ValueError(f"unsupported skill source: {asset.git_path}")
-        # ``ac_skill.name`` is the single runtime-name policy for every shared
-        # asset.  Repo paths are locators, not user-visible link identities:
-        # two different directories can legitimately share the same tail.
-        # ``ac_skill.name`` is the only RuntimeNamePolicy input for every
-        # corpus.  ``local://`` and ``git://`` tails are locators, never the
-        # runtime identity exposed to an Engine.
-        link_name = asset.name
-        identity = (
-            f"center:{asset.skill_uuid}:{asset.sc_version_number}"
-            if corpus == "center"
-            else f"{corpus}:{relative.as_posix()}"
-        )
+            continue
+        link_name = relative.name
+        identity = f"{corpus}:{relative.as_posix()}"
         if targets.get(link_name) == identity:
             continue
         if link_name in targets:
-            raise RuntimeMappingNameConflictError(
-                f"duplicate managed target: {link_name}"
-            )
+            raise ValueError(f"duplicate managed target: {link_name}")
         targets[link_name] = identity
         mappings.append(
             PoolSkillMapping(
                 corpus=corpus,
-                relative_path=None if relative is None else relative.as_posix(),
+                relative_path=relative.as_posix(),
                 link_name=link_name,
-                skill_uuid=asset.skill_uuid if corpus == "center" else None,
-                sc_version_number=(asset.sc_version_number if corpus == "center" else None),
             )
         )
     return mappings
@@ -149,41 +107,15 @@ def logical_skill_mappings_from_evidence(
     parsed: list[PoolSkillMapping] = []
     targets: dict[str, PoolSkillMapping] = {}
     for raw in raw_mappings:
-        if not isinstance(raw, dict):
+        if not isinstance(raw, dict) or set(raw) != {
+            "corpus",
+            "relative_path",
+            "link_name",
+        }:
             raise ValueError("invalid retired mapping evidence")
         corpus = raw.get("corpus")
         relative_path = raw.get("relative_path")
         link_name = raw.get("link_name")
-        if corpus == "center":
-            if set(raw) != {
-                "corpus",
-                "skill_uuid",
-                "sc_version_number",
-                "link_name",
-            }:
-                raise ValueError("invalid retired mapping evidence")
-            skill_uuid = raw.get("skill_uuid")
-            sc_version_number = raw.get("sc_version_number")
-            if not all(
-                isinstance(value, str) and value
-                for value in (skill_uuid, sc_version_number, link_name)
-            ):
-                raise ValueError("invalid retired mapping evidence")
-            mapping = PoolSkillMapping(
-                corpus="center",
-                relative_path=None,
-                link_name=link_name,
-                skill_uuid=skill_uuid,
-                sc_version_number=sc_version_number,
-            )
-            if link_name in targets and targets[link_name] != mapping:
-                raise ValueError("ambiguous retired mapping evidence")
-            targets[link_name] = mapping
-            if mapping not in parsed:
-                parsed.append(mapping)
-            continue
-        if set(raw) != {"corpus", "relative_path", "link_name"}:
-            raise ValueError("invalid retired mapping evidence")
         if (
             corpus not in {"local", "repo"}
             or not isinstance(relative_path, str)
@@ -197,11 +129,7 @@ def logical_skill_mappings_from_evidence(
             or path.is_absolute()
             or ".." in path.parts
             or path.as_posix() != relative_path
-            or not link_name
-            or link_name.strip() != link_name
-            or "/" in link_name
-            or "\\" in link_name
-            or link_name in {".", ".."}
+            or path.name != link_name
         ):
             raise ValueError("invalid retired mapping evidence")
         mapping = PoolSkillMapping(
@@ -250,8 +178,6 @@ __all__ = [
     "logical_skill_mappings_from_evidence",
     "local_locators_from_evidence",
     "local_skill_name",
-    "mapping_contract_for",
     "merge_retired_logical_skill_mappings",
     "retired_logical_skill_mappings",
-    "RuntimeMappingNameConflictError",
 ]

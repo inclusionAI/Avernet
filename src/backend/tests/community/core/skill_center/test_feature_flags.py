@@ -14,7 +14,6 @@ class TestSkillCenterFlags:
         )
         assert flags.write_skill_uuid is True
         assert flags.nas_sync_enabled is False
-        assert flags.space_skill_enabled is False
 
     def test_from_env_reads_env_vars(self):
         os.environ["SC_NAS_SYNC_ENABLED"] = "true"
@@ -24,7 +23,6 @@ class TestSkillCenterFlags:
             assert flags.nas_sync_enabled is True
             assert flags.propagation_enabled is True
             assert flags.center_uri_enabled is False
-            assert flags.space_skill_enabled is False
         finally:
             del os.environ["SC_NAS_SYNC_ENABLED"]
             del os.environ["SC_PROPAGATION_ENABLED"]

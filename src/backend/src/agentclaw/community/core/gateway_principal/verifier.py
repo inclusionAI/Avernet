@@ -40,7 +40,6 @@ from agentclaw.community.core.gateway_principal.errors import (
 from agentclaw.community.core.gateway_principal.models import (
     AppPrincipal,
     GatewayPrincipal,
-    GatewayUser,
     UserPrincipal,
 )
 from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
@@ -213,19 +212,6 @@ class VerifiedCaller:
         """
         principal = _first_user_principal(self.principals)
         return principal.subject.id if principal is not None else ""
-
-    @property
-    def user(self) -> GatewayUser | None:
-        """The end user's verified subject, or ``None`` for a machine-only set.
-
-        The full profile the gateway resolved — ``username`` and the optional
-        display attributes — where :attr:`user_id` is only its id. Both read the
-        set through :func:`_first_user_principal`, so they cannot name different
-        people. ``None`` is the same state ``has_user`` answers ``False`` for:
-        an application acting alone, which has no subject to return.
-        """
-        principal = _first_user_principal(self.principals)
-        return principal.subject if principal is not None else None
 
     @property
     def has_user(self) -> bool:

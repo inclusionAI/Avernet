@@ -106,7 +106,7 @@ def _bind_create_bot_deps(app):
 
     # AuthRelationshipPlugin: create_relationship
     mock_auth_rel = MagicMock(spec=AuthRelationshipPlugin)
-    mock_auth_rel.create_relationship.return_value = {"auth_id": 1}
+    mock_auth_rel.create_relationship.return_value = None
     bind_mock_service(AuthRelationshipPlugin, mock_auth_rel, app)
 
     # SkillSetServiceFactory: _get_bot_mcp_codes 使用

@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from agentclaw.community.core.errors import NotFound
+from agentclaw.community.core.errors import CallbackCorrelationError
 from agentclaw.community.core.task.domain.models import TaskCallbackData
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
@@ -42,7 +42,7 @@ def translate(
         else:
             rec = registry.resolve(source, req.workflow_instance_id)
             if rec is None:
-                raise NotFound(
+                raise CallbackCorrelationError(
                     f"task-level callback unregistered: {source}/{req.workflow_instance_id}"
                 )
             loop_task_id = rec.loop_task_id

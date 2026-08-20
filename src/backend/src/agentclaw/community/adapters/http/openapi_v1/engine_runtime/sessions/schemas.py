@@ -103,9 +103,7 @@ class Session(BaseModel):
         "once its last page is reached."
     )
     gmt_create: str = Field(description="Creation time (ISO 8601); may be empty.")
-    gmt_modified: str = Field(
-        description="Last-modified time (ISO 8601); may be empty."
-    )
+    gmt_modified: str = Field(description="Last-modified time (ISO 8601); may be empty.")
 
 
 class SessionCreate(BaseModel):
@@ -150,13 +148,6 @@ class SessionUpdate(BaseModel):
     model: str | None = Field(default=None, description="New model.")
 
 
-class SessionFavorite(BaseModel):
-    """The favorite state of one session for the acting user."""
-
-    session_id: str = Field(description="Session whose favorite state changed.")
-    favorited: bool = Field(description="Whether the session is now a favorite.")
-
-
 # Named concretisations rather than `BoundedPage[Session]` used inline. Pydantic
 # builds a parametrised generic with no `__doc__`, so the schema description —
 # the only place the lower-bound caveat is stated — would silently vanish from
@@ -184,7 +175,6 @@ __all__ = [
     "MessagePage",
     "Session",
     "SessionCreate",
-    "SessionFavorite",
     "SessionPage",
     "SessionUpdate",
 ]

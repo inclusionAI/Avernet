@@ -11,13 +11,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from engine.community.api.skills.router import (
-    _mapping_command,
-)
-from engine.community.api.skills.router import (
-    router as skills_router,
-)
-from engine.community.api.skills.schemas import PoolCenterMappingIntent
+from engine.community.api.skills.router import router as skills_router
 from engine.community.core.adapters.openclaw.skills import (
     OpenClawSkillsAdapter,
 )
@@ -303,21 +297,7 @@ def test_runtime_layout_probe_rejects_unknown_engine_before_dispatch(
             "error_type": "SkillLayoutResolutionError",
         },
     }
-
-
-def test_mapping_command_preserves_structured_center_identity() -> None:
-    command = _mapping_command(
-        PoolCenterMappingIntent(
-            corpus="center",
-            skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
-            sc_version_number="2026.8.19",
-            link_name="risk-review",
-        )
-    )
-
-    assert command.corpus == "center"
-    assert command.relative_path is None
-    assert command.skill_uuid == "2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a"
+    plugin.probe_pool_layout.assert_not_awaited()
 
 
 def test_runtime_layout_probe_rejects_unknown_contract_before_dispatch(

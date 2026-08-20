@@ -33,12 +33,7 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
-from agentclaw.community.core.skill_center.services.skill_parser import (
-    SkillInfo,
-    SkillManifestError,
-    SkillParser,
-    SkillTreeNode,
-)
+from agentclaw.community.core.skill_center.services.skill_parser import SkillInfo, SkillParser, SkillTreeNode
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 
@@ -520,18 +515,20 @@ class SkillService:
             active_path = active_root / name
             content = None
             skill_file = active_path / "SKILL.md"
-            if not await device_fs.exists(str(skill_file)):
-                continue
-            content = await device_fs.read_file(str(skill_file))
+            if await device_fs.exists(str(skill_file)):
+                content = await device_fs.read_file(str(skill_file))
+            else:
+                readme_file = active_path / "README.md"
+                if await device_fs.exists(str(readme_file)):
+                    content = await device_fs.read_file(str(readme_file))
             if content is None:
                 continue
 
             try:
-                text = SkillParser.decode_content(content)
-                skill_info = SkillParser.parse_installed_content(text)
-            except SkillManifestError:
-                logger.warning("[get_active_skills_from_device] Invalid SKILL.md: %s", skill_file)
-                continue
+                text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                text = content.decode("gbk", errors="replace")
+            skill_info = SkillParser.parse_content(text)
             if not skill_info:
                 continue
 
@@ -1308,12 +1305,6 @@ class SkillService:
                 "delegating to SkillRepoSyncPlugin"
             )
             result = self.sync_repo()
-            # The local Plugin only acquires/refreshed the host-side corpus.
-            # Keep the public operation equivalent to GitSyncService: one
-            # successful fetch is followed by exactly one DB scan and one
-            # atomic cache refresh (owned by sync_skills_from_git).
-            if result.get("success"):
-                result["database"] = self.sync_skills_from_git()
             result.setdefault("error", None)
             return result
 
@@ -1483,11 +1474,21 @@ class SkillService:
                     # 非 teclaw: identity（主机路径原样）。
                     skill_base = self._local_skill_path_adapter(str(local_path))
 
-                    for filename in ("SKILL.md", "README.md"):
-                        content = await device_fs.read_file(f"{skill_base}/{filename}")
-                        if content:
-                            return SkillParser.decode_content_for_display(content)
-                    logger.warning(f"[get_skill_readme] SKILL.md/README.md not found: {skill_base}")
+                    # 尝试 SKILL.md
+                    content = await device_fs.read_file(f"{skill_base}/SKILL.md")
+                    if content:
+                        try:
+                            return content.decode("utf-8")
+                        except UnicodeDecodeError:
+                            return content.decode("gbk", errors="replace")
+                    # 尝试 README.md
+                    content = await device_fs.read_file(f"{skill_base}/README.md")
+                    if content:
+                        try:
+                            return content.decode("utf-8")
+                        except UnicodeDecodeError:
+                            return content.decode("gbk", errors="replace")
+                    logger.warning(f"[get_skill_readme] Skill file not found: {skill_base}")
                     # Local skill 没找到，继续尝试 repo（兜底）
                 elif git_path.startswith('git://'):
                     # Git skill，从 repo 查找
@@ -1495,12 +1496,14 @@ class SkillService:
                     skill_path = self._get_market_repo_dir() / relative_path
                     logger.info(f"[get_skill_readme] git:// path: {skill_path}, exists={skill_path.exists()}")
                     if skill_path.exists():
-                        skill_file = SkillParser.find_display_file(skill_path)
+                        skill_file = SkillParser.find_skill_file(skill_path)
                         if skill_file:
                             try:
-                                return SkillParser.decode_content_for_display(skill_file.read_bytes())
+                                return skill_file.read_text(encoding="utf-8")
+                            except UnicodeDecodeError:
+                                return skill_file.read_text(encoding="gbk", errors="replace")
                             except Exception as e:
-                                logger.error(f"[SkillService] Error reading SKILL.md: {e}")
+                                logger.error(f"[SkillService] Error reading repo readme: {e}")
                     logger.info("[get_skill_readme] Falling through to _get_readme_from_repo")
                     return self._get_readme_from_repo(skill_id)
                 else:
@@ -1512,30 +1515,6 @@ class SkillService:
         except Exception as e:
             logger.error(f"[get_skill_readme] Unexpected error: skill_id={skill_id}, error={type(e).__name__}: {e}")
             raise
-
-    def get_repository_skill_content(self, skill_id: str) -> str | None:
-        """Read exactly the governed Repo asset's ``SKILL.md`` from global storage.
-
-        This deliberately does not reuse the historical README fallback or a
-        Bot-scoped workspace path.  Repo content is an environment-shared
-        artifact and its consumable contract is the literal global
-        ``skills-repo/<git-relative-path>/SKILL.md`` file.
-        """
-        if not skill_id.isdecimal():
-            return None
-        skill = self._skill_repo.get_by_id(skill_id)
-        git_path = str((skill or {}).get("git_path") or "")
-        if not git_path.startswith("git://"):
-            return None
-        relative_path = git_path[len("git://") :]
-        try:
-            root = self._get_market_repo_dir().resolve()
-            manifest = (root / relative_path / "SKILL.md").resolve()
-            if root not in manifest.parents or not manifest.is_file():
-                return None
-            return SkillParser.decode_content_for_display(manifest.read_bytes())
-        except (OSError, ValueError):
-            return None
 
     def _get_readme_from_repo(self, skill_id: str) -> str | None:
         """从仓库中查找技能的 README"""
@@ -1555,12 +1534,14 @@ class SkillService:
         if not skill_path:
             return None
 
-        skill_file = SkillParser.find_display_file(skill_path)
+        skill_file = SkillParser.find_skill_file(skill_path)
         if skill_file:
             try:
-                return SkillParser.decode_content_for_display(skill_file.read_bytes())
+                return skill_file.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                return skill_file.read_text(encoding="gbk", errors="replace")
             except Exception as e:
-                logger.error("[SkillService] Error reading SKILL.md: %s", e)
+                logger.error("[SkillService] Error reading repo readme: %s", e)
 
         return None
 
@@ -1646,7 +1627,10 @@ class SkillService:
             if content is None:
                 logger.warning(f"[parse_local_skill_config] SKILL.md not found: {rel}")
                 return None
-            text = SkillParser.decode_content(content)
+            try:
+                text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                text = content.decode("gbk", errors="replace")
             return SkillParser.parse_content(text)
         except Exception as e:
             logger.warning(f"[parse_local_skill_config] Failed to parse {git_path}: {e}")
@@ -1855,21 +1839,17 @@ class SkillService:
 
         raw_bytes = skill_md_file.get("content", b"")
         try:
-            content_str = SkillParser.decode_content(raw_bytes)
-        except SkillManifestError as exc:
-            raise ValueError("SKILL.md must be encoded as UTF-8 or GBK.") from exc
-        try:
-            skill_info = SkillParser.parse_content(content_str) if content_str else None
-        except SkillManifestError as exc:
-            if exc.code != "MISSING_FRONTMATTER":
-                raise
-            # Compatibility for packages accepted by the retiring upload API:
-            # plain YAML metadata at the root of SKILL.md. New manifests remain
-            # governed by the strict frontmatter parser above.
-            skill_info = SkillParser.parse_legacy_upload_content(content_str)
-        if not skill_info:
-            raise ValueError("SKILL.md must contain valid frontmatter or legacy metadata.")
-        skill_name = skill_info["name"]
+            content_str = raw_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            content_str = raw_bytes.decode("gbk", errors="replace")
+        skill_info = SkillParser.parse_content(content_str) if content_str else {}
+        if not self._has_required_skill_field(content_str, "name"):
+            raise ValueError("SKILL.md must contain required field: name.")
+        skill_name = self._extract_upload_scalar_field(content_str, "name")
+        if not skill_name:
+            raise ValueError("SKILL.md field 'name' cannot be empty.")
+        if not self._has_required_skill_field(content_str, "description"):
+            raise ValueError("SKILL.md must contain required field: description.")
         if skill_root:
             folder_name = os.path.basename(skill_root)
             if folder_name != skill_name:
@@ -1878,6 +1858,10 @@ class SkillService:
                     f"Folder name: '{folder_name}', SKILL.md name: '{skill_name}'."
                 )
 
+        if not re.match(r'^[a-zA-Z0-9-]+$', skill_name):
+            raise ValueError(
+                f"Skill name '{skill_name}' is invalid. Only English letters, numbers, and '-' are allowed"
+            )
         if skill_name in self.RESERVED_SKILL_NAMES:
             raise ValueError(f"Skill name '{skill_name}' is reserved and cannot be used")
         skill_info["name"] = skill_name

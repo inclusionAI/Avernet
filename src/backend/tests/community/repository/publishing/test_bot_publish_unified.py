@@ -110,14 +110,6 @@ def test_get_by_id_missing(repo):
 
 def test_query_methods(repo):
     r = repo.insert(_data(status="RELEASE", version=2, last_pub_id=42))
-    other = repo.insert(
-        _data(
-            source_bot_pk=2,
-            source_bot_id="other",
-            publish_bot_id="other.pub.1",
-            version=1,
-        )
-    )
     assert repo.get_by_publish_bot_id(
         "src-bot.pub.1", "emp001", "dev"
     ).id == r.id
@@ -128,11 +120,6 @@ def test_query_methods(repo):
         "src-bot.pub.1", "emp001", 2, "dev"
     ).id == r.id
     assert [x.id for x in repo.list_by_source_bot(1, "dev")] == [r.id]
-    assert {x.id for x in repo.list_by_source_bots([1, 2], "dev")} == {
-        r.id,
-        other.id,
-    }
-    assert repo.list_by_source_bots([], "dev") == []
     assert [x.id for x in repo.list_by_status("RELEASE", "dev")] == [
         r.id
     ]

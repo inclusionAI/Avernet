@@ -1,36 +1,15 @@
 """
 Skill 相关 ORM 模型（迁移自 services/openclawserver/server/models/skill.py）。
 """
-
 from agentclaw.community.core.base import Base
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
-from sqlalchemy import (
-    BigInteger,
-    Column,
-    String,
-    Text,
-    Boolean,
-    DateTime,
-    ForeignKey,
-    UniqueConstraint,
-    Integer,
-    func,
-)
-from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
+from sqlalchemy import Column, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint, Integer, func
 from sqlalchemy.orm import relationship
-
-
-_UNSIGNED_BIGINT = (
-    BigInteger()
-    .with_variant(MySQLBigInteger(unsigned=True), "mysql")
-    .with_variant(Integer, "sqlite")
-)
 
 
 class SkillSet(Base):
     """SkillSet (Capability Set) model."""
-
     __tablename__ = "ac_skill_set"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -40,32 +19,19 @@ class SkillSet(Base):
     is_builtin = Column(Boolean, default=False, nullable=False)
     user_id = Column(String(128), nullable=True, index=True)
     gmt_created = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(
-        DateTime, default=func.now(), onupdate=func.now(), nullable=False
-    )
+    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     bolt_id = Column(String(100), nullable=True, default="default", comment="bolt_id")
     env = Column(String(20), default=get_current_env, nullable=False)
-    engine_type = Column(
-        String(32),
-        nullable=True,
-        index=True,
-        comment="引擎类型，如 openclaw/moltis/hermes/aicoding/claude_code；is_default 行由应用层保证非空",
-    )
-    is_active = Column(
-        Boolean, default=False, nullable=False, comment="当前激活的技能集"
-    )
+    engine_type = Column(String(32), nullable=True, index=True, comment="引擎类型，如 openclaw/moltis/hermes/aicoding/claude_code；is_default 行由应用层保证非空")
+    is_active = Column(Boolean, default=False, nullable=False, comment="当前激活的技能集")
     # Persistence-only isolation metadata. The shared guard stamps ORM inserts
     # from the current request tenant; the server default preserves existing
     # internal rows and raw writers during the one-tenant cutover.
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
     # Relationships
-    skills = relationship(
-        "SkillSetSkill", back_populates="skill_set", cascade="all, delete-orphan"
-    )
-    mcp_servers = relationship(
-        "SkillSetMCPServer", back_populates="skill_set", cascade="all, delete-orphan"
-    )
+    skills = relationship("SkillSetSkill", back_populates="skill_set", cascade="all, delete-orphan")
+    mcp_servers = relationship("SkillSetMCPServer", back_populates="skill_set", cascade="all, delete-orphan")
 
     # Production has no business unique key on ac_skill_set. Keep the local
     # schema aligned so two tenants can hold the same legacy identity.
@@ -81,9 +47,7 @@ class SkillSet(Base):
             "is_builtin": self.is_builtin,
             "user_id": str(self.user_id) if self.user_id is not None else None,
             "gmt_created": self.gmt_created.isoformat() if self.gmt_created else None,
-            "gmt_modified": self.gmt_modified.isoformat()
-            if self.gmt_modified
-            else None,
+            "gmt_modified": self.gmt_modified.isoformat() if self.gmt_modified else None,
             "bolt_id": self.bolt_id if self.bolt_id else "default",
             "env": self.env,
             "engine_type": self.engine_type,
@@ -96,13 +60,9 @@ register_avernet_tenant_guard(SkillSet)
 
 class Skill(Base):
     """Skill metadata model."""
-
     __tablename__ = "ac_skill"
 
-    # Verified with production OceanBase ``SHOW CREATE TABLE ac_skill``:
-    # ``id bigint(20) unsigned NOT NULL AUTO_INCREMENT``.  Every new FK must
-    # use the same MySQL type; SQLite receives its portable INTEGER variant.
-    id = Column(_UNSIGNED_BIGINT, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     git_path = Column(String(500), nullable=True)
@@ -124,60 +84,30 @@ class Skill(Base):
     is_builtin = Column(Boolean, default=False, nullable=False)
     user_id = Column(String(128), nullable=True, index=True)
     gmt_created = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(
-        DateTime, default=func.now(), onupdate=func.now(), nullable=False
-    )
+    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     bolt_id = Column(String(100), nullable=True, default="default", comment="bolt_id")
     env = Column(String(20), default=get_current_env, nullable=False)
-    status = Column(
-        String(64),
-        nullable=True,
-        default="DEVELOPING",
-        comment="状态: DEVELOPING/PENDING/PUBLISHED/REJECTED",
-    )
+    status = Column(String(64), nullable=True, default="DEVELOPING", comment="状态: DEVELOPING/PENDING/PUBLISHED/REJECTED")
     version = Column(Integer, nullable=True, default=1, comment="版本号，整数递增")
-    skill_uuid = Column(
-        String(128), nullable=True, index=True, comment="技能身份标识，跨版本不变"
-    )
+    skill_uuid = Column(String(128), nullable=True, index=True, comment="技能身份标识，跨版本不变")
     source_type = Column(String(64), nullable=True, comment="创建方式: upload/git")
-    category_path = Column(
-        String(256), nullable=True, comment="类目完整路径(ac_skill_category.code)"
-    )
-    package_url = Column(
-        String(1028), nullable=True, comment="上传到oss上的可访问的url"
-    )
+    category_path = Column(String(256), nullable=True, comment="类目完整路径(ac_skill_category.code)")
+    package_url = Column(String(1028), nullable=True, comment="上传到oss上的可访问的url")
     zip_url = Column(String(1028), nullable=True, comment="用户上传的url")
-    # Additive Space Skill identity fields.  The existing name/description/
-    # status/version columns remain Legacy projections; their write paths stay
-    # untouched while the Space Skill feature flag is off.
-    draft_target_version = Column(Integer, nullable=True)
-    draft_status = Column(String(16), nullable=True)
-    retired_at = Column(DateTime, nullable=True)
-    retired_by = Column(String(128), nullable=True)
-    source_repo_url = Column(String(2048), nullable=True)
-    source_branch = Column(String(512), nullable=True)
-    source_subdir = Column(String(1024), nullable=True)
-    source_commit_sha = Column(String(64), nullable=True)
     # Deliberately absent from to_dict(): tenant is persistence metadata, not
     # part of the established internal Skills response contract.
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
-    # ``link_name`` remains derived and has no stored uniqueness rule.  The
-    # additive F01 migration instead makes the non-null stable Skill UUID
-    # unique within its tenant and environment.
-    __table_args__ = (
-        UniqueConstraint("avernet_tenant", "env", "skill_uuid", name="uk_skill_uuid"),
-        {"extend_existing": True},
-    )
+    # uix_skill_link_name_env_version was dropped with link_name, and prod has
+    # no replacement unique key on these fields. Keep SQLite create_all aligned
+    # with that production DDL rather than inventing a source-only constraint.
+    __table_args__ = {"extend_existing": True}
 
-    skill_sets = relationship(
-        "SkillSetSkill", back_populates="skill", cascade="all, delete-orphan"
-    )
+    skill_sets = relationship("SkillSetSkill", back_populates="skill", cascade="all, delete-orphan")
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         import json
-
         # ``link_name`` is derived from ``git_path`` — prod has no
         # such stored column. Logic mirrors the unified
         # ``_skill_to_dict`` helper (plugins/skill_repository.py).
@@ -200,18 +130,14 @@ class Skill(Base):
             # the inconsistency is faithful to prod.)
             "tags": self.tags,
             "risk_tags": json.loads(self.risk_tags) if self.risk_tags else [],
-            "mcp_dependencies": json.loads(self.mcp_dependencies)
-            if self.mcp_dependencies
-            else [],
+            "mcp_dependencies": json.loads(self.mcp_dependencies) if self.mcp_dependencies else [],
             "input_schema": self.input_schema,
             "output_schema": self.output_schema,
             "is_public": self.is_public,
             "is_builtin": self.is_builtin,
             "user_id": str(self.user_id) if self.user_id is not None else None,
             "gmt_created": self.gmt_created.isoformat() if self.gmt_created else None,
-            "gmt_modified": self.gmt_modified.isoformat()
-            if self.gmt_modified
-            else None,
+            "gmt_modified": self.gmt_modified.isoformat() if self.gmt_modified else None,
             "bolt_id": self.bolt_id if self.bolt_id else "default",
             "env": self.env,
             "status": self.status or "DEVELOPING",
@@ -229,45 +155,16 @@ register_avernet_tenant_guard(Skill)
 
 class SkillSetSkill(Base):
     """Association table between SkillSet and Skill."""
-
     __tablename__ = "ac_skill_set_skill"
-    __table_args__ = (
-        UniqueConstraint(
-            "avernet_tenant",
-            "env",
-            "skill_set_id",
-            "skill_id",
-            name="uk_skill_set_skill",
-        ),
-        UniqueConstraint(
-            "avernet_tenant",
-            "env",
-            "bot_id",
-            "skill_id",
-            name="uk_bot_skill_set_skill",
-        ),
-        {"extend_existing": True},
-    )
+    __table_args__ = {"extend_existing": True}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    skill_set_id = Column(
-        Integer, ForeignKey("ac_skill_set.id"), nullable=False, index=True
-    )
-    skill_id = Column(
-        _UNSIGNED_BIGINT, ForeignKey("ac_skill.id"), nullable=False, index=True
-    )
-    skill_uuid = Column(
-        String(128), nullable=True, index=True, comment="技能唯一标识(跨版本不变)"
-    )
-    # Additive denormalization used only to make the *ordinary* cross-SkillSet
-    # invariant database-expressible. System Default and historical rows keep
-    # NULL; writers for ordinary SkillSets persist the parent Bot id.
-    bot_id = Column(String(100), nullable=True, index=True)
+    skill_set_id = Column(Integer, ForeignKey("ac_skill_set.id"), nullable=False, index=True)
+    skill_id = Column(Integer, ForeignKey("ac_skill.id"), nullable=False, index=True)
+    skill_uuid = Column(String(128), nullable=True, index=True, comment="技能唯一标识(跨版本不变)")
     user_id = Column(String(128), nullable=True, index=True)
     gmt_created = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(
-        DateTime, default=func.now(), onupdate=func.now(), nullable=False
-    )
+    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     env = Column(String(20), default=get_current_env, nullable=False)
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
@@ -278,16 +175,12 @@ class SkillSetSkill(Base):
         """Convert to dictionary."""
         return {
             "id": str(self.id) if self.id is not None else None,
-            "skill_set_id": str(self.skill_set_id)
-            if self.skill_set_id is not None
-            else None,
+            "skill_set_id": str(self.skill_set_id) if self.skill_set_id is not None else None,
             "skill_id": str(self.skill_id) if self.skill_id is not None else None,
             "skill_uuid": self.skill_uuid,
             "user_id": str(self.user_id) if self.user_id is not None else None,
             "gmt_created": self.gmt_created.isoformat() if self.gmt_created else None,
-            "gmt_modified": self.gmt_modified.isoformat()
-            if self.gmt_modified
-            else None,
+            "gmt_modified": self.gmt_modified.isoformat() if self.gmt_modified else None,
             "env": self.env,
         }
 
@@ -295,83 +188,8 @@ class SkillSetSkill(Base):
 register_avernet_tenant_guard(SkillSetSkill)
 
 
-class BotSkillInstallation(Base):
-    """One active desired-state Skill relationship for a Bot.
-
-    A missing row is intentionally the only inactive representation.  This
-    table must not become a second home for membership provenance or runtime
-    observations; those facts have their own owners.
-    """
-
-    __tablename__ = "ac_bot_skill_installation"
-
-    id = Column(
-        _UNSIGNED_BIGINT,
-        primary_key=True,
-        autoincrement=True,
-    )
-    bot_id = Column(String(100), nullable=False, index=True)
-    skill_id = Column(
-        _UNSIGNED_BIGINT, ForeignKey("ac_skill.id"), nullable=False, index=True
-    )
-    env = Column(String(20), default=get_current_env, nullable=False)
-    gmt_created = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(
-        DateTime, default=func.now(), onupdate=func.now(), nullable=False
-    )
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
-
-    __table_args__ = (
-        UniqueConstraint(
-            "avernet_tenant",
-            "env",
-            "bot_id",
-            "skill_id",
-            name="uk_bot_skill_installation",
-        ),
-        {"extend_existing": True},
-    )
-
-
-register_avernet_tenant_guard(BotSkillInstallation)
-
-
-class SkillSetCreateIdempotency(Base):
-    """Durable replay record for canonical SkillSet create commands."""
-
-    __tablename__ = "ac_skill_set_create_idempotency"
-
-    id = Column(_UNSIGNED_BIGINT, primary_key=True, autoincrement=True)
-    bot_id = Column(String(100), nullable=False)
-    owner_id = Column(String(128), nullable=False)
-    idempotency_key = Column(String(190), nullable=False)
-    request_name = Column(String(100), nullable=False)
-    request_description = Column(Text, nullable=True)
-    request_hash = Column(String(64), nullable=False)
-    skill_set_id = Column(Integer, ForeignKey("ac_skill_set.id"), nullable=False)
-    env = Column(String(20), default=get_current_env, nullable=False)
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
-    gmt_created = Column(DateTime, default=func.now(), nullable=False)
-
-    __table_args__ = (
-        UniqueConstraint(
-            "avernet_tenant",
-            "env",
-            "bot_id",
-            "owner_id",
-            "idempotency_key",
-            name="uk_skill_set_create_idempotency",
-        ),
-        {"extend_existing": True},
-    )
-
-
-register_avernet_tenant_guard(SkillSetCreateIdempotency)
-
-
 class UserDefaultSkillSet(Base):
     """用户默认能力集启用状态关联表"""
-
     __tablename__ = "ac_user_default_skill_set"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -381,18 +199,10 @@ class UserDefaultSkillSet(Base):
     env = Column(String(20), default=get_current_env, nullable=False)
     engine_type = Column(String(32), nullable=True, index=True, comment="引擎类型")
     gmt_created = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(
-        DateTime, default=func.now(), onupdate=func.now(), nullable=False
-    )
+    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
-        UniqueConstraint(
-            "user_id",
-            "bolt_id",
-            "engine_type",
-            "env",
-            name="uix_user_default_skill_set_user_bolt_engine_env",
-        ),
+        UniqueConstraint("user_id", "bolt_id", "engine_type", "env", name="uix_user_default_skill_set_user_bolt_engine_env"),
         {"extend_existing": True},
     )
 
@@ -406,9 +216,7 @@ class UserDefaultSkillSet(Base):
             "env": self.env,
             "engine_type": self.engine_type,
             "gmt_created": self.gmt_created.isoformat() if self.gmt_created else None,
-            "gmt_modified": self.gmt_modified.isoformat()
-            if self.gmt_modified
-            else None,
+            "gmt_modified": self.gmt_modified.isoformat() if self.gmt_modified else None,
         }
 
 
@@ -417,7 +225,6 @@ class AcSkillMember(Base):
 
     用于管理技能的成员权限，支持 admin 和 member 两种角色。
     """
-
     __tablename__ = "ac_skill_member"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -425,11 +232,11 @@ class AcSkillMember(Base):
     user_id = Column(String(256), nullable=False, index=True, comment="成员 ID")
     role = Column(String(256), nullable=False, comment="成员角色")
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(
-        DateTime, default=func.now(), onupdate=func.now(), nullable=False
-    )
+    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 
-    __table_args__ = ({"extend_existing": True},)
+    __table_args__ = (
+        {"extend_existing": True},
+    )
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -439,33 +246,19 @@ class AcSkillMember(Base):
             "user_id": self.user_id,
             "role": self.role,
             "gmt_create": self.gmt_create.isoformat() if self.gmt_create else None,
-            "gmt_modified": self.gmt_modified.isoformat()
-            if self.gmt_modified
-            else None,
+            "gmt_modified": self.gmt_modified.isoformat() if self.gmt_modified else None,
         }
 
 
 class SkillCategory(Base):
     """技能类目表"""
-
     __tablename__ = "ac_skill_category"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     code = Column(String(256), nullable=False, comment="当前类目Code（目录名）")
     name = Column(String(256), nullable=False, comment="类目中文名称（暂用英文占位）")
-    parent_code = Column(
-        String(256),
-        nullable=False,
-        default="",
-        index=True,
-        comment="父类目编码，根节点为空字符串",
-    )
-    path = Column(
-        String(1024),
-        nullable=False,
-        unique=True,
-        comment="物化路径（唯一标识），如 /business/aml/",
-    )
+    parent_code = Column(String(256), nullable=False, default="", index=True, comment="父类目编码，根节点为空字符串")
+    path = Column(String(1024), nullable=False, unique=True, comment="物化路径（唯一标识），如 /business/aml/")
     level = Column(Integer, nullable=False, default=0, comment="层级深度，根节点为0")
     sort_order = Column(Integer, nullable=False, default=0, comment="同级排序序号")
     status = Column(Integer, nullable=False, default=1, comment="状态 1启用 0禁用")
@@ -478,7 +271,9 @@ class SkillCategory(Base):
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    __table_args__ = ({"extend_existing": True},)
+    __table_args__ = (
+        {"extend_existing": True},
+    )
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -492,7 +287,5 @@ class SkillCategory(Base):
             "sort_order": self.sort_order,
             "status": self.status,
             "gmt_created": self.gmt_created.isoformat() if self.gmt_created else None,
-            "gmt_modified": self.gmt_modified.isoformat()
-            if self.gmt_modified
-            else None,
+            "gmt_modified": self.gmt_modified.isoformat() if self.gmt_modified else None,
         }

@@ -27,21 +27,15 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
-from agentclaw.community.core.cron.errors import (
-    CronApiTimeoutError,
-    CronRelayError,
-)
+from agentclaw.community.core.cron.errors import CronRelayError
 from agentclaw.community.core.cron.services.cron_runtime_targets import (
     RUNTIME_STAGE_DRAFT,
 )
 from agentclaw.community.di import Injected
-from agentclaw.community.log import get_logger
 
 from .schemas import Routine, RoutineSpec, RoutineRun, RoutineUpdate, ScheduleTrigger
 
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/routines", tags=["routines"])
-
-logger = get_logger()
 
 #: The path parameter naming the routine an operation addresses.
 RoutineIdPath = Annotated[
@@ -144,9 +138,7 @@ async def list_routines(
     # operates a bot's pre-publication workspace, so a service bot's published
     # verify/online runtimes are neither listed nor queried here.
     result = await factory.list_all_crons(
-        user_id=user_id,
-        nick_name=nick_name,
-        bot_id=bot_id,
+        user_id=user_id, nick_name=nick_name, bot_id=bot_id,
         runtime_stage=RUNTIME_STAGE_DRAFT,
     )
     data = result.get("data") if isinstance(result, dict) else None
@@ -338,68 +330,26 @@ async def run_routine(
     with a reason) or 'unknown', and both timestamps are null. Read the runs
     listing for actual execution results and timings.
     """
-    # "Run now" is unconditional.  The runtime's default ``force=False`` means
-    # "run only when due" on OpenClaw; using that default here makes a manual
-    # click at any other time a no-op.  Worse, OpenClaw still returns
-    # ``ran=<routine id>, status=not_due`` and ``bool(ran)`` is true, so the old
-    # mapping reported that no-op as ``completed``.  Force the trigger and read
-    # the runtime status rather than treating its opaque routine id as a bool.
+    # The bot is named on the path (C3). run_cron returns
+    # {"success":..,"data":{"ok":..,"ran":..,"reason":..}} — no run_id, no
+    # timestamps. run_id is synthesized from routine_id + the handler's UTC
+    # trigger timestamp (uniqueness good enough for an immediate-trigger echo;
+    # the engine has no run_id to return).
     user_id = owner_id
     nick_name = owner_id
-    try:
-        result = await factory.run_cron(
-            bot_id=bot_id,
-            user_id=user_id,
-            nick_name=nick_name,
-            task_id=routine_id,
-            force=True,
-        )
-    except (CronRelayError, CronApiTimeoutError):
-        # Let the ENVELOPE_ERRORS mapping handle these; the fixed public message
-        # is applied by the app-level envelope handler.
-        raise
-    except Exception as exc:
-        # ValueError ("Bot has no device binding") and other non-ENVELOPE_ERRORS
-        # exceptions are translated here so the public response is the fixed
-        # "Cron relay service error" envelope (502), not a vague 500 with an
-        # internal identifier like ``bot_id`` leaking into it.
-        logger.warning("[run_routine] routine trigger relay failed: %s", exc)
-        raise CronRelayError("routine trigger failed", error_code=502) from exc
-    if not isinstance(result, dict) or not result.get("success", False):
-        # Routed via the ``@envelope_errors`` decorator to the ENVELOPE_ERRORS
-        # entry for ``CronRelayError`` (502, fixed public "Cron relay service
-        # error"), instead of leaking the adapter detail or hitting an
-        # app-level 500 with a vague message.
-        raise CronRelayError("routine trigger failed", error_code=502)
-
-    data = result.get("data")
-    if not isinstance(data, dict):
-        raise CronRelayError("routine trigger returned no data", error_code=502)
-
-    runtime_status = str(data.get("status", "") or "").lower()
-    reason = str(data.get("reason", "") or "")
-    ran = data.get("ran")
-    if runtime_status in {"dispatched", "started", "running", "success", "completed"}:
-        status = "completed"
-    elif runtime_status in {"already_running", "not_due", "skipped", "failed", "error"}:
-        status = "failed"
-    elif isinstance(ran, bool):
-        status = "completed" if ran else ("failed" if reason else "unknown")
-    elif ran:
-        # Claude Code currently acknowledges a successful trigger as
-        # ``{"ran": <routine id>}`` without a separate status.
+    result = await factory.run_cron(
+        bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
+    )
+    data = result.get("data") if isinstance(result, dict) else None
+    ran = bool(data.get("ran")) if isinstance(data, dict) else False
+    reason = str(data.get("reason", "") or "") if isinstance(data, dict) else ""
+    if ran:
         status = "completed"
     elif reason:
         status = "failed"
     else:
         status = "unknown"
-
-    upstream_run_id = data.get("run_id") or data.get("runId")
-    run_id = (
-        str(upstream_run_id)
-        if upstream_run_id
-        else (f"{routine_id}-{datetime.now(_tz.utc).isoformat()}")
-    )
+    run_id = f"{routine_id}-{datetime.now(_tz.utc).isoformat()}"
     return envelope(
         RoutineRun(
             run_id=run_id,

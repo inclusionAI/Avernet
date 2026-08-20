@@ -90,7 +90,6 @@ def test_error_envelope_pins_data_to_null():
     assert model["properties"]["data"].get("type") == "null"
 
 
-
 # ----- R9/F38: the one documented exception to ErrorEnvelope ----------------
 
 

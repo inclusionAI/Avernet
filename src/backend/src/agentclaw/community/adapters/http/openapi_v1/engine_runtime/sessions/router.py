@@ -9,7 +9,6 @@ see ``engine_runtime/gating.py`` and ``core/engine_runtime/gate.py``.
 from __future__ import annotations
 
 from typing import Annotated, Any
-from urllib.parse import quote
 
 from fastapi import APIRouter, Path, Query, Request
 
@@ -24,7 +23,6 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     MessagePage,
     Session,
     SessionCreate,
-    SessionFavorite,
     SessionPage,
     SessionUpdate,
 )
@@ -337,12 +335,8 @@ async def list_sessions(
     if session_key:
         params["session_key"] = session_key
     result = await relay.call(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        facts=facts,
-        stage=stage.value,
-        method="GET",
-        path="/api/sessions",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="GET", path="/api/sessions",
         params=params,
     )
     mapped = [_map_session(d) for d in _as_list(result.data)]
@@ -372,12 +366,8 @@ async def create_session(
         surface="sessions",
     )
     result = await relay.call(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        facts=facts,
-        stage=stage.value,
-        method="POST",
-        path="/api/sessions",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="POST", path="/api/sessions",
         body={
             "title": body.title,
             "model": body.model,
@@ -389,46 +379,6 @@ async def create_session(
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError("engine returned no session")
     return created(_map_session(result.data), request)
-
-
-@router.get("/favorites", response_model=Envelope[SessionPage])
-@envelope_errors
-async def list_session_favorites(
-    bot_id: BotIdPath,
-    page: PageParamsDep,
-    user_id: UserIdDep,
-    owner_id: OwnerIdDep,
-    request: Request,
-    stage: StageQuery = RuntimeStage.DRAFT,
-    agent_id: Annotated[
-        str | None, Query(description="Only favorites belonging to this agent.")
-    ] = None,
-    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
-) -> Envelope[SessionPage]:
-    """List sessions the acting user has favorited on this bot runtime."""
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
-    )
-    params: dict[str, Any] = {**_window(page), "user_id": user_id}
-    if agent_id:
-        params["agent_id"] = agent_id
-    result = await relay.call(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        facts=facts,
-        stage=stage.value,
-        method="GET",
-        path="/api/session-favorites",
-        params=params,
-    )
-    mapped = [_map_session(d) for d in _as_list(result.data)]
-    total, items = _page(mapped, page, reported=result.total)
-    return page_envelope(total, items, request)
 
 
 @router.get("/{session_id}", response_model=Envelope[Session])
@@ -458,95 +408,13 @@ async def get_session(
         surface="sessions",
     )
     result = await relay.call(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        facts=facts,
-        stage=stage.value,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="GET",
         path=f"/api/sessions/{session_id}",
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError(f"no session {session_id}")
     return envelope(_map_session(result.data), request)
-
-
-async def _set_session_favorite(
-    *,
-    bot_id: str,
-    session_id: str,
-    user_id: str,
-    owner_id: str,
-    stage: RuntimeStage,
-    favorited: bool,
-    relay: EngineRuntimeRelayProtocol,
-) -> SessionFavorite:
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
-    )
-    encoded_session_id = quote(session_id, safe="")
-    await relay.call(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        facts=facts,
-        stage=stage.value,
-        method="PUT" if favorited else "DELETE",
-        path=f"/api/session-favorites/{encoded_session_id}",
-        params={"user_id": user_id},
-    )
-    return SessionFavorite(session_id=session_id, favorited=favorited)
-
-
-@router.put("/{session_id}/favorite", response_model=Envelope[SessionFavorite])
-@envelope_errors
-async def add_session_favorite(
-    bot_id: BotIdPath,
-    session_id: SessionIdPath,
-    user_id: UserIdDep,
-    owner_id: OwnerIdDep,
-    request: Request,
-    stage: StageQuery = RuntimeStage.DRAFT,
-    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
-) -> Envelope[SessionFavorite]:
-    """Idempotently favorite one session for the acting user."""
-    result = await _set_session_favorite(
-        bot_id=bot_id,
-        session_id=session_id,
-        user_id=user_id,
-        owner_id=owner_id,
-        stage=stage,
-        favorited=True,
-        relay=relay,
-    )
-    return envelope(result, request)
-
-
-@router.delete("/{session_id}/favorite", response_model=Envelope[SessionFavorite])
-@envelope_errors
-async def remove_session_favorite(
-    bot_id: BotIdPath,
-    session_id: SessionIdPath,
-    user_id: UserIdDep,
-    owner_id: OwnerIdDep,
-    request: Request,
-    stage: StageQuery = RuntimeStage.DRAFT,
-    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
-) -> Envelope[SessionFavorite]:
-    """Idempotently remove the acting user's favorite marker."""
-    result = await _set_session_favorite(
-        bot_id=bot_id,
-        session_id=session_id,
-        user_id=user_id,
-        owner_id=owner_id,
-        stage=stage,
-        favorited=False,
-        relay=relay,
-    )
-    return envelope(result, request)
 
 
 @router.patch("/{session_id}", response_model=Envelope[Session])
@@ -574,18 +442,14 @@ async def update_session(
     )
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
     result = await relay.call(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        facts=facts,
-        stage=stage.value,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="POST",
         # QUERY params, not a body. The engine declares this route's fields as
         # bare scalar arguments, which FastAPI binds from the query string —
         # there is no Body(...) on it. Sending a body is silently discarded and
         # the endpoint answers 200 with the unchanged session: a no-op that
         # looks like success.
-        path=f"/api/sessions/{session_id}/update",
-        params=payload,
+        path=f"/api/sessions/{session_id}/update", params=payload,
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError(f"no session {session_id}")
@@ -613,10 +477,7 @@ async def delete_session(
         surface="sessions",
     )
     await relay.call(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        facts=facts,
-        stage=stage.value,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="DELETE",
         path=f"/api/sessions/{session_id}",
     )
@@ -654,10 +515,7 @@ async def list_session_messages(
     )
     _require_within_depth(page)
     result = await relay.call(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        facts=facts,
-        stage=stage.value,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="GET",
         path=f"/api/sessions/{session_id}/messages",
         # The history route tail-limits rather than paginating, so the offset is
@@ -693,10 +551,7 @@ async def clear_session_messages(
         surface="sessions",
     )
     await relay.call(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        facts=facts,
-        stage=stage.value,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="DELETE",
         path=f"/api/sessions/{session_id}/messages",
     )

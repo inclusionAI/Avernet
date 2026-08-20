@@ -8,7 +8,6 @@ use bcs_service_api::{
     GroupCoreService, GroupStatus, GroupStrategy, HumanActor, MessageFlowService, MessageRole, Participant,
     ParticipantMode, ParticipantRole, PersistentGroupSendCommand, ProviderStreamGrayList,
     RedactedToken, ServiceError, WebSendCommand,
-    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     ServiceResult, Session, SessionHistoryCommand, SessionKind, SessionManagementService,
     SessionStatus, SessionUseCaseError,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
@@ -1318,6 +1317,8 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
 
 #[tokio::test]
 async fn accepted_chat_send_records_run_context_for_callback() {
+    const CONFIGURED_TIMEOUT_MS: u64 = 7_200_000;
+
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let run_context = Arc::new(MemoryBotRunContextStore::new());
     let flow = BcsMessageFlow::new(
@@ -1327,6 +1328,7 @@ async fn accepted_chat_send_records_run_context_for_callback() {
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
     )
+    .with_provider_chat_run_timeout_ms(CONFIGURED_TIMEOUT_MS)
     .with_bot_run_context(run_context.clone());
 
     let before_send_ms = bcs_protocol::now_ms();
@@ -1370,11 +1372,11 @@ async fn accepted_chat_send_records_run_context_for_callback() {
     );
     assert!(
         context.deadline_ms
-            >= before_send_ms.saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+            >= before_send_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
     );
     assert!(
         context.deadline_ms
-            <= after_send_ms.saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+            <= after_send_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
     );
 }
 

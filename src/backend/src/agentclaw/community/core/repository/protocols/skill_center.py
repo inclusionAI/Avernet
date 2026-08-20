@@ -1,5 +1,4 @@
 """Repository contracts owned by the ``skill_center`` domain.
-
 Moved here by the ``core/repository`` consolidation. Every member is
 ``@abstractmethod``: an implementation that omits one fails at construction
 naming the missing member, instead of raising ``AttributeError`` at the call
@@ -10,54 +9,6 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from typing import List, Optional, Protocol, runtime_checkable
-
-from .skill_center_types import (
-    SpaceCreateData,
-    SpaceRecord,
-    SpaceSkillCreateData,
-    SpaceSkillCreationRecord,
-    SpaceSkillOwnerGrantData,
-    SpaceSkillOwnershipData,
-    SpaceSkillQueryRecord,
-)
-
-
-@runtime_checkable
-class SpaceSkillRepository(Protocol):
-    """Tenant-scoped persistence seam for additive Space Skill facts."""
-
-    @abstractmethod
-    def create_space(self, data: SpaceCreateData) -> SpaceRecord:
-        ...
-
-    @abstractmethod
-    def get_space(self, space_id: int, *, env: str) -> SpaceRecord | None:
-        ...
-
-    @abstractmethod
-    def create_space_skill(
-        self,
-        *,
-        skill_data: SpaceSkillCreateData,
-        ownership_data: SpaceSkillOwnershipData,
-        owner_grant_data: SpaceSkillOwnerGrantData,
-    ) -> SpaceSkillCreationRecord:
-        """Atomically persist the initial identity, ownership and owner grant."""
-        ...
-
-    @abstractmethod
-    def list_space_skills(
-        self,
-        *,
-        space_id: int,
-        actor_id: str,
-        env: str,
-        keyword: str | None,
-        offset: int,
-        limit: int,
-    ) -> tuple[int, list[SpaceSkillQueryRecord]]:
-        """Return a stable, database-paginated Space Skill projection."""
-        ...
 
 
 @runtime_checkable
@@ -135,11 +86,6 @@ class SkillRepository(Protocol):
         ...
 
     @abstractmethod
-    def list_bot_installed_skills(self, *, env: str, bot_id: str) -> list[dict]:
-        """Return active-only Installation assets for one Bot."""
-        ...
-
-    @abstractmethod
     def create(self, skill_data: dict) -> dict:
         ...
 
@@ -157,10 +103,8 @@ class SkillRepository(Protocol):
         old_locator: str,
         new_locator: str,
         description: str,
-        requires_runtime_restore: bool,
-        cleanup_work_id: int,
-    ) -> int | None:
-        """Atomically switch package authority and commit old-package cleanup."""
+    ) -> dict | None:
+        """Atomically switch package authority at a canonical locator."""
         ...
 
     @abstractmethod
@@ -182,10 +126,8 @@ class SkillRepository(Protocol):
         skill_id: str,
         owner_id: str,
         bot_id: str,
-        quarantine_locator: str,
-        cleanup_work_id: int,
-    ) -> int | None:
-        """Atomically delete scoped state and commit prepared cleanup work."""
+    ) -> bool | None:
+        """Atomically delete scoped Local Skill state."""
         ...
 
     @abstractmethod
@@ -264,6 +206,8 @@ class SkillSetRepository(Protocol):
         user_id: str | None = None,
         bolt_id: str | None = None,
         engine_type: str | None = None,
+        default_skill_set_bolt_id: str | None = None,
+        default_skill_set_engine_type: str | None = None,
     ) -> list[dict]:
         ...
 
@@ -382,6 +326,8 @@ class SkillSetRepository(Protocol):
         user_id: str | None = None,
         bolt_id: str | None = None,
         engine_type: str | None = None,
+        default_skill_set_bolt_id: str | None = None,
+        default_skill_set_engine_type: str | None = None,
     ) -> list[dict]:
         ...
 
@@ -393,6 +339,8 @@ class SkillSetRepository(Protocol):
         bolt_id: str | None = None,
         engine_type: str | None = None,
         env: str,
+        default_skill_set_bolt_id: str | None = None,
+        default_skill_set_engine_type: str | None = None,
     ) -> list[dict]:
         """Return active sets using an explicit environment, never runtime env."""
         ...
@@ -427,6 +375,8 @@ class SkillSetRepository(Protocol):
         user_id: str | None = None,
         bolt_id: str | None = None,
         engine_type: str | None = None,
+        default_skill_set_bolt_id: str | None = None,
+        default_skill_set_engine_type: str | None = None,
     ) -> list[dict]:
         """列出所有技能集（排除已删除 Bot 的），用于重名检查避免误判。"""
         ...
@@ -673,77 +623,4 @@ class SkillPropagationLogRepository(Protocol):
     @abstractmethod
     def find_recent(self, skill_uuid: str, env: str, within_seconds: int) -> dict | None:
         """查找 within_seconds 内同 (skill_uuid, env) 的最新 done/pending 记录。"""
-        ...
-
-
-@runtime_checkable
-class LocalSkillCleanupRepository(Protocol):
-    """Persist and progress retryable cleanup work within one exact Bot scope."""
-
-    @abstractmethod
-    def record_preparing(
-        self,
-        *,
-        env: str,
-        owner_id: str,
-        bot_id: str,
-        skill_id: str,
-        package_locator: str,
-    ) -> int | None:
-        """Durably reserve a quarantine before authoritative bytes move."""
-        ...
-
-    @abstractmethod
-    def record_pending(
-        self,
-        *,
-        env: str,
-        owner_id: str,
-        bot_id: str,
-        skill_id: str,
-        package_locator: str,
-        requires_runtime_restore: bool,
-    ) -> int | None: ...
-
-    @abstractmethod
-    def record_repair_required(
-        self,
-        *,
-        env: str,
-        owner_id: str,
-        bot_id: str,
-        skill_id: str,
-        package_locator: str,
-    ) -> int | None: ...
-
-    @abstractmethod
-    def list_pending(self, *, env: str, owner_id: str, bot_id: str) -> list[dict]: ...
-
-    @abstractmethod
-    def list_repair_required(
-        self,
-        *,
-        env: str,
-        owner_id: str,
-        bot_id: str,
-        skill_id: str,
-    ) -> list[dict]:
-        """Return quarantines that must be restored before retrying this delete."""
-        ...
-
-    @abstractmethod
-    def mark_cleaned(
-        self, *, work_id: int, env: str, owner_id: str, bot_id: str
-    ) -> bool: ...
-
-    @abstractmethod
-    def mark_failed(
-        self, *, work_id: int, env: str, owner_id: str, bot_id: str, error: str
-    ) -> bool: ...
-
-    @abstractmethod
-    def cancel_pending(
-        self, *, work_id: int, env: str, owner_id: str, bot_id: str
-    ) -> bool:
-        """Cancel pending or not-yet-committed preparation work."""
         ...

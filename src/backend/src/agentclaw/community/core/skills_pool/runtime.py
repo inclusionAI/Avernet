@@ -13,7 +13,6 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     CurrentRuntimeLayoutProbeService,
     MAPPING_CONTRACT_VERSION,
-    MAPPING_V3_CONTRACT_VERSION,
     RuntimeLayoutProbeResult,
 )
 from agentclaw.community.core.skills_pool.models import (
@@ -68,19 +67,7 @@ class SkillsPoolRuntime:
         preparation_id: str,
         registered_local_names: list[str],
         mappings: list[PoolSkillMapping],
-        mapping_contract_version: str = MAPPING_CONTRACT_VERSION,
     ) -> PoolCutoverResult:
-        if not await self._ensure_center_mappings(
-            bot_id=bot_id,
-            user_id=user_id,
-            mappings=mappings,
-            mapping_contract_version=mapping_contract_version,
-        ):
-            return PoolCutoverResult(
-                committed=False,
-                status=PoolCutoverStatus.TRANSIENT_ERROR,
-                evidence={"reason": "center_ensure_failed_before_mapping_publish"},
-            )
         try:
             response = await self._invoke(
                 bot_id=bot_id,
@@ -90,7 +77,7 @@ class SkillsPoolRuntime:
                     "migration_generation": migration_generation,
                     "preparation_id": preparation_id,
                     "registered_local_names": registered_local_names,
-                    "mapping_contract_version": mapping_contract_version,
+                    "mapping_contract_version": MAPPING_CONTRACT_VERSION,
                     "mappings": [mapping.to_dict() for mapping in mappings],
                 },
             )
@@ -144,22 +131,14 @@ class SkillsPoolRuntime:
         mappings: list[PoolSkillMapping],
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
-        mapping_contract_version: str = MAPPING_CONTRACT_VERSION,
     ) -> bool:
-        if not await self._ensure_center_mappings(
-            bot_id=bot_id,
-            user_id=user_id,
-            mappings=mappings,
-            mapping_contract_version=mapping_contract_version,
-        ):
-            return False
         try:
             response = await self._invoke(
                 bot_id=bot_id,
                 user_id=user_id,
                 path="/api/skills/layout/mappings/publish",
                 body={
-                    "mapping_contract_version": mapping_contract_version,
+                    "mapping_contract_version": MAPPING_CONTRACT_VERSION,
                     "mappings": [mapping.to_dict() for mapping in mappings],
                     "retired_mappings": [
                         mapping.to_dict() for mapping in retired_mappings
@@ -296,7 +275,6 @@ class SkillsPoolRuntime:
         mappings: list[PoolSkillMapping],
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
-        mapping_contract_version: str = MAPPING_CONTRACT_VERSION,
     ) -> bool:
         try:
             response = await self._invoke(
@@ -304,7 +282,7 @@ class SkillsPoolRuntime:
                 user_id=user_id,
                 path="/api/skills/layout/mappings/verify",
                 body={
-                    "mapping_contract_version": mapping_contract_version,
+                    "mapping_contract_version": MAPPING_CONTRACT_VERSION,
                     "mappings": [mapping.to_dict() for mapping in mappings],
                     "retired_mappings": [
                         mapping.to_dict() for mapping in retired_mappings
@@ -323,46 +301,6 @@ class SkillsPoolRuntime:
             response.get("success") is True
             and isinstance(data, dict)
             and data.get("valid") is True
-        )
-
-    async def _ensure_center_mappings(
-        self,
-        *,
-        bot_id: str,
-        user_id: str,
-        mappings: Sequence[PoolSkillMapping],
-        mapping_contract_version: str,
-    ) -> bool:
-        center = [mapping for mapping in mappings if mapping.corpus == "center"]
-        if not center:
-            return True
-        if mapping_contract_version != MAPPING_V3_CONTRACT_VERSION:
-            logger.error("[skills_pool.runtime] center mapping requires v3")
-            return False
-        items = [
-            {"skill_uuid": mapping.skill_uuid, "version": mapping.sc_version_number}
-            for mapping in center
-            if mapping.skill_uuid and mapping.sc_version_number
-        ]
-        if len(items) != len(center):
-            return False
-        try:
-            response = await self._invoke(
-                bot_id=bot_id,
-                user_id=user_id,
-                path="/api/skills/center/ensure",
-                body={"items": items},
-            )
-        except Exception:
-            logger.exception("[skills_pool.runtime] center ensure failed bot_id=%s", bot_id)
-            return False
-        data = response.get("data")
-        return (
-            response.get("success") is True
-            and isinstance(data, dict)
-            and data.get("failed") == []
-            and isinstance(data.get("ok"), list)
-            and len(data["ok"]) == len(items)
         )
 
     async def _invoke(

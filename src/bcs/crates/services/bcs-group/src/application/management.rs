@@ -49,6 +49,7 @@ impl Default for GroupConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct GroupManagement {
     group: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,

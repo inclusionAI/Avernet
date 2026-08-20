@@ -38,19 +38,9 @@ import inspect
 
 import pytest
 
-from agentclaw.community.api.bot_dormant_service import (
-    BotDormantActivateServiceProtocol,
-)
-from agentclaw.community.api.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconcilerProtocol,
-)
-from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
-from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
-from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
 )
-from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
@@ -59,12 +49,6 @@ from agentclaw.community.api.bot_app_grant_service import (
     BotAppGrantServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
-from agentclaw.community.api.health_diagnosis_service import (
-    HealthDiagnosisServiceProtocol,
-)
-from agentclaw.community.api.local_bot_workflow_service import (
-    LocalBotWorkflowServiceProtocol,
-)
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
@@ -77,61 +61,14 @@ from agentclaw.community.api.local_skill_state_service import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
-)
-from agentclaw.community.api.market_favorite_service import (
-    MarketFavoriteServiceProtocol,
-)
-from agentclaw.community.api.repository_catalog_service import (
-    RepositoryCatalogServiceProtocol,
-)
-from agentclaw.community.api.service_publication_facade import (
-    ServicePublicationFacadeProtocol,
-)
-from agentclaw.community.api.space_service import (
-    SpaceAccessServiceProtocol,
-    SpaceMemberServiceProtocol,
-    SpaceServiceProtocol,
-)
-from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
-from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
-    CollaboratorService,
-)
-from agentclaw.community.core.bot_inventory.protocols import (
-    BotInventoryBotPort,
-    DesktopBotInventoryPort,
-)
-from agentclaw.community.core.bot_inventory.services.bot_inventory_service import (
-    BotInventoryService,
-)
-from agentclaw.community.core.bot_inventory.services.local_bot_workflow import (
-    LocalBotWorkflowService,
-)
-from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.bot_management.services.bot_space_service import (
-    BotSpaceService,
-)
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     BotStartupScriptService,
 )
-from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
-    DesktopBotService,
-)
 from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
-from agentclaw.community.core.harness.services.health_diagnosis_service import (
-    HealthDiagnosisService,
-)
 from agentclaw.community.core.services.engine_config import EngineConfigService
 from agentclaw.community.core.skill_center.services.local_skill_query_service import (
     LocalSkillQueryService,
-)
-from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
-    BotSkillAssetService,
-)
-from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconciler,
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
@@ -143,51 +80,19 @@ from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
-from agentclaw.community.core.skill_center.services.repository_catalog_service import (
-    RepositoryCatalogService,
-)
-from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
-    SkillSetControlPlaneService,
-)
-from agentclaw.community.core.market_favorites.services import MarketFavoriteService
-from agentclaw.community.core.service_bot.services.service_publication_facade import (
-    ServicePublicationFacade,
-)
-from agentclaw.community.core.spaces.services import (
-    SpaceAccessService,
-    SpaceMemberService,
-    SpaceService,
-)
 
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
     (BotAppGrantServiceProtocol, BotAppGrantService),
-    (CollaboratorServiceProtocol, CollaboratorService),
-    (BotInventoryServiceProtocol, BotInventoryService),
     (BotStartupScriptServiceProtocol, BotStartupScriptService),
-    (BotSpaceServiceProtocol, BotSpaceService),
-    (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),
-    (BotDormantActivateServiceProtocol, ActivateBotService),
-    (BotInventoryBotPort, BotService),
-    (DesktopBotInventoryPort, DesktopBotService),
     (EngineConfigServiceProtocol, EngineConfigService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),
-    (HealthDiagnosisServiceProtocol, HealthDiagnosisService),
-    (BotSkillAssetServiceProtocol, BotSkillAssetService),
-    (BotRuntimeProjectionReconcilerProtocol, BotRuntimeProjectionReconciler),
     (LocalSkillQueryServiceProtocol, LocalSkillQueryService),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
     (LocalSkillStateServiceProtocol, LocalSkillStateService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),
-    (RepositoryCatalogServiceProtocol, RepositoryCatalogService),
-    (SkillSetControlPlaneServiceProtocol, SkillSetControlPlaneService),
-    (SpaceServiceProtocol, SpaceService),
-    (SpaceAccessServiceProtocol, SpaceAccessService),
-    (SpaceMemberServiceProtocol, SpaceMemberService),
-    (MarketFavoriteServiceProtocol, MarketFavoriteService),
-    (ServicePublicationFacadeProtocol, ServicePublicationFacade),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]

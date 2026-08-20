@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.models.skill import BotSkillInstallation, Skill
+from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
@@ -33,7 +33,6 @@ class _Database:
 def test_exact_local_skill_query_is_tenant_scoped_and_reports_desired_state(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'skills.db'}")
     Skill.__table__.create(engine)
-    BotSkillInstallation.__table__.create(engine)
     DefaultSkillsetSkillExclusion.__table__.create(engine)
     repo = SkillRepository(_Database(engine))
 
@@ -66,7 +65,7 @@ def test_exact_local_skill_query_is_tenant_scoped_and_reports_desired_state(tmp_
         )
         assert total == 1
         assert rows[0]["id"] == created["id"]
-        assert rows[0]["active"] is False
+        assert rows[0]["active"] is True
 
     with avernet_tenant_scope("tenant-b"):
         total, rows = repo.list_bot_local_skills(

@@ -6,8 +6,9 @@ from dataclasses import asdict
 
 import pytest
 
-from agentclaw.community.core.config_compose.models import McpComposeInput
+from agentclaw.community.core.config_compose.models import McpComposeInput, StdioLaunch
 from agentclaw.community.core.config_compose.services.mcporter_composer import (
+    STDIO_TRANSPORT,
     TECLAW_MCP_NETWORK_PRIORITY,
     McporterComposeError,
     McporterComposer,
@@ -159,40 +160,172 @@ def test_no_matching_env_endpoint_raises() -> None:
         composer.compose_server(McpComposeInput(mcp_data=md, endpoint_env="PROD"))
 
 
-def test_local_stdio_raises_as_unmodeled() -> None:
+def test_local_without_resolved_launch_raises_naming_the_registry() -> None:
+    """A LOCAL entry that arrives with no ``stdio`` cannot be composed either way.
+
+    It has no endpoint to select (local servers have none), so the failure must
+    name the real cause — the local-MCP registry had no entry — rather than the
+    endpoint error that would send a reader hunting in MCP Center.
+    """
     composer = McporterComposer()
     md = {"server_code": "fs", "run_mode": "LOCAL", "stdio_configs": [{"command": "node"}]}
-    with pytest.raises(McporterComposeError):
+
+    with pytest.raises(McporterComposeError, match="local-MCP registry"):
         composer.compose_server(McpComposeInput(mcp_data=md))
 
 
-def test_compose_skips_local_stdio_servers() -> None:
+def test_compose_emits_local_stdio_servers() -> None:
+    """LOCAL servers ride the artifact with a flat launch instruction."""
     composer = McporterComposer()
     manifest = composer.compose(
         [
             McpComposeInput(mcp_data=_remote_mcp("remote"), endpoint_env="PROD"),
             McpComposeInput(
-                mcp_data={
-                    "server_code": "hitl",
-                    "runMode": "LOCAL",
-                    "stdioConfigs": [
-                        {
-                            "command": "python3",
-                            "arguments": ["/home/admin/hitl/hitl_mcp_server.py"],
-                        }
-                    ],
-                }
+                mcp_data={"server_code": "hitl", "runMode": "LOCAL"},
+                stdio=StdioLaunch(
+                    command="python3",
+                    args=["/home/admin/hitl/hitl_mcp_server.py"],
+                    env={"MCP_TRANSPORT": "stdio"},
+                ),
             ),
         ]
     )
 
-    assert [s.server_code for s in manifest.servers] == ["remote"]
+    assert [s.server_code for s in manifest.servers] == ["remote", "hitl"]
+
+    local = manifest.servers[1]
+    assert local.transport == STDIO_TRANSPORT
+    # The launch instruction rides flat on the entry, not nested under "stdio".
+    assert local.command == "python3"
+    assert local.args == ["/home/admin/hitl/hitl_mcp_server.py"]
+    assert local.env == {"MCP_TRANSPORT": "stdio"}
+    # The local form carries no remote fields — a stdio child needs no endpoint
+    # and has nothing to authenticate against.
+    assert local.endpoint is None
+    assert local.headers == {}
+
+
+def test_local_stdio_ignores_credentials_rather_than_inlining_them() -> None:
+    """Credentials on a LOCAL input are dropped, not smuggled into the entry.
+
+    ``build_mcp_sync_payload`` merges a user's stored config for every server
+    regardless of run mode, so a local entry can arrive carrying an api_key. There
+    is no endpoint to append it to and no request to sign, so it must not survive
+    into the published artifact.
+    """
+    composer = McporterComposer()
+    manifest = composer.compose(
+        [
+            McpComposeInput(
+                mcp_data={"server_code": "hitl", "runMode": "LOCAL"},
+                api_key=f"authorization={SECRET_TOKEN}",
+                headers={"x-ling-auth": SECRET_TOKEN},
+                stdio=StdioLaunch(command="python3"),
+            )
+        ]
+    )
+
+    assert SECRET_TOKEN not in _manifest_json(manifest)
 
 
 def test_missing_server_code_raises() -> None:
     composer = McporterComposer()
     with pytest.raises(McporterComposeError):
         composer.compose_server(McpComposeInput(mcp_data={"name": "x"}))
+
+
+def test_selected_endpoint_without_a_url_raises() -> None:
+    """A remote entry with no URL gives the engine nothing to connect to.
+
+    Selection can pick a record that matched on network/env but carries no
+    ``url``; composing it produced ``endpoint: null``, deferring the discovery to
+    whoever tried to call the server. It fails at compose instead, naming the
+    record that was chosen.
+    """
+    composer = McporterComposer()
+    md = {
+        "server_code": "urlless",
+        "run_mode": "REMOTE",
+        "endpoints": [
+            {"networkType": "OFFICE", "env": "PROD",
+             "transportProtocol": "STREAMABLE_HTTP"},  # no url
+        ],
+    }
+
+    with pytest.raises(McporterComposeError, match="carries no url"):
+        composer.compose_server(
+            McpComposeInput(
+                mcp_data=md,
+                endpoint_env="PROD",
+                network_priority=TECLAW_MCP_NETWORK_PRIORITY,
+            )
+        )
+
+
+def test_selected_endpoint_without_a_url_raises_on_the_legacy_path() -> None:
+    """Same guard on the non-priority selector other engines still use."""
+    composer = McporterComposer()
+    md = {
+        "server_code": "urlless",
+        "run_mode": "REMOTE",
+        "endpoints": [
+            {"networkType": "INTERNET", "env": "PROD",
+             "transportProtocol": "STREAMABLE_HTTP"},  # no url
+        ],
+    }
+
+    with pytest.raises(McporterComposeError, match="carries no url"):
+        composer.compose_server(
+            McpComposeInput(mcp_data=md, endpoint_env="PROD")
+        )
+
+
+def test_no_endpoints_reports_only_what_this_layer_can_observe() -> None:
+    """Zero endpoints must not be reported as "the detail was never resolved".
+
+    Both a failed lookup and a record Center genuinely holds but has published no
+    endpoints for arrive here as an empty list, and this frame cannot tell them
+    apart. Naming either cause would misdirect for the other, so the message
+    stays with the fact — no endpoints — and points at the server's published
+    endpoints rather than at the lookup.
+    """
+    composer = McporterComposer()
+    md = {"server_code": "no-endpoints", "run_mode": "REMOTE", "endpoints": []}
+
+    with pytest.raises(McporterComposeError) as excinfo:
+        composer.compose_server(
+            McpComposeInput(
+                mcp_data=md,
+                endpoint_env="PROD",
+                network_priority=TECLAW_MCP_NETWORK_PRIORITY,
+            )
+        )
+
+    assert "carries no endpoints at all" in str(excinfo.value)
+    assert "never resolved" not in str(excinfo.value)
+
+
+def test_endpoints_present_but_unreachable_blames_the_networks() -> None:
+    """The genuinely misconfigured case keeps pointing at network coverage, and
+    reports how many endpoints were rejected so the gap is diagnosable."""
+    composer = McporterComposer()
+    md = {
+        "server_code": "wrong-net",
+        "run_mode": "REMOTE",
+        "endpoints": [
+            {"networkType": "DEVNET", "env": "PROD",
+             "transportProtocol": "STREAMABLE_HTTP", "url": "https://dev/x"},
+        ],
+    }
+
+    with pytest.raises(McporterComposeError, match="declares 1 endpoint"):
+        composer.compose_server(
+            McpComposeInput(
+                mcp_data=md,
+                endpoint_env="PROD",
+                network_priority=TECLAW_MCP_NETWORK_PRIORITY,
+            )
+        )
 
 
 def test_compose_builds_manifest_for_multiple_servers() -> None:

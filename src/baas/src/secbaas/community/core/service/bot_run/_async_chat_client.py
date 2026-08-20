@@ -688,12 +688,14 @@ class AsyncChatClient:
         chat_state = payload.get("state", "")
         event_run_id = payload.get("runId") or payload.get("run_id")
         message = payload.get("message", {})
-        content = message.get("content", [])
+        contents = message.get("content", [])
 
         # 提取文本内容
         text = ""
-        if content and len(content) > 0:
-            text = content[0].get("text", "")
+        for content in contents:
+            if content.get("text") is not None:
+                text = content.get("text")
+                break
 
         # No state associated with this session key
         if state is None:

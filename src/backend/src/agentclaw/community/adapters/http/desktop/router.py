@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.api.desktop_bot_service import DesktopBotServiceProtocol
-from agentclaw.community.core.desktop_bot.errors import DesktopBotServiceError
+from agentclaw.community.core.desktop_bot.services.desktop_bot_service import DesktopBotServiceError
 from agentclaw.community.core.errors import DomainError, NotFound
 from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES

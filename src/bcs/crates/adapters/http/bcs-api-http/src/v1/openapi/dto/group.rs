@@ -189,6 +189,7 @@ pub enum CreateGroupRequest {
         driver_bot_uuid: String,
         participants: Vec<ParticipantRequest>,
         collaboration: CollaborationRequest,
+        originator: Option<String>,
     },
     Dm {
         target_actor_id: String,
@@ -206,6 +207,7 @@ impl From<CreateGroupRequest> for CreateGroupSpec {
                 driver_bot_uuid,
                 participants,
                 collaboration,
+                originator,
             } => Self::Collaboration(CreateCollaborationGroup {
                 name,
                 context,
@@ -219,6 +221,7 @@ impl From<CreateGroupRequest> for CreateGroupSpec {
                     })
                     .collect(),
                 collaboration: collaboration.into(),
+                originator,
             }),
             CreateGroupRequest::Dm {
                 target_actor_id,
@@ -248,6 +251,7 @@ impl From<UpdateGroupRequest> for GroupPatch {
     fn from(value: UpdateGroupRequest) -> Self {
         Self {
             name: value.name,
+            context: None,
             visibility: value.visibility,
             delivery_policy: value.delivery_policy.map(|policy| GroupDeliveryPolicy {
                 bot_final_delivery: policy.bot_final_delivery,

@@ -223,7 +223,9 @@ def test_end_to_end_through_a_real_route(caplog):
         raise BotNotFoundError(f"Bot not found: {bot_id}")
 
     with caplog.at_level(logging.DEBUG):
-        resp = TestClient(app).post("/openapi/v1/bots/b-42", json={"bot_name": "alpha"})
+        resp = TestClient(app).post(
+            "/openapi/v1/bots/b-42", json={"bot_name": "alpha"}
+        )
 
     assert resp.status_code == 404
     assert json.loads(resp.content)["message"] == "Not found"
@@ -335,10 +337,7 @@ def _lookup(exc: Exception) -> tuple[int, str]:
     ("error", "expected"),
     [
         (LocalSkillEditBusyError(), (409, "Another Skill update is in progress")),
-        (
-            LocalSkillLayoutRollbackError(),
-            (409, "Skill layout rollback is in progress"),
-        ),
+        (LocalSkillLayoutRollbackError(), (409, "Skill layout rollback is in progress")),
         (
             LocalSkillEditLockUnavailableError(),
             (503, "Skill update service is temporarily unavailable"),
@@ -547,7 +546,6 @@ def test_engine_runtime_messages_are_fixed_not_exception_text():
         assert leak not in message
         assert message.isascii(), f"{name}: public messages are always English"
 
-
 # ── MCP category error mappings (Track B mcp, Task 6) ───────────────
 
 
@@ -568,11 +566,7 @@ async def test_mcp_errors_map_to_status_and_fixed_message():
         # Internal-language / identifier-bearing text that must NOT leak.
         (McpServerNotFoundError("mcp.secret.server"), 404, "Not found"),
         (McpHeadersInvalidError("Header 键不能为空"), 400, "Invalid MCP headers"),
-        (
-            McpConfigValueError("endpoint_env must be PROD or PRE"),
-            400,
-            "Invalid MCP configuration",
-        ),
+        (McpConfigValueError("endpoint_env must be PROD or PRE"), 400, "Invalid MCP configuration"),
         (McpSyncFailedError("bot b-123 device down"), 502, "Device sync failed"),
         (McpMarketUnavailableError("upstream 500"), 502, "MCP service error"),
     ]
@@ -611,87 +605,3 @@ async def test_mcp_not_found_is_indistinguishable_from_bots_not_found():
     b = await bot_missing(request=_request())
     assert a.status_code == b.status_code == 404
     assert json.loads(bytes(a.body)) == json.loads(bytes(b.body))
-
-
-@pytest.mark.asyncio
-async def test_skill_center_team_create_error_has_stable_space_contract():
-    import json
-
-    from agentclaw.community.adapters.http.openapi_v1.errors_space import (
-        SpaceErrorCode,
-        SpacePublicErrorMessage,
-    )
-    from agentclaw.community.plugin_api.skill_center_client import (
-        SkillCenterTeamCreateError,
-    )
-
-    @envelope_errors
-    async def handler(request: Request):
-        raise SkillCenterTeamCreateError("private SC diagnostics")
-
-    response = await handler(request=_request())
-    body = json.loads(bytes(response.body))
-
-    assert response.status_code == 502
-    assert body["code"] == SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED
-    assert body["message"] == SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED
-    assert "private SC diagnostics" not in body["message"]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("error_type", "status", "code", "message"),
-    [
-        ("WorkOrderInvalidReasonError", 400, 400201, "Invalid application reason"),
-        ("WorkOrderInvalidRemarkError", 400, 400202, "Invalid review remark"),
-        ("WorkOrderAccessDeniedError", 403, 403201, "Forbidden"),
-        ("WorkOrderNotFoundError", 404, 404201, "Not found"),
-        ("WorkOrderNotificationNotFoundError", 404, 404202, "Not found"),
-        (
-            "WorkOrderAlreadyPendingError",
-            409,
-            409201,
-            "A pending application already exists",
-        ),
-        (
-            "WorkOrderAlreadyProcessedError",
-            409,
-            409202,
-            "The work order has already been processed",
-        ),
-        (
-            "WorkOrderApplicantAlreadyMemberError",
-            409,
-            409203,
-            "Applicant is already a space member",
-        ),
-        ("WorkOrderNoReviewerError", 409, 409204, "The space has no available approver"),
-        (
-            "WorkOrderJoinNotAllowedError",
-            409,
-            409205,
-            "The space does not accept join requests",
-        ),
-    ],
-)
-async def test_work_order_errors_have_stable_codes_and_fixed_messages(
-    error_type, status, code, message
-):
-    import json
-
-    from agentclaw.community.core.work_orders import errors
-
-    private_detail = "private work-order id and database diagnostics"
-
-    @envelope_errors
-    async def handler(request: Request):
-        raise getattr(errors, error_type)(private_detail)
-
-    response = await handler(request=_request())
-    body = json.loads(bytes(response.body))
-
-    assert response.status_code == status
-    assert body["code"] == code
-    assert body["message"] == message
-    assert body["data"] is None
-    assert private_detail not in body["message"]

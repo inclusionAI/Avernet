@@ -33,9 +33,6 @@ class RegisteredSkillAsset:
     skill_id: int
     name: str
     git_path: str
-    skill_uuid: str | None = None
-    sc_version_number: str | None = None
-    mcp_dependencies: tuple[object, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,27 +40,15 @@ class PoolSkillMapping:
     """Backend-owned logical intent; Engine resolves filesystem paths."""
 
     corpus: str
-    relative_path: str | None
+    relative_path: str
     link_name: str
-    skill_uuid: str | None = None
-    sc_version_number: str | None = None
 
     def to_dict(self) -> dict[str, str]:
-        result = {
+        return {
             "corpus": self.corpus,
+            "relative_path": self.relative_path,
             "link_name": self.link_name,
         }
-        if self.corpus == "center":
-            if self.skill_uuid is None or self.sc_version_number is None:
-                raise ValueError("center mapping requires structured identity")
-            return {
-                **result,
-                "skill_uuid": self.skill_uuid,
-                "sc_version_number": self.sc_version_number,
-            }
-        if self.relative_path is None:
-            raise ValueError("mapping requires relative_path")
-        return {**result, "relative_path": self.relative_path}
 
 
 class SkillMappingSourceLayout(StrEnum):

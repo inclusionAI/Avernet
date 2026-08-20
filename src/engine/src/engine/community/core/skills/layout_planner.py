@@ -11,11 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
-from uuid import UUID
 
 LAYOUT_CONTRACT_VERSION = "skills-pool-p3-v1"
 MAPPING_CONTRACT_VERSION = "skills-pool-mapping-v2"
-MAPPING_V3_CONTRACT_VERSION = "skills-pool-mapping-v3"
 
 
 class SkillLayoutCapability(StrEnum):
@@ -28,7 +26,6 @@ class SkillCorpus(StrEnum):
 
     LOCAL = "local"
     REPO = "repo"
-    CENTER = "center"
 
 
 class SkillLayoutResolutionError(ValueError):
@@ -59,10 +56,8 @@ class LogicalSkillMapping:
     """Engine-independent declaration of one active Skill."""
 
     corpus: SkillCorpus
-    relative_path: str | None
+    relative_path: str
     link_name: str
-    skill_uuid: str | None = None
-    sc_version_number: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +102,6 @@ class _FilesystemTemplate:
             pool_root=pool_root,
             pool_local=pool_root / "skills-local",
             pool_repo=pool_root / "skills-repo",
-            pool_center=pool_root / "skill-center",
             ready_marker=pool_root / ".pool-ready",
             active_marker=pool_root / ".pool-active",
             local_bridge=path(self.local_bridge),
@@ -166,7 +160,6 @@ class ResolvedFilesystemLayoutPlan:
     pool_root: Path
     pool_local: Path
     pool_repo: Path
-    pool_center: Path
     ready_marker: Path
     active_marker: Path
     local_bridge: Path
@@ -235,7 +228,6 @@ def resolve_skill_mappings(
     active_root: Path,
     local_root: Path,
     repo_root: Path,
-    center_root: Path | None = None,
     mappings: list[LogicalSkillMapping],
 ) -> list[ResolvedSkillMapping]:
     """Resolve mappings from roots selected by the operation's protocol."""
@@ -243,35 +235,17 @@ def resolve_skill_mappings(
     resolved: list[ResolvedSkillMapping] = []
     seen_targets: set[Path] = set()
     for mapping in mappings:
+        relative_path = _normalize_relative_path(
+            mapping.relative_path,
+            field="relative_path",
+        )
         link_name = _normalize_link_name(mapping.link_name)
         if mapping.corpus is SkillCorpus.LOCAL:
-            if mapping.relative_path is None:
-                raise SkillLayoutResolutionError("local mapping requires relative_path")
-            relative_path = _normalize_relative_path(mapping.relative_path, field="relative_path")
             source_root = local_root
             locator_scheme = "local"
         elif mapping.corpus is SkillCorpus.REPO:
-            if mapping.relative_path is None:
-                raise SkillLayoutResolutionError("repo mapping requires relative_path")
-            relative_path = _normalize_relative_path(mapping.relative_path, field="relative_path")
             source_root = repo_root
             locator_scheme = "git"
-        elif mapping.corpus is SkillCorpus.CENTER:
-            if center_root is None:
-                raise SkillLayoutResolutionError("center mapping requires pool_center")
-            if mapping.relative_path is not None:
-                raise SkillLayoutResolutionError("center mapping must not carry relative_path")
-            skill_uuid = _normalize_link_name(mapping.skill_uuid or "")
-            sc_version_number = _normalize_link_name(mapping.sc_version_number or "")
-            try:
-                parsed_uuid = UUID(skill_uuid)
-            except ValueError as error:
-                raise SkillLayoutResolutionError("skill_uuid must be a UUID") from error
-            if parsed_uuid.version != 4:
-                raise SkillLayoutResolutionError("skill_uuid must be UUIDv4")
-            relative_path = f"{skill_uuid}/{sc_version_number}"
-            source_root = center_root
-            locator_scheme = "center"
         else:
             raise SkillLayoutResolutionError(
                 f"unknown Skill corpus: {mapping.corpus!r}"
@@ -284,7 +258,11 @@ def resolve_skill_mappings(
                 f"duplicate active Skill target: {link_name}"
             )
         seen_targets.add(target)
-        locator_value = str(source) if mapping.corpus is SkillCorpus.LOCAL else relative_path
+        locator_value = (
+            str(source)
+            if mapping.corpus is SkillCorpus.LOCAL
+            else relative_path
+        )
         resolved.append(
             ResolvedSkillMapping(
                 corpus=mapping.corpus,
@@ -435,7 +413,6 @@ __all__ = [
     "DESCRIPTORS",
     "LAYOUT_CONTRACT_VERSION",
     "MAPPING_CONTRACT_VERSION",
-    "MAPPING_V3_CONTRACT_VERSION",
     "EngineSkillLayoutDescriptor",
     "LayoutIdentity",
     "LogicalSkillMapping",

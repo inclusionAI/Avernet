@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import MagicMock, call
-
-import pytest
 
 from agentclaw.community.core.events.types import DeviceActivatedEvent
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
@@ -39,8 +36,6 @@ def _make_listener(
     bot_query=None,
     layout_repository=None,
     skills_pool_wakeup=None,
-    runtime_reconcile=None,
-    runtime_non_skill_reconcile=None,
 ):
     factory = MagicMock()
     if skill_set_service is not None:
@@ -78,8 +73,6 @@ def _make_listener(
             if skills_pool_wakeup is not None
             else None
         ),
-        runtime_reconcile=runtime_reconcile,
-        runtime_non_skill_reconcile=runtime_non_skill_reconcile,
     )
     return listener, factory, dispatcher, resolver
 
@@ -104,27 +97,6 @@ def _layout_state(
 
 
 class TestHandleDeviceActivated:
-    @pytest.mark.asyncio
-    async def test_runtime_reconcile_blocks_even_inside_a_running_loop(self):
-        completed = []
-
-        async def reconcile(bot_id, owner_id):
-            await asyncio.sleep(0)
-            completed.append((bot_id, owner_id))
-
-        bot_query = MagicMock()
-        bot_query.get_by_binding_id.return_value = {
-            "bot_id": "default", "owner_id": "u001"
-        }
-        listener, _, dispatcher, _ = _make_listener(
-            bot_query=bot_query, runtime_reconcile=reconcile
-        )
-
-        listener.handle(_make_event())
-
-        assert completed == [("default", "u001")]
-        dispatcher.dispatch.assert_not_called()
-
     def test_happy_path_syncs_symlinks(self):
         event = _make_event()
 
@@ -342,55 +314,21 @@ class TestHandleDeviceActivated:
         )
         sync_plugin = MagicMock()
         wakeup = MagicMock()
-        non_skill_reconcile = MagicMock()
         listener, factory, dispatcher, resolver = _make_listener(
             MagicMock(),
             sync_plugin,
             bot_query,
             layout_repository,
             wakeup,
-            runtime_non_skill_reconcile=non_skill_reconcile,
         )
 
         listener.handle(event)
 
         wakeup.handle.assert_called_once_with(event)
-        non_skill_reconcile.assert_called_once_with("desktop-1", "owner-1")
         factory.create.assert_not_called()
-        resolver.resolve_for_bot.assert_called_once_with("desktop-1", "owner-1")
+        resolver.resolve_for_bot.assert_not_called()
         dispatcher.dispatch.assert_not_called()
         sync_plugin.sync_symlinks.assert_not_called()
-
-    def test_full_runtime_reconcile_reenqueues_when_desktop_cutover_starts(self):
-        event = _make_event(device_provider="baas")
-        bot_query = MagicMock()
-        bot_query.get_by_binding_id.return_value = {
-            "bot_id": "desktop-1",
-            "owner_id": "owner-1",
-            "entity_id": "entity-1",
-            "env": "pre",
-            "bot_type": "desktop",
-            "active_engine": "openclaw",
-        }
-        layout_repository = MagicMock()
-        layout_repository.get.side_effect = [
-            _layout_state(),
-            _layout_state(phase=SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER),
-        ]
-        wakeup = MagicMock()
-        runtime_reconcile = MagicMock()
-        listener, _, dispatcher, _ = _make_listener(
-            bot_query=bot_query,
-            layout_repository=layout_repository,
-            skills_pool_wakeup=wakeup,
-            runtime_reconcile=runtime_reconcile,
-        )
-
-        listener.handle(event)
-
-        runtime_reconcile.assert_called_once_with("desktop-1", "owner-1")
-        assert wakeup.handle.call_args_list == [call(event), call(event)]
-        dispatcher.dispatch.assert_not_called()
 
     def test_cutover_started_during_legacy_sync_reenqueues_convergence(self):
         event = _make_event(device_provider="baas")

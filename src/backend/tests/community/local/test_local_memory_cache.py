@@ -1,5 +1,4 @@
 """Tests for LocalMemoryCacheManager."""
-
 import time
 import threading
 
@@ -104,13 +103,6 @@ class TestLocalMemoryCacheLock:
         cache = MemoryCachePlugin()
         cache.acquire_lock("my_lock", ttl=30)
         assert cache.release_lock("my_lock", "wrong_value") is False
-
-    def test_renew_lock_requires_current_token(self):
-        cache = MemoryCachePlugin()
-        token = cache.acquire_lock("my_lock", ttl=30)
-        assert token is not None
-        assert cache.renew_lock_strict("my_lock", token, ttl=60) is True
-        assert cache.renew_lock_strict("my_lock", "wrong", ttl=60) is False
 
     def test_release_lock_not_held(self):
         cache = MemoryCachePlugin()

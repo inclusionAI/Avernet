@@ -193,8 +193,10 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
 
         # Historical template types expose stable legacy bot-type values, while
         # template-factory templates expose their template_type verbatim so new
-        # template types do not require backend enum/map changes.
-        if template_type:
+        # template types do not require backend enum/map changes. Service bots
+        # already convey their service identity through the startup command, so
+        # skip this legacy template-kind env for that domain.
+        if template_type and ctx.bot_type != "service":
             envs["BOT_TYPE"] = LEGACY_BOT_TYPE_ENV_MAP.get(template_type, template_type)
 
         devflow_workflow = template_config.get("devflow_workflow", "")

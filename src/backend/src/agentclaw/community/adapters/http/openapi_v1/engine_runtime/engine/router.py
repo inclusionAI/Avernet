@@ -1,24 +1,14 @@
-"""Engine group — ``/openapi/v1/bots/{bot_id}/engine``.
+"""Engine group (read-only) — ``/openapi/v1/bots/{bot_id}/engine``.
 
 An **operator console**: served to the addressed bot's owner and its
 member-level collaborators, for the stage the request names (``?stage=``,
 draft by default), and device-wide — see ``engine_runtime/gating.py`` and
 ``core/engine_runtime/gate.py``.
 
-Three reads, one write:
-
-- ``switch`` is deliberately **not** wrapped: it would be a back door around the
-  rule that a bot's engine is fixed at creation (``PUT /openapi/v1/bots/{bot_id}``
-  rejects it).
-- ``restart`` *is* wrapped here as ``POST /openapi/v1/bots/{bot_id}/engine/restart``,
-  relaying the device-side engine daemon's ``POST /api/engine/restart`` (**not**
-  ``shell exec supervisorctl``). This is *not* the same verb as
-  ``POST /openapi/v1/bots/{bot_id}/restart`` — that one re-provisions the whole
-  container via BaaS (``restart_bot``), dropping sessions; this one restarts only
-  the engine process and leaves the container/session state alone. The legacy
-  frontend reached the engine daemon directly via the agentclawproxy proxypass to
-  ``<binding>:20003/api/engine/restart``; the public openapi surface wraps that same
-  device call behind ``EngineRuntimeRelay``.
+Three reads. ``switch`` and ``restart`` are deliberately **not** wrapped:
+wrapping ``switch`` would be a back door around the rule that a bot's engine is
+fixed at creation (``PUT /openapi/v1/bots/{bot_id}`` rejects it), and
+``POST /openapi/v1/bots/{bot_id}/restart`` already re-provisions the device.
 """
 
 from __future__ import annotations
@@ -34,7 +24,6 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.engine.schemas import (
     EngineCapabilities,
     EngineInfo,
-    EngineRestartResult,
     EngineStatus,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
@@ -196,54 +185,5 @@ async def list_available_engines(
             for e in raw
             if isinstance(e, dict)
         ],
-        request,
-    )
-
-
-@router.post(
-    "/restart",
-    response_model=Envelope[EngineRestartResult],
-)
-@envelope_errors
-async def restart_bot_engine(
-    bot_id: BotIdPath,
-    user_id: UserIdDep,
-    owner_id: OwnerIdDep,
-    request: Request,
-    stage: StageQuery = RuntimeStage.DRAFT,
-    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
-) -> Envelope[EngineRestartResult]:
-    """Restart the bot's engine process.
-
-    Relays the device-side engine daemon's own restart endpoint — the same one
-    the legacy frontend reached through the gateway proxy to the bot's binding.
-    The daemon owns the restart; the public surface here only resolves the
-    addressed bot, checks the caller is its operator, and forwards the call,
-    mirroring the three read routes in this group. The restart is in-flight by
-    the time the response returns; confirm completion via the engine status
-    endpoint.
-
-    This is NOT the bot-level restart endpoint: that one re-provisions the
-    whole container via BaaS and drops sessions; this one restarts only the
-    engine process. See the module docstring for the verb split.
-    """
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="engine",
-    )
-    result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
-        method="POST", path="/api/engine/restart",
-    )
-    raw = result.data if isinstance(result.data, dict) else {}
-    return envelope(
-        EngineRestartResult(
-            bot_id=bot_id,
-            status=str(raw.get("status") or ""),
-        ),
         request,
     )

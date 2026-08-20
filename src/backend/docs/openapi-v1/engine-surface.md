@@ -64,7 +64,7 @@ frontend rewrites to the engine.
 
 ---
 
-## The public surface — 21 endpoints
+## The public surface — 16 endpoints
 
 All bot-scoped under `/openapi/v1/bots/{bot_id}/<component>/…`, all returning
 the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
@@ -75,19 +75,19 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 > gateway forwards to agentclaw on that prefix**, so a route mounted anywhere
 > else is unreachable in production. A test asserts it.
 >
-> **`{bot_id}` comes before the component's name.** The original five shipped that
+> **`{bot_id}` comes before the component's name.** These five shipped that
 > way, were normalized to component-first on 2026-08-03, and were returned to
 > bot-first on 2026-08-15 when that rule was reversed for the whole surface —
 > see the **Addressing rule** in [`README.md`](README.md). The tables below use
 > the current addresses; the component-first ones still answer, marked
 > `deprecated`, until the sunset (see **Retiring addresses** in `README.md`).
 
-### sessions (10) — engine `/api/sessions` + `/api/session-favorites`
+### sessions (7) — engine `/api/sessions`
 
 > **An operator console, device-wide by contract.** _Amended 2026-08-09
 > (`specs/2026-08-09-openapi-v1-access-expansion/`); original 2026-07-30
 > ruling served personal bots only, PR #880 added the service draft._ All
-> ten routes serve the addressed bot's **operators** — its owner and its
+> seven routes serve the addressed bot's **operators** — its owner and its
 > member-level collaborators, adjudicated before any device call; anyone else
 > gets the masked 404 — at the stage the request names (`?stage=`, draft by
 > default; verify/online while live). The engine accepts `user_id`, logs it,
@@ -111,13 +111,10 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 | GET | `…/{bot_id}/sessions/{session_id}/messages` | `GET …/messages` | paged → `Envelope[MessagePage]` |
 | DELETE | `…/{bot_id}/sessions/{session_id}/messages` | `DELETE …/messages` | clear history → `Envelope[Deleted]` |
 | PATCH | `…/{bot_id}/sessions/{session_id}` | `POST …/{session_id}/update` | **divergence:** partial update is `PATCH` on the resource publicly, not a `/update` sub-path. Body is `title`/`model` only — see below |
-| GET | `…/{bot_id}/sessions/favorites` | `GET /api/session-favorites` | acting user's favorites, paged → `Envelope[SessionPage]` |
-| PUT | `…/{bot_id}/sessions/{session_id}/favorite` | `PUT /api/session-favorites/{encoded_session_id}` | idempotently favorite → `Envelope[SessionFavorite]` |
-| DELETE | `…/{bot_id}/sessions/{session_id}/favorite` | `DELETE /api/session-favorites/{encoded_session_id}` | idempotently unfavorite → `Envelope[SessionFavorite]` |
 
 Two things about this group are not the shape a reader would assume:
 
-- **`total` is a lower bound, not a count.** All three paged routes answer with
+- **`total` is a lower bound, not a count.** Both paged routes answer with
   `SessionPage` / `MessagePage` — `Page` subclasses whose `total` says *at least
   this many exist*, exact once you reach a page shorter than `page_size`. The
   engine reports no count for either collection, and the only way to compute one
@@ -149,20 +146,20 @@ Two things about this group are not the shape a reader would assume:
   do nothing depending on which engine the bot runs. A caller still sending it
   gets a 422 rather than a silent no-op. _Decided 2026-07-30._
 
-### engine (4) — engine `/api/engine`
+### engine, read-only (3) — engine `/api/engine`
 
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
 | GET | `…/{bot_id}/engine/status` | `GET /api/engine/status` | process / transition phase / connection count |
 | GET | `…/{bot_id}/engine/capabilities` | `GET /api/engine/capabilities` | **the most important endpoint in Track C** — see *Capabilities* below |
 | GET | `…/{bot_id}/engine/available` | `GET /api/engine/list` | **divergence:** `list` is a verb path; public uses a noun. Registered engines + active flag + version |
-| POST | `…/{bot_id}/engine/restart` | `POST /api/engine/restart` | restarts the engine process only; distinct from the bot-level restart that re-provisions the container |
 
-> **`POST /api/engine/switch` remains deliberately unwrapped.** PR #494 made
-> `engine` immutable on `PUT /openapi/v1/bots/{bot_id}`
+> **`POST /api/engine/switch` and `POST /api/engine/restart` are deliberately
+> NOT wrapped.** PR #494 made `engine` immutable on `PUT /openapi/v1/bots/{bot_id}`
 > (`extra="forbid"` → 422); wrapping `switch` would be a back door around that
-> ruling. Engine-process restart was added on 2026-08-17 with an explicit
-> component-qualified path so it cannot be confused with the bot-level restart.
+> ruling. And `POST /openapi/v1/bots/{bot_id}/restart` already re-provisions the
+> device, so wrapping `restart` would give one bot two restart verbs with
+> different blast radii. _Decided 2026-07-30._
 
 ### models (2) — engine `/api/models`
 
@@ -170,17 +167,6 @@ Two things about this group are not the shape a reader would assume:
 |---|---|---|---|
 | GET | `…/{bot_id}/models` | `GET /api/models` | `Envelope[Page[Model]]` |
 | GET | `…/{bot_id}/models/{model_id}` | `GET /api/models/{model_id:path}` | **model ids contain slashes** (`openai/gpt-5.3`). The engine uses a `:path` converter; the public route must settle URL-encoding vs. a `:path` converter and document it |
-
-### nodes (1) — engine `/api/nodes`
-
-| Method | Public path | Engine route | Notes |
-|---|---|---|---|
-| GET | `…/{bot_id}/nodes` | `GET /api/nodes` | read-only inventory used by the current frontend; forwards `status`, `platform`, `limit` and `offset` and returns `Envelope[list[Node]]` |
-
-Only the list is public. The frontend and Engine HTTP surface currently have no
-node register, unregister or status-write flow, so Track C does not invent one.
-The public projection keeps the stable frontend fields in snake case and drops
-engine-internal `metadata` / raw provider payloads. _Added 2026-08-19._
 
 ### approvals (3) — engine `/api/approvals`
 
@@ -292,10 +278,10 @@ Rules this endpoint must hold:
 | Engine router | Prefix | HTTP | WS | Ruling | Why |
 |---|---|---|---|---|---|
 | `api/session` | `/api/sessions` | 7 | — | ✅ **C1 — wrap** | in the frontend proxypass list |
-| `api/engine` | `/api/engine` | 5 | — | ✅ **C1 — wrap 4 of 5** | `switch` excluded; process restart is component-qualified, see above |
+| `api/engine` | `/api/engine` | 5 | — | ✅ **C1 — wrap 3 of 5** | `switch`/`restart` excluded, see above |
 | `api/models` | `/api/models` | 2 | — | ✅ **C1 — wrap** | in the proxypass list |
 | `api/approvals` | `/api/approvals` | 3 | — | ✅ **C1 — wrap** | in the proxypass list |
-| `api/node` | `/api/nodes` | 1 | — | ✅ **C1 — wrapped 2026-08-19** | the workshop now needs the same read-only inventory the frontend uses; no speculative write operations were added |
+| `api/node` | `/api/nodes` | 1 | — | ⛔ **dropped 2026-07-30** | in the proxypass list, so C1 would wrap it — but the product does not need node inventory on the public surface. Additive later. |
 | `api/cron` | `/api/cron` | 10 | — | ⛔ **C2** | **already the `routines` category** — backend `/api/cron` → `CronRelayService` → engine. Explicitly commented out of the frontend proxypass list (`requestConfig.ts:195`) |
 | `api/file` | `/api/file` | 5 | — | ⛔ **C2** | backend calls `/api/file/{read,upload,list,remove,rmtree}` server-side; frontend never proxypasses it |
 | `api/skills` | `/api/skills` | 10 | — | ⛔ **C2** | backend `skills_pool` / `skill_center` drive layout, symlink and bindpath ops. Internal filesystem mechanics, no tenant-facing contract |
@@ -304,7 +290,7 @@ Rules this endpoint must hold:
 | `api/bot` | `/api/bot` | 1 | — | ⛔ **C2** | `POST /config` — backend `bot_public` sync path |
 | `api/bash` | `/api/bash` | 1 | — | ⛔ **C2** | backend exposes `POST /api/v1/devices/exec_shell`; arbitrary shell on a tenant device is not a v1 public contract regardless |
 | `api/work_item` | `/api/work-items` | 3 | — | ⛔ **C2** | backend-mediated |
-| `api/session_favorites` | `/api/session-favorites` | 3 | — | ✅ **wrapped** | Published as session subresources; callers use the raw `session_id` returned by the sessions list and Backend owns upstream path encoding. _Added 2026-08-18._ |
+| `api/session_favorites` | `/api/session-favorites` | 3 | — | 🟡 **deferred** | the engine's own doc calls it frontend-direct via the engine proxy, but it is **absent from the proxypass prefix list** and has zero references in `src/frontend`. Likely corp-frontend-only. Additive later; excluded from v1. _Decided 2026-07-30._ |
 | `api/routers/openclaw_http` | `/api/openclaw` | 3 | — | 🟡 **deferred** | `test-connection` / `disconnect` / `config`. Listed in the proxypass array as `'api/openclaw'` — **no leading slash**, so `url.startsWith()` never matches `/api/openclaw/...` and the entry is dead as written (`requestConfig.ts:191`). Also openclaw-specific gateway debug tooling. _Decided 2026-07-30._ |
 | `api/default_config` | `/api/openclaw` | 1 | — | 🟡 **deferred** | same dead prefix entry |
 | `api/zero_check` | `/api/openclaw/zero-check` | 2 | — | 🟡 **deferred** | same dead prefix entry |
@@ -362,7 +348,7 @@ answers differently for two of a tenant's own bots.**
   entry with a fixed public message pointing the caller at
   `…/{bot_id}/engine/capabilities`.
 - That is why `…/{bot_id}/engine/capabilities` is in the v1 surface and not deferred: it
-  is how a caller discovers, ahead of time, which of the other 17 endpoints its
+  is how a caller discovers, ahead of time, which of the other 16 endpoints its
   bot will actually answer.
 
 ### 3. `user_id` must come from the principal, never the caller
@@ -519,11 +505,6 @@ does not add it (rule C2)._
 
 ## Decisions taken
 
-- **2026-08-19 — read-only nodes restored additively.** The current frontend
-  only proxypasses `GET /api/nodes`, and the Engine exposes only that HTTP
-  operation, so the public surface adds exactly
-  `GET /openapi/v1/bots/{bot_id}/nodes`. It inherits the runtime owner/editor,
-  grant and stage gates; registration, removal and status writes stay out.
 - **2026-07-30 — Scope rule adopted (C1–C4).** Wrap engine HTTP the frontend
   reaches directly; leave backend-mediated engine calls to the backend contract
   that already fronts them; return connection info for sockets instead of

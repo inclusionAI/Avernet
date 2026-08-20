@@ -17,15 +17,10 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.services.local_skill_state_service import (
     LocalSkillStateService,
 )
-from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
-    BotCapabilityMutationGuard,
-)
-from agentclaw.community.core.repository.protocols.skill_center import (
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.repository.protocols.skill_installation import (
-    SkillInstallationRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
@@ -77,10 +72,6 @@ class _Runtime:
     async def verify_mappings(self, **_kwargs) -> bool:
         return self.success
 
-    async def reconcile(self, **_kwargs) -> None:
-        if not self.success:
-            raise RuntimeError("runtime reconcile failed")
-
 
 class _RuntimeFactory:
     def __init__(self, success: bool) -> None:
@@ -112,7 +103,7 @@ def _principal() -> str:
                         "owners": "state-org",
                         "tenant": _TENANT,
                     },
-                },
+                }
             ],
         },
         _KEY,
@@ -175,15 +166,14 @@ def _seed_state(world, *, runtime_success: bool) -> None:
         LocalSkillStateServiceProtocol,
         to=LocalSkillStateService(
             world.get(SkillRepository),
-            world.get(SkillInstallationRepositoryProtocol),
+            world.get(SkillSetRepository),
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             runtime_factory,
-            world.get(BotCapabilityMutationGuard),
             _Guard(),
-            world.get(SkillRepository),
-            world.get(SkillSetRepository),
             runtime_factory._runtime,
+            world.get(SkillRepository),
+            world.get(SkillsPoolLayoutRepositoryProtocol),
         ),
         scope=None,
     )

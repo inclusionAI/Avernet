@@ -47,14 +47,3 @@ class CachePlugin(Plugin, Protocol):
 
     def release_lock(self, lock_key: str, lock_value: str) -> bool:
         ...
-
-    def renew_lock_strict(
-        self, lock_key: str, lock_value: str, ttl: int = 30
-    ) -> bool:
-        """Atomically extend a lock only while ``lock_value`` still owns it.
-
-        ``False`` means the lease was lost. Infrastructure failures must raise
-        ``CacheLockInfrastructureError``; callers use that distinction to fail
-        closed instead of allowing a stale mutation to continue.
-        """
-        ...

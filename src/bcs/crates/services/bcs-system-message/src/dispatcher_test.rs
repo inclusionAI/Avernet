@@ -13,7 +13,7 @@ use bcs_domain::{
 use bcs_service_api::{
     ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus, BotRegistryCoreService,
-    BotRunContext, BotRunContextPort, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+    BotRunContext, BotRunContextPort,
     EnsureHumanResult, ProviderRunTransport, ProviderStreamGrayList, RegisteredBot,
     ServiceError, ServiceResult, SystemMessageDispatcherService, SystemMessageProducerService,
 };
@@ -804,6 +804,8 @@ async fn dispatch_session_context_uses_at_mention_when_group_has_provider_downli
 
 #[tokio::test]
 async fn dispatch_send_system_message_records_run_context_for_provider_callback() {
+    const CONFIGURED_TIMEOUT_MS: u64 = 7_200_000;
+
     let group = Group {
         id: "group-provider".into(),
         label: None,
@@ -849,6 +851,7 @@ async fn dispatch_send_system_message_records_run_context_for_provider_callback(
         .with_delivery(delivery.clone())
         .with_frontend_delivery(frontend_delivery)
         .with_bot_run_context(run_context.clone())
+        .with_provider_chat_run_timeout_ms(CONFIGURED_TIMEOUT_MS)
         .register(FixedSendProducer)
         .build()
         .expect("build dispatcher");
@@ -874,11 +877,11 @@ async fn dispatch_send_system_message_records_run_context_for_provider_callback(
     assert!(!context.terminal);
     assert!(
         context.deadline_ms
-            >= before_dispatch_ms.saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+            >= before_dispatch_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
     );
     assert!(
         context.deadline_ms
-            <= after_dispatch_ms.saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+            <= after_dispatch_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
     );
 }
 

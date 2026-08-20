@@ -117,6 +117,9 @@ from agentclaw.community.adapters.http.skills_pool import router as skills_pool_
 from agentclaw.community.adapters.http.beta_quota.router import router as beta_quota_router  # noqa: E402
 from agentclaw.community.adapters.http.channel.router import router as channel_router  # noqa: E402
 from agentclaw.community.adapters.http.quality.router import router as quality_router  # noqa: E402
+from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router  # noqa: E402
+from agentclaw.community.adapters.http.task.router import router as task_internal_router  # noqa: E402
+from agentclaw.community.adapters.http.task.router import task_callback_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
@@ -148,7 +151,6 @@ from agentclaw.community.adapters.http.bot_management import router as bot_manag
 from agentclaw.community.adapters.http.caller_identity.router import router as caller_identity_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant.router import internal_router as bot_dormant_internal_router  # noqa: E402
-from agentclaw.community.adapters.http.spaces_internal import router as spaces_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_build import router as service_bot_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_publish import router as service_bot_publish_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_collaborator import router as bot_collaborator_router  # noqa: E402
@@ -315,6 +317,8 @@ from agentclaw.community.core.aicoding.services.data_proxy_service import (  # n
     EngineUrlNotConfigured,
 )
 from agentclaw.community.core.errors import (  # noqa: E402
+    CallbackAuthError,
+    CallbackCorrelationError,
     Conflict,
     DomainError,
     Forbidden,
@@ -350,10 +354,14 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
 _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     ValidationError:       400,
     Unauthorized:          401,
+    CallbackAuthError:     401,
+    CallbackCorrelationError: 400,
     LoginRedirectRequired: 302,
     Forbidden:             403,
     NotFound:              404,
     Conflict:              409,
+    CallbackAuthError:     401,
+    CallbackCorrelationError: 400,
     InternalError:         500,
     CallerIdentityPermissionError: 403,
     CallerIdentityAmbiguousError: 409,
@@ -763,6 +771,9 @@ app.include_router(skills_pool_ops_router)
 app.include_router(beta_quota_router)
 app.include_router(channel_router)
 app.include_router(quality_router)
+app.include_router(task_router)
+app.include_router(task_internal_router)
+app.include_router(task_callback_router)
 try:
     app.include_router(render_screen_router)
     logger.info("[RenderScreen] Router registered successfully: prefix=%s", render_screen_router.prefix)
@@ -800,7 +811,6 @@ app.include_router(bot_management_router.router)
 app.include_router(caller_identity_router)
 app.include_router(bot_dormant_router.router)
 app.include_router(bot_dormant_internal_router)
-app.include_router(spaces_internal_router)
 app.include_router(service_bot_router)
 app.include_router(service_bot_publish_router)
 app.include_router(bot_collaborator_router)
@@ -811,7 +821,7 @@ app.include_router(verify.router)
 app.include_router(sync.router)
 app.include_router(batch_sync.router)
 app.include_router(cron_router)
-app.include_router(cron_noauth_router) 
+app.include_router(cron_noauth_router)
 app.include_router(notify_router)
 # Harness Engineering: patch template management & diagnosis
 app.include_router(harness_router)

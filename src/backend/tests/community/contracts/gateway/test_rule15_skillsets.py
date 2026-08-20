@@ -11,9 +11,6 @@ from unittest.mock import MagicMock, AsyncMock
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
-)
 
 from tests.community.contracts.gateway.conftest import (
     assert_response_schema, assert_success, assert_has_fields,
@@ -102,19 +99,6 @@ def _bind_skillset_deps(app):
         {"cli_code": "cli.delete", "cli_name": "Delete CLI", "cli_desc": "removed"},
     ]
     bind_mock_service(PassportPlugin, mock_passport, app)
-    control = MagicMock()
-    control.list_sets.return_value = [MOCK_SKILLSET_ROW]
-    control.get_legacy_set.return_value = MOCK_SKILLSET_ROW
-    control.list_skills.return_value = [MOCK_SKILL_ROW]
-    control.resources.return_value = [{
-        **MOCK_SKILLSET_ROW,
-        "mcps": [MOCK_MCP_ROW],
-        "clis": mock_passport.query_passport_clis.return_value,
-    }]
-    control.delete_set.return_value = None
-    control.create_legacy_set.return_value = {**MOCK_SKILLSET_ROW, "name": "NewSet"}
-    control.update_set.return_value = {**MOCK_SKILLSET_ROW, "name": "Updated"}
-    bind_mock_service(SkillSetControlPlaneServiceProtocol, control, app)
     return mock_factory, mock_passport
 
 

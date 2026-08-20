@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
-
 from engine.community.api.caps import check_capability
 from engine.community.api.response import ApiResponse
 from engine.community.api.skills.schemas import (
@@ -28,9 +26,6 @@ from engine.community.api.skills.schemas import (
     RuntimeLayoutProbeRequest,
     RuntimeLayoutProbeResponse,
     SyncSymlinkRequest,
-)
-from engine.community.api.skills.schemas import (
-    PoolCenterMappingIntent as PoolCenterMappingIntentSchema,
 )
 from engine.community.api.skills.schemas import (
     PoolPhysicalMapping as PoolPhysicalMappingSchema,
@@ -71,6 +66,7 @@ from engine.community.core.skills.models import (
 from engine.community.core.skills.models import (
     PoolQuarantineCleanupRequest as PoolQuarantineCleanupCommand,
 )
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 log = logging.getLogger("api-skills")
@@ -83,16 +79,8 @@ def _skills_plugin():
 
 
 def _mapping_command(
-    item: PoolSkillMappingIntentSchema | PoolCenterMappingIntentSchema | PoolPhysicalMappingSchema,
+    item: PoolSkillMappingIntentSchema | PoolPhysicalMappingSchema,
 ) -> PoolSkillMappingIntent | SymlinkItem:
-    if isinstance(item, PoolCenterMappingIntentSchema):
-        return PoolSkillMappingIntent(
-            corpus=item.corpus,
-            relative_path=None,
-            link_name=item.link_name,
-            skill_uuid=item.skill_uuid,
-            sc_version_number=item.sc_version_number,
-        )
     if isinstance(item, PoolSkillMappingIntentSchema):
         return PoolSkillMappingIntent(
             corpus=item.corpus,

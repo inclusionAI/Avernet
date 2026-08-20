@@ -39,10 +39,9 @@ Hermes；物理路径投影由 Engine Layout Descriptor 统一持有。
 - 激活只处理当前仍可编辑、已经认领、引擎已显式接入且由当前 worker 持有
   lease 的 Bot；每次执行都重新读取 Bot 和当前 provider binding，并重新
   probe 对应引擎 marker。只有 probe evidence 明确声明
-  `skills-pool-mapping-v2`，并在含 Center mapping 时显式支持
-  `skills-pool-mapping-v3` 后才发送 logical mapping；旧或缺失 capability
+  `skills-pool-mapping-v2` 后才发送 logical mapping；旧或缺失 capability
   作为 `NOT_CAPABLE` 释放认领并保持 Legacy。OpenClaw、Claude Code 内置
-  consumer 直接广告 v2/v3；AICoding、Hermes 只有在具体 composition root
+  consumer 直接广告 v2；AICoding、Hermes 只有在具体 composition root
   已接入同一 resolver 后才显式广告，旧 consumer 继续保持
   `NOT_CAPABLE`/Legacy。未知引擎不回退到 OpenClaw。
 - Backend 发送的 v2 mapping 只包含
@@ -50,11 +49,6 @@ Hermes；物理路径投影由 Engine Layout Descriptor 统一持有。
   descriptor 投影 source/active target，并返回 locator evidence。Backend
   只校验并持久化 evidence，不按引擎重建 activation/publish/verify/reconcile
   的物理路径。
-- v3 的 Center mapping 只包含 `skill_uuid + sc_version_number + link_name`，
-  Runtime 解析为唯一 canonical `pool_center` 路径。Center 与
-  `source_layout=legacy|pool` 中立：cutover、rollback、publish、verify 与
-  retired lifecycle 都携带它，但绝不迁移、删除或创建 `legacy_center`。每次完整
-  v3 publish/cutover 前先 ensure 所有精确 Center 版本；ensure 失败不发布部分集合。
 - 容器内先把 Legacy local 以 generation-scoped rename 移入隔离区，再执行
   best-effort 后置合并；随后发布并验证直接指向 canonical Pool 的 active
   mapping。持久化 `.pool-active` 的 `finalizing → active` 后，active root
@@ -95,7 +89,7 @@ Hermes；物理路径投影由 Engine Layout Descriptor 统一持有。
   编辑 fail closed。mapping 请求同时声明 `source_layout`：激活缺省为
   `pool`，显式回滚前后使用 `legacy`。显式回滚也必须在第一次 logical
   mapping 请求前重新 probe 当前 binding；若运行时已降级或缺少 v2
-  capability，则不发送所需版本、不执行文件系统切换，并记录可重试失败。
+  capability，则不发送 v2、不执行文件系统切换，并记录可重试失败。
 - 显式回滚不会读取迁移隔离副本，Pool 激活后产生的 local 新增和修改会被
   带入新的 Legacy；Pool 本身保留用于证据和后续恢复。
 - local 后置合并采用 best-effort、无覆盖的文件级收敛：一般的切换前修改、
@@ -147,8 +141,6 @@ provides:
   - "SkillsPoolRolloutGate"
   - "SkillsPoolMigrationClaimService"
   - "SkillsPoolReconcileService"
-  - "SkillsPoolReconcileOutcome"
-  - "SkillsPoolReconcileResult"
   - "SkillsPoolReconcileTaskHandler"
   - "SkillsPoolReconcileWakeupListener"
   - "SkillsPoolRecoveryService"
@@ -173,7 +165,7 @@ consumes:
   - "DatabasePlugin (through Skills Pool layout, operational and rollout repositories)"
   - "SkillsPoolRuntimeProtocol"
   - "SkillsPoolSkillRepositoryProtocol"
-  - "skills-pool-mapping-v2/v3 capability and Engine locator evidence"
+  - "skills-pool-mapping-v2 capability and Engine locator evidence"
   - "DeviceBindingRepository"
   - "TaskQueueService and HandlerRegistry"
 internal_dependencies:

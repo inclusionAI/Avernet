@@ -11,6 +11,10 @@ max_history_per_session = 1000
 store_messages = false
 strict_container_validation = false
 
+# Default HTTP Provider chat.send run deadline when the frame has no explicit
+# timeout_ms. Configuration changes take effect after BCS restarts.
+provider_chat_run_timeout_ms = 10800000
+
 # Deprecated compatibility setting. Provider 2.0 chat.send is always SSE-first;
 # this value is retained for config/API compatibility and has no effect.
 provider_stream_gray_enabled = false

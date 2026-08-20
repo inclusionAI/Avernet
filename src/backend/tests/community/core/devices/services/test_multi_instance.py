@@ -487,41 +487,6 @@ def test_restart_device_no_baas_service_raises():
         )
 
 
-def test_restart_device_by_bot_resolves_live_binding_then_restarts():
-    repo = MagicMock()
-    repo.get_by_id.return_value = _make_record(
-        id=1001, device_id="bot-uuid-abc", entity_id="owner-001"
-    )
-    publish_repo = MagicMock()
-    publish_repo.get_latest_success_by_source_bot_id.return_value = _make_publish_record(
-        ext={"binding": {"online": 1001}}
-    )
-    baas = MagicMock()
-    baas.restart_devices.return_value = {"publish_id": 43}
-    router = _make_router(
-        repo=repo,
-        baas_service=baas,
-        publish_repo=publish_repo,
-    )
-
-    result = router.restart_device_by_bot(
-        bot_id="bot-001",
-        device_uuid="DEVICE-001",
-        operator=_make_operator("owner-001"),
-    )
-
-    assert result == {"publish_id": 43}
-    publish_repo.get_latest_success_by_source_bot_id.assert_called_once_with(
-        "bot-001", "dev"
-    )
-    baas.restart_devices.assert_called_once_with(
-        "bot-uuid-abc",
-        device_uuids=["DEVICE-001"],
-        operator="owner-001",
-        request_id="restart_dev_b1001_DEVICE-001",
-    )
-
-
 # ---------------------------------------------------------------------------
 # get_device_connection_by_bot (bot_id entry, ext.binding.online) — §3
 # ---------------------------------------------------------------------------

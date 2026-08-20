@@ -38,7 +38,6 @@ class SkillsPoolRuntimeProtocol(Protocol):
         preparation_id: str,
         registered_local_names: list[str],
         mappings: list[PoolSkillMapping],
-        mapping_contract_version: str = "skills-pool-mapping-v2",
     ) -> PoolCutoverResult: ...
 
     async def rollback_to_legacy(
@@ -67,7 +66,6 @@ class SkillsPoolRuntimeProtocol(Protocol):
         mappings: list[PoolSkillMapping],
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
-        mapping_contract_version: str = "skills-pool-mapping-v2",
     ) -> bool: ...
 
     async def verify_mappings(
@@ -78,7 +76,6 @@ class SkillsPoolRuntimeProtocol(Protocol):
         mappings: list[PoolSkillMapping],
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
-        mapping_contract_version: str = "skills-pool-mapping-v2",
     ) -> bool: ...
 
 

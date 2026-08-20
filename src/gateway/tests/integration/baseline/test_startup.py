@@ -173,8 +173,6 @@ class TestApiDocsDisabled:
         response = disabled_client.get("/internal-docs")
         assert response.status_code == 404
 
-    def test_internal_openapi_schema_disabled(
-        self, disabled_client: TestClient
-    ) -> None:
+    def test_internal_openapi_schema_disabled(self, disabled_client: TestClient) -> None:
         response = disabled_client.get("/internal-openapi.json")
         assert response.status_code == 404

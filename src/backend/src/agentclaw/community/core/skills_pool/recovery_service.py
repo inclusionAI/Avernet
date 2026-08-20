@@ -23,7 +23,6 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
     local_locators_from_evidence,
     local_skill_name,
-    mapping_contract_for,
 )
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
@@ -371,10 +370,6 @@ class SkillsPoolRollbackService:
         try:
             local_names = [local_skill_name(asset) for asset in local_assets]
             mappings = build_logical_skill_mappings(active_assets)
-            mapping_contract_version = mapping_contract_for(
-                mappings,
-                probe.evidence.get("supported_mapping_contract_versions"),
-            )
         except ValueError as error:
             return self._failure(
                 scope=scope,
@@ -433,7 +428,6 @@ class SkillsPoolRollbackService:
             scope=scope,
             user_id=user_id,
             mappings=mappings,
-            mapping_contract_version=mapping_contract_version,
             rollback_generation=rollback_generation,
             lease_owner=lease_owner,
         )
@@ -481,7 +475,6 @@ class SkillsPoolRollbackService:
         scope: BotSkillLayoutScope,
         user_id: str,
         mappings: list[PoolSkillMapping],
-        mapping_contract_version: str,
         rollback_generation: str,
         lease_owner: str,
     ) -> SkillsPoolRollbackResult | None:
@@ -491,7 +484,6 @@ class SkillsPoolRollbackService:
             mappings=mappings,
             retired_mappings=[],
             source_layout=SkillMappingSourceLayout.LEGACY,
-            mapping_contract_version=mapping_contract_version,
         ):
             return self._failure(
                 scope=scope,
@@ -509,7 +501,6 @@ class SkillsPoolRollbackService:
             mappings=mappings,
             retired_mappings=[],
             source_layout=SkillMappingSourceLayout.LEGACY,
-            mapping_contract_version=mapping_contract_version,
         ):
             return self._failure(
                 scope=scope,

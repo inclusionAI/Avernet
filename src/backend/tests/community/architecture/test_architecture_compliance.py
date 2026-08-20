@@ -137,13 +137,6 @@ _IMPORT_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset({
         "core/service_bot/services/publish_approval_service.py",
         "agentclaw.community.api.publish_approval",
     ),
-    # SpaceSkillQueryService implements the Service API Protocol defined in
-    # api/space_skill_query_service.py; this is the same explicit DI contract
-    # bridge as the service implementations listed above.
-    (
-        "core/skill_center/services/space_skill_query_service.py",
-        "agentclaw.community.api.space_skill_query_service",
-    ),
     # BotStartupScriptService implements the API Protocol defined in
     # api/bot_startup_script_service.py — the same shape as PublishApprovalService
     # above. Inheriting it is the point: every member of that Protocol is

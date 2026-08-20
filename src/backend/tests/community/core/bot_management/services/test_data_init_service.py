@@ -97,53 +97,6 @@ class TestShouldRunInit:
         assert self.service._should_run_init("bot1", "437240", self.mock_bot_service) is False
 
 
-class TestGetStatus:
-    def setup_method(self):
-        self.bot_service = MagicMock()
-        self.service = DataInitService(
-            resource_repo=MagicMock(),
-            device_service=MagicMock(),
-            skill_set_factory=MagicMock(),
-            skill_set_activator_factory=MagicMock(),
-            device_plugin=MagicMock(),
-            bot_service_provider=lambda: self.bot_service,
-            skill_md_path="/test/SKILL.md",
-            resolver=MagicMock(),
-        )
-
-    def test_absent_status_is_not_started(self):
-        self.bot_service.get_bot.return_value = {"ext": {"iam_token": "secret"}}
-
-        assert self.service.get_status("bot1", "u1") == {
-            "bot_id": "bot1",
-            "status": "not_started",
-            "started_at": None,
-        }
-
-    def test_reads_only_public_status_fields_from_json_ext(self):
-        self.bot_service.get_bot.return_value = {
-            "ext": json.dumps({
-                "data_init_status": "in_progress",
-                "data_init_started_at": "2026-08-18T08:00:00+00:00",
-                "iam_token": "must-not-leak",
-                "downstream_sync": {"ecb": {"success": False}},
-            })
-        }
-
-        assert self.service.get_status("bot1", "u1") == {
-            "bot_id": "bot1",
-            "status": "in_progress",
-            "started_at": "2026-08-18T08:00:00+00:00",
-        }
-
-    def test_unknown_or_malformed_status_fails_closed_to_not_started(self):
-        self.bot_service.get_bot.return_value = {
-            "ext": json.dumps({"data_init_status": "internal-new-state"})
-        }
-
-        assert self.service.get_status("bot1", "u1")["status"] == "not_started"
-
-
 class TestParseLlmResult:
     """LLM 结果解析测试。"""
 
@@ -285,76 +238,6 @@ class TestTriggerInit:
             skill_md_path="/test/SKILL.md",
             resolver=MagicMock(),
         )
-
-    @pytest.mark.asyncio
-    async def test_active_init_persists_iam_token_before_execution(self):
-        bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"status": "ACTIVE", "ext": {}}
-        self.service._bot_service_provider = lambda: bot_service
-        self.service._should_run_init = MagicMock(return_value=True)
-        self.service._async_execute_with_retry = AsyncMock(return_value=True)
-
-        result = await self.service.trigger_init(
-            bot_id="bot1", owner_id="u1", entity_id="u1", entity_type="staff",
-            iam_token="iam-secret",
-        )
-
-        assert result["status"] == "completed"
-        first_update = bot_service.update_bot_ext.call_args_list[0].args
-        assert first_update[0:2] == ("bot1", "u1")
-        assert first_update[2]["data_init_status"] == "in_progress"
-        assert first_update[2]["iam_token"] == "iam-secret"
-
-    @pytest.mark.asyncio
-    async def test_second_active_idempotency_check_does_not_leave_iam_token(self):
-        bot_service = MagicMock()
-        bot_service.get_bot.return_value = {
-            "status": "ACTIVE",
-            "ext": {"data_init_status": "in_progress"},
-        }
-        self.service._bot_service_provider = lambda: bot_service
-        self.service._should_run_init = MagicMock(return_value=True)
-
-        result = await self.service.trigger_init(
-            bot_id="bot1", owner_id="u1", entity_id="u1", entity_type="staff",
-            iam_token="iam-secret",
-        )
-
-        assert result["status"] == "skipped"
-        bot_service.update_bot_ext.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_pending_init_persists_status_and_iam_token_together(self):
-        bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"status": "PENDING", "ext": {}}
-        self.service._bot_service_provider = lambda: bot_service
-        self.service._should_run_init = MagicMock(return_value=True)
-
-        result = await self.service.trigger_init(
-            bot_id="bot1", owner_id="u1", entity_id="u1", entity_type="staff",
-            iam_token="iam-secret",
-        )
-
-        assert result["status"] == "pending_init"
-        bot_service.update_bot_ext.assert_called_once_with(
-            "bot1",
-            "u1",
-            {"data_init_status": "pending_init", "iam_token": "iam-secret"},
-        )
-
-    @pytest.mark.asyncio
-    async def test_skipped_init_does_not_persist_iam_token(self):
-        bot_service = MagicMock()
-        self.service._bot_service_provider = lambda: bot_service
-        self.service._should_run_init = MagicMock(return_value=False)
-
-        result = await self.service.trigger_init(
-            bot_id="bot1", owner_id="u1", entity_id="u1", entity_type="staff",
-            iam_token="iam-secret",
-        )
-
-        assert result["status"] == "skipped"
-        bot_service.update_bot_ext.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_already_completed_skips(self):

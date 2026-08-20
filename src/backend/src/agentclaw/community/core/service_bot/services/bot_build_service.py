@@ -29,7 +29,7 @@ from agentclaw.community.core.bot_management.engines.registry import (
     resolve_bot_engine,
 )
 from agentclaw.community.core.bot_management.services.engine_resolver import (
-    resolve_engine_for_bot,
+    resolve_runtime_engine_for_bot,
 )
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import DeviceService
@@ -165,7 +165,7 @@ class BotBuildService:
             owner_id = bot.get("owner_id") or bot.get("entity_id")
             if self._bot_repository is not None:
                 try:
-                    resolved_engine = resolve_engine_for_bot(
+                    resolved_engine = resolve_runtime_engine_for_bot(
                         bot_id,
                         owner_id,
                         bot_repo=self._bot_repository,

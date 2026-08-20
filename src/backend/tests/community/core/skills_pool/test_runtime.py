@@ -12,21 +12,15 @@ from agentclaw.community.core.skills_pool.models import (
 )
 from agentclaw.community.core.skills_pool.quarantine import RuntimeQuarantineCleanupStatus
 from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
-from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
-    MAPPING_V3_CONTRACT_VERSION,
-)
 
 
 class FakeResolver:
-    def __init__(self, provider: str = "local") -> None:
+    def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
-        self.provider = provider
 
     def resolve_for_bot(self, bot_id: str, user_id: str):
         self.calls.append((bot_id, user_id))
-        return SimpleNamespace(
-            conn_info={"binding": len(self.calls), "provider": self.provider}
-        )
+        return SimpleNamespace(conn_info={"binding": len(self.calls)})
 
 
 class FakeTransport:
@@ -68,16 +62,6 @@ class FakeTransport:
 class FakeProbe:
     async def probe_bot(self, **kwargs):
         return kwargs
-
-
-class CenterEnsureTransport(FakeTransport):
-    async def invoke(self, conn_info, method, path, *, body, timeout):
-        if path.endswith("/center/ensure"):
-            self.calls.append(
-                {"conn_info": conn_info, "method": method, "path": path, "body": body, "timeout": timeout}
-            )
-            return {"success": True, "data": {"ok": body["items"], "failed": []}}
-        return await super().invoke(conn_info, method, path, body=body, timeout=timeout)
 
 
 class FutureStatusTransport(FakeTransport):
@@ -198,41 +182,6 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider", ["local", "baas"])
-async def test_repo_retirement_projection_reaches_each_device_provider(provider: str) -> None:
-    """Repo Direct deactivate clears the old entry for Local and BaaS engines."""
-    transport = FakeTransport()
-    runtime = OpenClawSkillsPoolRuntime(
-        resolver=FakeResolver(provider),
-        adapter_transport=transport,
-        probe_service=FakeProbe(),
-    )
-    retired = PoolSkillMapping(
-        corpus="repo", relative_path="tools/repo", link_name="repo"
-    )
-
-    assert await runtime.publish_mappings(
-        bot_id="bot-1",
-        user_id="owner-1",
-        mappings=[],
-        retired_mappings=[retired],
-    )
-    assert await runtime.verify_mappings(
-        bot_id="bot-1",
-        user_id="owner-1",
-        mappings=[],
-        retired_mappings=[retired],
-    )
-
-    for call in transport.calls:
-        assert call["conn_info"]["provider"] == provider
-        assert call["body"]["mappings"] == []
-        assert call["body"]["retired_mappings"] == [
-            {"corpus": "repo", "relative_path": "tools/repo", "link_name": "repo"}
-        ]
-
-
-@pytest.mark.asyncio
 async def test_pool_runtime_fails_closed_for_unknown_engine_status() -> None:
     runtime = OpenClawSkillsPoolRuntime(
         resolver=FakeResolver(),
@@ -274,34 +223,6 @@ async def test_pool_runtime_returns_typed_quarantine_cleanup_result() -> None:
 
     assert result.status is RuntimeQuarantineCleanupStatus.CLEANED
     assert result.evidence == {"generation_scoped": True}
-
-
-@pytest.mark.asyncio
-async def test_center_mapping_is_ensured_before_full_v3_publish() -> None:
-    transport = CenterEnsureTransport()
-    runtime = OpenClawSkillsPoolRuntime(
-        resolver=FakeResolver(),
-        adapter_transport=transport,
-        probe_service=FakeProbe(),
-    )
-    mapping = PoolSkillMapping(
-        corpus="center",
-        relative_path=None,
-        link_name="risk-review",
-        skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
-        sc_version_number="2026.8.19",
-    )
-
-    assert await runtime.publish_mappings(
-        bot_id="bot-1",
-        user_id="owner-1",
-        mappings=[mapping],
-        mapping_contract_version=MAPPING_V3_CONTRACT_VERSION,
-    )
-    assert [call["path"] for call in transport.calls] == [
-        "/api/skills/center/ensure",
-        "/api/skills/layout/mappings/publish",
-    ]
 
 
 @pytest.mark.asyncio

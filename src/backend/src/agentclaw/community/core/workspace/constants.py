@@ -7,14 +7,7 @@
 import os
 
 # 支持的引擎类型列表
-SUPPORTED_ENGINE_TYPES = [
-    "moltis",
-    "openclaw",
-    "hermes",
-    "aicoding",
-    "claude_code",
-    "teclaw",
-]
+SUPPORTED_ENGINE_TYPES = ["moltis", "openclaw", "hermes", "aicoding", "claude_code"]
 
 # Backend 的默认引擎类型，硬编码为 openclaw。
 # 每个 bot 的实际引擎类型由 bot 自身属性决定，此值仅作 fallback。
@@ -29,7 +22,7 @@ def _get_engine_types() -> list[str]:
     2. SUPPORTED_ENGINE_TYPES 默认列表
 
     Returns:
-        list[str]: 引擎类型列表，如 ["moltis", "openclaw", "hermes", "aicoding", "teclaw"]
+        list[str]: 引擎类型列表，如 ["moltis", "openclaw", "hermes", "aicoding"]
     """
     env_engines = os.getenv("ENGINE_TYPES", "")
     if env_engines:

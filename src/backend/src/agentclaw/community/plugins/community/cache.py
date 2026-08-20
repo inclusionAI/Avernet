@@ -48,14 +48,6 @@ class _RedisBackend:
     end
     """
 
-    _RENEW_LOCK_SCRIPT = """
-    if redis.call("get", KEYS[1]) == ARGV[1] then
-        return redis.call("expire", KEYS[1], ARGV[2])
-    else
-        return 0
-    end
-    """
-
     def __init__(self, redis_url: str) -> None:
         import redis  # community dep; imported lazily so non-cache boots skip it
 
@@ -164,25 +156,6 @@ class _RedisBackend:
             )
             return False
 
-    def renew_lock_strict(
-        self, lock_key: str, lock_value: str, ttl: int = 30
-    ) -> bool:
-        storage_key = f"lock:{lock_key}"
-        try:
-            return bool(
-                self._redis.eval(
-                    self._RENEW_LOCK_SCRIPT,
-                    1,
-                    storage_key,
-                    lock_value,
-                    ttl,
-                )
-            )
-        except Exception as exc:
-            raise CacheLockInfrastructureError(
-                "cache lock renewal backend is unavailable"
-            ) from exc
-
 
 class _InProcessBackend:
     """dict + ``threading.Lock`` + TTL; process-local lock. Single-process only."""
@@ -237,23 +210,6 @@ class _InProcessBackend:
                     return True
             return False
 
-    def renew_lock_strict(
-        self, lock_key: str, lock_value: str, ttl: int = 30
-    ) -> bool:
-        storage_key = f"lock:{lock_key}"
-        with self._guard:
-            current = self._store.get(storage_key)
-            if current is None:
-                return False
-            current_value, expiry = current
-            if expiry is not None and time.time() >= expiry:
-                del self._store[storage_key]
-                return False
-            if current_value != lock_value:
-                return False
-            self._store[storage_key] = (current_value, time.time() + ttl)
-            return True
-
 
 class CommunityCache(CachePlugin):
     """KV cache + distributed lock; Redis-backed when configured, else in-proc."""
@@ -287,11 +243,6 @@ class CommunityCache(CachePlugin):
 
     def release_lock(self, lock_key: str, lock_value: str) -> bool:
         return self._backend.release_lock(lock_key, lock_value)
-
-    def renew_lock_strict(
-        self, lock_key: str, lock_value: str, ttl: int = 30
-    ) -> bool:
-        return self._backend.renew_lock_strict(lock_key, lock_value, ttl)
 
     def get_json(self, key: str) -> Optional[Dict[str, Any]]:
         value = self.get(key)

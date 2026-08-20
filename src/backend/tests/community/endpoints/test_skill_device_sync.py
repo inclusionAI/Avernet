@@ -30,7 +30,6 @@ import shutil
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.core.devices.services.local_device_filesystem import LocalDeviceFileSystem
@@ -96,12 +95,6 @@ def _record_for_bot(world) -> LocalDeviceSyncPlugin:
 
 def _seed_bot_with_active_git_skill(world, *, bot_id: str, engine: str) -> None:
     """user → bot(active_engine) → active skill set → one git skill."""
-    class _UnboundAssetControlPlane:
-        """Explicit legacy fixture: no additive resolver has been deployed."""
-
-    world.injector.binder.bind(
-        BotSkillAssetServiceProtocol, to=_UnboundAssetControlPlane(), scope=None
-    )
     make_staff_user(world, user_id=_OWNER)
 
     world.get(BotRepository).insert(

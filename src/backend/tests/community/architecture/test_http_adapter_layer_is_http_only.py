@@ -81,6 +81,11 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
     "principal",     # caller-identity extraction from the principal seam
     "enums",         # adapter-owned public enums (import-light by design:
                      # a public vocabulary must not depend on the HTTP stack)
+    "auth",          # inbound-callback HMAC/Noop authenticators — pure
+                     # hashlib/hmac verification against core errors, no HTTP
+                     # stack by design (router invokes verify() after reading body)
+    "translator",    # inbound-callback edge→SSOT folding (schema → TaskCallbackData);
+                     # pure dataclass/protocol work, no HTTP stack
     "startup_script_support",
                      # the bots group's startup-script helpers, split out when
                      # router.py reached the module line cap. Plain functions
@@ -88,11 +93,6 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
                      # deliberately no FastAPI, which is what lets them be
                      # tested without a client. Named in full rather than as a
                      # short pattern so this entry cannot exempt anything else.
-    "auth",          # callback HMAC verification ports (e.g. task/auth.py) —
-                     # import-light by design: a pluggable authenticator must not
-                     # depend on the HTTP stack.
-    "translator",    # inbound edge schema → SSOT domain translation (task/translator.py):
-                     # pure data shaping, no FastAPI, exercised without a client.
 )
 
 
@@ -224,7 +224,7 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     "StreamingForwardResult",
     # Pure-function helpers / generators:
     "generate_bot_id", "validate_bot_name", "resolve_engine_for_bot",
-    "filter_passport_mcp_codes",
+    "resolve_runtime_engine_for_bot", "filter_passport_mcp_codes",
     # Pure functions in core/mcp/services/_defaults that build the passport
     # resource scope (default MCP server codes / default CLI items) from
     # engine-scoped module constants. Read-only helpers, not service instances;

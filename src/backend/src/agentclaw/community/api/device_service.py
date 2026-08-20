@@ -1,5 +1,4 @@
 """Service API Protocol for device allocation/lifecycle/inspection."""
-
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
@@ -38,7 +37,5 @@ class DeviceServiceProtocol(Protocol):
     def get_instances_by_bot(self, *args: Any, **kwargs: Any) -> Any: ...
 
     def restart_device(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def restart_device_by_bot(self, *args: Any, **kwargs: Any) -> Any: ...
 
     def get_device_connection_by_bot(self, *args: Any, **kwargs: Any) -> Any: ...

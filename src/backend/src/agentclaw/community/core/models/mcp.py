@@ -4,20 +4,12 @@ MCP 相关 ORM 模型定义（新架构源码所在地）。
 - ``UserMCPConfig`` 由 mcp 模块拥有。
 - ``SkillSetMCPServer`` 由 skill_center 模块拥有（表关联定义）。
 """
-from sqlalchemy import BigInteger, Column, String, Text, DateTime, ForeignKey, Integer, UniqueConstraint, func
-from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer, UniqueConstraint, func
 from sqlalchemy.orm import relationship
 
 # 使用 plugins.models.Base 以与 SkillSet 等模型共享同一个 metadata
 from agentclaw.community.plugin_api.models import Base
 from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
-
-
-_UNSIGNED_BIGINT = (
-    BigInteger()
-    .with_variant(MySQLBigInteger(unsigned=True), "mysql")
-    .with_variant(Integer, "sqlite")
-)
 
 
 class SkillSetMCPServer(Base):
@@ -28,7 +20,7 @@ class SkillSetMCPServer(Base):
     """
     __tablename__ = "ac_skill_set_mcp"
 
-    id = Column(_UNSIGNED_BIGINT, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     skill_set_id = Column(Integer, ForeignKey("ac_skill_set.id"), nullable=False, index=True)
     server_code = Column(String(256), nullable=False, index=True)  # MCP server code (e.g., mcp.third.faas...)
     name = Column(String(256), nullable=False)  # MCP server name
@@ -36,10 +28,6 @@ class SkillSetMCPServer(Base):
     icon = Column(String(500), nullable=True)  # MCP server icon URL
     user_id = Column(String(100), nullable=True, index=True)  # 用户工号
     env = Column(String(50), nullable=True)  # 环境标识: dev/pre/prod
-    # Like SkillSetSkill.bot_id, this denormalization makes the ordinary-set
-    # ownership invariant database-expressible.  System Default and historical
-    # records remain NULL; canonical writers always persist the parent Bot id.
-    bot_id = Column(String(100), nullable=True, index=True)
     # The association is tenant-owned alongside its Skill Set. Keep the field
     # out of to_dict() so existing Skills API payloads do not change.
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
@@ -49,17 +37,6 @@ class SkillSetMCPServer(Base):
     gmt_created = Column(DateTime, server_default=func.now(), nullable=False)
     gmt_modified = Column(
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-    __table_args__ = (
-        UniqueConstraint(
-            "avernet_tenant", "env", "skill_set_id", "server_code",
-            name="uk_skill_set_mcp",
-        ),
-        UniqueConstraint(
-            "avernet_tenant", "env", "bot_id", "server_code",
-            name="uk_bot_skill_set_mcp",
-        ),
     )
 
     # Relationships
@@ -83,37 +60,6 @@ class SkillSetMCPServer(Base):
 # Register where the model is defined so every direct ORM path has the shared
 # read/write boundary without per-repository predicates or Session listeners.
 register_avernet_tenant_guard(SkillSetMCPServer)
-
-
-class BotMCPInstallation(Base):
-    """One active desired-state MCP relationship for a Bot.
-
-    Absence is the only inactive representation.  Membership ownership lives
-    in ``ac_skill_set_mcp`` and runtime observations belong to the runtime,
-    never to this table.
-    """
-
-    __tablename__ = "ac_bot_mcp_installation"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    bot_id = Column(String(100), nullable=False, index=True)
-    server_code = Column(String(256), nullable=False, index=True)
-    env = Column(String(50), nullable=False)
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
-    gmt_created = Column(DateTime, server_default=func.now(), nullable=False)
-    gmt_modified = Column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-    __table_args__ = (
-        UniqueConstraint(
-            "avernet_tenant", "env", "bot_id", "server_code",
-            name="uk_bot_mcp_installation",
-        ),
-    )
-
-
-register_avernet_tenant_guard(BotMCPInstallation)
 
 
 class UserMCPConfig(Base):

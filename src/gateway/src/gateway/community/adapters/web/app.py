@@ -123,7 +123,6 @@ def create_app() -> FastAPI:
     app.openapi = _served_openapi  # type: ignore[method-assign]
 
     if enable_docs:
-
         @app.get("/internal-openapi.json", include_in_schema=False)
         async def internal_openapi() -> dict[str, Any]:
             return bs.served_internal_openapi(

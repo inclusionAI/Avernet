@@ -19,10 +19,6 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.desktop_bot.errors import (
-    DesktopBotOrphanError,
-    DesktopBotServiceError,
-)
 from agentclaw.community.core.desktop_bot.status_mapping import StatusDecision
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import DeviceService
@@ -82,6 +78,14 @@ def _format_datetime(value: object) -> str:
     if isinstance(value, datetime):
         return value.isoformat()
     return str(value)
+
+
+class DesktopBotServiceError(Exception):
+    """Desktop bot service error."""
+
+
+class DesktopBotOrphanError(DesktopBotServiceError):
+    """BaaS confirmed bot not found (orphan)."""
 
 
 class DesktopBotService:

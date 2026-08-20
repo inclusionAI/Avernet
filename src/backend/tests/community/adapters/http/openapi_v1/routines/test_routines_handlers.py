@@ -821,12 +821,9 @@ async def test_delete_routine_reads_x_trace_id_from_request():
 class _StubCronRunService:
     """Minimal stub satisfying the CronRelayServiceProtocol.run_cron seam."""
 
-    def __init__(self, ran=True, reason="", *, status="", success=True, run_id=None):
+    def __init__(self, ran=True, reason=""):
         self._ran = ran
         self._reason = reason
-        self._status = status
-        self._success = success
-        self._run_id = run_id
         self.last_call_kwargs: dict = {}
 
     async def run_cron(
@@ -840,16 +837,10 @@ class _StubCronRunService:
             "force": force,
             "runtime_stage": runtime_stage,
         }
-        data = {
-            "ok": self._ran,
-            "ran": self._ran,
-            "reason": self._reason,
+        return {
+            "success": True,
+            "data": {"ok": self._ran, "ran": self._ran, "reason": self._reason},
         }
-        if self._status:
-            data["status"] = self._status
-        if self._run_id:
-            data["runId"] = self._run_id
-        return {"success": self._success, "data": data}
 
 
 @pytest.mark.asyncio
@@ -881,59 +872,6 @@ async def test_run_routine_returns_completed_status_when_ran():
     assert service.last_call_kwargs.get("user_id") == "u1"
     assert service.last_call_kwargs.get("nick_name") == "u1"
     assert service.last_call_kwargs.get("task_id") == "t1"
-    assert service.last_call_kwargs.get("force") is True
-
-
-@pytest.mark.asyncio
-async def test_run_routine_maps_openclaw_dispatched_response_and_run_id():
-    service = _StubCronRunService(ran="t1", status="dispatched", run_id="manual:t1:123")
-
-    env = await run_routine(
-        routine_id="t1",
-        owner_id="u1",
-        bot_id="bot-x",
-        factory=service,
-        request=_request_without_trace(),
-    )
-
-    assert env.data.status == "completed"
-    assert env.data.run_id == "manual:t1:123"
-    assert service.last_call_kwargs["force"] is True
-
-
-@pytest.mark.asyncio
-async def test_run_routine_does_not_treat_not_due_routine_id_as_completed():
-    service = _StubCronRunService(ran="t1", status="not_due")
-
-    env = await run_routine(
-        routine_id="t1",
-        owner_id="u1",
-        bot_id="bot-x",
-        factory=service,
-        request=_request_without_trace(),
-    )
-
-    assert env.data.status == "failed"
-
-
-@pytest.mark.asyncio
-async def test_run_routine_returns_502_when_relay_reports_failure():
-    service = _StubCronRunService(ran=False, success=False)
-
-    # Failure reaches the caller as a CronRelayError(error_code=502), not a
-    # raw HTTPException; the app-level envelope handler maps it to the public
-    # 502 envelope via ENVELOPE_ERRORS[CronRelayError] ("Cron relay service
-    # error"). Internal adapter detail does not leak.
-    with pytest.raises(CronRelayError, match="routine trigger failed") as exc:
-        await run_routine(
-            routine_id="t1",
-            owner_id="u1",
-            bot_id="bot-x",
-            factory=service,
-            request=_request_without_trace(),
-        )
-
-    assert exc.value.error_code == 502
 
 
 @pytest.mark.asyncio
@@ -1135,73 +1073,3 @@ async def test_list_routine_runs_handles_bare_data_list_defensively():
 
     assert env.data.total == 1
     assert env.data.items[0].run_id == "r1"
-
-
-# ── run_routine, raised CronRelay*/adapter failure paths ───────────────
-# ``@envelope_errors`` is a passthrough wrapper; the ENVELOPE_ERRORS mapping is
-# applied by the app-level envelope handler. So in a direct unit call, the
-# raised domain errors propagate; the assertions below nail that they carry the
-# right type / error_code so the app-level map returns the right envelope.
-from agentclaw.community.core.cron.errors import (
-    CronApiTimeoutError,
-    CronRelayError,
-)
-
-
-class _RaisingCronRunService:
-    def __init__(self, exc):
-        self._exc = exc
-        self.last_call_kwargs: dict = {}
-
-    async def run_cron(self, **kwargs):
-        self.last_call_kwargs = kwargs
-        raise self._exc
-
-
-@pytest.mark.asyncio
-async def test_run_routine_propagates_service_raised_cron_relay_error():
-    service = _RaisingCronRunService(
-        CronRelayError("Bot has no device binding", error_code=400)
-    )
-    with pytest.raises(CronRelayError, match="Bot has no device binding") as exc:
-        await run_routine(
-            routine_id="t1",
-            owner_id="u1",
-            bot_id="bot-x",
-            factory=service,
-            request=_request_without_trace(),
-        )
-    assert exc.value.error_code == 400
-    # Pre-existing behaviour retained: handler always forces the knock.
-    assert service.last_call_kwargs.get("force") is True
-
-
-@pytest.mark.asyncio
-async def test_run_routine_propagates_cron_api_timeout():
-    service = _RaisingCronRunService(
-        CronApiTimeoutError("/api/cron/t1/run", 10.0)
-    )
-    with pytest.raises(CronApiTimeoutError):
-        await run_routine(
-            routine_id="t1",
-            owner_id="u1",
-            bot_id="bot-x",
-            factory=service,
-            request=_request_without_trace(),
-        )
-
-
-@pytest.mark.asyncio
-async def test_run_routine_translates_unexpected_adapter_exception():
-    # ValueError("Bot has no device binding") from the relay is translated to
-    # CronRelayError(502) → ENVELOPE_ERRORS → "Cron relay service error".
-    service = _RaisingCronRunService(ValueError("Bot has no device binding"))
-    with pytest.raises(CronRelayError, match="routine trigger failed") as exc:
-        await run_routine(
-            routine_id="t1",
-            owner_id="u1",
-            bot_id="bot-x",
-            factory=service,
-            request=_request_without_trace(),
-        )
-    assert exc.value.error_code == 502

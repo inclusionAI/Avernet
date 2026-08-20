@@ -1,5 +1,4 @@
 """Unit tests for SkillParser.parse_content and async SkillService methods."""
-
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
@@ -9,9 +8,7 @@ class TestSkillParserParseContent:
 
     def test_parse_basic_frontmatter(self):
         """Test parsing basic YAML frontmatter."""
-        from agentclaw.community.core.skill_center.services.skill_parser import (
-            SkillParser,
-        )
+        from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 
         content = "---\nname: my-skill\ndescription: A test skill\n---\n# My Skill"
         result = SkillParser.parse_content(content)
@@ -20,9 +17,7 @@ class TestSkillParserParseContent:
 
     def test_parse_empty_content(self):
         """Test parsing empty content returns None."""
-        from agentclaw.community.core.skill_center.services.skill_parser import (
-            SkillParser,
-        )
+        from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 
         assert SkillParser.parse_content("") is None
         assert SkillParser.parse_content(None) is None
@@ -32,9 +27,7 @@ class TestSkillServiceAsyncRouting:
     """Tests for async SkillService file I/O via DeviceFileSystemPlugin."""
 
     def _service(self, tmp_path, mock_device_fs=None, mock_repo=None):
-        from agentclaw.community.core.skill_center.services.skill_service import (
-            SkillService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_service import SkillService
 
         if mock_device_fs is None:
             mock_device_fs = AsyncMock()
@@ -67,13 +60,11 @@ class TestSkillServiceAsyncRouting:
         """Test upload_skill writes files via DeviceFileSystemPlugin."""
         service, mock_device_fs, _ = self._service(tmp_path)
 
-        files = [
-            {
-                "filename": "SKILL.md",
-                "content": b"---\nname: test-skill\ndescription: test\n---\n# Test",
-                "relative_path": "SKILL.md",
-            }
-        ]
+        files = [{
+            "filename": "SKILL.md",
+            "content": b"---\nname: test-skill\ndescription: test\n---\n# Test",
+            "relative_path": "SKILL.md",
+        }]
         await service.upload_skill(files, user_id="user1", bolt_id="bot1")
 
         # Verify DeviceFileSystemPlugin was used for file operations
@@ -85,7 +76,8 @@ class TestSkillServiceAsyncRouting:
         self, tmp_path
     ):
         pool_path = (
-            "/home/admin/.openclaw/workspace/skills-pool/skills-local/test-skill"
+            "/home/admin/.openclaw/workspace/"
+            "skills-pool/skills-local/test-skill"
         )
         existing = {
             "id": "41",
@@ -103,7 +95,8 @@ class TestSkillServiceAsyncRouting:
                 {
                     "filename": "SKILL.md",
                     "content": (
-                        b"---\nname: test-skill\ndescription: test\n---\n# Test"
+                        b"---\nname: test-skill\ndescription: test\n"
+                        b"---\n# Test"
                     ),
                     "relative_path": "SKILL.md",
                 }
@@ -122,7 +115,9 @@ class TestSkillServiceAsyncRouting:
         repo.create.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_reupload_migrates_existing_legacy_locator_to_pool(self, tmp_path):
+    async def test_reupload_migrates_existing_legacy_locator_to_pool(
+        self, tmp_path
+    ):
         from pathlib import Path
 
         from agentclaw.community.core.skill_center.path_resolution import (
@@ -130,9 +125,12 @@ class TestSkillServiceAsyncRouting:
         )
 
         legacy_path = (
-            "/home/admin/.openclaw/workspace/skills/skills-local/writing-beats"
+            "/home/admin/.openclaw/workspace/"
+            "skills/skills-local/writing-beats"
         )
-        pool_local = Path("/home/admin/.openclaw/workspace/skills-pool/skills-local")
+        pool_local = Path(
+            "/home/admin/.openclaw/workspace/skills-pool/skills-local"
+        )
         pool_path = str(pool_local / "writing-beats")
         existing = {
             "id": "1119874",
@@ -158,7 +156,8 @@ class TestSkillServiceAsyncRouting:
                 {
                     "filename": "SKILL.md",
                     "content": (
-                        b"---\nname: writing-beats\ndescription: test\n---\n# Test"
+                        b"---\nname: writing-beats\ndescription: test\n"
+                        b"---\n# Test"
                     ),
                     "relative_path": "SKILL.md",
                 }
@@ -187,10 +186,14 @@ class TestSkillServiceAsyncRouting:
             build_pool_local_path_adapter,
         )
 
-        pool_local = Path("/home/admin/.openclaw/workspace/skills-pool/skills-local")
+        pool_local = Path(
+            "/home/admin/.openclaw/workspace/skills-pool/skills-local"
+        )
         service, device_fs, _ = self._service(tmp_path)
         service.local_dir = pool_local
-        service._local_skill_path_adapter = build_pool_local_path_adapter(pool_local)
+        service._local_skill_path_adapter = build_pool_local_path_adapter(
+            pool_local
+        )
         service.runtime_uses_pool_paths = True
         device_fs.exists = AsyncMock(return_value=False)
 
@@ -204,10 +207,14 @@ class TestSkillServiceAsyncRouting:
         )
 
         assert activated is False
-        device_fs.exists.assert_awaited_once_with(f"{pool_local}/writing-beats")
+        device_fs.exists.assert_awaited_once_with(
+            f"{pool_local}/writing-beats"
+        )
 
     @pytest.mark.asyncio
-    async def test_legacy_activate_keeps_best_effort_source_semantics(self, tmp_path):
+    async def test_legacy_activate_keeps_best_effort_source_semantics(
+        self, tmp_path
+    ):
         service, device_fs, _ = self._service(tmp_path)
         device_fs.exists = AsyncMock(return_value=False)
 
@@ -240,7 +247,9 @@ class TestSkillServiceAsyncRouting:
         assert existing.is_symlink()
 
     @pytest.mark.asyncio
-    async def test_upload_does_not_overwrite_global_local_skill(self, tmp_path):
+    async def test_upload_does_not_overwrite_global_local_skill(
+        self, tmp_path
+    ):
         repo = MagicMock()
         repo.get_bot_local_by_name.return_value = None
         repo.create.side_effect = lambda data: {"id": "52", **data}
@@ -276,13 +285,11 @@ class TestSkillServiceAsyncRouting:
         service, mock_device_fs, _ = self._service(tmp_path)
         mock_device_fs.write_file.side_effect = Exception("404 Not Found")
 
-        files = [
-            {
-                "filename": "SKILL.md",
-                "content": b"---\nname: test-skill\ndescription: test\n---\n# Test",
-                "relative_path": "SKILL.md",
-            }
-        ]
+        files = [{
+            "filename": "SKILL.md",
+            "content": b"---\nname: test-skill\ndescription: test\n---\n# Test",
+            "relative_path": "SKILL.md",
+        }]
 
         with pytest.raises(
             ValueError,
@@ -294,9 +301,7 @@ class TestSkillServiceAsyncRouting:
         mock_device_fs.write_file.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_upload_nested_skill_root_uses_skill_md_name_and_strips_root(
-        self, tmp_path
-    ):
+    async def test_upload_nested_skill_root_uses_skill_md_name_and_strips_root(self, tmp_path):
         service, mock_device_fs, mock_repo = self._service(tmp_path)
 
         files = [
@@ -322,17 +327,9 @@ class TestSkillServiceAsyncRouting:
         assert result["name"] == "real-skill-name"
         assert result["git_path"].startswith("local:///")
         assert result["git_path"].endswith("/skills-local/real-skill-name")
-        written_paths = [
-            call.args[0] for call in mock_device_fs.write_file.call_args_list
-        ]
-        assert (
-            str(tmp_path / "skills-local" / "real-skill-name" / "SKILL.md")
-            in written_paths
-        )
-        assert (
-            str(tmp_path / "skills-local" / "real-skill-name" / "assets" / "icon.png")
-            in written_paths
-        )
+        written_paths = [call.args[0] for call in mock_device_fs.write_file.call_args_list]
+        assert str(tmp_path / "skills-local" / "real-skill-name" / "SKILL.md") in written_paths
+        assert str(tmp_path / "skills-local" / "real-skill-name" / "assets" / "icon.png") in written_paths
         assert not any(".DS_Store" in path for path in written_paths)
         mock_repo.create.assert_called_once()
 
@@ -395,84 +392,31 @@ class TestSkillServiceAsyncRouting:
         service, mock_device_fs, _ = self._service(tmp_path)
 
         missing_description = [
-            {
-                "filename": "SKILL.md",
-                "content": b"---\nname: a\n---",
-                "relative_path": "root/a/SKILL.md",
-            },
+            {"filename": "SKILL.md", "content": b"---\nname: a\n---", "relative_path": "root/a/SKILL.md"},
         ]
         with pytest.raises(ValueError, match="description"):
-            await service.upload_skill(
-                missing_description, user_id="user1", bolt_id="bot1"
-            )
+            await service.upload_skill(missing_description, user_id="user1", bolt_id="bot1")
 
         empty_name = [
-            {
-                "filename": "SKILL.md",
-                "content": b"---\nname:\ndescription: a\n---",
-                "relative_path": "root/a/SKILL.md",
-            },
+            {"filename": "SKILL.md", "content": b"---\nname:\ndescription: a\n---", "relative_path": "root/a/SKILL.md"},
         ]
-        with pytest.raises(ValueError, match="must be a string"):
+        with pytest.raises(ValueError, match="cannot be empty"):
             await service.upload_skill(empty_name, user_id="user1", bolt_id="bot1")
-
-        invalid_encoding = [
-            {
-                "filename": "SKILL.md",
-                "content": b"\x81\x30",
-                "relative_path": "SKILL.md",
-            },
-        ]
-        with pytest.raises(ValueError, match="encoded as UTF-8 or GBK"):
-            await service.upload_skill(
-                invalid_encoding, user_id="user1", bolt_id="bot1"
-            )
-
-        empty_manifest = [
-            {
-                "filename": "SKILL.md",
-                "content": b"",
-                "relative_path": "SKILL.md",
-            },
-        ]
-        with pytest.raises(ValueError, match="valid frontmatter"):
-            await service.upload_skill(empty_manifest, user_id="user1", bolt_id="bot1")
 
         mock_device_fs.write_file.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_parse_local_skill_config_decodes_gbk(self, tmp_path):
-        service, device_fs, _ = self._service(tmp_path)
-        device_fs.read_file.return_value = (
-            "---\nname: 安全检查\ndescription: 中文描述\n---\n".encode("gbk")
-        )
-
-        result = await service.parse_local_skill_config(
-            "local:///skills-local/安全检查",
-            bolt_id="bot1",
-            user_id="user1",
-        )
-
-        assert result["name"] == "安全检查"
-        assert result["description"] == "中文描述"
-
-    @pytest.mark.asyncio
     async def test_delete_removes_via_device_filesystem(self, tmp_path):
         """Test delete_skill removes files via DeviceFileSystemPlugin."""
-        from agentclaw.community.core.skill_center.services.skill_service import (
-            SkillService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_service import SkillService
 
         mock_device_fs = AsyncMock()
         mock_device_fs.delete_tree.return_value = True
 
         mock_repo = MagicMock()
         mock_repo.get_by_id.return_value = {
-            "id": "1",
-            "name": "test",
-            "git_path": "local:///path/test",
-            "bolt_id": "bot1",
-            "user_id": "user1",
+            "id": "1", "name": "test", "git_path": "local:///path/test",
+            "bolt_id": "bot1", "user_id": "user1"
         }
         mock_repo.delete.return_value = True
         mock_repo.list_skill_set_references.return_value = []
@@ -508,13 +452,20 @@ class TestSkillServiceAsyncRouting:
         )
 
         legacy_path = (
-            "/home/admin/.openclaw/workspace/skills/skills-local/writing-beats"
+            "/home/admin/.openclaw/workspace/"
+            "skills/skills-local/writing-beats"
         )
-        pool_local = Path("/home/admin/.openclaw/workspace/skills-pool/skills-local")
+        pool_local = Path(
+            "/home/admin/.openclaw/workspace/skills-pool/skills-local"
+        )
         service, device_fs, repo = self._service(tmp_path)
-        service.active_dir = Path("/home/admin/.openclaw/workspace/skills")
+        service.active_dir = Path(
+            "/home/admin/.openclaw/workspace/skills"
+        )
         service.local_dir = pool_local
-        service._local_skill_path_adapter = build_pool_local_path_adapter(pool_local)
+        service._local_skill_path_adapter = build_pool_local_path_adapter(
+            pool_local
+        )
         repo.get_by_id.return_value = {
             "id": "1119874",
             "name": "writing-beats",
@@ -533,19 +484,15 @@ class TestSkillServiceAsyncRouting:
     @pytest.mark.asyncio
     async def test_readme_reads_via_device_filesystem(self, tmp_path):
         """Test get_skill_readme reads via DeviceFileSystemPlugin."""
-        from agentclaw.community.core.skill_center.services.skill_service import (
-            SkillService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_service import SkillService
 
         mock_device_fs = AsyncMock()
         mock_device_fs.read_file.return_value = b"# Test Skill"
 
         mock_repo = MagicMock()
         mock_repo.get_by_id.return_value = {
-            "id": "1",
-            "git_path": "local:///path/test",
-            "bolt_id": "bot1",
-            "user_id": "user1",
+            "id": "1", "git_path": "local:///path/test",
+            "bolt_id": "bot1", "user_id": "user1"
         }
 
         service = SkillService(
@@ -573,12 +520,17 @@ class TestSkillServiceAsyncRouting:
         )
 
         legacy_path = (
-            "/home/admin/.openclaw/workspace/skills/skills-local/writing-beats"
+            "/home/admin/.openclaw/workspace/"
+            "skills/skills-local/writing-beats"
         )
-        pool_local = Path("/home/admin/.openclaw/workspace/skills-pool/skills-local")
+        pool_local = Path(
+            "/home/admin/.openclaw/workspace/skills-pool/skills-local"
+        )
         service, device_fs, repo = self._service(tmp_path)
         service.local_dir = pool_local
-        service._local_skill_path_adapter = build_pool_local_path_adapter(pool_local)
+        service._local_skill_path_adapter = build_pool_local_path_adapter(
+            pool_local
+        )
         repo.get_by_id.return_value = {
             "id": "1119874",
             "name": "writing-beats",

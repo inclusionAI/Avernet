@@ -444,9 +444,7 @@ class TestBuildForwardingWithMixedSources:
         assert result.refresh_seconds == 45
         assert result.internal_openapi_domains == ("bcn-internal",)
 
-    def test_rejects_non_mapping_internal_schemas_collection(
-        self, tmp_path: Path
-    ) -> None:
+    def test_rejects_non_mapping_internal_schemas_collection(self, tmp_path: Path) -> None:
         from gateway.community.bootstrap._forwarding import build_forwarding
 
         config = Config(
@@ -480,9 +478,7 @@ class TestBuildForwardingWithMixedSources:
                 assert "internal_api_docs.schemas" in str(error)
                 assert "must be a mapping" in str(error)
             else:
-                raise AssertionError(
-                    "non-mapping internal schemas collection was accepted"
-                )
+                raise AssertionError("non-mapping internal schemas collection was accepted")
 
     def test_rejects_non_mapping_internal_schema_entry(self, tmp_path: Path) -> None:
         from gateway.community.bootstrap._forwarding import build_forwarding
@@ -576,7 +572,9 @@ class TestBuildForwardingWithMixedSources:
                     },
                     "servers": {"backend": {"base_url": "http://backend:8080"}},
                 },
-                internal_api_docs={"schemas": {"bcn-internal": {"source": "file"}}},
+                internal_api_docs={
+                    "schemas": {"bcn-internal": {"source": "file"}}
+                },
             ),
         )
 
@@ -612,7 +610,9 @@ class TestBuildForwardingWithMixedSources:
                     },
                     "servers": {"backend": {"base_url": "http://backend:8080"}},
                 },
-                internal_api_docs={"schemas": {"bcn-internal": {"source": "http"}}},
+                internal_api_docs={
+                    "schemas": {"bcn-internal": {"source": "http"}}
+                },
             ),
         )
 

@@ -16,8 +16,7 @@ The grammar is three kinds of segment:
 - the **glob** (``**``), matching every remaining segment *including none*.
 
 Callers may accept a narrower grammar than they can rank — the domain map does,
-requiring a pinned literal prefix and a trailing ``**`` — but they all rank
-through :attr:`specificity`.
+taking only ``<literals>/**`` — but they all rank through :attr:`specificity`.
 
 No web framework here (Rule 7): this is pure matching logic.
 """

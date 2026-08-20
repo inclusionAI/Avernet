@@ -23,11 +23,12 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.skill_center.services.git_sync import GitSyncService
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillSetRepository,
+)
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
-from agentclaw.community.core.repository.protocols.skill_installation import (
-    SkillInstallationRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillCategoryRepository,
 )
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.core.skill_center.path_resolution import (
@@ -44,6 +45,8 @@ from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetService,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
+from agentclaw.community.core.bot_management.engines.registry import get_default_skill_set_selection_policy
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
@@ -106,22 +109,30 @@ class LocalSkillPackageStorage:
         """Whether this storage currently has an authoritative package."""
         return await self._filesystem.exists(self._device_directory)
 
-    async def read_file(self, relative_path: str) -> bytes | None:
-        """Read one validated package-relative file without exposing its locator."""
-        if (
-            not relative_path
-            or relative_path.startswith("/")
-            or ".." in relative_path.split("/")
-        ):
-            raise ValueError("Local Skill package path is invalid")
-        return await self._filesystem.read_file(
-            f"{self._device_directory}/{relative_path}"
-        )
-
     async def verify(self) -> bool:
         """Read and validate every package file without changing storage."""
         await self._read_package_files()
         return True
+
+    async def copy_to(
+        self, target: "LocalSkillPackageStorage", *, replace: bool = False
+    ) -> None:
+        """Copy and verify this complete package without deleting the source.
+
+        Device backends deliberately do not promise a common directory rename.
+        Replacement therefore stages and verifies bytes first, then publishes
+        them to the stable user-visible package directory through this portable
+        copy seam.  The source remains available for rollback until the caller
+        explicitly cleans it up.
+        """
+        files = await self._read_package_files()
+        if await target._filesystem.exists(target.directory):
+            if not replace:
+                raise OSError("Local Skill copy target already exists")
+            if not await target.cleanup():
+                raise OSError("unable to clear Local Skill copy target")
+        if not await target._restore_contents(files):
+            raise OSError("Local Skill copy verification failed")
 
     async def quarantine_to(self, quarantine: "LocalSkillPackageStorage") -> None:
         """Copy, verify, then remove this authoritative package.
@@ -235,6 +246,7 @@ class SkillServiceFactory:
     def __init__(
         self,
         skill_repo: SkillRepository,
+        bot_repo: BotRepository,
         skill_repo_sync: SkillRepoSyncPlugin,
         category_repo: SkillCategoryRepository,
         device_fs_dispatcher: "DeviceFilesystemDispatcher",
@@ -247,6 +259,7 @@ class SkillServiceFactory:
         ],
     ) -> None:
         self._skill_repo = skill_repo
+        self._bot_repo = bot_repo
         self._skill_repo_sync = skill_repo_sync
         self._category_repo = category_repo
         self._device_fs_dispatcher = device_fs_dispatcher
@@ -287,10 +300,16 @@ class SkillServiceFactory:
             # binding are owned by ac_bots.owner_id.  They differ for project
             # and team Bots and therefore must not be conflated.
             lookup_owner_id = bot_owner_id or entity_id
+            runtime_engine = resolve_runtime_engine_for_bot(
+                str(bot_id),
+                str(lookup_owner_id),
+                override=engine_type,
+                bot_repo=self._bot_repo,
+            )
             pool_paths = self.resolve_pool_paths(
                 str(lookup_owner_id),
                 str(bot_id),
-                engine_type or "",
+                runtime_engine or "",
             )
             if pool_paths is not None:
                 uses_pool_paths = True
@@ -301,6 +320,7 @@ class SkillServiceFactory:
                 pool_local_adapter = build_pool_local_path_adapter(local_dir)
                 local_skill_path_adapter = pool_local_adapter
                 local_skill_locator_adapter = pool_local_adapter
+
 
         return SkillService(
             skill_repo=self._skill_repo,
@@ -335,8 +355,9 @@ class SkillServiceFactory:
         """Return a Bot-local package storage port.
 
         ``directory_name`` is intentionally internal.  A replacement writes a
-        complete package to an isolated versioned directory before its metadata
-        points runtime at it; first creation keeps the historical name path.
+        complete package to an isolated versioned directory, then publishes it
+        to the stable ``name`` directory.  Metadata never points at the
+        internal directory.
         """
         service = self.create(
             entity_id=entity_id,
@@ -346,10 +367,16 @@ class SkillServiceFactory:
         )
         local_dir = service.local_dir
         if not service.runtime_uses_pool_paths:
+            runtime_engine = resolve_runtime_engine_for_bot(
+                bot_id,
+                owner_id,
+                override=engine_type,
+                bot_repo=self._bot_repo,
+            )
             local_dir = self._path_factory.get_bot_skills_local_dir(
                 entity_id,
                 bot_id,
-                engine_type or "openclaw",
+                runtime_engine or "openclaw",
                 entity_type,
                 is_desktop=is_desktop,
                 is_teclaw=is_teclaw,
@@ -384,10 +411,16 @@ class SkillServiceFactory:
         )
         local_dir = service.local_dir
         if not service.runtime_uses_pool_paths:
+            runtime_engine = resolve_runtime_engine_for_bot(
+                bot_id,
+                owner_id,
+                override=engine_type,
+                bot_repo=self._bot_repo,
+            )
             local_dir = self._path_factory.get_bot_skills_local_dir(
                 entity_id,
                 bot_id,
-                engine_type or "openclaw",
+                runtime_engine or "openclaw",
                 entity_type,
                 is_desktop=is_desktop,
                 is_teclaw=is_teclaw,
@@ -403,7 +436,9 @@ class SkillServiceFactory:
         try:
             relative_locator = resolved_candidate.relative_to(resolved_base)
         except ValueError as exc:
-            raise ValueError("Local Skill cleanup locator escapes skills-local") from exc
+            raise ValueError(
+                "Local Skill cleanup locator escapes skills-local"
+            ) from exc
         if not relative_locator.parts:
             raise ValueError("Local Skill cleanup locator must name a package")
         # Keep the original path form for the device adapter (notably Teclaw's
@@ -447,7 +482,6 @@ class SkillSetServiceFactory:
             tuple[str, str, str] | None,
         ],
         ext_info_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
-        installations: SkillInstallationRepositoryProtocol | None = None,
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -462,7 +496,6 @@ class SkillSetServiceFactory:
         self._path_factory = path_factory
         self._pool_layout_paths = pool_layout_paths
         self._ext_info_provider = ext_info_provider
-        self._installations = installations
 
     def create(
         self,
@@ -473,6 +506,7 @@ class SkillSetServiceFactory:
         entity_id: Optional[str] = None,
         bot_id: Optional[str] = None,
         engine_type: Optional[str] = None,
+        runtime_engine_type: Optional[str] = None,
         entity_type: Optional[str] = None,
     ) -> SkillSetService:
         # Build a SkillSetService first to compute the resolved paths,
@@ -503,13 +537,26 @@ class SkillSetServiceFactory:
                     owner_id,
                     exc,
                 )
+        # Backward compatibility: callers that explicitly pass only ``engine_type``
+        # to this factory have historically meant "use this engine's filesystem
+        # layout". HTTP routers that need bot-aware runtime remapping now pass
+        # ``runtime_engine_type`` explicitly, so keep this fallback predictable.
+        effective_runtime_engine = runtime_engine_type or engine_type
+        if effective_runtime_engine is None:
+            owner_id = user_id or entity_id
+            effective_runtime_engine = resolve_runtime_engine_for_bot(
+                bot_id or "default",
+                str(owner_id) if owner_id is not None else None,
+                bot_repo=self._bot_repo,
+            )
+
         if user_id or entity_id:
             resolved_skills, resolved_repo, resolved_local = _get_bot_paths(
                 path_factory=self._path_factory,
                 user_id=user_id,
                 entity_id=entity_id,
                 bot_id=bot_id,
-                engine_type=engine_type,
+                engine_type=effective_runtime_engine,
                 entity_type=entity_type,
                 is_desktop=is_desktop,
             )
@@ -523,7 +570,7 @@ class SkillSetServiceFactory:
             pool_paths = self._pool_layout_paths(
                 str(effective_owner),
                 str(bot_id),
-                engine_type or "",
+                effective_runtime_engine or engine_type or "",
             )
             if pool_paths is not None:
                 active_path, local_path, repo_path = pool_paths
@@ -558,15 +605,16 @@ class SkillSetServiceFactory:
             entity_id=entity_id,
             bot_id=bot_id,
             engine_type=engine_type,
+            runtime_engine_type=effective_runtime_engine,
             entity_type=entity_type,
             resolver=self._resolver_provider(),
             device_sync_dispatcher=self._device_sync_dispatcher_provider(),
             mcp_sync_service=self._mcp_sync_service,
             device_plugin=self._device_plugin,
             ext_info_provider=self._ext_info_provider,
+            default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
             path_factory=self._path_factory,
             pool_layout_paths=self._pool_layout_paths,
-            installations=self._installations,
         )
 
 

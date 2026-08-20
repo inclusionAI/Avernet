@@ -1246,7 +1246,6 @@ class BotService:
         template_type: Optional[str] = None,
         template_config: Optional[Dict[str, Any]] = None,
         cookie: Optional[str] = None,
-        space_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Create a new bot with async device allocation.
@@ -1384,7 +1383,6 @@ class BotService:
                 "ext": ext,
                 "bot_type": resolved_bot_type,
                 "template_type": template_type,  # Template type (e.g., "applicationCoding")
-                "space_id": space_id,  # Business-space ownership: NULL -> personal fallback
             }
 
             bot_record = self._repository.insert(bot_data)
@@ -2168,7 +2166,6 @@ class BotService:
         owner_id: Optional[str] = None,
         engine: Optional[str] = None,
         status: Optional[str] = None,
-        space_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
         bot_ids: Optional[List[str]] = None,
@@ -2182,7 +2179,6 @@ class BotService:
             owner_name: Filter by owner name
             bot_id: Filter by bot ID (exact match)
             owner_id: Filter by owner id (exact match) — scopes to one owner
-            space_id: Filter by numeric business-space id (exact match)
             engine: Filter by active engine (exact match)
             status: Filter by lifecycle status (exact match)
             page: Page number (1-based)
@@ -2203,7 +2199,6 @@ class BotService:
             owner_id=owner_id,
             engine=engine,
             status=status,
-            space_id=space_id,
             page=page,
             page_size=page_size,
             bot_ids=bot_ids,

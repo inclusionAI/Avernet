@@ -42,7 +42,6 @@ def test_bootstrap_clones_and_extracts_skills(
 ):
     bare = local_skills_bare_repo
     monkeypatch.setenv("GIT_SYNC_TMP_BASE", str(tmp_path / "git-tmp"))
-    monkeypatch.setenv("HOME", str(tmp_path))
 
     # GitSyncConfig defaults paths under ~/aiworkbench; redirect to tmp so the
     # test is hermetic and the clone/extract actually happens (no pre-existing repo).

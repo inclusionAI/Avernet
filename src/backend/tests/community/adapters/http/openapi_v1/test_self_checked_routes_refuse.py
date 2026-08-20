@@ -62,7 +62,6 @@ from agentclaw.community.api.local_skill_state_service import (
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
 from agentclaw.community.core.gateway_principal import (
     AppPrincipal,
     GatewayApp,
@@ -146,14 +145,6 @@ class _Services:
             "changed": True,
         }
 
-    def get_skill(self, *, skill_id: str, bot_id: str, actor_id: str):
-        return self.get_local_skill(skill_id=skill_id, actor_id=actor_id)
-
-    async def set_active(self, *, skill_id: str, bot_id: str, actor_id: str, active):
-        return await self.set_local_skill_active(
-            skill_id=skill_id, actor_id=actor_id, active=active
-        )
-
     async def upload_local_skill(self, *, bot_id, owner_id, actor_id, package):
         self._record("upload_local_skill")
         return {
@@ -183,7 +174,6 @@ def client(services):
                 LocalSkillDeleteServiceProtocol,
                 LocalSkillStateServiceProtocol,
                 LocalSkillUploadServiceProtocol,
-                BotSkillAssetServiceProtocol,
             ):
                 binder.bind(protocol, to=services)
 
@@ -235,9 +225,6 @@ BODIES: dict[tuple[str, str], dict] = {
     ("POST", "/openapi/v1/bots/{bot_id}/skills"): {
         "content": b"PK\x03\x04",
         "headers": {"content-type": "application/zip"},
-    },
-    ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): {
-        "json": {"parameters": {}},
     },
 }
 

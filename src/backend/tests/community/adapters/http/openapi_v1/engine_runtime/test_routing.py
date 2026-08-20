@@ -11,17 +11,15 @@ from agentclaw.community.adapters.http.openapi_v1 import (
     build_public_router,
 )
 
-#: sessions 10 + engine 4 + models 2 + nodes 1 + approvals 3 + connection 1
-_EXPECTED_ROUTE_COUNT = 21
+#: sessions 7 + engine 3 + models 2 + approvals 3 + connection 1
+_EXPECTED_ROUTE_COUNT = 16
 
 _BOTS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/"
 
 
 def _engine_runtime_routes() -> list[APIRoute]:
     """The current engine-runtime routes."""
-    return [
-        r for g in _ENGINE_RUNTIME_GROUPS for r in g.routes if isinstance(r, APIRoute)
-    ]
+    return [r for g in _ENGINE_RUNTIME_GROUPS for r in g.routes if isinstance(r, APIRoute)]
 
 
 def _all_engine_runtime_paths() -> set[str]:
@@ -75,7 +73,7 @@ def test_every_route_begins_with_the_bots_prefix():
 
 
 #: Each group's component segment, which its paths must name after ``{bot_id}``.
-_COMPONENTS = ("sessions", "engine", "models", "nodes", "approvals", "connection")
+_COMPONENTS = ("sessions", "engine", "models", "approvals", "connection")
 
 
 def test_every_route_names_the_bot_then_its_component():
@@ -116,7 +114,6 @@ def test_groups_are_mounted_and_reachable_in_the_public_router():
         f"{_BOTS_PREFIX}{{bot_id}}/sessions",
         f"{_BOTS_PREFIX}{{bot_id}}/engine/capabilities",
         f"{_BOTS_PREFIX}{{bot_id}}/models",
-        f"{_BOTS_PREFIX}{{bot_id}}/nodes",
         f"{_BOTS_PREFIX}{{bot_id}}/approvals/mode",
         f"{_BOTS_PREFIX}{{bot_id}}/connection",
     ):
@@ -139,13 +136,7 @@ def test_literal_groups_are_registered_before_the_bot_id_wildcard():
     """
     order = list(_document()["paths"])
     wildcard = order.index(f"{_BOTS_PREFIX}{{bot_id}}")
-    for literal in (
-        "check-name",
-        "ceiling",
-        "authorized",
-        "mcp/servers",
-        "logs/traces",
-    ):
+    for literal in ("check-name", "ceiling", "authorized", "mcp/servers", "logs/traces"):
         assert order.index(f"{_BOTS_PREFIX}{literal}") < wildcard, literal
 
 
@@ -159,9 +150,7 @@ def test_engine_runtime_routes_document_501_and_504():
             documented = set(operation["responses"])
             extras = {"501", "504"} & documented
             if path in runtime_paths:
-                assert extras == {"501", "504"}, (
-                    f"{method.upper()} {path} missing {extras}"
-                )
+                assert extras == {"501", "504"}, f"{method.upper()} {path} missing {extras}"
             else:
                 assert not extras, f"{method.upper()} {path} advertises {extras}"
 

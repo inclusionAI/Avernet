@@ -55,7 +55,7 @@ class BotDiscoverService:
     def search_by_keyword(
         self,
         keyword: str,
-        user_id: str | None = None,
+        user_id: str,
         top_k: int = 10,
         min_score: float = 0.01,
         filters: Optional[dict[str, Any]] = None,
@@ -298,7 +298,6 @@ class BotDiscoverService:
                 bot_detail = {
                     "id": bot["id"],
                     "bot_id": bot["bot_id"],
-                    "bot_type": bot["bot_type"],
                     "bot_name": bot["bot_name"],
                     "bot_desc": bot["bot_desc"],
                     "entity_id": bot["entity_id"],

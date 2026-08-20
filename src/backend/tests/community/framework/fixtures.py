@@ -15,7 +15,6 @@ in ``tests/endpoints/`` can request them by name.
 """
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 
 import httpx
@@ -46,7 +45,7 @@ def app_with_testing_modules(request) -> FastAPI:
          ``TestingDatabaseModule`` calls ``reset_for_tests()`` so the
          underlying engine is brand new.
       2. Bootstrap the schema on the new engine
-         through the database lifecycle hook. Required because the engine is
+         (``Base.metadata.create_all``). Required because the engine is
          in-memory — tables don't survive engine disposal.
       3. Save the prior ``app.state.injector``, attach the per-test
          injector via ``attach_injector(app, injector)``, ``yield app``.
@@ -63,6 +62,7 @@ def app_with_testing_modules(request) -> FastAPI:
     # registration, which we want done exactly once per test session,
     # not at import time of this conftest module.
     from agentclaw.community.adapters.http.app import app
+    from agentclaw.community.core.base import Base
     from agentclaw.community.di import DeployProfile, build_injector
     from agentclaw.community.plugin_api.database import DatabasePlugin
     from agentclaw.community.plugins.local import database as db_mod
@@ -74,14 +74,21 @@ def app_with_testing_modules(request) -> FastAPI:
     # app.py bootstrap and the conftest wiring.
     injector = build_injector(profile=DeployProfile.detect())
 
-    # Bootstrap through the same lifecycle hook as the running app. Besides
-    # creating the schema, SqliteDB.bootstrap() eagerly imports every ORM model
-    # owned by the active profile; relying on router import side effects leaves
-    # lazily imported repository tables absent from this fresh in-memory DB.
+    # Force the engine into existence on this injector. ``TestingDatabaseModule``
+    # has already called ``reset_for_tests()``, so this is a fresh engine
+    # bound to a fresh in-memory database.
     plugin = injector.get(DatabasePlugin)
-    asyncio.run(plugin.bootstrap())
+    with plugin.session() as _s:
+        pass
     engine = db_mod._engine
-    assert engine is not None, "engine should have been created by database bootstrap"
+    assert engine is not None, "engine should have been created by SqliteDB session()"
+
+    # Bootstrap the schema. ``adapters/http/app.py`` already imported every
+    # ``*models*`` module at app-load time, so ``Base.metadata`` is
+    # populated by the time we reach this fixture.
+    import agentclaw.community.core.expert_chat.sqlite_models  # noqa: F401
+
+    Base.metadata.create_all(engine)
 
     # Save the prior ``app.state.injector`` so legacy tests / a bare
     # ``TestClient(app)`` keep seeing the same injector identity after

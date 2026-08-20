@@ -84,23 +84,12 @@ user_config:
   # decide which planes the upstream serves. The router re-spells it per plane
   # (https ⇄ wss, http ⇄ ws), so one configured value works for both and no
   # operator has to know which planes a given upstream is used for.
-  #
-  # These defaults are the SINGLE-BOX values: each URL names the port the
-  # matching `scripts/singlebox.sh` service listens on by default (backend 8888,
-  # baas 8890, bcs 21000, bcsfuse 8765 — two independent constants per service;
-  # changing a singlebox default port means changing it here too). A deployed
-  # edition overrides this whole section, exactly as it does for the schema
-  # sources above.
-  #
-  # `engine_proxy_server_url` stays a placeholder: no singlebox service serves
-  # the `/proxypass` prefix, so there is nothing local to name. Only the
-  # `bots-messages-ws` socket domain reads it; every other route is unaffected.
   upstream_vars:
-    backend_server_url: http://127.0.0.1:8888
-    baas_server_url: http://127.0.0.1:8890
-    bcs_server_url: http://127.0.0.1:21000
+    backend_server_url: https://backend.sample.com
+    baas_server_url: https://baas.sample.com
+    bcs_server_url: https://bcs.sample.com
     engine_proxy_server_url: https://engineproxy.sample.com
-    bcsfuse_server_url: http://127.0.0.1:8765
+    bcsfuse_server_url: https://bcsfuse.sample.com
 
   # Per-identity strategy chain (system-level config).
   # Each identity type runs its strategies in order; the first to recognise the
@@ -156,46 +145,8 @@ user_config:
     "/openapi/v1/bots/**":
       user: optional
       app: optional
-    "/openapi/v1/bots/skills/**":
-      user: required
 
     # ── The refusals: operations that still require a human on the wire ──────
-
-    # The caller-identity read: its answer IS the end user, so a caller with no
-    # human on the wire has nothing to ask. Explicit even though /** already
-    # requires a user, for the same reason the spaces rules below are: when the
-    # broader policy evolves, this route must remain fail-closed.
-    "/openapi/v1/caller":
-      user: required
-
-    # Space/member/favorite OpenAPI operations are user-only in the first
-    # refactor phase. Keep this explicit even though /** also requires a user:
-    # when the broader public API policy evolves, these routes must remain
-    # fail-closed until app identity semantics for spaces are approved.
-    "/openapi/v1/bots/spaces/**":
-      user: required
-    "/openapi/v1/bots/work-orders/**":
-      user: required
-    "/openapi/v1/bots/work-order-notifications/**":
-      user: required
-
-    # Local Bot creation has no existing Bot grant to check and may initiate
-    # Passport consent. Polling auth-status completes that same human creation
-    # transaction. Other workshop/local operations inherit the wide user-or-app
-    # rule and are narrowed or grant-checked by Backend admission.
-    "POST /openapi/v1/bots/local":
-      user: required
-    "GET /openapi/v1/bots/{bot_id}/local/auth-status":
-      user: required
-
-    # The IAM token is a first-party browser credential and Caller preparation
-    # consumes that same user's HttpOnly cookie.  Do not declare `app` here:
-    # the auth runner resolves only identities named by the matched rule, so an
-    # application credential cannot reach either operation as a principal.
-    "GET /openapi/v1/org/user/iam-token":
-      user: required
-    "POST /openapi/v1/bots/{bot_id}/caller-identity":
-      user: required
 
     # Creating a bot. No bot exists yet for a grant to cover, and creation
     # spends the user's quota.
@@ -315,6 +266,13 @@ user_config:
     "/openapi/v1/bcsfuse/**":
       user: required
 
+    # The harness operations sit beneath the addressed bot, so the wide
+    # "/openapi/v1/bots/**" rule above would otherwise admit them with no user
+    # on the wire. They diagnose and patch a bot's live config files — a human
+    # stays on the boundary, and the extra literal segment outranks the prefix.
+    "/openapi/v1/bots/{bot_id}/harness/**":
+      user: required
+
     # BCN verifies the short-lived session credential carried by this exact
     # WebSocket handshake. Keep every other collaboration operation, including
     # session-token issuance, on the required User Principal boundary above.
@@ -388,27 +346,21 @@ user_config:
     # Each domain may also declare:
     #
     #   match: <path pattern>
-    #     Which paths this domain claims: literal segments, optionally
-    #     continued by `{param}` segments (each claims ONE segment, whatever it
-    #     holds — literals may follow it), then `**`. Unset means
-    #     `<base_path>/<domain name>/**` — the leading-segment routing every
-    #     domain had before patterns, so a domain that says nothing keeps its
-    #     address exactly. Declare one to put a domain BENEATH another, on a
-    #     different upstream — `/openapi/v1/bots/{bot_id}/shell/**` claims the
-    #     shell subtree of every bot while `/openapi/v1/bots/**` keeps the rest.
+    #     Which paths this domain claims: literal segments, then `**`. Unset
+    #     means `<base_path>/<domain name>/**` — the leading-segment routing
+    #     every domain had before patterns, so a domain that says nothing keeps
+    #     its address exactly. Declare one to put a domain BENEATH another, on a
+    #     different upstream.
     #
     #     Resolution matches first and ranks second: every domain claiming the
     #     path AND answering the request's plane is a candidate, and the most
-    #     specific (most literal segments, parameters breaking ties) wins. The
-    #     plane filters the candidates, so claiming a prefix for one plane
-    #     leaves the other plane's resolution of the same path untouched.
+    #     specific (most literal segments) wins. The plane filters the
+    #     candidates, so claiming a prefix for one plane leaves the other
+    #     plane's resolution of the same path untouched.
     #
-    #     Startup REFUSES a pattern whose leading LITERAL segments do not pin
-    #     `base_path` plus at least one more literal segment — a parameter pins
-    #     nothing, so it may only appear after that. `match: /**` is an open
-    #     proxy into that domain's upstream, and this is the check that makes
-    #     it untypable. It also refuses two patterns that claim a common path
-    #     with equal specificity, where the winner would be undefined.
+    #     Startup REFUSES a pattern that does not pin `base_path` plus at least
+    #     one more literal segment. `match: /**` is an open proxy into that
+    #     domain's upstream, and this is the check that makes it untypable.
     #
     #   protocols: [http] | [websocket] | [http, websocket]
     #     Which plane serves it. Unset means `[http]`, so every domain below
@@ -425,14 +377,6 @@ user_config:
     #     rule could never match and startup refuses it.
 
     domains:
-      org:
-        server: backend
-        # Backend publishes one public artifact; domain generation filters it
-        # to /openapi/v1/org before serving it through this route.
-        schema:
-          source: file
-          path: schemas/bots.openapi.json
-          refresh_seconds: 300
       bots:
         server: backend
         # Single-box default. A deployed edition overrides this with an object store:
@@ -444,37 +388,10 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
-      caller:
-        server: backend
-        schema:
-          source: file
-          path: schemas/bots.openapi.json
-          refresh_seconds: 300
-      repository-skills:
-        match: /openapi/v1/bots/skills/**
-        server: backend
-        schema:
-          source: file
-          path: schemas/bots.openapi.json
-          refresh_seconds: 300
-      spaces:
-        server: backend
-        schema:
-          source: file
-          path: schemas/bots.openapi.json
-          refresh_seconds: 300
-      work-orders:
-        server: backend
-        schema:
-          source: file
-          path: schemas/bots.openapi.json
-          refresh_seconds: 300
-      work-order-notifications:
-        server: backend
-        schema:
-          source: file
-          path: schemas/bots.openapi.json
-          refresh_seconds: 300
+      # The harness operations moved under /openapi/v1/bots/{bot_id}/harness/**:
+      # the bots domain routes them to the same backend verbatim, and a domain
+      # match cannot pin a path behind a path parameter, so no separate domain
+      # can claim them. Their published description rides in bots.openapi.json.
       collaboration:
         server: bcs
         protocols: [http, websocket]

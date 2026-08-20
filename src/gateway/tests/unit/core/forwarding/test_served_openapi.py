@@ -60,31 +60,6 @@ def test_non_public_paths_are_filtered_out() -> None:
     assert "/api/internal/debug" not in _served()["paths"]
 
 
-def test_backend_artifact_serves_spaces_through_its_own_domain() -> None:
-    artifact = json.loads(
-        (_SHIPPED_CONFIG.parent / "schemas" / "bots.openapi.json").read_text()
-    )
-    document = build_served_openapi(
-        ["bots", "spaces"],
-        lambda _domain: artifact,
-        _SHIPPED_RULES,
-        title="gateway",
-        version="0.1.0",
-    )
-
-    assert "/openapi/v1/bots" in document["paths"]
-    assert "/openapi/v1/bots/spaces" in document["paths"]
-    assert document["paths"]["/openapi/v1/bots/spaces"]["get"][
-        "x-avernet-security"
-    ] == {"user": "required"}
-
-    space_skills_path = "/openapi/v1/bots/spaces/{space_id}/skills"
-    assert space_skills_path in document["paths"]
-    assert document["paths"][space_skills_path]["get"][
-        "x-avernet-security"
-    ] == {"user": "required"}
-
-
 def test_every_served_operation_carries_security() -> None:
     for path, item in _served()["paths"].items():
         for method, operation in item.items():
@@ -157,14 +132,20 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     # the shipped baas artifact now serves the sessions path under chat.
     assert "/openapi/v1/chat/sessions/{session_id}" in paths
     assert "/openapi/v1/collaboration/bots/mine" in paths
-    assert not any(path.startswith("/api/v1/collaboration") for path in paths)
+    assert not any(
+        path.startswith("/api/v1/collaboration") for path in paths
+    )
     assert "post" in paths["/openapi/v1/collaboration/sessions/{session_id}/token"]
-    collection = paths["/openapi/v1/collaboration/sessions/{session_id}/collect"]
+    collection = paths[
+        "/openapi/v1/collaboration/sessions/{session_id}/collect"
+    ]
     assert set(collection) == {"delete", "post"}
     assert "get" in paths["/openapi/v1/collaboration/messages/ws"]
-    message_data = paths["/openapi/v1/collaboration/sessions/{session_id}/messages"][
-        "get"
-    ]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["data"]
+    message_data = paths[
+        "/openapi/v1/collaboration/sessions/{session_id}/messages"
+    ]["get"]["responses"]["200"]["content"]["application/json"]["schema"][
+        "properties"
+    ]["data"]
     assert message_data["type"] == "array"
     assert {
         "historyMeta",
@@ -178,23 +159,18 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     collaboration_http_security = {"user": "required", "app": "required"}
     assert collection["post"]["x-avernet-security"] == collaboration_http_security
     assert collection["delete"]["x-avernet-security"] == collaboration_http_security
-    assert (
-        paths["/openapi/v1/collaboration/bots/mine"]["get"]["x-avernet-security"]
-        == collaboration_http_security
-    )
-    assert (
-        paths["/openapi/v1/collaboration/sessions/{session_id}/token"]["post"][
-            "x-avernet-security"
-        ]
-        == collaboration_http_security
-    )
+    assert paths["/openapi/v1/collaboration/bots/mine"]["get"][
+        "x-avernet-security"
+    ] == collaboration_http_security
+    assert paths["/openapi/v1/collaboration/sessions/{session_id}/token"]["post"][
+        "x-avernet-security"
+    ] == collaboration_http_security
     # REL qualified the collaboration messages/ws exemption by plane: only the
     # WEBSOCKET handshake is exempt (BCN verifies its session credential); the
     # HTTP GET operation on the same path keeps the collaboration HTTP security.
-    assert (
-        paths["/openapi/v1/collaboration/messages/ws"]["get"]["x-avernet-security"]
-        == collaboration_http_security
-    )
+    assert paths["/openapi/v1/collaboration/messages/ws"]["get"][
+        "x-avernet-security"
+    ] == collaboration_http_security
     assert paths["/openapi/v1/collaboration/sessions/{session_id}/token"]["post"][
         "tags"
     ] == ["Collaboration / Sessions"]
@@ -207,6 +183,7 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
         "Collaboration / Groups",
         "Collaboration / Sessions",
         "Collaboration / Invitations",
+        "Collaboration / Channels",
     ]
 
 
@@ -224,8 +201,12 @@ def test_shipped_internal_openapi_serves_bcn_internal_paths_only() -> None:
 
     paths = document["paths"]
     assert "/api/v1/collaboration/sessions/{session_id}/files" in paths
-    assert "/api/v1/collaboration/bots/{bot_id}/candidates/search" in paths
-    assert not any(path.startswith("/openapi/v1/collaboration") for path in paths)
+    assert (
+        "/api/v1/collaboration/bots/{bot_id}/candidates/search" in paths
+    )
+    assert not any(
+        path.startswith("/openapi/v1/collaboration") for path in paths
+    )
 
 
 def test_served_internal_openapi_combines_only_internal_schema_paths() -> None:
@@ -270,7 +251,9 @@ def test_served_internal_openapi_combines_only_internal_schema_paths() -> None:
     )
 
     assert document["info"]["title"] == "gateway internal"
-    assert "/api/v1/collaboration/sessions/{session_id}/files" in document["paths"]
+    assert (
+        "/api/v1/collaboration/sessions/{session_id}/files" in document["paths"]
+    )
     assert "/openapi/v1/collaboration/groups" not in document["paths"]
     assert document["components"]["schemas"]["InternalFile"] == {"type": "object"}
     assert document["tags"] == [{"name": "Internal / Session Files"}]
@@ -326,6 +309,57 @@ def test_bcsfuse_paths_served_with_user_security() -> None:
     }
     for path, item in paths.items():
         for method, operation in item.items():
+            if method in _METHODS:
+                assert operation["x-avernet-security"] == {"user": "required"}, (
+                    f"{method} {path}"
+                )
+
+
+_BOTS_ARTIFACT = (
+    Path(__file__).resolve().parents[4]
+    / "configs"
+    / "schemas"
+    / "bots.openapi.json"
+)
+
+
+def test_harness_paths_served_with_user_security() -> None:
+    """The harness operations publish beneath the addressed bot.
+
+    They live under ``/openapi/v1/bots/{bot_id}/harness/…`` now, so the bots
+    domain routes and documents them: no separate domain can pin a match behind
+    the ``{bot_id}`` parameter, and the bots artifact carries their description.
+    Their rule is the one thing that stays their own — a user on the wire,
+    outranking the wide optional rule the rest of the bots surface admits.
+    """
+    dm = DomainMap.from_yaml(_SHIPPED_CONFIG, variables=_BCSFUSE_VARS)
+    mount_prefixes = {name: domain.mount_prefix for name, domain in dm.domains.items()}
+    rewrites = {name: domain.rewrite for name, domain in dm.domains.items()}
+    describe = {"bots": json.loads(_BOTS_ARTIFACT.read_text())}
+    document = build_served_openapi(
+        ["bots"],
+        describe.__getitem__,
+        _SHIPPED_RULES,
+        title="gateway",
+        version="0.1.0",
+        description="test",
+        rewrites=rewrites,
+        mount_prefixes=mount_prefixes,
+    )
+
+    harness_paths = {
+        "/openapi/v1/bots/{bot_id}/harness/diagnose",
+        "/openapi/v1/bots/{bot_id}/harness/preview",
+        "/openapi/v1/bots/{bot_id}/harness/apply",
+        "/openapi/v1/bots/{bot_id}/harness/rollback",
+        "/openapi/v1/bots/{bot_id}/harness/dim-report",
+        "/openapi/v1/bots/{bot_id}/harness/dim-history",
+    }
+    assert harness_paths <= set(document["paths"])
+    # The retired shape is published nowhere.
+    assert not any(p.startswith("/openapi/v1/harness") for p in document["paths"])
+    for path in harness_paths:
+        for method, operation in document["paths"][path].items():
             if method in _METHODS:
                 assert operation["x-avernet-security"] == {"user": "required"}, (
                     f"{method} {path}"

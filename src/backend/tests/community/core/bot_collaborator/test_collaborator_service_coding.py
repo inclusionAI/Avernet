@@ -5,7 +5,6 @@
     if bot_type != "service" and not is_coding_app: raise BotNotServiceTypeError
 即 coding 应用（Personal Bot）作为"应用成员"复用协作者流程时放行。
 """
-
 import pytest
 from unittest.mock import Mock
 
@@ -57,7 +56,6 @@ def service(collaborator_repo, bot_repo, template_service):
         bot_repo=bot_repo,
         passport_plugin=Mock(),
         credentials_admins_writer=Mock(),
-        space_access_service=Mock(),
         member_management_capability_service=MemberManagementCapabilityService(
             engine_capabilities=(AICodingMemberManagementCapability(template_service),),
         ),
@@ -123,9 +121,7 @@ def test_add_collaborator_member_management_flag_allowed(
     collaborator_repo.insert.assert_called_once()
 
 
-def test_add_collaborator_member_management_requires_boolean_true(
-    service, bot_repo, template_service
-):
+def test_add_collaborator_member_management_requires_boolean_true(service, bot_repo, template_service):
     """member_management 只有布尔 True 放行，字符串等 truthy 值不扩权。"""
     bot_repo.get_by_id_and_owner.return_value = _bot(
         bot_type="personal",
@@ -140,9 +136,7 @@ def test_add_collaborator_member_management_requires_boolean_true(
         _add(service)
 
 
-def test_add_collaborator_service_type_still_allowed(
-    service, bot_repo, collaborator_repo
-):
+def test_add_collaborator_service_type_still_allowed(service, bot_repo, collaborator_repo):
     """回归：service 类型仍按原逻辑放行。"""
     bot_repo.get_by_id_and_owner.return_value = _bot(bot_type="service")
 
@@ -191,27 +185,19 @@ def test_add_collaborator_bot_not_found(service, bot_repo):
 # are gone). The resolver thunk resolves to "no running device" so the
 # credentials-sync leg is a clean no-op and we stay focused on the passport leg.
 
-
 def _service_for_sync(passport):
     return CollaboratorService(
         collaborator_repo=Mock(),
         bot_repo=Mock(),
         passport_plugin=passport,
         credentials_admins_writer=Mock(),
-        space_access_service=Mock(),
     )
 
 
 def _admin_record(user_id):
     return CollaboratorRecord(
-        id=1,
-        bot_pk=1,
-        bot_id="bot1",
-        user_id=user_id,
-        role=CollaboratorRole.ADMIN,
-        owner_id="owner1",
-        operator_id="op1",
-        env="dev",
+        id=1, bot_pk=1, bot_id="bot1", user_id=user_id,
+        role=CollaboratorRole.ADMIN, owner_id="owner1", operator_id="op1", env="dev",
     )
 
 
@@ -219,17 +205,12 @@ def test_on_collaboration_changed_syncs_admins_to_passport():
     passport = Mock()
     svc = _service_for_sync(passport)
     svc._collaborator_repo.list_by_bot.return_value = [_admin_record("admin001")]
-    svc._bot_repo.get_by_id_and_owner.return_value = {
-        "bot_id": "bot1",
-        "owner_id": "owner1",
-    }
+    svc._bot_repo.get_by_id_and_owner.return_value = {"bot_id": "bot1", "owner_id": "owner1"}
 
     svc.on_collaboration_changed("bot1", "owner1", env="dev")
 
     passport.update_passport.assert_called_once_with(
-        bot_id="bot1",
-        user_id="owner1",
-        admins=["admin001"],
+        bot_id="bot1", user_id="owner1", admins=["admin001"],
     )
 
 
@@ -238,10 +219,7 @@ def test_on_collaboration_changed_passport_failure_is_swallowed():
     passport.update_passport.side_effect = RuntimeError("passport service down")
     svc = _service_for_sync(passport)
     svc._collaborator_repo.list_by_bot.return_value = []
-    svc._bot_repo.get_by_id_and_owner.return_value = {
-        "bot_id": "bot1",
-        "owner_id": "owner1",
-    }
+    svc._bot_repo.get_by_id_and_owner.return_value = {"bot_id": "bot1", "owner_id": "owner1"}
 
     # A passport-sync failure must not propagate out of the collaboration hook.
     svc.on_collaboration_changed("bot1", "owner1", env="dev")
@@ -277,7 +255,6 @@ def test_on_collaboration_changed_delegates_admins_to_credentials_writer():
         bot_repo=bot_repo,
         passport_plugin=Mock(),
         credentials_admins_writer=writer,
-        space_access_service=Mock(),
     )
 
     svc.on_collaboration_changed("bot1", "owner1", env="dev")
@@ -299,9 +276,7 @@ def _collaborator_record(user_id: str = MEMBER) -> CollaboratorRecord:
     )
 
 
-def test_leave_collaboration_allows_member_self_exit(
-    service, bot_repo, collaborator_repo
-):
+def test_leave_collaboration_allows_member_self_exit(service, bot_repo, collaborator_repo):
     """成员主动退出协作：只删除当前用户自己的协作者记录，不要求 admin 权限。"""
     bot_repo.get_by_id_and_owner.return_value = _bot(bot_type="service")
     collaborator_repo.get_by_bot_and_user.return_value = _collaborator_record()
@@ -320,9 +295,7 @@ def test_leave_collaboration_allows_member_self_exit(
     service.on_collaboration_changed.assert_called_once_with("bot-123", OWNER, "dev")
 
 
-def test_leave_collaboration_rejects_non_collaborator(
-    service, bot_repo, collaborator_repo
-):
+def test_leave_collaboration_rejects_non_collaborator(service, bot_repo, collaborator_repo):
     """非协作者没有自己的记录，退出返回 CollaboratorNotFoundError。"""
     from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
         CollaboratorNotFoundError,
@@ -343,9 +316,7 @@ def test_leave_collaboration_rejects_non_collaborator(
     service.on_collaboration_changed.assert_not_called()
 
 
-def test_leave_collaboration_owner_is_not_collaborator_record(
-    service, bot_repo, collaborator_repo
-):
+def test_leave_collaboration_owner_is_not_collaborator_record(service, bot_repo, collaborator_repo):
     """Owner 不是协作者记录，不能使用成员退出接口。"""
     from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
         CollaboratorNotFoundError,

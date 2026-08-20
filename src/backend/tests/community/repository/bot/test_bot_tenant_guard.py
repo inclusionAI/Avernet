@@ -3,7 +3,6 @@ queries, and the escape hatch.
 
 Complements ``test_bot_tenant_isolation.py`` (the spec's read red→green test).
 """
-
 from contextlib import contextmanager
 
 import pytest
@@ -75,7 +74,6 @@ def _data(**ov):
 
 # ── insert guard: stamping ──────────────────────────────────────────
 
-
 def test_insert_stamps_current_tenant(repo, db):
     with avernet_tenant_scope("tenant-b"):
         repo.insert(_data(bot_id="bot-b", owner_id="own-b"))
@@ -105,7 +103,6 @@ def test_insert_outside_any_request_stamps_default_tenant(repo, db):
 
 # ── insert guard: rejection ─────────────────────────────────────────
 
-
 def test_explicit_conflicting_tenant_insert_raises(db):
     with avernet_tenant_scope("tenant-b"):
         with pytest.raises(CrossTenantInsertError):
@@ -124,7 +121,6 @@ def test_explicit_conflicting_tenant_insert_raises(db):
 
 
 # ── write guards: cross-tenant update / delete are no-ops ────────────
-
 
 def test_update_by_owner_cross_tenant_is_noop(repo):
     with avernet_tenant_scope("tenant-a"):
@@ -146,7 +142,6 @@ def test_soft_delete_by_owner_cross_tenant_is_noop(repo):
 
 
 # ── non-repository access is filtered too ───────────────────────────
-
 
 def test_bare_session_query_is_filtered(repo, db):
     with avernet_tenant_scope("tenant-a"):
@@ -174,17 +169,3 @@ def test_skip_option_sees_all_tenants(repo, db):
                 .all()
             )
             assert {r.bot_id for r in rows} == {"bot-a", "bot-b"}
-
-
-def test_update_space_by_owner_cross_tenant_is_noop(repo):
-    with avernet_tenant_scope("tenant-a"):
-        repo.insert(_data(bot_id="space-bot", owner_id="own-a", space_id=7))
-    with avernet_tenant_scope("tenant-b"):
-        assert (
-            repo.update_space_by_owner(
-                bot_id="space-bot", owner_id="own-a", space_id=42
-            )
-            is None
-        )
-    with avernet_tenant_scope("tenant-a"):
-        assert repo.get_by_id("space-bot")["space_id"] == 7

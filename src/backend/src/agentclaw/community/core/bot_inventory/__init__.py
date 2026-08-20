@@ -1,1 +1,0 @@
-"""Bot Inventory core package."""

@@ -4,9 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
 from engine.community.core.adapters.claude_code.skills import (
     ClaudeCodeSkillsAdapter,
-    _serialize_pool_mapping,
 )
 from engine.community.core.skills.models import (
     PoolLayoutActivateRequest,
@@ -220,33 +220,6 @@ async def test_claude_code_adapter_propagates_logical_mapping_version() -> None:
 
 
 @pytest.mark.asyncio
-async def test_claude_adapter_serializes_center_v3_for_full_lifecycle() -> None:
-    port = _port()
-    mapping = PoolSkillMappingIntent(
-        corpus="center", relative_path=None, link_name="risk-review",
-        skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a", sc_version_number="2026.8.19",
-    )
-    version = "skills-pool-mapping-v3"
-    adapter = ClaudeCodeSkillsAdapter(port)
-
-    await adapter.activate_pool_layout(PoolLayoutActivateRequest(
-        migration_generation="generation-1", preparation_id="prep-1",
-        mappings=[mapping], mapping_contract_version=version,
-    ))
-    await adapter.publish_pool_mappings([mapping], retired_mappings=[mapping], mapping_contract_version=version)
-    await adapter.verify_pool_mappings([mapping], retired_mappings=[mapping], mapping_contract_version=version)
-
-    expected = {"corpus": "center", "skill_uuid": mapping.skill_uuid, "sc_version_number": mapping.sc_version_number, "link_name": "risk-review"}
-    assert port.activate_pool_layout.await_args.args[0]["mapping_contract_version"] == version
-    assert port.publish_pool_mappings.await_args.args[0]["mapping_contract_version"] == version
-    assert port.verify_pool_mappings.await_args.args[0]["mapping_contract_version"] == version
-    assert port.activate_pool_layout.await_args.args[0]["mappings"] == [expected]
-    assert port.publish_pool_mappings.await_args.args[0]["mappings"] == [expected]
-    assert port.publish_pool_mappings.await_args.args[0]["retired_mappings"] == [expected]
-    assert port.verify_pool_mappings.await_args.args[0]["mappings"] == [expected]
-
-
-@pytest.mark.asyncio
 async def test_claude_code_adapter_unknown_activation_fails_closed() -> None:
     port = _port()
     port.activate_pool_layout.return_value = {
@@ -291,18 +264,3 @@ async def test_claude_code_adapter_unknown_rollback_fails_closed() -> None:
         "source": "newer-plugin",
         "raw_status": "FUTURE_STATUS",
     }
-
-
-@pytest.mark.parametrize(
-    "mapping,message",
-    [
-        (PoolSkillMappingIntent(corpus="center", relative_path=None, link_name="a"), "structured identity"),
-        (PoolSkillMappingIntent(corpus="repo", relative_path=None, link_name="a"), "relative_path"),
-    ],
-)
-def test_claude_mapping_serializer_rejects_incomplete_intent(
-    mapping: PoolSkillMappingIntent,
-    message: str,
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        _serialize_pool_mapping(mapping)

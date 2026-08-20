@@ -18,7 +18,6 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects import mysql
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base  # noqa: F401  — canonical registry lives in core/
@@ -40,11 +39,6 @@ from agentclaw.community.utils.env_utils import get_current_env  # noqa: E402
 # with_variant() makes SQLAlchemy use Integer (→ "INTEGER") on SQLite while
 # keeping BigInteger (→ "BIGINT") on MySQL/PostgreSQL.
 AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
-UnsignedBigInteger = (
-    BigInteger()
-    .with_variant(mysql.BIGINT(unsigned=True), "mysql")
-    .with_variant(Integer, "sqlite")
-)
 
 
 class BotModel(Base):
@@ -83,12 +77,6 @@ class BotModel(Base):
     ext = Column(Text, nullable=True)
     env = Column(String(20), default=get_current_env, nullable=False)
     bot_type = Column(String(128), default="personal", nullable=True)
-    # Business-space ownership (PRD §0.1 / 系分 §3-K). This mirrors
-    # ``ac_space.id BIGINT UNSIGNED``; NULL keeps the personal-space fallback
-    # for legacy rows and owners whose personal Space has not been initialized.
-    # Synthetic inventory ids such as ``personal:{owner_id}`` are presentation
-    # values and must never be persisted here.
-    space_id = Column(UnsignedBigInteger, nullable=True)
     template_type = Column(String(64), nullable=True)  # 模板类型，如 applicationCoding
     call_type = Column(String(16), default="owner", nullable=False)
     caller_config_revision = Column(BigInteger, default=0, nullable=False)
@@ -164,7 +152,6 @@ class BotModel(Base):
             "ext": json.loads(self.ext) if self.ext else None,
             "env": self.env,
             "bot_type": self.bot_type,
-            "space_id": self.space_id,
             "template_type": self.template_type,
             "call_type": self.call_type,
             "caller_config_revision": self.caller_config_revision,
@@ -270,29 +257,18 @@ class ChannelConfig(Base):
     # get_current_env() on insert and filters by it, so the column is
     # effectively populated though the DDL permits NULL.
     env = Column(String(20), default=get_current_env, nullable=True)
-    # Public OpenAPI callers are tenant-scoped by the gateway principal. The
-    # persisted Channel row needs the same axis: owner_id + bot_id are not
-    # globally unique ("default" is intentionally common across tenants).
-    # The shared guard stamps this value on writes and filters every ORM read,
-    # update and delete. It is deliberately not projected by ChannelRecord.
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     # stage: 配置阶段，可选值: draft(草稿)/verify(验证中)/online(已上线)，默认 NULL
     stage = Column(String(128), nullable=True)
 
     __table_args__ = (
         Index(
-            "idx_tenant_env_type_id_d_bbi",
-            "avernet_tenant",
-            "env",
+            "idx_type_id_d_bbi",
             "type",
             "identity_id",
             "deleted",
             "bind_bot_id",
         ),
     )
-
-
-register_avernet_tenant_guard(ChannelConfig)
 
 
 class OssToNasRecord(Base):

@@ -24,8 +24,7 @@ from agentclaw.community.core.skills_pool.claim_service import (
 )
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.core.skills_pool.participation import (
-    BotEngineSkillLayoutParticipationResolver,
-    SkillLayoutParticipation,
+    BotSkillLayoutStateParticipationResolver,
     SkillLayoutParticipationResolver,
 )
 from agentclaw.community.core.skills_pool.operational_query import (
@@ -147,23 +146,10 @@ class SkillsPoolModule(Module):
     @inject
     def skill_layout_participation_resolver(
         self,
-        bot_repository: BotRepository,
+        layout_repository: SkillsPoolLayoutRepositoryProtocol,
     ) -> SkillLayoutParticipationResolver:
-        return BotEngineSkillLayoutParticipationResolver(
-            bot_repository=bot_repository,
-            default=SkillLayoutParticipation(
-                participates_in_pool_layout=True,
-                label="default_pool_layout",
-            ),
-            # Teclaw owns an artifact-style filesystem and never enters the
-            # Pool migration or rollback state machine.  Keep that engine
-            # policy in composition, rather than the shared edit guard.
-            by_engine={
-                "teclaw": SkillLayoutParticipation(
-                    participates_in_pool_layout=False,
-                    label="teclaw_no_pool_layout",
-                )
-            },
+        return BotSkillLayoutStateParticipationResolver(
+            layout_repository=layout_repository,
         )
 
     @singleton
