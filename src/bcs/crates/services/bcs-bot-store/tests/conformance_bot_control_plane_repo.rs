@@ -17,7 +17,8 @@ use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateVisibility, BotCapabilities,
     BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRepoPort, BotRepoPort, FriendCheckInStrategy, UserVisibility,
+    BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort, BotTaskModesQuery,
+    FriendCheckInStrategy, TaskModeMatch, UserVisibility,
 };
 use tokio::sync::Barrier;
 
@@ -1073,4 +1074,214 @@ async fn persistent_control_plane_task_modes_patch_persists_and_reads_back() {
         .expect("dream row");
     assert!(!dream.task_claim_mode);
     assert!(dream.task_dream_mode);
+}
+
+/// Sort a Vec<String> in place so roster filter assertions stay order-independent
+/// (the repo orders by gmt_create DESC, bot_uuid ASC, which the caller should not re-derive).
+fn sorted_ids(mut ids: Vec<String>) -> Vec<String> {
+    ids.sort();
+    ids
+}
+
+/// Extract + sort the bot_ids from a roster query result for order-independent comparison.
+fn roster_ids(records: Vec<BotControlPlaneRecord>) -> Vec<String> {
+    sorted_ids(records.into_iter().map(|record| record.bot_id).collect())
+}
+
+#[tokio::test]
+async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
+    let (repo, db) = fixture().await;
+    seed_bot(
+        db.as_ref(),
+        "claim-bot",
+        "Claim Bot",
+        "bot",
+        "public",
+        "online",
+        Some("staff-1"),
+        "2026-01-01 00:00:00",
+    )
+    .await;
+    seed_bot(
+        db.as_ref(),
+        "dream-bot",
+        "Dream Bot",
+        "bot",
+        "public",
+        "online",
+        Some("staff-2"),
+        "2026-01-02 00:00:00",
+    )
+    .await;
+    seed_bot(
+        db.as_ref(),
+        "both-bot",
+        "Both Bot",
+        "bot",
+        "public",
+        "online",
+        Some("staff-3"),
+        "2026-01-03 00:00:00",
+    )
+    .await;
+    // none-bot keeps the seeded defaults (claim=false, dream=false) to exercise the
+    // `false` filter branch and the default-value read-through in record_from_row.
+    seed_bot(
+        db.as_ref(),
+        "none-bot",
+        "None Bot",
+        "bot",
+        "public",
+        "online",
+        Some("staff-4"),
+        "2026-01-04 00:00:00",
+    )
+    .await;
+
+    // claim-bot: claim=T, dream=F | dream-bot: claim=F, dream=T | both-bot: claim=T, dream=T.
+    repo.patch_control_plane(
+        "claim-bot",
+        "dev",
+        BotControlPlanePatch {
+            task_claim_mode: Some(true),
+            task_dream_mode: Some(false),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch claim-bot")
+    .expect("claim-bot row");
+    repo.patch_control_plane(
+        "dream-bot",
+        "dev",
+        BotControlPlanePatch {
+            task_claim_mode: Some(false),
+            task_dream_mode: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch dream-bot")
+    .expect("dream-bot row");
+    repo.patch_control_plane(
+        "both-bot",
+        "dev",
+        BotControlPlanePatch {
+            task_claim_mode: Some(true),
+            task_dream_mode: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch both-bot")
+    .expect("both-bot row");
+
+    // (None, None, _) => no filter: all four bots.
+    let all = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: None,
+            task_dream_mode: None,
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("list (none, none)");
+    assert_eq!(
+        roster_ids(all),
+        sorted_ids(vec![
+            "claim-bot".to_string(),
+            "dream-bot".to_string(),
+            "both-bot".to_string(),
+            "none-bot".to_string(),
+        ]),
+    );
+
+    // (Some(true), None, _) => claim ON: claim-bot, both-bot.
+    let claim_on = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: Some(true),
+            task_dream_mode: None,
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("list (claim=true, none)");
+    assert_eq!(
+        roster_ids(claim_on),
+        sorted_ids(vec!["claim-bot".to_string(), "both-bot".to_string()]),
+    );
+
+    // (None, Some(true), _) => dream ON: dream-bot, both-bot.
+    let dream_on = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: None,
+            task_dream_mode: Some(true),
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("list (none, dream=true)");
+    assert_eq!(
+        roster_ids(dream_on),
+        sorted_ids(vec!["dream-bot".to_string(), "both-bot".to_string()]),
+    );
+
+    // (Some(true), Some(true), All) => both ON: both-bot only.
+    let both_all = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: Some(true),
+            task_dream_mode: Some(true),
+            match_mode: TaskModeMatch::All,
+        })
+        .await
+        .expect("list (both=true, all)");
+    assert_eq!(roster_ids(both_all), vec!["both-bot".to_string()]);
+
+    // (Some(true), Some(true), Any) => claim OR dream ON: claim-bot, dream-bot, both-bot.
+    let both_any = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: Some(true),
+            task_dream_mode: Some(true),
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("list (both=true, any)");
+    assert_eq!(
+        roster_ids(both_any),
+        sorted_ids(vec![
+            "claim-bot".to_string(),
+            "dream-bot".to_string(),
+            "both-bot".to_string(),
+        ]),
+    );
+
+    // (Some(false), None, _) => claim OFF: dream-bot, none-bot. Exercises the `false`
+    // SQL-param branch (value 0) and reading a false toggle back through record_from_row.
+    let claim_off = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: Some(false),
+            task_dream_mode: None,
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("list (claim=false, none)");
+    assert_eq!(
+        roster_ids(claim_off),
+        sorted_ids(vec!["dream-bot".to_string(), "none-bot".to_string()]),
+    );
+
+    // env scoping: a different env returns no rows (environment isolation).
+    let other_env = repo
+        .list_control_plane_by_task_modes(BotTaskModesQuery {
+            env: "prod".to_string(),
+            task_claim_mode: None,
+            task_dream_mode: None,
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("list prod env");
+    assert!(other_env.is_empty());
 }

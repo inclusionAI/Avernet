@@ -2539,3 +2539,30 @@ async fn response_json(response: axum::response::Response) -> Value {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&body).unwrap()
 }
+
+#[tokio::test]
+async fn list_provider_bots_by_task_modes_rejects_invalid_toggle_and_accepts_false() {
+    let TestApp { app, .. } = test_app();
+    let provider = register_provider(&app, json!({ "mode": "static_bearer" })).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+
+    // `false` parses to Some(false) — exercises the false/0 arm of
+    // parse_task_mode_toggle. With no bots bound the roster is empty but 200.
+    let (status, body) =
+        task_mode_roster(&app, provider_id, Some(admin_token), "?task_claim_mode=false").await;
+    assert_eq!(status, StatusCode::OK, "false toggle failed: {body}");
+    assert!(body["items"].is_array(), "false toggle response missing items: {body}");
+
+    // `0` is the other accepted false spelling (same parse arm).
+    let (status, _body) =
+        task_mode_roster(&app, provider_id, Some(admin_token), "?task_dream_mode=0").await;
+    assert_eq!(status, StatusCode::OK, "0 toggle failed");
+
+    // An unrecognized toggle value surfaces as 400 bad_request from the handler
+    // (parse_task_mode_toggle error arm), before the service is consulted.
+    let (status, body) =
+        task_mode_roster(&app, provider_id, Some(admin_token), "?task_claim_mode=maybe").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "invalid toggle not rejected: {body}");
+    assert_eq!(body["status"], 400);
+}
