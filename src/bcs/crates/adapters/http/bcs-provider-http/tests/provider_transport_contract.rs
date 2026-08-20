@@ -83,6 +83,56 @@ async fn interaction_resolve_reuses_provider_route_and_expects_json_ack() {
     assert_eq!(request.body["timeout_ms"], 3_600_000);
     server.abort();
 }
+
+#[tokio::test]
+async fn interaction_resolve_forwards_ask_user_header() {
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new()
+        .route("/webhook", post(capture_ack))
+        .with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+    let target = provider_target_v2(webhook_url);
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+
+    let ack = transport
+        .resolve_interaction(InteractionProviderCommand {
+            target,
+            provider_bypass_headers: Vec::new(),
+            bcs_run_id: "bcs-run-1".to_string(),
+            provider_run_id: "provider-run-1".to_string(),
+            bcs_session_id: "session-1".to_string(),
+            group_id: "group-1".to_string(),
+            bot_id: "bot-1".to_string(),
+            interaction_id: "interaction-ask-1".to_string(),
+            kind: InteractionKind::AskUser,
+            idempotency_key: "idem-ask-1".to_string(),
+            resolution: json!({
+                "action": "submit",
+                "answers": {
+                    "deploy_target": {
+                        "header": "Deployment environment",
+                        "question": "Where should this be deployed?",
+                        "values": ["staging"]
+                    }
+                }
+            }),
+        })
+        .await
+        .unwrap();
+
+    assert!(ack.ok);
+    let request = captured.lock().await.clone().unwrap();
+    assert_eq!(request.body["params"]["kind"], "ask_user");
+    assert_eq!(
+        request.body["params"]["answers"]["deploy_target"],
+        json!({
+            "header": "Deployment environment",
+            "question": "Where should this be deployed?",
+            "values": ["staging"]
+        })
+    );
+    server.abort();
+}
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock};
 use tracing::Instrument;

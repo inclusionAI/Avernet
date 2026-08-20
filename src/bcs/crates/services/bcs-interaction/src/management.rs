@@ -737,9 +737,10 @@ fn validate_ask_user_resolution(
 }
 
 /// AskUser submit 时，按 questionId（answers 对象的键）把 requested 阶段存储的
-/// 原始 question 文本补进每个 answer 对象，字段名 `question`，与 `values` 平级。
-/// 前端 resolve 只发 `values`，question 始终由 BCS 用权威存储文本补齐并覆盖前端
-/// 可能回传的同名字段。cancel / exec / mode_switch 原样返回。
+/// 原始 question 和可选 header 补进每个 answer 对象，与 `values` 平级。
+/// 前端 resolve 只发 `values`；question/header 始终由 BCS 用权威存储值覆盖，存储
+/// header 缺失时保持缺失，不从 questionId 或前端输入合成。canonical resolution
+/// 同时用于 fingerprint 与 Provider 转发。cancel / exec / mode_switch 原样返回。
 fn augment_ask_user_resolution(record: &InteractionRecord, mut resolution: Value) -> Value {
     if record.kind != bcs_service_api::InteractionKind::AskUser {
         return resolution;
@@ -768,10 +769,19 @@ fn augment_ask_user_resolution(record: &InteractionRecord, mut resolution: Value
             continue;
         };
         if let Some(answer) = answers.get_mut(question_id).and_then(Value::as_object_mut) {
+            answer.remove("question");
+            answer.remove("header");
             answer.insert(
                 "question".to_string(),
                 Value::String(question_text.to_string()),
             );
+            if let Some(header) = question
+                .get("header")
+                .and_then(Value::as_str)
+                .filter(|header| !header.trim().is_empty())
+            {
+                answer.insert("header".to_string(), Value::String(header.to_string()));
+            }
         }
     }
     resolution
@@ -1580,11 +1590,11 @@ mod tests {
             "interactionId":"ask-1",
             "kind":"ask_user",
             "questions":[
-                {"questionId":"target","question":"Where should this be deployed?","options":[
+                {"questionId":"target","header":"Deployment environment","question":"Where should this be deployed?","options":[
                     {"value":"staging","label":"Staging"},
                     {"value":"prod","label":"Production"}
                 ]},
-                {"questionId":"components","question":"Which components?","multiSelect":true,"options":[
+                {"questionId":"components","header":"Components","question":"Which components?","multiSelect":true,"options":[
                     {"value":"web","label":"Web"},
                     {"value":"worker","label":"Worker"}
                 ]}
@@ -1596,7 +1606,11 @@ mod tests {
         command.resolution = json!({
             "action":"submit",
             "answers":{
-                "target":{"values":["staging"]},
+                "target":{
+                    "values":["staging"],
+                    "question":"frontend question",
+                    "header":"frontend header"
+                },
                 "components":{"values":["web","worker"]}
             }
         });
@@ -1615,6 +1629,10 @@ mod tests {
             "Where should this be deployed?"
         );
         assert_eq!(
+            resolution["answers"]["target"]["header"],
+            "Deployment environment"
+        );
+        assert_eq!(
             resolution["answers"]["components"]["values"],
             json!(["web", "worker"])
         );
@@ -1622,6 +1640,45 @@ mod tests {
             resolution["answers"]["components"]["question"],
             "Which components?"
         );
+        assert_eq!(resolution["answers"]["components"]["header"], "Components");
+    }
+
+    #[tokio::test]
+    async fn ask_user_submit_omits_header_when_requested_header_is_absent() {
+        let (service, _store, provider, _frontend) = service(true);
+        let mut ask = requested("ask-1");
+        ask.kind = InteractionKind::AskUser;
+        ask.payload = json!({
+            "runId":"provider-run-1",
+            "phase":"requested",
+            "interactionId":"ask-1",
+            "kind":"ask_user",
+            "questions":[{
+                "questionId":"target",
+                "question":"Where?",
+                "options":[{"value":"staging","label":"Staging"}]
+            }]
+        });
+        service.on_provider_requested(ask).await.unwrap();
+
+        let mut command = resolve("ask-1", "idem-ask");
+        command.resolution = json!({
+            "action":"submit",
+            "answers":{
+                "target":{
+                    "values":["staging"],
+                    "question":"frontend question",
+                    "header":"untrusted"
+                }
+            }
+        });
+        let result = service.resolve(command).await.unwrap();
+        assert!(result.accepted);
+
+        let calls = provider.calls.lock().await;
+        let answer = &calls[0].resolution["answers"]["target"];
+        assert_eq!(answer["question"], "Where?");
+        assert!(answer.get("header").is_none());
     }
 
     #[tokio::test]
