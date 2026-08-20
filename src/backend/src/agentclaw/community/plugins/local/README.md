@@ -64,7 +64,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.device_connection_manager
   - agentclaw.community.core.devices.services.device_filesystem
   - agentclaw.community.plugin_api.device_mcp_sync
-  - agentclaw.community.plugin_api.device_sync
+  - agentclaw.community.plugin_api.device_sync_dispatcher
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.drm
   - agentclaw.community.plugin_api.engine_ext_client
