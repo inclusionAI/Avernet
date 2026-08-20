@@ -27,6 +27,7 @@ from agentclaw.community.core.skill_center.services.bot_capability_mutation_guar
     BotCapabilityMutationLockUnavailableError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from agentclaw.community.core.mcp.services._defaults import get_default_mcp_servers
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
@@ -758,4 +759,11 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
 
     await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
 
-    assert factory.service.mcp_codes == {"mcp.weather"}
+    assert factory.service.mcp_codes == {
+        "mcp.weather",
+        *{
+            item["server_code"]
+            for item in get_default_mcp_servers("openclaw", None)
+            if item.get("server_code")
+        },
+    }

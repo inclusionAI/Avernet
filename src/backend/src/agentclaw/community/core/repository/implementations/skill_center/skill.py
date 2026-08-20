@@ -542,6 +542,7 @@ class SkillRepository(
                     git_path=row.git_path,
                     skill_uuid=getattr(row, "skill_uuid", None),
                     sc_version_number=getattr(row, "sc_version_number", None),
+                    mcp_dependencies=tuple(_skill_to_dict(row).get("mcp_dependencies") or ()),
                 )
                 for row in rows
             ]
@@ -610,6 +611,7 @@ class SkillRepository(
                             if row.get("sc_version_number") is not None
                             else None
                         ),
+                        mcp_dependencies=tuple(row.get("mcp_dependencies") or ()),
                     )
                 )
         for row in self.list_bot_installed_skills(env=env, bot_id=bot_id):
@@ -628,6 +630,7 @@ class SkillRepository(
                     git_path=git_path,
                     skill_uuid=skill_uuid,
                     sc_version_number=sc_version_number,
+                    mcp_dependencies=tuple(row.get("mcp_dependencies") or ()),
                 )
             )
         return assets

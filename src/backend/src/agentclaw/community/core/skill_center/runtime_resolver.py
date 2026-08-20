@@ -31,6 +31,7 @@ class RuntimeDesiredState:
 
     skills: tuple[RegisteredSkillAsset, ...]
     installed_mcp_server_codes: frozenset[str] = frozenset()
+    system_default_mcp_server_codes: frozenset[str] = frozenset()
     system_default_cli_commands: tuple[str, ...] = ()
 
 
@@ -76,10 +77,24 @@ class RuntimeProjectionResolver:
             mappings = build_logical_skill_mappings(list(assets))
         except RuntimeMappingNameConflictError as exc:
             raise RuntimeNameConflictError() from exc
+        mcp_codes = set(state.installed_mcp_server_codes)
+        mcp_codes.update(state.system_default_mcp_server_codes)
+        for asset in assets:
+            for dependency in asset.mcp_dependencies:
+                if isinstance(dependency, str):
+                    mcp_codes.add(dependency)
+                elif isinstance(dependency, dict) and isinstance(
+                    dependency.get("server_code") or dependency.get("code"), str
+                ):
+                    mcp_codes.add(dependency.get("server_code") or dependency["code"])
+                else:
+                    raise ValueError("invalid Skill MCP dependency in runtime projection")
+        if any(not isinstance(code, str) or not code for code in mcp_codes):
+            raise ValueError("invalid MCP server code in runtime projection")
         return RuntimeProjection(
             skill_mappings=tuple(mappings),
             skill_assets=assets,
-            mcp_server_codes=tuple(sorted(state.installed_mcp_server_codes)),
+            mcp_server_codes=tuple(sorted(mcp_codes)),
             cli_commands=tuple(dict.fromkeys(state.system_default_cli_commands)),
         )
 

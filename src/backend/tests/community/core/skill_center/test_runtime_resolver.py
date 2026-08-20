@@ -33,6 +33,7 @@ def test_resolver_projects_every_supported_skill_corpus_and_deduplicates_inputs(
             RegisteredSkillAsset(skill_id=2, name="repo", git_path="git://team/repo"),
         ),
         installed_mcp_server_codes=frozenset({"mcp-b", "mcp-a"}),
+        system_default_mcp_server_codes=frozenset({"mcp-default"}),
         system_default_cli_commands=("builtin",),
     )
 
@@ -48,7 +49,7 @@ def test_resolver_projects_every_supported_skill_corpus_and_deduplicates_inputs(
             "sc_version_number": "7",
         },
     ]
-    assert projection.mcp_server_codes == ("mcp-a", "mcp-b")
+    assert projection.mcp_server_codes == ("mcp-a", "mcp-b", "mcp-default")
     assert projection.cli_commands == ("builtin",)
 
 
@@ -67,6 +68,24 @@ def test_resolver_uses_ac_skill_name_for_local_runtime_entry_not_locator_tail() 
 
     assert projection.skill_mappings[0].link_name == "display-name"
     assert projection.skill_mappings[0].relative_path == "uploaded-directory"
+
+
+def test_resolver_merges_explicit_and_skill_declared_mcp_dependencies() -> None:
+    projection = RuntimeProjectionResolver().resolve(
+        RuntimeDesiredState(
+            skills=(
+                RegisteredSkillAsset(
+                    skill_id=1,
+                    name="skill",
+                    git_path="git://team/skill",
+                    mcp_dependencies=("mcp.explicit", {"server_code": "mcp.object"}),
+                ),
+            ),
+            installed_mcp_server_codes=frozenset({"mcp.explicit", "mcp.direct"}),
+        )
+    )
+
+    assert projection.mcp_server_codes == ("mcp.direct", "mcp.explicit", "mcp.object")
 
 
 def test_resolver_fails_closed_when_distinct_assets_have_same_runtime_name() -> None:

@@ -61,6 +61,10 @@ from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolSkillRepositoryProtocol,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.core.mcp.services._defaults import (
+    get_default_cli_items,
+    get_default_mcp_servers,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -111,6 +115,22 @@ class SkillSetRuntimeReconciler:
                 ),
                 installed_mcp_server_codes=frozenset(
                     self._repository.list_installed_mcps(bot_id=bot_id)
+                ),
+                system_default_mcp_server_codes=frozenset(
+                    str(item["server_code"])
+                    for item in get_default_mcp_servers(
+                        str(bot.get("active_engine") or "openclaw"),
+                        bot.get("template_type"),
+                    )
+                    if item.get("server_code")
+                ),
+                system_default_cli_commands=tuple(
+                    str(item["cli_code"])
+                    for item in get_default_cli_items(
+                        str(bot.get("active_engine") or "openclaw"),
+                        bot.get("template_type"),
+                    )
+                    if item.get("cli_code")
                 ),
             )
         )
