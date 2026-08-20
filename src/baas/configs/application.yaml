@@ -117,6 +117,12 @@ user_config:
   oauth:
     base_url: "https://oauth.example.com"
 
+  # ARCA TTL 续期调度器引擎选择 (Phase 5 config switch)
+  # "legacy": DeviceTtlTimerTask 运行，DeadlineRenewalScheduler 不启动
+  # "deadline": DeadlineRenewalScheduler 运行，DeviceTtlTimerTask 不启动
+  renewal_scheduler:
+    engine: "legacy"
+
   # 设备 TTL 定时器配置（每 30 分钟扫描整个到期队列并续期+探活）
   device_ttl_timer:
     enabled: true  # 是否启用定时任务
