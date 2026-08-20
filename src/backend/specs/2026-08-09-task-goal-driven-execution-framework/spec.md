@@ -23,7 +23,7 @@
 
 1. **领域模型 = 最新 classDiagram**:
    - 规格面:`TaskInfo`(入口,带 `source_channel_type/id` + `execution_config`)→ `TaskSpec`(metadata/context/goal,**无 SLA**)→ `Metadata`(**含 `task_id`**/title/instruction)、`Context`(background/**`extend_props`**)、`Goal`(objective/`acceptances: list[AcceptanceCriteria]`)、`AcceptanceCriteria`(id/description)。
-   - 运行态:`TaskExecutionGraph`(**`run_id`**/loop_round/status/output/**`tasks`**/**`relations: list[Relation]`**/extend_props)、`TaskNode`(node_id/**`task_id`**/status/task_spec/run_info/**`node_run_graph`**)、`Relation`({src_id,dst_id,**`type: RelationType`**,extend_props})、`RuntimeInfo`(**`run_mode: str`**/assignee/start_time/end_time/output/acceptance_result/extend_props,**无 collab_mode**)、`AcceptanceResult`(verdict/`acceptances_metric`/gaps,**无 verifier**)。
+   - 运行态:`TaskExecutionGraph`(**`run_id`**/loop_round/status/output/**`tasks`**/**`relations: list[Relation]`**/extend_props;loop_round=图级升 BBS 轮次达 MAX_LOOP→HUNG;节点级重规划次数由 extend_props.plan_round 记达 MAX_PLAN_ROUND→HUNG)、`TaskNode`(node_id/**`task_id`**/status/task_spec/run_info/**`node_run_graph`**)、`Relation`({src_id,dst_id,**`type: RelationType`**,extend_props})、`RuntimeInfo`(**`run_mode: str`**/assignee/start_time/end_time/output/acceptance_result/extend_props,**无 collab_mode**;start_time/end_time 为**毫秒整数 int**)、`AcceptanceResult`(verdict/`acceptances_metric`/gaps,**无 verifier**)。
    - 枚举:`Status` **6 态**(PENDING/**PLANNING**/RUNNING/DONE/FAILED/HUNG)、`AcceptanceVerdict`(PASS/FAIL)、`RelationType`(DEPENDENCY)。
    - **分解树统一承载结构归属**:`Relation{type=DEPENDENCY}` 在 `TaskExecutionGraph.relations` 表分解树(单入:每非根节点恰好 1 条入边=结构父,`src_id`=父,`dst_id`=子)。`TaskNode` 不持 `decomposed_by`/`depends_on` 字段——结构归属、验收、传播一律从 `relations` 派生。无跨兄弟直接数据边;数据流由步进式批规划顺序 + 执行时结构父聚合上下文承载。就绪=被 `add_task_nodes` 加入即就绪,无 `dependencies_satisfied` 闸门。
    - **`PLANNING` 新态**:承担"待规划/委托中"语义(节点已被/将被分解委托子执行)。
@@ -58,7 +58,9 @@
 - **深度闸门是引擎决策**:MISS 拆解前查核内派生深度(从 `relations` 递归),达内层 `MAX_DEPTH` → **自动升 BBS**(非 HUNG);BBS 链路 `loop_round` 达 `BBS_MAX_DEPTH` → STUCK → HUNG;规划器保持纯读图。
 - **派发只决定"谁来做"**:`dispatch` 经搜推匹配单 bot / 已有协作群 / 多 bot 动态拉协作群 / MISS;写 `run_info.run_mode`(str)/`assignee`;协作群协作模式(chat/manager_worker/state_machine)作 `form_coop_group` 内部参数(对齐 BCS `GroupStrategy`),**不进 `RuntimeInfo` 持久字段**(模型无 `collab_mode`)。
 - **执行三模态一个入口**:`TaskRunner.start_run(批量)` 按 `run_mode` 自适应分发单 bot/协作群/BBS;BBS = bot 认领任务后自算 gap+自规划子任务(落图 `run_mode="bbs"`,`assignee=bot_id`)→ 自执行 → 上报结果+验收;完成结果经 PUSH `TaskLoopCallback.report_result` 或 PULL `query_status`/`query_detail`/`query_result` 回收。
-- **执行主体只发 `task_loop_id`**:回调数据协议 `TaskCallbackData` 承载 `loop_task_id`/`workflow_type`/`workflow_id`/`instance_id`/`result`;框架适配层做 `loop_task_id↔(task_id,node_id)`、`result.success→verdict`、`result.data→output` 映射,再走图谱写口。
+- **执行主体只发 `task_loop_id`**:回调数据协议 `TaskCallbackData` 承载 `loop_task_id`/`workflow_type`/`workflow_id`/`instance_id`/`result`;合法终态严格为 `success:bool + data + gaps:list[str]`(FAIL 的 gaps 必须非空),执行/回收异常为 `exec_error`;框架适配层做 `loop_task_id↔(task_id,node_id)`、`success/gaps→verdict`、`data→output` 映射,再走图谱写口。空/非法终态不得默认 PASS,统一进入 Harness。
+- **BCS 身份边界**:任务领域、搜推结果和 `GroupFormation` 只保存产品 Bot ID;动态拉群时框架通过 BotService 权威 owner_id 在 BCS integration 边界转换为 `{product_bot_id}:{owner_id}`。BCS 请求中的 driver/originator/participant/manager/worker/binding bot_ids 使用 BCS UUID;state-machine binding key 是 workflow 逻辑名,不得使用 Bot ID,且 workflow binding 与 BCS ParticipantRole 分离。
+- **执行 SLA 单一所有者**:worker fire-and-poll 执行由结果 Poller 统一判定业务 SLA;Singlebox Adapter 只判传输错误,不得以更短 adapter timeout 提前截断仍在生成的 Bot。SLA/poll_exhausted 属执行异常(`exec_error→Harness`),不属于验收 FAIL。
 - **聚合收敛**:`terminal PASS` = `plan(root)==[]` ∧ 全非根节点 DONE ∧ 无 RUNNING → 根保持 PLANNING 等 owner bot 经 `TaskLoopCallback.report_result` 回投 verdict=PASS → 根节点 DONE ∧ 图 status=DONE;验收 100% 走回投(engine 不主动触发终验 skill,无 `OwnerBotVerifyPort`)。`terminal FAIL` 仅人工放弃(若提供),自动路径不产生终态 FAIL。
 - **并发安全**:同任务图推进串行化(可重入锁),跨任务并行;防止回投并发撕裂图。
 - **transport-agnostic**:core 逻辑不绑定框架/传输;搜推匹配与动态拉群不外泄为对外 API;图谱原子变更收口单一写网关(Harness 旁路同写口)。
@@ -97,7 +99,10 @@
 27. 作为系统,我想递归 MISS 到内层深度上限 `MAX_DEPTH` 自动升 BBS(删子树+挂广场),BBS 链路再迭代到 `BBS_MAX_DEPTH` 仍执行不下去变 `HUNG`(STUCK,人介入),这样图不无限膨胀。
 28. 作为系统,我想升 BBS 自动(无人工确认挡板,BBS bot 自主认领执行),BBS 仍执行不下去时 STUCK→HUNG 留人工入口,这样长尾能力可被利用且最终有人把关。
 29. 作为系统,我想 `loop_round` 仅升 BBS 时递增(外层 BBS 上升轮次)并可在 `extend_props` 带元信息,这样 BBS 迭代可审计。
-30. 作为系统,我想 `RuntimeInfo.start_time/end_time` 由图谱流转 RUNNING 时自动维护,这样时间戳与业务解耦。
+30. 作为系统,我想 `RuntimeInfo.start_time/end_time` 由图谱流转 RUNNING 时自动维护、存储为**毫秒整数(int)**,这样时间戳与业务解耦。
+
+31. 作为系统,我想 `miss_depth_exhausted` 布升 BBS(bbs_mode=true)后,若绿上存在 RUNNING 兄弟,不把根置 HUNG(可恢复态,等 BBS 接力),且 owner 不重 plan 抢占接力;仅 `on_bbs_report root_verified=true` 可从 bbs_mode 收口图 DONE(根 PLANNING→DONE)。其它 reason(gap_no_progress/plan_round_exhausted/root_gap_no_decompose)升 BBS 仍按硬 HUNG 收口(无规划端口/无拆解能力,BBS 也接不上)。
+30b. 作为系统,我想每个**父节点**的重规划产子次数计入其 extend_props.plan_round,达 MAX_PLAN_ROUND(默认 10)→该父 HUNG(不再产子),这样单节点 gap 反复读不闭时不会无限产子撑爆图;loop_round 收敛到只数升 BBS 的总次数(MAX_LOOP)。
 31. 作为系统,我想崩溃堆栈/超时标记/miss 事件进 `extend_props`,这样非业务异常态增量合并不污染主字段。
 32. 作为开发者,我想对外服务集中在"任务中心"`TaskService` facade(2 API),图谱/规划/派发/执行/Harness 各管各的内部 API,这样模块边界清晰、调用方只认一处入口。
 33. 作为开发者,我想图谱原子变更收口在"任务图谱"`TaskGraphService`(8 API:5 核心写/读+3 派生只读),这样状态流转有单一写网关、不散在各执行器。
@@ -154,6 +159,8 @@
 - **reroute 局部化**:补救挂该 FAIL/PLANNING 节点本体下,未触下游在依赖满足前从未入图,无下游可复位;自动 reroute 不调级联回滚。
 - **输入/验收上下文**:store 不提供投影 API;执行/验收上下文由 `TaskRunner` 内部用 `get_child_tasks`/`get_parent_task` 组合自算(验收只按 `(task_id,node_id)` 上报节点:有结构子→验收模式聚合结构子(子树)output;无结构子→执行模式聚合结构父 P 的聚合上下文={P.task_spec/goal + P 已 DONE 结构子(本节点兄弟)output};无 NODE/SUBTREE/TASK scope 区分,见 `plan.md` §3.5)。
 - **回投坑点**:`output` MERGE 只浅合并一层(patch 覆盖);`extend_props_patch` 扁平传不可再包一层。
+- **终态结果契约**:`success` 必须是 JSON bool;PASS=`success=true,gaps=[]`;FAIL=`success=false,gaps` 非空;旧 `fail_detail` 仅兼容归一为单 gap。空内容、非法 JSON、缺 success、类型错误、FAIL 无 gaps 均转 `terminal_result_invalid→Harness`,绝不默认 PASS。
+- **结果回收 SLA**:`TaskExecutorResultPoller` 是 worker single_bot/coop_group 业务 SLA 的唯一所有者;超时/连续轮询失败回投 `exec_error` 并 best-effort `cancel_run`;Singlebox worker collector 无独立业务超时。planning/search 的同步 `send_and_wait_async` 仍持各自调用 SLA。
 - **Harness 与主链解耦**:Harness 是旁路常驻、只读图谱+反向 `update_task_node_info`,不参与正向规划/派发;主链故障由 Harness 复位后,下一轮事件自然续驱。
 - **`loop_round` 审计 + 图级写归属**(外层 BBS 上升轮次):仅升 BBS 时 `TaskExecutionGraph.loop_round++`(正常补救不再 ++);达 `BBS_MAX_DEPTH`(默认 3)→ STUCK → HUNG。
   图级终态(图 `status`=DONE/HUNG、图 `output`、`loop_round`、图 `extend_props` 的 `bbs_mode`/`hung_reason`)由编排核经 `TaskGraphService.update_task_graph_info(TaskGraphPatch)` 图级写口收口(原子、加锁、SSOT 唯一图级写口);`TaskGraphPatch`(增量 patch:`loop_round_increment`/`status`/`output_patch`/`extend_props_patch`)是中间类型。编排核不直写返回的 graph 引用。
