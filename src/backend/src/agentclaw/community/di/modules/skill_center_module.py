@@ -182,9 +182,11 @@ from agentclaw.community.core.skill_center.services.bot_skill_asset_service impo
 from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
     SkillSetControlPlaneService,
 )
+from agentclaw.community.api.bot_runtime_projection_reconciler import (
+    BotRuntimeProjectionReconcilerProtocol,
+)
 from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
     BotRuntimeProjectionReconciler,
-    BotRuntimeProjectionReconcilerProtocol,
 )
 from agentclaw.community.core.skill_center.authorization_hook import (
     BotCapabilityAuthorizationHookProtocol,

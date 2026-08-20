@@ -36,7 +36,7 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
 from agentclaw.community.core.skill_center.runtime_policy import (
     require_supported_bot_skill_runtime,
 )
-from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
+from agentclaw.community.api.bot_runtime_projection_reconciler import (
     BotRuntimeProjectionReconcilerProtocol,
 )
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (

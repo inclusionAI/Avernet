@@ -33,7 +33,7 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
     RuntimeProjectionResolver,
 )
-from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
+from agentclaw.community.api.bot_runtime_projection_reconciler import (
     BotRuntimeProjectionReconcilerProtocol,
 )
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (

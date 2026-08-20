@@ -31,10 +31,6 @@ from agentclaw.community.core.skill_center.services.bot_capability_mutation_guar
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
-from agentclaw.community.core.mcp.services._defaults import (
-    get_default_cli_items,
-    get_default_mcp_servers,
-)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
@@ -303,6 +299,7 @@ class _McpCenter:
 class _RuntimeFactoryService:
     def __init__(self) -> None:
         self.mcp_codes: set[str] | None = None
+        self.collect_calls: list[dict] = []
 
     def sync_runtime(self, *, desired_skills: list[dict]) -> bool:
         assert desired_skills == []
@@ -311,6 +308,15 @@ class _RuntimeFactoryService:
     async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
         self.mcp_codes = server_codes
         return True
+
+    def collect_bot_active_mcps(self, **kwargs) -> list[dict]:
+        self.collect_calls.append(kwargs)
+        # ``hitl`` is a real LOCAL/stdio default: it belongs in the runtime
+        # projection but must never be declared to AgentPass.
+        return [
+            {"server_code": "mcp.template-preset"},
+            {"server_code": "hitl", "source": "local"},
+        ]
 
 
 class _RuntimeFactory:
@@ -428,6 +434,18 @@ class _RuntimePassport:
 
     def update_passport(self, **kwargs) -> None:
         self.calls.append(kwargs)
+
+    def query_passport_clis(self, bot_id: str, owner_id: str) -> list[dict]:
+        assert (bot_id, owner_id) == ("bot-1", "true-owner")
+        # This is the effective Default CLI scope after a user removed a
+        # static default. A reconcile must preserve it exactly, not revive the
+        # engine's static list.
+        return [{"cli_code": "kept-cli", "cli_name": "Kept"}]
+
+
+class _FailingRuntimePassport(_RuntimePassport):
+    def query_passport_clis(self, bot_id: str, owner_id: str) -> list[dict]:
+        raise RuntimeError("passport unavailable")
 
 
 @pytest.mark.asyncio
@@ -860,23 +878,49 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
     }
     assert factory.service.mcp_codes == {
         "mcp.weather",
-        *{
-            item["server_code"]
-            for item in get_default_mcp_servers("openclaw", None)
-            if item.get("server_code")
-        },
+        "mcp.template-preset",
+        "hitl",
     }
+    assert factory.service.collect_calls == [
+        {
+            "entity_id": "entity-1",
+            "bot_id": "bot-1",
+            "user_id": "true-owner",
+            "entity_type": "staff",
+            "engine_type": "openclaw",
+        }
+    ]
     assert passport.calls == [
         {
             "bot_id": "bot-1",
             "user_id": "true-owner",
             "engine_type": "openclaw",
             "resource_scope": {
-                "mcp_codes": sorted(factory.service.mcp_codes),
-                "cli_items": get_default_cli_items("openclaw", None),
+                "mcp_codes": ["mcp.template-preset", "mcp.weather"],
+                "cli_items": [{"cli_code": "kept-cli", "cli_name": "Kept"}],
             },
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_reconcile_fails_closed_when_effective_cli_scope_cannot_be_read():
+    factory = _RuntimeFactory()
+    passport = _FailingRuntimePassport()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        pool_skills=_RuntimeSkills(),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=passport,
+    )
+
+    with pytest.raises(SkillSetRuntimeReconcileError):
+        await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+    assert passport.calls == []
 
 
 @pytest.mark.asyncio

@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
 
 from injector import inject
 
-from agentclaw.community.core.mcp.services._defaults import (
-    get_default_cli_items,
-    get_default_mcp_servers,
+from agentclaw.community.core.mcp.services.passport_scope import (
+    filter_passport_mcp_codes,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
@@ -42,18 +40,6 @@ from agentclaw.community.core.skills_pool.types import (
     runtime_uses_pool_paths,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
-
-
-class BotRuntimeProjectionReconcilerProtocol(Protocol):
-    """Apply the complete database desired state for one Bot."""
-
-    async def reconcile(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        retired_mappings: Sequence[PoolSkillMapping] = (),
-    ) -> None: ...
 
 
 class BotRuntimeProjectionReconciler:
@@ -96,9 +82,6 @@ class BotRuntimeProjectionReconciler:
         require_supported_bot_skill_runtime(bot)
 
         engine = str(bot.get("active_engine") or "openclaw")
-        template_type = bot.get("template_type")
-        default_mcp_items = get_default_mcp_servers(engine, template_type)
-        default_cli_items = get_default_cli_items(engine, template_type)
         service = self._factory.create(
             user_id=owner_id,
             entity_id=str(bot.get("entity_id") or owner_id),
@@ -106,6 +89,31 @@ class BotRuntimeProjectionReconciler:
             engine_type=engine,
             entity_type=bot.get("entity_type") or "staff",
         )
+        # The legacy SkillSet service remains the authority for effective
+        # System Defaults during Phase 1.  It resolves template presets and
+        # applies ac_default_skillset_mcp_exclusion; rebuilding defaults from
+        # static constants here would silently resurrect user exclusions.
+        effective_mcp_entries = service.collect_bot_active_mcps(
+            entity_id=str(bot.get("entity_id") or owner_id),
+            bot_id=bot_id,
+            user_id=owner_id,
+            entity_type=bot.get("entity_type") or "staff",
+            engine_type=engine,
+        )
+        effective_default_mcp_codes = frozenset(
+            str(item.get("server_code") or item.get("serverCode") or "").strip()
+            for item in effective_mcp_entries
+            if item.get("server_code") or item.get("serverCode")
+        )
+        try:
+            # CLI removal is currently persisted by AgentPass itself.  Its
+            # current scope is therefore the only effective Default CLI fact;
+            # merging static engine defaults here would undo that removal.
+            effective_cli_items = self._passport.query_passport_clis(
+                bot_id, owner_id
+            )
+        except Exception as exc:
+            raise SkillSetRuntimeReconcileError() from exc
         projection = RuntimeProjectionResolver().resolve(
             RuntimeDesiredState(
                 skills=tuple(
@@ -119,14 +127,10 @@ class BotRuntimeProjectionReconciler:
                 installed_mcp_server_codes=frozenset(
                     self._repository.list_installed_mcps(bot_id=bot_id)
                 ),
-                system_default_mcp_server_codes=frozenset(
-                    str(item["server_code"])
-                    for item in default_mcp_items
-                    if item.get("server_code")
-                ),
+                system_default_mcp_server_codes=effective_default_mcp_codes,
                 system_default_cli_commands=tuple(
                     str(item["cli_code"])
-                    for item in default_cli_items
+                    for item in effective_cli_items
                     if item.get("cli_code")
                 ),
             )
@@ -195,8 +199,10 @@ class BotRuntimeProjectionReconciler:
                 user_id=owner_id,
                 engine_type=engine,
                 resource_scope={
-                    "mcp_codes": list(projection.mcp_server_codes),
-                    "cli_items": default_cli_items,
+                    "mcp_codes": filter_passport_mcp_codes(
+                        projection.mcp_server_codes
+                    ),
+                    "cli_items": effective_cli_items,
                 },
             )
         except Exception as exc:
@@ -249,13 +255,10 @@ class BotRuntimeProjectionReconciler:
 
 # Compatibility names for existing constructors and tests. They are aliases,
 # not subclasses: the implementation authority remains this Bot-level module.
-SkillSetRuntimeReconcilerProtocol = BotRuntimeProjectionReconcilerProtocol
 SkillSetRuntimeReconciler = BotRuntimeProjectionReconciler
 
 
 __all__ = [
     "BotRuntimeProjectionReconciler",
-    "BotRuntimeProjectionReconcilerProtocol",
     "SkillSetRuntimeReconciler",
-    "SkillSetRuntimeReconcilerProtocol",
 ]
