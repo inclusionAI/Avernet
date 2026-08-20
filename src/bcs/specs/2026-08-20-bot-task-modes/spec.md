@@ -1,10 +1,11 @@
 # Spec — Bot Task Modes (`task_claim_mode` / `task_dream_mode`)
 
 > SDD phase 1 — WHAT and WHY. No implementation detail.
-> Module: **BCS** (`src/bcs/`, Rust). The frontend-facing PATCH endpoint and the
-> `bcs_bots` storage live here; the BCS core service exposes an internal
-> (non-OpenAPI) read capability for the roster (see C3). Frontend contract
-> extracted in `api-frontend-patch.md`.
+> Module: **BCS** (`src/bcs/`, Rust) for the write side — the frontend-facing
+> PATCH endpoint and the `bcs_bots` storage live here, and `PhysicalBot` exposes
+> the toggles. The roster **read** lives in the **backend task module** core
+> (depends on BCS) — see C3. Frontend contract extracted in
+> `api-frontend-patch.md`.
 
 ## Overview
 
@@ -41,11 +42,11 @@ discovery/dispatch to opted-in bots.
    `api-frontend-patch.md`.)
 3. **Read** both toggles in BCS bot representations returned to clients
    (single GET, PATCH response, candidates/mine, etc.).
-4. **Query enabled bots**: provide a **BCS-internal core-service read**
-   (`list_by_task_modes`) that returns physical bots filtered (optionally) by
-   `task_claim_mode` / `task_dream_mode` with OR (`Any`) / AND (`All`) semantics.
-   It is **not exposed over OpenAPI** and is consumed in-process by the task
-   consumer (see C3 for the consumer-boundary caveat). The existing
+4. **Query enabled bots**: implement the roster query in the **backend task
+   module core** (which depends on BCS for bot data), filtering by
+   `task_claim_mode` / `task_dream_mode`. It is **not** a new BCS OpenAPI
+   endpoint and **not** implemented inside the BCS module (see C3 for the
+   open transport decision). The existing
    `POST /openapi/v1/collaboration/bots/query` is **not modified**.
 
 ## Non-goals
@@ -88,32 +89,34 @@ present**, defaulting to `false` when never set. Human rows do not expose these
 fields (they have no task-behavior semantics), consistent with Human rows
 omitting `descriptor` / `reachability` / `provider` / `agent_code`.
 
-### C3 — Query enabled bots (internal BCS core-service read; not exposed over OpenAPI)
+### C3 — Query enabled bots (read lives in backend/task core; depends on BCS)
 
-The roster of enabled bots is a **BCS-internal core-service capability** — read
-at the `BotControlPlaneCoreService` / `BotControlPlaneRepoPort` layer only:
+The roster of enabled bots is queried in the **backend task module's core layer**,
+which depends on BCS. BCS itself only persists the toggles and exposes them on its
+bot representations; it does **not** host the roster read.
 
 - `POST /bots/query` is **not** changed. It remains explicit-ID hydration only.
-- **No new HTTP/OpenAPI read endpoint** is exposed. The core service gains
-  `list_by_task_modes` (repo `list_control_plane_by_task_modes`) with optional
-  filters on `task_claim_mode` / `task_dream_mode` and OR (`Any`) / AND (`All`)
-  semantics, scoped to physical bots and excluding soft-deleted rows.
-- The consumer calls the BCS core service directly (in-process, BCS-internal).
-  No backend Python client, no backend HTTP route, no read-side OpenAPI contract.
+- **No new BCS HTTP/OpenAPI read endpoint** for the roster. BCS exposes the toggles
+  via existing bot representations (`PhysicalBot` now carries `task_claim_mode` /
+  `task_dream_mode`); the roster query/filter is implemented in `backend/.../task`
+  core, depending on BCS for the bot data.
+- The earlier BCS-internal `list_by_task_modes` (repo `list_control_plane_by_task_modes`
+  + `TaskModeMatch`/`BotTaskModesQuery` types) was **reverted** — the read does not
+  belong in the BCS module.
 
-> Rationale for the internal shape: the consumer stated the read is "task内部实现用"
-> / "只是core service调用" — an internal capability, not a published API. Keeping
-> the read at the core layer avoids widening the OpenAPI surface and the
-> cross-module contract burden. The toggles stay set through BCS and persisted on
-> `bcs_bots` (BCS-owned); BCS keeps table ownership.
+> Rationale: the consumer stated the read is "task 内部实现用" and lives in the
+> backend task submodule whose core depends on BCS — not in the BCS module. BCS
+> keeps table ownership and the PATCH write path; the roster read is a task-module
+> concern.
 >
-> **Open consumer-boundary question**: this shape assumes the consumer is
-> BCS-internal (in-process). If the consumer is actually the backend Python task
-> module (separate process, no `bcs_bots` access), an in-process core call is
-> unreachable and a transport (OpenAPI/IPC) would have to be reintroduced — that
-> conflicts with "no OpenAPI" and must be resolved with the consumer owner. The
-> implementation delivers exactly the requested internal read; the question only
-> governs whether a follow-up transport task is needed.
+> **Open transport decision (blocks the backend read implementation):** `BcnService`
+> (backend's only BCS client) is currently **write-only** (onboard/register/switch/
+> delete); backend has no existing read path to BCS bots. "No new OpenAPI" + "backend
+> core depends on BCS" + "bcs_bots is BCS-owned" therefore need a concrete transport:
+> (a) reuse an existing BCS bot-read surface that already returns the toggles and
+> filter locally in backend task core; (b) BCS syncs the toggles into a
+> backend-readable store and backend reads locally; or (c) another agreed channel.
+> This must be confirmed with the consumer/BCS owner before the backend read is built.
 
 ## Decisions (locked)
 
@@ -127,9 +130,9 @@ at the `BotControlPlaneCoreService` / `BotControlPlaneRepoPort` layer only:
    toggles ride the same patch path as `visibility` / `status`.
 3. **Read exposure**: physical bots only; Human rows do not expose or accept
    the toggles (`invalid_bot_kind` on PATCH).
-4. **Roster query**: internal BCS core-service read (`list_by_task_modes`),
-   **not** `/bots/query` and **not** a new OpenAPI endpoint. Consumer is
-   BCS-internal (see open question in C3).
+4. **Roster query**: implemented in the **backend task module core** (depends on
+   BCS), **not** in the BCS module and **not** a new BCS OpenAPI endpoint.
+   Transport TBD (see C3).
 5. **Unset vs explicitly-false**: indistinguishable — unset reads as `false`.
    Existing rows are backfilled to `false` on migration.
 
@@ -139,7 +142,7 @@ at the `BotControlPlaneCoreService` / `BotControlPlaneRepoPort` layer only:
   body + `PhysicalBot` response): requires updated `bots.yaml` +
   `domain-models.yaml` + docs + conformance tests (`test_bot_v1_contract.py`,
   Rust route tests, store conformance tests). **No new read path** is added to
-  the OpenAPI contract.
+  the BCS OpenAPI contract.
 - Schema migration ships with the code (MySQL `009_*` + SQLite DDL/versioned
   migration); existing rows backfilled to `false`.
 - DB write failures propagate as errors (OCB rule).

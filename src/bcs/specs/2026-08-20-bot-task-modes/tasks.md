@@ -55,37 +55,27 @@
   [verify] patching one toggle leaves the other and `bot_info` untouched.
 - [x] **10.** `lib.rs` INSERTs (:414 onboard, :1900 `ensure_human_actor`): leave the two columns **out** so
   DB `DEFAULT 0` applies. [verify] new bots persist with both toggles `false` without listing the columns.
-- [x] **11.** `types/bot_control_plane.rs`: add `TaskModeMatch { Any, All }` + `BotTaskModesQuery { env,
-  task_claim_mode: Option<bool>, task_dream_mode: Option<bool>, match_mode: TaskModeMatch }`; re-export
-  both from `bcs-service-api/src/lib.rs`. Repo port `port/repo/bot_control_plane.rs`: add required
-  `async fn list_control_plane_by_task_modes(&self, query: BotTaskModesQuery) -> ServiceResult<Vec<BotControlPlaneRecord>>`.
-  [verify] crate compiles; port trait carries the new method.
-- [x] **12.** `lib.rs` `PersistentBotRepo`: implement `list_control_plane_by_task_modes` —
-  `SELECT <cols incl task_claim_mode, task_dream_mode> FROM bcs_bots WHERE env=? AND COALESCE(is_deleted,0)=0
-  AND COALESCE(actor_kind,'bot')='bot' AND <mode clause>` with conditional Any(OR)/All(AND)/single/none;
-  `ORDER BY gmt_create DESC, bot_uuid ASC`. Unpaginated (returns full set; no `COUNT(*)`).
-  [verify] SQL returns correct sets for any/all/single/none on a seeded table.
-- [x] **13.** `memory.rs` in-memory impl: implement the same method (iterate bots, filter by toggles +
-  `ActorKind::Bot`, sort by `created_at` desc then `bot_id` asc).
-  [verify] in-memory matches SQL semantics for the 4 cases.
+- [-] **11.** ~~`types/bot_control_plane.rs`: add `TaskModeMatch` + `BotTaskModesQuery`; repo port
+  `list_control_plane_by_task_modes`.~~ **Reverted** — the roster read does not belong in the BCS module
+  (see §E/§I). BCS keeps only the write-side types from task 4.
+- [-] **12.** ~~`PersistentBotRepo::list_control_plane_by_task_modes` SQL impl.~~ **Reverted** (read moved
+  to backend/task).
+- [-] **13.** ~~`memory.rs` in-memory `list_control_plane_by_task_modes`.~~ **Reverted** (read moved to
+  backend/task).
 
-## E. BCS core for the internal read (no application/route layer)
+## E. BCS core read — reverted (read lives in backend/task, not BCS)
 
-- [x] **14.** Core trait `core/bot_control_plane.rs`: add `list_by_task_modes(query: BotTaskModesQuery)`
-  with a **default** `Ok(Vec::new())` (so stubs like `AuthorizationProbeCore` keep compiling); override in
-  `services/bcs-bot/src/core/bot_control_plane_core.rs` to delegate to `list_control_plane_by_task_modes`
-  + `hydrate`. Re-export `BotTaskModesQuery` from the core import list.
-  [verify] `bcs-bot` + `bcs-app-bot` compile; probe stub still compiles; override hydrates providers.
-- [~] **15.** **No application/command layer** (`ListBotsByTaskModes`, `BotService::list_bots_by_task_modes`).
-  Dropped per the read-side revision — the read is core-only, not route-facing. (marked done-as-NA)
+- [-] **14.** ~~Core trait `list_by_task_modes` + core override.~~ **Reverted** — BCS hosts no roster read.
+  The read is implemented in the backend task module core (depends on BCS); see §I.
+- [~] **15.** **No BCS application/command layer** for the read — confirmed NA (read is not in BCS at all).
 
 ## F. BCS delivery adapter (`bcs-api-http`) — write side only
 
 - [x] **16.** `dto/bot.rs`: add `#[serde(default)] task_claim_mode: Option<bool>, task_dream_mode: Option<bool>`
   to `UpdateBotRequest` (:82); map both in `From<UpdateBotRequest> for BotPatch` (:93).
-  [verify] PATCH body with toggles deserializes; unknown fields still rejected (`deny_unknown_fields`).
-- [~] **17.** **No read route.** `routes/bot.rs` gains no `/bots/by-task-modes` handler — the roster is an
-  internal core read, not an HTTP endpoint. (done-as-NA per revision)
+  [verify] PATCH body with toggles deserializes; unknown fields still rejected (`denyunknown_fields`).
+- [~] **17.** **No read route.** `routes/bot.rs` gains no `/bots/by-task-modes` handler — the roster read
+  is in backend/task, not a BCS HTTP endpoint. (done-as-NA)
 
 ## G. OpenAPI contract — write side only
 
@@ -103,12 +93,12 @@
   the app layer (task 6). A dedicated route-level toggle-echo assertion is a nice-to-have follow-up, not
   required for correctness.
 - [x] **21.** Store conformance `tests/conformance_bot_control_plane_repo.rs`: test `CREATE TABLE bcs_bots`
-  fixtures include both columns; added `persistent_control_plane_task_modes_patch_persists_and_filters`
-  (independent patch, untouched-other via single-filter, Any/All/single/none, default-false read).
-  [verify] `cargo test -p bcs-bot-store --test conformance_bot_control_plane_repo` passes.
+  fixtures include both columns; added `persistent_control_plane_task_modes_patch_persists_and_reads_back`
+  (default-false read, independent toggle patch, untouched-other + bot_info intact, read-back via
+  `get_control_plane`). No `list_control_plane_by_task_modes` test (read reverted).
+  [verify] `cargo test -p bcs-bot-store --test conformance_bot_control_plane_repo` passes (7 tests).
 - [~] **22.** Application/core contract: patch-carries-toggles + projection are exercised by existing
-  app-bot tests (task 6) + the conformance read test (task 21). A separate `list_by_task_modes` core
-  contract test is a follow-up if the consumer wires a core-level caller.
+  app-bot tests (task 6) + the conformance write-persistence test (task 21). No BCS core read to test.
 - [x] **23.** OpenAPI conformance `src/bcs/tests/openapi/test_bot_v1_contract.py` + `test_contract.py`:
   assertions updated to require the new fields in `UpdateBotRequest` + `PhysicalBot` (required + physical-only).
   No new path to assert; no gateway forwarding-test changes.
@@ -117,15 +107,20 @@
   passes. No new HTTP endpoint, so the singlebox 100%-HTTP-endpoint coverage gate is unaffected; still
   cover the toggle PATCH in an E2E story if the singlebox suite exercises PATCH /bots/{id}.
 
-## I. Consumer-boundary confirmation (no backend client in this plan)
+## I. Backend task-module roster read (transport decision blocks implementation)
 
-- [ ] **25.** **Confirm** who consumes the roster: if the task consumer is BCS-internal (in-process), the
-  core `list_by_task_modes` implemented here is sufficient and nothing else is needed. If the consumer is
-  the backend Python task module (separate process, no `bcs_bots` access), an in-process core call is
-  unreachable and a transport must be chosen — that would reintroduce an OpenAPI/IPC surface and conflict
-  with "no OpenAPI"; re-open as a separate task. Block on a real answer from the consumer owner.
-- [~] **26–29.** **Dropped** — no `bcs_task_mode_client.py`, no `TaskBotRosterProtocol`, no DI wiring, no
-  backend HTTP route. Re-open only if task 25 lands on "backend needs the roster".
+- [ ] **25.** **Decide the transport** for "backend task core depends on BCS" given: `BcnService`
+  (`core/bot_management/services/bcn_service.py`) is currently **write-only** (onboard/register/switch/
+  delete); backend has no existing read path to BCS bots; `bcs_bots` is BCS-owned; no new BCS OpenAPI read
+  endpoint. Options: (a) reuse an existing BCS bot-read surface that returns the toggles + filter locally
+  in backend task core; (b) BCS syncs toggles into a backend-readable store + backend reads locally;
+  (c) another agreed channel. Block on the consumer/BCS owner.
+- [ ] **26.** Backend task core: add a roster Protocol/service (e.g. `TaskBotRosterProtocol`) with
+  `list_bots_by_task_modes(claim, dream, match)`, depending on BCS per task 25's transport; roster DTO
+  (`bot_id, name, env, task_claim_mode, task_dream_mode`, optional descriptor).
+- [ ] **27.** DI wiring: inject the BCS dependency into the task core; inject the roster into task
+  discovery so it iterates enabled bots. No backend HTTP route unless an external caller needs it.
+- [~] **28–29.** (reserved) backend HTTP route for the roster — deferred unless an external caller needs it.
 
 ## J. Gates & docs
 

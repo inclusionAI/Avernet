@@ -7,7 +7,7 @@ use async_trait::async_trait;
 pub use crate::types::{
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
-    BotControlPlanePatch, BotControlPlaneRecord, BotTaskModesQuery, TaskModeMatch,
+    BotControlPlanePatch, BotControlPlaneRecord,
 };
 use crate::ServiceResult;
 
@@ -44,13 +44,6 @@ pub trait BotControlPlaneRepoPort: Send + Sync {
     async fn list_control_plane_by_creator(
         &self,
         query: BotControlPlaneOwnedQuery,
-    ) -> ServiceResult<Vec<BotControlPlaneRecord>>;
-
-    /// Read physical bots by the task-mode toggles. Internal core-service capability;
-    /// not exposed over OpenAPI.
-    async fn list_control_plane_by_task_modes(
-        &self,
-        query: BotTaskModesQuery,
     ) -> ServiceResult<Vec<BotControlPlaneRecord>>;
 
     async fn patch_control_plane(

@@ -9,17 +9,17 @@ Two touch points; BCS is the owner, backend task module is the consumer.
 
 ```
 Frontend ──PATCH /openapi/v1/collaboration/bots/{bot_id}──▶ BCS ─▶ bcs_bots (new cols)
-
-BCS core service (internal) ── list_by_task_modes ──▶ bcs_bots (read by toggles)
-  (repo + core only; NOT exposed over OpenAPI, NOT a backend client)
+                                                            │
+                                                            └─ PhysicalBot exposes the toggles
+Backend task core ── list_bots_by_task_modes ──▶ depends on BCS for bot data (transport TBD)
+  (implemented in backend/.../task; NOT in the BCS module; no new BCS OpenAPI read endpoint)
 ```
 
 - `POST /bots/query` is **not touched**. No new BCS read endpoint is exposed over OpenAPI.
 - Storage: two top-level columns on `bcs_bots` (default 0/false), not in `bot_info` JSON.
-- Read side is a BCS **internal core-service capability**
-  (`BotControlPlaneCoreService::list_by_task_modes` +
-  `BotControlPlaneRepoPort::list_control_plane_by_task_modes`) only — no HTTP route, no OpenAPI read
-  contract, no backend Python client. Consumer-boundary assumption to confirm: see §6.
+- Read side lives in the **backend task module core** (depends on BCS), not in the BCS module — the
+  BCS-internal `list_by_task_modes` was reverted. Transport for "backend core depends on BCS" is open
+  (BcnService is currently write-only); see §6.
 
 Layering to mirror (BCS): `routes/bot.rs` (DTO) → `application/v1/bot.rs` →
 `bcs-app-bot/src/lib.rs` → `core/bot_control_plane.rs` + `types/bot_control_plane.rs`
@@ -131,45 +131,48 @@ false; this does **not** protect an unmigrated DB (SELECT would error), hence th
 
 ---
 
-## 6. BCS internal read capability (core + repo only — not exposed)
+## 6. Roster read lives in backend/task core (depends on BCS); BCS read reverted
 
-The task-mode roster is a BCS-internal read, **not** an HTTP/OpenAPI endpoint and **not** a backend
-client. Per the consumer's decision ("读侧不暴露openapi，只是task内部实现用" / "只是core service调用"),
-only the repo port + core service gain a read method.
+The task-mode roster read is **not** in the BCS module. It belongs in the **backend task module's core
+layer**, which depends on BCS for bot data. Per the consumer's correction ("读不实现在 bcs 模块下，而是
+实现在 backend 模块下的 task 子模块下，core 层代码要依赖"), BCS only:
 
-- `BotControlPlaneRepoPort::list_control_plane_by_task_modes(query: BotTaskModesQuery)
-  -> ServiceResult<Vec<BotControlPlaneRecord>>` (SQL in `PersistentBotRepo`, filter loop in
-  `MemoryBotRepo`).
-- `BotControlPlaneCoreService::list_by_task_modes(query: BotTaskModesQuery)
-  -> ServiceResult<Vec<BotControlPlaneView>>` — declared with a **default** `Ok(Vec::new())` on the
-  trait (so test stubs keep compiling) and overridden in `BotControlPlaneCore` to delegate to the repo
-  port and `hydrate` providers.
-- No `application/v1/bot.rs` command, no `bcs-api-http` route/DTO, no OpenAPI read path, no backend
-  Python client. The consumer calls the BCS core service directly (in-process, BCS-internal).
+- persists the toggles on `bcs_bots` (migration + patch — done);
+- exposes them on `PhysicalBot` so existing BCS bot representations carry the fields (done);
+- **does not** host a roster read.
+
+The earlier BCS-internal `list_by_task_modes` (repo `list_control_plane_by_task_modes` +
+`TaskModeMatch`/`BotTaskModesQuery` types + the SQL/memory impls + the read conformance test) was
+**reverted** in this revision. The `persistent_control_plane_task_modes_patch_persists_and_reads_back`
+write-side test (patch persists + independent toggle + read-back via `get_control_plane`) remains.
 
 ### OpenAPI contract — write side only (`bots.yaml` + `domain-models.yaml`)
 - `UpdateBotRequest` (:555): add `task_claim_mode` (boolean), `task_dream_mode` (boolean).
 - `domain-models.yaml` `PhysicalBot` (:117): add `task_claim_mode` (boolean, required),
   `task_dream_mode` (boolean, required).
-- **No new read path** is added to `bots.yaml`; no endpoint-registration test changes for a read path.
+- **No new read path** is added to `bots.yaml`; no endpoint-registration test changes.
 
-### Consumer-boundary confirmation (open)
-The toggles live on `bcs_bots` (BCS-owned). The task consumer is BCS-internal per the latest decision,
-so the read stays at the core layer. **If** the consumer is actually the backend Python task module
-(which has no `bcs_bots` access and is a separate process), an in-process core call is not reachable and
-a transport must be chosen — that would reintroduce an OpenAPI/IPC surface and conflict with "no
-OpenAPI". Confirm with the consumer owner before closeout. This plan implements exactly what the user
-asked for (repo + core, no OpenAPI); the confirmation only governs whether a follow-up transport task is
-needed.
+### Open transport decision (blocks the backend read)
+`BcnService` (backend's only BCS client, `core/bot_management/services/bcn_service.py`) is currently
+**write-only** (onboard/register/switch/delete); backend has no existing read path to BCS bots. So
+"backend task core depends on BCS" + "no new OpenAPI" + "bcs_bots is BCS-owned" need a concrete
+transport, to be confirmed with the consumer/BCS owner:
+- (a) reuse an existing BCS bot-read surface that already returns the toggles, filter locally in
+  backend task core;
+- (b) BCS syncs the toggles into a backend-readable store, backend reads locally;
+- (c) another agreed channel.
 
 ---
 
-## 7. No backend task-module client
+## 7. Backend task-module roster read (pending transport decision)
 
-Dropped per the read-side revision. No `bcs_task_mode_client.py`, no `TaskBotRosterProtocol`, no DI
-wiring, no backend HTTP route. If §6's consumer-boundary confirmation lands on "backend needs the
-roster", this section is re-opened as a separate task with its own transport decision (and would require
-re-introducing an OpenAPI/IPC read surface, explicitly outside this plan's scope).
+Once §6's transport is chosen, implement in `backend/src/agentclaw/community/core/task/`:
+- a core service/Protocol (e.g. `TaskBotRosterProtocol`) with a `list_bots_by_task_modes(...)` method
+  that filters by the toggles (OR/AND), depending on BCS for the bot data per the chosen transport;
+- a roster DTO (minimal: `bot_id, name, env, task_claim_mode, task_dream_mode`, optional descriptor);
+- DI wiring injecting the BCS dependency into the task core; inject the roster into task discovery so it
+  iterates enabled bots.
+No backend HTTP route unless an external caller needs it. **Blocked on the transport decision in §6.**
 
 ---
 

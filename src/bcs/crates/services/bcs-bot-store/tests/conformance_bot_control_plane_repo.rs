@@ -17,7 +17,7 @@ use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateVisibility, BotCapabilities,
     BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRepoPort, BotRepoPort, BotTaskModesQuery, TaskModeMatch,
+    BotControlPlaneRepoPort, BotRepoPort,
 };
 
 #[tokio::test]
@@ -626,11 +626,11 @@ async fn seed_bot(
 }
 
 #[tokio::test]
-async fn persistent_control_plane_task_modes_patch_persists_and_filters() {
+async fn persistent_control_plane_task_modes_patch_persists_and_reads_back() {
     let (repo, db) = fixture().await;
     seed_bot(
         db.as_ref(),
-        "claim-only",
+        "claim-bot",
         "Claim Bot",
         "bot",
         "public",
@@ -641,7 +641,7 @@ async fn persistent_control_plane_task_modes_patch_persists_and_filters() {
     .await;
     seed_bot(
         db.as_ref(),
-        "dream-only",
+        "dream-bot",
         "Dream Bot",
         "bot",
         "public",
@@ -650,41 +650,36 @@ async fn persistent_control_plane_task_modes_patch_persists_and_filters() {
         "2026-01-02 00:00:00",
     )
     .await;
-    seed_bot(
-        db.as_ref(),
-        "idle-bot",
-        "Idle Bot",
-        "bot",
-        "public",
-        "online",
-        Some("staff-3"),
-        "2026-01-03 00:00:00",
-    )
-    .await;
 
-    // Default state: both toggles false.
+    // Default state: both toggles false on seeded rows.
     let claim = repo
-        .get_control_plane("claim-only", "dev")
+        .get_control_plane("claim-bot", "dev")
         .await
         .expect("get claim")
         .expect("claim row");
     assert!(!claim.task_claim_mode);
     assert!(!claim.task_dream_mode);
 
+    // Patching one toggle leaves the other untouched and bot_info intact.
+    let patched = repo
+        .patch_control_plane(
+            "claim-bot",
+            "dev",
+            BotControlPlanePatch {
+                task_claim_mode: Some(true),
+                task_dream_mode: Some(false),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("patch claim")
+        .expect("claim row");
+    assert!(patched.task_claim_mode);
+    assert!(!patched.task_dream_mode);
+    assert_eq!(patched.descriptor.summary, "summary-claim-bot");
+
     repo.patch_control_plane(
-        "claim-only",
-        "dev",
-        BotControlPlanePatch {
-            task_claim_mode: Some(true),
-            task_dream_mode: Some(false),
-            ..Default::default()
-        },
-    )
-    .await
-    .expect("patch claim")
-    .expect("claim row");
-    repo.patch_control_plane(
-        "dream-only",
+        "dream-bot",
         "dev",
         BotControlPlanePatch {
             task_claim_mode: Some(false),
@@ -696,77 +691,20 @@ async fn persistent_control_plane_task_modes_patch_persists_and_filters() {
     .expect("patch dream")
     .expect("dream row");
 
-    let names = |rows: Vec<bcs_service_api::BotControlPlaneRecord>| {
-        let mut ids: Vec<String> = rows.into_iter().map(|r| r.bot_id).collect();
-        ids.sort();
-        ids
-    };
-
-    let claim_rows = repo
-        .list_control_plane_by_task_modes(BotTaskModesQuery {
-            env: "dev".to_string(),
-            task_claim_mode: Some(true),
-            task_dream_mode: None,
-            match_mode: TaskModeMatch::Any,
-        })
+    // Reads back the persisted values independently.
+    let claim = repo
+        .get_control_plane("claim-bot", "dev")
         .await
-        .expect("claim filter");
-    assert_eq!(names(claim_rows), vec!["claim-only".to_string()]);
+        .expect("get claim")
+        .expect("claim row");
+    assert!(claim.task_claim_mode);
+    assert!(!claim.task_dream_mode);
 
-    let dream_rows = repo
-        .list_control_plane_by_task_modes(BotTaskModesQuery {
-            env: "dev".to_string(),
-            task_claim_mode: None,
-            task_dream_mode: Some(true),
-            match_mode: TaskModeMatch::Any,
-        })
+    let dream = repo
+        .get_control_plane("dream-bot", "dev")
         .await
-        .expect("dream filter");
-    assert_eq!(names(dream_rows), vec!["dream-only".to_string()]);
-
-    // Any (OR) -> both enabled bots, exclude idle.
-    let any_rows = repo
-        .list_control_plane_by_task_modes(BotTaskModesQuery {
-            env: "dev".to_string(),
-            task_claim_mode: Some(true),
-            task_dream_mode: Some(true),
-            match_mode: TaskModeMatch::Any,
-        })
-        .await
-        .expect("any filter");
-    assert_eq!(
-        names(any_rows),
-        vec!["claim-only".to_string(), "dream-only".to_string()]
-    );
-
-    // All (AND) -> no bot has both true.
-    let all_rows = repo
-        .list_control_plane_by_task_modes(BotTaskModesQuery {
-            env: "dev".to_string(),
-            task_claim_mode: Some(true),
-            task_dream_mode: Some(true),
-            match_mode: TaskModeMatch::All,
-        })
-        .await
-        .expect("all filter");
-    assert!(all_rows.is_empty());
-
-    // No filters -> returns all physical bots in env.
-    let all_bots = repo
-        .list_control_plane_by_task_modes(BotTaskModesQuery {
-            env: "dev".to_string(),
-            task_claim_mode: None,
-            task_dream_mode: None,
-            match_mode: TaskModeMatch::Any,
-        })
-        .await
-        .expect("roster filter");
-    assert_eq!(
-        names(all_bots),
-        vec![
-            "claim-only".to_string(),
-            "dream-only".to_string(),
-            "idle-bot".to_string()
-        ]
-    );
+        .expect("get dream")
+        .expect("dream row");
+    assert!(!dream.task_claim_mode);
+    assert!(dream.task_dream_mode);
 }

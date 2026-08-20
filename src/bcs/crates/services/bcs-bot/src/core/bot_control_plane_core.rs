@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use bcs_service_api::{
     ActorKind, BotCandidateReadQuery, BotControlPlaneCandidate, BotControlPlaneCoreService,
     BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneProvider,
-    BotControlPlaneRecord, BotControlPlaneRepoPort, BotControlPlaneView, BotTaskModesQuery,
+    BotControlPlaneRecord, BotControlPlaneRepoPort, BotControlPlaneView,
     ProviderBotBindingRepoPort, ProviderRepoPort, ServiceResult,
 };
 
@@ -141,17 +141,6 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         let records = self
             .control_plane
             .list_control_plane_by_creator(query)
-            .await?;
-        self.hydrate(records).await
-    }
-
-    async fn list_by_task_modes(
-        &self,
-        query: BotTaskModesQuery,
-    ) -> ServiceResult<Vec<BotControlPlaneView>> {
-        let records = self
-            .control_plane
-            .list_control_plane_by_task_modes(query)
             .await?;
         self.hydrate(records).await
     }
