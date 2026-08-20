@@ -11,6 +11,7 @@ provides:
   - "SkillSetActivator"
   - "SkillSetSwitcher"
   - "MarketSyncService"
+  - "RepositoryCatalogService"
   - "GitSyncService"
   - "SkillAuthService"
   - "CurrentRuntimeLayoutProbeService"
@@ -18,6 +19,14 @@ provides:
   - "LocalSkillUploadService"
   - "LocalSkillStateService"
   - "LocalSkillDeleteService"
+  - "BotCapabilityMutationGuard"
+  - "BotCapabilityAuthorizationHookProtocol"
+  - "SkillSetControlPlaneService"
+  - "SkillInstallationRepositoryProtocol"
+  - "BotSkillAssetService"
+  - "RuntimeProjectionResolver"
+  - "BotRuntimeProjectionReconciler"
+  - "BotRuntimeProjectionReconcilerProtocol"
   - "LocalSkillCleanupWorkModel"
 consumes:
   - "BotRepository"
@@ -36,11 +45,18 @@ consumes:
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
+  - "BotRuntimeProjectionReconcilerProtocol"
 internal_dependencies:
+  - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service
+  - agentclaw.community.api.space_skill_query_service
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
+  - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skill_set_control_plane
+  - agentclaw.community.core.repository.skill_set_control_plane_types
   - agentclaw.community.core.access
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator
@@ -51,6 +67,7 @@ internal_dependencies:
   - agentclaw.community.core.events
   - agentclaw.community.core.mcp
   - agentclaw.community.core.models
+  - agentclaw.community.core.spaces.services
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.workspace
   - agentclaw.community.di.modules
@@ -63,6 +80,8 @@ internal_dependencies:
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.mcp_center
+  - agentclaw.community.plugin_api.mcp_auth
+  - agentclaw.community.plugin_api.passport
   - agentclaw.community.plugin_api.object_storage
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.skill_center_client
@@ -76,6 +95,44 @@ internal_dependencies:
 ### Change impact
 
 Skill-set switching is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
+
+Local Skill compatibility materializes active state in
+`ac_bot_skill_installation` and reads it through the Installation repository.
+HTTP and runtime adapters must not write that table or reconstruct Local active
+state from Default SkillSet exclusions.
+
+MCP Direct activation and ordinary SkillSet MCP membership share the same
+active-only desired-state and compensation boundary as Skills.  The MCP
+catalogue, user configuration, and permission grant remain separate facts;
+the control plane consults the MCP authorization Service API before any MCP
+membership or Direct-installation write.
+
+`RuntimeProjectionResolver` is the only source of a mutation/restart runtime
+snapshot. It receives Installation, active ordinary SkillSet membership,
+System Default assets and required configuration, then produces a complete
+Local/Repo/Center/MCP/CLI projection. Engine adapters receive that snapshot;
+they do not reconstruct it from Default exclusions or BFF state.
+
+All Direct activation and canonical SkillSet mutations first acquire the
+layout-neutral `BotCapabilityMutationGuard`, keyed by `(tenant, env, entity_id, bot)`.
+It remains held through desired-state writes, runtime projection, and
+compensating restore; the existing `SkillsPoolEditGuard` is additionally held
+only to preserve Pool rollback exclusion. The cache lease uses compare-token
+release and a 600-second TTL. Runtime reconciliation must finish within that
+lease; a process pause beyond the TTL is recovered by the next full reconcile,
+not by treating the expired lease as an ownership proof.
+
+The P1-01 Local migration is a two-step operation: run the read-only
+`sql/2026_08_20_bot_skill_installation_backfill_dry_run.sql`, retain its
+complete result, then explicitly approve and run
+`sql/2026_08_20_bot_skill_installation_backfill_apply.sql` under the same
+Local-writer freeze. Its selector mirrors the legacy rule that *any* matching
+Default exclusion is inactive, including a stale former-default exclusion.
+The apply script leaves its transaction open; source the paired
+`backfill_verify_commit.sql` in that same session and issue `COMMIT` only after
+its missing-installations count is zero (otherwise `ROLLBACK`).
+The audit run id supports exact rollback only while that writer freeze remains
+in effect; see `sql/2026_08_20_bot_skill_installation_backfill_rollback.sql`.
 
 Local Skill replacement stages a complete package before switching the existing
 Skill metadata. Its old-package cleanup work is persisted before an Active

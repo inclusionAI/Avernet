@@ -181,6 +181,7 @@ from .caller import router as caller_router
 from .channels import router as channels_router
 from .containers import router as containers_router
 from .diagnostics import router as diagnostics_router
+from .editors import router as editors_router
 from .deprecated import (
     ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
     GRANT_CHECKED_GROUPS as _LEGACY_GRANT_CHECKED,
@@ -198,23 +199,30 @@ from .engine_runtime.approvals import router as engine_approvals_router
 from .engine_runtime.connection import router as engine_connection_router
 from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
+from .engine_runtime.nodes import router as engine_nodes_router
 from .engine_runtime.sessions import router as engine_sessions_router
 from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
 from .market import router as market_router
 from .mcp import router as mcp_router
+from .mcp.router import bot_mcp_router
 from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
+from .bot_public import router as bot_public_router
 from .resources import router as resources_router
+from .render_screens import router as render_screens_router
+from .repository_catalog import router as repository_catalog_router
 from .routines import router as routines_router
 from .skills import router as skills_router
+from .skill_sets import router as skill_sets_router
 from .service_publications import (
     edit_lock_router as service_edit_lock_router,
     router as service_lifecycle_router,
 )
 from .spaces import router as spaces_router
 from .work_orders import router as work_orders_router
+from .token import caller_identity_router, token_router
 
 # Every public route lives under this prefix. Exported so app-level handlers can
 # tell a public request from an internal one (e.g. to envelope validation errors
@@ -256,6 +264,8 @@ _MIXED_GROUPS = [
 # about which *response table* each gets; it does not change that they all
 # precede `bots`.
 _SUBGROUPS = [
+    token_router,
+    caller_identity_router,
     # Both authorization groups precede `bots` below. `authorized_apps_router`
     # sits *under* `{bot_id}` so path shape already keeps it distinct, but
     # `authorized_bots_router` is a top-level literal and genuinely depends on
@@ -267,12 +277,8 @@ _SUBGROUPS = [
     # owner/collaborator adjudication. Their own route dependency checks an
     # app-only caller's grant against the addressed owner.
     chats_router,
-    # Mixed, like `bots`: its two collection operations declare the grant check
-    # per route, and its four `{skill_id}` operations resolve the bot's owner
-    # from the skill record and check it themselves. A group-level dependency
-    # here would refuse an application holding a valid grant on a *shared* bot,
-    # because it would look the grant up against the delegating user rather than
-    # the owner. See `skills/router.py` and `admission.SKILL_SCOPED_OPERATIONS`.
+    # Every current Skill operation carries the addressed owner at its public
+    # boundary, so collection and item operations share one grant model.
     skills_router,
     # Local workflows are mixed: listings filter grants, device discovery is
     # user-gated, existing Bot operations check the own-Bot grant, and only the
@@ -286,11 +292,19 @@ _SUBGROUPS = [
 # declares it explicitly so the admission rule is visible where the public
 # surface is assembled. FastAPI caches the shared dependency per request.
 _ADDRESSED_BOT_SUBGROUPS = [
+    # Bot grants lend the delegating user's live Bot permissions. Editors and
+    # render screens therefore use the same addressed-owner grant boundary as
+    # the other shared-Bot configuration groups; their services still enforce
+    # the caller's effective Owner/Admin/Member level for each operation.
+    editors_router,
+    render_screens_router,
     service_lifecycle_router,
     service_edit_lock_router,
     containers_router,
     diagnostics_router,
     channels_router,
+    skill_sets_router,
+    bot_mcp_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
@@ -333,6 +347,7 @@ _ENGINE_RUNTIME_GROUPS = [
     engine_sessions_router,
     engine_engine_router,
     engine_models_router,
+    engine_nodes_router,
     engine_approvals_router,
     engine_connection_router,
 ]
@@ -404,6 +419,18 @@ def build_public_router() -> APIRouter:
     public.include_router(
         market_router,
         responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Tenant-identical Bot catalog queries. The catalog has no user dimension,
+    # so it publishes the base error table and admits User or App principals.
+    public.include_router(
+        bot_public_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        repository_catalog_router,
+        responses=USER_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
     for router in _GROUPS_WITHOUT_CALLER_SCOPE + _MIXED_GROUPS:

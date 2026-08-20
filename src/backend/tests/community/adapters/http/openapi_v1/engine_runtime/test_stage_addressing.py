@@ -71,6 +71,7 @@ def _is_engine_runtime(path: str) -> bool:
 #: frozen, so they must not have grown the parameter — which the exclusivity
 #: assertion below is what proves.
 _STAGE_ADDRESSED_ELSEWHERE = {
+    ("post", "/openapi/v1/bots/{bot_id}/caller-identity"),
     ("get", "/openapi/v1/bots/{bot_id}/engine/config"),
     ("put", "/openapi/v1/bots/{bot_id}/engine/config"),
     ("get", "/openapi/v1/bots/{bot_id}/identity"),
@@ -122,6 +123,50 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("patch", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
     ("delete", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
     ("put", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"),
+    ("get", "/openapi/v1/bots/{bot_id}/editors"),
+    ("post", "/openapi/v1/bots/{bot_id}/editors"),
+    ("patch", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/editors/me"),
+    ("get", "/openapi/v1/bots/{bot_id}/render-screens"),
+    ("post", "/openapi/v1/bots/{bot_id}/render-screens"),
+    (
+        "patch",
+        "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}",
+    ),
+    (
+        "delete",
+        "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}",
+    ),
+    # Phase-1 Skill controls are all owner-addressed. The Set and MCP routes
+    # may operate on a collaborator's Bot, so their caller and target owner
+    # cannot be collapsed into one field.
+    ("get", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
+    ("post", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"),
+    ("post", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"),
+    ("get", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content"),
+    ("get", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"),
+    ("put", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"),
+    ("get", "/openapi/v1/bots/{bot_id}/skill-sets"),
+    ("post", "/openapi/v1/bots/{bot_id}/skill-sets"),
+    ("get", "/openapi/v1/bots/{bot_id}/skill-sets/resources"),
+    ("get", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
+    ("put", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
+    ("post", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"),
+    ("post", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/deactivate"),
+    ("get", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills"),
+    ("put", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"),
+    ("get", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps"),
+    ("put", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"),
+    ("delete", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"),
+    ("get", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permissions"),
+    ("post", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permission-requests"),
+    ("get", "/openapi/v1/bots/{bot_id}/mcps"),
+    ("post", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"),
+    ("post", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"),
 }
 
 
@@ -152,6 +197,7 @@ _GROUP_ROUTES = [
     ("sessions", f"/openapi/v1/bots/{BOT}/sessions"),
     ("engine", f"/openapi/v1/bots/{BOT}/engine/capabilities"),
     ("models", f"/openapi/v1/bots/{BOT}/models"),
+    ("nodes", f"/openapi/v1/bots/{BOT}/nodes"),
     ("approvals", f"/openapi/v1/bots/{BOT}/approvals/mode?session_key=k"),
 ]
 
@@ -172,7 +218,9 @@ def test_a_named_stage_travels_to_the_forward_unchanged(
     relay.set_bot_type("service")
     relay.results = [
         EngineResult(
-            data={"supported": [], "sessionKey": "k", "mode": "approve", "id": "s"}
+            data=[]
+            if group == "nodes"
+            else {"supported": [], "sessionKey": "k", "mode": "approve", "id": "s"}
         )
     ]
     client = make_client(module.router)
@@ -297,15 +345,16 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
             # parameter existed.
             assert not params["owner_id"].get("required", False), path
 
-    # 17 current operations. Sixteen also answer at their former addresses
-    # while callers migrate; engine restart was introduced after bot-first
-    # addressing and therefore has no legacy alias.
-    assert len(engine_runtime) == 33
+    # The original 16 operations also answer at their former addresses while
+    # callers migrate. The three newly added favorite operations have only
+    # their bot-first address; engine restart and nodes also have no legacy
+    # alias. That yields 21 current + 16 retiring operations.
+    assert len(engine_runtime) == 37
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (
-        "stage belongs to the engine-runtime operations and the five per-bot "
-        "file operations, and to nothing else by accident — in particular to "
+        "stage belongs to the engine-runtime operations, Caller preparation, "
+        "and the five per-bot file operations, and to nothing else by accident — in particular to "
         "no retiring address of those five, whose contract is frozen"
     )
     assert sorted(carrying_owner) == sorted(
@@ -324,7 +373,7 @@ def test_the_stage_enum_publishes_exactly_the_three_runtimes():
 
 
 def test_neither_parameter_is_ever_a_body_field_or_a_path_segment():
-    """Scoped to the sixteen operations' request bodies and addresses — a
+    """Scoped to the engine-runtime operations' request bodies and addresses — a
     future *response* model elsewhere on the surface may legitimately expose
     an ``owner_id`` or ``stage`` field; the placement rule is about where
     these two request parameters travel."""

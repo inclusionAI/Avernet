@@ -33,6 +33,18 @@ class SpaceRole(_DocumentedEnum):
     }
 
 
+class SkillRole(_DocumentedEnum):
+    """Role held by the current user for one Space Skill."""
+
+    OWNER = "OWNER"
+    MANAGER = "MANAGER"
+
+    __descriptions__ = {
+        "OWNER": "Owns the Skill and may manage its edit grants.",
+        "MANAGER": "May edit the Skill without managing its ownership.",
+    }
+
+
 class SpaceJoinStatus(_DocumentedEnum):
     """Current user's membership state for a Space."""
 
@@ -169,6 +181,50 @@ class SpaceMemberItem(_UtcResponseModel):
             "UTC time when this membership relation was created or its role "
             "was last changed."
         ),
+        json_schema_extra={"format": "date-time"},
+    )
+
+
+class SpaceSkillItem(_UtcResponseModel):
+    """Skill card data owned by one Space."""
+
+    skill_id: str = Field(description="Unique numeric Skill identifier.")
+    skill_uuid: str = Field(description="Stable Skill identity across versions.")
+    name: str = Field(description="Skill name projected from SKILL.md.")
+    description: str | None = Field(
+        default=None, description="Skill description projected from SKILL.md."
+    )
+    status: str | None = Field(
+        default=None, description="Current Skill lifecycle status, when available."
+    )
+    draft_status: str | None = Field(
+        default=None, description="Current draft status, when available."
+    )
+    space_type: SpaceType = Field(
+        description="Whether the Skill belongs to a personal or team Space."
+    )
+    current_user_skill_role: SkillRole | None = Field(
+        default=None,
+        description="Current user's active Skill grant, or null when ungranted.",
+    )
+    can_edit: bool = Field(
+        description="Whether the current user may edit this Skill."
+    )
+    can_grant: bool = Field(
+        description="Whether the current user may grant team Skill edit access."
+    )
+    can_apply_edit: bool = Field(
+        description=(
+            "Whether the current user is eligible to apply for team Skill edit "
+            "access; this does not represent a pending application state."
+        )
+    )
+    gmt_created: datetime = Field(
+        description="UTC time when the Skill was created.",
+        json_schema_extra={"format": "date-time"},
+    )
+    gmt_modified: datetime = Field(
+        description="UTC time when the Skill metadata was last modified.",
         json_schema_extra={"format": "date-time"},
     )
 

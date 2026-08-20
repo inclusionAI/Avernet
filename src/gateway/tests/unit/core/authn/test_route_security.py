@@ -39,6 +39,8 @@ def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
         ("POST", "/openapi/v1/bots/market/skills"),
         ("POST", "/openapi/v1/bots/market/mcp-servers"),
         ("POST", "/openapi/v1/bots/market/skill-center/skills"),
+        ("GET", "/openapi/v1/bots/catalog/search"),
+        ("GET", "/openapi/v1/bots/catalog/discover"),
     ],
 )
 def test_shipped_config_admits_app_only_market_queries(method: str, path: str) -> None:
@@ -70,6 +72,9 @@ _HUMAN_ONLY = [
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites"),
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/cancel"),
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/search"),
+    ("GET", "/openapi/v1/bots/spaces/1/skills"),
+    ("GET", "/openapi/v1/org/user/iam-token"),
+    ("POST", "/openapi/v1/bots/bot-123/caller-identity"),
     ("POST", "/openapi/v1/bots"),
     ("POST", "/openapi/v1/bots/local"),
     ("GET", "/openapi/v1/bots/bot-123/local/auth-status"),
@@ -105,6 +110,25 @@ def test_shipped_config_still_requires_a_user_where_a_human_is_required(
     assert req[PrincipalType.USER] is Presence.REQUIRED, (method, path)
 
 
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/openapi/v1/org/user/iam-token"),
+        ("POST", "/openapi/v1/bots/bot-123/caller-identity"),
+    ],
+)
+def test_iam_operations_do_not_resolve_an_app_identity(
+    method: str, path: str
+) -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    req = RouteSecurity.from_table(raw["user_config"]["route_security"]).resolve(
+        method, path
+    )
+
+    assert req is not None
+    assert req == {PrincipalType.USER: Presence.REQUIRED}
+
+
 def test_shipped_config_lets_an_application_discover_its_own_scope() -> None:
     """The one operation an integration calls before it can call anything else.
 
@@ -120,6 +144,33 @@ def test_shipped_config_lets_an_application_discover_its_own_scope() -> None:
     assert req is not None
     assert req[PrincipalType.USER] is Presence.OPTIONAL
     assert req[PrincipalType.APP] is Presence.REQUIRED
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/openapi/v1/bots/bot-123/editors"),
+        ("POST", "/openapi/v1/bots/bot-123/editors"),
+        ("PATCH", "/openapi/v1/bots/bot-123/editors/7"),
+        ("DELETE", "/openapi/v1/bots/bot-123/editors/7"),
+        ("DELETE", "/openapi/v1/bots/bot-123/editors/me"),
+        ("GET", "/openapi/v1/bots/bot-123/render-screens"),
+        ("POST", "/openapi/v1/bots/bot-123/render-screens"),
+        ("PATCH", "/openapi/v1/bots/bot-123/render-screens/7"),
+        ("DELETE", "/openapi/v1/bots/bot-123/render-screens/7"),
+    ],
+)
+def test_shipped_config_allows_app_identity_for_bot_configuration(
+    method: str, path: str
+) -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    req = rs.resolve(method, path)
+
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.OPTIONAL
+    assert req[PrincipalType.APP] is Presence.OPTIONAL
 
 
 _SOCKET_PATH = "/openapi/v1/bots/messages/ws/ARCA_x@0:20003/api/openclaw/ws"

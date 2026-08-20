@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal, NotRequired, TypedDict
 
 
@@ -83,3 +84,36 @@ class SpaceSkillCreationRecord(TypedDict):
     skill: SpaceSkillIdentityRecord
     ownership: SpaceSkillOwnershipRecord
     owner_grant: SpaceSkillGrantRecord
+
+
+class SpaceSkillQueryRecord(TypedDict):
+    """Persistence projection for a Space-owned Skill and actor grant."""
+
+    id: int
+    skill_uuid: str
+    name: str
+    description: str | None
+    status: str | None
+    draft_status: str | None
+    space_type: Literal["PERSONAL", "TEAM"]
+    current_user_skill_role: Literal["OWNER", "MANAGER"] | None
+    gmt_created: datetime
+    gmt_modified: datetime
+
+
+class SpaceSkillSummaryRecord(TypedDict):
+    """Service projection containing explicit UI authorization decisions."""
+
+    id: int
+    skill_uuid: str
+    name: str
+    description: str | None
+    status: str | None
+    draft_status: str | None
+    space_type: Literal["PERSONAL", "TEAM"]
+    current_user_skill_role: Literal["OWNER", "MANAGER"] | None
+    gmt_created: datetime
+    gmt_modified: datetime
+    can_edit: bool
+    can_grant: bool
+    can_apply_edit: bool

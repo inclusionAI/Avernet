@@ -19,7 +19,7 @@ class BotInventoryServiceProtocol(Protocol):
         self,
         *,
         owner_id: str,
-        space: BusinessSpaceRef | None,
+        space: BusinessSpaceRef,
         keyword: str | None,
         engine: str | None,
         deploy_mode: DeployMode | None,

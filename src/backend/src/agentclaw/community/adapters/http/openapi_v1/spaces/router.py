@@ -43,6 +43,7 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     SpaceMemberDeletedResult,
     SpaceMemberItem,
     SpaceMemberMutationResult,
+    SpaceSkillItem,
     UpdateSpaceMemberRoleRequest,
 )
 from agentclaw.community.api.market_favorite_service import (
@@ -51,6 +52,9 @@ from agentclaw.community.api.market_favorite_service import (
 from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
+)
+from agentclaw.community.api.space_skill_query_service import (
+    SpaceSkillQueryServiceProtocol,
 )
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType as DomainFavoriteTargetType,
@@ -62,6 +66,9 @@ from agentclaw.community.core.spaces.models import (
     SpaceRole as DomainSpaceRole,
     SpaceSummaryRecord,
     SpaceType as DomainSpaceType,
+)
+from agentclaw.community.core.repository.protocols.skill_center_types import (
+    SpaceSkillSummaryRecord,
 )
 from agentclaw.community.di import Injected
 
@@ -131,6 +138,24 @@ def _favorite_item(record: MarketFavoriteRecord) -> MarketFavoriteItem:
         target_type=record.target_type,
         target_code=record.target_code,
         favorite_at=record.gmt_created,
+    )
+
+
+def _space_skill_item(record: SpaceSkillSummaryRecord) -> SpaceSkillItem:
+    return SpaceSkillItem(
+        skill_id=str(record["id"]),
+        skill_uuid=record["skill_uuid"],
+        name=record["name"],
+        description=record["description"],
+        status=record["status"],
+        draft_status=record["draft_status"],
+        space_type=record["space_type"],
+        current_user_skill_role=record["current_user_skill_role"],
+        can_edit=record["can_edit"],
+        can_grant=record["can_grant"],
+        can_apply_edit=record["can_apply_edit"],
+        gmt_created=record["gmt_created"],
+        gmt_modified=record["gmt_modified"],
     )
 
 
@@ -221,6 +246,39 @@ async def list_space_members(
         page_size=page_size,
     )
     return page(total, [_member_item(record) for record in records], request)
+
+
+@router.get(
+    "/{space_id}/skills",
+    response_model=Envelope[Page[SpaceSkillItem]],
+)
+@envelope_errors
+async def list_space_skills(
+    request: Request,
+    caller: ActingCallerDep,
+    space_id: SpaceIdPath,
+    keyword: Annotated[
+        str | None,
+        Query(
+            max_length=128,
+            description="Optional Skill-name or description search text.",
+        ),
+    ] = None,
+    page_no: PageNoQuery = 1,
+    page_size: PageSizeQuery = 20,
+    service: SpaceSkillQueryServiceProtocol = Injected(
+        SpaceSkillQueryServiceProtocol
+    ),
+) -> Envelope[Page[SpaceSkillItem]]:
+    actor_id = _require_user_delegation(caller)
+    total, records = service.list_space_skills(
+        space_id=space_id,
+        actor_id=actor_id,
+        keyword=keyword,
+        page_no=page_no,
+        page_size=page_size,
+    )
+    return page(total, [_space_skill_item(record) for record in records], request)
 
 
 @router.post(

@@ -45,10 +45,15 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
-    GrantNotResolvableError,
+    CallerIdentityConflictError,
+    CallerIdentityForbiddenError,
+    CallerIdentityInvalidError,
+    CallerIdentityOpenApiError,
     ClusterMismatchError,
-    StartupScriptUnsupportedError,
+    GrantNotResolvableError,
+    IamTokenUnavailableError,
     MissingPrincipalError,
+    StartupScriptUnsupportedError,
     UnsupportedEngineError,
     UserIdMismatchError,
 )
@@ -66,6 +71,16 @@ from agentclaw.community.core.bot_app_grant.errors import (
     GrantNotFoundError,
     GrantOwnerConflictError,
 )
+from agentclaw.community.core.bot_collaborator.errors import (
+    BotNotFoundError as CollaboratorBotNotFoundError,
+    BotNotServiceTypeError,
+    CannotRemoveSelfError,
+    CollaboratorAlreadyExistsError,
+    CollaboratorNotFoundError,
+    CollaboratorSpaceMembershipError,
+    InvalidCollaboratorRoleError,
+    PermissionDeniedError as CollaboratorPermissionDeniedError,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
     BotLimitExceededError,
@@ -81,6 +96,10 @@ from agentclaw.community.core.channel.errors import (
     ChannelEditLockedError,
     ChannelNotFoundError,
     ChannelSyncError,
+)
+from agentclaw.community.core.bot_management.render_screen.errors import (
+    RenderScreenConflictError,
+    RenderScreenNotFoundError,
 )
 from agentclaw.community.core.bot_chat.errors import (
     InvalidBotLogQueryError,
@@ -174,6 +193,20 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillOwnerAmbiguousError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
+    RepositoryCatalogNotFoundError,
+    RepositoryCatalogSyncFailedError,
+    RepositoryCatalogSyncInProgressError,
+    SkillEngineNotSupportedError,
+    SkillManagedBySkillSetError,
+    SkillParameterValidationError,
+    SkillRuntimeNameConflictError,
+    SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneLockUnavailableError,
+    SkillSetControlPlaneNotFoundError,
+    SkillSetRuntimeReconcileError,
+    SkillSetManagedResourceError,
+    SkillSetAccessDeniedError,
+    McpPermissionDeniedError,
     LocalSkillTooLargeError,
 )
 from agentclaw.community.core.services.identity import (
@@ -255,6 +288,11 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # (b) the two 404-mapped errors are byte-for-byte identical — a caller cannot
 # tell "exists but not yours/other tenant" from "does not exist".
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
+    IamTokenUnavailableError: (401, "IAM credential is unavailable"),
+    CallerIdentityInvalidError: (400, "Invalid Caller identity request"),
+    CallerIdentityForbiddenError: (403, "Forbidden"),
+    CallerIdentityConflictError: (409, "Caller identity target is ambiguous"),
+    CallerIdentityOpenApiError: (502, "Caller identity operation failed"),
     MissingPrincipalError: (401, "Unauthorized"),
     # Byte-identical to the line above, deliberately. "You sent no principal" and
     # "your principal did not verify" must be indistinguishable, or the response
@@ -350,6 +388,19 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         409,
         "Another authorization for this bot id is already live",
     ),
+    CollaboratorBotNotFoundError: (404, "Not found"),
+    CollaboratorPermissionDeniedError: (404, "Not found"),
+    CollaboratorNotFoundError: (404, "Not found"),
+    CollaboratorAlreadyExistsError: (409, "Editor already exists"),
+    CannotRemoveSelfError: (409, "Use the leave operation to remove yourself"),
+    BotNotServiceTypeError: (409, "Editors are not supported for this bot"),
+    InvalidCollaboratorRoleError: (400, "Invalid editor role"),
+    CollaboratorSpaceMembershipError: (
+        409,
+        "Editor must be a member of the Bot Team Space",
+    ),
+    RenderScreenNotFoundError: (404, "Not found"),
+    RenderScreenConflictError: (409, "Render-screen mapping already exists"),
     BotPermissionError: (404, "Not found"),
     ServiceContainerNotFoundError: (404, "Not found"),
     ServiceContainerConflictError: (
@@ -419,6 +470,19 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # rejection into a probe for how addresses are resolved.
     InvalidResourcePathError: (400, "Invalid resource path"),
     LocalSkillNotFoundError: (404, "Not found"),
+    SkillSetControlPlaneNotFoundError: (404, "Not found"),
+    SkillSetAccessDeniedError: (403, "Forbidden"),
+    McpPermissionDeniedError: (403, "Forbidden"),
+    SkillSetControlPlaneConflictError: (
+        409,
+        "SkillSet state conflicts with this operation",
+    ),
+    SkillSetControlPlaneLockUnavailableError: (
+        503,
+        "SkillSet mutation service is temporarily unavailable",
+    ),
+    SkillSetRuntimeReconcileError: (502, "Skill runtime synchronization failed"),
+    SkillSetManagedResourceError: (409, "Skill is managed by a SkillSet"),
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
     LocalSkillNotReadyError: (409, "Bot is not ready"),
@@ -426,6 +490,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillDuplicateError: (409, "Local Skill already exists"),
     LocalSkillTooLargeError: (413, "Skill package is too large"),
     LocalSkillStorageError: (502, "Skill storage operation failed"),
+    SkillParameterValidationError: (422, "Skill parameters are invalid"),
     LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
     LocalSkillEditBusyError: (409, "Another Skill update is in progress"),
     LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
@@ -434,6 +499,12 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Skill update service is temporarily unavailable",
     ),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
+    SkillManagedBySkillSetError: (409, "Skill is managed by a SkillSet"),
+    SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with an active Skill"),
+    SkillEngineNotSupportedError: (409, "Skill is not supported by this bot type and engine"),
+    RepositoryCatalogNotFoundError: (404, "Not found"),
+    RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
+    RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
     # caller learns the limit instead of hitting it inside a container. The
@@ -580,7 +651,28 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillDuplicateError: 409103,
     LocalSkillTooLargeError: 413101,
     LocalSkillStorageError: 502101,
+    SkillParameterValidationError: 422101,
     LocalSkillRuntimeSyncError: 502102,
+    SkillManagedBySkillSetError: 409105,
+    SkillRuntimeNameConflictError: 409106,
+    SkillEngineNotSupportedError: 409107,
+    RepositoryCatalogSyncInProgressError: 409108,
+    RepositoryCatalogSyncFailedError: 502103,
+    SkillSetManagedResourceError: 409202,
+    SkillSetControlPlaneLockUnavailableError: 503201,
+    SkillSetAccessDeniedError: 403201,
+    McpPermissionDeniedError: 403202,
+}
+
+_SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
+    "RESOURCE_DIRECT_ACTIVE": (409201, "Resource is directly active"),
+    "RESOURCE_MANAGED_BY_SKILL_SET": (409202, "Resource is managed by a SkillSet"),
+    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": (409203, "Resource belongs to another SkillSet"),
+    "SYSTEM_DEFAULT_IMMUTABLE": (409204, "System Default SkillSet is immutable"),
+    "SKILL_SET_ACTIVE": (409205, "Active SkillSet cannot be deleted"),
+    "SKILL_SET_NAME_CONFLICT": (409206, "SkillSet name already exists"),
+    "IDEMPOTENCY_KEY_REUSED": (409207, "Idempotency key was reused with a different request"),
+    "BOT_MUTATION_BUSY": (409208, "Another SkillSet mutation is in progress"),
 }
 
 
@@ -751,6 +843,11 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
     Returns on the first ``isinstance`` match in insertion order, so a specific
     leaf listed before its base class still wins.
     """
+    if isinstance(exc, SkillSetControlPlaneConflictError):
+        code, message = _SKILL_SET_CONFLICT_CODES.get(
+            str(exc), (409000, "SkillSet state conflicts with this operation")
+        )
+        return _error_response(409, message, request, code=code)
     for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
         if isinstance(exc, error_type):
             return _error_response(

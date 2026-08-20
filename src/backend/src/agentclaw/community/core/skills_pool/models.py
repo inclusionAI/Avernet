@@ -35,6 +35,7 @@ class RegisteredSkillAsset:
     git_path: str
     skill_uuid: str | None = None
     sc_version_number: str | None = None
+    mcp_dependencies: tuple[object, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -13,6 +13,8 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterMarketSearchRequest,
     SkillCenterTeamCreateError,
     SkillCenterTeamCreateRequest,
+    SkillCenterTeamQueryError,
+    SkillCenterTeamQueryRequest,
 )
 from agentclaw.community.plugins.community.skill_center_client import (
     CommunitySkillCenterClient,
@@ -32,6 +34,12 @@ def test_create_team_raises_stable_sync_error():
     )
     with pytest.raises(SkillCenterTeamCreateError):
         _client().create_team(request)
+
+
+def test_get_team_by_ref_source_raises_stable_query_error():
+    request = SkillCenterTeamQueryRequest(source="OCB", ref_source_id="7")
+    with pytest.raises(SkillCenterTeamQueryError):
+        _client().get_team_by_ref_source(request)
 
 
 def test_upload_and_publish_raises():

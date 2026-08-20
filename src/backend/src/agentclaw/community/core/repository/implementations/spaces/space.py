@@ -155,6 +155,46 @@ class SpaceRepository(SpaceRepositoryProtocol):
             )
             return row.to_record() if row is not None else None
 
+    def backfill_sc_team_id(self, *, space_id: int, env: str, sc_team_id: str) -> bool:
+        """Fill a missing SC Team id without overwriting a concurrent repair.
+
+        The predicates deliberately repeat all repair invariants at write time:
+        only a live TEAM Space in the requested environment with no established
+        binding can be updated. Database failures propagate to the caller.
+        """
+        with self._db.transactional_orm_session() as db:
+            updated = (
+                db.query(self._Space)
+                .filter(
+                    self._Space.id == space_id,
+                    self._Space.env == env,
+                    self._Space.space_type == SpaceType.TEAM.value,
+                    self._Space.deleted_at.is_(None),
+                    self._Space.sc_team_id.is_(None),
+                )
+                .update(
+                    {
+                        self._Space.sc_team_id: sc_team_id,
+                        self._Space.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+            return updated == 1
+
+    def get_space_by_code(self, *, space_code: str, env: str):
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self._Space)
+                .filter(
+                    self._Space.space_code == space_code,
+                    self._Space.env == env,
+                    self._Space.deleted_at.is_(None),
+                )
+                .one_or_none()
+            )
+            return row.to_record() if row is not None else None
+
     def batch_query_personal(
         self, *, user_ids: list[str], env: str
     ) -> list[PersonalSpaceLookupRecord]:

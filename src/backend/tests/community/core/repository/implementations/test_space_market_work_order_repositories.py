@@ -1,6 +1,7 @@
 """SQLite-backed unit tests for the new unified ORM repositories."""
 
 import asyncio
+from datetime import datetime
 
 import pytest
 
@@ -88,6 +89,8 @@ def test_space_repository_full_member_lifecycle(db) -> None:
         == "sc-Team-owner-1"
     )
     assert repository.get_space(space_id=999, env="dev") is None
+    assert repository.get_space_by_code(space_code=team.space_code, env="dev") == team
+    assert repository.get_space_by_code(space_code="missing", env="dev") is None
 
     other_env_personal, _ = repository.initialize_personal(
         user_id="user-other-env", env="pre"
@@ -657,3 +660,107 @@ def test_badge_counts_distinct_pending_work_orders(db) -> None:
     assert summary.unread_count == 2
     assert summary.pending_approval_count == 1
     assert summary.badge_count == 1
+
+
+def test_space_repository_backfills_only_live_unbound_team_in_same_env(db) -> None:
+    repository = SpaceRepository(db)
+    target = SpaceModel(
+        space_code="spc-repair-target",
+        space_type=SpaceType.TEAM.value,
+        name="Repair Target",
+        personal_owner_id=None,
+        sc_team_id=None,
+        env="dev",
+        created_by="owner",
+        updated_by="owner",
+    )
+    personal = SpaceModel(
+        space_code="spc-repair-personal",
+        space_type=SpaceType.PERSONAL.value,
+        name="Personal",
+        personal_owner_id="personal-owner",
+        sc_team_id=None,
+        env="dev",
+        created_by="personal-owner",
+        updated_by="personal-owner",
+    )
+    already_bound = SpaceModel(
+        space_code="spc-repair-bound",
+        space_type=SpaceType.TEAM.value,
+        name="Already Bound",
+        personal_owner_id=None,
+        sc_team_id="existing-team",
+        env="dev",
+        created_by="owner",
+        updated_by="owner",
+    )
+    deleted = SpaceModel(
+        space_code="spc-repair-deleted",
+        space_type=SpaceType.TEAM.value,
+        name="Deleted",
+        personal_owner_id=None,
+        sc_team_id=None,
+        env="dev",
+        created_by="owner",
+        updated_by="owner",
+        deleted_at=datetime(2026, 8, 20, 10, 0),
+    )
+    with db.orm_session() as session:
+        session.add_all([target, personal, already_bound, deleted])
+        session.flush()
+        session.refresh(target)
+        session.refresh(personal)
+        session.refresh(already_bound)
+        session.refresh(deleted)
+        ids = {
+            "target": target.id,
+            "personal": personal.id,
+            "bound": already_bound.id,
+            "deleted": deleted.id,
+        }
+
+    assert (
+        repository.backfill_sc_team_id(
+            space_id=ids["target"], env="pre", sc_team_id="wrong-env"
+        )
+        is False
+    )
+    assert (
+        repository.backfill_sc_team_id(
+            space_id=ids["personal"], env="dev", sc_team_id="personal-team"
+        )
+        is False
+    )
+    assert (
+        repository.backfill_sc_team_id(
+            space_id=ids["bound"], env="dev", sc_team_id="replacement-team"
+        )
+        is False
+    )
+    assert (
+        repository.backfill_sc_team_id(
+            space_id=ids["deleted"], env="dev", sc_team_id="deleted-team"
+        )
+        is False
+    )
+    assert (
+        repository.backfill_sc_team_id(
+            space_id=ids["target"], env="dev", sc_team_id="repaired-team"
+        )
+        is True
+    )
+    assert (
+        repository.backfill_sc_team_id(
+            space_id=ids["target"], env="dev", sc_team_id="second-team"
+        )
+        is False
+    )
+
+    assert repository.get_space(space_id=ids["target"], env="dev").sc_team_id == (
+        "repaired-team"
+    )
+    assert repository.get_space(space_id=ids["bound"], env="dev").sc_team_id == (
+        "existing-team"
+    )
+    assert repository.get_space(space_id=ids["personal"], env="dev").sc_team_id is None
+    assert repository.get_space(space_id=ids["deleted"], env="dev") is None

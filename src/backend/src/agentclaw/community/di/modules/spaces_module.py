@@ -8,9 +8,12 @@ from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
 )
 from agentclaw.community.api.space_service import (
-    SpaceAccessServiceProtocol,
+    SpaceAccessServiceProtocol as SpaceAccessServiceApiProtocol,
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
+)
+from agentclaw.community.api.space_skill_query_service import (
+    SpaceSkillQueryServiceProtocol,
 )
 from agentclaw.community.core.bot_management.bot_space import (
     BotSpaceAccessProtocol,
@@ -29,6 +32,12 @@ from agentclaw.community.core.spaces.services import (
     SpaceMemberService,
     SpaceService,
 )
+from agentclaw.community.core.skill_center.services.space_skill_query_service import (
+    SpaceSkillQueryService,
+)
+from agentclaw.community.core.spaces.protocols import (
+    SpaceAccessServiceProtocol as CoreSpaceAccessServiceProtocol,
+)
 
 
 class SpacesModule(Module):
@@ -46,12 +55,22 @@ class SpacesModule(Module):
             scope=singleton,
         )
         binder.bind(
-            SpaceAccessServiceProtocol,
+            SpaceAccessServiceApiProtocol,
+            to=SpaceAccessService,
+            scope=singleton,
+        )
+        binder.bind(
+            CoreSpaceAccessServiceProtocol,
             to=SpaceAccessService,
             scope=singleton,
         )
         binder.bind(SpaceServiceProtocol, to=SpaceService, scope=singleton)
         binder.bind(SpaceMemberServiceProtocol, to=SpaceMemberService, scope=singleton)
+        binder.bind(
+            SpaceSkillQueryServiceProtocol,
+            to=SpaceSkillQueryService,
+            scope=singleton,
+        )
         binder.bind(
             MarketFavoriteServiceProtocol,
             to=MarketFavoriteService,

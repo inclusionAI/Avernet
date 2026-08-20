@@ -18,6 +18,7 @@ from .skill_center_types import (
     SpaceSkillCreationRecord,
     SpaceSkillOwnerGrantData,
     SpaceSkillOwnershipData,
+    SpaceSkillQueryRecord,
 )
 
 
@@ -42,6 +43,20 @@ class SpaceSkillRepository(Protocol):
         owner_grant_data: SpaceSkillOwnerGrantData,
     ) -> SpaceSkillCreationRecord:
         """Atomically persist the initial identity, ownership and owner grant."""
+        ...
+
+    @abstractmethod
+    def list_space_skills(
+        self,
+        *,
+        space_id: int,
+        actor_id: str,
+        env: str,
+        keyword: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[int, list[SpaceSkillQueryRecord]]:
+        """Return a stable, database-paginated Space Skill projection."""
         ...
 
 
@@ -117,6 +132,11 @@ class SkillRepository(Protocol):
         self, *, skill_id: str, bot_id: str, user_id: str
     ) -> dict | None:
         """Return one exact Bot-owned ``local://`` Skill with desired state."""
+        ...
+
+    @abstractmethod
+    def list_bot_installed_skills(self, *, env: str, bot_id: str) -> list[dict]:
+        """Return active-only Installation assets for one Bot."""
         ...
 
     @abstractmethod

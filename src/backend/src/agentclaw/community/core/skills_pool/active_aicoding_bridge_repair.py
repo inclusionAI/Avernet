@@ -48,7 +48,8 @@ async def request_active_aicoding_bridge_repair(
     state: BotSkillLayoutState,
     bot_id: str,
     user_id: str,
-    engine: str,
+    logical_engine: str,
+    layout_engine: str,
     initial_probe: RuntimeLayoutProbeResult,
 ) -> ActiveAICodingBridgeRepairResult:
     """Ask the Engine to repair only a bridge it can prove is trusted.
@@ -82,7 +83,7 @@ async def request_active_aicoding_bridge_repair(
                 env=scope.env,
                 bot_id=scope.bot_id,
                 user_id=user_id,
-                engine=engine,
+                engine=logical_engine,
             )
         )
     except ValueError as error:
@@ -114,7 +115,7 @@ async def request_active_aicoding_bridge_repair(
     refreshed_probe = await runtime.probe(
         bot_id=bot_id,
         user_id=user_id,
-        engine=engine,
+        engine=layout_engine,
     )
     if refreshed_probe.status is not RuntimeLayoutProbeStatus.READY:
         return ActiveAICodingBridgeRepairResult(
@@ -131,7 +132,7 @@ async def request_active_aicoding_bridge_repair(
             probe_status=refreshed_probe.status,
         )
     if (
-        refreshed_probe.engine != engine
+        refreshed_probe.engine != layout_engine
         or refreshed_probe.preparation_id is None
         or refreshed_probe.preparation_id != state.preparation_id
         or refreshed_probe.layout_contract_version != state.layout_contract_version

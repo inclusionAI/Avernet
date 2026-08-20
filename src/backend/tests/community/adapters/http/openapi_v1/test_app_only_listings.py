@@ -51,6 +51,9 @@ from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
+from agentclaw.community.api.space_skill_query_service import (
+    SpaceSkillQueryServiceProtocol,
+)
 from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
     WorkOrderServiceProtocol,
@@ -216,6 +219,7 @@ def make_client(bots):
                 unexpected = _UnexpectedService()
                 binder.bind(SpaceServiceProtocol, to=unexpected)
                 binder.bind(SpaceMemberServiceProtocol, to=unexpected)
+                binder.bind(SpaceSkillQueryServiceProtocol, to=unexpected)
                 binder.bind(MarketFavoriteServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderNotificationServiceProtocol, to=unexpected)
@@ -587,6 +591,24 @@ def test_the_name_check_needs_no_delegation(make_client):
 #: *nothing*, and what the empty answer must look like. `assert_starved` gets
 #: the response; it must assert the app learned nothing.
 _UNGRANTED_APP_CASES = {
+    ("GET", "/openapi/v1/bots/skills/repository"): {
+        "request": lambda client: client.get("/openapi/v1/bots/skills/repository"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/skills/repository/tree"): {
+        "request": lambda client: client.get("/openapi/v1/bots/skills/repository/tree"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/skills/repository/{skill_id}"): {
+        "request": lambda client: client.get("/openapi/v1/bots/skills/repository/1"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/skills/repository/sync"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/skills/repository/sync"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("GET", "/openapi/v1/bots"): {
         "request": lambda client: client.get("/openapi/v1/bots"),
         "assert_starved": lambda response: (
@@ -633,6 +655,10 @@ _UNGRANTED_APP_CASES = {
     },
     ("GET", "/openapi/v1/bots/spaces/{space_id}/members"): {
         "request": lambda client: client.get("/openapi/v1/bots/spaces/1/members"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): {
+        "request": lambda client: client.get("/openapi/v1/bots/spaces/1/skills"),
         "assert_starved": lambda response: response.status_code == 404,
     },
     ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites"): {

@@ -24,6 +24,9 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 **[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**
 （[English](engine-surface.md)）。本 README 仍是唯一的状态看板；清单在那个文件里。
 
+前端接入会话收藏能力时，请参考
+**[`session-favorites.zh-CN.md`](session-favorites.zh-CN.md)**。
+
 ---
 
 ## 全局视角（请先读这一节）
@@ -57,7 +60,8 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
   详见其看板行。
 - **Track C —— Engine（运行时）面。** _2026-07-30 新增。_ 把 engine adapter 面向
   客户端的 HTTP 包装到 `/openapi/v1/bots/<component>/{bot_id}/…` 之下，并用一个净化过的
-  socket 信息端点取代 `get_device_connection` 的移交。**16 个端点 —— 已实现，PR #630。**
+  socket 信息端点取代 `get_device_connection` 的移交。**当前六组共 18 个端点，均已实现**
+  （PR #630 为基线，后续增加 engine restart 与只读 nodes）。
 
 > ⚠️ **唯一需要避免的误解：** "隔离 Stage N 已完成"**并不**意味着任何 API 端点被实现了。
 > Track A 的每个阶段都只是底层管道（可复用机制 + 该类别的记录）。API 端点落在
@@ -129,6 +133,7 @@ _按优先级分层排序。_
 | 类别 | 负责人 | 优先级 | 路由 | 状态 | 依赖 |
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE —— PR #494 已于 2026-07-29 合并**（13/13 端点） | ~~Track A 阶段 1~~ ✅ |
+| token / caller identity | liaoxianhao | P1 | `openapi_v1/token/router.py` | 🔧 IN PROGRESS —— 两种能力已迁移，待 OCB Gateway SOFA 配置同步 | 用户 Principal + 浏览器 HttpOnly `IAM_TOKEN` Cookie |
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE —— PR #610**（6/6 端点） | ~~Track A 阶段 5~~ ✅（PR #564） |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0)，Track B 全 7 端点接通 stub→service，仅文件、按路径寻址；待 auth workstream(gateway principal seam) 落地 + DDL 部署后才可对外 |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 NOT PUBLIC-READY | Track A routines 无表靠 ac_bots 间接隔离；Track B 7 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
@@ -136,7 +141,7 @@ _按优先级分层排序。_
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS（PARTIAL）— 3 handler 全接通但 NOT PUBLIC-READY | bots 隔离（Stage 1 ✅）；Track B 3 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | 🔧 **实现 + CI 完成；发布待定**——六个已定案 Local Skill 操作 | #725 cleanup-work DDL 必须先于代码部署；[预发验收 runbook](skills-track-b-preprod-acceptance.md) 仍为 **PRE-PROD PENDING** |
 
-### Track C —— Engine（运行时）面（5 组已全部实现 —— PR #630）
+### Track C —— Engine（运行时）面（6 组已全部实现）
 _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶段，没有 DDL。
 完整裁定与逐端点映射见
 **[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**。_
@@ -148,12 +153,15 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 | connection | 1 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **已实现 —— PR #630** |
 | approvals | 3 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **已实现 —— PR #630** |
 | models | 2 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/models/` | ✅ **已实现 —— PR #630** |
+| nodes | 1 | joseph | P2 | `openapi_v1/engine_runtime/nodes/` | ✅ **已实现 —— 2026-08-19**；只读列表，与当前前端保持一致 |
 
 > **范围规则（为什么只有这些）。** 只包装前端经 proxypass **直连**的 engine HTTP
 > （`src/frontend/src/requestConfig.ts:189-205`）。前端**经由后端**触达的 engine
 > 路由 —— `/api/cron`（已经是 `routines` 类别）、`/api/file`、`/api/skills`、
 > `/api/mcp`、`/api/resource-materializations`、`/api/bash`、`/api/bot/config`、
 > `/api/work-items` —— 已经有后端契约在其之上，不纳入。仅 aicoding 的路由不纳入。
+> 当前前端直连的只读 `/api/nodes` 清单纳入；前端与 Engine HTTP 目前都没有节点写操作，
+> 因此不扩展注册、解绑或状态写入。
 > **WebSocket 不包装**：新的 `…/connection` 端点返回一条完整的 socket URL（凭据在其中），
 > 由调用方自己建连。
 >
@@ -617,9 +625,9 @@ GET /openapi/v1/bots/b-1/connection?user_id=u-collab&owner_id=u-owner&stage=veri
 skills 组的 `owner_entity_id` 定位参数早于 `owner_id`；已于 2026-08-15 随 Agent 在前的
 寻址统一为 `owner_id`，待退役的 skills 旧地址仍发布旧参数名（spec 未决问题 1，已关闭）。
 
-`tests/…/openapi_v1/engine_runtime/test_operator_access.py` 对全部十六个操作扫掠
-运维者矩阵；`…/test_stage_addressing.py` 钉住阶段行为并断言两个参数恰好出现在这
-十六个操作上、可选、位于 query；`tests/community/core/engine_runtime/test_stage.py`
+`tests/…/openapi_v1/engine_runtime/test_operator_access.py` 对共享扫描覆盖的运行时操作扫掠
+运维者矩阵；`…/test_stage_addressing.py` 钉住阶段行为并断言两个参数恰好出现在所有
+运行时操作上、可选、位于 query；`tests/community/core/engine_runtime/test_stage.py`
 钉住存活规则。
 
 ---
@@ -970,7 +978,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 > 不写数据 —— 但在本面上任何 socket 路由开始接触数据之前，这是第一件要修的事：在默认
 > 租户下执行按租户收敛的读取是数据隔离故障，而不只是少了一行日志。
 
-### ⬜ 未分配 · Track C —— engine 运行时（16 个端点）
+### ⬜ 未分配 · Track C —— engine 运行时（21 个端点）
 这不是一个 Track B 类别 —— 它们包装的是 Bot 设备上的 **engine adapter**，
 而不是某个后端服务。逐端点清单、每个端点对应的 engine 路由，以及那约 72 条
 *不*包装的 engine 路由的裁定，都在
@@ -978,9 +986,10 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 | 组 | 端点数 | 公共路径 |
 |---|---|---|
-| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` —— 拥有者/协作者运维 |
-| engine | 3 | `/openapi/v1/bots/{bot_id}/engine/{status,capabilities,available}` |
+| sessions | 10 | `/openapi/v1/bots/{bot_id}/sessions…` —— 拥有者/协作者运维，含收藏 |
+| engine | 4 | `/openapi/v1/bots/{bot_id}/engine/{status,capabilities,available,restart}` |
 | models | 2 | `/openapi/v1/bots/{bot_id}/models`、`…/models/{model_id}` |
+| nodes | 1 | `/openapi/v1/bots/{bot_id}/nodes` —— 只读节点清单 |
 | approvals | 3 | `/openapi/v1/bots/{bot_id}/approvals/mode`（GET/PUT）、`…/modes` |
 | connection | 1 | `/openapi/v1/bots/{bot_id}/connection` —— 完整 WS URL，取代 `get_device_connection` |
 
@@ -1004,10 +1013,10 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 7. **跨租户的外部身份问题已定案（[#556](https://github.com/inclusionAI/Avernet/issues/556)）** —— Passport、授权关系与 BCN 都带上
    租户维度，从而可以在公共路径上重新打开 BCN 同步。—— _⬜（2026-07-29 新增；它是开启
    多租户的前置闸口）。_
-8. **Track C：** 五个 engine 运行时组（16 个端点）均已实现、按 owner 收敛且能力感知，
+8. **Track C：** 六个 engine 运行时组（18 个端点）均已实现、按 owner 收敛且能力感知，
    并且 `…/connection` 返回 socket URL，使任何外部调用方都看不到 proxypass target
-   或裸设备 token。—— _✅ 5 组全部完成（PR #630）。与其它类别一样，在第 6 项落地
-   之前一律返回 401；singlebox E2E 流也阻塞在同一个事件上。_
+   或裸设备 token。—— _✅ 6 组全部完成（PR #630 为基线，后续增加 engine restart
+   与 nodes）。_
 
 ---
 
@@ -1078,6 +1087,10 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
+- **2026-08-20** —— **新增认证 Bot Catalog 查询。** 提供
+  `GET /openapi/v1/bots/catalog/search` 与 `/discover`；User 和 App 身份读取
+  相同的公开白名单投影，不再接受 `user_id` 或返回用户 `friendship`。
+
 - **2026-08-19** —— **新增 Bot 归属空间变更能力。** 新增
   `PUT /openapi/v1/bots/{bot_id}/space`：显式传 `user_id` 和数值型目标
   `space_id`；校验 Bot owner、目标空间成员关系，应用按
@@ -1116,6 +1129,13 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   2026-08-19 的按操作形状准入规则取代。engine restart 只发布 bot-first
   地址，因为此前没有可供退役的公共路径。本次生成的 Gateway `bots.openapi.json` 是该公共面的
   发布产物，必须原样同步到独立 OCB Gateway。
+
+- **2026-08-18** —— 将旧 `/api/v1/token/iam` 的两种能力拆分迁移到 OpenAPI：
+  `GET /openapi/v1/org/user/iam-token` 返回第一方聊天所需 IAM Token，
+  `POST /openapi/v1/bots/{bot_id}/caller-identity` 为 Bot 准备 Caller 身份。两条操作均
+  要求 Gateway 用户身份并在 Backend 复核 `user_id`，应用单独调用按 `REFUSED` 拒绝；
+  响应统一使用 Envelope，敏感响应由统一中间件禁止缓存。Avernet Gateway 增加 `org` 转发域和
+  精确用户鉴权规则；实际发布前仍需同步 OCB Gateway SOFA 配置。
 
 - **2026-08-15** —— **Agent 在前的寻址。** 每个带 Agent 作用域的操作都迁到
   `/openapi/v1/bots/{bot_id}/<component>/…`，推翻了 2026-08-03 的组件在前规则。原先九个
@@ -1257,6 +1277,11 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   `route_security.yaml` 允许本界面真实的调用方；另外 `app` / `access_key` 调用方在有人
   就"它们归属于谁"定案之前一律 401。SDD：
   `src/backend/specs/2026-07-30-gateway-principal-verifier/`。
+- **2026-08-19** —— **新增只读 Node OpenAPI。** 当前前端与 Engine 只支持
+  `GET /api/nodes`，所以公共 API 只增加
+  `GET /openapi/v1/bots/{bot_id}/nodes`，沿用其他运行时组的 owner/editor、Bot grant 与
+  stage 门禁。它转发 `status`、`platform`、`limit`、`offset`，只发布稳定节点字段，
+  不虚构 register/unregister/status-write 操作。
 - **2026-07-30** —— **Track C 已实现（PR #630）** —— 五个组共 16 个 engine 运行时
   端点，外加 `core/engine_runtime/`（relay 与 connection service）及其 Service API
   Protocol。动这条主线或参考它之前，有七点值得知道：
@@ -1336,6 +1361,40 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   **新记为待办：** 没有任何跨仓测试钉住这份契约，任一侧改字段名都会让两边测试保持绿色
   而线上全 401。整套测试 10204 通过 / 3 跳过。SDD：
   `src/backend/specs/2026-08-02-public-api-user-only-principal/`。
+
+- **2026-08-19 —— Bot Editors 协作者 CRUD。** 公共面新增
+  `GET/POST /openapi/v1/bots/{bot_id}/editors`、
+  `PATCH/DELETE /openapi/v1/bots/{bot_id}/editors/{editor_id}` 与
+  `DELETE /openapi/v1/bots/{bot_id}/editors/me`。五个操作都允许持有目标 Bot 有效 grant
+  的 App 调用；App 以委托用户的实时权限执行，并在每次请求重新判定。当前调用人仍通过
+  必填的 `user_id` query 参数表达，新增目标成员则在 body 中使用 `editor_user_id`。角色收紧为
+  `admin | member` 闭集。读取需要 Member 权限，增删改需要 Owner/Admin；非 Owner 的
+  Admin 要退出时必须调用 `/me`，不能通过管理删除接口删掉自己。所有带 `{editor_id}`
+  的写操作都会在执行前把记录重新绑定到被寻址 Bot 的主键、Bot id、Owner 和环境，任一
+  不符都返回与不存在完全相同的固定 404。Bot 关联 Team Space 时，新增或调整角色前要求
+  目标用户仍是该 Space 的有效成员；无法解析的 Space 引用按 fail-closed 拒绝。Owner
+  不存放在 editor 表中，因此当前契约有意允许零个或多个协作者 Admin，也不把成员变更
+  绑定到草稿 edit lock。
+
+- **2026-08-19 —— Bot 工坊接入 Spaces 正式契约。** Bot 创建、本地 Bot 工作流以及
+  `GET /openapi/v1/bots/all` 的 `space_id` / `X-Space-Id` 统一改为 Space 数值主键，
+  `space_code` 继续作为独立且稳定的外部编码。工坊卡片与 Spaces API 对齐，返回
+  `space_id`、`space_code`、`space_name`、`space_type`，替换临时的字符串
+  `space_id`、`name`、`kind` 结构。这是一次协调后的 breaking 契约修正，Gateway
+  产物通过兼容性闸门并显式使用 `--allow-breaking` 发布。Team Space 工坊会展示该
+  Space 下所有受支持的云端 Bot，不再按 Bot Owner 过滤；Space 成员关系只决定可见性，
+  实际操作仍由 Bot Owner/Editor 决定。Team Editor 必须保持有效 Space 成员身份，
+  Personal Space 允许 Editor，Bot Owner 离开 Team Space 后仍保留其 Bot 权限。
+
+- **2026-08-19 —— 副屏配置 CRUD。** 新增
+  `GET/POST /openapi/v1/bots/{bot_id}/render-screens` 与
+  `PATCH/DELETE /openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}`。
+  GET 返回副屏渲染所需的“组件库名称 → UMD CDN URL”非敏感映射：已认证真人可读取
+  显式寻址的 Bot，不要求 Editor；App 只有在该 Bot 存在有效 grant 时才能调用。写操作
+  要求委托用户的实时有效 Editor 权限达到 `MEMBER+`，Team Editor 会同步
+  复核当前 Space 成员身份。所有公开 `render_screen_id` 在修改或删除前都会重新绑定到
+  当前 Bot id、Owner 和环境，任一不符均返回与不存在相同的固定 404。请求 body 为严格
+  模型，CDN 地址只接受 HTTP(S) URL。
 - **2026-08-03** —— **`/openapi/v1/bots` 路径规范化 + 删除 channels。**
   每个组件的路由现在都位于 `/openapi/v1/bots/<component>/…` 之下，`{bot_id}` 作为组件
   **之内**的第一段 —— 见新增的**寻址规则**一节，新增组件前应先读它。此前并存三种形态，而

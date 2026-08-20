@@ -82,6 +82,10 @@ backend_start() {
         log_info "Backend coverage mode enabled: ${coverage_dir}"
     fi
 
+    if [ "${SERVER_ENV:-dev}" = "local" ] || [ "${DEPLOY_PROFILE:-}" = "singlebox" ]; then
+        export AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="${AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+    fi
+
     log_info "Engine type: ${CHAT_ENGINE}"
     local backend_pid
     if [ "$LOCAL_MODE" = true ]; then

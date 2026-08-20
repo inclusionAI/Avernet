@@ -78,6 +78,12 @@ def test_backend_artifact_serves_spaces_through_its_own_domain() -> None:
         "x-avernet-security"
     ] == {"user": "required"}
 
+    space_skills_path = "/openapi/v1/bots/spaces/{space_id}/skills"
+    assert space_skills_path in document["paths"]
+    assert document["paths"][space_skills_path]["get"][
+        "x-avernet-security"
+    ] == {"user": "required"}
+
 
 def test_every_served_operation_carries_security() -> None:
     for path, item in _served()["paths"].items():
