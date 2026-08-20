@@ -36,8 +36,8 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineUpstreamError,
 )
 from agentclaw.community.core.engine_runtime.gate import (
-    require_bot_operator,
     require_operable_bot,
+    require_space_aware_bot_operator,
 )
 from agentclaw.community.core.engine_runtime.models import (
     BotFacts,
@@ -202,7 +202,7 @@ class EngineConnectionService:
         # full rule. Gated here rather than in the router because the rule is
         # about what may be *composed*, not about how it is served: any future
         # caller of ``build`` is covered without repeating the check.
-        require_bot_operator(
+        require_space_aware_bot_operator(
             self._collaborators,
             bot=bot,
             bot_id=resolved_id,

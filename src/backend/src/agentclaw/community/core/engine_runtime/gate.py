@@ -71,7 +71,8 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 #: The bot types an operator surface may serve. Necessary but **not**
-#: sufficient — the caller must also pass :func:`require_bot_operator`.
+#: sufficient — the caller must also pass
+#: :func:`require_space_aware_bot_operator`.
 SUPPORTED_BOT_TYPES = frozenset({"personal", SERVICE_BOT_TYPE})
 
 #: The least collaborator level that holds an operator channel. One bar for
@@ -85,32 +86,34 @@ OPERATOR_LEVEL = PermissionLevel.MEMBER
 def resolve_operator_level(
     collaborators: CollaboratorServiceProtocol,
     *,
-    bot: Mapping[str, Any],
+    bot_pk: int,
     caller_id: str,
     owner_id: str,
 ) -> PermissionLevel:
     """The caller's level on this bot: OWNER, their collaborator level, or NONE.
 
-    Delegates to the platform's effective Bot permission policy: owner
-    short-circuit, collaborator role mapping, and live Team Space membership
-    for non-owner editors. A lookup failure returns ``NONE`` (fail closed).
+    Delegates to ``CollaboratorService.get_permission_level`` — the platform's
+    one role policy (owner short-circuit, role→level mapping) — rather than
+    keeping a second copy of it here; this wrapper adds only the fail-closed
+    direction. ``owner_id`` must be the *resolved* owner — the record's, not
+    the request's — and ``bot_pk`` the primary key ownership was proven
+    against; ``bot_id`` alone is not unique across owners. A lookup failure
+    returns ``NONE`` (fail closed) and logs: this feeds a refusal, so the
+    direction of the guess decides what a database blip does.
 
     Synchronous — one indexed read, and only when the caller is not the
     owner. Callers on an event loop run it in a worker thread with the rest
     of their resolution.
     """
     try:
-        return resolve_operable_permission_level(
-            collaborators,
-            bot=bot,
-            user_id=caller_id,
-            owner_id=owner_id,
+        return PermissionLevel(
+            collaborators.get_permission_level(bot_pk, caller_id, owner_id)
         )
     except Exception:
         logger.exception(
             "[engine_runtime] collaborator lookup failed for bot_pk=%s; "
             "refusing the caller",
-            bot.get("id"),
+            bot_pk,
         )
         return PermissionLevel.NONE
 
@@ -118,7 +121,7 @@ def resolve_operator_level(
 def require_bot_operator(
     collaborators: CollaboratorServiceProtocol,
     *,
-    bot: Mapping[str, Any],
+    bot_pk: int,
     bot_id: str,
     caller_id: str,
     owner_id: str,
@@ -131,12 +134,67 @@ def require_bot_operator(
     cannot carry them.
     """
     level = resolve_operator_level(
-        collaborators, bot=bot, caller_id=caller_id, owner_id=owner_id
+        collaborators, bot_pk=bot_pk, caller_id=caller_id, owner_id=owner_id
     )
     if level < OPERATOR_LEVEL:
         # ``%r`` on the caller id deliberately: this branch runs only for a
         # value the server refused, so quoting keeps a forged multi-line id
         # from poisoning the refusal audit trail.
+        logger.warning(
+            "[engine_runtime] caller %r is not an operator of bot=%s owner=%s",
+            caller_id,
+            bot_id,
+            owner_id,
+        )
+        raise BotNotFoundError(f"bot {bot_id} not found")
+
+
+def resolve_space_aware_operator_level(
+    collaborators: CollaboratorServiceProtocol,
+    *,
+    bot: Mapping[str, Any],
+    caller_id: str,
+    owner_id: str,
+) -> PermissionLevel:
+    """Resolve an operator's effective level including live Space membership.
+
+    This is deliberately separate from :func:`resolve_operator_level`, whose
+    ``bot_pk`` contract predates Spaces and remains shared by existing surfaces.
+    Engine-runtime entry points opt into the stronger policy explicitly because
+    they already hold the resolved Bot row needed to evaluate ``space_id``.
+    """
+    try:
+        return resolve_operable_permission_level(
+            collaborators,
+            bot=bot,
+            user_id=caller_id,
+            owner_id=owner_id,
+        )
+    except Exception:
+        logger.exception(
+            "[engine_runtime] effective operator lookup failed for bot_pk=%s; "
+            "refusing the caller",
+            bot.get("id"),
+        )
+        return PermissionLevel.NONE
+
+
+def require_space_aware_bot_operator(
+    collaborators: CollaboratorServiceProtocol,
+    *,
+    bot: Mapping[str, Any],
+    bot_id: str,
+    caller_id: str,
+    owner_id: str,
+) -> None:
+    """Refuse a runtime operator without effective Bot and Space permission."""
+    level = resolve_space_aware_operator_level(
+        collaborators,
+        bot=bot,
+        caller_id=caller_id,
+        owner_id=owner_id,
+    )
+    if level < OPERATOR_LEVEL:
         logger.warning(
             "[engine_runtime] caller %r is not an operator of bot=%s owner=%s",
             caller_id,
@@ -174,5 +232,7 @@ __all__ = [
     "SUPPORTED_BOT_TYPES",
     "require_bot_operator",
     "require_operable_bot",
+    "require_space_aware_bot_operator",
     "resolve_operator_level",
+    "resolve_space_aware_operator_level",
 ]

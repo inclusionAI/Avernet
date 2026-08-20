@@ -111,7 +111,7 @@ def resolve_delegable_bot(
         raise BotNotFoundError("Bot not found")
     require_bot_operator(
         collaborators,
-        bot=bot,
+        bot_pk=bot_pk,
         bot_id=bot_id,
         caller_id=caller_id,
         owner_id=resolved_owner,

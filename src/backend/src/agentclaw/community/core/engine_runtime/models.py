@@ -84,7 +84,8 @@ class BotFacts:
         Deliberately **without** ``ac_bots.id``. The collaborator adjudication
         and the publish lookup are keyed on that primary key, but they take it
         from the row their caller read rather than from these facts — see
-        ``gate.require_bot_operator`` and ``stage.resolve_stage_bind_id``.
+        ``gate.require_space_aware_bot_operator`` and
+        ``stage.resolve_stage_bind_id``.
         Carrying it here would put an internal join key on the value object
         three of its four consumers already hold the row for, and give it a
         default no caller could satisfy.
