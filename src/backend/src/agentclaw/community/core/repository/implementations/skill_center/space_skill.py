@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from injector import inject
+from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import (
@@ -25,6 +26,7 @@ from agentclaw.community.core.repository.protocols.skill_center_types import (
     SpaceSkillOwnerGrantData,
     SpaceSkillOwnershipData,
     SpaceSkillOwnershipRecord,
+    SpaceSkillQueryRecord,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -134,6 +136,68 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                 "owner_grant": self._grant_to_dict(owner_grant),
             }
 
+    def list_space_skills(
+        self,
+        *,
+        space_id: int,
+        actor_id: str,
+        env: str,
+        keyword: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[int, list[SpaceSkillQueryRecord]]:
+        with self._db.orm_session() as session:
+            query = (
+                session.query(Skill, SpaceModel.space_type, SkillGrant.role)
+                .join(
+                    SkillSpaceBinding,
+                    and_(
+                        SkillSpaceBinding.skill_id == Skill.id,
+                        SkillSpaceBinding.env == Skill.env,
+                    ),
+                )
+                .join(
+                    SpaceModel,
+                    and_(
+                        SpaceModel.id == SkillSpaceBinding.space_id,
+                        SpaceModel.env == SkillSpaceBinding.env,
+                    ),
+                )
+                .outerjoin(
+                    SkillGrant,
+                    and_(
+                        SkillGrant.skill_id == Skill.id,
+                        SkillGrant.user_id == actor_id,
+                        SkillGrant.status == "ACTIVE",
+                        SkillGrant.env == env,
+                    ),
+                )
+                .filter(
+                    SkillSpaceBinding.space_id == space_id,
+                    SkillSpaceBinding.env == env,
+                    Skill.env == env,
+                    SpaceModel.deleted_at.is_(None),
+                    Skill.retired_at.is_(None),
+                )
+            )
+            if keyword is not None:
+                pattern = f"%{keyword.lower()}%"
+                query = query.filter(
+                    or_(
+                        func.lower(Skill.name).like(pattern),
+                        func.lower(Skill.description).like(pattern),
+                    )
+                )
+
+            total = query.count()
+            rows = (
+                query.order_by(Skill.gmt_modified.desc(), Skill.id.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return total, [self._skill_query_to_dict(*row) for row in rows]
+
     @staticmethod
     def _space_to_dict(space: SpaceModel) -> SpaceRecord:
         return {
@@ -159,6 +223,25 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             "draft_target_version": skill.draft_target_version,
             "draft_status": skill.draft_status,
             "env": skill.env,
+        }
+
+    @staticmethod
+    def _skill_query_to_dict(
+        skill: Skill,
+        space_type: str,
+        current_user_skill_role: str | None,
+    ) -> SpaceSkillQueryRecord:
+        return {
+            "id": skill.id,
+            "skill_uuid": skill.skill_uuid,
+            "name": skill.name,
+            "description": skill.description,
+            "status": skill.status,
+            "draft_status": skill.draft_status,
+            "space_type": space_type,
+            "current_user_skill_role": current_user_skill_role,
+            "gmt_created": skill.gmt_created,
+            "gmt_modified": skill.gmt_modified,
         }
 
     @staticmethod

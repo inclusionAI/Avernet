@@ -483,6 +483,11 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/spaces/personal/initialize"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/create"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.USER_GATED,
+    # The caller must arrive on behalf of a real user.  The handler then
+    # resolves that user as the actor and SpaceAccessService enforces the
+    # concrete space membership; this is deliberately not OPEN or
+    # GRANT_FILTERED because the result is scoped by the path's space_id.
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): AdmissionMode.USER_GATED,
     ("POST", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.REFUSED,
     (
         "DELETE",

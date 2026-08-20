@@ -23,6 +23,9 @@ from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
+from agentclaw.community.api.space_skill_query_service import (
+    SpaceSkillQueryServiceProtocol,
+)
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
@@ -36,6 +39,10 @@ from agentclaw.community.core.spaces.models import (
     SpaceRole,
     SpaceSummaryRecord,
     SpaceType,
+)
+from agentclaw.community.core.spaces.errors import (
+    SpaceAccessDeniedError,
+    SpaceNotFoundError,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
@@ -70,12 +77,18 @@ def favorite_service():
 
 
 @pytest.fixture
-def client(member_service, space_service, favorite_service):
+def skill_query_service():
+    return MagicMock()
+
+
+@pytest.fixture
+def client(member_service, space_service, favorite_service, skill_query_service):
     class _Bindings(Module):
         def configure(self, binder):
             binder.bind(SpaceMemberServiceProtocol, to=member_service)
             binder.bind(SpaceServiceProtocol, to=space_service)
             binder.bind(MarketFavoriteServiceProtocol, to=favorite_service)
+            binder.bind(SpaceSkillQueryServiceProtocol, to=skill_query_service)
 
     app = FastAPI()
     app.include_router(router)
@@ -205,6 +218,101 @@ def test_cancel_missing_favorite_returns_idempotent_success(client, favorite_ser
     assert body["code"] == 200000
     assert body["data"]["is_favorited"] is False
     assert body["data"]["changed"] is False
+
+
+def test_list_space_skills_maps_page_and_forwards_search(
+    client, skill_query_service
+):
+    timestamp = datetime(2026, 8, 20, 3, 40)
+    skill_query_service.list_space_skills.return_value = (
+        1,
+        [
+            {
+                "id": 10001,
+                "skill_uuid": "0b1b5f8f-demo",
+                "name": "Smart Form Parser",
+                "description": "Parse complex forms",
+                "status": "DEVELOPING",
+                "draft_status": "EDITING",
+                "space_type": "TEAM",
+                "current_user_skill_role": None,
+                "can_edit": False,
+                "can_grant": False,
+                "can_apply_edit": True,
+                "gmt_created": timestamp,
+                "gmt_modified": timestamp,
+            }
+        ],
+    )
+
+    response = client.get(
+        "/openapi/v1/bots/spaces/7/skills",
+        params={"keyword": "form", "page_no": 2, "page_size": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "total": 1,
+        "items": [
+            {
+                "skill_id": "10001",
+                "skill_uuid": "0b1b5f8f-demo",
+                "name": "Smart Form Parser",
+                "description": "Parse complex forms",
+                "status": "DEVELOPING",
+                "draft_status": "EDITING",
+                "space_type": "TEAM",
+                "current_user_skill_role": None,
+                "can_edit": False,
+                "can_grant": False,
+                "can_apply_edit": True,
+                "gmt_created": "2026-08-20T03:40:00Z",
+                "gmt_modified": "2026-08-20T03:40:00Z",
+            }
+        ],
+    }
+    skill_query_service.list_space_skills.assert_called_once_with(
+        space_id=7,
+        actor_id="owner-1",
+        keyword="form",
+        page_no=2,
+        page_size=5,
+    )
+
+
+@pytest.mark.parametrize(
+    ("params", "expected_status"),
+    [
+        ({"page_no": 0}, 422),
+        ({"page_size": 101}, 422),
+        ({"keyword": "x" * 129}, 422),
+    ],
+)
+def test_list_space_skills_validates_query_contract(client, params, expected_status):
+    response = client.get("/openapi/v1/bots/spaces/7/skills", params=params)
+
+    assert response.status_code == expected_status
+    assert response.json()["code"] == 422000
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "code", "message"),
+    [
+        (SpaceAccessDeniedError("membership required"), 403, 403000, "Forbidden"),
+        (SpaceNotFoundError("space not found"), 404, 404000, "Not found"),
+    ],
+)
+def test_list_space_skills_returns_stable_space_error_codes(
+    client, skill_query_service, error, status, code, message
+):
+    skill_query_service.list_space_skills.side_effect = error
+
+    response = client.get("/openapi/v1/bots/spaces/7/skills")
+
+    assert response.status_code == status
+    assert response.json()["code"] == code
+    assert response.json()["message"] == message
+    assert response.json()["data"] is None
 
 
 def _space_record(space_type=SpaceType.TEAM):

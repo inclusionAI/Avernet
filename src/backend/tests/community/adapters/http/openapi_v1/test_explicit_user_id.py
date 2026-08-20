@@ -336,7 +336,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: placement. Together with the caller-identity read, the combined contract is
 #: 83/1/45. Channels adds six Bot-addressed operations, and the Bot Space
 #: reassignment endpoint adds one more, yielding 90/1/45.
-_BOT_ID_PLACEMENT = {"path": 90, "query": 1, "none": 45}
+_BOT_ID_PLACEMENT = {"path": 90, "query": 1, "none": 46}
 
 
 def _schema() -> dict:
@@ -422,8 +422,8 @@ def test_the_pinned_number_of_operations_take_it():
     # for the Bot Chats operations. The combined Bot Workshop surface adds a
     # further net 32 user-scoped operations (27 bot-addressed and five
     # account-level operations), then +6 for Bot-scoped Channels CRUD/status,
-    # then +1 for Bot Space reassignment.
-    assert len(taking) == 125
+    # then +1 for Bot Space reassignment and +1 for the Space Skill list.
+    assert len(taking) == 126
 
 
 def test_the_exempt_operations_take_none():

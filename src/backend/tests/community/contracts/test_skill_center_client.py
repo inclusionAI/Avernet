@@ -19,6 +19,7 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
     SkillCenterMarketSearchRequest,
     SkillCenterTeamCreateRequest,
+    SkillCenterTeamQueryRequest,
 )
 
 
@@ -53,6 +54,19 @@ def test_local_skill_center_client_create_team_records_plugin_hit(world) -> None
     assert len(calls) == 1
     assert calls[0].args == (request,)
     assert calls[0].kwargs == {}
+
+
+def test_local_skill_center_client_queries_team_by_external_identity(world) -> None:
+    client = world.get(SkillCenterClient)
+    request = SkillCenterTeamQueryRequest(source="OCB", ref_source_id="7")
+
+    result = client.get_team_by_ref_source(request)
+
+    assert result is not None
+    assert result.team_id == "mock-OCB-7"
+    calls = client.calls_to("get_team_by_ref_source")
+    assert calls[-1].args == (request,)
+    assert calls[-1].kwargs == {}
 
 
 def test_local_skill_center_market_search_records_typed_request(world) -> None:

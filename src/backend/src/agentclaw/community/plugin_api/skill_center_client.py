@@ -38,6 +38,25 @@ class SkillCenterTeamCreateResult:
     team_id: str
 
 
+class SkillCenterTeamQueryError(RuntimeError):
+    """Raised when an SC team lookup fails or returns invalid data."""
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamQueryRequest:
+    """Transport-neutral identity used to find an SC team mapping."""
+
+    source: str
+    ref_source_id: str
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamQueryResult:
+    """SC team identity resolved from ``source`` and ``ref_source_id``."""
+
+    team_id: str
+
+
 class SkillCenterMarketSearchError(RuntimeError):
     """Raised when Skill Center market search fails or returns invalid data."""
 
@@ -86,6 +105,16 @@ class SkillCenterClient(Plugin, Protocol):
         configuration. A failed or rejected creation raises
         :class:`SkillCenterTeamCreateError`; it must not return a false-success
         result.
+        """
+        ...
+
+    def get_team_by_ref_source(
+        self, request: SkillCenterTeamQueryRequest
+    ) -> SkillCenterTeamQueryResult | None:
+        """Find an SC team by its external source identity.
+
+        ``None`` means that SC has no matching team. Upstream failures or
+        malformed responses raise :class:`SkillCenterTeamQueryError`.
         """
         ...
 
