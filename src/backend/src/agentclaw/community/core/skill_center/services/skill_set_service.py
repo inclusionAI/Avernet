@@ -351,11 +351,10 @@ class SkillSetService:
         """
         try:
             # 获取当前激活技能集的软链配置（包括空列表，表示清空）
-            symlinks = self.get_symlink_mappings(
-                user_id=user_id,
-                bolt_id=self.bot_id,
-                desired_skills=desired_skills,
-            )
+            mapping_kwargs = {"user_id": user_id, "bolt_id": self.bot_id}
+            if desired_skills is not None:
+                mapping_kwargs["desired_skills"] = desired_skills
+            symlinks = self.get_symlink_mappings(**mapping_kwargs)
 
             # 通过 DeviceSyncPlugin 同步到设备 — 经 resolver + dispatcher 收口
             effective_user_id = user_id or self.entity_id or "default"
