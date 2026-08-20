@@ -20,6 +20,11 @@ from secbaas.community.core.service.scheduler._tasks._file_transfer_poller impor
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
+def test_config_enabled_defaults_false():
+    """The FileTransferPollerConfig.enabled field defaults to False (disabled)."""
+    assert FileTransferPollerConfig().enabled is False
+
+
 def _make_config(**overrides):
     defaults = dict(
         enabled=True,
@@ -66,6 +71,10 @@ def _make_poller(config=None, **overrides):
     if config is None:
         config = _make_config()
 
+    # A real, available backend by default (non-disabled) so existing
+    # processing tests behave as before.
+    file_backend.disabled = False
+
     # Default: lock acquired
     lock_ctx = MagicMock()
     lock_ctx.acquired = True
@@ -106,6 +115,27 @@ class TestRun:
         await poller.run()
         # Should return early without hitting ticket_repo
         poller._ticket_repo.list_pending_uploads.assert_not_called()
+
+    def test_disabled_backend_disables_poller_even_when_config_enabled(self):
+        """A disabled backend turns the poller off even if config.enabled is True."""
+        config = _make_config(enabled=True)
+        poller = _make_poller(config=config, file_backend=MagicMock(disabled=True))
+        assert poller.enabled is False
+
+    @pytest.mark.asyncio
+    async def test_noop_backend_default_config_produces_no_backend_work(self):
+        """With a no-op backend and default (disabled) config, run() is silent:
+        it must not query tickets or perform storage operations."""
+        config = FileTransferPollerConfig()
+        assert config.enabled is False
+        noop_backend = AsyncMock()
+        noop_backend.disabled = True
+        poller = _make_poller(config=config, file_backend=noop_backend)
+
+        await poller.run()
+
+        poller._ticket_repo.list_pending_uploads.assert_not_called()
+        noop_backend.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_run_dry_run(self):
