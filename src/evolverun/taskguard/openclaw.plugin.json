@@ -1,0 +1,24 @@
+{
+  "id": "taskguard",
+  "name": "taskguard",
+  "description": "通用 YAML DAG 工作流引擎，基于 TaskFlow 持久化编排",
+  "version": "0.1.0",
+  "hooks": {
+    "allowConversationAccess": true,
+    "allowPromptInjection": true
+  },
+  "contracts": {
+    "tools": [
+      "workflow_engine_dispatch",
+      "get_current_user",
+      "workflow_choice",
+      "workflow_submit_phase_result",
+      "clawmind_update"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": true
+  }
+}

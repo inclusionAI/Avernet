@@ -90,6 +90,7 @@ user_config:
     bcs_server_url: https://bcs.sample.com
     engine_proxy_server_url: https://engineproxy.sample.com
     bcsfuse_server_url: https://bcsfuse.sample.com
+    clawweb_server_url: https://clawweb.sample.com
 
   # Per-identity strategy chain (system-level config).
   # Each identity type runs its strategies in order; the first to recognise the
@@ -266,12 +267,18 @@ user_config:
     "/openapi/v1/bcsfuse/**":
       user: required
 
-    # The harness operations sit beneath the addressed bot, so the wide
+# The harness operations sit beneath the addressed bot, so the wide
     # "/openapi/v1/bots/**" rule above would otherwise admit them with no user
     # on the wire. They diagnose and patch a bot's live config files — a human
     # stays on the boundary, and the extra literal segment outranks the prefix.
     "/openapi/v1/bots/{bot_id}/harness/**":
       user: required
+
+    # HarnessFlow (task escort) — served by clawweb. Authz is delegated to
+    # clawweb; the gateway passes through both identities when present.
+    "/openapi/v1/harnessflow/**":
+      user: optional
+      app: optional
 
     # BCN verifies the short-lived session credential carried by this exact
     # WebSocket handshake. Keep every other collaboration operation, including
@@ -436,6 +443,15 @@ user_config:
           path: schemas/baas.openapi.json
           refresh_seconds: 300
 
+      # HarnessFlow (task escort) — served by clawweb.
+      harnessflow:
+        match: /openapi/v1/harnessflow/**
+        server: clawweb
+        protocols: [http]
+        rewrite:
+          from: /openapi/v1/harnessflow
+          to: /
+
       # The tenant bot socket. The backend's connection endpoint publishes
       # `wss://<gateway>/openapi/v1/bots/messages/ws/<target><engine-path>?x-proxypass-token=…`
       # and this is what serves it.
@@ -519,3 +535,5 @@ user_config:
         base_url: "${bcsfuse_server_url}"
       engine_proxy:
         base_url: "${engine_proxy_server_url}"
+      clawweb:
+        base_url: "${clawweb_server_url}"
