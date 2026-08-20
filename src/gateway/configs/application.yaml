@@ -190,7 +190,7 @@ user_config:
     # consumes that same user's HttpOnly cookie.  Do not declare `app` here:
     # the auth runner resolves only identities named by the matched rule, so an
     # application credential cannot reach either operation as a principal.
-    "GET /openapi/v1/token/iam":
+    "GET /openapi/v1/org/user/iam-token":
       user: required
     "POST /openapi/v1/bots/{bot_id}/caller-identity":
       user: required
@@ -423,10 +423,10 @@ user_config:
     #     rule could never match and startup refuses it.
 
     domains:
-      token:
+      org:
         server: backend
         # Backend publishes one public artifact; domain generation filters it
-        # to /openapi/v1/token before serving it through this route.
+        # to /openapi/v1/org before serving it through this route.
         schema:
           source: file
           path: schemas/bots.openapi.json

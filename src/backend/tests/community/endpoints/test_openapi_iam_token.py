@@ -94,7 +94,7 @@ def _assert_no_store(response, _world) -> None:
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/token/iam",
+    path="/openapi/v1/org/user/iam-token",
     scenario="returns_the_http_only_cookie_value",
     input=CaseInput(query_params=_QUERY, headers=_HEADERS),
     seed=_boot_verifier,
@@ -114,7 +114,7 @@ def get_openapi_iam_token_ok():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/token/iam",
+    path="/openapi/v1/org/user/iam-token",
     scenario="missing_iam_cookie",
     input=CaseInput(query_params=_QUERY, headers={PRINCIPAL_HEADER: _principal()}),
     seed=_boot_verifier,
@@ -126,6 +126,7 @@ def get_openapi_iam_token_ok():
             "data": None,
         },
     ),
+    extra_assertions=(_assert_no_store,),
 )
 def get_openapi_iam_token_missing_cookie():
     """The framework owns invocation."""
@@ -171,6 +172,7 @@ def prepare_openapi_caller_identity_ok():
             "data": None,
         },
     ),
+    extra_assertions=(_assert_no_store,),
 )
 def prepare_openapi_caller_identity_missing_cookie():
     """The framework owns invocation."""

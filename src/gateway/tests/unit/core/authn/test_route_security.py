@@ -70,7 +70,7 @@ _HUMAN_ONLY = [
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites"),
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/cancel"),
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/search"),
-    ("GET", "/openapi/v1/token/iam"),
+    ("GET", "/openapi/v1/org/user/iam-token"),
     ("POST", "/openapi/v1/bots/bot-123/caller-identity"),
     ("POST", "/openapi/v1/bots"),
     ("POST", "/openapi/v1/bots/local"),
@@ -110,7 +110,7 @@ def test_shipped_config_still_requires_a_user_where_a_human_is_required(
 @pytest.mark.parametrize(
     ("method", "path"),
     [
-        ("GET", "/openapi/v1/token/iam"),
+        ("GET", "/openapi/v1/org/user/iam-token"),
         ("POST", "/openapi/v1/bots/bot-123/caller-identity"),
     ],
 )

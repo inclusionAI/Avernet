@@ -1654,11 +1654,11 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   artifact for this surface and must be copied unchanged to the OCB Gateway.
 
 - **2026-08-18** — Split and migrated both legacy `/api/v1/token/iam`
-  capabilities: `GET /openapi/v1/token/iam` returns the first-party chat IAM
+  capabilities: `GET /openapi/v1/org/user/iam-token` returns the first-party chat IAM
   token, while `POST /openapi/v1/bots/{bot_id}/caller-identity` prepares Caller
   identity for a Bot. Both require a Gateway user principal, re-check
   `user_id` in Backend, refuse app-only callers, use the standard Envelope, and
-  disable response caching. Avernet Gateway now has the token forwarding domain
+  disable response caching through shared middleware. Avernet Gateway now has the org forwarding domain
   and exact user-only security rules; the OCB Gateway SOFA config still needs
   the corresponding deployment-side update.
 

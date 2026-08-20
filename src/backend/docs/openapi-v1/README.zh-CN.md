@@ -1122,10 +1122,10 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   发布产物，必须原样同步到独立 OCB Gateway。
 
 - **2026-08-18** —— 将旧 `/api/v1/token/iam` 的两种能力拆分迁移到 OpenAPI：
-  `GET /openapi/v1/token/iam` 返回第一方聊天所需 IAM Token，
+  `GET /openapi/v1/org/user/iam-token` 返回第一方聊天所需 IAM Token，
   `POST /openapi/v1/bots/{bot_id}/caller-identity` 为 Bot 准备 Caller 身份。两条操作均
   要求 Gateway 用户身份并在 Backend 复核 `user_id`，应用单独调用按 `REFUSED` 拒绝；
-  响应统一使用 Envelope，凭据响应禁止缓存。Avernet Gateway 增加 `token` 转发域和
+  响应统一使用 Envelope，敏感响应由统一中间件禁止缓存。Avernet Gateway 增加 `org` 转发域和
   精确用户鉴权规则；实际发布前仍需同步 OCB Gateway SOFA 配置。
 
 - **2026-08-15** —— **Agent 在前的寻址。** 每个带 Agent 作用域的操作都迁到
