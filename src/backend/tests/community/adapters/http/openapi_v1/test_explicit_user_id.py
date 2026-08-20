@@ -335,8 +335,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: and five account-level operations. The trace filter remains the sole query
 #: placement. Together with the caller-identity read, the combined contract is
 #: 83/1/45. Channels adds six Bot-addressed operations, and the Bot Space
-#: reassignment endpoint adds one more, yielding 90/1/45.
-_BOT_ID_PLACEMENT = {"path": 90, "query": 1, "none": 45}
+#: reassignment endpoint adds one more, yielding 90/1/45. Session Favorites then
+#: adds three Bot-addressed operations, Caller preparation adds one more, and the
+#: account-level IAM-token read adds one operation with no ``bot_id``, yielding
+#: 94/1/46.
+_BOT_ID_PLACEMENT = {"path": 94, "query": 1, "none": 46}
 
 
 def _schema() -> dict:
@@ -422,8 +425,9 @@ def test_the_pinned_number_of_operations_take_it():
     # for the Bot Chats operations. The combined Bot Workshop surface adds a
     # further net 32 user-scoped operations (27 bot-addressed and five
     # account-level operations), then +6 for Bot-scoped Channels CRUD/status,
-    # then +1 for Bot Space reassignment.
-    assert len(taking) == 125
+    # then +1 for Bot Space reassignment, +3 for Session Favorites, and +2 for
+    # IAM-token retrieval and Caller preparation.
+    assert len(taking) == 130
 
 
 def test_the_exempt_operations_take_none():
