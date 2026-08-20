@@ -16,7 +16,8 @@ from agentclaw.community.core.service_bot.services.bot_build_service import BotB
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     ImagePolicyState,
     ServiceBotImagePin,
-    resolve_publish_image_pin as resolve_publish_image_pin_policy,
+    has_explicit_image_policy,
+    image_policy_from_ext,
 )
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
@@ -125,25 +126,15 @@ def _pf(*args, **kw):
     publish_service = args[0] if args else kw.get("bot_publish_service")
     if isinstance(publish_service, Mock):
         def _resolve_image_policy(record, *, device_provider):
-            if device_provider == "teclaw":
+            # Stands in for PublishImagePolicyResolver.resolve: teclaw carries no
+            # ARCA policy, an explicit snapshot decodes as-is, and a record with no
+            # policy stays legacy. These flow tests predate runtime-pin
+            # configuration and focus on orchestration, so the resolver's lazy
+            # common-config snapshot is deliberately not modelled here — dedicated
+            # image-policy tests cover it.
+            if device_provider == "teclaw" or not has_explicit_image_policy(record.ext):
                 return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
-            if not any(
-                key in (record.ext or {})
-                for key in (
-                    "sbot_pin_image",
-                    "sbot_docker_image",
-                    "sbot_use_default_image",
-                )
-            ):
-                # These flow tests predate runtime-pin configuration and focus
-                # on orchestration. Dedicated image-policy tests cover the
-                # production resolver's fail-closed behavior.
-                return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
-            return resolve_publish_image_pin_policy(
-                record,
-                common_config_service=kw["common_config_service"],
-                env=record.env,
-            )
+            return image_policy_from_ext(record)
 
         publish_service.resolve_publish_image_pin.side_effect = _resolve_image_policy
     if "channel_overrides_reader" not in kw:
