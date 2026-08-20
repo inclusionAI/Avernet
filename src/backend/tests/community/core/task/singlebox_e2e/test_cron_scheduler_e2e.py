@@ -7,9 +7,9 @@ gated by ``SINGLEBOX_CRON_E2E=1``。本地起后端 singlebox 时设置:
 
 完整流程覆盖:
   1) 查已有 bot + 写入 mock 任务数据到 discovered_tasks.db
-  2) 调度状态查找: GET /api/public/task-discovery/scheduler-status
+  2) 调度状态查找: GET /api/v1/collaboration/tasks/discovery/scheduler-status
      — 验证 APScheduler running=True、job 列表非空、cron 表达式、next_run_time
-  3) 主动触发: POST /api/public/task-discovery/scheduled-trigger
+  3) 主动触发: POST /api/v1/collaboration/tasks/discovery/scheduled-trigger
      — 模拟外部 cron 触发 discover_all_bots，验证 session 创建成功
 
 环境变量:
@@ -110,7 +110,7 @@ class TestCronSchedulerE2E(unittest.TestCase):
     # ===== 测试用例 =====
 
     def test_01_scheduler_status(self) -> None:
-        """APScheduler 状态查找 — GET /api/public/task-discovery/scheduler-status。"""
+        """APScheduler 状态查找 — GET /api/v1/collaboration/tasks/discovery/scheduler-status。"""
         loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(self._scheduler_status(loop))
@@ -120,7 +120,7 @@ class TestCronSchedulerE2E(unittest.TestCase):
     async def _scheduler_status(self, loop: asyncio.AbstractEventLoop) -> None:
         async with httpx.AsyncClient(timeout=30.0, headers=_HDRS) as cli:
             r = await cli.get(
-                f"{_BACKEND}/api/public/task-discovery/scheduler-status",
+                f"{_BACKEND}/api/v1/collaboration/tasks/discovery/scheduler-status",
             )
             self.assertEqual(r.status_code, 200,
                              f"scheduler-status HTTP 异常: {r.status_code}")
@@ -151,7 +151,7 @@ class TestCronSchedulerE2E(unittest.TestCase):
                                      "next_run_time 为空 — cron 可能未正确注册")
 
     def test_02_scheduled_trigger(self) -> None:
-        """APScheduler 主动触发 — POST /api/public/task-discovery/scheduled-trigger。"""
+        """APScheduler 主动触发 — POST /api/v1/collaboration/tasks/discovery/scheduled-trigger。"""
         loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(self._scheduled_trigger(loop))
@@ -161,7 +161,7 @@ class TestCronSchedulerE2E(unittest.TestCase):
     async def _scheduled_trigger(self, loop: asyncio.AbstractEventLoop) -> None:
         async with httpx.AsyncClient(timeout=120.0, headers=_HDRS) as cli:
             r = await cli.post(
-                f"{_BACKEND}/api/public/task-discovery/scheduled-trigger",
+                f"{_BACKEND}/api/v1/collaboration/tasks/discovery/scheduled-trigger",
             )
             body = r.json() if r.status_code == 200 else {}
             print(f"[trigger] status={r.status_code} success={body.get('success')} "

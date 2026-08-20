@@ -65,6 +65,9 @@ from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
 )
+from agentclaw.community.core.task.task_discovery.scheduler import (
+    TaskDiscoveryScheduler,
+)
 from agentclaw.community.core.task.task_discovery.task_reader import (
     SqliteTaskReader,
 )
@@ -289,6 +292,75 @@ async def get_discovery_status(request: Request) -> Envelope[dict[str, Any]]:
         },
         request,
     )
+
+
+# ===== task-discovery 调度端点（discovery 阶段；外部 cron / 运维触发）=====
+# 扁平 JSON 响应（success + 业务字段顶层直返），供外部 scheduler / 运维直接调用，
+# 契约：scheduler-status 顶层 running/jobs；scheduled-trigger 顶层 total_discovered/results。
+@router.get("/discovery/scheduler-status")
+async def get_scheduler_status(
+    scheduler: TaskDiscoveryScheduler = Injected(TaskDiscoveryScheduler),  # noqa: B008
+) -> dict[str, Any]:
+    """查看 APScheduler 调度状态 — running / jobs / cron / timezone / auto_start。
+
+    透传 ``TaskDiscoveryScheduler.get_status()``，顶层追加 ``success``。
+    scheduler 未启动时 running=False、jobs=[]（不报错，便于运维探活）。
+    """
+    try:
+        status = scheduler.get_status()
+    except Exception as exc:
+        logger.error(
+            "[task_discovery] scheduler-status failed: %s", exc, exc_info=True,
+        )
+        return {"success": False, "message": str(exc), "running": False, "jobs": []}
+    return {"success": True, **status}
+
+
+@router.post("/discovery/scheduled-trigger")
+async def run_scheduled_trigger(
+    service: DiscoveryService = Injected(DiscoveryService),  # noqa: B008
+) -> dict[str, Any]:
+    """外部 scheduler 主动触发 — 调用 ``discover_all_bots()`` 全量发现。
+
+    遍历所有 bot 执行发现流程，按任务聚合结果。顶层 always 200，
+    单任务失败体现在 ``results[].success/error``（session 创建按任务捕获，非顶层）。
+    """
+    logger.info("[task_discovery] scheduled-trigger received")
+    try:
+        results = await service.discover_all_bots()
+    except Exception as exc:
+        logger.error(
+            "[task_discovery] scheduled-trigger failed: %s", exc, exc_info=True,
+        )
+        return {
+            "success": False,
+            "message": str(exc),
+            "total_discovered": 0,
+            "results": [],
+        }
+
+    payload = [
+        {
+            "bot_id": r.task.bot_id,
+            "task_id": r.task.task_id,
+            "success": r.success,
+            "session_id": r.session.session_id if r.session else None,
+            "session_url": r.session.session_url if r.session else None,
+            "notification_sent": r.notification_sent,
+            "error": r.error,
+        }
+        for r in results
+    ]
+    logger.info(
+        "[task_discovery] scheduled-trigger done: total=%d ok=%d",
+        len(payload),
+        sum(1 for r in payload if r["success"]),
+    )
+    return {
+        "success": True,
+        "total_discovered": len(payload),
+        "results": payload,
+    }
 
 
 # ===== task_loop inbound PUSH callback router(单 bot workflow / bcn 协作群)=====
