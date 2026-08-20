@@ -184,7 +184,13 @@ class LocalSkillStateService:
             self._mutation_guard.release(mutation_lease)
 
     async def set_repo_skill_active(
-        self, *, skill_id: str, bot_id: str, actor_id: str, active: bool
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        active: bool,
     ) -> dict[str, Any]:
         """Apply the same Installation/reconcile transaction to shared Repo assets."""
         raw = self._skill_repo.get_by_id(skill_id) if skill_id.isdecimal() else None
@@ -197,9 +203,8 @@ class LocalSkillStateService:
             or not str(raw.get("git_path") or "").startswith("git://")
         ):
             raise LocalSkillNotFoundError()
-        bot = self._bot_repo.get_unique_by_id(bot_id)
-        owner_id = str((bot or {}).get("user_id") or (bot or {}).get("owner_id") or "")
-        if not bot or not owner_id:
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if not bot:
             raise LocalSkillNotFoundError()
         if actor_id != owner_id:
             permission = self._collaborators.check_collaborator_permission(
@@ -389,9 +394,7 @@ class LocalSkillStateService:
     @staticmethod
     def _runtime_command(*, active: bool) -> BotSkillRuntimeCommand:
         return (
-            BotSkillRuntimeCommand.WRITE
-            if active
-            else BotSkillRuntimeCommand.CLEANUP
+            BotSkillRuntimeCommand.WRITE if active else BotSkillRuntimeCommand.CLEANUP
         )
 
     def _require_no_normal_skill_set_membership(

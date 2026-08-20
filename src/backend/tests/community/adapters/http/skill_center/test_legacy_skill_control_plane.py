@@ -43,22 +43,30 @@ class _Assets:
     def __init__(self) -> None:
         self.calls: list[tuple[str, bool | None]] = []
 
-    def get_skill(self, *, skill_id: str, bot_id: str, actor_id: str):
-        assert (skill_id, bot_id, actor_id) == ("7", "bot", "owner")
+    def get_skill(self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str):
+        assert (skill_id, bot_id, owner_id, user_id) == ("7", "bot", "owner", "owner")
         self.calls.append(("get", None))
         return {"name": "local-seven"}
 
     def resolve_legacy_skill_id(
-        self, *, skill_reference: str, source_path: str, bot_id: str, actor_id: str
+        self,
+        *,
+        skill_reference: str,
+        source_path: str,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
     ):
-        assert (skill_reference, source_path, bot_id, actor_id) in {
-            ("legacy/path", "legacy", "bot", "owner"),
-            ("legacy-link", "legacy/path", "bot", "owner"),
+        assert (skill_reference, source_path, bot_id, owner_id, user_id) in {
+            ("legacy/path", "legacy", "bot", "owner", "owner"),
+            ("legacy-link", "legacy/path", "bot", "owner", "owner"),
         }
         return "7"
 
-    async def set_active(self, *, skill_id: str, bot_id: str, actor_id: str, active: bool):
-        assert (skill_id, bot_id, actor_id) == ("7", "bot", "owner")
+    async def set_active(
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str, active: bool
+    ):
+        assert (skill_id, bot_id, owner_id, user_id) == ("7", "bot", "owner", "owner")
         self.calls.append(("set", active))
         return {"name": "local-seven"}
 
@@ -90,9 +98,10 @@ class _Catalog:
         }
 
 
-
 @pytest.mark.asyncio
-async def test_legacy_activate_keeps_wire_but_uses_bot_skill_asset_control_plane() -> None:
+async def test_legacy_activate_keeps_wire_but_uses_bot_skill_asset_control_plane() -> (
+    None
+):
     assets = _Assets()
     response = await activate_skill(
         "7",
@@ -120,30 +129,46 @@ async def test_legacy_activate_keeps_wire_but_uses_bot_skill_asset_control_plane
 async def test_legacy_activate_with_relative_path_still_uses_control_plane() -> None:
     assets = _Assets()
     await activate_skill(
-        "7", ActivateRequest(source_path="legacy", relative_path="legacy/path"),
-        bot_id="bot", ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
-        bot_repo=_Bots(), path_factory=object(), skill_service_factory=object(),
-        skill_set_service_factory=object(), resolver=object(),
-        device_sync_dispatcher=object(), asset_service=assets,
+        "7",
+        ActivateRequest(source_path="legacy", relative_path="legacy/path"),
+        bot_id="bot",
+        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+        bot_repo=_Bots(),
+        path_factory=object(),
+        skill_service_factory=object(),
+        skill_set_service_factory=object(),
+        resolver=object(),
+        device_sync_dispatcher=object(),
+        asset_service=assets,
     )
     assert assets.calls == [("get", None), ("set", True)]
 
 
 @pytest.mark.asyncio
-async def test_legacy_activate_with_link_name_resolves_decimal_id_before_control_plane() -> None:
+async def test_legacy_activate_with_link_name_resolves_decimal_id_before_control_plane() -> (
+    None
+):
     assets = _Assets()
     await activate_skill(
-        "legacy-link", ActivateRequest(source_path="legacy/path"),
-        bot_id="bot", ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
-        bot_repo=_Bots(), path_factory=object(), skill_service_factory=object(),
-        skill_set_service_factory=object(), resolver=object(),
-        device_sync_dispatcher=object(), asset_service=assets,
+        "legacy-link",
+        ActivateRequest(source_path="legacy/path"),
+        bot_id="bot",
+        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+        bot_repo=_Bots(),
+        path_factory=object(),
+        skill_service_factory=object(),
+        skill_set_service_factory=object(),
+        resolver=object(),
+        device_sync_dispatcher=object(),
+        asset_service=assets,
     )
     assert assets.calls == [("get", None), ("set", True)]
 
 
 @pytest.mark.asyncio
-async def test_bound_control_plane_not_found_never_falls_back_to_legacy_mutation() -> None:
+async def test_bound_control_plane_not_found_never_falls_back_to_legacy_mutation() -> (
+    None
+):
     class _MissingAssets(_Assets):
         def resolve_legacy_skill_id(self, **_kwargs):
             raise LocalSkillNotFoundError()
@@ -151,19 +176,26 @@ async def test_bound_control_plane_not_found_never_falls_back_to_legacy_mutation
     legacy_service_factory = MagicMock()
     with pytest.raises(LocalSkillNotFoundError):
         await activate_skill(
-            "missing-link", ActivateRequest(source_path="missing/path"),
-            bot_id="bot", ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
-            bot_repo=_Bots(), path_factory=object(),
+            "missing-link",
+            ActivateRequest(source_path="missing/path"),
+            bot_id="bot",
+            ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+            bot_repo=_Bots(),
+            path_factory=object(),
             skill_service_factory=legacy_service_factory,
-            skill_set_service_factory=object(), resolver=object(),
-            device_sync_dispatcher=object(), asset_service=_MissingAssets(),
+            skill_set_service_factory=object(),
+            resolver=object(),
+            device_sync_dispatcher=object(),
+            asset_service=_MissingAssets(),
         )
 
     legacy_service_factory.create.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_legacy_deactivate_keeps_wire_but_uses_bot_skill_asset_control_plane() -> None:
+async def test_legacy_deactivate_keeps_wire_but_uses_bot_skill_asset_control_plane() -> (
+    None
+):
     assets = _Assets()
     response = await deactivate_skill(
         "7",
@@ -309,7 +341,9 @@ async def test_legacy_skill_set_batch_keeps_domain_partial_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_legacy_skill_set_batch_validates_target_before_materialising_asset() -> None:
+async def test_legacy_skill_set_batch_validates_target_before_materialising_asset() -> (
+    None
+):
     class _ControlPlane:
         resolved = False
 

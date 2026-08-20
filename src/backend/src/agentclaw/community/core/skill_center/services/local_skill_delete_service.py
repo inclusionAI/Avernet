@@ -28,7 +28,9 @@ from agentclaw.community.core.skill_center.factories import (
     LocalSkillQuarantineRepairError,
     SkillServiceFactory,
 )
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillSetRepository,
+)
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
 from agentclaw.community.core.skills_pool.edit_guard import (
@@ -39,7 +41,9 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
-from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    LocalSkillCleanupRepository,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -71,7 +75,9 @@ class LocalSkillDeleteService:
         self._cleanup_repo = cleanup_repo
         self._device_context_resolver_provider = device_context_resolver_provider
 
-    async def delete_local_skill(self, *, skill_id: str, actor_id: str) -> None:
+    async def delete_local_skill(
+        self, *, skill_id: str, owner_id: str, user_id: str
+    ) -> None:
         scope = self._discover_scope(skill_id)
         try:
             lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
@@ -84,7 +90,13 @@ class LocalSkillDeleteService:
         except SkillsPoolEditPausedError as exc:
             raise LocalSkillEditPausedError() from exc
         try:
-            skill, bot, owner_id, bot_id = self._authorize(skill_id, actor_id)
+            skill, bot, resolved_owner_id, bot_id = self._authorize(
+                skill_id,
+                owner_id,
+                user_id,
+            )
+            if resolved_owner_id != owner_id:
+                raise LocalSkillNotFoundError()
             if self._scope_for(bot, bot_id) != scope:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
@@ -94,7 +106,7 @@ class LocalSkillDeleteService:
             active_custom_set_ids = {
                 str(skill_set["id"])
                 for skill_set in self._skill_set_repo.get_all_active_skill_sets_for_env(
-                    user_id=owner_id,
+                    user_id=resolved_owner_id,
                     bolt_id=bot_id,
                     engine_type=bot.get("active_engine"),
                     env=str(bot["env"]),
@@ -108,17 +120,17 @@ class LocalSkillDeleteService:
             if active_custom_set_ids & referenced_set_ids:
                 raise LocalSkillActiveError()
             locator = str(skill["git_path"])[len("local://") :]
-            is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=owner_id)
+            is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=resolved_owner_id)
             package = self._package_for_locator(
                 bot=bot,
-                owner_id=owner_id,
+                owner_id=resolved_owner_id,
                 bot_id=bot_id,
                 is_teclaw=is_teclaw,
                 locator=locator,
             )
             await self._recover_repair_required(
                 bot=bot,
-                owner_id=owner_id,
+                owner_id=resolved_owner_id,
                 bot_id=bot_id,
                 skill_id=skill_id,
                 is_teclaw=is_teclaw,
@@ -461,21 +473,23 @@ class LocalSkillDeleteService:
         return self._scope_for(bot, bot_id)
 
     def _authorize(
-        self, skill_id: str, actor_id: str
+        self, skill_id: str, owner_id: str, user_id: str
     ) -> tuple[dict[str, Any], dict[str, Any], str, str]:
         if not skill_id.isdecimal():
             raise LocalSkillNotFoundError()
         raw = self._skill_repo.get_by_id(skill_id)
         if not self._is_exact_local_skill(raw):
             raise LocalSkillNotFoundError()
-        owner_id = str(raw["user_id"])
+        skill_owner_id = str(raw["user_id"])
         bot_id = str(raw["bolt_id"])
+        if skill_owner_id != owner_id:
+            raise LocalSkillNotFoundError()
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
-        if actor_id != owner_id:
+        if user_id != owner_id:
             permission = self._collaborators.check_collaborator_permission(
-                bot_id, owner_id, actor_id, PermissionLevel.MEMBER
+                bot_id, owner_id, user_id, PermissionLevel.MEMBER
             )
             if not permission.get("has_permission"):
                 raise LocalSkillNotFoundError()

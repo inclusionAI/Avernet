@@ -150,13 +150,13 @@ class _Asset:
 
     def get_skill(self, **kwargs):
         return self.query.get_local_skill(
-            skill_id=kwargs["skill_id"], actor_id=kwargs["actor_id"]
+            skill_id=kwargs["skill_id"], actor_id=kwargs["user_id"]
         )
 
     async def set_active(self, **kwargs):
         return await self.state.set_local_skill_active(
             skill_id=kwargs["skill_id"],
-            actor_id=kwargs["actor_id"],
+            actor_id=kwargs["user_id"],
             active=kwargs["active"],
         )
 
@@ -297,7 +297,11 @@ def test_delete_derives_scope_from_skill_id_and_returns_standard_deleted_payload
     assert response.status_code == 200
     assert response.json()["code"] == 200000
     assert response.json()["data"] == {"deleted": True}
-    assert delete.args == {"skill_id": "8", "actor_id": "actor"}
+    assert delete.args == {
+        "skill_id": "8",
+        "owner_id": "actor",
+        "user_id": "actor",
+    }
 
 
 def test_delete_active_error_uses_the_fixed_public_conflict_envelope():
@@ -387,17 +391,20 @@ def test_content_and_parameters_use_the_type_resolved_asset_service():
     assert asset.content_args == {
         "skill_id": "7",
         "bot_id": "bot-1",
-        "actor_id": "actor",
+        "owner_id": "actor",
+        "user_id": "actor",
     }
     assert asset.parameter_args == {
         "skill_id": "7",
         "bot_id": "bot-1",
-        "actor_id": "actor",
+        "owner_id": "actor",
+        "user_id": "actor",
     }
     assert asset.replace_args == {
         "skill_id": "7",
         "bot_id": "bot-1",
-        "actor_id": "actor",
+        "owner_id": "actor",
+        "user_id": "actor",
         "parameters": {"region": "us"},
     }
 
@@ -547,9 +554,9 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
                 )
 
                 class Assets:
-                    def get_skill(self, *, skill_id, bot_id, actor_id):
+                    def get_skill(self, *, skill_id, bot_id, owner_id, user_id):
                         return local_query.get_local_skill(
-                            skill_id=skill_id, actor_id=actor_id
+                            skill_id=skill_id, actor_id=user_id
                         )
 
                 binder.bind(BotSkillAssetServiceProtocol, to=Assets())
@@ -752,11 +759,11 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
         object(),
         factory,
         _MutationGuard(),
-            _Guard(),
-            object(),
-            object(),
-            object(),
-        )
+        _Guard(),
+        object(),
+        object(),
+        object(),
+    )
     with avernet_tenant_scope("tenant-b"):
         with pytest.raises(LocalSkillNotFoundError):
             await service.set_local_skill_active(

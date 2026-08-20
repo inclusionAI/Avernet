@@ -245,18 +245,27 @@ class _Cleanup:
 
 
 def _service(
-    *, active=False, fail_delete=False, active_during_delete=False,
-    on_acquire=None, status="ACTIVE", provider="local", guard_error=None,
+    *,
+    active=False,
+    fail_delete=False,
+    active_during_delete=False,
+    on_acquire=None,
+    status="ACTIVE",
+    provider="local",
+    guard_error=None,
 ):
     files = _Files()
     skills = _Skills(
-        active=active, fail_delete=fail_delete,
+        active=active,
+        fail_delete=fail_delete,
         active_during_delete=active_during_delete,
     )
     guard = _Guard(on_acquire)
     if guard_error is not None:
+
         async def fail_acquire(*, scope):
             raise guard_error
+
         guard.acquire_for_edit_wait = fail_acquire
     cleanup = _Cleanup()
     service = LocalSkillDeleteService(
@@ -278,7 +287,7 @@ def _service(
 async def test_inactive_delete_quarantines_then_removes_database_state_and_package():
     service, files, skills, guard, cleanup = _service()
 
-    await service.delete_local_skill(skill_id="9", actor_id="owner")
+    await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
 
     assert skills.deleted is True
     assert files.files == {}
@@ -301,19 +310,19 @@ async def test_inactive_delete_quarantines_then_removes_database_state_and_packa
 async def test_delete_maps_guard_failures_to_public_domain_errors(
     guard_error, expected_error
 ):
-    service, _files, _skills, _guard, _cleanup = _service(
-        guard_error=guard_error
-    )
+    service, _files, _skills, _guard, _cleanup = _service(guard_error=guard_error)
 
     with pytest.raises(expected_error):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
 
 @pytest.mark.asyncio
 async def test_teclaw_delete_uses_device_context_for_both_package_storages():
     service, _files, _skills, _guard, _cleanup = _service(provider="teclaw")
 
-    await service.delete_local_skill(skill_id="9", actor_id="owner")
+    await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
 
     factory = service._skill_service_factory
     assert factory.locator_kwargs["is_teclaw"] is True
@@ -330,7 +339,9 @@ async def test_delete_fails_closed_when_device_context_cannot_be_resolved():
     service._device_context_resolver_provider = _unavailable_resolver
 
     with pytest.raises(LocalSkillStorageError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert skills.deleted is False
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
@@ -341,7 +352,9 @@ async def test_active_delete_is_rejected_before_quarantine_or_database_mutation(
     service, files, skills, _guard, cleanup = _service(active=True)
 
     with pytest.raises(LocalSkillActiveError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert skills.deleted is False
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
@@ -360,7 +373,7 @@ async def test_exclusion_from_a_previous_default_set_allows_delete():
             return [9]
 
     service._skill_set_repo = _PreviousDefaultExcluded(skills)
-    await service.delete_local_skill(skill_id="9", actor_id="owner")
+    await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
 
     assert skills.deleted is True
     assert files.files == {}
@@ -372,7 +385,9 @@ async def test_non_ready_delete_is_rejected_without_package_or_database_mutation
     service, files, skills, _guard, cleanup = _service(status="PENDING")
 
     with pytest.raises(LocalSkillNotReadyError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert skills.deleted is False
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
@@ -384,7 +399,9 @@ async def test_database_failure_restores_verified_package_before_fixed_storage_e
     service, files, skills, _guard, cleanup = _service(fail_delete=True)
 
     with pytest.raises(LocalSkillStorageError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert skills.deleted is False
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
@@ -395,14 +412,18 @@ async def test_transactional_active_recheck_restores_package_and_returns_active_
     service, files, skills, _guard, _cleanup = _service(active_during_delete=True)
 
     with pytest.raises(LocalSkillActiveError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert skills.deleted is False
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
 
 
 @pytest.mark.asyncio
-async def test_quarantine_identity_is_durable_before_source_bytes_are_removed(monkeypatch):
+async def test_quarantine_identity_is_durable_before_source_bytes_are_removed(
+    monkeypatch,
+):
     service, files, _skills, _guard, cleanup = _service()
     original_quarantine = LocalSkillPackageStorage.quarantine_to
 
@@ -417,7 +438,9 @@ async def test_quarantine_identity_is_durable_before_source_bytes_are_removed(mo
         LocalSkillPackageStorage, "quarantine_to", crash_after_source_removal
     )
     with pytest.raises(_ProcessCrash):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
     assert cleanup.preparing[0]["skill_id"] == "9"
     assert cleanup.repair_required[0]["skill_id"] == "9"
     assert "/skills/one/SKILL.md" not in files.files
@@ -425,7 +448,9 @@ async def test_quarantine_identity_is_durable_before_source_bytes_are_removed(mo
 
 
 @pytest.mark.asyncio
-async def test_next_delete_recovers_a_crash_retained_quarantine_before_retrying(monkeypatch):
+async def test_next_delete_recovers_a_crash_retained_quarantine_before_retrying(
+    monkeypatch,
+):
     service, files, skills, _guard, cleanup = _service()
     original_quarantine = LocalSkillPackageStorage.quarantine_to
 
@@ -440,15 +465,15 @@ async def test_next_delete_recovers_a_crash_retained_quarantine_before_retrying(
         LocalSkillPackageStorage, "quarantine_to", crash_after_source_removal
     )
     with pytest.raises(_ProcessCrash):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
     retained_work_id = cleanup.list_repair_required(
         env="dev", owner_id="owner", bot_id="bot", skill_id="9"
     )[0]["id"]
 
-    monkeypatch.setattr(
-        LocalSkillPackageStorage, "quarantine_to", original_quarantine
-    )
-    await service.delete_local_skill(skill_id="9", actor_id="owner")
+    monkeypatch.setattr(LocalSkillPackageStorage, "quarantine_to", original_quarantine)
+    await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
 
     assert skills.deleted is True
     assert files.files == {}
@@ -456,7 +481,9 @@ async def test_next_delete_recovers_a_crash_retained_quarantine_before_retrying(
 
 
 @pytest.mark.asyncio
-async def test_next_delete_cancels_pre_copy_repair_work_when_source_verifies(monkeypatch):
+async def test_next_delete_cancels_pre_copy_repair_work_when_source_verifies(
+    monkeypatch,
+):
     service, files, skills, _guard, cleanup = _service()
     original_quarantine = LocalSkillPackageStorage.quarantine_to
 
@@ -470,16 +497,16 @@ async def test_next_delete_cancels_pre_copy_repair_work_when_source_verifies(mon
         LocalSkillPackageStorage, "quarantine_to", crash_before_quarantine_copy
     )
     with pytest.raises(_ProcessCrash):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
     retained_work_id = cleanup.list_repair_required(
         env="dev", owner_id="owner", bot_id="bot", skill_id="9"
     )[0]["id"]
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
 
-    monkeypatch.setattr(
-        LocalSkillPackageStorage, "quarantine_to", original_quarantine
-    )
-    await service.delete_local_skill(skill_id="9", actor_id="owner")
+    monkeypatch.setattr(LocalSkillPackageStorage, "quarantine_to", original_quarantine)
+    await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
 
     assert skills.deleted is True
     assert files.files == {}
@@ -494,11 +521,13 @@ async def test_retry_repairs_an_incomplete_existing_source_before_purging_quaran
     files.fail_write_prefixes.add("/skills/one/")
 
     with pytest.raises(LocalSkillStorageError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     files.fail_write_prefixes.clear()
     files.partial_fail_delete.clear()
-    await service.delete_local_skill(skill_id="9", actor_id="owner")
+    await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
 
     assert skills.deleted is True
     assert files.files == {}
@@ -517,7 +546,9 @@ async def test_database_failure_records_quarantine_cleanup_after_source_restores
 
     files.delete_tree = fail_restored_quarantine_purge
     with pytest.raises(LocalSkillStorageError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert skills.deleted is False
     assert files.files["/skills/one/SKILL.md"] == b"name: one\ndescription: One\n"
@@ -530,7 +561,9 @@ async def test_restore_failure_is_not_swallowed_after_database_rollback():
     files.fail_write_prefixes.add("/skills/one/")
 
     with pytest.raises(LocalSkillStorageError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert skills.deleted is False
     assert any(".one.delete-" in path for path in files.files)
@@ -543,7 +576,9 @@ async def test_failed_source_cleanup_restores_authoritative_bytes_and_removes_qu
     files.fail_delete.add("/skills/one")
 
     with pytest.raises(LocalSkillStorageError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert skills.deleted is False
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
@@ -564,7 +599,9 @@ async def test_source_cleanup_exception_restores_authoritative_bytes_and_removes
     files.delete_tree = partially_delete_then_raise
 
     with pytest.raises(LocalSkillStorageError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert skills.deleted is False
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
@@ -578,7 +615,9 @@ async def test_partial_source_cleanup_failure_repairs_authoritative_bytes_before
     files.partial_fail_delete.add("/skills/one")
 
     with pytest.raises(LocalSkillStorageError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert skills.deleted is False
     assert files.files == {
@@ -596,7 +635,9 @@ async def test_unverified_partial_source_repair_retains_complete_quarantine_fail
     files.fail_write_prefixes.add("/skills/one/")
 
     with pytest.raises(LocalSkillStorageError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert skills.deleted is False
     assert any(".one.delete-" in path for path in files.files)
@@ -614,7 +655,7 @@ async def test_post_commit_purge_failure_records_durable_quarantine_cleanup():
         return await original_delete(path)
 
     files.delete_tree = fail_quarantine_purge
-    await service.delete_local_skill(skill_id="9", actor_id="owner")
+    await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
 
     assert skills.deleted is True
     assert skills.pending_work["skill_id"] == "9"
@@ -627,7 +668,9 @@ async def test_purge_completion_mark_failure_propagates_without_resurrecting_ski
     cleanup.mark_cleaned = lambda **_kwargs: False
 
     with pytest.raises(LocalSkillStorageError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert skills.deleted is True
     assert skills.pending_work is not None
@@ -643,6 +686,8 @@ async def test_lock_rereads_active_state_before_any_package_mutation():
     service._skill_set_repo = _Sets(skills)
 
     with pytest.raises(LocalSkillActiveError):
-        await service.delete_local_skill(skill_id="9", actor_id="owner")
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
 
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}

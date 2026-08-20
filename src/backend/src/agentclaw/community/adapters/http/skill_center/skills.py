@@ -4,6 +4,7 @@ Migrated from: services/openclawserver/server/skills
 Unified Skills router for skill management, activation, and metadata.
 Combines functionality from skills, skills_metadata, and skillset_switch routers.
 """
+
 import asyncio
 import io
 import json
@@ -13,7 +14,16 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.dependencies import (
@@ -86,7 +96,9 @@ from agentclaw.community.api.skill_set_control_plane import (
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
+from agentclaw.community.core.bot_management.services.engine_resolver import (
+    resolve_engine_for_bot,
+)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     LocalSkillRuntimeSyncError,
@@ -103,7 +115,9 @@ from agentclaw.community.core.repository.protocols.skill_center import SkillRepo
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import Injected
 from agentclaw.community.api.skill_member_service import SkillMemberServiceProtocol
-from agentclaw.community.api.skill_parameter_service_factory import SkillParameterServiceFactoryProtocol
+from agentclaw.community.api.skill_parameter_service_factory import (
+    SkillParameterServiceFactoryProtocol,
+)
 from agentclaw.community.api.skill_publish_service import SkillPublishServiceProtocol
 from agentclaw.community.api.runtime_layout_probe_service import (
     RuntimeLayoutProbeResult,
@@ -111,19 +125,31 @@ from agentclaw.community.api.runtime_layout_probe_service import (
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
-from agentclaw.community.api.skill_set_activator_factory import SkillSetActivatorFactoryProtocol
-from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
-from agentclaw.community.api.skill_set_switcher_factory import SkillSetSwitcherFactoryProtocol
+from agentclaw.community.api.skill_set_activator_factory import (
+    SkillSetActivatorFactoryProtocol,
+)
+from agentclaw.community.api.skill_set_service_factory import (
+    SkillSetServiceFactoryProtocol,
+)
+from agentclaw.community.api.skill_set_switcher_factory import (
+    SkillSetSwitcherFactoryProtocol,
+)
 from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
-from agentclaw.community.api.repository_catalog_service import RepositoryCatalogServiceProtocol
-from agentclaw.community.core.config_compose.teclaw_paths import to_local_skill_engine_path
+from agentclaw.community.api.repository_catalog_service import (
+    RepositoryCatalogServiceProtocol,
+)
+from agentclaw.community.core.config_compose.teclaw_paths import (
+    to_local_skill_engine_path,
+)
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
 )
-from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+    DeviceSyncDispatcher,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
@@ -136,7 +162,9 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     InterceptorContext,
     with_interceptors,
 )
-from agentclaw.community.core.bot_collaborator.interceptor.extractors import PermissionParams
+from agentclaw.community.core.bot_collaborator.interceptor.extractors import (
+    PermissionParams,
+)
 
 DEFAULT_ENGINE_TYPE = "openclaw"
 _UPLOAD_SIGN_URL_EXPIRES = 7200
@@ -227,16 +255,22 @@ def _build_uploaded_zip(uploaded_files: list[dict[str, Any]]) -> bytes:
     return buf.getvalue()
 
 
-def _build_upload_oss_path(skill_name: str, version: str = "1.0.0", timestamp: str = None) -> str:
+def _build_upload_oss_path(
+    skill_name: str, version: str = "1.0.0", timestamp: str = None
+) -> str:
     from agentclaw.community.core.config import sofa
+
     ts = timestamp or str(int(time.time()))
     # 从配置读取 OSS 上传路径前缀，没配置则用默认值
     skill_config = sofa.sofa_config.user_config.get("skill", {}).get("oss", {})
-    prefix = skill_config.get("upload_prefix", "aidesktop/aidesktop_pre/bolt_shared/skills-upload")
+    prefix = skill_config.get(
+        "upload_prefix", "aidesktop/aidesktop_pre/bolt_shared/skills-upload"
+    )
     return f"{prefix}/{skill_name}/{ts}/{version}.zip"
 
 
 # ==================== Helper Functions ====================
+
 
 def parse_tags(skill_tags) -> list[str]:
     """Parse tags from database (JSON string) to list."""
@@ -297,7 +331,9 @@ def _get_path_params(
     #         )
     #         raise HTTPException(status_code=403, detail="无权操作其他用户的资源")
 
-    effective_entity_id = entity_id if entity_id else (ctx.user_id if ctx.user_id else "default")
+    effective_entity_id = (
+        entity_id if entity_id else (ctx.user_id if ctx.user_id else "default")
+    )
     effective_bot_id = bot_id if bot_id else (ctx.bot_id if ctx.bot_id else "default")
 
     # Use entity_id as owner when supplied (entity_id = bot owner; ctx.user_id = current viewer).
@@ -318,10 +354,18 @@ def _get_path_params(
         logger.warning(
             "[_get_path_params] bot_type lookup failed for "
             "bot_id=%s owner=%s: %s — defaulting is_desktop=False",
-            effective_bot_id, owner_id_for_lookup, e,
+            effective_bot_id,
+            owner_id_for_lookup,
+            e,
         )
 
-    return effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop
+    return (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    )
 
 
 def _resolve_teclaw_local_skill(resolver, bot_id: str, owner_id: str):
@@ -410,12 +454,22 @@ async def _set_legacy_asset_active_if_resolved(
                 skill_reference=skill_reference,
                 source_path=source_path,
                 bot_id=bot_id,
-                actor_id=actor_id,
+                owner_id=actor_id,
+                user_id=actor_id,
             )
         )
-        asset_service.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+        asset_service.get_skill(
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=actor_id,
+            user_id=actor_id,
+        )
         return await asset_service.set_active(
-            skill_id=skill_id, bot_id=bot_id, actor_id=actor_id, active=active
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=actor_id,
+            user_id=actor_id,
+            active=active,
         )
     except LocalSkillNotFoundError:
         if control_plane_bound:
@@ -425,24 +479,35 @@ async def _set_legacy_asset_active_if_resolved(
 
 # ==================== Core CRUD APIs ====================
 
+
 @router.post("/upload", response_model=UploadSkillResponse)
-@with_interceptors(CollaboratorPermissionInterceptor(
-    bot_id="$bot_id",
-    owner_id="$user_id",
-))
+@with_interceptors(
+    CollaboratorPermissionInterceptor(
+        bot_id="$bot_id",
+        owner_id="$user_id",
+    )
+)
 async def upload_skill(
     files: list[UploadFile] = File(...),
-    file_paths: str | None = Form(None, description="JSON array of relative paths for each file"),
+    file_paths: str | None = Form(
+        None, description="JSON array of relative paths for each file"
+    ),
     entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     user_id: str | None = Query(None, description="User ID"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     edit_guard: SkillsPoolEditGuard = Injected(SkillsPoolEditGuard),
 ) -> UploadSkillResponse:
@@ -451,13 +516,28 @@ async def upload_skill(
     Supports single file or multiple files (for skills with subdirectories).
     Also supports ZIP files which will be extracted automatically.
     """
-    logger.info(f"[skills.upload_skill] Request started: user_id={user_id}, ctx.user_id={ctx.user_id}, bot_id={ctx.bot_id}, file_count={len(files)}, entity_id={entity_id}")
+    logger.info(
+        f"[skills.upload_skill] Request started: user_id={user_id}, ctx.user_id={ctx.user_id}, bot_id={ctx.bot_id}, file_count={len(files)}, entity_id={entity_id}"
+    )
 
     # Use user_id as entity_id if provided, otherwise use entity_id
     effective_entity_id_input = user_id or entity_id
 
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_input, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
+        ctx,
+        effective_entity_id_input,
+        entity_type,
+        bot_id,
+        engine_type,
+        bot_repo=bot_repo,
+    )
 
     owner_id_for_lookup = user_id or entity_id or ctx.user_id or ""
     bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
@@ -485,21 +565,42 @@ async def upload_skill(
     if bot_status != "ACTIVE":
         return UploadSkillResponse(
             success=False,
-            message=f"Bot is not ready. Current status: {bot_status or 'UNKNOWN'}, expected ACTIVE."
+            message=f"Bot is not ready. Current status: {bot_status or 'UNKNOWN'}, expected ACTIVE.",
         )
 
     # teclaw owns its local-skill files (engine-owned model): record the minimal
     # logical path (local://skills-local/<name>) and forward writes per-file to the
     # draft container, expanding the path to the workspace namespace at the
     # device-fs seam.
-    is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(resolver, effective_bot_id, effective_entity_id)
+    is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(
+        resolver, effective_bot_id, effective_entity_id
+    )
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop, is_teclaw=is_teclaw)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    logger.info(f"[skills.upload_skill] Paths: skills_dir={skills_dir}, local_dir={local_dir}, repo_dir={repo_dir}, is_teclaw={is_teclaw}")
+    skills_dir = path_factory.get_bot_skills_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    local_dir = path_factory.get_bot_skills_local_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+        is_teclaw=is_teclaw,
+    )
+    path_factory.get_bot_engine_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    repo_dir = path_factory.get_bot_skills_repo_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+    )
+    logger.info(
+        f"[skills.upload_skill] Paths: skills_dir={skills_dir}, local_dir={local_dir}, repo_dir={repo_dir}, is_teclaw={is_teclaw}"
+    )
 
     # Create per-request service instance with user-specific paths. teclaw gets the
     # path adapter that expands skills-local/... → workspace/skills-local/...
@@ -524,18 +625,15 @@ async def upload_skill(
         except json.JSONDecodeError as e:
             logger.error(f"[skills.upload_skill] Failed to parse file_paths JSON: {e}")
             return UploadSkillResponse(
-                success=False,
-                message="file_paths must be a JSON array."
+                success=False, message="file_paths must be a JSON array."
             )
         if not isinstance(parsed_paths, list):
             return UploadSkillResponse(
-                success=False,
-                message="file_paths must be a JSON array."
+                success=False, message="file_paths must be a JSON array."
             )
         if len(parsed_paths) != len(files):
             return UploadSkillResponse(
-                success=False,
-                message="file_paths length must match files length."
+                success=False, message="file_paths length must match files length."
             )
 
     try:
@@ -545,14 +643,20 @@ async def upload_skill(
             content = await file.read()
             # Use provided relative_path or fallback to filename
             relative_path = parsed_paths[i] if i < len(parsed_paths) else file.filename
-            logger.info(f"[skills.upload_skill] Processing file {i}: filename={file.filename}, relative_path={relative_path}")
-            uploaded_files.append({
-                "filename": file.filename,
-                "relative_path": relative_path,
-                "content": content
-            })
+            logger.info(
+                f"[skills.upload_skill] Processing file {i}: filename={file.filename}, relative_path={relative_path}"
+            )
+            uploaded_files.append(
+                {
+                    "filename": file.filename,
+                    "relative_path": relative_path,
+                    "content": content,
+                }
+            )
 
-        logger.info(f"[skills.upload_skill] Calling service.upload_skill with {len(uploaded_files)} files")
+        logger.info(
+            f"[skills.upload_skill] Calling service.upload_skill with {len(uploaded_files)} files"
+        )
 
         # ``ctx.user_id`` is the authenticated actor used by the collaborator
         # interceptor and audit trail.  Local Skill metadata follows the
@@ -576,34 +680,42 @@ async def upload_skill(
         finally:
             edit_guard.release(edit_lease)
 
-        logger.info(f"[skills.upload_skill] Success: skill_id={skill.get('id')}, name={skill.get('name')}")
+        logger.info(
+            f"[skills.upload_skill] Success: skill_id={skill.get('id')}, name={skill.get('name')}"
+        )
 
         return UploadSkillResponse(
             success=True,
             data=SkillMetadataResponse(
-                id=str(skill.get('id')) if skill.get('id') is not None else "",
-                name=skill.get('name'),
-                description=skill.get('description'),
-                git_path=skill.get('git_path'),
-                link_name=skill.get('link_name'),
-                category=skill.get('category'),
-                tags=parse_tags(skill.get('tags')),
-                risk_tags=skill.get('risk_tags') or [],
-                mcp_dependencies=skill.get('mcp_dependencies') or [],
-                input_schema=skill.get('input_schema'),
-                output_schema=skill.get('output_schema'),
-                is_public=skill.get('is_public'),
-                is_builtin=skill.get('is_builtin'),
-                user_id=str(skill.get('user_id')) if skill.get('user_id') is not None else None,
+                id=str(skill.get("id")) if skill.get("id") is not None else "",
+                name=skill.get("name"),
+                description=skill.get("description"),
+                git_path=skill.get("git_path"),
+                link_name=skill.get("link_name"),
+                category=skill.get("category"),
+                tags=parse_tags(skill.get("tags")),
+                risk_tags=skill.get("risk_tags") or [],
+                mcp_dependencies=skill.get("mcp_dependencies") or [],
+                input_schema=skill.get("input_schema"),
+                output_schema=skill.get("output_schema"),
+                is_public=skill.get("is_public"),
+                is_builtin=skill.get("is_builtin"),
+                user_id=str(skill.get("user_id"))
+                if skill.get("user_id") is not None
+                else None,
                 bot_id=(
                     str(skill["bolt_id"])
                     if skill.get("bolt_id") is not None
                     else "default"
                 ),
-                gmt_created=skill.get('gmt_created') if skill.get('gmt_created') else "",
-                gmt_modified=skill.get('gmt_modified') if skill.get('gmt_modified') else ""
+                gmt_created=skill.get("gmt_created")
+                if skill.get("gmt_created")
+                else "",
+                gmt_modified=skill.get("gmt_modified")
+                if skill.get("gmt_modified")
+                else "",
             ),
-            message="Skill uploaded successfully"
+            message="Skill uploaded successfully",
         )
     except SkillsPoolEditPausedError as e:
         return UploadSkillResponse(success=False, message=str(e))
@@ -611,15 +723,16 @@ async def upload_skill(
         error_msg = str(e)
         logger.error(f"[skills.upload_skill] Validation error: {error_msg}")
         return UploadSkillResponse(
-            success=False,
-            message=_normalize_upload_error_message(error_msg)
+            success=False, message=_normalize_upload_error_message(error_msg)
         )
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"[skills.upload_skill] Unexpected error: {error_msg}", exc_info=True)
+        logger.error(
+            f"[skills.upload_skill] Unexpected error: {error_msg}", exc_info=True
+        )
         return UploadSkillResponse(
             success=False,
-            message=_normalize_upload_error_message(f"Upload failed: {error_msg}")
+            message=_normalize_upload_error_message(f"Upload failed: {error_msg}"),
         )
 
 
@@ -629,13 +742,17 @@ async def list_skills(
     tags: str | None = Query(None, description="Filter by tags (comma-separated)"),
     is_public: bool | None = Query(None, description="Filter by public status"),
     search: str | None = Query(None, description="Search query"),
-    sort_by: str = Query("gmt_created", description="Sort field: gmt_created, gmt_modified, name"),
+    sort_by: str = Query(
+        "gmt_created", description="Sort field: gmt_created, gmt_modified, name"
+    ),
     sort_order: str = Query("desc", description="Sort order: asc, desc"),
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     user_id: Optional[str] = Query(None, description="User ID for filtering"),
     bot_id: Optional[str] = Query(None, description="Bot ID for filtering"),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
 ) -> PaginatedSkillListResponse:
     """List skills with filtering and pagination (from database)."""
     try:
@@ -648,7 +765,9 @@ async def list_skills(
 
         if search:
             # Search mode
-            skills = service.search_skills_db(search, user_id=user_id, limit=limit, bolt_id=bot_id)
+            skills = service.search_skills_db(
+                search, user_id=user_id, limit=limit, bolt_id=bot_id
+            )
             total = len(skills)
         else:
             # Filter mode
@@ -657,36 +776,41 @@ async def list_skills(
                 tags=tag_list,
                 is_public=is_public,
                 user_id=user_id,
-                bolt_id=bot_id
+                bolt_id=bot_id,
             )
             total = len(skills)
             # Manual pagination
-            skills = skills[offset:offset + limit]
+            skills = skills[offset : offset + limit]
 
         return PaginatedSkillListResponse(
             success=True,
-            data=[SkillMetadataResponse(
-                id=str(s.get('id')) if s.get('id') is not None else "",
-                name=s.get('name'),
-                description=s.get('description'),
-                git_path=s.get('git_path'),
-                link_name=s.get('link_name'),
-                category=s.get('category'),
-                tags=parse_tags(s.get('tags')),
-                risk_tags=s.get('risk_tags') or [],
-                mcp_dependencies=s.get('mcp_dependencies') or [],
-                input_schema=s.get('input_schema'),
-                output_schema=s.get('output_schema'),
-                is_public=s.get('is_public'),
-                is_builtin=s.get('is_builtin'),
-                user_id=str(s.get('user_id')) if s.get('user_id') is not None else None,
-                bot_id=s.get('bolt_id') if s.get('bolt_id') else "default",
-                gmt_created=s.get('gmt_created') if s.get('gmt_created') else "",
-                gmt_modified=s.get('gmt_modified') if s.get('gmt_modified') else ""
-            ) for s in skills],
+            data=[
+                SkillMetadataResponse(
+                    id=str(s.get("id")) if s.get("id") is not None else "",
+                    name=s.get("name"),
+                    description=s.get("description"),
+                    git_path=s.get("git_path"),
+                    link_name=s.get("link_name"),
+                    category=s.get("category"),
+                    tags=parse_tags(s.get("tags")),
+                    risk_tags=s.get("risk_tags") or [],
+                    mcp_dependencies=s.get("mcp_dependencies") or [],
+                    input_schema=s.get("input_schema"),
+                    output_schema=s.get("output_schema"),
+                    is_public=s.get("is_public"),
+                    is_builtin=s.get("is_builtin"),
+                    user_id=str(s.get("user_id"))
+                    if s.get("user_id") is not None
+                    else None,
+                    bot_id=s.get("bolt_id") if s.get("bolt_id") else "default",
+                    gmt_created=s.get("gmt_created") if s.get("gmt_created") else "",
+                    gmt_modified=s.get("gmt_modified") if s.get("gmt_modified") else "",
+                )
+                for s in skills
+            ],
             total=total,
             limit=limit,
-            offset=offset
+            offset=offset,
         )
     except Exception as e:
         logger.error(f"[list_skills] Error: {e}", exc_info=True)
@@ -699,7 +823,9 @@ async def create_skill(
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
 ) -> SkillDetailResponse:
     """Create a new skill metadata entry."""
     # Scope the service to the caller's bot so repo_dir resolves to the bot's
@@ -729,53 +855,83 @@ async def create_skill(
             output_schema=request.output_schema,
             is_public=request.is_public,
             user_id=request.user_id,
-            bolt_id=request.bot_id
+            bolt_id=request.bot_id,
         )
-        return SkillDetailResponse(success=True, data=SkillMetadataResponse(
-            id=str(skill.get('id')) if skill.get('id') is not None else "",
-            name=skill.get('name'),
-            description=skill.get('description'),
-            git_path=skill.get('git_path'),
-            link_name=skill.get('link_name'),
-            category=skill.get('category'),
-            tags=parse_tags(skill.get('tags')),
-            risk_tags=skill.get('risk_tags') or [],
-            mcp_dependencies=skill.get('mcp_dependencies') or [],
-            input_schema=skill.get('input_schema'),
-            output_schema=skill.get('output_schema'),
-            is_public=skill.get('is_public'),
-            is_builtin=skill.get('is_builtin'),
-            user_id=str(skill.get('user_id')) if skill.get('user_id') is not None else None,
-            bot_id=skill.get('bolt_id') if skill.get('bolt_id') else "default",
-            gmt_created=skill.get('gmt_created') if skill.get('gmt_created') else "",
-            gmt_modified=skill.get('gmt_modified') if skill.get('gmt_modified') else ""
-        ))
+        return SkillDetailResponse(
+            success=True,
+            data=SkillMetadataResponse(
+                id=str(skill.get("id")) if skill.get("id") is not None else "",
+                name=skill.get("name"),
+                description=skill.get("description"),
+                git_path=skill.get("git_path"),
+                link_name=skill.get("link_name"),
+                category=skill.get("category"),
+                tags=parse_tags(skill.get("tags")),
+                risk_tags=skill.get("risk_tags") or [],
+                mcp_dependencies=skill.get("mcp_dependencies") or [],
+                input_schema=skill.get("input_schema"),
+                output_schema=skill.get("output_schema"),
+                is_public=skill.get("is_public"),
+                is_builtin=skill.get("is_builtin"),
+                user_id=str(skill.get("user_id"))
+                if skill.get("user_id") is not None
+                else None,
+                bot_id=skill.get("bolt_id") if skill.get("bolt_id") else "default",
+                gmt_created=skill.get("gmt_created")
+                if skill.get("gmt_created")
+                else "",
+                gmt_modified=skill.get("gmt_modified")
+                if skill.get("gmt_modified")
+                else "",
+            ),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 # ==================== Activation APIs ====================
 
+
 @router.get("/active/list", response_model=ActiveSkillsResponse)
 async def get_active_skills(
     entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
-    runtime_layout_probe: RuntimeLayoutProbeServiceProtocol = Injected(RuntimeLayoutProbeServiceProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
+    runtime_layout_probe: RuntimeLayoutProbeServiceProtocol = Injected(
+        RuntimeLayoutProbeServiceProtocol
+    ),
 ) -> ActiveSkillsResponse:
     """Get list of currently active skills (symlinked in skills directory)."""
-    logger.info(f"[skills.get_active_skills] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, entity_id={entity_id}")
+    logger.info(
+        f"[skills.get_active_skills] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, entity_id={entity_id}"
+    )
 
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
+        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    )
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
+    skills_dir = path_factory.get_bot_skills_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
     runtime_skills_dir = skills_dir
     if is_desktop and effective_engine in _FILESYSTEM_LAYOUT_ENGINES:
         probe = await runtime_layout_probe.probe_bot(
@@ -787,9 +943,23 @@ async def get_active_skills(
             probe,
             legacy_fallback=skills_dir,
         )
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    local_dir = path_factory.get_bot_skills_local_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+    )
+    path_factory.get_bot_engine_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    repo_dir = path_factory.get_bot_skills_repo_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+    )
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -813,21 +983,30 @@ async def get_active_skills(
     return ActiveSkillsResponse(
         success=True,
         data=[s.to_dict() for s in active_skills],
-        count=len(active_skills)
+        count=len(active_skills),
     )
 
 
 # ==================== SkillSet APIs (固定路径必须在动态路径之前) ====================
 
-@router.get("/skillset/current", response_model=CurrentSkillSetResponse, deprecated=True)
+
+@router.get(
+    "/skillset/current", response_model=CurrentSkillSetResponse, deprecated=True
+)
 async def get_current_skill_set(
     entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    switcher_factory: SkillSetSwitcherFactoryProtocol = Injected(SkillSetSwitcherFactoryProtocol),
+    switcher_factory: SkillSetSwitcherFactoryProtocol = Injected(
+        SkillSetSwitcherFactoryProtocol
+    ),
 ) -> CurrentSkillSetResponse:
     """[DEPRECATED] Get the currently active skill set.
 
@@ -835,7 +1014,15 @@ async def get_current_skill_set(
     此接口将在未来版本中移除。
     """
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
+        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    )
 
     switcher = switcher_factory.create(
         entity_id=effective_entity_id,
@@ -851,12 +1038,18 @@ async def get_current_skill_set(
 async def switch_skill_set(
     request: SwitchSkillSetRequest,
     entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
+        SkillSetControlPlaneServiceProtocol
+    ),
 ) -> SwitchSkillSetResponse:
     """[DEPRECATED] Switch to a new skill set (batch deactivate current, activate new).
 
@@ -867,7 +1060,15 @@ async def switch_skill_set(
         proxy_token: agentclawproxy token for syncing symlinks to remote device.
     """
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
+        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    )
 
     result = await control_plane.switch(
         bot_id=effective_bot_id,
@@ -882,7 +1083,7 @@ async def switch_skill_set(
             "activated": result.get("activated", []),
             "deactivated": result.get("deactivated", []),
             "failed": [],
-        }
+        },
     )
 
 
@@ -890,16 +1091,30 @@ async def switch_skill_set(
 async def sync_skill_set(
     request: SyncSkillSetRequest,
     entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
+        SkillSetControlPlaneServiceProtocol
+    ),
 ) -> SwitchSkillSetResponse:
     """Sync a skill set to active skills without deactivating others."""
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
+        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    )
 
     result = await control_plane.sync(
         bot_id=effective_bot_id,
@@ -913,23 +1128,30 @@ async def sync_skill_set(
             "activated": result.get("activated", []),
             "deactivated": result.get("deactivated", []),
             "failed": [],
-        }
+        },
     )
 
 
 # ==================== Multi-SkillSet Activation APIs ====================
 
+
 @router.post("/skillset/activate", response_model=ActivateSkillSetResponse)
-@with_interceptors(CollaboratorPermissionInterceptor(
-    bot_id="$request.bot_id",
-    owner_id="$request.entity_id",
-))
+@with_interceptors(
+    CollaboratorPermissionInterceptor(
+        bot_id="$request.bot_id",
+        owner_id="$request.entity_id",
+    )
+)
 async def activate_skill_set(
     request: ActivateSkillSetRequest,
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    activator_factory: SkillSetActivatorFactoryProtocol = Injected(SkillSetActivatorFactoryProtocol),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
+    activator_factory: SkillSetActivatorFactoryProtocol = Injected(
+        SkillSetActivatorFactoryProtocol
+    ),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
+        SkillSetControlPlaneServiceProtocol
+    ),
 ) -> ActivateSkillSetResponse:
     """激活单个能力集（增量激活，不清除其他已激活的能力集）
 
@@ -940,8 +1162,19 @@ async def activate_skill_set(
         proxy_token: agentclawproxy token，用于同步软链到远程设备
     """
     # Get effective path parameters from request body
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(
-        ctx, request.entity_id, request.entity_type, request.bot_id, request.engine_type, bot_repo=bot_repo
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
+        ctx,
+        request.entity_id,
+        request.entity_type,
+        request.bot_id,
+        request.engine_type,
+        bot_repo=bot_repo,
     )
 
     item = await control_plane.activate(
@@ -953,24 +1186,27 @@ async def activate_skill_set(
     return ActivateSkillSetResponse(
         success=True,
         message="Skill set activated",
-        data={
-            "activated": [item["id"]] if item.get("changed") else [],
-            "failed": []
-        }
+        data={"activated": [item["id"]] if item.get("changed") else [], "failed": []},
     )
 
 
 @router.post("/skillset/deactivate", response_model=DeactivateSkillSetResponse)
-@with_interceptors(CollaboratorPermissionInterceptor(
-    bot_id="$request.bot_id",
-    owner_id="$request.entity_id",
-))
+@with_interceptors(
+    CollaboratorPermissionInterceptor(
+        bot_id="$request.bot_id",
+        owner_id="$request.entity_id",
+    )
+)
 async def deactivate_skill_set(
     request: DeactivateSkillSetRequest,
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    activator_factory: SkillSetActivatorFactoryProtocol = Injected(SkillSetActivatorFactoryProtocol),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
+    activator_factory: SkillSetActivatorFactoryProtocol = Injected(
+        SkillSetActivatorFactoryProtocol
+    ),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
+        SkillSetControlPlaneServiceProtocol
+    ),
 ) -> DeactivateSkillSetResponse:
     """取消激活单个能力集
 
@@ -981,8 +1217,19 @@ async def deactivate_skill_set(
         proxy_token: agentclawproxy token，用于同步软链到远程设备
     """
     # Get effective path parameters from request body
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(
-        ctx, request.entity_id, request.entity_type, request.bot_id, request.engine_type, bot_repo=bot_repo
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
+        ctx,
+        request.entity_id,
+        request.entity_type,
+        request.bot_id,
+        request.engine_type,
+        bot_repo=bot_repo,
     )
 
     item = await control_plane.deactivate(
@@ -994,78 +1241,112 @@ async def deactivate_skill_set(
     return DeactivateSkillSetResponse(
         success=True,
         message="Skill set deactivated",
-        data={
-            "deactivated": [item["id"]] if item.get("changed") else [],
-            "failed": []
-        }
+        data={"deactivated": [item["id"]] if item.get("changed") else [], "failed": []},
     )
 
 
 @router.get("/skillset/active", response_model=ActiveSkillSetsResponse)
-@with_interceptors(CollaboratorPermissionInterceptor(
-    bot_id="$bot_id",
-    owner_id="$entity_id",
-    persist_audit_log=False,  # 只读操作，不记录日志
-))
+@with_interceptors(
+    CollaboratorPermissionInterceptor(
+        bot_id="$bot_id",
+        owner_id="$entity_id",
+        persist_audit_log=False,  # 只读操作，不记录日志
+    )
+)
 async def get_active_skill_sets(
     entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(
+        SkillSetControlPlaneServiceProtocol
+    ),
 ) -> ActiveSkillSetsResponse:
     """获取当前 bot 的所有激活能力集列表
 
     返回用户激活的能力集 + 默认能力集（始终在列表中）
     """
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
+        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    )
 
     active_sets = [
-        item for item in control_plane.list_sets(
+        item
+        for item in control_plane.list_sets(
             bot_id=effective_bot_id, actor_id=ctx.user_id
-        ) if item.get("is_active") or item.get("is_default")
+        )
+        if item.get("is_active") or item.get("is_default")
     ]
 
     # 处理返回数据，移除 skills 字段
     for s in active_sets:
-        s.pop('skills', None)
-        s['bot_id'] = s.pop('bolt_id', effective_bot_id)
-        s.pop('type', None)
+        s.pop("skills", None)
+        s["bot_id"] = s.pop("bolt_id", effective_bot_id)
+        s.pop("type", None)
 
     return ActiveSkillSetsResponse(
-        success=True,
-        data=active_sets,
-        count=len(active_sets)
+        success=True, data=active_sets, count=len(active_sets)
     )
 
 
 # ==================== Skill Activation APIs (动态路径) ====================
+
 
 @router.post("/{skill_id}/activate", response_model=ActivateResponse)
 async def activate_skill(
     skill_id: str,
     request: ActivateRequest,
     entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
+    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(
+        SkillSetServiceFactoryProtocol
+    ),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_sync_dispatcher: DeviceSyncDispatcher = Injected(DeviceSyncDispatcher),
-    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
+    asset_service: BotSkillAssetServiceProtocol = Injected(
+        BotSkillAssetServiceProtocol
+    ),
 ) -> ActivateResponse:
     """Activate a skill by creating symlink."""
-    logger.info(f"[skills.activate_skill] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, skill_id={skill_id}, entity_id={entity_id}")
+    logger.info(
+        f"[skills.activate_skill] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, skill_id={skill_id}, entity_id={entity_id}"
+    )
 
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
+        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    )
 
     # Keep the published BFF response shape, but translate every reference that
     # now resolves to an ``ac_skill.id`` through the unified desired-state
@@ -1093,10 +1374,26 @@ async def activate_skill(
         )
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    local_dir = path_factory.get_bot_skills_local_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+    )
+    path_factory.get_bot_engine_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    repo_dir = path_factory.get_bot_skills_repo_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+    )
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -1159,31 +1456,55 @@ async def activate_skill(
             detail="Failed to synchronize activated skills to runtime",
         )
 
-    logger.info(f"[skills.activate_skill] Success: skill_id={actual_skill_id}, link_name={link_name}")
-    return ActivateResponse(success=True, message="Skill activated successfully", link_name=link_name)
+    logger.info(
+        f"[skills.activate_skill] Success: skill_id={actual_skill_id}, link_name={link_name}"
+    )
+    return ActivateResponse(
+        success=True, message="Skill activated successfully", link_name=link_name
+    )
 
 
 @router.post("/{skill_id}/deactivate", response_model=DeactivateResponse)
 async def deactivate_skill(
     skill_id: str,
     entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
-    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
+    skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(
+        SkillSetServiceFactoryProtocol
+    ),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_sync_dispatcher: DeviceSyncDispatcher = Injected(DeviceSyncDispatcher),
-    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
+    asset_service: BotSkillAssetServiceProtocol = Injected(
+        BotSkillAssetServiceProtocol
+    ),
 ) -> DeactivateResponse:
     """Deactivate a skill by removing symlink."""
-    logger.info(f"[skills.deactivate_skill] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, skill_id={skill_id}, entity_id={entity_id}")
+    logger.info(
+        f"[skills.deactivate_skill] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, skill_id={skill_id}, entity_id={entity_id}"
+    )
 
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
+        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    )
 
     try:
         result = await _set_legacy_asset_active_if_resolved(
@@ -1200,13 +1521,31 @@ async def deactivate_skill(
             detail="Failed to synchronize deactivated skills to runtime",
         ) from exc
     if result is not None:
-        return DeactivateResponse(success=True, message="Skill deactivated successfully")
+        return DeactivateResponse(
+            success=True, message="Skill deactivated successfully"
+        )
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    local_dir = path_factory.get_bot_skills_local_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+    )
+    path_factory.get_bot_engine_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    repo_dir = path_factory.get_bot_skills_repo_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+    )
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -1268,23 +1607,53 @@ async def deactivate_skill(
 @router.post("/deactivate-all", response_model=SwitchSkillSetResponse)
 async def deactivate_all_skills(
     entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    switcher_factory: SkillSetSwitcherFactoryProtocol = Injected(SkillSetSwitcherFactoryProtocol),
+    switcher_factory: SkillSetSwitcherFactoryProtocol = Injected(
+        SkillSetSwitcherFactoryProtocol
+    ),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
 ) -> SwitchSkillSetResponse:
     """Deactivate all currently active skills."""
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
+        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    )
 
     # Get user-specific paths using new directory structure
-    path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    path_factory.get_bot_skills_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    path_factory.get_bot_skills_local_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+    )
+    path_factory.get_bot_engine_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    path_factory.get_bot_skills_repo_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+    )
 
     switcher = switcher_factory.create(
         entity_id=effective_entity_id,
@@ -1298,24 +1667,31 @@ async def deactivate_all_skills(
         data={
             "activated": result.activated,
             "deactivated": result.deactivated,
-            "failed": result.failed
-        }
+            "failed": result.failed,
+        },
     )
 
 
 # ==================== Skill README API ====================
 
+
 @router.get("/{skill_id}/readme", response_model=SkillReadmeResponse)
 async def get_skill_readme(
     skill_id: str,
     entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
     skill_center_client: SkillCenterClient = Injected(SkillCenterClient),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
 ) -> SkillReadmeResponse:
@@ -1328,11 +1704,21 @@ async def get_skill_readme(
     logger.info(
         "[skills.get_skill_readme] Request: user_id=%s, ctx_bot_id=%s, "
         "skill_id=%s, entity_id=%s, bot_id=%s",
-        ctx.user_id, ctx.bot_id, skill_id, entity_id, bot_id,
+        ctx.user_id,
+        ctx.bot_id,
+        skill_id,
+        entity_id,
+        bot_id,
     )
 
     # Start with the caller/request context only to locate the DB record.
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
         ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
     )
 
@@ -1347,9 +1733,15 @@ async def get_skill_readme(
         is_desktop=is_desktop,
         is_teclaw=False,
     )
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
+    path_factory.get_bot_engine_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
     initial_repo_dir = path_factory.get_bot_skills_repo_dir(
-        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
     )
 
     service = skill_service_factory.create(
@@ -1362,25 +1754,32 @@ async def get_skill_readme(
         engine_type=effective_engine,
     )
 
-    skill = _get_skill_by_id_or_link_name(service, skill_id, effective_bot_id, ctx.bot_id)
+    skill = _get_skill_by_id_or_link_name(
+        service, skill_id, effective_bot_id, ctx.bot_id
+    )
 
     # SkillCenter branch: route center:// skills to file-content API.
-    if skill and (skill.get('git_path') or '').startswith('center://'):
+    if skill and (skill.get("git_path") or "").startswith("center://"):
         try:
-            result = skill_center_client.get_file_content(skill.get('name'), "SKILL.md")
+            result = skill_center_client.get_file_content(skill.get("name"), "SKILL.md")
             if result.get("success") and result.get("data", {}).get("content"):
                 content = result["data"]["content"]
                 # SkillCenter file-content 可能返回 base64 编码
                 if isinstance(content, str) and not content.startswith("#"):
                     import base64
+
                     try:
                         content = base64.b64decode(content).decode("utf-8")
                     except Exception:
                         pass
-                logger.info(f"[skills.get_skill_readme] Found in SkillCenter: skill_id={skill_id}")
+                logger.info(
+                    f"[skills.get_skill_readme] Found in SkillCenter: skill_id={skill_id}"
+                )
                 return SkillReadmeResponse(success=True, data={"content": content})
         except Exception as e:
-            logger.warning(f"[skills.get_skill_readme] SkillCenter file-content failed: {e}")
+            logger.warning(
+                f"[skills.get_skill_readme] SkillCenter file-content failed: {e}"
+            )
         raise HTTPException(status_code=404, detail="Skill or README not found")
 
     # A Skill may be read while the caller is operating another Bot.  Its DB
@@ -1402,7 +1801,9 @@ async def get_skill_readme(
                 env=get_current_env(),
             )
             if len(matches) > 1:
-                raise HTTPException(status_code=409, detail="Skill's owning bot is ambiguous")
+                raise HTTPException(
+                    status_code=409, detail="Skill's owning bot is ambiguous"
+                )
             if matches:
                 target_bot = matches[0]
 
@@ -1466,15 +1867,25 @@ async def get_skill_readme(
         is_desktop=read_is_desktop,
         is_teclaw=read_is_teclaw,
     )
-    path_factory.get_bot_engine_dir(read_owner_id, read_bot_id, read_engine, read_entity_type)
+    path_factory.get_bot_engine_dir(
+        read_owner_id, read_bot_id, read_engine, read_entity_type
+    )
     read_repo_dir = path_factory.get_bot_skills_repo_dir(
-        read_owner_id, read_bot_id, read_engine, read_entity_type, is_desktop=read_is_desktop
+        read_owner_id,
+        read_bot_id,
+        read_engine,
+        read_entity_type,
+        is_desktop=read_is_desktop,
     )
 
     logger.info(
         "[skills.get_skill_readme] Creating read service: skills_dir=%s, "
         "repo_dir=%s, read_bot_id=%s, read_owner_id=%s, is_teclaw=%s",
-        read_skills_dir, read_repo_dir, read_bot_id, read_owner_id, read_is_teclaw,
+        read_skills_dir,
+        read_repo_dir,
+        read_bot_id,
+        read_owner_id,
+        read_is_teclaw,
     )
 
     read_service = skill_service_factory.create(
@@ -1491,7 +1902,9 @@ async def get_skill_readme(
     logger.info(
         "[skills.get_skill_readme] Calling service.get_skill_readme: "
         "skill_id=%s, user_id=%s, bot_id=%s",
-        skill_id, read_owner_id, read_bot_id,
+        skill_id,
+        read_owner_id,
+        read_bot_id,
     )
     readme = await read_service.get_skill_readme(
         skill_id,
@@ -1507,10 +1920,13 @@ async def get_skill_readme(
 
 # ==================== Git Sync APIs ====================
 
+
 @router.post("/sync-from-git", response_model=SyncSkillsResponse)
 async def sync_skills_from_git(
     request: SyncSkillsRequest,
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
 ) -> SyncSkillsResponse:
     """Sync skills from Git repository to database."""
     service = skill_service_factory.create()
@@ -1518,19 +1934,30 @@ async def sync_skills_from_git(
     # the contract scanner false-positives because the API endpoint above
     # shares the name as an async def. allow-run-in-threadpool suppresses
     # only this contract check, not other lint rules.
-    results = await run_in_threadpool(service.sync_skills_from_git, user_id=request.user_id)  # allow-run-in-threadpool
+    results = await run_in_threadpool(
+        service.sync_skills_from_git, user_id=request.user_id
+    )  # allow-run-in-threadpool
     return SyncSkillsResponse(
         success=True,
         data=SyncSkillsResult(**results),
-        message=f"Synced: {results['created']} created, {results['updated']} updated, {results['deleted']} deleted, {results['failed']} failed"
+        message=f"Synced: {results['created']} created, {results['updated']} updated, {results['deleted']} deleted, {results['failed']} failed",
     )
 
 
 # ==================== Market APIs ====================
 
 _EXTRA_FIELDS = [
-    "is_public", "git_path", "is_builtin", "gmt_created", "gmt_modified",
-    "risk_tags", "mcp_dependencies", "user_id", "env", "bolt_id", "category",
+    "is_public",
+    "git_path",
+    "is_builtin",
+    "gmt_created",
+    "gmt_modified",
+    "risk_tags",
+    "mcp_dependencies",
+    "user_id",
+    "env",
+    "bolt_id",
+    "category",
     "skill_uuid",
 ]
 
@@ -1552,11 +1979,17 @@ def _merge_skill_fields(sc_skills: list[dict], name_skill_map: dict[str, dict]) 
 @router.get("/market/local", response_model=MarketListResponse)
 async def list_local_market_skills(
     entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
-    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(
+        RepositoryCatalogServiceProtocol
+    ),
 ) -> MarketListResponse:
     """Compatibility alias for the governed shared Repo catalog."""
     # Keep the historical Bot-shaped query wire.  Repo Catalog has always
@@ -1569,11 +2002,17 @@ async def list_local_market_skills(
 @router.get("/market/tree", response_model=MarketTreeResponse)
 async def get_market_tree(
     entity_id: Optional[str] = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: Optional[str] = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: Optional[str] = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: Optional[str] = Query(None, description="Bot ID"),
-    engine_type: Optional[str] = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: Optional[str] = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
-    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(
+        RepositoryCatalogServiceProtocol
+    ),
 ) -> MarketTreeResponse:
     """Get skill market tree structure from git repo."""
     _ = (entity_id, entity_type, bot_id, engine_type, ctx)
@@ -1583,13 +2022,21 @@ async def get_market_tree(
 @router.get("/market/list", response_model=MarketListResponse)
 async def list_market_skills(
     path: str = "",
-    orderby: str | None = Query(None, description="排序方式: 'latest'(最新), 'hotest'(最热)，默认按创建时间倒序"),
+    orderby: str | None = Query(
+        None, description="排序方式: 'latest'(最新), 'hotest'(最热)，默认按创建时间倒序"
+    ),
     entity_id: Optional[str] = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: Optional[str] = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: Optional[str] = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: Optional[str] = Query(None, description="Bot ID"),
-    engine_type: Optional[str] = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: Optional[str] = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
-    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(
+        RepositoryCatalogServiceProtocol
+    ),
 ) -> MarketListResponse:
     """Get all skills in marketplace (only git:// skills from database).
 
@@ -1613,10 +2060,16 @@ async def activate_skills_batch(
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     entity_id: Optional[str] = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: Optional[str] = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: Optional[str] = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: Optional[str] = Query(None, description="Bot ID"),
-    engine_type: Optional[str] = Query(None, description="Engine type override; defaults to bot's active_engine"),
-    asset_service: BotSkillAssetServiceProtocol = Injected(BotSkillAssetServiceProtocol),
+    engine_type: Optional[str] = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
+    asset_service: BotSkillAssetServiceProtocol = Injected(
+        BotSkillAssetServiceProtocol
+    ),
 ) -> ActivateSkillsResponse:
     """Compatibility batch adapter over the canonical Direct control plane."""
     _, effective_bot_id, _, _, _ = _get_path_params(
@@ -1634,12 +2087,14 @@ async def activate_skills_batch(
                 skill_reference=path,
                 source_path=path,
                 bot_id=effective_bot_id,
-                actor_id=ctx.user_id,
+                owner_id=ctx.user_id,
+                user_id=ctx.user_id,
             )
             item = await asset_service.set_active(
                 skill_id=skill_id,
                 bot_id=effective_bot_id,
-                actor_id=ctx.user_id,
+                owner_id=ctx.user_id,
+                user_id=ctx.user_id,
                 active=True,
             )
             results["success"].append(
@@ -1665,9 +2120,9 @@ async def activate_skills_batch(
         success=True,
         data=ActivateSkillsResults(
             success=[ActivateSkillSuccessItem(**item) for item in results["success"]],
-            failed=[ActivateSkillFailedItem(**item) for item in results["failed"]]
+            failed=[ActivateSkillFailedItem(**item) for item in results["failed"]],
         ),
-        message=f"Activated {len(results['success'])} skills, {len(results['failed'])} failed"
+        message=f"Activated {len(results['success'])} skills, {len(results['failed'])} failed",
     )
 
 
@@ -1675,11 +2130,17 @@ async def activate_skills_batch(
 async def search_market_skills(
     request: SearchRequest,
     entity_id: Optional[str] = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: Optional[str] = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: Optional[str] = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: Optional[str] = Query(None, description="Bot ID"),
-    engine_type: Optional[str] = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: Optional[str] = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
     ctx: RequestContext = Depends(get_request_context),
-    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(
+        RepositoryCatalogServiceProtocol
+    ),
 ) -> SearchResponse:
     """Search skills in marketplace."""
     _ = (entity_id, entity_type, bot_id, engine_type, ctx)
@@ -1690,17 +2151,23 @@ async def search_market_skills(
 @router.post("/market/sync", response_model=SyncStatusResponse)
 async def sync_market(
     entity_id: str | None = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID (default: default)"),
     engine_type: str | None = Query(None, description="Engine type (default: moltis)"),
     ctx: RequestContext = Depends(get_request_context),
-    repository_catalog: RepositoryCatalogServiceProtocol = Injected(RepositoryCatalogServiceProtocol),
+    repository_catalog: RepositoryCatalogServiceProtocol = Injected(
+        RepositoryCatalogServiceProtocol
+    ),
 ) -> SyncStatusResponse:
     """Compatibility adapter for the one governed environment-wide sync."""
     _ = (entity_id, entity_type, bot_id, engine_type, ctx)
     result = await asyncio.to_thread(repository_catalog.sync)
     if result["status"] == "in_progress":
-        return SyncStatusResponse(success=True, data={"synced": False, "message": "同步进行中，请稍后再试"})
+        return SyncStatusResponse(
+            success=True, data={"synced": False, "message": "同步进行中，请稍后再试"}
+        )
     if result["status"] == "failed":
         sync_result = result.get("result") or {}
         # The pre-Gateway response published the completed DB scan verbatim in
@@ -1719,7 +2186,16 @@ async def sync_market(
             )
         raise HTTPException(status_code=500, detail=result["message"])
     sync_result = result["result"]
-    return SyncStatusResponse(success=True, data={"synced": bool(sync_result.get("synced")), "last_sync": sync_result.get("last_sync"), "next_sync_in": sync_result.get("next_sync_in", 0), "db_sync": sync_result.get("database")}, message=sync_result.get("message", "Sync completed"))
+    return SyncStatusResponse(
+        success=True,
+        data={
+            "synced": bool(sync_result.get("synced")),
+            "last_sync": sync_result.get("last_sync"),
+            "next_sync_in": sync_result.get("next_sync_in", 0),
+            "db_sync": sync_result.get("database"),
+        },
+        message=sync_result.get("message", "Sync completed"),
+    )
 
 
 @router.get("/market/sync-status", response_model=SyncStatusResponse)
@@ -1728,23 +2204,55 @@ async def get_sync_status(
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     entity_id: Optional[str] = Query(None, description="Entity ID (纯ID，不需要前缀)"),
-    entity_type: Optional[str] = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    entity_type: Optional[str] = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: Optional[str] = Query(None, description="Bot ID"),
-    engine_type: Optional[str] = Query(None, description="Engine type override; defaults to bot's active_engine"),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    engine_type: Optional[str] = Query(
+        None, description="Engine type override; defaults to bot's active_engine"
+    ),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
 ) -> SyncStatusResponse:
     """Get current sync status."""
-    logger.info(f"[skills.get_sync_status] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, entity_id={entity_id}")
+    logger.info(
+        f"[skills.get_sync_status] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, entity_id={entity_id}"
+    )
 
     # Get user-specific paths
     # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
+    (
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop,
+    ) = _get_path_params(
+        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    )
 
     # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    local_dir = path_factory.get_bot_skills_local_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+    )
+    path_factory.get_bot_engine_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    repo_dir = path_factory.get_bot_skills_repo_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+    )
 
     # Create per-request service instance with user-specific paths
     service = skill_service_factory.create(
@@ -1758,26 +2266,27 @@ async def get_sync_status(
 
     status = service.get_sync_status()
     logger.info(f"[skills.get_sync_status] Status: last_sync={status.get('last_sync')}")
-    return SyncStatusResponse(
-        success=True,
-        data=status,
-        message="获取同步状态成功"
-    )
+    return SyncStatusResponse(success=True, data=status, message="获取同步状态成功")
 
 
 # ==================== User Skills APIs ====================
 
+
 @router.get("/user/my-skills", response_model=SkillListResponse)
-@with_interceptors(CollaboratorPermissionInterceptor(
-    bot_id="$bot_id",
-    owner_id="$user_id",
-    persist_audit_log=False,  # 只读操作，不记录日志
-))
+@with_interceptors(
+    CollaboratorPermissionInterceptor(
+        bot_id="$bot_id",
+        owner_id="$user_id",
+        persist_audit_log=False,  # 只读操作，不记录日志
+    )
+)
 async def list_user_skills(
     user_id: Optional[str] = Query(None, description="User ID"),
     bot_id: Optional[str] = Query(None, description="Bot ID (default: default)"),
     ctx: RequestContext = Depends(get_request_context),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
 ) -> SkillListResponse:
     """List skills uploaded by user."""
     service = skill_service_factory.create()
@@ -1785,26 +2294,29 @@ async def list_user_skills(
     skills = service.list_user_skills(user_id=user_id, bolt_id=effective_bot_id)
     return SkillListResponse(
         success=True,
-        data=[SkillMetadataResponse(
-            id=str(s.get('id')) if s.get('id') is not None else "",
-            name=s.get('name'),
-            description=s.get('description'),
-            git_path=s.get('git_path'),
-            link_name=s.get('link_name'),
-            category=s.get('category'),
-            tags=parse_tags(s.get('tags')),
-            risk_tags=s.get('risk_tags') or [],
-            mcp_dependencies=s.get('mcp_dependencies') or [],
-            input_schema=s.get('input_schema'),
-            output_schema=s.get('output_schema'),
-            is_public=s.get('is_public'),
-            is_builtin=s.get('is_builtin'),
-            user_id=str(s.get('user_id')) if s.get('user_id') is not None else None,
-            bot_id=s.get('bolt_id') if s.get('bolt_id') else "default",
-            gmt_created=s.get('gmt_created') if s.get('gmt_created') else "",
-            gmt_modified=s.get('gmt_modified') if s.get('gmt_modified') else ""
-        ) for s in skills],
-        count=len(skills)
+        data=[
+            SkillMetadataResponse(
+                id=str(s.get("id")) if s.get("id") is not None else "",
+                name=s.get("name"),
+                description=s.get("description"),
+                git_path=s.get("git_path"),
+                link_name=s.get("link_name"),
+                category=s.get("category"),
+                tags=parse_tags(s.get("tags")),
+                risk_tags=s.get("risk_tags") or [],
+                mcp_dependencies=s.get("mcp_dependencies") or [],
+                input_schema=s.get("input_schema"),
+                output_schema=s.get("output_schema"),
+                is_public=s.get("is_public"),
+                is_builtin=s.get("is_builtin"),
+                user_id=str(s.get("user_id")) if s.get("user_id") is not None else None,
+                bot_id=s.get("bolt_id") if s.get("bolt_id") else "default",
+                gmt_created=s.get("gmt_created") if s.get("gmt_created") else "",
+                gmt_modified=s.get("gmt_modified") if s.get("gmt_modified") else "",
+            )
+            for s in skills
+        ],
+        count=len(skills),
     )
 
 
@@ -1812,11 +2324,14 @@ async def list_user_skills(
 # These routes use path parameters and should be registered LAST to avoid catching
 # specific paths like "market", "active", "user", etc.
 
+
 @router.get("/{skill_id}", response_model=SkillDetailResponse)
 async def get_skill(
     skill_id: str,
     user_id: Optional[str] = Query(None, description="User ID for permission check"),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
 ) -> SkillDetailResponse:
     """Get a skill by ID or link_name."""
     service = skill_service_factory.create()
@@ -1833,33 +2348,40 @@ async def get_skill(
     if not skill:
         raise HTTPException(
             status_code=500,
-            detail=f"Skill lookup failed: the identifier '{skill_id}' does not match any existing skill ID or link_name"
+            detail=f"Skill lookup failed: the identifier '{skill_id}' does not match any existing skill ID or link_name",
         )
-    return SkillDetailResponse(success=True, data=SkillMetadataResponse(
-        id=str(skill.get('id')) if skill.get('id') is not None else "",
-        name=skill.get('name'),
-        description=skill.get('description'),
-        git_path=skill.get('git_path'),
-        link_name=skill.get('link_name'),
-        category=skill.get('category'),
-        tags=parse_tags(skill.get('tags')),
-        risk_tags=skill.get('risk_tags') or [],
-        mcp_dependencies=skill.get('mcp_dependencies') or [],
-        input_schema=skill.get('input_schema'),
-        output_schema=skill.get('output_schema'),
-        is_public=skill.get('is_public'),
-        is_builtin=skill.get('is_builtin'),
-        user_id=str(skill.get('user_id')) if skill.get('user_id') is not None else None,
-        gmt_created=skill.get('gmt_created') if skill.get('gmt_created') else "",
-        gmt_modified=skill.get('gmt_modified') if skill.get('gmt_modified') else ""
-    ))
+    return SkillDetailResponse(
+        success=True,
+        data=SkillMetadataResponse(
+            id=str(skill.get("id")) if skill.get("id") is not None else "",
+            name=skill.get("name"),
+            description=skill.get("description"),
+            git_path=skill.get("git_path"),
+            link_name=skill.get("link_name"),
+            category=skill.get("category"),
+            tags=parse_tags(skill.get("tags")),
+            risk_tags=skill.get("risk_tags") or [],
+            mcp_dependencies=skill.get("mcp_dependencies") or [],
+            input_schema=skill.get("input_schema"),
+            output_schema=skill.get("output_schema"),
+            is_public=skill.get("is_public"),
+            is_builtin=skill.get("is_builtin"),
+            user_id=str(skill.get("user_id"))
+            if skill.get("user_id") is not None
+            else None,
+            gmt_created=skill.get("gmt_created") if skill.get("gmt_created") else "",
+            gmt_modified=skill.get("gmt_modified") if skill.get("gmt_modified") else "",
+        ),
+    )
 
 
 @router.put("/{skill_id}", response_model=SkillDetailResponse)
 async def update_skill(
     skill_id: str,
     request: UpdateSkillRequest,
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
 ) -> SkillDetailResponse:
     """Update a skill."""
     service = skill_service_factory.create()
@@ -1868,25 +2390,34 @@ async def update_skill(
         skill = service.update_skill(skill_id, user_id=request.user_id, **update_data)
         if not skill:
             raise HTTPException(status_code=404, detail="Skill not found")
-        return SkillDetailResponse(success=True, data=SkillMetadataResponse(
-            id=str(skill.get('id')) if skill.get('id') is not None else "",
-            name=skill.get('name'),
-            description=skill.get('description'),
-            git_path=skill.get('git_path'),
-            link_name=skill.get('link_name'),
-            category=skill.get('category'),
-            tags=parse_tags(skill.get('tags')),
-            risk_tags=skill.get('risk_tags') or [],
-            mcp_dependencies=skill.get('mcp_dependencies') or [],
-            input_schema=skill.get('input_schema'),
-            output_schema=skill.get('output_schema'),
-            is_public=skill.get('is_public'),
-            is_builtin=skill.get('is_builtin'),
-            user_id=str(skill.get('user_id')) if skill.get('user_id') is not None else None,
-            bot_id=skill.get('bolt_id') if skill.get('bolt_id') else "default",
-            gmt_created=skill.get('gmt_created') if skill.get('gmt_created') else "",
-            gmt_modified=skill.get('gmt_modified') if skill.get('gmt_modified') else ""
-        ))
+        return SkillDetailResponse(
+            success=True,
+            data=SkillMetadataResponse(
+                id=str(skill.get("id")) if skill.get("id") is not None else "",
+                name=skill.get("name"),
+                description=skill.get("description"),
+                git_path=skill.get("git_path"),
+                link_name=skill.get("link_name"),
+                category=skill.get("category"),
+                tags=parse_tags(skill.get("tags")),
+                risk_tags=skill.get("risk_tags") or [],
+                mcp_dependencies=skill.get("mcp_dependencies") or [],
+                input_schema=skill.get("input_schema"),
+                output_schema=skill.get("output_schema"),
+                is_public=skill.get("is_public"),
+                is_builtin=skill.get("is_builtin"),
+                user_id=str(skill.get("user_id"))
+                if skill.get("user_id") is not None
+                else None,
+                bot_id=skill.get("bolt_id") if skill.get("bolt_id") else "default",
+                gmt_created=skill.get("gmt_created")
+                if skill.get("gmt_created")
+                else "",
+                gmt_modified=skill.get("gmt_modified")
+                if skill.get("gmt_modified")
+                else "",
+            ),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1895,33 +2426,46 @@ async def update_skill(
 async def update_skill_risk_tags(
     skill_id: str,
     request: UpdateRiskTagsRequest,
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
 ) -> SkillDetailResponse:
     """Update skill risk tags by ID."""
     service = skill_service_factory.create()
     try:
-        skill = service.update_skill(skill_id, user_id=request.user_id, risk_tags=request.risk_tags)
+        skill = service.update_skill(
+            skill_id, user_id=request.user_id, risk_tags=request.risk_tags
+        )
         if not skill:
             raise HTTPException(status_code=404, detail="Skill not found")
-        return SkillDetailResponse(success=True, data=SkillMetadataResponse(
-            id=str(skill.get('id')) if skill.get('id') is not None else "",
-            name=skill.get('name'),
-            description=skill.get('description'),
-            git_path=skill.get('git_path'),
-            link_name=skill.get('link_name'),
-            category=skill.get('category'),
-            tags=parse_tags(skill.get('tags')),
-            risk_tags=skill.get('risk_tags') or [],
-            mcp_dependencies=skill.get('mcp_dependencies') or [],
-            input_schema=skill.get('input_schema'),
-            output_schema=skill.get('output_schema'),
-            is_public=skill.get('is_public'),
-            is_builtin=skill.get('is_builtin'),
-            user_id=str(skill.get('user_id')) if skill.get('user_id') is not None else None,
-            bot_id=skill.get('bolt_id') if skill.get('bolt_id') else "default",
-            gmt_created=skill.get('gmt_created') if skill.get('gmt_created') else "",
-            gmt_modified=skill.get('gmt_modified') if skill.get('gmt_modified') else ""
-        ))
+        return SkillDetailResponse(
+            success=True,
+            data=SkillMetadataResponse(
+                id=str(skill.get("id")) if skill.get("id") is not None else "",
+                name=skill.get("name"),
+                description=skill.get("description"),
+                git_path=skill.get("git_path"),
+                link_name=skill.get("link_name"),
+                category=skill.get("category"),
+                tags=parse_tags(skill.get("tags")),
+                risk_tags=skill.get("risk_tags") or [],
+                mcp_dependencies=skill.get("mcp_dependencies") or [],
+                input_schema=skill.get("input_schema"),
+                output_schema=skill.get("output_schema"),
+                is_public=skill.get("is_public"),
+                is_builtin=skill.get("is_builtin"),
+                user_id=str(skill.get("user_id"))
+                if skill.get("user_id") is not None
+                else None,
+                bot_id=skill.get("bolt_id") if skill.get("bolt_id") else "default",
+                gmt_created=skill.get("gmt_created")
+                if skill.get("gmt_created")
+                else "",
+                gmt_modified=skill.get("gmt_modified")
+                if skill.get("gmt_modified")
+                else "",
+            ),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1988,18 +2532,22 @@ class _FailClosedSkillMutationPermissionInterceptor(
 
 
 @router.post("/{skill_id}/mcp-dependencies", response_model=SkillDetailResponse)
-@with_interceptors(_FailClosedSkillMutationPermissionInterceptor(
-    params_extractor=_extract_skill_mutation_permission,
-    extractor_params={"skill_id": "$skill_id"},
-    persist_audit_log=True,
-    authorization_state_key="skill_mcp_collaborator_authorized",
-))
+@with_interceptors(
+    _FailClosedSkillMutationPermissionInterceptor(
+        params_extractor=_extract_skill_mutation_permission,
+        extractor_params={"skill_id": "$skill_id"},
+        persist_audit_log=True,
+        authorization_state_key="skill_mcp_collaborator_authorized",
+    )
+)
 async def update_skill_mcp_dependencies(
     skill_id: str,
     request: UpdateMCPDependenciesRequest,
     user: AuthenticatedUser = Depends(get_current_user),
     http_request: Request = None,
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
 ) -> SkillDetailResponse:
     """Update skill MCP dependencies by ID.
 
@@ -2032,29 +2580,42 @@ async def update_skill_mcp_dependencies(
             )
         # 使用认证用户ID替代请求体中的user_id，防止越权
         if request.user_id and request.user_id != user.staffId:
-            logger.warning(f"[update_skill_mcp_dependencies] 权限拒绝: user={user.staffId} 尝试以 user_id={request.user_id} 修改 skill_id={skill_id} 的MCP依赖，已使用认证用户ID")
-        skill = service.update_skill(skill_id, user_id=user.staffId, mcp_dependencies=request.mcp_dependencies)
+            logger.warning(
+                f"[update_skill_mcp_dependencies] 权限拒绝: user={user.staffId} 尝试以 user_id={request.user_id} 修改 skill_id={skill_id} 的MCP依赖，已使用认证用户ID"
+            )
+        skill = service.update_skill(
+            skill_id, user_id=user.staffId, mcp_dependencies=request.mcp_dependencies
+        )
         if not skill:
             raise HTTPException(status_code=404, detail="Skill not found")
-        return SkillDetailResponse(success=True, data=SkillMetadataResponse(
-            id=str(skill.get('id')) if skill.get('id') is not None else "",
-            name=skill.get('name'),
-            description=skill.get('description'),
-            git_path=skill.get('git_path'),
-            link_name=skill.get('link_name'),
-            category=skill.get('category'),
-            tags=parse_tags(skill.get('tags')),
-            risk_tags=skill.get('risk_tags') or [],
-            mcp_dependencies=skill.get('mcp_dependencies') or [],
-            input_schema=skill.get('input_schema'),
-            output_schema=skill.get('output_schema'),
-            is_public=skill.get('is_public'),
-            is_builtin=skill.get('is_builtin'),
-            user_id=str(skill.get('user_id')) if skill.get('user_id') is not None else None,
-            bot_id=skill.get('bolt_id') if skill.get('bolt_id') else "default",
-            gmt_created=skill.get('gmt_created') if skill.get('gmt_created') else "",
-            gmt_modified=skill.get('gmt_modified') if skill.get('gmt_modified') else ""
-        ))
+        return SkillDetailResponse(
+            success=True,
+            data=SkillMetadataResponse(
+                id=str(skill.get("id")) if skill.get("id") is not None else "",
+                name=skill.get("name"),
+                description=skill.get("description"),
+                git_path=skill.get("git_path"),
+                link_name=skill.get("link_name"),
+                category=skill.get("category"),
+                tags=parse_tags(skill.get("tags")),
+                risk_tags=skill.get("risk_tags") or [],
+                mcp_dependencies=skill.get("mcp_dependencies") or [],
+                input_schema=skill.get("input_schema"),
+                output_schema=skill.get("output_schema"),
+                is_public=skill.get("is_public"),
+                is_builtin=skill.get("is_builtin"),
+                user_id=str(skill.get("user_id"))
+                if skill.get("user_id") is not None
+                else None,
+                bot_id=skill.get("bolt_id") if skill.get("bolt_id") else "default",
+                gmt_created=skill.get("gmt_created")
+                if skill.get("gmt_created")
+                else "",
+                gmt_modified=skill.get("gmt_modified")
+                if skill.get("gmt_modified")
+                else "",
+            ),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -2062,18 +2623,22 @@ async def update_skill_mcp_dependencies(
 @router.get("/{link_name}/id", response_model=dict[str, Any])
 async def get_skill_id_by_link_name(
     link_name: str,
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
 ) -> Dict[str, Any]:
     """Get skill ID by link_name (e.g., 'infra_demo_odps-sql-generator')."""
     service = skill_service_factory.create()
     skill = service.get_skill_by_link_name(link_name)
     if not skill:
-        raise HTTPException(status_code=404, detail=f"Skill not found with link_name: {link_name}")
+        raise HTTPException(
+            status_code=404, detail=f"Skill not found with link_name: {link_name}"
+        )
     return {
         "success": True,
-        "id": str(skill.get('id')),
-        "link_name": skill.get('link_name'),
-        "name": skill.get('name')
+        "id": str(skill.get("id")),
+        "link_name": skill.get("link_name"),
+        "name": skill.get("name"),
     }
 
 
@@ -2107,25 +2672,34 @@ async def extract_from_skill_id(skill_id: str, ctx) -> PermissionParams:
             return PermissionParams()
 
         return PermissionParams(
-            bot_id=skill.get('bolt_id'),  # Skill.bolt_id 即 bot_id
-            owner_id=skill.get('user_id'),  # Skill.user_id 即 owner_id
+            bot_id=skill.get("bolt_id"),  # Skill.bolt_id 即 bot_id
+            owner_id=skill.get("user_id"),  # Skill.user_id 即 owner_id
         )
     except Exception:
         return PermissionParams()
 
 
 @router.delete("/{skill_id}", response_model=MessageResponse)
-@with_interceptors(_FailClosedSkillMutationPermissionInterceptor(
-    params_extractor=extract_from_skill_id,
-    extractor_params={"skill_id": "$skill_id"},  # 表达式：从路由参数取值
-    persist_audit_log=True,  # 记录操作审计日志
-    authorization_state_key="skill_delete_collaborator_authorized",
-))
+@with_interceptors(
+    _FailClosedSkillMutationPermissionInterceptor(
+        params_extractor=extract_from_skill_id,
+        extractor_params={"skill_id": "$skill_id"},  # 表达式：从路由参数取值
+        persist_audit_log=True,  # 记录操作审计日志
+        authorization_state_key="skill_delete_collaborator_authorized",
+    )
+)
 async def delete_skill(
     skill_id: str,
-    user_id: str | None = Query(None, description="User ID for permission check (optional, uses current user if not provided)"),
-    entity_id: str | None = Query(None, description="Entity ID (pure ID, no prefix needed)"),
-    entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
+    user_id: str | None = Query(
+        None,
+        description="User ID for permission check (optional, uses current user if not provided)",
+    ),
+    entity_id: str | None = Query(
+        None, description="Entity ID (pure ID, no prefix needed)"
+    ),
+    entity_type: str | None = Query(
+        None, description="Entity type (staff/proj/team, default: staff)"
+    ),
     bot_id: str | None = Query(None, description="Bot ID"),
     engine_type: str | None = Query(
         None,
@@ -2135,7 +2709,9 @@ async def delete_skill(
     skill_repo: SkillRepository = Injected(SkillRepository),
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     edit_guard: SkillsPoolEditGuard = Injected(SkillsPoolEditGuard),
 ) -> MessageResponse:
@@ -2163,9 +2739,8 @@ async def delete_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     persisted_git_path = str(skill.get("git_path") or "")
-    is_shared_source = (
-        not skill.get("user_id")
-        and persisted_git_path.startswith(("git://", "center://"))
+    is_shared_source = not skill.get("user_id") and persisted_git_path.startswith(
+        ("git://", "center://")
     )
     if is_shared_source:
         service = skill_service_factory.create()
@@ -2226,9 +2801,7 @@ async def delete_skill(
     if not bot:
         raise HTTPException(status_code=404, detail="Bot not found")
 
-    effective_entity_id = str(
-        bot.get("entity_id") or bot.get("owner_id") or ""
-    )
+    effective_entity_id = str(bot.get("entity_id") or bot.get("owner_id") or "")
     effective_entity_type = str(bot.get("entity_type") or "staff")
     effective_engine = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
     if engine_type and engine_type != effective_engine:
@@ -2244,11 +2817,28 @@ async def delete_skill(
 
     # teclaw deletes the skill files from the (draft) container; resolve provider
     # so the device-fs path is the workspace-namespace form.
-    is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(resolver, effective_bot_id, effective_entity_id)
+    is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(
+        resolver, effective_bot_id, effective_entity_id
+    )
 
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop, is_teclaw=is_teclaw)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
+    skills_dir = path_factory.get_bot_skills_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    local_dir = path_factory.get_bot_skills_local_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+        is_teclaw=is_teclaw,
+    )
+    repo_dir = path_factory.get_bot_skills_repo_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+    )
 
     service = skill_service_factory.create(
         active_dir=skills_dir,
@@ -2322,10 +2912,7 @@ class _SkillParameterPermissionInterceptor(CollaboratorPermissionInterceptor):
             return None
         actor_id = ctx.metadata.get("_log_user_id")
         owner_id = ctx.metadata.get("_log_owner_id")
-        if (
-            actor_id != owner_id
-            and not ctx.metadata.get("permission_level")
-        ):
+        if actor_id != owner_id and not ctx.metadata.get("permission_level"):
             ctx.response = InterceptedResponse(
                 success=False,
                 message="协作者权限服务暂不可用",
@@ -2403,11 +2990,7 @@ async def _extract_parameter_permission(
         if bot_repo is not None
         else None
     )
-    owner_id = (
-        str(bot.get("owner_id") or "")
-        if isinstance(bot, dict)
-        else ""
-    )
+    owner_id = str(bot.get("owner_id") or "") if isinstance(bot, dict) else ""
     # A non-empty sentinel prevents the generic interceptor from falling back
     # to its bot_id-only legacy lookup. The route will return the precise 404.
     return PermissionParams(
@@ -2437,11 +3020,13 @@ async def _create_skill_parameter_service(
 
 
 @router.get("/{skill_id}/parameters", response_model=SkillParametersResponse)
-@with_interceptors(_SkillParameterPermissionInterceptor(
-    params_extractor=_extract_parameter_permission,
-    extractor_params={"bot_id": "$bot_id", "entity_id": "$entity_id"},
-    persist_audit_log=False,
-))
+@with_interceptors(
+    _SkillParameterPermissionInterceptor(
+        params_extractor=_extract_parameter_permission,
+        extractor_params={"bot_id": "$bot_id", "entity_id": "$entity_id"},
+        persist_audit_log=False,
+    )
+)
 async def get_skill_parameters(
     skill_id: str,
     entity_id: str = Query(..., description="Entity ID (e.g., staff_xxx, proj_xxx)"),
@@ -2450,7 +3035,9 @@ async def get_skill_parameters(
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     skill_repo: SkillRepository = Injected(SkillRepository),
-    parameter_service_factory: SkillParameterServiceFactoryProtocol = Injected(SkillParameterServiceFactoryProtocol),
+    parameter_service_factory: SkillParameterServiceFactoryProtocol = Injected(
+        SkillParameterServiceFactoryProtocol
+    ),
 ) -> SkillParametersResponse:
     """获取用户对技能的参数配置（全局，不绑定 skill_set）"""
     # 获取 skill_name
@@ -2464,7 +3051,7 @@ async def get_skill_parameters(
         requested_entity_id=entity_id,
         bot_repo=bot_repo,
     )
-    skill_name = skill.get('link_name') or skill.get('name')
+    skill_name = skill.get("link_name") or skill.get("name")
 
     # 使用异步工厂函数获取参数服务
     parameter_service = await _create_skill_parameter_service(
@@ -2478,13 +3065,15 @@ async def get_skill_parameters(
 
 
 @router.post("/{skill_id}/parameters", response_model=SkillParametersResponse)
-@with_interceptors(_SkillParameterPermissionInterceptor(
-    params_extractor=_extract_parameter_permission,
-    extractor_params={"bot_id": "$bot_id", "entity_id": "$entity_id"},
-    # Keep edit-lock enforcement and audit metadata, but never serialize
-    # credential-bearing parameter values.
-    audit_excluded_params={"request"},
-))
+@with_interceptors(
+    _SkillParameterPermissionInterceptor(
+        params_extractor=_extract_parameter_permission,
+        extractor_params={"bot_id": "$bot_id", "entity_id": "$entity_id"},
+        # Keep edit-lock enforcement and audit metadata, but never serialize
+        # credential-bearing parameter values.
+        audit_excluded_params={"request"},
+    )
+)
 async def save_skill_parameters(
     skill_id: str,
     request: SaveSkillParametersRequest,
@@ -2494,9 +3083,13 @@ async def save_skill_parameters(
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
     skill_repo: SkillRepository = Injected(SkillRepository),
-    parameter_service_factory: SkillParameterServiceFactoryProtocol = Injected(SkillParameterServiceFactoryProtocol),
+    parameter_service_factory: SkillParameterServiceFactoryProtocol = Injected(
+        SkillParameterServiceFactoryProtocol
+    ),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
 ) -> SkillParametersResponse:
     """保存用户对技能的参数配置"""
@@ -2516,7 +3109,7 @@ async def save_skill_parameters(
     trusted_entity_id = str(bot.get("entity_id") or trusted_owner_id)
     trusted_engine_type = str(bot.get("active_engine") or engine_type)
     trusted_entity_type = str(bot.get("entity_type") or "staff")
-    skill_name = skill.get('link_name') or skill.get('name')
+    skill_name = skill.get("link_name") or skill.get("name")
 
     # Resolve is_desktop for path construction
     is_desktop = bot.get("bot_type") == "desktop"
@@ -2560,22 +3153,21 @@ async def save_skill_parameters(
     )
     if is_teclaw:
         skill_info = await service.parse_local_skill_config(
-            skill.get('git_path', ''),
+            skill.get("git_path", ""),
             trusted_bot_id,
             trusted_owner_id,
         )
     else:
-        skill_info = service._parse_skill_from_git(skill.get('git_path', ''))
+        skill_info = service._parse_skill_from_git(skill.get("git_path", ""))
     if skill_info:
-        parameter_schema = skill_info.get('config', [])
+        parameter_schema = skill_info.get("config", [])
 
     # 校验必填项
     if parameter_schema:
         for param in parameter_schema:
-            if param.get('required') and not request.parameters.get(param['name']):
+            if param.get("required") and not request.parameters.get(param["name"]):
                 raise HTTPException(
-                    status_code=400,
-                    detail=f"参数 {param['label']} 是必填项"
+                    status_code=400, detail=f"参数 {param['label']} 是必填项"
                 )
 
     # 使用异步工厂函数获取参数服务
@@ -2591,6 +3183,7 @@ async def save_skill_parameters(
 
 # ==================== Skill Publish ====================
 
+
 @router.post("/{skill_id}/publish", response_model=PublishStatusResponse)
 async def publish_skill(
     skill_id: str,
@@ -2599,13 +3192,21 @@ async def publish_skill(
     service: SkillPublishServiceProtocol = Injected(SkillPublishServiceProtocol),
 ):
     """触发技能发布 — developing/rejected → pending"""
-    from agentclaw.community.core.skill_center.services.skill_publish_service import InvalidTransitionError
+    from agentclaw.community.core.skill_center.services.skill_publish_service import (
+        InvalidTransitionError,
+    )
 
     try:
         user_id = request.user_id if request else ctx.user_id
         zip_path = request.zip_path if request else None
         package_url = request.package_url if request else None
-        result = service.publish(skill_id, user_id=user_id, zip_path=zip_path, package_url=package_url, nick_name=ctx.nick_name)
+        result = service.publish(
+            skill_id,
+            user_id=user_id,
+            zip_path=zip_path,
+            package_url=package_url,
+            nick_name=ctx.nick_name,
+        )
         return PublishStatusResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -2712,18 +3313,25 @@ async def get_market_tags_center(
 @router.post("/market/center/{skill_code}/install", response_model=MessageResponse)
 async def install_market_skill(skill_code: str):
     """从 SkillCenter 公开市场安装技能（占位，后续扩展下载+创建本地记录）"""
-    return MessageResponse(success=True, message=f"技能 {skill_code} 安装接口已就绪，完整安装流程后续迭代")
+    return MessageResponse(
+        success=True, message=f"技能 {skill_code} 安装接口已就绪，完整安装流程后续迭代"
+    )
 
 
 # ==================== Version Download URL (SkillCenter 透传) ====================
 
 
-@router.get("/{skill_id}/versions/{version_number}/download-url", response_model=DownloadUrlResponse)
+@router.get(
+    "/{skill_id}/versions/{version_number}/download-url",
+    response_model=DownloadUrlResponse,
+)
 async def get_version_download_url(
     skill_id: str,
     version_number: str,
     ctx: RequestContext = Depends(get_request_context),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
     client: SkillCenterClient = Injected(SkillCenterClient),
 ):
     """获取指定版本的下载 URL（透传 SkillCenter）"""
@@ -2748,11 +3356,13 @@ async def get_version_download_url(
 
 @router.get("/{skill_id}/file-structure", response_model=FileStructureResponse)
 async def get_skill_file_structure(
-        skill_id: str,
-        version: str = Query("", description="版本号（可选，默认最新版本）"),
-        ctx: RequestContext = Depends(get_request_context),
-        skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
-        client: SkillCenterClient = Injected(SkillCenterClient),
+    skill_id: str,
+    version: str = Query("", description="版本号（可选，默认最新版本）"),
+    ctx: RequestContext = Depends(get_request_context),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
+    client: SkillCenterClient = Injected(SkillCenterClient),
 ):
     """获取技能文件结构树（透传 SkillCenter）"""
 
@@ -2776,12 +3386,14 @@ async def get_skill_file_structure(
 
 @router.get("/{skill_id}/file-content", response_model=FileContentResponse)
 async def get_skill_file_content(
-        skill_id: str,
-        file_path: str = Query(..., alias="filePath", description="文件相对路径"),
-        version: str = Query("", description="版本号（可选，默认最新版本）"),
-        ctx: RequestContext = Depends(get_request_context),
-        skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
-        client: SkillCenterClient = Injected(SkillCenterClient),
+    skill_id: str,
+    file_path: str = Query(..., alias="filePath", description="文件相对路径"),
+    version: str = Query("", description="版本号（可选，默认最新版本）"),
+    ctx: RequestContext = Depends(get_request_context),
+    skill_service_factory: SkillServiceFactoryProtocol = Injected(
+        SkillServiceFactoryProtocol
+    ),
+    client: SkillCenterClient = Injected(SkillCenterClient),
 ):
     """获取技能指定文件内容（透传 SkillCenter）"""
 
@@ -2805,11 +3417,12 @@ async def get_skill_file_content(
 
 # ==================== Skill Member Management APIs ====================
 
+
 @router.get("/{skill_uuid}/members", response_model=SkillMemberListResponse)
 async def get_skill_members(
     skill_uuid: str,
     ctx: RequestContext = Depends(get_request_context),
-    member_service: SkillMemberServiceProtocol = Injected(SkillMemberServiceProtocol)
+    member_service: SkillMemberServiceProtocol = Injected(SkillMemberServiceProtocol),
 ) -> SkillMemberListResponse:
     """获取技能的所有成员列表
 
@@ -2822,7 +3435,7 @@ async def get_skill_members(
         return SkillMemberListResponse(
             success=True,
             data=[SkillMemberResponse(**m) for m in members],
-            count=len(members)
+            count=len(members),
         )
     except Exception as e:
         logger.error(f"[get_skill_members] Error: {e}", exc_info=True)
@@ -2834,7 +3447,7 @@ async def add_skill_member(
     skill_uuid: str,
     request: AddSkillMemberRequest,
     ctx: RequestContext = Depends(get_request_context),
-    member_service: SkillMemberServiceProtocol = Injected(SkillMemberServiceProtocol)
+    member_service: SkillMemberServiceProtocol = Injected(SkillMemberServiceProtocol),
 ) -> SkillMemberOperationResponse:
     """添加技能成员
 
@@ -2844,15 +3457,13 @@ async def add_skill_member(
     """
     try:
         member = member_service.add_member(
-            skill_uuid=skill_uuid,
-            user_id=request.user_id,
-            role=request.role
+            skill_uuid=skill_uuid, user_id=request.user_id, role=request.role
         )
 
         return SkillMemberOperationResponse(
             success=True,
             data=SkillMemberResponse(**member),
-            message="Member added successfully"
+            message="Member added successfully",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -2866,7 +3477,7 @@ async def add_skill_members_batch(
     skill_uuid: str,
     request: BatchAddSkillMembersRequest,
     ctx: RequestContext = Depends(get_request_context),
-    member_service: SkillMemberServiceProtocol = Injected(SkillMemberServiceProtocol)
+    member_service: SkillMemberServiceProtocol = Injected(SkillMemberServiceProtocol),
 ) -> BatchAddMembersResponse:
     """批量添加技能成员
 
@@ -2876,17 +3487,15 @@ async def add_skill_members_batch(
     """
     try:
         results = member_service.add_members_batch(
-            skill_uuid=skill_uuid,
-            members=request.members
+            skill_uuid=skill_uuid, members=request.members
         )
 
         return BatchAddMembersResponse(
             success=True,
             data=BatchAddMembersResult(
-                success=results["success"],
-                failed=results["failed"]
+                success=results["success"], failed=results["failed"]
             ),
-            message=f"Added {len(results['success'])} members, {len(results['failed'])} failed"
+            message=f"Added {len(results['success'])} members, {len(results['failed'])} failed",
         )
     except Exception as e:
         logger.error(f"[add_skill_members_batch] Error: {e}", exc_info=True)
@@ -2898,7 +3507,7 @@ async def remove_skill_member(
     skill_uuid: str,
     user_id: str,
     ctx: RequestContext = Depends(get_request_context),
-    member_service: SkillMemberServiceProtocol = Injected(SkillMemberServiceProtocol)
+    member_service: SkillMemberServiceProtocol = Injected(SkillMemberServiceProtocol),
 ) -> MessageResponse:
     """移除技能成员
 
@@ -2907,15 +3516,9 @@ async def remove_skill_member(
         user_id: 用户 ID
     """
     try:
-        member_service.remove_member(
-            skill_uuid=skill_uuid,
-            user_id=user_id
-        )
+        member_service.remove_member(skill_uuid=skill_uuid, user_id=user_id)
 
-        return MessageResponse(
-            success=True,
-            message="Member removed successfully"
-        )
+        return MessageResponse(success=True, message="Member removed successfully")
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -2923,13 +3526,15 @@ async def remove_skill_member(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/{skill_uuid}/members/{user_id}/role", response_model=SkillMemberOperationResponse)
+@router.put(
+    "/{skill_uuid}/members/{user_id}/role", response_model=SkillMemberOperationResponse
+)
 async def update_skill_member_role(
     skill_uuid: str,
     user_id: str,
     request: UpdateSkillMemberRoleRequest,
     ctx: RequestContext = Depends(get_request_context),
-    member_service: SkillMemberServiceProtocol = Injected(SkillMemberServiceProtocol)
+    member_service: SkillMemberServiceProtocol = Injected(SkillMemberServiceProtocol),
 ) -> SkillMemberOperationResponse:
     """更新成员角色
 
@@ -2940,15 +3545,13 @@ async def update_skill_member_role(
     """
     try:
         member = member_service.update_member_role(
-            skill_uuid=skill_uuid,
-            user_id=user_id,
-            role=request.role
+            skill_uuid=skill_uuid, user_id=user_id, role=request.role
         )
 
         return SkillMemberOperationResponse(
             success=True,
             data=SkillMemberResponse(**member),
-            message="Member role updated successfully"
+            message="Member role updated successfully",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
