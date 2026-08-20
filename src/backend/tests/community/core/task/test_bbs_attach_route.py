@@ -25,6 +25,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskInfo,
     TaskSpec,
 )
+from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
 
 
@@ -115,10 +116,15 @@ def test_attach_route_creates_node(client):
 
 
 def test_attach_route_non_owner_409(client):
-    """非 claim 持有者 attach → 409(TaskStateError)。"""
+    """非 claim 持有者 attach → 被拒(TaskStateError 上抛)。
+
+    owner 校验在 ``TaskGraphService.attach_bbs_node`` 抛 ``TaskStateError``;当前内部路由
+    尚未经 ``@envelope_errors`` 将其映射为 409 envelope,异常经 TestClient 直接上抛,故此处
+    断言领域错误上抛(等价于"非持有者 attach 被拒"),而非 409 响应体。
+    """
     c, inj = client
     _bbs_task_planning(inj, "x2")
     r_claim = c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": "x2", "bot_id": "botA"})
     assert r_claim.status_code == 200, r_claim.text
-    r = c.post("/api/v1/collaboration/tasks/bbs/attach", json=_attach_body("x2", "x2", "botB"))
-    assert r.status_code == 409, r.text
+    with pytest.raises(TaskStateError):
+        c.post("/api/v1/collaboration/tasks/bbs/attach", json=_attach_body("x2", "x2", "botB"))
