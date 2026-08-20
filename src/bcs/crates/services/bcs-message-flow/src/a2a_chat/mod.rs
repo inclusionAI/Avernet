@@ -1185,7 +1185,9 @@ fn direct_chat_service_error_reason(error: &ServiceError) -> DirectChatRunReason
 }
 
 fn is_timeout_text(normalized: &str) -> bool {
-    normalized.contains("timeout") || normalized.contains("timed out")
+    normalized.contains("timeout")
+        || normalized.contains("timed out")
+        || normalized.contains("time out")
 }
 
 fn ensure_run_owner(record: &ChatRunRecord, from_bot_id: &str) -> ServiceResult<()> {
@@ -1350,6 +1352,10 @@ mod tests {
         );
         assert_eq!(
             direct_chat_failure_reason("Agent response timed out before completion."),
+            DirectChatRunReason::Timeout
+        );
+        assert_eq!(
+            direct_chat_failure_reason("executor safety-net: time out"),
             DirectChatRunReason::Timeout
         );
         assert_eq!(
