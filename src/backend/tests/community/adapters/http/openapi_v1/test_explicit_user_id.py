@@ -346,7 +346,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: Bot-addressed operation, yielding 104/1/49. Skill Installation then adds
 #: three Bot-addressed operations. Repo Catalog then adds three more
 #: Bot-addressed plus eight account-level operations, yielding 110/1/57.
-_BOT_ID_PLACEMENT = {"path": 110, "query": 1, "none": 57}
+#: P1-03 then adds eleven Bot-scoped SkillSet operations, yielding 121/1/57.
+_BOT_ID_PLACEMENT = {"path": 121, "query": 1, "none": 57}
 
 
 def _schema() -> dict:
@@ -439,8 +440,8 @@ def test_the_pinned_number_of_operations_take_it():
     # IAM-token retrieval and Caller preparation, +1 for Space Skill list, then
     # +5 for Editors and +4 for render screens. The read-only Node inventory adds
     # the final operation. Skill Installation adds three further Bot-addressed
-    # operations, and Repo Catalog adds seven operations.
-    assert len(taking) == 151
+    # operations, Repo Catalog adds seven operations, and SkillSet adds eleven.
+    assert len(taking) == 162
 
 
 def test_the_exempt_operations_take_none():
