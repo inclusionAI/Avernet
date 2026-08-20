@@ -7,6 +7,7 @@
 pub mod authorization;
 pub mod bot;
 pub mod error;
+pub mod event_subscription;
 pub mod friendship;
 pub mod group;
 pub mod group_session_connection;
@@ -22,7 +23,8 @@ pub use authorization::{
     require_human, select_principal,
 };
 pub use bot::*;
-pub use error::ApplicationError;
+pub use error::*;
+pub use event_subscription::*;
 pub use friendship::*;
 pub use group::*;
 pub use group_session_connection::*;

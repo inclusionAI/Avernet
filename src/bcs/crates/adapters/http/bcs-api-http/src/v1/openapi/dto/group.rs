@@ -1,8 +1,9 @@
 use bcs_service_api::application::v1::{
     BotFinalDelivery, ChatConfiguration, CollaborationConfiguration, CreateCollaborationGroup,
     CreateDirectMessageGroup, CreateGroupSpec, CreateParticipant, GroupDeliveryPolicy,
-    GroupKindFilter, GroupPatch, GroupStrategy, GroupVisibility, ManagerWorkerConfiguration,
-    MembershipFilter, ParticipantRole, StateMachineConfiguration, StateMachineDefinition,
+    GroupKindFilter, GroupPatch, GroupStrategy, GroupVisibility,
+    InlineGroupEventSubscriptionRequest, ManagerWorkerConfiguration, MembershipFilter,
+    ParticipantRole, StateMachineConfiguration, StateMachineDefinition,
     StateMachineDefinitionContent, StateMachineParticipantBinding,
 };
 use serde::{Deserialize, Deserializer, de::Error as _};
@@ -190,17 +191,21 @@ pub enum CreateGroupRequest {
         participants: Vec<ParticipantRequest>,
         collaboration: CollaborationRequest,
         originator: Option<String>,
+        #[serde(default)]
+        event_subscriptions: Vec<InlineGroupEventSubscriptionRequest>,
     },
     Dm {
         target_actor_id: String,
         name: Option<String>,
         context: Option<String>,
+        #[serde(default)]
+        event_subscriptions: Vec<InlineGroupEventSubscriptionRequest>,
     },
 }
 
-impl From<CreateGroupRequest> for CreateGroupSpec {
-    fn from(value: CreateGroupRequest) -> Self {
-        match value {
+impl CreateGroupRequest {
+    pub fn into_parts(self) -> (CreateGroupSpec, Vec<InlineGroupEventSubscriptionRequest>) {
+        match self {
             CreateGroupRequest::Normal {
                 name,
                 context,
@@ -208,31 +213,45 @@ impl From<CreateGroupRequest> for CreateGroupSpec {
                 participants,
                 collaboration,
                 originator,
-            } => Self::Collaboration(CreateCollaborationGroup {
-                name,
-                context,
-                driver_bot_uuid,
-                visibility: GroupVisibility::Private,
-                participants: participants
-                    .into_iter()
-                    .map(|participant| CreateParticipant {
-                        actor_id: participant.actor_id,
-                        role: participant.role,
-                    })
-                    .collect(),
-                collaboration: collaboration.into(),
-                originator,
-            }),
+                event_subscriptions,
+            } => (
+                CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                    name,
+                    context,
+                    driver_bot_uuid,
+                    visibility: GroupVisibility::Private,
+                    participants: participants
+                        .into_iter()
+                        .map(|participant| CreateParticipant {
+                            actor_id: participant.actor_id,
+                            role: participant.role,
+                        })
+                        .collect(),
+                    collaboration: collaboration.into(),
+                    originator,
+                }),
+                event_subscriptions,
+            ),
             CreateGroupRequest::Dm {
                 target_actor_id,
                 name,
                 context,
-            } => Self::DirectMessage(CreateDirectMessageGroup {
-                name,
-                context,
-                target_actor_id,
-            }),
+                event_subscriptions,
+            } => (
+                CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+                    name,
+                    context,
+                    target_actor_id,
+                }),
+                event_subscriptions,
+            ),
         }
+    }
+}
+
+impl From<CreateGroupRequest> for CreateGroupSpec {
+    fn from(value: CreateGroupRequest) -> Self {
+        value.into_parts().0
     }
 }
 

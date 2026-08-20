@@ -1367,6 +1367,7 @@ async fn create_dm_creates_and_reuses_human_bot_pair() {
             label: None,
             topic: Some("help".to_string()),
             context: Some("dm context".to_string()),
+            provisioning: false,
         })
         .await
         .expect("owner human should create Human-Bot DM");
@@ -1408,6 +1409,7 @@ async fn create_dm_creates_and_reuses_human_bot_pair() {
             label: Some("new label should not overwrite".to_string()),
             topic: None,
             context: Some("new context should not overwrite".to_string()),
+            provisioning: false,
         })
         .await
         .expect("second create should reuse canonical pair");
@@ -1435,6 +1437,7 @@ async fn create_dm_without_explicit_id_uses_dm_namespace() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await
         .expect("owner human should create generated Human-Bot DM");
@@ -1458,6 +1461,7 @@ async fn create_dm_enforces_human_to_bot_reachability() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await
         .expect_err("unrelated human cannot reach protected bot");
@@ -1476,6 +1480,7 @@ async fn create_dm_enforces_human_to_bot_reachability() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await
         .expect_err("unrelated human sees private bot as unreachable");
@@ -1498,6 +1503,7 @@ async fn create_dm_enforces_human_to_bot_reachability() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await
         .expect("friendship allows private DM");
@@ -1521,6 +1527,7 @@ async fn create_dm_rejects_mismatched_driver_bot_for_human_caller() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await
         .expect_err("Human-Bot DM driver_bot is only legacy advisory for target bot");
@@ -1549,6 +1556,7 @@ async fn workbench_human_bot_dm_rejects_owner_bot_proxy_sender_by_default() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await
         .unwrap();
@@ -1682,7 +1690,7 @@ async fn delete_group_cleans_up_channel_bindings() {
 }
 
 #[tokio::test]
-async fn delete_group_restores_group_when_channel_binding_cleanup_fails() {
+async fn delete_group_keeps_committed_deletion_when_channel_binding_cleanup_fails() {
     let fixture = Fixture::new().with_bot("driver", "Driver", "public", None);
     let cleanup = Arc::new(RecordingChannelBindingCleanup::failing());
     let service = fixture
@@ -1711,8 +1719,8 @@ async fn delete_group_restores_group_when_channel_binding_cleanup_fails() {
             if message == "channel binding cleanup failed"
     ));
     assert!(
-        fixture.group.get("group-under-test").await.is_some(),
-        "group must be restored when binding cleanup fails"
+        fixture.group.get("group-under-test").await.is_none(),
+        "terminal Group deletion cannot be rolled back after its Event is committed"
     );
 }
 
@@ -2454,6 +2462,7 @@ fn create_cmd(
         service_spec: None,
         group_strategy: None,
         visibility: None,
+        provisioning: false,
     }
 }
 
@@ -3566,6 +3575,7 @@ async fn list_groups_filters_by_visibility() {
         service_spec: None,
         group_strategy: None,
         visibility: Some("public".to_string()),
+        provisioning: false,
     };
     service.create_group(cmd2).await.unwrap();
 

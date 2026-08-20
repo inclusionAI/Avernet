@@ -111,7 +111,12 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         contract["paths"][GROUPS_PATH]["post"]["responses"]["409"][
             "x-error-codes"
         ]
-    ) == {"conflict", "non_public_participant"}
+    ) == {
+        "conflict",
+        "non_public_participant",
+        "event_subscription_limit_reached",
+        "eventing_disabled",
+    }
     assert set(
         contract["paths"][GROUPS_PATH]["post"]["responses"]["400"][
             "x-error-codes"
@@ -120,6 +125,8 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         "invalid_request",
         "invalid_participant",
         "invalid_participant_binding",
+        "invalid_event_filter",
+        "invalid_webhook_url",
     }
     assert set(
         contract["paths"][GROUP_PATH]["get"]["responses"]["409"][
@@ -158,6 +165,30 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         ]["schema"]["properties"]["code"]["const"]
         == 20_000
     )
+
+
+def test_group_create_inline_event_subscriptions_cannot_supply_scope() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    request_variants = contract["paths"][GROUPS_PATH]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["schema"]["oneOf"]
+    assert len(request_variants) == 2
+    for request_variant in request_variants:
+        subscriptions = request_variant["properties"]["event_subscriptions"]
+        assert subscriptions["type"] == "array"
+        inline = subscriptions["items"]
+        assert inline["additionalProperties"] is False
+        assert set(inline["required"]) == {"name", "event_filters", "sink"}
+        assert "scope" not in inline["properties"]
+
+    response_variants = contract["paths"][GROUPS_PATH]["post"]["responses"]["201"][
+        "content"
+    ]["application/json"]["schema"]["properties"]["data"]["oneOf"]
+    assert len(response_variants) == 2
+    for response_variant in response_variants:
+        response_property = response_variant["properties"]["event_subscriptions"]
+        assert response_property["type"] == "array"
+        assert "event_subscriptions" not in response_variant["required"]
 
 
 def test_group_detail_uses_implicit_human_or_owned_bot_participant_access() -> None:

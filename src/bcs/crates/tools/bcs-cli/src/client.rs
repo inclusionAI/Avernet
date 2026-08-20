@@ -1545,6 +1545,7 @@ impl BcsClient {
             auto_start_on_service_invocation: Some(options.auto_start_on_service_invocation),
             start_initial_run: None,
             visibility: None,
+            event_subscriptions: Vec::new(),
         };
         let response = self
             .add_auth(self.http_client.post(&url).json(&payload))
@@ -1597,6 +1598,7 @@ impl BcsClient {
             auto_start_on_service_invocation: None,
             start_initial_run: None,
             visibility: None,
+            event_subscriptions: Vec::new(),
         };
 
         let response = self
@@ -1674,6 +1676,7 @@ impl BcsClient {
             auto_start_on_service_invocation: None,
             start_initial_run: None,
             visibility: None,
+            event_subscriptions: Vec::new(),
         };
 
         let response = self

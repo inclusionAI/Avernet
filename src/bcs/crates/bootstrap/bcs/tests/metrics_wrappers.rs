@@ -525,6 +525,7 @@ fn group_create_cmd() -> GroupCreateCommand {
         service_spec: None,
         group_strategy: None,
         visibility: None,
+        provisioning: false,
     }
 }
 

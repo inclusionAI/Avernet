@@ -1,13 +1,21 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_group_store::MemoryGroupRepo;
-use bcs_service_api::port::repo::GroupRepoPort;
+use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
+use bcs_service_api::port::repo::{
+    CommitGroupEventfulMutation, FinalizeGroupProvisioning, GroupEventfulMutation, GroupRepoPort,
+};
+use bcs_service_api::port::{EventRecordFactoryPort, NewEvent};
+use bcs_service_api::types::{EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject};
 use bcs_service_api::{
     ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage,
     GroupMutableFieldsPatch, GroupStatus, Participant, ParticipantMode, ParticipantRole,
     ServiceError, ServiceResult, ServiceSpec, Workspace,
 };
+use chrono::{SecondsFormat, Utc};
+use serde_json::{Value, json};
 
 /// Core group service implementation.
 ///
@@ -15,6 +23,7 @@ use bcs_service_api::{
 #[derive(Clone)]
 pub struct GroupCore {
     repo: Arc<dyn GroupRepoPort>,
+    event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
 }
 
 impl GroupCore {
@@ -23,7 +32,18 @@ impl GroupCore {
     }
 
     pub fn with_repo(repo: Arc<dyn GroupRepoPort>) -> Self {
-        Self { repo }
+        Self {
+            repo,
+            event_record_factory: None,
+        }
+    }
+
+    pub fn with_event_record_factory(
+        mut self,
+        event_record_factory: Arc<dyn EventRecordFactoryPort>,
+    ) -> Self {
+        self.event_record_factory = Some(event_record_factory);
+        self
     }
 
     pub fn memory() -> Self {
@@ -41,6 +61,62 @@ impl Default for GroupCore {
 impl GroupCoreService for GroupCore {
     async fn upsert(&self, group: Group) -> ServiceResult<()> {
         self.repo.upsert(group).await
+    }
+
+    async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {
+        self.repo.finalize_provisioning(command).await
+    }
+
+    async fn mutate(&self, command: GroupMutationCommand) -> ServiceResult<Group> {
+        let current = self
+            .repo
+            .try_get(&command.group_id)
+            .await?
+            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        let next_version = current.version.checked_add(1).ok_or_else(|| {
+            ServiceError::Conflict(format!("Group '{}' version overflow", current.id))
+        })?;
+        let Some(prepared) = prepare_group_mutation(&current, &command.mutation, next_version)?
+        else {
+            return Ok(current);
+        };
+        let mutated_at = Utc::now();
+        let mutated_at_ms = u64::try_from(mutated_at.timestamp_millis()).map_err(|_| {
+            ServiceError::InternalError("Group mutation timestamp is out of range".to_string())
+        })?;
+        let event = match (prepared.event, self.event_record_factory.as_ref()) {
+            (Some(event), Some(factory)) => factory
+                .prepare(NewEvent {
+                    event_id: format!("evt_{}", uuid::Uuid::new_v4()),
+                    event_type: event.event_type.to_string(),
+                    schema_version: EVENT_SCHEMA_VERSION_V1.to_string(),
+                    producer: "bcs-group".to_string(),
+                    producer_key: format!("{}:{}:v{}", event.event_type, current.id, next_version),
+                    occurred_at: mutated_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+                    subject: event.subject,
+                    scope: EventScope {
+                        group_id: Some(current.id.clone()),
+                        ..EventScope::default()
+                    },
+                    stream_key: format!("group:{}", current.id),
+                    actor: Some(command.actor),
+                    correlation_id: command.correlation_id,
+                    causation_event_id: None,
+                    trace_id: command.trace_id,
+                    data: event.data,
+                })
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?,
+            _ => None,
+        };
+        self.repo
+            .commit_eventful_mutation(CommitGroupEventfulMutation {
+                group_id: current.id.clone(),
+                expected_version: current.version,
+                mutated_at_ms,
+                mutation: prepared.mutation,
+                event,
+            })
+            .await
     }
 
     async fn patch_mutable_fields(
@@ -251,6 +327,30 @@ impl GroupCoreService for GroupCore {
         label: Option<String>,
         context: Option<String>,
     ) -> ServiceResult<(Group, bool)> {
+        self.create_or_reuse_actor_dm_group_with_record_status(
+            id,
+            actor_a,
+            actor_b,
+            legacy_driver_bot,
+            originator_actor_id,
+            label,
+            context,
+            "active",
+        )
+        .await
+    }
+
+    async fn create_or_reuse_actor_dm_group_with_record_status(
+        &self,
+        id: &str,
+        actor_a: DmActorSpec,
+        actor_b: DmActorSpec,
+        legacy_driver_bot: &str,
+        originator_actor_id: &str,
+        label: Option<String>,
+        context: Option<String>,
+        record_status: &str,
+    ) -> ServiceResult<(Group, bool)> {
         if actor_a.actor_id == actor_b.actor_id {
             return Err(ServiceError::InvalidOperation {
                 message: "DM requires two distinct actors".to_string(),
@@ -323,6 +423,7 @@ impl GroupCoreService for GroupCore {
         group.originator = Some(originator_actor_id.to_string());
         group.group_kind = GroupKind::Dm;
         group.dm_pair_key = Some(pair_key.clone());
+        group.record_status = record_status.to_string();
 
         if self.repo.insert_dm_group_if_absent(group.clone()).await? {
             return Ok((group, true));
@@ -366,5 +467,229 @@ impl GroupCoreService for GroupCore {
             None,
         )
         .await
+    }
+}
+
+struct PreparedGroupMutation {
+    event: Option<PreparedGroupEvent>,
+    mutation: GroupEventfulMutation,
+}
+
+struct PreparedGroupEvent {
+    event_type: &'static str,
+    subject: EventSubject,
+    data: BTreeMap<String, Value>,
+}
+
+fn prepare_group_mutation(
+    group: &Group,
+    mutation: &GroupMutationKind,
+    next_version: i32,
+) -> ServiceResult<Option<PreparedGroupMutation>> {
+    let participant_subject = |actor_id: &str| EventSubject {
+        subject_type: "participant".to_string(),
+        id: actor_id.to_string(),
+    };
+    let mut data = BTreeMap::new();
+    let prepared = match mutation {
+        GroupMutationKind::PatchMutableFields(patch) => {
+            let mut changed_fields = Vec::new();
+            if let Some(label) = &patch.label
+                && group.label.as_ref() != Some(label)
+            {
+                changed_fields.push("name");
+            }
+            if let Some(context) = &patch.context
+                && group.context.as_ref() != Some(context)
+            {
+                changed_fields.push("context");
+            }
+            if let Some(visibility) = &patch.visibility
+                && group.visibility != *visibility
+            {
+                changed_fields.push("visibility");
+            }
+            if let Some(delivery) = patch.default_bot_final_delivery {
+                let current = group
+                    .routing_policy
+                    .as_ref()
+                    .map(|policy| policy.default_bot_final_delivery)
+                    .unwrap_or_default();
+                if current != delivery {
+                    changed_fields.push("delivery_policy");
+                }
+            }
+            if changed_fields.is_empty() {
+                return Ok(None);
+            }
+            PreparedGroupMutation {
+                event: None,
+                mutation: GroupEventfulMutation::PatchMutableFields(patch.clone()),
+            }
+        }
+        GroupMutationKind::UpdateStatus { status, reason } => {
+            if group.status == *status {
+                return Ok(None);
+            }
+            validate_reason(reason)?;
+            PreparedGroupMutation {
+                event: None,
+                mutation: GroupEventfulMutation::UpdateStatus(*status),
+            }
+        }
+        GroupMutationKind::AddParticipant {
+            participant,
+            actor_is_public,
+        } => {
+            if group
+                .participants
+                .iter()
+                .any(|existing| existing.bot_uuid == participant.bot_uuid)
+            {
+                return Ok(None);
+            }
+            data.insert("actor_id".to_string(), json!(participant.bot_uuid));
+            data.insert(
+                "actor_type".to_string(),
+                json!(actor_kind_name(participant.actor_kind)),
+            );
+            data.insert(
+                "role".to_string(),
+                json!(participant_role_name(participant.role)),
+            );
+            data.insert(
+                "mode".to_string(),
+                json!(participant_mode_name(participant.effective_mode())),
+            );
+            data.insert("group_version".to_string(), json!(next_version));
+            PreparedGroupMutation {
+                event: Some(PreparedGroupEvent {
+                    event_type: "group.participant.added",
+                    subject: participant_subject(&participant.bot_uuid),
+                    data,
+                }),
+                mutation: GroupEventfulMutation::AddParticipant {
+                    participant: participant.clone(),
+                    actor_is_public: *actor_is_public,
+                },
+            }
+        }
+        GroupMutationKind::RemoveParticipant { actor_id, reason } => {
+            validate_reason(reason)?;
+            let participant = group
+                .participants
+                .iter()
+                .find(|participant| participant.bot_uuid == *actor_id)
+                .ok_or_else(|| ServiceError::ParticipantNotFound(actor_id.clone()))?;
+            data.insert("actor_id".to_string(), json!(actor_id));
+            data.insert(
+                "actor_type".to_string(),
+                json!(actor_kind_name(participant.actor_kind)),
+            );
+            data.insert(
+                "previous_role".to_string(),
+                json!(participant_role_name(participant.role)),
+            );
+            data.insert("reason".to_string(), json!(reason));
+            data.insert("group_version".to_string(), json!(next_version));
+            PreparedGroupMutation {
+                event: Some(PreparedGroupEvent {
+                    event_type: "group.participant.removed",
+                    subject: participant_subject(actor_id),
+                    data,
+                }),
+                mutation: GroupEventfulMutation::RemoveParticipant {
+                    actor_id: actor_id.clone(),
+                },
+            }
+        }
+        GroupMutationKind::UpdateParticipantMode { actor_id, mode } => {
+            let participant = group
+                .participants
+                .iter()
+                .find(|participant| participant.bot_uuid == *actor_id)
+                .ok_or_else(|| ServiceError::ParticipantNotFound(actor_id.clone()))?;
+            let before = participant.effective_mode();
+            if before == *mode {
+                return Ok(None);
+            }
+            PreparedGroupMutation {
+                event: None,
+                mutation: GroupEventfulMutation::UpdateParticipantMode {
+                    actor_id: actor_id.clone(),
+                    mode: *mode,
+                },
+            }
+        }
+        GroupMutationKind::UpdateRoutingPolicy(policy) => {
+            if serde_json::to_value(&group.routing_policy)
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?
+                == serde_json::to_value(Some(policy))
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?
+            {
+                return Ok(None);
+            }
+            PreparedGroupMutation {
+                event: None,
+                mutation: GroupEventfulMutation::UpdateRoutingPolicy(policy.clone()),
+            }
+        }
+        GroupMutationKind::UpdateServiceSpec(service_spec) => {
+            if serde_json::to_value(&group.service_spec)
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?
+                == serde_json::to_value(service_spec)
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?
+            {
+                return Ok(None);
+            }
+            PreparedGroupMutation {
+                event: None,
+                mutation: GroupEventfulMutation::UpdateServiceSpec(service_spec.clone()),
+            }
+        }
+        GroupMutationKind::Delete { reason } => {
+            validate_reason(reason)?;
+            PreparedGroupMutation {
+                event: None,
+                mutation: GroupEventfulMutation::Delete,
+            }
+        }
+    };
+    Ok(Some(prepared))
+}
+
+fn validate_reason(reason: &str) -> ServiceResult<()> {
+    if reason.trim().is_empty() {
+        return Err(ServiceError::InvalidOperation {
+            message: "Group mutation reason must not be empty".to_string(),
+            request_id: None,
+        });
+    }
+    Ok(())
+}
+
+fn actor_kind_name(kind: ActorKind) -> &'static str {
+    match kind {
+        ActorKind::Bot => "bot",
+        ActorKind::Human => "human",
+    }
+}
+
+fn participant_role_name(role: ParticipantRole) -> &'static str {
+    match role {
+        ParticipantRole::Driver => "driver",
+        ParticipantRole::Consultant => "consultant",
+        ParticipantRole::Manager => "manager",
+        ParticipantRole::Worker => "worker",
+        ParticipantRole::Observer => "observer",
+    }
+}
+
+fn participant_mode_name(mode: ParticipantMode) -> &'static str {
+    match mode {
+        ParticipantMode::Auto => "auto",
+        ParticipantMode::Muted => "muted",
+        ParticipantMode::Present => "present",
+        ParticipantMode::Absent => "absent",
     }
 }

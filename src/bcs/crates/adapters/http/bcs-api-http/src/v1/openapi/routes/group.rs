@@ -6,8 +6,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use bcs_service_api::application::v1::{
     AddGroupParticipant, AuthenticatedCaller, CreateGroup, DeleteGroup, DeleteGroupParticipant,
-    GetGroup, ListGroups, UpdateGroup,
+    EventSubscription, GetGroup, GroupDetail, ListGroups, UpdateGroup,
 };
+use serde::Serialize;
 
 use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
@@ -71,12 +72,10 @@ async fn create_group(
     body: Result<Json<CreateGroupRequest>, JsonRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let (group, event_subscriptions) = body.into_parts();
     let result = state
         .group_service
-        .create_with_outcome(CreateGroup {
-            caller,
-            group: body.into(),
-        })
+        .create_with_event_subscriptions(CreateGroup { caller, group }, event_subscriptions)
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     let (status, code, message) = if result.created {
@@ -86,9 +85,25 @@ async fn create_group(
     };
     Ok((
         status,
-        Json(Envelope::success(code, message, result.group, request_id.0)),
+        Json(Envelope::success(
+            code,
+            message,
+            CreateGroupResponse {
+                group: result.group,
+                event_subscriptions: result.event_subscriptions,
+            },
+            request_id.0,
+        )),
     )
         .into_response())
+}
+
+#[derive(Serialize)]
+struct CreateGroupResponse {
+    #[serde(flatten)]
+    group: GroupDetail,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    event_subscriptions: Vec<EventSubscription>,
 }
 
 async fn get_group(

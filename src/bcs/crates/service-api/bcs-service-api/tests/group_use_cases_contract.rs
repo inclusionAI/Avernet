@@ -45,6 +45,7 @@ fn group_create_command_carries_caller_and_members() {
         service_spec: None,
         group_strategy: None,
         visibility: None,
+        provisioning: false,
     };
 
     assert_eq!(cmd.group_id.as_deref(), Some("group-explicit"));
@@ -75,6 +76,7 @@ fn dm_create_command_and_result_carry_create_or_reuse_semantics() {
         label: Some("Alice / Assistant".to_string()),
         topic: Some("debug incident".to_string()),
         context: Some("prod checkout outage".to_string()),
+        provisioning: false,
     };
     assert_eq!(cmd.group_id.as_deref(), Some("dm-explicit"));
     assert_eq!(cmd.caller_actor_id.as_deref(), Some("human_123"));
@@ -314,6 +316,7 @@ async fn noop_group_management_service_fails_closed() {
             service_spec: None,
             group_strategy: None,
             visibility: None,
+            provisioning: false,
         })
         .await;
     assert_not_configured(created, "group management service is not configured");
@@ -327,6 +330,7 @@ async fn noop_group_management_service_fails_closed() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await;
     assert_not_configured(dm, "group management service is not configured");

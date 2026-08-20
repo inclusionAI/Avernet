@@ -6,25 +6,24 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
+    AcceptFriendRequest, AcceptInvitation, CreateBotFriendRequest, CreateGroupInvitation,
+    CreateSessionInvitation, DeleteBotFriendship, FriendRequest, Friendship, FriendshipService,
+    Invitation, InvitationAcceptResult, InvitationService, ListBotFriendRequests,
+    ListBotFriendships, RejectFriendRequest,
+};
+use bcs_service_api::application::v1::{
     AddGroupParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
     BotFinalDelivery, ChatConfiguration, CollaborationConfiguration, CollaborationGroupDetail,
     CreateGroup, CreateGroupOutcome, CreateGroupSpec,
     DeleteGroup, DeleteGroupParticipant, DeleteResult, GetGroup, GroupDeliveryPolicy, GroupDetail,
     GroupService, GroupStatus, GroupStrategy, GroupVisibility, ListGroups, MembershipFilter, Page,
-    Participant, UpdateGroup, UpdateGroupParticipant,
+    InlineGroupEventSubscriptionRequest, Participant, UpdateGroup, UpdateGroupParticipant,
 };
 use bcs_service_api::application::v1::{
-    AddSessionParticipant, CompleteSession, CreateSession, CreateSessionOutcome,
-    DeleteSession, DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions,
-    SessionCompletionResult, SessionDetail, SessionMessageService,
-    SessionParticipant, SessionService, SessionSummary, UpdateSession,
-    UpdateSessionParticipant,
-};
-use bcs_service_api::application::v1::{
-    AcceptFriendRequest, AcceptInvitation, CreateBotFriendRequest, CreateGroupInvitation,
-    CreateSessionInvitation, Friendship, FriendshipService, FriendRequest, Invitation,
-    InvitationAcceptResult, InvitationService, ListBotFriendRequests, ListBotFriendships,
-    RejectFriendRequest, DeleteBotFriendship,
+    AddSessionParticipant, CompleteSession, CreateSession, CreateSessionOutcome, DeleteSession,
+    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions,
+    SessionCompletionResult, SessionDetail, SessionMessageService, SessionParticipant,
+    SessionService, SessionSummary, UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::{ActorKind, ParticipantMode, ParticipantRole};
 use serde_json::{Value, json};
@@ -56,6 +55,7 @@ impl PrincipalVerifier for HeaderVerifier {
 struct FakeGroupService {
     list: Mutex<Option<ListGroups>>,
     created: Mutex<Option<CreateGroup>>,
+    inline_event_subscriptions: Mutex<Vec<InlineGroupEventSubscriptionRequest>>,
     reuse_dm: AtomicBool,
     get: Mutex<Option<GetGroup>>,
     updated: Mutex<Option<UpdateGroup>>,
@@ -88,7 +88,20 @@ impl GroupService for FakeGroupService {
         Ok(CreateGroupOutcome {
             group,
             created: !self.reuse_dm.load(Ordering::Relaxed),
+            event_subscriptions: Vec::new(),
         })
+    }
+
+    async fn create_with_event_subscriptions(
+        &self,
+        command: CreateGroup,
+        event_subscriptions: Vec<InlineGroupEventSubscriptionRequest>,
+    ) -> Result<CreateGroupOutcome, ApplicationError> {
+        *self
+            .inline_event_subscriptions
+            .lock()
+            .expect("inline Event Subscription lock") = event_subscriptions;
+        self.create_with_outcome(command).await
     }
 
     async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError> {
@@ -103,9 +116,7 @@ impl GroupService for FakeGroupService {
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
         *self.deleted.lock().expect("delete lock") = Some(command);
-        Ok(DeleteResult {
-            deleted: true,
-        })
+        Ok(DeleteResult { deleted: true })
     }
 
     async fn add_participant(
@@ -229,7 +240,9 @@ impl SessionMessageService for NoopSessionMessageService {
         &self,
         _query: ListSessionMessages,
     ) -> Result<Vec<bcs_service_api::GroupMessage>, ApplicationError> {
-        Err(ApplicationError::internal("session messages not configured"))
+        Err(ApplicationError::internal(
+            "session messages not configured",
+        ))
     }
 }
 
@@ -359,9 +372,7 @@ fn test_router(service: Arc<FakeGroupService>) -> axum::Router {
         Arc::new(NoopSessionMessageService),
         Arc::new(NoopInvitationService),
         Arc::new(NoopFriendshipService),
-        Arc::new(HeaderVerifier {
-            caller: caller(),
-        }),
+        Arc::new(HeaderVerifier { caller: caller() }),
     ))
 }
 
@@ -519,8 +530,17 @@ async fn group_routes_forward_the_verified_caller() {
         ))
         .await
         .expect("update participant forwarding response");
-    assert_eq!(update_participant_response.status(), StatusCode::METHOD_NOT_ALLOWED);
-    assert!(service.updated_participant.lock().expect("update participant lock").is_none());
+    assert_eq!(
+        update_participant_response.status(),
+        StatusCode::METHOD_NOT_ALLOWED
+    );
+    assert!(
+        service
+            .updated_participant
+            .lock()
+            .expect("update participant lock")
+            .is_none()
+    );
 
     let remove_participant_response = app
         .oneshot(authenticated_request(
@@ -541,6 +561,100 @@ async fn group_routes_forward_the_verified_caller() {
         assert_eq!(removed.group_id, "group-1");
         assert_eq!(removed.actor_id, "bot-2");
     }
+}
+
+#[tokio::test]
+async fn create_group_accepts_inline_event_subscriptions_for_normal_and_dm() {
+    let requests = [
+        json!({
+            "group_kind": "normal",
+            "driver_bot_uuid": "bot-1",
+            "participants": [{"actor_id": "bot-1", "role": "driver"}],
+            "collaboration": {
+                "strategy": "chat",
+                "delivery_policy": {"bot_final_delivery": "send_to_driver"}
+            },
+            "event_subscriptions": [{
+                "name": "group-observer",
+                "event_filters": ["group.*", "session.created"],
+                "sink": {
+                    "type": "webhook",
+                    "url": "https://example.com/bcs-events"
+                }
+            }]
+        }),
+        json!({
+            "group_kind": "dm",
+            "target_actor_id": "bot-2",
+            "event_subscriptions": [{
+                "name": "dm-observer",
+                "event_filters": ["message.created"],
+                "sink": {
+                    "type": "webhook",
+                    "url": "https://example.com/dm-events"
+                }
+            }]
+        }),
+    ];
+
+    for request in requests {
+        let service = Arc::new(FakeGroupService::default());
+        let response = test_router(service.clone())
+            .oneshot(authenticated_request(
+                "POST",
+                "/openapi/v1/collaboration/groups",
+                request,
+            ))
+            .await
+            .expect("inline Event Subscription response");
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = response_json(response).await;
+        assert!(body["data"].get("event_subscriptions").is_none());
+        let subscriptions = service
+            .inline_event_subscriptions
+            .lock()
+            .expect("inline Event Subscription lock");
+        assert_eq!(subscriptions.len(), 1);
+        assert_eq!(
+            subscriptions[0].event_filters.len(),
+            if subscriptions[0].name == "group-observer" {
+                2
+            } else {
+                1
+            }
+        );
+    }
+}
+
+#[tokio::test]
+async fn create_group_rejects_client_supplied_inline_subscription_scope() {
+    let service = Arc::new(FakeGroupService::default());
+    let response = test_router(service.clone())
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/groups",
+            json!({
+                "group_kind": "dm",
+                "target_actor_id": "bot-2",
+                "event_subscriptions": [{
+                    "name": "forged-scope",
+                    "scope": {"type": "group", "id": "someone-elses-group"},
+                    "event_filters": ["message.created"],
+                    "sink": {
+                        "type": "webhook",
+                        "url": "https://example.com/dm-events"
+                    }
+                }]
+            }),
+        ))
+        .await
+        .expect("forged scope response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
+    assert!(service.created.lock().expect("create lock").is_none());
 }
 
 #[tokio::test]
@@ -702,7 +816,11 @@ async fn malformed_percent_encoded_paths_use_the_common_error_envelope() {
             "/openapi/v1/collaboration/groups/%FF",
             json!({"name": "Renamed"}),
         ),
-        ("DELETE", "/openapi/v1/collaboration/groups/%FF", Value::Null),
+        (
+            "DELETE",
+            "/openapi/v1/collaboration/groups/%FF",
+            Value::Null,
+        ),
     ] {
         let response = app
             .clone()

@@ -2,24 +2,26 @@ use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
 use bcs_route_security::OutboundUrlGuard;
+use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
 
 use crate::core::validate_service_spec_patch;
 use crate::noop::{
     EmptyRelationCoreService, EmptySessionManagementService, NoopSystemMessageService,
 };
+use bcs_service_api::types::{EventActor, EventActorType};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, BotRuntimeConnectionService,
     CallbackChannelConfig, CanResolveInteraction, CanResolveInteractionCommand,
-    ChannelBindingCleanupPort, DmActorSpec, DmCreateCommand, DmCreateResult,
-    CollaborationRuntimeService, FriendCoreService, Group as DomainGroup, GroupAddMemberCommand,
-    GroupAddMemberResult, GroupCoreService, GroupCreateCommand, GroupDeleteCommand, GroupDeleteResult,
-    GroupDetailCommand, GroupDetailResult, GroupKind, GroupListCommand, GroupListEntry,
-    GroupListResult, GroupManagementService, GroupParticipantModeCommand,
-    GroupParticipantModeResult, GroupParticipantView, GroupPatchSettingsCommand,
-    GroupPatchSettingsConflict, GroupPatchSettingsResult, GroupQueryService,
-    GroupRemoveMemberCommand, GroupRemoveMemberResult, GroupRoutingPolicyCommand,
-    GroupRoutingPolicyResult, GroupStatus, GroupStatusCommand, GroupStrategy,
-    GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
+    ChannelBindingCleanupPort, CollaborationRuntimeService, DmActorSpec, DmCreateCommand,
+    DmCreateResult, FriendCoreService, Group as DomainGroup, GroupAddMemberCommand,
+    GroupAddMemberResult, GroupCoreService, GroupCreateCommand, GroupDeleteCommand,
+    GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupKind, GroupListCommand,
+    GroupListEntry, GroupListResult, GroupManagementService, GroupMutableFieldsPatch,
+    GroupParticipantModeCommand, GroupParticipantModeResult, GroupParticipantView,
+    GroupPatchSettingsCommand, GroupPatchSettingsConflict, GroupPatchSettingsResult,
+    GroupQueryService, GroupRemoveMemberCommand, GroupRemoveMemberResult,
+    GroupRoutingPolicyCommand, GroupRoutingPolicyResult, GroupStatus, GroupStatusCommand,
+    GroupStrategy, GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
     GroupUpdateWorkspaceCommand, GroupUseCaseError, GroupWorkspaceQueryCommand,
     GroupWorkspaceResult, NoopChannelBindingCleanupPort, Participant, ParticipantMode,
     ParticipantRole, RegisteredBot, RelationCoreService, ServiceError, ServiceResult, ServiceSpec,
@@ -1037,6 +1039,9 @@ impl GroupManagementService for GroupManagement {
         group.group_kind = cmd.group_kind.unwrap_or(GroupKind::Normal);
         group.service_spec = cmd.service_spec.clone();
         group.group_strategy = requested_strategy;
+        if cmd.provisioning {
+            group.record_status = "provisioning".to_string();
+        }
 
         let visibility = cmd.visibility.as_deref().unwrap_or("private").to_string();
         if visibility != "public" && visibility != "private" {
@@ -1254,7 +1259,7 @@ impl GroupManagementService for GroupManagement {
 
         let (group, created) = self
             .group
-            .create_or_reuse_actor_dm_group(
+            .create_or_reuse_actor_dm_group_with_record_status(
                 &group_id,
                 actor_a,
                 actor_b,
@@ -1262,6 +1267,11 @@ impl GroupManagementService for GroupManagement {
                 &originator_actor_id,
                 label,
                 cmd.context,
+                if cmd.provisioning {
+                    "provisioning"
+                } else {
+                    "active"
+                },
             )
             .await?;
 
@@ -1295,12 +1305,17 @@ impl GroupManagementService for GroupManagement {
             )));
         }
 
-        self.group.update_status(&cmd.group_id, status).await?;
         let updated = self
             .group
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
+            .mutate(group_mutation_command(
+                &cmd.group_id,
+                caller,
+                GroupMutationKind::UpdateStatus {
+                    status,
+                    reason: "status_updated".to_string(),
+                },
+            ))
+            .await?;
         Ok(group_to_detail(updated))
     }
 
@@ -1308,7 +1323,7 @@ impl GroupManagementService for GroupManagement {
         &self,
         cmd: GroupAddMemberCommand,
     ) -> Result<GroupAddMemberResult, GroupUseCaseError> {
-        let (_caller, group) = self.authorize_add_member(&cmd).await?;
+        let (caller, group) = self.authorize_add_member(&cmd).await?;
 
         let bot = self
             .registry
@@ -1368,11 +1383,15 @@ impl GroupManagementService for GroupManagement {
         };
 
         self.group
-            .add_participant_with_visibility_guard(
+            .mutate(group_mutation_command(
                 &cmd.group_id,
-                participant.clone(),
-                bot.actor_kind != ActorKind::Bot || bot.capabilities.visibility == "public",
-            )
+                &caller,
+                GroupMutationKind::AddParticipant {
+                    participant: participant.clone(),
+                    actor_is_public: bot.actor_kind != ActorKind::Bot
+                        || bot.capabilities.visibility == "public",
+                },
+            ))
             .await?;
 
         if bot.actor_kind == ActorKind::Bot {
@@ -1468,7 +1487,19 @@ impl GroupManagementService for GroupManagement {
         }
 
         self.group
-            .remove_participant(&cmd.group_id, &cmd.bot_id)
+            .mutate(group_mutation_command(
+                &cmd.group_id,
+                caller,
+                GroupMutationKind::RemoveParticipant {
+                    actor_id: cmd.bot_id.clone(),
+                    reason: if is_self {
+                        "participant_left"
+                    } else {
+                        "participant_removed"
+                    }
+                    .to_string(),
+                },
+            ))
             .await?;
 
         Ok(GroupRemoveMemberResult {
@@ -1482,6 +1513,9 @@ impl GroupManagementService for GroupManagement {
         cmd: GroupDeleteCommand,
     ) -> Result<GroupDeleteResult, GroupUseCaseError> {
         let Some(group) = self.group.try_get(&cmd.group_id).await? else {
+            self.channel_binding_cleanup
+                .delete_bindings_for_group(&cmd.group_id)
+                .await?;
             return Ok(GroupDeleteResult {
                 group_id: cmd.group_id,
                 deleted: false,
@@ -1495,26 +1529,23 @@ impl GroupManagementService for GroupManagement {
         }
         self.ensure_group_coordinator(&group, &cmd.caller_actor_id, "delete this group")?;
 
-        // Remove the group first so concurrent binding creation can no longer validate the target.
-        // If binding cleanup fails, restore the group instead of leaving a dangling binding.
-        let Some(deleted_group) = self.group.delete(&cmd.group_id).await? else {
-            return Ok(GroupDeleteResult {
-                group_id: cmd.group_id,
-                deleted: false,
-            });
-        };
+        self.group
+            .mutate(group_mutation_command(
+                &cmd.group_id,
+                &cmd.caller_actor_id,
+                GroupMutationKind::Delete {
+                    reason: "group_deleted".to_string(),
+                },
+            ))
+            .await?;
+        // Group deletion and subscription shutdown are already committed.
+        // Binding cleanup is idempotent and retried by the not-found path
+        // above; it cannot roll back the committed deletion.
         if let Err(cleanup_error) = self
             .channel_binding_cleanup
             .delete_bindings_for_group(&cmd.group_id)
             .await
         {
-            if let Err(rollback_error) = self.group.upsert(deleted_group).await {
-                return Err(ServiceError::InternalError(format!(
-                    "Failed to delete channel bindings for group '{}': {}; group rollback also failed: {}",
-                    cmd.group_id, cleanup_error, rollback_error
-                ))
-                .into());
-            }
             return Err(cleanup_error.into());
         }
         Ok(GroupDeleteResult {
@@ -1537,9 +1568,25 @@ impl GroupManagementService for GroupManagement {
                 "DM groups cannot be terminated".to_string(),
             ));
         }
+        if existing.driver_bot != cmd.caller_actor_id
+            && existing.originator() != cmd.caller_actor_id
+        {
+            return Err(ServiceError::Unauthorized(format!(
+                "Only the group coordinator can terminate Group '{}'",
+                cmd.group_id
+            ))
+            .into());
+        }
         let group = self
             .group
-            .terminate(&cmd.group_id, &cmd.caller_actor_id)
+            .mutate(group_mutation_command(
+                &cmd.group_id,
+                &cmd.caller_actor_id,
+                GroupMutationKind::UpdateStatus {
+                    status: GroupStatus::Completed,
+                    reason: "group_terminated".to_string(),
+                },
+            ))
             .await?;
         Ok(group_to_detail(group))
     }
@@ -1555,14 +1602,17 @@ impl GroupManagementService for GroupManagement {
             .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
         self.ensure_group_coordinator(&group, &cmd.caller_actor_id, "update label")?;
 
-        self.group
-            .update_label(&cmd.group_id, cmd.label.clone())
-            .await?;
         let updated = self
             .group
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
+            .mutate(group_mutation_command(
+                &cmd.group_id,
+                &cmd.caller_actor_id,
+                GroupMutationKind::PatchMutableFields(GroupMutableFieldsPatch {
+                    label: cmd.label.clone(),
+                    ..GroupMutableFieldsPatch::default()
+                }),
+            ))
+            .await?;
         Ok(group_to_detail(updated))
     }
 
@@ -1607,15 +1657,17 @@ impl GroupManagementService for GroupManagement {
             self.ensure_all_bots_public(&group.participants).await?;
         }
 
-        self.group
-            .update_visibility(&cmd.group_id, visibility)
-            .await?;
-
         let updated = self
             .group
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
+            .mutate(group_mutation_command(
+                &cmd.group_id,
+                &cmd.caller_actor_id,
+                GroupMutationKind::PatchMutableFields(GroupMutableFieldsPatch {
+                    visibility: Some(visibility.to_string()),
+                    ..GroupMutableFieldsPatch::default()
+                }),
+            ))
+            .await?;
         Ok(group_to_detail(updated))
     }
 
@@ -1636,7 +1688,7 @@ impl GroupManagementService for GroupManagement {
         &self,
         cmd: GroupRoutingPolicyCommand,
     ) -> Result<GroupRoutingPolicyResult, GroupUseCaseError> {
-        let mut group = self
+        let group = self
             .group
             .get(&cmd.group_id)
             .await
@@ -1656,8 +1708,13 @@ impl GroupManagementService for GroupManagement {
                 .map_err(|error| GroupUseCaseError::InvalidProposal(error.to_string()))?;
         }
 
-        group.routing_policy = Some(new_policy.clone());
-        self.group.upsert(group).await?;
+        self.group
+            .mutate(group_mutation_command(
+                &cmd.group_id,
+                cmd.caller_actor_id.as_deref().unwrap_or("system"),
+                GroupMutationKind::UpdateRoutingPolicy(new_policy.clone()),
+            ))
+            .await?;
         Ok(GroupRoutingPolicyResult {
             group_id: cmd.group_id,
             routing_policy: new_policy,
@@ -1683,19 +1740,42 @@ impl GroupManagementService for GroupManagement {
         self.ensure_actor_self_or_creator(&cmd.caller_actor_id, &cmd.actor_id)
             .await?;
 
-        match self
+        let group = self
             .group
-            .update_participant_mode(&cmd.group_id, &cmd.actor_id, cmd.mode)
+            .get(&cmd.group_id)
             .await
+            .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
+        let mutation = if group
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == cmd.actor_id)
         {
-            Ok(()) => {}
-            Err(ServiceError::BotNotFound(_)) if target.actor_kind == ActorKind::Human => {
-                self.group
-                    .insert_human_participant(&cmd.group_id, &cmd.actor_id, cmd.mode)
-                    .await?;
+            GroupMutationKind::UpdateParticipantMode {
+                actor_id: cmd.actor_id.clone(),
+                mode: cmd.mode,
             }
-            Err(error) => return Err(error.into()),
-        }
+        } else if target.actor_kind == ActorKind::Human {
+            GroupMutationKind::AddParticipant {
+                participant: Participant {
+                    bot_uuid: cmd.actor_id.clone(),
+                    bot_name: target.capabilities.name.clone(),
+                    kind: None,
+                    role: ParticipantRole::Observer,
+                    actor_kind: ActorKind::Human,
+                    mode: Some(cmd.mode),
+                },
+                actor_is_public: true,
+            }
+        } else {
+            return Err(ServiceError::ParticipantNotFound(cmd.actor_id.clone()).into());
+        };
+        self.group
+            .mutate(group_mutation_command(
+                &cmd.group_id,
+                &cmd.caller_actor_id,
+                mutation,
+            ))
+            .await?;
 
         Ok(GroupParticipantModeResult {
             group_id: cmd.group_id,
@@ -1747,7 +1827,11 @@ impl GroupManagementService for GroupManagement {
             }
 
             self.group
-                .update_service_spec(&cmd.group_id, spec_patch)
+                .mutate(group_mutation_command(
+                    &cmd.group_id,
+                    "system",
+                    GroupMutationKind::UpdateServiceSpec(spec_patch),
+                ))
                 .await?;
         }
 
@@ -1996,6 +2080,31 @@ fn workbench_participants_from_slice(
             mode: participant.mode,
         })
         .collect()
+}
+
+fn group_mutation_command(
+    group_id: &str,
+    actor_id: &str,
+    mutation: GroupMutationKind,
+) -> GroupMutationCommand {
+    let actor_type = if actor_id == "system" {
+        EventActorType::System
+    } else if actor_id.starts_with("human_") {
+        EventActorType::Human
+    } else {
+        EventActorType::Bot
+    };
+    GroupMutationCommand {
+        group_id: group_id.to_string(),
+        actor: EventActor {
+            actor_type,
+            id: actor_id.to_string(),
+            display_name: None,
+        },
+        correlation_id: None,
+        trace_id: None,
+        mutation,
+    }
 }
 
 fn parse_group_status(status: &str) -> Result<GroupStatus, GroupUseCaseError> {

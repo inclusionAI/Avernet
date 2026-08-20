@@ -85,6 +85,10 @@ import {
   getCollaborationParticipantLabel,
   type CollaborationParticipantDefinition,
 } from '../utils/collaborationValidation';
+import {
+  buildGroupWebhookSubscriptions,
+  getGroupWebhookUrlError,
+} from '../utils/groupWebhook';
 import CollaborationFlowPreviewLoader from './CollaborationFlowPreviewLoader';
 import CollaborationFlowWorkspace from './CollaborationFlowWorkspace';
 import PrivateBotHint from './PrivateBotHint';
@@ -238,6 +242,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const { bcnCollaborationDocUrl } = useExt(AppExt).resources;
   const [topic, setTopic] = useState('');
   const [description, setDescription] = useState('');
+  const [webhookUrl, setWebhookUrl] = useState('');
   const [consultantBots, setConsultantBots] = useState<string[]>([]);
   const [botSearch, setBotSearch] = useState('');
   const [error, setError] = useState<string>('');
@@ -1101,6 +1106,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const resetForm = () => {
     setTopic('');
     setDescription('');
+    setWebhookUrl('');
     setConsultantBots([]);
     setBotSearch('');
     setError('');
@@ -1598,6 +1604,13 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const handleCreate = async () => {
     const isManagerWorker = groupStrategy === 'manager_worker';
     const isStateMachine = groupStrategy === 'state_machine';
+    const webhookUrlError = getGroupWebhookUrlError(webhookUrl);
+
+    if (webhookUrlError) {
+      setError(webhookUrlError);
+      return;
+    }
+    const eventSubscriptions = buildGroupWebhookSubscriptions(webhookUrl);
 
     if (!originator) {
       setError('暂无可用的群主 Bot');
@@ -1724,6 +1737,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         group_strategy: 'state_machine',
         auto_start_on_service_invocation: true,
         collaboration_definition_yaml: collaborationDefinitionYaml,
+        event_subscriptions: eventSubscriptions,
       });
       if (result) {
         // 关闭副屏
@@ -1808,6 +1822,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         : undefined,
       group_strategy: groupStrategy,
       master_bot: isManagerWorker ? masterBot : undefined,
+      event_subscriptions: eventSubscriptions,
     };
 
     const result = await createGroup(params);
@@ -2592,6 +2607,28 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
           {/* 下方：Bot 选择区（flex-1，撑满剩余空间） */}
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-6 py-2">
+            <div className="mb-3 flex-shrink-0">
+              <label
+                htmlFor="create-group-webhook-url"
+                className="mb-1 block text-sm font-medium text-slate-700"
+              >
+                Webhook URL
+                <span className="ml-1 text-xs font-normal text-slate-400">
+                  （可选）
+                </span>
+              </label>
+              <input
+                id="create-group-webhook-url"
+                type="url"
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                value={webhookUrl}
+                onChange={(event) => setWebhookUrl(event.target.value)}
+                placeholder="http://127.0.0.1:28082/events"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-lavender-400 focus:ring-2 focus:ring-lavender-100"
+              />
+            </div>
             {groupStrategy === 'state_machine' ? (
               <div className="flex-1 min-h-0 flex flex-col gap-3">
                 {isCollaborationYamlValidated &&

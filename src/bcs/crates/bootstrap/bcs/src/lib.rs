@@ -131,6 +131,7 @@ mod config;
 mod config_loader;
 mod env;
 mod error;
+mod eventing_wiring;
 pub mod http_adapter;
 mod identity_wiring;
 pub mod lifecycle;

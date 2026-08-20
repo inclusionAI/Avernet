@@ -555,7 +555,6 @@ NormalGroupSummary:
     updated_at:
       type: integer
       minimum: 0
-
 DirectMessageGroupSummary:
   type: object
   additionalProperties: false
@@ -597,7 +596,6 @@ DirectMessageGroupSummary:
     updated_at:
       type: integer
       minimum: 0
-
 GroupSummary:
   oneOf:
     - $ref: "#/NormalGroupSummary"
@@ -733,6 +731,13 @@ CollaborationGroupDetail:
     updated_at:
       type: integer
       minimum: 0
+    event_subscriptions:
+      type: array
+      description: >-
+        Present only on a successful Group create request that provisioned
+        inline Event Subscriptions. Endpoint URLs are redacted.
+      items:
+        $ref: ./openapi/event-subscriptions.yaml#/EventSubscription
 
 DirectMessageGroupDetail:
   type: object
@@ -776,6 +781,13 @@ DirectMessageGroupDetail:
     updated_at:
       type: integer
       minimum: 0
+    event_subscriptions:
+      type: array
+      description: >-
+        Present only on a successful Group create request that provisioned
+        inline Event Subscriptions. Endpoint URLs are redacted.
+      items:
+        $ref: ./openapi/event-subscriptions.yaml#/EventSubscription
 
 GroupDetail:
   oneOf:

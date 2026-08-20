@@ -16,6 +16,8 @@ tags:
     description: Invitations for joining collaboration groups and sessions.
   - name: Collaboration / Channels
     description: Channel bindings between IM accounts and BCS bots/groups.
+  - name: Collaboration / Event Subscriptions
+    description: Durable Event Subscription and Webhook delivery management.
 paths:
   /openapi/v1/collaboration/bots/mine:
     $ref: ./openapi/bots.yaml#/MyBotsPath
@@ -71,6 +73,20 @@ paths:
     $ref: ./openapi/channel-bindings.yaml#/ChannelsBindingsByTargetPath
   /openapi/v1/collaboration/channels/bindings/{id}:
     $ref: ./openapi/channel-bindings.yaml#/ChannelsBindingsIdPath
+  /openapi/v1/collaboration/event-subscriptions:
+    $ref: ./openapi/event-subscriptions.yaml#/EventSubscriptionsPath
+  /openapi/v1/collaboration/event-subscriptions/{subscription_id}:
+    $ref: ./openapi/event-subscriptions.yaml#/EventSubscriptionPath
+  /openapi/v1/collaboration/event-subscriptions/{subscription_id}:test:
+    $ref: ./openapi/event-subscriptions.yaml#/TestEventSubscriptionPath
+  /openapi/v1/collaboration/event-subscriptions/{subscription_id}/deliveries:
+    $ref: ./openapi/event-subscriptions.yaml#/EventSubscriptionDeliveriesPath
+  /openapi/v1/collaboration/event-deliveries/{delivery_id}:
+    $ref: ./openapi/event-subscriptions.yaml#/EventDeliveryPath
+  /openapi/v1/collaboration/event-deliveries/{delivery_id}:replay:
+    $ref: ./openapi/event-subscriptions.yaml#/ReplayEventDeliveryPath
+  /openapi/v1/collaboration/event-deliveries/{delivery_id}:skip:
+    $ref: ./openapi/event-subscriptions.yaml#/SkipEventDeliveryPath
 components:
   schemas:
     Bot:
@@ -115,3 +131,7 @@ components:
       $ref: ./domain-models.yaml#/FriendRequest
     ErrorEnvelope:
       $ref: ./shared.yaml#/ErrorEnvelope
+    EventSubscription:
+      $ref: ./openapi/event-subscriptions.yaml#/EventSubscription
+    EventDeliverySummary:
+      $ref: ./openapi/event-subscriptions.yaml#/EventDeliverySummary

@@ -224,6 +224,19 @@ export interface CreateGroupParams {
   auto_start_on_service_invocation?: boolean;
   /** 结构化协同定义 YAML（state_machine 群必填） */
   collaboration_definition_yaml?: string;
+  /** 随建群创建的事件订阅；当前前端仅配置 Webhook URL */
+  event_subscriptions?: Array<{
+    name: string;
+    event_filters: string[];
+    payload: {
+      mode: 'metadata_only';
+    };
+    sink: {
+      type: 'webhook';
+      url: string;
+      request_timeout_ms: number;
+    };
+  }>;
 }
 
 /**

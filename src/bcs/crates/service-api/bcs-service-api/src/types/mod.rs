@@ -6,10 +6,12 @@
 
 pub mod bot_control_plane;
 pub mod error;
+pub mod event;
 
 pub use bot_control_plane::*;
 pub use bcs_domain::*;
 pub use error::{ServiceError, ServiceResult};
+pub use event::*;
 
 /// Mutable fields exposed by the BCN OpenAPI v1 Group PATCH operation.
 ///
