@@ -704,6 +704,31 @@ async def test_deactivate_selects_pool_source_layout_after_cutover():
 
 
 @pytest.mark.asyncio
+async def test_center_projection_uses_v3_adapter_contract_without_current_locator():
+    service, skills, _sets, _guard, runtime, _factory = _service(active=True)
+    skills.list_bot_active_assets = lambda **_kwargs: [
+        RegisteredSkillAsset(
+            skill_id=9,
+            name="center-skill",
+            git_path="center://skill-uuid",
+            skill_uuid="skill-uuid",
+            sc_version_number="42",
+        )
+    ]
+
+    await service.set_local_skill_active(skill_id="9", actor_id="owner", active=False)
+
+    assert runtime.publish_calls[0]["mapping_contract_version"] == "skills-pool-mapping-v3"
+    assert runtime.verify_calls[0]["mapping_contract_version"] == "skills-pool-mapping-v3"
+    assert runtime.publish_calls[0]["mappings"][0].to_dict() == {
+        "corpus": "center",
+        "skill_uuid": "skill-uuid",
+        "sc_version_number": "42",
+        "link_name": "center-skill",
+    }
+
+
+@pytest.mark.asyncio
 async def test_deactivate_invalid_locator_fails_closed_and_restores_desired_state():
     service, skills, sets, _guard, runtime, _factory = _service(
         active=True, git_path="local://folder/../one"

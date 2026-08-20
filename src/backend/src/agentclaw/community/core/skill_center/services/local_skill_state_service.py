@@ -70,6 +70,10 @@ from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     runtime_uses_pool_paths,
 )
+from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    MAPPING_CONTRACT_VERSION,
+    MAPPING_V3_CONTRACT_VERSION,
+)
 
 
 class LocalSkillStateService:
@@ -555,12 +559,18 @@ class LocalSkillStateService:
                 else SkillMappingSourceLayout.LEGACY
             )
             retired = retired_mappings or []
+            mapping_contract = (
+                MAPPING_V3_CONTRACT_VERSION
+                if any(mapping.corpus == "center" for mapping in mappings)
+                else MAPPING_CONTRACT_VERSION
+            )
             if not await self._pool_runtime.publish_mappings(
                 bot_id=bot_id,
                 user_id=owner_id,
                 mappings=mappings,
                 retired_mappings=retired,
                 source_layout=source_layout,
+                mapping_contract_version=mapping_contract,
             ):
                 return False
             return await self._pool_runtime.verify_mappings(
@@ -569,6 +579,7 @@ class LocalSkillStateService:
                 mappings=mappings,
                 retired_mappings=retired,
                 source_layout=source_layout,
+                mapping_contract_version=mapping_contract,
             )
         except Exception:
             return False
