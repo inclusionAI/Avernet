@@ -43,6 +43,38 @@ class SkillSetSkillItem(BaseModel):
     description: str | None = Field(default=None, description="Optional Skill description.")
 
 
+class SkillSetMcpItem(BaseModel):
+    """An explicit MCP server member of a SkillSet."""
+
+    server_code: str = Field(description="Opaque MCP server identifier.")
+    name: str = Field(description="MCP display name.")
+    description: str | None = Field(default=None, description="Optional MCP description.")
+
+
+class SkillSetMcpPermission(BaseModel):
+    """The caller's authorization state for one explicit MCP member."""
+
+    server_code: str = Field(description="Opaque MCP server identifier.")
+    has_permission: bool = Field(description="Whether the caller may install this MCP.")
+    access_level: str | None = Field(default=None, description="Marketplace access level.")
+    tool_permissions: dict = Field(default_factory=dict, description="Per-tool authorization states.")
+
+
+class RequestMcpPermissions(BaseModel):
+    """Request missing permissions for every explicit MCP member."""
+
+    reason: str = Field(default="", max_length=500, description="Optional justification for the request.")
+
+
+class SkillSetMcpPermissionRequest(BaseModel):
+    """One reused MCP permission-application result."""
+
+    server_code: str = Field(description="Opaque MCP server identifier.")
+    success: bool = Field(description="Whether the permission request was accepted.")
+    process_url: str | None = Field(default=None, description="Approval workflow URL when provided.")
+    error: str | None = Field(default=None, description="Failure reason when the request was rejected.")
+
+
 class SkillSetResourceItem(SkillSetItem):
     """Read-only resource projection for a SkillSet."""
 

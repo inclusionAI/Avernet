@@ -206,6 +206,7 @@ from .local import router as local_router
 from .loadtest import router as loadtest_router
 from .market import router as market_router
 from .mcp import router as mcp_router
+from .mcp.router import bot_mcp_router
 from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
 from .bot_public import router as bot_public_router
@@ -330,6 +331,7 @@ _GRANT_CHECKED_SUBGROUPS = [
     # both. See ``bots/engine_config.py``.
     engine_config_router,
     skill_sets_router,
+    bot_mcp_router,
     identity_router,
     resources_router,
     routines_router,

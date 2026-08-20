@@ -14,12 +14,15 @@ from agentclaw.community.di import Injected
 
 from .schemas import (
     CreateSkillSetRequest, SkillSetItem, SkillSetMembershipResult,
-    SkillSetResourceItem, SkillSetSkillItem, UpdateSkillSetRequest,
+    RequestMcpPermissions, SkillSetMcpItem, SkillSetMcpPermission,
+    SkillSetMcpPermissionRequest, SkillSetResourceItem, SkillSetSkillItem,
+    UpdateSkillSetRequest,
 )
 
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/skill-sets", tags=["skill-sets"])
 SetIdPath = Annotated[str, Path(description="Decimal SkillSet identifier.")]
 SkillIdPath = Annotated[str, Path(description="Decimal Skill identifier.")]
+McpServerCodePath = Annotated[str, Path(description="Opaque MCP server identifier.")]
 IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=1, description="Client key for idempotent SkillSet creation.")]
 
 
@@ -85,6 +88,36 @@ async def add_skill(bot_id: BotIdPath, set_id: SetIdPath, skill_id: SkillIdPath,
 @envelope_errors
 async def remove_skill(bot_id: BotIdPath, set_id: SetIdPath, skill_id: SkillIdPath, actor_id: UserIdDep, request: Request, service: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol)) -> Envelope[SkillSetMembershipResult]:
     return envelope(SkillSetMembershipResult(**await service.remove_skill(bot_id=bot_id, actor_id=actor_id, set_id=set_id, skill_id=skill_id)), request)
+
+
+@router.get("/{set_id}/mcps", response_model=Envelope[list[SkillSetMcpItem]])
+@envelope_errors
+async def list_set_mcps(bot_id: BotIdPath, set_id: SetIdPath, actor_id: UserIdDep, request: Request, service: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol)) -> Envelope[list[SkillSetMcpItem]]:
+    return envelope([SkillSetMcpItem(**item) for item in service.list_mcps(bot_id=bot_id, actor_id=actor_id, set_id=set_id)], request)
+
+
+@router.get("/{set_id}/mcp-permissions", response_model=Envelope[list[SkillSetMcpPermission]])
+@envelope_errors
+async def mcp_permissions(bot_id: BotIdPath, set_id: SetIdPath, actor_id: UserIdDep, request: Request, service: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol)) -> Envelope[list[SkillSetMcpPermission]]:
+    return envelope([SkillSetMcpPermission(**item) for item in service.mcp_permissions(bot_id=bot_id, actor_id=actor_id, set_id=set_id)], request)
+
+
+@router.post("/{set_id}/mcp-permission-requests", response_model=Envelope[list[SkillSetMcpPermissionRequest]])
+@envelope_errors
+async def request_mcp_permissions(bot_id: BotIdPath, set_id: SetIdPath, payload: RequestMcpPermissions, actor_id: UserIdDep, request: Request, service: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol)) -> Envelope[list[SkillSetMcpPermissionRequest]]:
+    return envelope([SkillSetMcpPermissionRequest(**item) for item in service.request_mcp_permissions(bot_id=bot_id, actor_id=actor_id, set_id=set_id, reason=payload.reason)], request)
+
+
+@router.put("/{set_id}/mcps/{server_code}", response_model=Envelope[SkillSetMembershipResult])
+@envelope_errors
+async def add_mcp(bot_id: BotIdPath, set_id: SetIdPath, server_code: McpServerCodePath, actor_id: UserIdDep, request: Request, service: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol)) -> Envelope[SkillSetMembershipResult]:
+    return envelope(SkillSetMembershipResult(**await service.add_mcp(bot_id=bot_id, actor_id=actor_id, set_id=set_id, server_code=server_code)), request)
+
+
+@router.delete("/{set_id}/mcps/{server_code}", response_model=Envelope[SkillSetMembershipResult])
+@envelope_errors
+async def remove_mcp(bot_id: BotIdPath, set_id: SetIdPath, server_code: McpServerCodePath, actor_id: UserIdDep, request: Request, service: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol)) -> Envelope[SkillSetMembershipResult]:
+    return envelope(SkillSetMembershipResult(**await service.remove_mcp(bot_id=bot_id, actor_id=actor_id, set_id=set_id, server_code=server_code)), request)
 
 
 @router.post("/{set_id}/activate", response_model=Envelope[SkillSetItem])

@@ -20,8 +20,15 @@ from agentclaw.community.core.models.skill import (
     SkillSetCreateIdempotency,
     SkillSetSkill,
 )
+from agentclaw.community.core.models.mcp import (
+    BotMCPInstallation,
+    SkillSetMCPServer,
+)
 from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
     SkillSetControlPlaneRepositoryProtocol,
+)
+from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_set_control_plane import (
+    McpSkillSetControlPlaneCommands,
 )
 from agentclaw.community.core.repository.skill_set_control_plane_types import (
     SkillSetDesiredState,
@@ -60,12 +67,18 @@ def _item(row: SkillSet) -> dict:
     }
 
 
-class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
+class SkillSetControlPlaneRepository(
+    McpSkillSetControlPlaneCommands, SkillSetControlPlaneRepositoryProtocol
+):
     """Desired-state UoW for SkillSet Membership and Installations."""
 
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
+
+    @staticmethod
+    def _as_item(row: SkillSet) -> dict:
+        return _item(row)
 
     @staticmethod
     def _scope(query, model):
@@ -236,6 +249,9 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                 raise SkillSetControlPlaneConflictError("SKILL_SET_ACTIVE")
             self._scope(session.query(SkillSetSkill), SkillSetSkill).filter(
                 SkillSetSkill.skill_set_id == row.id
+            ).delete(synchronize_session=False)
+            self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer).filter(
+                SkillSetMCPServer.skill_set_id == row.id
             ).delete(synchronize_session=False)
             # Create idempotency records intentionally retain the original
             # response only while their SkillSet exists.  Delete them in the
@@ -440,6 +456,15 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                 .all()
             )
             ids = {int(member.skill_id) for member in members}
+            mcp_members = (
+                self._scope(
+                    session.query(SkillSetMCPServer), SkillSetMCPServer
+                )
+                .filter(SkillSetMCPServer.skill_set_id == row.id)
+                .with_for_update()
+                .all()
+            )
+            mcp_codes = {str(member.server_code) for member in mcp_members}
             changed = bool(row.is_active) != active
             row.is_active = active
             if active:
@@ -456,12 +481,29 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                             avernet_tenant=get_current_avernet_tenant(),
                         )
                     )
+                existing_mcps = self._mcp_installations(session, bot_id)
+                for server_code in mcp_codes - existing_mcps:
+                    session.add(
+                        BotMCPInstallation(
+                            bot_id=bot_id,
+                            server_code=server_code,
+                            env=get_current_env(),
+                            avernet_tenant=get_current_avernet_tenant(),
+                        )
+                    )
             elif ids:
                 self._scope(
                     session.query(BotSkillInstallation), BotSkillInstallation
                 ).filter(
                     BotSkillInstallation.bot_id == bot_id,
                     BotSkillInstallation.skill_id.in_(ids),
+                ).delete(synchronize_session=False)
+            if not active and mcp_codes:
+                self._scope(
+                    session.query(BotMCPInstallation), BotMCPInstallation
+                ).filter(
+                    BotMCPInstallation.bot_id == bot_id,
+                    BotMCPInstallation.server_code.in_(mcp_codes),
                 ).delete(synchronize_session=False)
             session.flush()
             return SkillSetMutation(_item(row), changed, old)
@@ -501,6 +543,16 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                     .with_for_update()
                     .all()
                 )
+                mcp_memberships = (
+                    self._scope(
+                        session.query(SkillSetMCPServer), SkillSetMCPServer
+                    )
+                    .filter(SkillSetMCPServer.skill_set_id.in_(set_ids))
+                    .with_for_update()
+                    .all()
+                )
+            else:
+                mcp_memberships = []
             active_member_ids = {
                 int(member.skill_id)
                 for member in memberships
@@ -509,6 +561,16 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
             target_member_ids = {
                 int(member.skill_id)
                 for member in memberships
+                if int(member.skill_set_id) == int(target.id)
+            }
+            active_mcp_codes = {
+                str(member.server_code)
+                for member in mcp_memberships
+                if old.set_active.get(int(member.skill_set_id), False)
+            }
+            target_mcp_codes = {
+                str(member.server_code)
+                for member in mcp_memberships
                 if int(member.skill_set_id) == int(target.id)
             }
             for row in sets:
@@ -532,6 +594,23 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                     BotSkillInstallation(
                         bot_id=bot_id,
                         skill_id=skill_id,
+                        env=get_current_env(),
+                        avernet_tenant=get_current_avernet_tenant(),
+                    )
+                )
+            if active_mcp_codes:
+                self._scope(
+                    session.query(BotMCPInstallation), BotMCPInstallation
+                ).filter(
+                    BotMCPInstallation.bot_id == bot_id,
+                    BotMCPInstallation.server_code.in_(active_mcp_codes),
+                ).delete(synchronize_session=False)
+            existing_mcps = self._mcp_installations(session, bot_id)
+            for server_code in target_mcp_codes - existing_mcps:
+                session.add(
+                    BotMCPInstallation(
+                        bot_id=bot_id,
+                        server_code=server_code,
                         env=get_current_env(),
                         avernet_tenant=get_current_avernet_tenant(),
                     )
@@ -580,6 +659,11 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                 self._scope(session.query(SkillSetSkill), SkillSetSkill).filter(
                     SkillSetSkill.skill_set_id.in_(current_ids)
                 ).delete(synchronize_session=False)
+                self._scope(
+                    session.query(SkillSetMCPServer), SkillSetMCPServer
+                ).filter(SkillSetMCPServer.skill_set_id.in_(current_ids)).delete(
+                    synchronize_session=False
+                )
             for row in current_sets:
                 row.is_active = state.set_active.get(int(row.id), False)
             for set_id, members in state.memberships.items():
@@ -595,6 +679,22 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                             avernet_tenant=get_current_avernet_tenant(),
                         )
                     )
+            for set_id, server_codes in state.mcp_memberships.items():
+                set_row = next((row for row in current_sets if int(row.id) == set_id), None)
+                if set_row is None:
+                    continue
+                for server_code in server_codes:
+                    session.add(
+                        SkillSetMCPServer(
+                            skill_set_id=set_id,
+                            server_code=server_code,
+                            name=server_code,
+                            bot_id=bot_id,
+                            user_id=set_row.user_id,
+                            env=get_current_env(),
+                            avernet_tenant=get_current_avernet_tenant(),
+                        )
+                    )
             self._scope(
                 session.query(BotSkillInstallation), BotSkillInstallation
             ).filter(BotSkillInstallation.bot_id == bot_id).delete(
@@ -606,6 +706,20 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                     BotSkillInstallation(
                         bot_id=bot_id,
                         skill_id=skill_id,
+                        env=get_current_env(),
+                        avernet_tenant=get_current_avernet_tenant(),
+                    )
+                )
+            self._scope(
+                session.query(BotMCPInstallation), BotMCPInstallation
+            ).filter(BotMCPInstallation.bot_id == bot_id).delete(
+                synchronize_session=False
+            )
+            for server_code in state.mcp_installations:
+                session.add(
+                    BotMCPInstallation(
+                        bot_id=bot_id,
+                        server_code=server_code,
                         env=get_current_env(),
                         avernet_tenant=get_current_avernet_tenant(),
                     )
@@ -706,6 +820,29 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
             .all()
         }
 
+    def _mcp_installations(self, session, bot_id: str) -> set[str]:
+        return {
+            str(value[0])
+            for value in self._scope(
+                session.query(BotMCPInstallation.server_code), BotMCPInstallation
+            )
+            .filter(BotMCPInstallation.bot_id == bot_id)
+            .all()
+        }
+
+    def _mcp_has_ordinary_membership(self, session, bot_id: str, server_code: str) -> bool:
+        return (
+            self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer)
+            .join(SkillSet, SkillSet.id == SkillSetMCPServer.skill_set_id)
+            .filter(
+                SkillSet.bolt_id == bot_id,
+                SkillSet.is_default.is_(False),
+                SkillSetMCPServer.server_code == server_code,
+            )
+            .first()
+            is not None
+        )
+
     def _require_unique_runtime_names(
         self,
         session,
@@ -758,8 +895,26 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
                 memberships[int(member.skill_set_id)].append(
                     (int(member.skill_id), member.user_id, member.skill_uuid)
                 )
+        mcp_memberships: dict[int, list[str]] = {set_id: [] for set_id in set_ids}
+        if set_ids:
+            mcp_rows = (
+                self._scope(
+                    session.query(SkillSetMCPServer), SkillSetMCPServer
+                )
+                .filter(SkillSetMCPServer.skill_set_id.in_(set_ids))
+                .with_for_update()
+                .all()
+            )
+            for member in mcp_rows:
+                mcp_memberships[int(member.skill_set_id)].append(
+                    str(member.server_code)
+                )
         return SkillSetDesiredState(
             installations=self._installations(session, bot_id),
             set_active={int(row.id): bool(row.is_active) for row in sets},
             memberships={set_id: tuple(items) for set_id, items in memberships.items()},
+            mcp_installations=self._mcp_installations(session, bot_id),
+            mcp_memberships={
+                set_id: tuple(items) for set_id, items in mcp_memberships.items()
+            },
         )

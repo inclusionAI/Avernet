@@ -1284,18 +1284,31 @@ async def get_skill_set_mcps(
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> SkillSetMCPsResponse:
     """Get all MCP servers in a skill set."""
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
+    legacy_set = control_plane.get_legacy_set(
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
+        actor_id=_legacy_actor(ctx, entity_id),
+        set_id=skill_set_id,
     )
-    mcps = service.get_set_mcp_servers(skill_set_id, user_id=ctx.user_id)
+    if legacy_set.get("is_default"):
+        service = skill_set_service_factory.create(
+            entity_id=effective_entity_id,
+            bot_id=effective_bot_id,
+            engine_type=effective_engine,
+            entity_type=effective_entity_type,
+        )
+        mcps = service.get_set_mcp_servers(skill_set_id, user_id=ctx.user_id)
+    else:
+        mcps = control_plane.list_mcps(
+            bot_id=effective_bot_id,
+            actor_id=_legacy_actor(ctx, entity_id),
+            set_id=skill_set_id,
+        )
     return SkillSetMCPsResponse(
         success=True,
         data=[MCPServerInSetResponse(
@@ -1325,43 +1338,26 @@ async def add_mcp_to_skill_set(
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> AddMCPResponse:
     """Add an MCP server to a skill set."""
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
-    )
     try:
-        # Priority: request body user_id > ctx.user_id
-        effective_user_id = request.user_id or ctx.user_id
-        result = await service.add_mcp_to_skill_set(
-            skill_set_id,
-            request.server_code,
-            user_id=effective_user_id
+        await control_plane.add_mcp(
+            bot_id=effective_bot_id,
+            actor_id=_legacy_actor(ctx, entity_id),
+            set_id=skill_set_id,
+            server_code=request.server_code,
         )
-        if result.get("success"):
-            return AddMCPResponse(
-                success=True,
-                message="MCP server added to skill set successfully",
-                server_code=request.server_code
-            )
-        else:
-            return AddMCPResponse(
-                success=False,
-                message=result.get("error", "Failed to add MCP server"),
-                server_code=request.server_code,
-                error=result.get("error"),
-                sync_error=result.get("sync_error"),  # 设备同步错误详情
-                requires_api_key=result.get("requires_api_key", False),
-                requires_permission=result.get("requires_permission", False)
-            )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return AddMCPResponse(
+            success=True,
+            message="MCP server added to skill set successfully",
+            server_code=request.server_code,
+        )
+    except Exception as e:
+        raise _legacy_error(e) from e
 
 
 @router.delete("/{skill_set_id}/mcps/{server_code}", response_model=MessageResponse)
@@ -1379,26 +1375,21 @@ async def remove_mcp_from_skill_set(
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
+    control_plane: SkillSetControlPlaneServiceProtocol = Injected(SkillSetControlPlaneServiceProtocol),
 ) -> MessageResponse:
     """Remove an MCP server from a skill set."""
     # Get effective path parameters
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
-    service = skill_set_service_factory.create(
-        entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-        entity_type=effective_entity_type
-    )
     try:
-        result = await service.remove_mcp_from_skill_set(skill_set_id, server_code, user_id=effective_entity_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    if not result.get("success"):
-        error_msg = result.get("error", "Unknown error")
-        if "not found" in error_msg.lower():
-            raise HTTPException(status_code=404, detail=error_msg)
-        return MessageResponse(success=False, message=error_msg)
+        await control_plane.remove_mcp(
+            bot_id=effective_bot_id,
+            actor_id=_legacy_actor(ctx, entity_id),
+            set_id=skill_set_id,
+            server_code=server_code,
+        )
+    except Exception as e:
+        raise _legacy_error(e) from e
     return MessageResponse(success=True, message="MCP server removed from skill set successfully")
 
 
