@@ -7,9 +7,13 @@ Covers additional error scenarios and transport variants:
 - Response JSON structure and field presence
 """
 
+from copy import deepcopy
+
 import pytest
 
+from secbaas.community.api.bcn import BcnInteractionResolveResult
 from tests.e2e.asgi.conftest import APITestHelper
+from tests.unit.adapters.web.conftest import iter_api_routes
 
 pytestmark = [pytest.mark.e2e_asgi]
 
@@ -46,6 +50,31 @@ _CHAT_INJECT_BODY: dict = {
     },
 }
 
+_INTERACTION_RESOLVE_BODY: dict = {
+    "type": "req",
+    "id": "resolve-001",
+    "method": "interaction.resolve",
+    "session_id": "test-session-001",
+    "bcn_group_id": "test-group-001",
+    "to_bot": {"provider_id": "baas", "provider_bot_ref": "test-bot"},
+    "params": {
+        "bcsRunId": "bcs-run-001",
+        "runId": "provider-run-001",
+        "interactionId": "interaction-001",
+        "kind": "ask_user",
+        "idempotencyKey": "idem-001",
+        "action": "submit",
+        "answers": {
+            "components": {
+                "header": "Components",
+                "question": "Which components?",
+                "values": ["web", "worker"],
+            }
+        },
+    },
+    "timeout_ms": 600_000,
+}
+
 
 def _assert_json_response(response, expected_status=None):
     """Assert response is JSON with expected structure."""
@@ -55,6 +84,71 @@ def _assert_json_response(response, expected_status=None):
         assert isinstance(data, dict)
         if expected_status is not None:
             assert response.status_code == expected_status
+
+
+class TestInteractionResolve:
+    @pytest.mark.asyncio
+    async def test_invalid_resolve_returns_sanitized_finite_ack(
+        self,
+        api: APITestHelper,
+    ) -> None:
+        body = deepcopy(_INTERACTION_RESOLVE_BODY)
+        body["params"]["answers"]["components"]["values"] = [
+            "answer-must-not-leak",
+            "",
+        ]
+
+        response = await api.client.post(
+            _BCN_DOWNLINK_URL,
+            json=body,
+            headers=_VALID_HEADERS,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "ok": False,
+            "retryable": False,
+            "error": "invalid interaction.resolve request",
+        }
+        assert "answer-must-not-leak" not in response.text
+
+    @pytest.mark.asyncio
+    async def test_ask_user_resolve_returns_provider_ack(
+        self,
+        api: APITestHelper,
+        _testclient_app,
+    ) -> None:
+        captured = {}
+
+        class _CapturingService:
+            async def handle_interaction_resolve(self, resolve_input):
+                captured["input"] = resolve_input
+                return BcnInteractionResolveResult(ok=True)
+
+        downlink_route = next(
+            route
+            for route in iter_api_routes(_testclient_app)
+            if route.path == _BCN_DOWNLINK_URL
+        )
+        dep_key = next(
+            dependency.call
+            for dependency in downlink_route.dependant.dependencies
+            if dependency.name == "service"
+        )
+        _testclient_app.dependency_overrides[dep_key] = lambda: _CapturingService()
+        try:
+            response = await api.client.post(
+                _BCN_DOWNLINK_URL,
+                json=_INTERACTION_RESOLVE_BODY,
+                headers=_VALID_HEADERS,
+            )
+        finally:
+            _testclient_app.dependency_overrides.pop(dep_key, None)
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": True, "retryable": None, "error": None}
+        assert captured["input"].answers["components"].values == ("web", "worker")
+        assert captured["input"].answers["components"].header == "Components"
 
 
 class TestChatInject:

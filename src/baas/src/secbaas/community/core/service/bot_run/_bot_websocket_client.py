@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 import websockets
 from websockets.asyncio.client import ClientConnection
 
+from secbaas.community.api.bot_interaction import InteractionResolution
 from secbaas.community.core.utils.env_utils import is_dev
 from secbaas.community.logger import get_logger
 
@@ -332,13 +333,13 @@ class BotWebSocketClient:
         self,
         *,
         interaction_id: str,
-        decision: str,
+        resolution: InteractionResolution,
     ) -> EngineInteractionResolveExchange:
         """Resolve an interaction and return the exact validated RPC exchange."""
         request = build_interaction_resolve_request(
             request_id=self._next_request_id(),
             interaction_id=interaction_id,
-            decision=decision,
+            resolution=resolution,
         )
         response = await self._send_request_frame(request, timeout=30.0)
         return EngineInteractionResolveExchange.from_frames(
@@ -444,7 +445,7 @@ class BotWebSocketClient:
     async def _handle_message(self, message: str) -> None:
         """处理收到的文本消息"""
         try:
-            logger.debug(f"Received text message: {message[:500]}...")
+            logger.debug("Received text message: length=%d", len(message))
             data = json.loads(message)
             frame_type = data.get("type")
             logger.debug(f"Parsed message: type={frame_type}, keys={list(data.keys())}")

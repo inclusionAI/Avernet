@@ -991,6 +991,7 @@ class TestResolveMessageInteraction:
         from secbaas.community.adapters.web.routers.open_api.model import (
             InteractionResolveEnvelope,
         )
+        from secbaas.community.api.bot_interaction import InteractionResolution
         from secbaas.community.core.service.bot_interaction import (
             InteractionResolveResult,
         )
@@ -1020,7 +1021,7 @@ class TestResolveMessageInteraction:
         service.resolve.assert_called_once_with(
             session_key="s-1",
             interaction_id="int-1",
-            decision="allow-once",
+            resolution=InteractionResolution(decision="allow-once"),
             request_envelope={
                 "type": "req",
                 "id": "req-1",

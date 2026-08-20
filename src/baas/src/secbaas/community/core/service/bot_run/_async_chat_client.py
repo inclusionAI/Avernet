@@ -264,6 +264,7 @@ class AsyncChatClient:
         _client.on_event("agent", self._on_agent)
         _client.on_event("interaction.requested", self._on_interaction_requested)
         _client.on_event("interaction.resolved", self._on_interaction_resolved)
+        _client.on_event("mode_transition.resolved", self._on_mode_transition_resolved)
         _client.on_event("error", self._on_error)
         _client.on_event("*", self._log_event)
         _client.on_disconnect(self._on_disconnect)
@@ -901,6 +902,8 @@ class AsyncChatClient:
                     },
                 ),
             )
+            if state.stream_queue is not None and payload.get("kind") == "mode_switch":
+                state.pending_mode_transition_ids.add(event.interaction_id)
 
         # Engine events normally arrive only on an active client. Keep persistence
         # and SSE delivery above, but do not start a dispatcher without an uplink.
@@ -962,6 +965,49 @@ class AsyncChatClient:
                 ),
             )
 
+    @_with_session_trace("_on_mode_transition_resolved")
+    def _on_mode_transition_resolved(
+        self,
+        payload: JsonObject,
+        *,
+        session_key: str,
+        state: SessionState | None,
+    ) -> None:
+        """Persist a raw mode terminal event and expose it once to its stream."""
+        if self._interaction_service is None:
+            logger.debug(
+                "interaction processing is disabled; skip mode transition event"
+            )
+            return
+
+        event = EngineInteractionResolvedEvent.from_mode_transition_payload(
+            session_key=session_key,
+            payload=payload,
+        )
+        self._interaction_service.mark_resolved(
+            session_key=event.session_key,
+            interaction_id=event.interaction_id,
+            envelope=event.envelope,
+        )
+        if (
+            state is None
+            or event.interaction_id not in state.pending_mode_transition_ids
+        ):
+            return
+
+        state.pending_mode_transition_ids.remove(event.interaction_id)
+        self._emit_stream_chunk(
+            state,
+            StreamChunk(
+                type="interaction",
+                content="",
+                metadata={
+                    "event": "mode_transition.resolved",
+                    "payload": event.envelope,
+                },
+            ),
+        )
+
     def _discard_interaction_task(
         self,
         key: tuple[str, str],
@@ -1011,7 +1057,7 @@ class AsyncChatClient:
                 try:
                     exchange = await client.interaction_resolve(
                         interaction_id=command.interaction_id,
-                        decision=command.decision,
+                        resolution=command.resolution,
                     )
                 except Exception as exc:
                     logger.warning(
@@ -1039,6 +1085,15 @@ class AsyncChatClient:
                         interaction_id=interaction_id,
                         error=exchange.error_message
                         or "engine rejected interaction.resolve",
+                    )
+                elif command.resolution.kind == "mode_switch":
+                    # The Engine resolves mode transitions through the RPC response
+                    # and a compatibility agent stream; it does not emit the
+                    # top-level interaction.resolved event used by other kinds.
+                    interaction_service.mark_resolved(
+                        session_key=session_key,
+                        interaction_id=interaction_id,
+                        envelope=exchange.response,
                     )
                 return
 
@@ -1110,12 +1165,32 @@ class AsyncChatClient:
             "chat": ("message", "deltaText", "delta"),
             "agent": ("data",),
         }
-        sensitive_keys = _sensitive_keys.get(event_name)
-        if sensitive_keys:
+        if event_name in {
+            "interaction.requested",
+            "interaction.resolved",
+            "mode_transition.resolved",
+        }:
+            metadata_keys = (
+                "interactionId",
+                "id",
+                "runId",
+                "sessionKey",
+                "kind",
+                "phase",
+                "status",
+                "toolCallId",
+                "seq",
+                "ts",
+            )
+            safe_payload = {
+                key: payload[key] for key in metadata_keys if key in payload
+            }
+            logger.info("[log_event] event=%s, payload=%s", event_name, safe_payload)
+        elif sensitive_keys := _sensitive_keys.get(event_name):
             safe_payload = {k: v for k, v in payload.items() if k not in sensitive_keys}
-            logger.info(f"[log_event] event={event_name}, payload={safe_payload}")
+            logger.info("[log_event] event=%s, payload=%s", event_name, safe_payload)
         else:
-            logger.info(f"[log_event] event={event_name}, payload={payload}")
+            logger.info("[log_event] event=%s, payload=%s", event_name, payload)
 
     def _on_disconnect(self, event_name: str, payload: dict[str, Any]) -> None:
         """断连回调：通知 _reconnect_loop 立即感知断连。
@@ -1214,6 +1289,10 @@ class AsyncChatClient:
                     )
                     new_client.on_event(
                         "interaction.resolved", self._on_interaction_resolved
+                    )
+                    new_client.on_event(
+                        "mode_transition.resolved",
+                        self._on_mode_transition_resolved,
                     )
                     new_client.on_event("error", self._on_error)
                     new_client.on_event("*", self._log_event)

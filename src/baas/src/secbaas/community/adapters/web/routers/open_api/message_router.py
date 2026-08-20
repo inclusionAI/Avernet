@@ -33,6 +33,11 @@ from secbaas.community.adapters.web.routers.open_api.model import (
     StreamMessageRequest,
 )
 from secbaas.community.api.api_gateway import APIKeyRecord
+from secbaas.community.api.bot_interaction import (
+    BotInteractionService,
+    InteractionResolution,
+    InteractionServiceError,
+)
 from secbaas.community.api.bot_runtime import (
     BotChatContext,
     BotNotAvailableError,
@@ -49,10 +54,6 @@ from secbaas.community.api.sse import (
     with_sse_heartbeat,
 )
 from secbaas.community.bootstrap import ApplicationContainer
-from secbaas.community.core.service.bot_interaction import (
-    BotInteractionService,
-    InteractionServiceError,
-)
 from secbaas.community.logger import get_logger
 
 logger = get_logger("router-open-api")
@@ -368,7 +369,7 @@ async def resolve_message_interaction(
         result = interaction_service.resolve(
             session_key=request.params.session_key,
             interaction_id=request.params.interaction_id,
-            decision=request.params.decision,
+            resolution=InteractionResolution(decision=request.params.decision),
             request_envelope=envelope,
         )
     except InteractionServiceError as exc:

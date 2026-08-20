@@ -8,10 +8,13 @@ chat state with stopReason=inject, agent error handling, and verbose paths.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+import json
+from copy import deepcopy
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
+from secbaas.community.api.bot_interaction import InteractionResolution
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.service.bot_interaction import InteractionDispatch
 from secbaas.community.core.service.bot_run._async_chat_client import (
@@ -24,6 +27,7 @@ from secbaas.community.core.service.bot_run._async_chat_client import (
 from secbaas.community.core.service.bot_run._interaction_protocol import (
     EngineInteractionResolveExchange,
 )
+from secbaas.community.core.service.sse import DefaultStreamConverter
 
 _TEST_SESSION_KEY = "test-session-key"
 
@@ -112,6 +116,22 @@ class TestProperties:
         client._active_sessions.add("s1")
         client._active_sessions.add("s2")
         assert client.active_session_count == 2
+
+    @pytest.mark.asyncio
+    async def test_connect_registers_mode_transition_resolved_handler(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+
+        await client.connect()
+
+        assert (
+            call(
+                "mode_transition.resolved",
+                client._on_mode_transition_resolved,
+            )
+            in mock_bot_ws_instance.on_event.call_args_list
+        )
 
 
 # ==================== _capture_trace_context ====================
@@ -746,6 +766,61 @@ class TestOnError:
 
 class TestLogEvent:
     @pytest.mark.asyncio
+    async def test_log_event_interaction_resolved_keeps_only_metadata(
+        self, mock_bot_ws
+    ):
+        client = AsyncChatClient(uri="ws://host/ws")
+        _setup_session_state(client, "sk1")
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.logger"
+        ) as mock_logger:
+            client._log_event(
+                "interaction.resolved",
+                {
+                    "sessionKey": "sk1",
+                    "interactionId": "int-1",
+                    "kind": "ask_user",
+                    "answers": {"Question?": "answer-must-not-leak"},
+                    "selectedOptions": [["answer-must-not-leak"]],
+                },
+            )
+
+        logged = str(mock_logger.info.call_args)
+        assert "interactionId" in logged
+        assert "answer-must-not-leak" not in logged
+
+    @pytest.mark.asyncio
+    async def test_log_event_mode_transition_resolved_keeps_only_metadata(
+        self, mock_bot_ws
+    ):
+        client = AsyncChatClient(uri="ws://host/ws")
+        _setup_session_state(client, "sk1")
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.logger"
+        ) as mock_logger:
+            client._log_event(
+                "mode_transition.resolved",
+                {
+                    "sessionKey": "sk1",
+                    "interactionId": "int-mode",
+                    "kind": "mode_switch",
+                    "phase": "proceeded",
+                    "options": [
+                        {
+                            "label": "private-mode-option-label",
+                            "decision": "proceed",
+                        }
+                    ],
+                },
+            )
+
+        logged = str(mock_logger.info.call_args)
+        assert "interactionId" in logged
+        assert "private-mode-option-label" not in logged
+
+    @pytest.mark.asyncio
     async def test_log_event_chat_filters_sensitive(self, mock_bot_ws):
         client = AsyncChatClient(uri="ws://host/ws")
         _setup_session_state(client, "sk1")
@@ -1142,6 +1217,15 @@ class TestReconnectLoop:
 
         # The second BotWebSocketClient instance should have been created
         assert mock_bot_ws.call_count >= 2
+        assert (
+            mock_bot_ws_instance.on_event.call_args_list.count(
+                call(
+                    "mode_transition.resolved",
+                    client._on_mode_transition_resolved,
+                )
+            )
+            >= 2
+        )
 
         await client.close()
 
@@ -1306,9 +1390,10 @@ class TestInteractionEvents:
         payload = {
             "sessionKey": "sk1",
             "interactionId": "int-1",
+            "kind": "exec",
             "seq": 42,
             "expiresAtMs": 123456,
-            "options": [{"decision": "allow-once"}],
+            "options": [{"label": "Once", "decision": "allow-once"}],
         }
         client._on_interaction_requested(payload)
 
@@ -1329,6 +1414,47 @@ class TestInteractionEvents:
         assert chunk.metadata["event"] == "interaction.requested"
         assert chunk.metadata["payload"]["event"] == "interaction.requested"
         assert chunk.metadata["payload"]["seq"] == 42
+
+    @pytest.mark.asyncio
+    async def test_requested_mixed_options_reach_persistence_chunk_and_converter(
+        self, mock_bot_ws
+    ):
+        service = MagicMock()
+        service.record_requested.return_value = True
+        client = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+        payload = {
+            "sessionKey": "sk1",
+            "interactionId": "int-mixed",
+            "kind": "exec",
+            "command": "make test",
+            "options": [
+                "not-an-object",
+                {"label": "Once", "decision": "", "value": "allow-once"},
+                {"label": "Deny", "decision": 42, "value": "deny"},
+                {"label": "Once replacement", "decision": "allow-once"},
+                {},
+            ],
+        }
+        original = deepcopy(payload)
+
+        client._on_interaction_requested(payload)
+
+        persisted = service.record_requested.call_args.kwargs
+        assert persisted["allowed_decisions"] == ("allow-once", "deny")
+        assert persisted["envelope"]["payload"] is payload
+        assert payload == original
+        chunk = state.stream_queue.get_nowait()
+        event = DefaultStreamConverter().convert(chunk, run_id="bcn-run")
+        assert event is not None
+        data = json.loads(event.data)
+        assert data["options"] == [
+            {"label": "Once replacement", "decision": "allow-once"},
+            {"label": "Deny", "decision": "deny"},
+        ]
 
     @pytest.mark.asyncio
     async def test_duplicate_requested_does_not_emit_duplicate_chunk(self, mock_bot_ws):
@@ -1414,14 +1540,163 @@ class TestInteractionEvents:
 
         assert state.stream_queue.qsize() == 1
 
+    @pytest.mark.asyncio
+    async def test_mode_transition_resolved_emits_once_after_rpc_terminalized_record(
+        self, mock_bot_ws
+    ):
+        service = MagicMock()
+        service.record_requested.return_value = True
+        service.mark_resolved.return_value = False
+        client = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+        requested = {
+            "sessionKey": "sk1",
+            "interactionId": "int-mode",
+            "kind": "mode_switch",
+            "options": [
+                {"label": "Continue to execution", "decision": "proceed"},
+                {"label": "Stay in planning", "decision": "stay"},
+            ],
+        }
+        client._on_interaction_requested(requested)
+        requested_chunk = state.stream_queue.get_nowait()
+        assert requested_chunk.metadata["event"] == "interaction.requested"
+        resolved = {
+            "sessionKey": "sk1",
+            "interactionId": "int-mode",
+            "transitionId": "int-mode",
+            "kind": "mode_switch",
+            "phase": "proceeded",
+            "decision": "proceed",
+            "status": "resolved",
+            "options": [
+                {"label": "Continue to execution", "decision": "proceed"},
+                {"label": "Stay in planning", "decision": "stay"},
+            ],
+            "seq": 131,
+        }
+
+        client._on_mode_transition_resolved(resolved)
+        client._on_mode_transition_resolved(resolved)
+
+        assert state.stream_queue.qsize() == 1
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.metadata["event"] == "mode_transition.resolved"
+        assert chunk.metadata["payload"] == {
+            "type": "event",
+            "event": "mode_transition.resolved",
+            "payload": resolved,
+            "seq": 131,
+        }
+        event = DefaultStreamConverter().convert(chunk, run_id="bcn-run")
+        assert event is not None
+        data = json.loads(event.data)
+        assert isinstance(data.pop("ts"), int)
+        assert data == {
+            "runId": "bcn-run",
+            "seq": 1,
+            "interactionId": "int-mode",
+            "kind": "mode_switch",
+            "phase": "resolved",
+            "decision": "proceed",
+        }
+
+    def test_mode_transition_resolved_without_exposed_request_does_not_emit(
+        self, mock_bot_ws
+    ):
+        service = MagicMock()
+        service.mark_resolved.return_value = True
+        client = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        client._on_mode_transition_resolved(
+            {
+                "sessionKey": "sk1",
+                "interactionId": "int-mode",
+                "kind": "mode_switch",
+                "decision": "stay",
+            }
+        )
+
+        assert state.stream_queue.empty()
+
+    def test_mode_transition_requested_without_stream_queue_is_not_exposed(
+        self, mock_bot_ws
+    ):
+        service = MagicMock()
+        service.record_requested.return_value = True
+        service.mark_resolved.return_value = False
+        client = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        state = _setup_session_state(client, "sk1")
+
+        client._on_interaction_requested(
+            {
+                "sessionKey": "sk1",
+                "interactionId": "int-mode",
+                "kind": "mode_switch",
+                "options": [{"label": "Continue", "decision": "proceed"}],
+            }
+        )
+        state.stream_queue = asyncio.Queue()
+        client._on_mode_transition_resolved(
+            {
+                "sessionKey": "sk1",
+                "interactionId": "int-mode",
+                "kind": "mode_switch",
+                "decision": "proceed",
+            }
+        )
+
+        assert state.stream_queue.empty()
+
+    def test_mode_transition_resolved_rejects_non_mode_kind_before_delivery(
+        self, mock_bot_ws
+    ):
+        service = MagicMock()
+        client = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        with pytest.raises(ValueError, match="kind must be mode_switch"):
+            client._on_mode_transition_resolved(
+                {
+                    "sessionKey": "sk1",
+                    "interactionId": "int-exec",
+                    "kind": "exec",
+                    "decision": "allow-once",
+                }
+            )
+
+        assert state.stream_queue.empty()
+        service.mark_resolved.assert_not_called()
+
 
 @pytest.mark.asyncio
 async def test_interaction_dispatch_uses_typed_claim_command(mock_bot_ws):
     service = MagicMock()
+    resolution = InteractionResolution(
+        kind="ask_user",
+        decision="submit",
+        answer="target: staging",
+        message="target: staging",
+        values={"target": "staging"},
+        answers={"Where?": "staging"},
+        selected_options=(("staging",),),
+    )
     service.claim_for_dispatch.return_value = InteractionDispatch(
         session_key="sk1",
         interaction_id="int-1",
-        decision="allow-once",
+        resolution=resolution,
     )
     engine_client = MagicMock()
     engine_request = {
@@ -1450,11 +1725,61 @@ async def test_interaction_dispatch_uses_typed_claim_command(mock_bot_ws):
 
     engine_client.interaction_resolve.assert_awaited_once_with(
         interaction_id="int-1",
-        decision="allow-once",
+        resolution=resolution,
     )
     service.record_engine_exchange.assert_called_once_with(
         session_key="sk1",
         interaction_id="int-1",
         engine_req=engine_request,
         engine_res=engine_response,
+    )
+
+
+@pytest.mark.asyncio
+async def test_mode_switch_dispatch_marks_accepted_rpc_resolved(mock_bot_ws):
+    service = MagicMock()
+    resolution = InteractionResolution(kind="mode_switch", decision="stay")
+    service.claim_for_dispatch.return_value = InteractionDispatch(
+        session_key="sk1",
+        interaction_id="int-mode-1",
+        resolution=resolution,
+    )
+    engine_client = MagicMock()
+    engine_request = {
+        "type": "req",
+        "id": "engine-mode-1",
+        "method": "mode_transition.resolve",
+        "params": {"transitionId": "int-mode-1", "decision": "stay"},
+    }
+    engine_response = {
+        "type": "res",
+        "id": "engine-mode-1",
+        "ok": True,
+        "payload": {
+            "accepted": True,
+            "transitionId": "int-mode-1",
+            "decision": "stay",
+        },
+    }
+    engine_client.interaction_resolve = AsyncMock(
+        return_value=EngineInteractionResolveExchange.from_frames(
+            request=engine_request,
+            response=engine_response,
+        )
+    )
+    client = AsyncChatClient(
+        uri="ws://host/ws", max_retries=0, interaction_service=service
+    )
+    client._client = engine_client
+
+    await client._dispatch_interaction_answer(
+        session_key="sk1",
+        interaction_id="int-mode-1",
+        deadline_ms=None,
+    )
+
+    service.mark_resolved.assert_called_once_with(
+        session_key="sk1",
+        interaction_id="int-mode-1",
+        envelope=engine_response,
     )

@@ -26,3 +26,5 @@ class SessionState:
     # 流式模式专用：_on_chat/_on_agent push StreamChunk 到此 queue，
     # send_message_stream 从中消费。仅流式请求时创建，非流式为 None。
     stream_queue: asyncio.Queue[Any] | None = None
+    # 已向当前流暴露、正在等待 Engine 终态事件的 mode-switch interaction。
+    pending_mode_transition_ids: set[str] = field(default_factory=set)
