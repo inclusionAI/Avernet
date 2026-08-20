@@ -23,6 +23,7 @@ def _life(**over) -> LocalDeviceLifecycle:
             "skill_set_factory_provider", lambda: MagicMock()
         ),
         bot_service_provider=over.get("bot_service_provider", lambda: MagicMock()),
+        local_device_sync=over.get("local_device_sync", MagicMock()),
     )
 
 
@@ -77,14 +78,14 @@ def test_database_dependency_is_required():
 async def test_restore_symlinks_no_active_sets_is_noop():
     ssr = MagicMock()
     ssr.get_all_active_skill_sets.return_value = []
-    life = _life(skill_set_repo=ssr)
+    sync = MagicMock()
+    life = _life(skill_set_repo=ssr, local_device_sync=sync)
 
-    with patch(
-        "agentclaw.community.plugins.local.device_sync.LocalDeviceSyncPlugin"
-    ) as sync_cls:
-        await life._restore_local_symlinks()
+    await life._restore_local_symlinks()
 
-    sync_cls.assert_not_called()
+    # The DI-constructed service still exists, but sync_symlinks is NOT invoked
+    # when there are no active sets (no local sync, no filesystem change).
+    sync.sync_symlinks.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -100,7 +101,12 @@ async def test_restore_symlinks_collects_mappings_and_full_syncs():
     set_service.get_symlink_mappings.return_value = [mapping]
     factory = MagicMock()
     factory.create.return_value = set_service
-    life = _life(skill_set_repo=ssr, skill_set_factory_provider=lambda: factory)
+    sync = MagicMock()
+    life = _life(
+        skill_set_repo=ssr,
+        skill_set_factory_provider=lambda: factory,
+        local_device_sync=sync,
+    )
 
     with patch(
         "agentclaw.community.core.bot_management.services.engine_resolver.resolve_engine_for_bot",
@@ -108,13 +114,10 @@ async def test_restore_symlinks_collects_mappings_and_full_syncs():
     ), patch(
         "agentclaw.community.core.skill_center.services.skill_set_service._get_bot_paths",
         return_value=("/skills", "/repo", "/local"),
-    ), patch(
-        "agentclaw.community.plugins.local.device_sync.LocalDeviceSyncPlugin"
-    ) as sync_cls:
-        sync_cls.return_value.sync_symlinks.return_value = {"synced": 1}
+    ):
         await life._restore_local_symlinks()
 
-    sync_cls.return_value.sync_symlinks.assert_called_once_with(
+    sync.sync_symlinks.assert_called_once_with(
         [{"target": "/t", "source": "/s"}]
     )
 
@@ -125,16 +128,14 @@ async def test_restore_symlinks_one_bad_set_does_not_block_rest():
     ssr.get_all_active_skill_sets.return_value = [
         {"id": 1, "user_id": "u1", "bolt_id": "b1"},
     ]
-    life = _life(skill_set_repo=ssr)
+    sync = MagicMock()
+    life = _life(skill_set_repo=ssr, local_device_sync=sync)
 
     with patch(
         "agentclaw.community.core.bot_management.services.engine_resolver.resolve_engine_for_bot",
         side_effect=RuntimeError("resolve boom"),
-    ), patch(
-        "agentclaw.community.plugins.local.device_sync.LocalDeviceSyncPlugin"
-    ) as sync_cls:
-        sync_cls.return_value.sync_symlinks.return_value = {"synced": 0}
+    ):
         await life._restore_local_symlinks()
 
     # The per-set error is swallowed; sync still runs with an empty mapping list.
-    sync_cls.return_value.sync_symlinks.assert_called_once_with([])
+    sync.sync_symlinks.assert_called_once_with([])

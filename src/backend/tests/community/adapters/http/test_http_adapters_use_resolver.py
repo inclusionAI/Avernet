@@ -97,7 +97,7 @@ def _skills_router_app(mock_ctx, tmp_path):
     from agentclaw.community.di.modules.skill_center_module import (
         SkillSetServiceFactory,
     )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+    from agentclaw.community.plugin_api.device_sync_dispatcher import (
         DeviceSyncDispatcher,
     )
     from agentclaw.community.api.skill_service_factory import (
@@ -202,7 +202,7 @@ def _skillsets_router_app(mock_ctx, tmp_path):
     from agentclaw.community.di.modules.skill_center_module import (
         SkillSetServiceFactory,
     )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+    from agentclaw.community.plugin_api.device_sync_dispatcher import (
         DeviceSyncDispatcher,
     )
     from agentclaw.community.api.skill_set_service_factory import (

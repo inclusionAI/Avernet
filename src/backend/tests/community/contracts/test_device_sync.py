@@ -17,12 +17,14 @@ executed; an empty-list short-circuit would not produce it.
 """
 from __future__ import annotations
 
-from agentclaw.community.plugins.local.device_sync import LocalDeviceSyncPlugin
+from agentclaw.community.core.devices.services.local_device_sync import (
+    LocalDeviceSyncService,
+)
 
 
 def test_local_plugin_actually_runs(tmp_path) -> None:
     skills_dir = tmp_path / "skills"
-    plugin = LocalDeviceSyncPlugin(skills_dir=skills_dir)
+    plugin = LocalDeviceSyncService(skills_dir=skills_dir)
     result = plugin.sync_symlinks([])
 
     # Plugin-hit assertion: the local impl mkdir's the skills_dir and
@@ -36,7 +38,7 @@ def test_local_plugin_serves_mcp_methods(tmp_path) -> None:
     former DeviceMCPSyncPlugin). In local mode every MCP method is a no-op that
     reports success / present, so the boundary is uniformly callable."""
     skills_dir = tmp_path / "skills"
-    plugin = LocalDeviceSyncPlugin(skills_dir=skills_dir)
+    plugin = LocalDeviceSyncService(skills_dir=skills_dir)
 
     assert plugin.sync_all_mcp_servers([{"server_code": "svc_a"}]) is True
     assert plugin.sync_single_mcp({"server_code": "svc_a"}) is True

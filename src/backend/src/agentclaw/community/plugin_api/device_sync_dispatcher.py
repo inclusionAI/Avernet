@@ -15,18 +15,20 @@ seam IS this ``Plugin`` Protocol and consumers inject it directly. Each profile
 binds its impl to this key; callers reach it via
 ``resolver.resolve_for_bot(...) -> ctx`` then ``dispatcher.dispatch(ctx)``.
 
-The old Core-located ``core/devices/services/device_sync_dispatcher.py`` module
-is deleted by CHG-17 (Task 14) after all production callers migrate.
+``DeviceContext`` (core) and ``DeviceSync`` (core) are referenced by string
+forward annotations only — ``plugin_api/`` must not import ``core/`` (layer
+rule). The old Core-located ``core/devices/services/device_sync_dispatcher.py``
+module is deleted by CHG-17 (Task 14) after all production callers migrate.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from agentclaw.community.plugin_api.base import Plugin
 
-if TYPE_CHECKING:
-    from agentclaw.community.core.devices.services.device_context import DeviceContext
-    from agentclaw.community.core.devices.services.device_sync import DeviceSync
+# ``DeviceContext`` (core) and ``DeviceSync`` (core) are referenced only as
+# string forward annotations below — ``plugin_api/`` must not import ``core/``
+# (layer rule), so no ``from agentclaw.community.core... import`` lives here.
 
 
 @runtime_checkable

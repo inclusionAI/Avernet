@@ -87,7 +87,7 @@ class TestDeviceSyncModule(Module):
             conn_info = ctx.conn_info
             bot_type = ctx.bot_type
             engine_port = conn_info["engine_port"]
-            tenant = conn_info.get("tenant", "team_claw")
+            tenant = conn_info.get("tenant", "")
             if bot_type == "desktop":
                 transport = DesktopBaasInvokeTransport(
                     baas_base_url=conn_info["baas_base_url"],

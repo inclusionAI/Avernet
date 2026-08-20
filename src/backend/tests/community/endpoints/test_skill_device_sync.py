@@ -34,10 +34,10 @@ from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetService
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.core.devices.services.local_device_filesystem import LocalDeviceFileSystem
-from agentclaw.community.plugins.local.device_sync import LocalDeviceSyncPlugin
 from tests.community.factories.access import make_staff_user
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
 from tests.community.framework.device_seams import (
+    RecordingLocalDeviceSync,
     install_fake_filesystem_dispatcher,
     install_fake_resolver,
     install_fake_sync_dispatcher,
@@ -66,7 +66,7 @@ def _expected_symlink(engine: str) -> dict:
     }
 
 
-def _record_for_bot(world) -> LocalDeviceSyncPlugin:
+def _record_for_bot(world) -> RecordingLocalDeviceSync:
     """Patch ``DeviceSyncDispatcher.dispatch``, ``DeviceFilesystemDispatcher.
     dispatch``/``for_bot``, and ``DeviceContextResolver.resolve_for_bot`` so
     the activate/deactivate paths can drive a stable, recording local plugin
@@ -79,7 +79,7 @@ def _record_for_bot(world) -> LocalDeviceSyncPlugin:
     routed to a real ``LocalDeviceFileSystem`` so the on-disk symlink ops
     that ``skill_service.deactivate_skill`` makes work normally.
     """
-    rec = LocalDeviceSyncPlugin(skills_dir=None)  # real impl, noop + records
+    rec = RecordingLocalDeviceSync(skills_dir=None)  # real impl, noop + records
     local_fs = LocalDeviceFileSystem()  # real pathlib-backed fs
 
     world._resolve_calls = []

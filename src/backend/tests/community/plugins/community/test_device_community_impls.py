@@ -18,12 +18,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 
+from agentclaw.community.core.devices.services.community_device_sync import (
+    CommunityDeviceSyncService,
+)
 from agentclaw.community.plugins.community.device_adapter_transport import (
     CommunityDeviceAdapterTransport,
 )
-from agentclaw.community.plugins.community.device_sync import (
+from agentclaw.community.plugins.community.device_sync_dispatcher import (
     CommunityDeviceSyncDispatcher,
-    CommunityDeviceSyncPlugin,
 )
 from agentclaw.community.plugins.community.health_probe import CommunityHealthProbe
 
@@ -179,12 +181,15 @@ def test_sandbox_health_unsupported():
 
 def test_device_sync_dispatcher_returns_noop_plugin():
     ctx = SimpleNamespace(bot_id="bot-1", provider="baas")
-    plugin = CommunityDeviceSyncDispatcher().dispatch(ctx)
-    assert isinstance(plugin, CommunityDeviceSyncPlugin)
+    dispatcher = CommunityDeviceSyncDispatcher(
+        community_device_sync_service=CommunityDeviceSyncService()
+    )
+    plugin = dispatcher.dispatch(ctx)
+    assert isinstance(plugin, CommunityDeviceSyncService)
 
 
 def test_device_sync_plugin_noop_results():
-    p = CommunityDeviceSyncPlugin()
+    p = CommunityDeviceSyncService()
     assert p.sync_symlinks([{"source": "a", "target": "b"}])["success"] is False
     assert p.sync_bot_config("bot", 1, "1", "OWNER", "u", "nick")["success"] is False
     # MCP bool methods return True (Option B: counted, no network call)

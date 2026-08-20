@@ -209,7 +209,7 @@ def _skill_service_di_app(
             from agentclaw.community.di.modules.skill_center_module import (
                 SkillSetServiceFactory,
             )
-            from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+            from agentclaw.community.plugin_api.device_sync_dispatcher import (
                 DeviceSyncDispatcher,
             )
 

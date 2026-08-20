@@ -1108,7 +1108,7 @@ class TestProviderDispatch:
         self, channel_service, mock_repository, mock_bot_service, mock_device_sync_dispatcher
     ):
         """No syncable device → DeviceSyncUnavailableError is swallowed; status persisted."""
-        from agentclaw.community.plugin_api.device_sync import DeviceSyncUnavailableError
+        from agentclaw.community.core.devices.services.device_sync import DeviceSyncUnavailableError
 
         self._teclaw_bot(mock_bot_service)
         mock_repository.get_by_id.return_value = _make_channel_record(channel_id=3)

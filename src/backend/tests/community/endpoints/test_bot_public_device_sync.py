@@ -13,12 +13,12 @@ monkey-patch dispatcher.dispatch 让其返回一个 recording ``LocalDeviceSyncP
 """
 from __future__ import annotations
 
-from agentclaw.community.plugins.local.device_sync import LocalDeviceSyncPlugin
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
 from tests.community.factories.devices import make_active_local_device
 from tests.community.framework import CaseInput, ExpectSuccess, endpoint_test
 from tests.community.framework.device_seams import (
+    RecordingLocalDeviceSync,
     install_fake_resolver,
     install_fake_sync_dispatcher,
 )
@@ -28,10 +28,10 @@ _OWNER = "u_owner"
 _OWNER_NAME = "Owner U"
 
 
-def _record_dispatch(world) -> LocalDeviceSyncPlugin:
+def _record_dispatch(world) -> RecordingLocalDeviceSync:
     """Wire dispatcher + resolver to a recording local plugin via the framework
     seam helper (out of scope for the ``no-mock-on-world-get`` scanner)."""
-    rec = LocalDeviceSyncPlugin(skills_dir=None)  # real impl, noop + records
+    rec = RecordingLocalDeviceSync(skills_dir=None)  # real impl, noop + records
     install_fake_resolver(
         world,
         provider="baas",
