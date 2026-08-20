@@ -11,7 +11,7 @@ from secbaas.community.core.repository.bot_run_interaction import (
     BotRunInteractionPayloadPatch,
     OrmBotRunInteractionRepository,
 )
-from secbaas.community.plugins.database.stub.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 
 
 @pytest.fixture
