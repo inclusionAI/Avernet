@@ -111,7 +111,10 @@ def test_every_skills_operation_is_guarded_from_another_tenant(
             }
         )
         assert world.get(SkillInstallationRepositoryProtocol).install(
-            env="dev", bot_id=_PRIVATE_BOT_ID, skill_id=skill["id"]
+            env="dev",
+            owner_id=_OWNER,
+            bot_id=_PRIVATE_BOT_ID,
+            skill_id=skill["id"],
         )
         world.get(BotRepository).insert(
             {
