@@ -58,8 +58,8 @@ class TestCronTaskFactories:
 
     def test_same_name_twice_last_registration_wins(self, _fresh_registry):
         """Later registration for a name replaces the earlier factory."""
-        first_factory = _factory
-        second_factory = _factory
+        first_factory = lambda: "first"  # noqa: E731
+        second_factory = lambda: "second"  # noqa: E731
 
         _fresh_registry.register_cron_task_factory(
             "deadline_renewal_scheduler", first_factory
@@ -69,8 +69,8 @@ class TestCronTaskFactories:
         )
 
         snapshot = _fresh_registry.get_cron_task_factories()
-        assert snapshot is not first_factory
         assert snapshot["deadline_renewal_scheduler"] is second_factory
+        assert snapshot["deadline_renewal_scheduler"] is not first_factory
 
     def test_empty_when_nothing_registered(self, _fresh_registry):
         """Empty dict before any registration."""
