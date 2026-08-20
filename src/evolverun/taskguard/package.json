@@ -64,7 +64,7 @@
     }
   },
   "scripts": {
-    "build": "tshy && node ./scripts/fix-exports-wildcards.mjs && node ./scripts/bundle-runtime.mjs && node ./scripts/generate-facade-skills.mjs && node ./scripts/copy-runtime-assets.mjs",
+    "build": "tshy && node ./scripts/build/fix-exports-wildcards.mjs && node ./scripts/build/bundle-runtime.mjs && node ./scripts/build/generate-facade-skills.mjs && node ./scripts/build/copy-runtime-assets.mjs",
     "build:all": "npm run build",
     "test": "node --import tsx --test tests/*.test.ts tests/**/*.test.ts"
   },

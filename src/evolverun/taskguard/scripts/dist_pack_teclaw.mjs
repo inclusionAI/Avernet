@@ -91,7 +91,7 @@ if (!SKIP_BUILD) {
 // ── Step 2: Generate facade skills ──
 
 console.log("[2/3] Generating facade skills...");
-execSync("node scripts/generate-facade-skills.mjs", { cwd: ROOT_DIR, stdio: "inherit" });
+execSync("node scripts/build/generate-facade-skills.mjs", { cwd: ROOT_DIR, stdio: "inherit" });
 console.log("  ✅ Facade skills generated\n");
 
 // ── Step 3: Pack ──

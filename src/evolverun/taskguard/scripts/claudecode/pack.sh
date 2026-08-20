@@ -205,7 +205,7 @@ if [[ -d "$ROOT_DIR/configs" ]]; then
   fi
 
   # ── Step 5.2: Patch dist/esm/configs/application.yaml ──
-  # The build process copies configs/ into dist/esm/configs/ (via copy-runtime-assets.mjs).
+  # The build process copies configs/ into dist/esm/configs/ (via scripts/build/copy-runtime-assets.mjs).
   # findConfigFile() walk-up from import.meta.dirname hits dist/esm/package.json +
   # dist/esm/configs/application.yaml BEFORE reaching the package root — so this file
   # is the one actually loaded at runtime. If teclaw.enabled=true here, the MCP server
