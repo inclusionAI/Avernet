@@ -789,7 +789,7 @@ async def change_bot_space(
     bot_id: BotIdPath,
     body: BotSpaceUpdate,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
     service: BotSpaceServiceProtocol = Injected(BotSpaceServiceProtocol),
 ) -> Envelope[BotSpaceAssignment]:
     """Change the Space that owns a Bot.
@@ -800,7 +800,7 @@ async def change_bot_space(
     numeric id from the Spaces API; `null` is not an implicit shortcut.
     """
     result = service.change_space(
-        bot_id=bot_id, owner_id=owner_id, space_id=body.space_id
+        bot_id=bot_id, owner_id=user_id, space_id=body.space_id
     )
     return envelope(
         BotSpaceAssignment(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, Path, Request
+from fastapi import APIRouter, Depends, Path, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
@@ -19,7 +19,10 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    UserIdDep,
+    require_granted_addressed_bot,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     deleted,
@@ -61,6 +64,11 @@ router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/channels",
     tags=["channels"],
 )
+
+# Keep the admission mode visible at the route boundary. ``OwnerIdDep`` also
+# consumes this dependency to resolve an application grant's owner, and FastAPI
+# caches that shared dependency result within the request.
+_GRANT_CHECKED_ADDRESSED_BOT = [Depends(require_granted_addressed_bot)]
 
 ChannelIdPath = Annotated[
     int,
@@ -220,7 +228,11 @@ async def _set_status(
         raise ChannelSyncError("channel runtime synchronization failed") from exc
 
 
-@router.get("", response_model=Envelope[list[Channel]])
+@router.get(
+    "",
+    response_model=Envelope[list[Channel]],
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+)
 @envelope_errors
 async def list_channels(
     bot_id: BotIdPath,
@@ -261,6 +273,7 @@ async def list_channels(
     status_code=201,
     response_model=Envelope[Channel],
     responses=CHANNEL_WRITE_RESPONSES,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def create_channel(
@@ -314,7 +327,11 @@ async def create_channel(
     return created(_project(record), request)
 
 
-@router.get("/{channel_id}", response_model=Envelope[Channel])
+@router.get(
+    "/{channel_id}",
+    response_model=Envelope[Channel],
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+)
 @envelope_errors
 async def get_channel(
     bot_id: BotIdPath,
@@ -349,6 +366,7 @@ async def get_channel(
     "/{channel_id}",
     response_model=Envelope[Channel],
     responses=CHANNEL_WRITE_RESPONSES,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def update_channel(
@@ -426,6 +444,7 @@ async def update_channel(
     "/{channel_id}/status",
     response_model=Envelope[Channel],
     responses=CHANNEL_WRITE_RESPONSES,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def update_channel_status(
@@ -479,6 +498,7 @@ async def update_channel_status(
     "/{channel_id}",
     response_model=Envelope[Deleted],
     responses=CHANNEL_WRITE_RESPONSES,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def delete_channel(
