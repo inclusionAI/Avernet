@@ -10,43 +10,49 @@ import io
 import json
 import re
 import zipfile
-from typing import Any, Callable, TYPE_CHECKING
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Callable
 from uuid import uuid4
-
-from injector import inject
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
-from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.readiness import is_bot_ready
+from agentclaw.community.core.repository.protocols.bot import (
+    BotCollabLogRepositoryProtocol,
+    BotRepository,
+)
+from agentclaw.community.core.repository.protocols.skill_center import (
+    LocalSkillCleanupRepository,
+    SkillRepository,
+    SkillSetRepository,
+)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
     LocalSkillEditBusyError,
     LocalSkillEditLockUnavailableError,
     LocalSkillEditPausedError,
     LocalSkillInvalidPackageError,
+    LocalSkillLayoutRollbackError,
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
     LocalSkillTooLargeError,
-    LocalSkillLayoutRollbackError,
 )
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
-from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.skill_center.services.skill_parser import (
-    SkillManifestError,
-    SkillParser,
+from agentclaw.community.core.skill_center.factories import (
+    SkillServiceFactory,
 )
 from agentclaw.community.core.skill_center.runtime_policy import (
     require_supported_bot_skill_runtime,
 )
-from agentclaw.community.core.bot_management.readiness import is_bot_ready
-from agentclaw.community.core.skill_center.factories import (
-    SkillServiceFactory,
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    BotRuntimeProjectionReconcilerProtocol,
 )
-from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
+from agentclaw.community.core.skill_center.services.skill_parser import (
+    SkillManifestError,
+    SkillParser,
+)
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditBusyError,
     SkillsPoolEditGuard,
@@ -55,9 +61,7 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
-from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectionReconcilerProtocol,
-)
+from injector import inject
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -177,6 +181,32 @@ class LocalSkillUploadService:
             )
         finally:
             self._edit_guard.release(lease)
+
+    async def upload_local_skill_files(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        files: Sequence[tuple[str, bytes]],
+    ) -> dict[str, Any]:
+        """Accept a browser directory selection through the ZIP authority.
+
+        The old product API represents a directory as a flat multipart file
+        list plus relative paths.  Repackage it once here, then reuse the
+        complete ZIP validation, same-name replacement and compensation flow.
+        """
+        package = (
+            files[0][1]
+            if len(files) == 1 and files[0][0].endswith(".zip")
+            else self._pack_directory(files)
+        )
+        return await self.upload_local_skill(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            package=package,
+        )
 
     async def _create(
         self,
@@ -472,9 +502,8 @@ class LocalSkillUploadService:
             restored = self._skill_repo.update(skill["id"], old_metadata)
             if restored is None:
                 raise LocalSkillStorageError()
-            if (
-                runtime_sync_attempted
-                and not await self._sync_runtime(owner_id, bot_id)
+            if runtime_sync_attempted and not await self._sync_runtime(
+                owner_id, bot_id
             ):
                 # Runtime may have switched partway before reporting failure.
                 # Keep the complete staged package until a later serialized
@@ -578,9 +607,9 @@ class LocalSkillUploadService:
                     int(work["id"]), bot, owner_id, bot_id
                 )
                 continue
-            if bool(work.get("requires_runtime_restore")) and not await self._sync_runtime(
-                owner_id, bot_id
-            ):
+            if bool(
+                work.get("requires_runtime_restore")
+            ) and not await self._sync_runtime(owner_id, bot_id):
                 if not self._cleanup_repo.mark_failed(
                     work_id=int(work["id"]),
                     env=str(bot["env"]),
@@ -642,9 +671,12 @@ class LocalSkillUploadService:
             skill = self._skill_repo.get_by_id(str(skill_id))
             if skill and skill.get("git_path") == f"local://{locator}":
                 return True
-        return self._skill_repo.get_bot_local_by_locator(
-            bot_id=bot_id, user_id=owner_id, locator=locator
-        ) is not None
+        return (
+            self._skill_repo.get_bot_local_by_locator(
+                bot_id=bot_id, user_id=owner_id, locator=locator
+            )
+            is not None
+        )
 
     def _same_name_matches(
         self, *, bot_id: str, owner_id: str, name: str
@@ -791,3 +823,51 @@ class LocalSkillUploadService:
             raise LocalSkillInvalidPackageError()
         normalized = [(p[len(wrapper) + 1 :] if wrapper else p, c) for p, c in files]
         return name, description, normalized
+
+    @staticmethod
+    def _pack_directory(files: Sequence[tuple[str, bytes]]) -> bytes:
+        """Encode directory files without trusting browser-provided paths."""
+        if not files or len(files) > _MAX_FILES:
+            raise LocalSkillInvalidPackageError()
+        seen: set[str] = set()
+        total = 0
+        stream = io.BytesIO()
+        try:
+            with zipfile.ZipFile(
+                stream, mode="w", compression=zipfile.ZIP_DEFLATED
+            ) as archive:
+                for path, content in files:
+                    if not isinstance(path, str) or not isinstance(content, bytes):
+                        raise LocalSkillInvalidPackageError()
+                    if (
+                        not path
+                        or path.startswith(("/", "\\"))
+                        or re.match(r"^[A-Za-z]:", path) is not None
+                        or "\\" in path
+                        or any(part == "" for part in path.split("/"))
+                        or ".." in path.split("/")
+                        or len(path) > 256
+                    ):
+                        raise LocalSkillInvalidPackageError()
+                    normalized = "/".join(
+                        part for part in path.split("/") if part not in ("", ".")
+                    )
+                    if not normalized or normalized in seen:
+                        raise LocalSkillInvalidPackageError()
+                    if len(content) > _MAX_FILE:
+                        raise LocalSkillTooLargeError()
+                    total += len(content)
+                    if total > _MAX_EXPANDED:
+                        raise LocalSkillTooLargeError()
+                    seen.add(normalized)
+                    archive.writestr(normalized, content)
+        except LocalSkillInvalidPackageError:
+            raise
+        except LocalSkillTooLargeError:
+            raise
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise LocalSkillInvalidPackageError() from exc
+        package = stream.getvalue()
+        if len(package) > _MAX_COMPRESSED:
+            raise LocalSkillTooLargeError()
+        return package

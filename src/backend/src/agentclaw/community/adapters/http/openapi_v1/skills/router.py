@@ -10,8 +10,7 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
-
+from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     EXAMPLE_TRACE_ID,
     BotIdPath,
@@ -21,7 +20,6 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
@@ -35,19 +33,21 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import require_pr
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
+)
+from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
-from agentclaw.community.api.local_skill_upload_service import (
-    LocalSkillUploadServiceProtocol,
-)
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
+from agentclaw.community.api.bot_skill_asset_service import (
+    BotSkillAssetServiceProtocol,
 )
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import (
-    BotSkillAssetServiceProtocol,
+from agentclaw.community.api.local_skill_query_service import (
+    LocalSkillQueryServiceProtocol,
+)
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillInvalidPackageError,
@@ -66,6 +66,18 @@ from .schemas import (
     SkillPublishStatus,
     SkillState,
     SkillUpload,
+)
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    Path,
+    Query,
+    Request,
+    Response,
+    UploadFile,
 )
 
 publish_status_router = APIRouter(
@@ -192,6 +204,40 @@ def _to_skill(record: dict[str, Any]) -> Skill:
         created_at=record.get("gmt_created"),
         updated_at=record.get("gmt_modified"),
     )
+
+
+def _uploaded_skill_response(
+    result: dict[str, Any], request: Request, response: Response
+) -> Envelope[SkillUpload]:
+    operation = str(result["operation"])
+    if operation == "updated":
+        response.status_code = 200
+    return envelope(
+        SkillUpload(operation=operation, skill=_to_skill(result["skill"])),
+        request,
+        code=201000 if operation == "created" else 200000,
+        message="Created" if operation == "created" else "OK",
+    )
+
+
+def _directory_relative_paths(
+    raw_paths: str | None, files: list[UploadFile]
+) -> list[str]:
+    """Preserve the legacy multipart folder wire without trusting filenames."""
+    if raw_paths is None:
+        paths = [file.filename or "" for file in files]
+    else:
+        try:
+            paths = json.loads(raw_paths)
+        except json.JSONDecodeError as exc:
+            raise LocalSkillInvalidPackageError() from exc
+        if not isinstance(paths, list) or not all(
+            isinstance(path, str) for path in paths
+        ):
+            raise LocalSkillInvalidPackageError()
+    if len(paths) != len(files):
+        raise LocalSkillInvalidPackageError()
+    return paths
 
 
 @router.get(
@@ -428,15 +474,63 @@ async def upload_skill(
         actor_id=user_id,
         package=package,
     )
-    operation = str(result["operation"])
-    if operation == "updated":
-        response.status_code = 200
-    return envelope(
-        SkillUpload(operation=operation, skill=_to_skill(result["skill"])),
-        request,
-        code=201000 if operation == "created" else 200000,
-        message="Created" if operation == "created" else "OK",
+    return _uploaded_skill_response(result, request, response)
+
+
+@router.post(
+    "/upload-folder",
+    status_code=201,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+    response_model=Envelope[SkillUpload],
+    responses={
+        200: {
+            "model": Envelope[SkillUpload],
+            "description": "Existing Local Skill safely replaced.",
+        },
+        413: {
+            "model": ErrorEnvelope,
+            "description": "Directory package exceeds an upload limit.",
+        },
+    },
+)
+@envelope_errors
+async def upload_skill_folder(
+    bot_id: BotIdPath,
+    user_id: UserIdDep,
+    request: Request,
+    response: Response,
+    owner_id: OwnerIdDep,
+    files: list[UploadFile] = File(
+        ..., description="Files selected from exactly one local Skill directory."
+    ),
+    file_paths: str | None = Form(
+        default=None,
+        description=(
+            "JSON array of relative paths aligned one-to-one with files. "
+            "When omitted, each uploaded filename is used as its relative path."
+        ),
+    ),
+    upload_service: LocalSkillUploadServiceProtocol = Injected(
+        LocalSkillUploadServiceProtocol
+    ),
+) -> Envelope[SkillUpload]:
+    """Upload a browser-selected local Skill directory.
+
+    This preserves the legacy multipart ``files`` + ``file_paths`` contract.
+    The Service API converts the directory into the exact same validated
+    package authority as the existing raw-ZIP endpoint.
+    """
+    paths = _directory_relative_paths(file_paths, files)
+    uploaded = [
+        (path, await file.read()) for path, file in zip(paths, files, strict=True)
+    ]
+    result = await upload_service.upload_local_skill_files(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        actor_id=user_id,
+        files=uploaded,
     )
+    return _uploaded_skill_response(result, request, response)
 
 
 @router.post(
