@@ -477,20 +477,32 @@ class SkillSetService:
             True if sync attempted, False otherwise
         """
         try:
-            # 获取当前激活技能集的软链配置（包括空列表，表示清空）
-            symlinks = self.get_symlink_mappings(
-                user_id=user_id,
-                bolt_id=self.bot_id
-            )
-
             # 通过 DeviceSyncPlugin 同步到设备 — 经 resolver + dispatcher 收口
             effective_user_id = user_id or self.entity_id or "default"
             ctx = self._resolver.resolve_for_bot(self.bot_id, effective_user_id)
             device_sync = self._device_sync_dispatcher.dispatch(ctx)
 
-            logger.info(f"[_sync_symlinks_to_device_if_needed] Syncing {len(symlinks)} symlinks to device (bot_id={self.bot_id})")
+            # Teclaw owns its workspace and receives a complete composed artifact.
+            # It has no filesystem Skills Pool layout, so it must not receive the
+            # file-engine symlink mappings below. Its device-sync plugin treats an
+            # empty list as a request to refresh that artifact.
+            if ctx.provider == "teclaw":
+                symlinks_dict: list[dict[str, str]] = []
+            else:
+                symlinks = self.get_symlink_mappings(
+                    user_id=user_id,
+                    bolt_id=self.bot_id,
+                )
+                symlinks_dict = [sm.to_dict() for sm in symlinks]
 
-            symlinks_dict = [sm.to_dict() for sm in symlinks]
+            logger.info(
+                "[_sync_symlinks_to_device_if_needed] Syncing %d symlinks to device "
+                "(bot_id=%s, provider=%s)",
+                len(symlinks_dict),
+                self.bot_id,
+                ctx.provider,
+            )
+
             sync_result = device_sync.sync_symlinks(symlinks_dict)
 
             if sync_result.get("success"):
@@ -2389,12 +2401,26 @@ class _DeviceSyncMixin:
             ctx = self._resolver.resolve_for_bot(bot_id, user_id)
             device_sync = self._device_sync_dispatcher.dispatch(ctx)
             logger.info(f"[DEVICE-PLUGIN-DEBUG] {caller}._do_device_sync: factory returned {type(device_sync).__name__}")
-            symlinks = self.skill_set_service.get_symlink_mappings(
-                user_id=user_id,
-                bolt_id=bot_id,
+            # Teclaw is a whole-artifact runtime, not a filesystem Skills Pool
+            # runtime. Passing file-engine symlink mappings into its plugin makes
+            # the plugin resolve a nonexistent teclaw Pool layout. An empty list
+            # is the established Teclaw refresh signal; the plugin recomposes and
+            # delivers the artifact from persisted metadata.
+            if ctx.provider == "teclaw":
+                symlinks_dict: list[dict[str, str]] = []
+            else:
+                symlinks = self.skill_set_service.get_symlink_mappings(
+                    user_id=user_id,
+                    bolt_id=bot_id,
+                )
+                symlinks_dict = [sm.to_dict() for sm in symlinks]
+            logger.info(
+                "[DEVICE-PLUGIN-DEBUG] %s._do_device_sync: %d symlinks to sync "
+                "(provider=%s)",
+                caller,
+                len(symlinks_dict),
+                ctx.provider,
             )
-            symlinks_dict = [sm.to_dict() for sm in symlinks]
-            logger.info(f"[DEVICE-PLUGIN-DEBUG] {caller}._do_device_sync: {len(symlinks_dict)} symlinks to sync")
             sync_result = device_sync.sync_symlinks(symlinks_dict)
             logger.info(f"[DEVICE-PLUGIN-DEBUG] {caller}._do_device_sync: result={sync_result}")
 
