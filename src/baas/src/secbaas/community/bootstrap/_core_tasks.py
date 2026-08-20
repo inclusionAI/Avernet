@@ -24,7 +24,6 @@ try:
     from secbaas.enterprise.core.arca_ttl_renewal import (
         DeadlineRenewalScheduler,
         DeadlineRenewalSchedulerConfig,
-        TtlRenewalScheduleRepository,
     )
 
     _HAS_ENTERPRISE_RENEWAL = True
