@@ -14,21 +14,6 @@ from secbaas.community.core.service.scheduler import (
     FileTransferPoller,
     FileTransferPollerConfig,
 )
-from secbaas.community.core.utils.env_utils import get_current_env
-
-# ── Enterprise-only optional imports ─────────────────────────────────────
-# DeadlineRenewalScheduler lives in the enterprise flat tree. Community
-# builds that don't have the enterprise package on PYTHONPATH will see
-# _HAS_ENTERPRISE_RENEWAL = False and skip the deadline path.
-try:
-    from secbaas.enterprise.core.arca_ttl_renewal import (
-        DeadlineRenewalScheduler,
-        DeadlineRenewalSchedulerConfig,
-    )
-
-    _HAS_ENTERPRISE_RENEWAL = True
-except ImportError:
-    _HAS_ENTERPRISE_RENEWAL = False
 
 
 class CoreTaskContainer(containers.DeclarativeContainer):
@@ -42,7 +27,6 @@ class CoreTaskContainer(containers.DeclarativeContainer):
     ticket_repository = providers.Dependency()
     paas_service_facade = providers.Dependency()
     file_transfer_backend = providers.Dependency()
-    ttl_renewal_schedule_repository = providers.Dependency()
 
     # ── DeviceTtlTimer task ──────────────────────────────────────────────────
 
@@ -103,28 +87,3 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         file_backend=file_transfer_backend,
         paas_facade=paas_service_facade,
     )
-
-    # ── DeadlineRenewalScheduler (enterprise-only, conditional) ────────────
-    # Per D-04: if/else branch (not Plugin Selector). The enabled flag is
-    # derived from config.renewal_scheduler.engine: only True when "deadline".
-    # When enterprise is not installed, deadline_renewal_scheduler is None.
-    if _HAS_ENTERPRISE_RENEWAL:
-        deadline_renewal_config = providers.Singleton(
-            DeadlineRenewalSchedulerConfig,
-            enabled=providers.Callable(
-                lambda engine: engine == "deadline",
-                config.renewal_scheduler.engine,
-            ),
-            engine=config.renewal_scheduler.engine,
-            env=providers.Callable(get_current_env),
-        )
-
-        deadline_renewal_scheduler = providers.Singleton(
-            DeadlineRenewalScheduler,
-            config=deadline_renewal_config,
-            lock_service=distributed_lock_service,
-            schedule_repo=ttl_renewal_schedule_repository,
-            paas_facade=paas_service_facade,
-        )
-    else:
-        deadline_renewal_scheduler = providers.Object(None)

@@ -1,6 +1,6 @@
 """TeClaw bot plugin — StubTeClawBotPlugin only.
 
-RealTeClawBotPlugin is in secbaas.enterprise.
+RealTeClawBotPlugin lives in the enterprise bundle.
 """
 
 from ._stub import StubTeClawBotPlugin
