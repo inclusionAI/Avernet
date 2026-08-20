@@ -42,6 +42,94 @@ Provider 接入至少会产生 Provider 管理 token 和 BCS 到 Provider 的下
 
 这些 token 只应保存在 Bot Provider 自己的安全存储中，不要写入仓库、镜像或公开配置示例。实际部署也可以启用自有 bot 身份体系；这属于部署侧扩展，不影响本文描述的 HTTP Provider 基线协议。
 
+## 管理 Provider Bot 属性
+
+可信 Backend Provider 可以读取和局部更新自己已注册 Bot 的协作属性。该能力属于 BCS 的 Provider 管理 API，不是 Provider webhook：调用方使用注册 Provider 时获得的 `provider_admin_token`，不使用 `bcs_to_provider_token` 或 `bot_runtime_token`。
+
+```http
+Authorization: Bearer <provider_admin_token>
+```
+
+接口路径中的 `<bot_uuid>` 是注册 Bot 接口返回的 `bot_uuid`，不是
+`provider_bot_ref`。`provider_id` 由 URL 路径提供；不要额外传
+`X-BCN-Provider-Id` 请求头。
+
+```http
+GET /providers/{provider_id}/bots/{bot_uuid}/attributes
+PATCH /providers/{provider_id}/bots/{bot_uuid}/attributes
+```
+
+这两个接口仅对 BCS 部署配置为可信 Backend Provider 的 Provider 开放。即使
+Bearer Token 有效，Provider 未启用、未被允许使用 Backend 属性管理能力，或
+Bot 不属于该 Provider 时，BCS 也会拒绝请求。
+
+### 查询属性
+
+```bash
+curl --request GET \
+  "$BCS_BASE_URL/providers/$PROVIDER_ID/bots/$BOT_UUID/attributes" \
+  --header "Authorization: Bearer $PROVIDER_ADMIN_TOKEN"
+```
+
+成功时返回属性对象本身：
+
+```json
+{
+  "user_visibility": "protected",
+  "friend_ext": {
+    "owner_staff_id": "zhangsan"
+  },
+  "friend_check_in_strategy": "APPROVAL"
+}
+```
+
+历史 Bot 没有显式属性时，返回默认值 `protected`、`{}` 和 `APPROVAL`。
+
+### 局部更新属性
+
+请求体至少包含一个字段；未提供的字段保持不变。
+
+```bash
+curl --request PATCH \
+  "$BCS_BASE_URL/providers/$PROVIDER_ID/bots/$BOT_UUID/attributes" \
+  --header "Authorization: Bearer $PROVIDER_ADMIN_TOKEN" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "user_visibility": "public",
+    "friend_ext": {"department_code": "TECH"},
+    "friend_check_in_strategy": "DEPT_FREE"
+  }'
+```
+
+成功响应与查询接口相同。
+
+| 字段 | 类型 | 取值 / 语义 |
+| --- | --- | --- |
+| `user_visibility` | string enum | `public`、`protected` 或 `private`。 |
+| `friend_ext` | JSON object | Bot 级扩展信息；顶层必须是对象。传入的对象整体替换已有值，传 `{}` 清空。 |
+| `friend_check_in_strategy` | string enum | `OPEN`：直接通过；`APPROVAL`：需审批；`DEPT_FREE`：部门内免审批。BCS 本次只保存和返回该值，不执行部门归属或审批流程。 |
+
+请求体不接受未知字段或 `null` 值。空对象、无效 JSON、非法枚举值，以及
+`friend_ext` 不是对象时均返回 `400`。
+
+### 错误处理
+
+错误响应使用以下结构：
+
+```json
+{
+  "error": "provider does not own bot",
+  "status": 403
+}
+```
+
+| HTTP 状态 | 场景 |
+| --- | --- |
+| `400` | 请求体为空、字段未知、字段为 `null`、字段类型或枚举值非法。 |
+| `401` | 缺少、格式错误或无效的 Provider Admin Token。 |
+| `403` | Provider 与 Token 不匹配、Provider 已禁用、Provider 未获允许使用该能力，或 Bot 不属于该 Provider。 |
+| `404` | Bot 未注册，或该 Provider Bot 绑定已禁用。 |
+
 ## Provider webhook 需要支持什么
 
 Provider 注册时提供一个 `webhook_url`。BCS 会向这个 URL 发送 `POST` 请求，并通过 body 里的 `method` 区分具体动作。
@@ -210,6 +298,7 @@ Provider 需要按 `(provider_bot_ref, session_id)` 维护会话上下文。`cha
 - Provider webhook 可以被 BCS 访问。
 - Provider 能校验下行 token，并拒绝错误的 `provider_id`。
 - Bot 注册信息能映射到 Provider 自有的 `provider_bot_ref`。
+- 如需管理 Bot 属性，Provider 管理程序保存 `provider_admin_token` 和注册响应中的 `bot_uuid`，并仅调用自身 `provider_id` 路径下的属性接口。
 - `chat.send` 可以启动一次 bot run，并在超时前回调 final。
 - `chat.inject` 只写上下文，不触发回复。
 - Provider 对 `id` 做幂等去重。

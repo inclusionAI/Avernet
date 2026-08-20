@@ -58,6 +58,99 @@ them into the repository, image, or public configuration examples. A deployment
 may also use its own bot identity system; that is a deployment-side extension
 and does not change the HTTP Provider baseline protocol described here.
 
+## Managing Provider Bot Attributes
+
+A trusted Backend Provider can read and partially update collaboration
+attributes of Bots that it has registered. This is a BCS Provider management
+API, not a Provider webhook: use the `provider_admin_token` returned when the
+Provider was registered, not `bcs_to_provider_token` or `bot_runtime_token`.
+
+```http
+Authorization: Bearer <provider_admin_token>
+```
+
+`<bot_uuid>` is the `bot_uuid` returned by the Bot registration endpoint; it is
+not `provider_bot_ref`. The URL supplies `provider_id`; do not send an
+additional `X-BCN-Provider-Id` header.
+
+```http
+GET /providers/{provider_id}/bots/{bot_uuid}/attributes
+PATCH /providers/{provider_id}/bots/{bot_uuid}/attributes
+```
+
+These endpoints are available only to Providers configured by BCS as trusted
+Backend Providers. BCS rejects the request even with a valid Bearer token when
+the Provider is disabled, is not permitted to manage Backend attributes, or the
+Bot does not belong to that Provider.
+
+### Read attributes
+
+```bash
+curl --request GET \
+  "$BCS_BASE_URL/providers/$PROVIDER_ID/bots/$BOT_UUID/attributes" \
+  --header "Authorization: Bearer $PROVIDER_ADMIN_TOKEN"
+```
+
+On success, BCS returns the attributes object directly:
+
+```json
+{
+  "user_visibility": "protected",
+  "friend_ext": {
+    "owner_staff_id": "zhangsan"
+  },
+  "friend_check_in_strategy": "APPROVAL"
+}
+```
+
+For historical Bots without explicit attributes, the defaults are `protected`,
+`{}`, and `APPROVAL`.
+
+### Partially update attributes
+
+The body must contain at least one field. Omitted fields remain unchanged.
+
+```bash
+curl --request PATCH \
+  "$BCS_BASE_URL/providers/$PROVIDER_ID/bots/$BOT_UUID/attributes" \
+  --header "Authorization: Bearer $PROVIDER_ADMIN_TOKEN" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "user_visibility": "public",
+    "friend_ext": {"department_code": "TECH"},
+    "friend_check_in_strategy": "DEPT_FREE"
+  }'
+```
+
+The successful response is the same as the read response.
+
+| Field | Type | Values / semantics |
+| --- | --- | --- |
+| `user_visibility` | string enum | `public`, `protected`, or `private`. |
+| `friend_ext` | JSON object | Bot-level extension data. The top level must be an object. The supplied object replaces the entire previous value; send `{}` to clear it. |
+| `friend_check_in_strategy` | string enum | `OPEN`: allow directly; `APPROVAL`: require approval; `DEPT_FREE`: exempt users in the same department. In this release BCS only stores and returns the value; it does not perform department checks or approval workflows. |
+
+The body rejects unknown fields and `null` values. An empty object, malformed
+JSON, an invalid enum value, or a non-object `friend_ext` returns `400`.
+
+### Errors
+
+Error responses use this structure:
+
+```json
+{
+  "error": "provider does not own bot",
+  "status": 403
+}
+```
+
+| HTTP status | Scenario |
+| --- | --- |
+| `400` | Empty body, unknown field, `null` field, or an invalid field type or enum value. |
+| `401` | Missing, malformed, or invalid Provider Admin Token. |
+| `403` | Token and Provider do not match; Provider is disabled or is not permitted to use this capability; or the Bot belongs to another Provider. |
+| `404` | The Bot is not registered, or its Provider Bot binding is disabled. |
+
 ## What must the Provider webhook support?
 
 When registering a Provider, you provide a `webhook_url`. BCS sends `POST`
@@ -244,6 +337,9 @@ reasoning.
 - Provider validates the downstream token and rejects an incorrect
   `provider_id`.
 - Bot registration can be mapped to the Provider's own `provider_bot_ref`.
+- To manage Bot attributes, the Provider management program stores
+  `provider_admin_token` and the registered `bot_uuid`, then calls the
+  attributes endpoint only under its own `provider_id`.
 - `chat.send` can start one bot run and call back final before timeout.
 - `chat.inject` only writes context and does not trigger a reply.
 - Provider performs idempotency deduplication by `id`.
