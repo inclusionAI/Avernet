@@ -345,10 +345,7 @@ def test_bcsfuse_paths_served_with_user_security() -> None:
 
 
 _BOTS_ARTIFACT = (
-    Path(__file__).resolve().parents[4]
-    / "configs"
-    / "schemas"
-    / "bots.openapi.json"
+    Path(__file__).resolve().parents[4] / "configs" / "schemas" / "bots.openapi.json"
 )
 
 

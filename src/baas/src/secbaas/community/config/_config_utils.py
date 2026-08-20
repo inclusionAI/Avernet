@@ -31,13 +31,18 @@ logger = get_logger("config")
 _config: Config | None = None
 
 
-def get_config(*, reload: bool = False) -> Config:
+def get_config(*, strict: bool = True, reload: bool = False) -> Config:
     """Return the singleton ``Config``, loading it on first call.
 
-    Pass ``reload=True`` to force a fresh load from disk (e.g. after changing
-    an overlay environment variable in tests).
+    Strict expansion is the BaaS default: an unresolvable placeholder with no
+    default raises ``KeyError`` (fail fast). Pass ``strict=False`` for backward
+    compatible expansion that leaves unresolvable placeholders intact for their
+    config consumer. Pass ``reload=True`` to force a fresh load from disk (e.g.
+    after changing an overlay environment variable in tests).
     """
     global _config  # noqa: PLW0603
+    if not strict:
+        return ConfigLoader.load(strict=False)
     if _config is None or reload:
         _config = ConfigLoader.load()
         logger.info(

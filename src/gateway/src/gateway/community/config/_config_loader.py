@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -23,8 +25,59 @@ logger = get_logger("config")
 class ConfigLoader:
     """Load and merge gateway configuration."""
 
+    # Placeholder syntax: ${NAME} or ${NAME:-default} (shell / k8s / envsubst
+    # style). ${NAME:-} yields an empty string; a placeholder that references an
+    # unset env var with no default raises KeyError (see _env_replacer).
+    ENV_INTERP = re.compile(
+        r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-(?P<default>[^}]*))?\}"
+    )
+
+    @classmethod
+    def _expand_env_placeholders(cls, data: Any, *, strict: bool = False) -> Any:
+        """Recursively expand ``${NAME}`` env placeholders in a merged config tree.
+
+        Walks dict and list nodes; for string leaves, expands every ``${NAME}``
+        (or ``${NAME:-default}``) occurrence that names an environment variable.
+        Non-string values are returned as-is.
+
+        Resolution order for a placeholder:
+        1. environment variable ``NAME`` if set (an empty string counts as set);
+        2. the default given via ``:-default`` if present;
+        3. when *strict* is False (default) the placeholder is left unchanged,
+           preserving backward compatibility with intra-config references such
+           as ``${backend_server_url}`` that a later config consumer (e.g. the
+           forwarding ``DomainMap``) resolves; when *strict* is True it raises
+           ``KeyError``, matching BaaS.
+        """
+
+        def _env_replacer(match: re.Match[str]) -> str:
+            name = match.group("name")
+            if name in os.environ:
+                return os.environ[name]
+            default = match.group("default")
+            if default is not None:
+                return default
+            if strict:
+                msg = (
+                    f"Environment variable '{name}' referenced by "
+                    f"${{{name}}} in config is not set and has no default"
+                )
+                raise KeyError(msg)
+            return match.group(0)
+
+        if isinstance(data, dict):
+            return {
+                k: cls._expand_env_placeholders(v, strict=strict)
+                for k, v in data.items()
+            }
+        if isinstance(data, list):
+            return [cls._expand_env_placeholders(v, strict=strict) for v in data]
+        if isinstance(data, str):
+            return cls.ENV_INTERP.sub(_env_replacer, data)
+        return data
+
     @staticmethod
-    def load() -> Config:
+    def load(*, strict: bool = False) -> Config:
         base_path = _resolve_base_path()
         base = _load_yaml(base_path) if base_path is not None else {}
         applied: list[str] = []
@@ -56,12 +109,13 @@ class ConfigLoader:
         )
 
         config_dir = base_path.parent if base_path is not None else None
+        base = ConfigLoader._expand_env_placeholders(base, strict=strict)
         return _parse_config(base, config_dir=config_dir)
 
     @staticmethod
-    def load_raw() -> dict:
+    def load_raw(*, strict: bool = False) -> dict:
         """Return the merged raw config dict (used by enterprise forwarding)."""
-        return ConfigLoader.load().raw
+        return ConfigLoader.load(strict=strict).raw
 
 
 def _load_yaml(path: Path | None) -> dict:

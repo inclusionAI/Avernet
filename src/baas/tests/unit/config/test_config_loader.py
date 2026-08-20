@@ -41,16 +41,16 @@ class TestLoad:
         assert config.app_name == "custom_app"
         assert config.user_config["key"] == "val"
 
-    def test_not_set_falls_back_to_base_yaml(self, tmp_path):
+    def test_not_set_falls_back_to_base_yaml(self, monkeypatch, tmp_path):
         config_dir = tmp_path / "configs"
         config_dir.mkdir()
         (config_dir / "application.yaml").write_text(
             "app_name: default_app\nworkers: 1\nuser_config: {}\n"
         )
-        import os as _os
-
-        _os.environ.pop("SOFAPY_CONFIG_OVERLAY", None)
-        _os.environ["SOFAPY_CONFIG_PATH"] = str(config_dir)
+        # Use monkeypatch so SOFAPY_CONFIG_PATH is restored after the test,
+        # avoiding leaking config-path state into subsequent tests.
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
         from secbaas.community.config import ConfigLoader
 
         config = ConfigLoader.load()
@@ -159,9 +159,20 @@ class TestEnvInterpolation:
     def test_missing_without_default_raises(self, monkeypatch):
         from secbaas.community.config import ConfigLoader
 
+        # BaaS defaults to strict: an unresolvable, un-defaulted placeholder
+        # raises rather than passing through.
         monkeypatch.delenv("NOPE_MISSING", raising=False)
         with pytest.raises(KeyError, match="NOPE_MISSING"):
             ConfigLoader._expand_env_placeholders({"a": "${NOPE_MISSING}"})
+
+    def test_backward_compatible_mode_left_unchanged(self, monkeypatch):
+        from secbaas.community.config import ConfigLoader
+
+        monkeypatch.delenv("NOPE_MISSING", raising=False)
+        out = ConfigLoader._expand_env_placeholders(
+            {"a": "${NOPE_MISSING}"}, strict=False
+        )
+        assert out == {"a": "${NOPE_MISSING}"}
 
     def test_does_not_mutate_input(self, monkeypatch):
         from secbaas.community.config import ConfigLoader
@@ -187,3 +198,36 @@ class TestEnvInterpolation:
         config = ConfigLoader.load()
         assert config.user_config["secret"] == "topsecret"
         assert config.module_config.web.port == 9999  # pydantic coerced str->int
+
+
+class TestGetConfig:
+    """End-to-end: get_config() strict passthrough and BaaS defaults."""
+
+    def test_get_config_strict_default_raises(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "user_config:\n  secret: ${REQUIRED_VAR}\n"
+        )
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("REQUIRED_VAR", raising=False)
+        from secbaas.community.config import get_config, reset_config
+
+        reset_config()
+        with pytest.raises(KeyError, match="REQUIRED_VAR"):
+            get_config()
+
+    def test_get_config_backward_compatible_mode(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "user_config:\n  secret: ${REQUIRED_VAR}\n"
+        )
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("REQUIRED_VAR", raising=False)
+        from secbaas.community.config import get_config
+
+        config = get_config(strict=False)
+        assert config.user_config["secret"] == "${REQUIRED_VAR}"
