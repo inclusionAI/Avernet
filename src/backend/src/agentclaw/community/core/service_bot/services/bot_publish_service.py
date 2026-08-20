@@ -431,7 +431,12 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         *,
         device_provider: str,
     ) -> ServiceBotImagePin:
-        """Resolve image policy through the shared persisted-CAS seam.
+        """Resolve image policy through :class:`PublishImagePolicyResolver`.
+
+        This is *the* image-policy operation: it re-reads the record, may
+        lazily snapshot the configured ARCA image under CAS, and returns the
+        resulting policy. (``arca_image_pin.image_policy_from_ext`` is only the
+        pure decoder the resolver uses internally.)
 
         ``device_provider`` is the caller's resolved container token; the policy
         never re-derives the provider from the record's ``ext``.
