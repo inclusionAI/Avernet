@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html
 
 from gateway.community import __version__
+from gateway.community.adapters.web._cors import install_cors
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
 from gateway.community.adapters.web._log_redaction import install_credential_redaction
 from gateway.community.adapters.web._relay_ws import forward_websocket, relay_routes
@@ -159,6 +160,12 @@ def create_app() -> FastAPI:
         methods=_ALL_METHODS,
         include_in_schema=False,
     )
+
+    # Added last, so it is OUTERMOST: a browser preflight carries no credential
+    # and must be answered here, before the catch-all above resolves a domain or
+    # the authenticator refuses it. The allow-list is configuration
+    # (``user_config.cors``) — no origin is named in code.
+    install_cors(app, config.user_config.cors)
 
     return app
 
