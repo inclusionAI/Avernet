@@ -51,7 +51,7 @@ class ConfigLoader:
             if env_data:
                 base = Config.merge_configs(base, env_data)
         return base
-    
+
     @classmethod
     def _expand_env_placeholders(cls, data: Any) -> Any:
         """Recursively expand ``${NAME}`` placeholders in a merged config tree.
@@ -71,7 +71,7 @@ class ConfigLoader:
         access per AGENTS.md). Replacing values here, before ``Config(**base)``,
         lets pydantic coerce env strings into field types (int/bool/...).
         """
-        
+
         def _env_replacer(match: "re.Match[str]") -> str:
             name = match.group("name")
             if name in os.environ:
@@ -84,6 +84,7 @@ class ConfigLoader:
                 f"${{{name}}} in config is not set and has no default"
             )
             raise KeyError(msg)
+
         if isinstance(data, dict):
             return {k: cls._expand_env_placeholders(v) for k, v in data.items()}
         if isinstance(data, list):
