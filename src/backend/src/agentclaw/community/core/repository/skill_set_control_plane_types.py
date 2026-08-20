@@ -10,6 +10,8 @@ class SkillSetDesiredState:
     installations: set[int]
     set_active: dict[int, bool]
     memberships: dict[int, tuple[tuple[int, str | None, str | None], ...]]
+    mcp_installations: set[str] = field(default_factory=set)
+    mcp_memberships: dict[int, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

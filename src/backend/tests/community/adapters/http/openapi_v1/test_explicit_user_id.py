@@ -335,8 +335,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: and five account-level operations. The trace filter remains the sole query
 #: placement. Together with the caller-identity read, the combined contract is
 #: 83/1/41.
-# P1-03 contributes eleven Bot-scoped SkillSet operations.
-_BOT_ID_PLACEMENT = {"path": 97, "query": 1, "none": 49}
+# P1-03 contributes eleven Bot-scoped SkillSet operations; P1-04 adds eight
+# Bot-scoped MCP Direct and SkillSet-MCP operations.
+_BOT_ID_PLACEMENT = {"path": 105, "query": 1, "none": 49}
 
 
 def _schema() -> dict:
@@ -424,7 +425,8 @@ def test_the_pinned_number_of_operations_take_it():
     # account-level operations).
     # P1-03 adds eleven Bot-scoped SkillSet operations, all explicitly acting
     # for the authenticated user rather than accepting a body-supplied owner.
-    assert len(taking) == 136
+    # P1-04 adds eight Bot-scoped MCP Direct and SkillSet-MCP operations.
+    assert len(taking) == 144
 
 
 def test_the_exempt_operations_take_none():
