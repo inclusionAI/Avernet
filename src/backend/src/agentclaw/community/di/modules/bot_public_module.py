@@ -19,17 +19,22 @@ through the injector.
 """
 from __future__ import annotations
 
-
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
-from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.api.bot_public_service import (
+    BotCatalogMetadataServiceProtocol,
+    BotPublicServiceProtocol,
+)
 from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.services.bot_discover_service import BotDiscoverService
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
+from agentclaw.community.core.bot_public.services.bot_catalog_metadata_service import (
+    UnavailableBotCatalogMetadataService,
+)
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -61,6 +66,11 @@ class BotPublicModule(Module):
         binder.bind(
             BotFriendRepositoryProtocol,
             to=UnifiedBotFriendRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            BotCatalogMetadataServiceProtocol,
+            to=UnavailableBotCatalogMetadataService,
             scope=singleton,
         )
 
@@ -96,6 +106,7 @@ class BotPublicModule(Module):
         skill_set_service_factory: SkillSetServiceFactory,
         device_context_resolver: DeviceContextResolver,
         device_sync_dispatcher: DeviceSyncDispatcher,
+        catalog_metadata_service: BotCatalogMetadataServiceProtocol,
     ) -> BotPublicService:
         # Explicit provider (not ``binder.bind``): BotPublicService types
         # ``skill_set_service_factory`` under TYPE_CHECKING to avoid a
@@ -112,6 +123,7 @@ class BotPublicModule(Module):
             skill_set_service_factory=skill_set_service_factory,
             device_context_resolver=device_context_resolver,
             device_sync_dispatcher=device_sync_dispatcher,
+            catalog_metadata_service=catalog_metadata_service,
         )
 
     @singleton

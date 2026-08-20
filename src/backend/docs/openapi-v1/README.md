@@ -2093,6 +2093,9 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 - **2026-08-20** — Added authenticated Bot catalog reads at
   `GET /openapi/v1/bots/catalog/search` and `/discover`. User and App
   principals see the same allowlisted public projection.
+  `/search` has a tenant-scoped `(bot_id, entity_id)` BCS metadata port; its
+  current fail-closed binding returns `502000 / Catalog service unavailable`
+  until a concrete BCS protocol is configured, with no Backend-only fallback.
 
 - **2026-08-19 — Bot Editors CRUD.** The public surface now exposes
   `GET/POST /openapi/v1/bots/{bot_id}/editors`,

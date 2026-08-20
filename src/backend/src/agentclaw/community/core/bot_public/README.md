@@ -12,10 +12,12 @@ provides:
   - "Bot-public SQLAlchemy models"
 consumes:
   - "BotManagement repo + service"
+  - "BotCatalogMetadata port (membership-only, joined by (bot_id, entity_id))"
   - "AntProcess plugins (auth_relationship, bot_publish_approval, antprocess)"
   - "PassportPlugin"
   - "SkillCenter factories"
 internal_dependencies:
+  - agentclaw.community.api.bot_public_service
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.devices

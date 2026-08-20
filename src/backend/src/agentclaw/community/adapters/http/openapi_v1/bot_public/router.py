@@ -15,7 +15,11 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import error_response, page
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
-from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.api.bot_public_service import (
+    BotCatalogCaller,
+    BotCatalogSearchUnavailableError,
+    BotPublicServiceProtocol,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
@@ -67,10 +71,11 @@ def _public_bot(record: Mapping[str, Any]) -> PublicBot:
     "/search",
     response_model=Envelope[Page[PublicBot]],
     response_model_exclude_none=True,
+    responses={502: {"description": "Catalog service unavailable"}},
 )
 async def search_public_bots(
     request: Request,
-    _principal: PrincipalDep,
+    principal: PrincipalDep,
     search: str | None = Query(default=None, description="Bot or owner name keyword."),
     page_number: int = Query(
         default=1, alias="page", ge=1, description="1-based page number."
@@ -79,9 +84,20 @@ async def search_public_bots(
     service: BotPublicServiceProtocol = Injected(BotPublicServiceProtocol),
 ) -> Envelope[Page[PublicBot]]:
     try:
-        result = service.search_public_bots_by_keyword(
-            search=search, page=page_number, page_size=page_size
+        result = service.search_catalog_public_bots_by_keyword(
+            search=search,
+            page=page_number,
+            page_size=page_size,
+            caller=BotCatalogCaller(
+                tenant_id=principal.tenant,
+                user_id=principal.user_id or None,
+                app_id=principal.app_id,
+            ),
+            request_id=_request_id(request),
         )
+    except BotCatalogSearchUnavailableError:
+        _log_failure("search", request, "bcs_unavailable")
+        return error_response(502, "Catalog service unavailable", request)
     except Exception:  # noqa: BLE001 - the public error must remain fixed
         _log_failure("search", request, "service_failure")
         return error_response(500, "Internal Server Error", request)

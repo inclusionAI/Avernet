@@ -19,8 +19,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
 from agentclaw.community.core.devices.services.device_context import DeviceContext
 
@@ -45,6 +43,7 @@ def _make_service(
         skill_set_service_factory=MagicMock(),
         device_context_resolver=resolver or MagicMock(),
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
+        catalog_metadata_service=MagicMock(),
     )
 
 

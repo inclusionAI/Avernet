@@ -16154,19 +16154,7 @@
             "description": "Internal error"
           },
           "502": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 502000,
-                  "message": "Bad Gateway",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
+            "description": "Catalog service unavailable"
           }
         },
         "summary": "Search Public Bots",

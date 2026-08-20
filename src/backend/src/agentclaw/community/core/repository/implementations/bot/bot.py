@@ -436,8 +436,8 @@ class BotRepository(
         self,
         public: Optional[str] = None,
         search: Optional[str] = None,
-        page: int = 1,
-        page_size: int = 20,
+        page: int | None = 1,
+        page_size: int | None = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(self.Model.is_delete == 0, self._env())
@@ -451,12 +451,10 @@ class BotRepository(
                     )
                 )
             total = query.count()
-            bots = (
-                query.order_by(self.Model.gmt_create.desc())
-                .offset((page - 1) * page_size)
-                .limit(page_size)
-                .all()
-            )
+            query = query.order_by(self.Model.gmt_create.desc(), self.Model.id.desc())
+            if page is not None and page_size is not None:
+                query = query.offset((page - 1) * page_size).limit(page_size)
+            bots = query.all()
             return total, [b.to_dict() for b in bots]
 
     # ── updates (single conditional statements) ─────────────────

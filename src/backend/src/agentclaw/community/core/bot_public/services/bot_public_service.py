@@ -19,6 +19,14 @@ from agentclaw.community.utils.avernet_tenant import (
 from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.repository.models import BotFriendQueryKey, BotFriendStatus, ApprovalStatus, ApprovalType
 from agentclaw.community.core.operator_context import OperatorContext
+from agentclaw.community.api.bot_public_service import (
+    BotCatalogAddress,
+    BotCatalogCaller,
+    BotCatalogMetadata,
+    BotCatalogMetadataServiceProtocol,
+    BotCatalogMetadataUnavailableError,
+    BotCatalogSearchUnavailableError,
+)
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.log import get_logger
 
@@ -94,6 +102,7 @@ class BotPublicService:
         skill_set_service_factory: "SkillSetServiceFactory",
         device_context_resolver: DeviceContextResolver,
         device_sync_dispatcher: "DeviceSyncDispatcher",
+        catalog_metadata_service: BotCatalogMetadataServiceProtocol,
     ) -> None:
         self._bot_friend_repo = bot_friend_repo
         self._bot_repository = bot_repository
@@ -107,6 +116,7 @@ class BotPublicService:
         # sync_bot_config_to_device 路径上的角色。Task 6 收口后 supplier 已删。
         self._resolver = device_context_resolver
         self._device_sync_dispatcher = device_sync_dispatcher
+        self._catalog_metadata_service = catalog_metadata_service
         self._sync_lock = threading.Lock()
         self._syncing_bots: set[str] = set()
         self._pending_syncs: dict[str, tuple[str, str]] = {}  # sync_key -> (access_mode, public)
@@ -1046,26 +1056,7 @@ class BotPublicService:
         if not items:
             return public_bot_result
 
-        # Sanitize sensitive fields to avoid leaking them through the public search API.
-        EXT_SENSITIVE_KEYS = {"iam_token"}
-        for bot in items:
-            # Redact top-level device_id
-            if "device_id" in bot:
-                bot["device_id"] = None
-            # Redact sensitive fields inside ext
-            ext = bot.get("ext")
-            if isinstance(ext, str):
-                try:
-                    ext = json.loads(ext)
-                except json.JSONDecodeError:
-                    ext = {}
-            if isinstance(ext, dict):
-                if isinstance(ext.get("passport"), dict) and "token" in ext["passport"]:
-                    ext["passport"]["token"] = None
-                for key in EXT_SENSITIVE_KEYS:
-                    if key in ext:
-                        ext[key] = None
-                bot["ext"] = ext
+        self._sanitize_public_bots(items)
 
         # 查询好友申请记录。公开 catalog 不携带用户作用域，因此不读取关系数据。
         if not user_id:
@@ -1091,6 +1082,127 @@ class BotPublicService:
                 logger.warning(f"[search_public_bots_by_keyword] Failed to query friend records: {e}")
 
         return public_bot_result
+
+    def search_catalog_public_bots_by_keyword(
+        self,
+        search: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        caller: BotCatalogCaller,
+        request_id: str,
+    ) -> Dict[str, Any]:
+        """Return public Backend Bots admitted by the metadata port."""
+        public_bot_result = self._bot_service.list_bots_by_search(
+            public="1", search=search, page=None, page_size=None
+        )
+        candidates = public_bot_result.get("items", [])
+        addresses = self._catalog_addresses(candidates)
+        try:
+            metadata = self._catalog_metadata_service.query_public_bot_metadata(
+                addresses=addresses,
+                caller=caller,
+                request_id=request_id,
+            )
+            admitted = self._validated_catalog_addresses(metadata, addresses)
+        except BotCatalogMetadataUnavailableError as exc:
+            logger.warning(
+                "[BotPublicService.catalog_search] request_id=%s candidate_count=%s "
+                "failure=metadata_unavailable",
+                request_id,
+                len(candidates),
+            )
+            raise BotCatalogSearchUnavailableError() from exc
+        except Exception as exc:  # noqa: BLE001 - metadata is fail-closed
+            logger.warning(
+                "[BotPublicService.catalog_search] request_id=%s candidate_count=%s "
+                "failure=invalid_metadata",
+                request_id,
+                len(candidates),
+            )
+            raise BotCatalogSearchUnavailableError() from exc
+        items = [
+            bot
+            for bot in candidates
+            if self._catalog_address(bot) in admitted
+        ]
+        self._sanitize_public_bots(items)
+        total = len(items)
+        page_items = items[(page - 1) * page_size:page * page_size]
+        logger.info(
+            "[BotPublicService.catalog_search] request_id=%s candidate_count=%s "
+            "joined_count=%s page_count=%s",
+            request_id,
+            len(candidates),
+            total,
+            len(page_items),
+        )
+        return {"total": total, "items": page_items}
+
+    @staticmethod
+    def _catalog_address(bot: dict[str, Any]) -> BotCatalogAddress | None:
+        bot_id = bot.get("bot_id")
+        entity_id = bot.get("entity_id")
+        if not isinstance(bot_id, str) or not bot_id.strip():
+            return None
+        if not isinstance(entity_id, str) or not entity_id.strip():
+            return None
+        return BotCatalogAddress(bot_id=bot_id, entity_id=entity_id)
+
+    @classmethod
+    def _catalog_addresses(
+        cls, candidates: list[dict[str, Any]]
+    ) -> tuple[BotCatalogAddress, ...]:
+        return tuple(
+            dict.fromkeys(
+                address
+                for candidate in candidates
+                if (address := cls._catalog_address(candidate)) is not None
+            )
+        )
+
+    @staticmethod
+    def _validated_catalog_addresses(
+        metadata: Any,
+        requested: tuple[BotCatalogAddress, ...],
+    ) -> set[BotCatalogAddress]:
+        requested_set = set(requested)
+        admitted: set[BotCatalogAddress] = set()
+        for item in metadata:
+            if not isinstance(item, BotCatalogMetadata) or item.kind != "bot":
+                raise BotCatalogMetadataUnavailableError()
+            address = item.address
+            if (
+                not isinstance(address, BotCatalogAddress)
+                or not address.bot_id.strip()
+                or not address.entity_id.strip()
+                or address not in requested_set
+                or address in admitted
+            ):
+                raise BotCatalogMetadataUnavailableError()
+            admitted.add(address)
+        return admitted
+
+    @staticmethod
+    def _sanitize_public_bots(items: list[dict[str, Any]]) -> None:
+        """Redact fields that must not leave either public-search path."""
+        EXT_SENSITIVE_KEYS = {"iam_token"}
+        for bot in items:
+            if "device_id" in bot:
+                bot["device_id"] = None
+            ext = bot.get("ext")
+            if isinstance(ext, str):
+                try:
+                    ext = json.loads(ext)
+                except json.JSONDecodeError:
+                    ext = {}
+            if isinstance(ext, dict):
+                if isinstance(ext.get("passport"), dict) and "token" in ext["passport"]:
+                    ext["passport"]["token"] = None
+                for key in EXT_SENSITIVE_KEYS:
+                    if key in ext:
+                        ext[key] = None
+                bot["ext"] = ext
 
     def list_my_bot_friends(
         self,

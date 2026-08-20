@@ -313,6 +313,18 @@ def test_list_and_count(repo):
     assert t4 == 2
 
 
+def test_list_by_search_can_return_complete_ordered_candidate_set(repo):
+    """Catalog joins must happen before pagination to avoid page holes."""
+    repo.insert(_data(bot_id="b1", public="1"))
+    repo.insert(_data(bot_id="b2", public="1"))
+    repo.insert(_data(bot_id="b3", public="1"))
+
+    total, rows = repo.list_by_search(public="1", page=None, page_size=None)
+
+    assert total == 3
+    assert {row["bot_id"] for row in rows} == {"b1", "b2", "b3"}
+
+
 def test_list_by_conditions_owner_engine_status_filters(repo):
     """Additive owner_id / engine / status filters narrow with exact totals."""
     repo.insert(

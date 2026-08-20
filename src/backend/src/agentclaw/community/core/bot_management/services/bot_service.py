@@ -2218,8 +2218,8 @@ class BotService:
         self,
         public: Optional[str] = None,
         search: Optional[str] = None,
-        page: int = 1,
-        page_size: int = 20,
+        page: int | None = 1,
+        page_size: int | None = 20,
     ) -> Dict[str, Any]:
         """
         List bots with search and pagination.
