@@ -170,6 +170,22 @@ def test_search_projects_only_catalog_fields(
     ]
 
 
+def test_search_openapi_declares_the_fixed_catalog_unavailable_envelope(
+    app: FastAPI,
+) -> None:
+    """Catches generated clients losing the fixed 502 catalog error contract."""
+    response = app.openapi()["paths"][_SEARCH_PATH]["get"]["responses"]["502"]
+
+    assert response["description"] == "Catalog service unavailable"
+    content = response["content"]["application/json"]
+    assert content["schema"] == {"$ref": "#/components/schemas/ErrorEnvelope"}
+    assert content["example"] == {
+        "code": 502000,
+        "message": "Catalog service unavailable",
+        "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+    }
+
+
 @pytest.mark.parametrize(
     ("principal", "expected_caller"),
     [

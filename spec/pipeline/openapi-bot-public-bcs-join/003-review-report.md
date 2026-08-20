@@ -1,3 +1,10 @@
+> **SUPERSEDED HISTORICAL REVIEW — DO NOT USE AS CURRENT IMPLEMENTATION OR SHIP INSTRUCTION.**
+>
+> This report records the rejected BCSFuse HTTP batch design only. The current binding design is
+> the tenant-scoped metadata port with a fixed unavailable response in
+> [004-implementation-plan.md](004-implementation-plan.md); it deliberately has no BCS HTTP
+> URL, path, payload, credentials, base-URL configuration, or network call.
+
 ---
 agent: tc-code-reviewer
 status: completed
@@ -5,7 +12,7 @@ created: 2026-08-20T15:35:00+08:00
 iteration: 2
 ---
 
-# 代码评审报告（复审）
+# 已废弃的 BCSFuse HTTP batch 代码评审报告（历史记录）
 
 ## 评审范围
 

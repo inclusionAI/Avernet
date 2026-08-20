@@ -1,52 +1,60 @@
 ---
 agent: tc-review
-status: completed
+status: superseded-by-004
 created: 2026-08-20T00:00:00+08:00
-iteration: 2
+iteration: 3
 ---
 
-# 系分 Spec: Public Bot Catalog BCSFuse 元信息内连接
+# 系分 Spec：Public Bot Catalog BCS 元信息端口
+
+> 当前实现与发布约束以 [004-implementation-plan.md](004-implementation-plan.md) 为准。本文件只保留
+> 本次已批准的端口设计；不得据此推断任何 BCS HTTP URL、路径、请求体、凭据、超时或网络调用。
 
 ## 需求概述
 
-`GET /openapi/v1/bots/catalog/search` 保持 Backend 的公开 Bot 搜索语义，使用每个候选的
-`(bot_id, owner_id)` 生成 worker ID，批量查询 BCSFuse 的 Bot 元信息。仅当 BCSFuse 返回同一
-worker ID 时该 Backend Bot 才能返回给前端；所有公开响应字段仍由 Backend 白名单投影生成。
+`GET /openapi/v1/bots/catalog/search` 保持 Backend 的公开 Bot 搜索语义。Backend 从当前租户的
+公开候选构造有序、去重的 `(bot_id, entity_id)` 地址，并将这些地址、已验证的
+`tenant_id` / `user_id` / `app_id` caller 投影及 request ID 交给 BCS 元信息端口决定成员资格。
+Backend 是全部公开响应字段的唯一权威来源。
 
-BCSFuse 的 batch 合约需要已有 worker ID，因此实现顺序是 Backend 产生当前租户的候选 key，
-再批量查询 BCSFuse，最后才向调用方返回 join 结果。这不是 Backend-only fallback。
+当前 production、local 和 test 均绑定为 unavailable 端口实现。因此 Catalog Search 固定返回
+`502000 / Catalog service unavailable`，不会退化为 Backend-only 结果，也不会猜测或调用未实现的
+BCS HTTP 接口。
 
 ## 编码 Spec
 
-- [x] `BotPublicService.search_public_bots_by_keyword` 先读取完整、稳定排序的 Backend public
-  candidate set；禁止先分页后 join。
-- [x] 以 Backend 记录生成唯一 `{bot_id}:{owner_id}`，每批最多 100 个调用
-  `POST /v1/workers/batch`，仅承认本批请求中出现在 `data` 的 key。
-- [x] 仅保留 BCSFuse 和 Backend 都存在的记录，在完成交集后计算 `total`、再应用页面切片。
-- [x] BCSFuse 非 2xx、超时、坏 JSON 或不成功响应 fail closed，OpenAPI 返回 `502000`，不返回
-  Backend 单边数据。
-- [x] BCSFuse 响应和 worker ID 不写日志、不透传。日志只含候选数、join 数、页大小和失败类别。
-- [x] 对 BCSFuse 使用独立的、配置 base URL 的 `HttpClient` qualifier，5 秒单批超时；测试环境
-  使用无网络的 LocalHttpClient。
+- [x] 在 Backend Service API 定义 frozen `BotCatalogAddress`、`BotCatalogCaller`、
+  `BotCatalogMetadata`、runtime-checkable metadata protocol 及 unavailable error。
+- [x] Catalog 专用 service 方法先读取完整、稳定排序的 Backend public candidate set，生成精确
+  `(bot_id, entity_id)` 地址后才做内连接；`total` 与分页均基于完整 join 后结果。
+- [x] 即使地址列表为空也调用 metadata protocol；当前 unavailable 实现仅记录 request ID、候选数
+  与 `unconfigured` 类别后 fail closed。
+- [x] 任何非 `kind == "bot"`、重复、未请求、无效或空白地址的 metadata 结果均 fail closed。
+- [x] OpenAPI router 只从 verified principal 投影 caller；固定错误 envelope 为
+  `502000 / Catalog service unavailable`。
+- [x] Legacy `/api/v1/bot-public/search` 保持 Backend-only；Discover 保持既有 BCSFuse 行为与日志。
 
 ## 验收标准
 
-- Backend-only 和 BCSFuse-only Bot 均不出现在 `items`；join key 是完整 `(bot_id, owner_id)`。
-- 大于 100 个候选时按批查询，输出仍保持 Backend 排序；分页和 `total` 均针对完整交集。
-- BCSFuse 故障返回固定 `502000`，空成功结果返回 `200000` 的空列表。
-- 公开响应不含 BCSFuse 原始字段，也不含 binding、设备、ext、token 或环境数据。
+- 任何未配置或不可用的 metadata port（包括空候选）均令 `/search` 返回固定 `502000` envelope。
+- 未来配置端口时，只有 exact `(bot_id, entity_id)` metadata 命中的 Backend Bot 可以出现；同一
+  `bot_id` 的不同 entity 不得混淆。
+- 公开响应不含 metadata 原始字段，也不含 binding、设备、ext、token 或环境数据。
+- 机器可读 OpenAPI 的 502 response 使用 `ErrorEnvelope`，示例固定为
+  `502000 / Catalog service unavailable`。
 
 ## QA Spec
 
 | 编号 | 用例 | 预期 |
 |---|---|---|
-| TC-01 | 101 个 Backend 候选，BCSFuse 两批均确认 | 两个 batch 请求；第 2 页只有第 101 个 Bot；`total=101`。 |
-| TC-02 | BCSFuse 返回额外 worker ID | 额外 key 不会出现在前端结果。 |
-| TC-03 | BCSFuse 调用异常 | `/search` 返回 `502000`，不降级为 Backend-only。 |
-| TC-04 | 多个 owner 使用同一 bot_id | 仅完整 `{bot_id}:{owner_id}` 匹配的记录返回。 |
+| TC-01 | 空与非空地址调用 unavailable port | 均 fail closed，接口返回 `502000`。 |
+| TC-02 | metadata 含非 Bot、重复、未知或空白地址 | fail closed，不返回部分结果。 |
+| TC-03 | 同一 bot_id、不同 entity_id | 仅 exact address 可 join。 |
+| TC-04 | 502 OpenAPI response | 有 `ErrorEnvelope` 与固定 `502000` 示例。 |
 
 ## Ship Spec
 
-- 分支：`feat/openapi-bot-public-catalog`
-- 发布前确认目标环境的 `bcsfuse.base_url` 已配置并可访问 `/v1/workers/batch`。
-- 如需回滚，回滚本功能提交可恢复原 Backend-only 目录搜索；不要在线改为静默降级。
+- 当前阶段不得配置或发布任何推测的 BCS HTTP integration。
+- 若要启用 Catalog Search，先单独批准并实现 tenant/caller-scoped metadata protocol、DI binding、
+  contract tests 和 deployment configuration；完成前保持当前 fixed-502 行为。
+- 回滚只需恢复本功能改动；绝不能在线改为静默 Backend-only fallback。

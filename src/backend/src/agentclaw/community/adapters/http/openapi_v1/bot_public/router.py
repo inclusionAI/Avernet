@@ -8,7 +8,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import ValidationError
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
+from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    Envelope,
+    ErrorEnvelope,
+    Page,
+    error_example,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
@@ -71,7 +76,13 @@ def _public_bot(record: Mapping[str, Any]) -> PublicBot:
     "/search",
     response_model=Envelope[Page[PublicBot]],
     response_model_exclude_none=True,
-    responses={502: {"description": "Catalog service unavailable"}},
+    responses={
+        502: {
+            "model": ErrorEnvelope,
+            "description": "Catalog service unavailable",
+            **error_example(502, "Catalog service unavailable"),
+        }
+    },
 )
 async def search_public_bots(
     request: Request,
