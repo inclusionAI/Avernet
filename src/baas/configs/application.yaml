@@ -37,6 +37,14 @@ user_config:
     create_schema: true
     seed_data: true
 
+  # Aliyun ACK 集群连接配置（用于 plugins.sandbox.arca = "aliyun_ack"）
+  aliyun_ack_cluster:
+    api_server: "https://k8s.example.com"
+    token: ""
+    namespace: "default"
+    default_images:
+      ALIYUN_ACK_OPENCLAW: "openclaw:latest"
+
   bot_service:
     proxy_base_url: "https://bot_service.example.com"
     proxy_ws_base_url: "wss://bot_service.example.com"
