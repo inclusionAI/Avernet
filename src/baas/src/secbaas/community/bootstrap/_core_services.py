@@ -241,6 +241,8 @@ class CoreServiceContainer(containers.DeclarativeContainer):
 
     # ── Desktop infrastructure providers ───────────────────────────────────────────
 
+    ttl_renewal_schedule_repository = providers.Dependency()
+
     connection_management = providers.Dependency()
 
     worker_router = providers.Singleton(
@@ -456,6 +458,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         device_template_service=device_template_service,
         secret_plugin=secret_plugin,
         callback_handler=device_callback_handler,
+        schedule_repo=ttl_renewal_schedule_repository,
     )
 
     session_service = providers.Singleton(
