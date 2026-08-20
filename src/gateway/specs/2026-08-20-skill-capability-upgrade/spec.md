@@ -298,10 +298,10 @@ Repo 唯一内容源是 `security_release/aiworkbench` master。用户不能通�
 
 | Method | Path | Request | 语义 |
 | --- | --- | --- | --- |
-| GET | `/openapi/v1/skills/repository` | `keyword?,path?,sort=latest\|hottest,page,page_size` | 全局 Repo 列表与搜索；真实分页 |
-| GET | `/openapi/v1/skills/repository/tree` | 无 Bot 参数 | aiworkbench 目录树 |
-| GET | `/openapi/v1/skills/{skill_id}` | path | Repo 资产详情；Phase 2 additive 支持 Consumable Space Skill |
-| POST | `/openapi/v1/skills/repository/sync` | 无 Bot/Entity/Engine/Git URL | 同步 aiworkbench master |
+| GET | `/openapi/v1/bots/skills/repository` | `keyword?,path?,sort=latest\|hottest,page,page_size` | 全局 Repo 列表与搜索；真实分页 |
+| GET | `/openapi/v1/bots/skills/repository/tree` | 无 Bot 参数 | aiworkbench 目录树 |
+| GET | `/openapi/v1/bots/skills/repository/{skill_id}` | path | Repo 资产详情；Phase 2 additive 支持 Consumable Space Skill |
+| POST | `/openapi/v1/bots/skills/repository/sync` | 无 Bot/Entity/Engine/Git URL | 同步 aiworkbench master |
 
 Sync 同步执行、环境级互斥；并发返回 `409 SYNC_IN_PROGRESS`。一次完成 fetch、extract、DB scan、cache refresh，不提供新的 `sync-status` 或异步 Operation。
 
@@ -393,7 +393,7 @@ POST   /openapi/v1/spaces/{space_id}/market-favorites/search
 | POST | `/openapi/v1/spaces/{space_id}/skills` | raw ZIP + 幂等键创建 Identity、V1 Draft、Binding、Owner |
 | POST | `/openapi/v1/spaces/{space_id}/skills/import-from-git` | JSON Git source + 幂等键，映射同一创建命令 |
 | GET | `/openapi/v1/spaces/{space_id}/skills/{skill_id}` | 创作详情：Draft、Version、Attempt、权限 |
-| GET | `/openapi/v1/skills/{skill_id}` | 消费详情：只返回 latest Published |
+| GET | `/openapi/v1/bots/skills/repository/{skill_id}` | 消费详情：只返回 latest Published |
 
 创建事务包含 `ac_skill Identity + V1 Draft facts + ac_skill_space_binding + 唯一 Skill Owner`；SC RPC 不进入事务。Git 导入后与 ZIP 创建同模型，不转换 Legacy Repo Skill。
 
