@@ -10,23 +10,24 @@
   / `code.alipay.com/mirrors/Avernet`
 - Head / base: `feat/openapi-bot-public-catalog` /
   `dev_refactory_collaboration` in both independent repositories.
-- Avernet PR: [#1238](https://github.com/inclusionAI/Avernet/pull/1238), MERGED;
-  the BCS metadata-port follow-up is local-only pending a decision on a new PR.
+- Avernet PR: [#1293](https://github.com/inclusionAI/Avernet/pull/1293), OPEN;
+  follow-up to merged PR [#1238](https://github.com/inclusionAI/Avernet/pull/1238).
 - Conflict-resolution merge: `e9d4b4ed8` merges current
   `dev_refactory_collaboration` (`3d6531c5`) into the topic without rewriting
   or force-pushing branch history.
 - OCB mirror PR: BLOCKED; its topic-branch push was rejected by remote project
   authorization.
-- Planned titles:
-  - Avernet: `feat(openapi): add public bot catalog endpoints`
+- Final titles:
+  - Avernet follow-up: `feat(bot-catalog): add fail-closed BCS metadata port`
   - OCB mirror: `feat(gateway): expose public bot catalog routes`
-- PR description sections: Problem / Solution / Validation / Compatibility and risk / Spec
+- PR description sections: Problem / Solution / Validation / Compatibility and risk / Spec / Related issues
 - 人工意见模式: auto
 
 ## PR 判定
 
 | 结果 | 证据 | 说明 |
 |---|---|---|
+| Avernet follow-up PR | [#1293](https://github.com/inclusionAI/Avernet/pull/1293) | OPEN；head `bcbe0c94a87770946e5ffbccabb5c9c43c612770`，base `dev_refactory_collaboration`。Title 使用语义化 outcome，body 含 Problem / Solution / Validation / Compatibility and risk / Spec / Related issues。 |
 | Avernet open PR | [#1238](https://github.com/inclusionAI/Avernet/pull/1238) | Created after verifying its base is `dev_refactory_collaboration`, head is `feat/openapi-bot-public-catalog`, and its title/body contain all required sections. Initial head: `70c54bdd5`. |
 | PR merge conflict | resolved | GitHub reported `CONFLICTING` after the base advanced to `3d6531c5`. The merge kept both the Bot Workshop/local additions and the public-catalog routes, regenerated `bots.openapi.json`, and did not touch `.superpowers/`. |
 | OCB mirror PR | BLOCKED | Its local gateway-sync commit is `e23bf4ff3`; `git push --no-verify -u origin feat/openapi-bot-public-catalog` was rejected because the current user has no access to `mirrors/Avernet`. |
@@ -114,4 +115,12 @@ PR head `e595d27ef` 的首次 Backend unit tests 失败已收敛为三个测试�
 - 当前实现不调用或猜测 BCS HTTP API；production/local/test 均绑定 fail-closed unavailable service，Catalog Search 固定返回 `502000`。Legacy Search 与 Discover 保持原行为。
 - 本地最终验证：Backend 全量 `13149 passed, 21 skipped`；Gateway schema/auth/forwarding `228 passed`；全部改动 Python 文件 Ruff、JSON、OpenAPI 重生成一致性和 `git diff --check` 通过。Gateway 项目级全量另有 12 个非本分支失败：10 个 live/baseline E2E 因未启动 Gateway 而连接失败，2 个项目级 Ruff 门禁命中三个相对 base 未改动的文件；未越界修改这些基线问题。
 - 整分支 Review 为 Ready，安全审查无 high/medium 候选；顺序测试与 Core 分层修复的 scoped rereview 为 PASS（Critical/Important/Minor 均为 0）。
-- 当前结论：后续 PR `NOT_CREATED`。创建新的远端分支/PR 需要用户确认；未强推、未合并、未回复或 resolve review thread。
+- 当前结论：后续 PR [#1293](https://github.com/inclusionAI/Avernet/pull/1293) 已创建且为 `OPEN`；未强推、未合并、未回复或 resolve review thread。
+
+### PR #1293 初始收敛状态
+
+- PR: OPEN，head `bcbe0c94a87770946e5ffbccabb5c9c43c612770`，base `dev_refactory_collaboration`，metadata 已核验。
+- 自动意见: CLEAR；创建后未发现 review、inline comment 或普通 comment。
+- ACI/CI: PENDING；BCS E2E、Singlebox coverage、BCS/BaaS unit tests 为 QUEUED，Backend/Engine/Gateway unit tests 为 IN_PROGRESS，均未当作通过。
+- 人工意见: CLEAR；创建后未发现人工 review 或 comment。
+- 下一步: 等待当前 head 的远端 jobs 终态，再按实际评论与失败日志继续收敛。
