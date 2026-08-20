@@ -1565,6 +1565,9 @@ class SkillSetRepository(
                 self.SkillSetSkill(
                     skill_set_id=int(skill_set_id),
                     skill_id=int(skill_id),
+                    # System Default is a separate platform projection and is
+                    # deliberately excluded from ordinary-set uniqueness.
+                    bot_id=None if skill_set.is_default else skill_set.bolt_id,
                     user_id=_normalize_user_id(user_id),
                     env=get_current_env(),
                 )

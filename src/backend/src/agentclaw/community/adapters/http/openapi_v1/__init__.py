@@ -351,6 +351,7 @@ _GRANT_CHECKED_SUBGROUPS = [
     # rather than the engine-runtime one, and mounting it here is what gives it
     # both. See ``bots/engine_config.py``.
     engine_config_router,
+    skill_sets_router,
     identity_router,
     resources_router,
     routines_router,
