@@ -42,10 +42,6 @@ key_id = "bare"
 # Runtime lookup only; set this environment variable to real secret material.
 signing_key_env = "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE"
 
-# Private backend routes remain disabled when this section is omitted.
-# [internal_api]
-# trusted_backend_provider_id = "replace-with-backend-provider-id"
-
 [cors]
 allowed_origins = [
   "https://bcs.example.com",

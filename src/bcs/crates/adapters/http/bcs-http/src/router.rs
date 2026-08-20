@@ -148,6 +148,11 @@ fn build_api_routes() -> Router<HttpAppState> {
             delete(routes::providers::delete_provider_bot),
         )
         .route(
+            "/providers/{provider_id}/bots/{bot_uuid}/attributes",
+            get(routes::providers::get_provider_bot_attributes)
+                .patch(routes::providers::patch_provider_bot_attributes),
+        )
+        .route(
             "/providers/{provider_id}/disable",
             post(routes::providers::disable_provider),
         )

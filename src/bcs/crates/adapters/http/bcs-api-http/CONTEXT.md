@@ -6,8 +6,6 @@
   boundaries.
 - Request/response DTO translation and the common response envelope.
 - An injectable Gateway Principal verification boundary.
-- An independently mounted Provider-admin authentication boundary for private
-  Bot-attribute GET/PATCH routes.
 - The focused authenticated
   `POST /openapi/v1/collaboration/sessions/{sid}/token` delivery slice.
 - The nine-operation Session File surface, including protected
@@ -39,9 +37,8 @@
 ## Configuration
 
 - Production bootstrap mounts this Router directly at its contract-owned
-  `/openapi/v1/collaboration/**` and `/internal/v1/**` paths, injects completed
-  V1 application services, and applies separate Gateway Principal and internal
-  Provider authentication boundaries.
+  `/openapi/v1/collaboration/**` paths and injects completed V1 application
+  services behind the Gateway Principal boundary.
 - Bootstrap injects the Session File application facade and a validated public
   collaboration base URL. The adapter does not infer public URLs from request
   headers.
@@ -54,8 +51,7 @@
 ## Runtime ownership
 
 This crate owns HTTP parsing, versioned wire DTOs, Gateway token verification,
-internal Provider credential/header parsing, request IDs, envelopes, no-store
-token responses, and HTTP error mapping.
+request IDs, envelopes, no-store token responses, and HTTP error mapping.
 It also owns the public/protected Router split, raw file-body streaming, and
 OpenAPI upload/share URL projection. Identity-policy selection happens before
 dispatch, while resource authorization remains in the application facade.

@@ -8,9 +8,8 @@
 - Composition of the V1 Bot, Group, Session/Message, and Invitation/Friendship
   application facades from the same runtime stores and core services used by
   legacy HTTP, then direct mounting of the versioned collaboration Router.
-- Composition of the private Bot-attributes application facade and a
-  fail-closed Provider-admin authenticator restricted by
-  `internal_api.trusted_backend_provider_id`.
+- Composition of the Bot-attributes application facade consumed by the
+  Provider-scoped HTTP adapter.
 - Fail-closed resolution of the dedicated group-session WebSocket signing key,
   composition of one session-connection application service from the shared
   V1 Session facade, and mounting of its focused token issuance and WebSocket
@@ -45,8 +44,9 @@
 ## Configuration
 
 - This crate owns config file discovery, env parsing, and CLI/bootstrap flags.
-- Missing `internal_api.trusted_backend_provider_id` leaves private routes
-  mounted but denies every caller; an explicitly blank value is invalid.
+- `allowed_switch_provider_ids` controls backend-only Provider Bot operations,
+  including delivery switching and Bot attribute management; an empty list
+  denies both capabilities.
 - Only this crate selects local, test, or remote concrete implementations.
 - Production resolves group-session WebSocket JWT signing material through the
   configured `SecretAccessPort` using `[group_session_ws].signing_key_secret`

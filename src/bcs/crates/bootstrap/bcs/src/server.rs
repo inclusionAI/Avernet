@@ -30,7 +30,6 @@ use crate::config::{
     BcsConfig, CollaborationTemplateStorageKind, GatewayPrincipalConfig, GroupSessionWsConfig,
     LlmConfig, LlmProviderType,
 };
-use crate::internal_api::ProviderAdminInternalAuthenticator;
 use crate::lifecycle::LifecycleOrchestrator;
 use crate::plugins::{
     DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
@@ -1414,7 +1413,6 @@ fn build_openapi_v1_state(
     invite_token_secret: Vec<u8>,
     control_plane_repo: Arc<dyn BotControlPlaneRepoPort>,
     provider_repos: &ProviderRepoBundle,
-    provider_core: Arc<dyn ProviderCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     groups: Arc<dyn GroupCoreService>,
     friends: Arc<dyn FriendCoreService>,
@@ -1451,10 +1449,6 @@ fn build_openapi_v1_state(
         BotServiceConfig {
             env: relation_env.clone(),
         },
-    ));
-    let internal_provider_authenticator = Arc::new(ProviderAdminInternalAuthenticator::new(
-        provider_core,
-        config.internal_api.trusted_backend_provider_id.clone(),
     ));
     let group_service = Arc::new(
         GroupServiceImpl::new(
@@ -1532,10 +1526,7 @@ fn build_openapi_v1_state(
     )
     .with_bot_service(bot_service)
     .with_session_file_service(session_file_service, session_file_url_projector)
-    .with_internal_bot_attributes(
-        internal_bot_attributes_service,
-        internal_provider_authenticator,
-    )
+    .with_internal_bot_attributes_service(internal_bot_attributes_service)
 }
 
 pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifier> {
@@ -2021,7 +2012,6 @@ impl Default for BcsServerState {
             invite_token_secret.clone(),
             control_plane_repo,
             &provider_repos,
-            provider_core.clone(),
             bot_registry.clone(),
             sessions.clone(),
             friend_store.clone(),
@@ -3430,7 +3420,6 @@ impl BcsServer {
             invite_token_secret.clone(),
             control_plane_repo,
             &provider_repos,
-            provider_core.clone(),
             bot_registry.clone(),
             sessions.clone(),
             friend_store.clone(),
@@ -4065,7 +4054,6 @@ impl BcsServer {
             invite_token_secret.clone(),
             control_plane_repo,
             &provider_repos,
-            provider_core.clone(),
             bot_registry.clone(),
             sessions.clone(),
             friend_svc.clone(),

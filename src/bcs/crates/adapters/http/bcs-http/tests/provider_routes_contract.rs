@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use axum::{
     Router,
     body::{Body, to_bytes},
@@ -14,12 +15,15 @@ use bcs_http::{
     service_key::{ApiKeyEntry, ApiKeyRegistry, sha256_hex},
     state::{ChainUserIdentityPort, HttpAppState, HttpUserIdentity, UserIdentityPort},
 };
+use bcs_service_api::application::v1::ApplicationError;
 use bcs_user_directory_api::{UserDirectoryPlugin, UserDirectoryProfile};
 use bcs_service_api::{
-    ActorKind, EnsureOwnerEdgesResult, BotRegistryCoreService, ProviderBotBindingRepoPort,
+    ActorKind, BotInternalAttributes, BotRegistryCoreService, EnsureOwnerEdgesResult,
+    FriendCheckInStrategy, InternalBotAttributesService, PatchBotInternalAttributes,
+    ProviderBotBindingRepoPort,
     ProviderBotCoreService, ProviderCoreService, ProviderCredential, ProviderCredentialRepoPort,
     ProviderRecord, ProviderRepoPort, ProviderStreamGrayList, RelationCoreService, RelationEdge,
-    ServiceResult,
+    ServiceResult, UserVisibility,
 };
 use bcs_services_container::Services;
 use serde_json::{Value, json};
@@ -33,7 +37,39 @@ struct TestApp {
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     registry: Arc<BotCore>,
     relation: Arc<RecordingRelationCoreService>,
+    internal_bot_attributes: Arc<RecordingInternalBotAttributesService>,
     _temp_dir: TempDir,
+}
+
+#[derive(Default)]
+struct RecordingInternalBotAttributesService {
+    patches: tokio::sync::Mutex<Vec<PatchBotInternalAttributes>>,
+}
+
+#[async_trait]
+impl InternalBotAttributesService for RecordingInternalBotAttributesService {
+    async fn get(&self, _bot_id: String) -> Result<BotInternalAttributes, ApplicationError> {
+        Ok(BotInternalAttributes {
+            user_visibility: UserVisibility::Protected,
+            friend_ext: serde_json::Map::new(),
+            friend_check_in_strategy: FriendCheckInStrategy::Approval,
+        })
+    }
+
+    async fn patch(
+        &self,
+        command: PatchBotInternalAttributes,
+    ) -> Result<BotInternalAttributes, ApplicationError> {
+        let attributes = BotInternalAttributes {
+            user_visibility: command.user_visibility.unwrap_or(UserVisibility::Protected),
+            friend_ext: command.friend_ext.clone().unwrap_or_default(),
+            friend_check_in_strategy: command
+                .friend_check_in_strategy
+                .unwrap_or(FriendCheckInStrategy::Approval),
+        };
+        self.patches.lock().await.push(command);
+        Ok(attributes)
+    }
 }
 
 fn test_app() -> TestApp {
@@ -84,6 +120,7 @@ fn test_app_with_options(
     let provider_credentials: Arc<dyn ProviderCredentialRepoPort> = provider_store.clone();
     let provider_bindings: Arc<dyn ProviderBotBindingRepoPort> = provider_store.clone();
     let provider_stream_gray_list = Arc::new(ProviderStreamGrayList::default());
+    let internal_bot_attributes = Arc::new(RecordingInternalBotAttributesService::default());
     let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
     let registry = Arc::new(BotCore::with_provider_repos(
         bot_repo,
@@ -124,6 +161,7 @@ fn test_app_with_options(
             HttpAppState::new(services)
                 .with_user_identity(user_identity)
                 .with_allowed_switch_provider_ids(allowed_provider_ids)
+                .with_internal_bot_attributes_service(internal_bot_attributes.clone())
                 .with_service_api_keys(Arc::new(ApiKeyRegistry::new(service_keys)))
                 .with_provider_stream_gray_list(provider_stream_gray_list.clone()),
         ),
@@ -132,6 +170,7 @@ fn test_app_with_options(
         provider_stream_gray_list,
         registry,
         relation,
+        internal_bot_attributes,
         _temp_dir: temp_dir,
     }
 }
@@ -1797,6 +1836,202 @@ async fn register_provider_bot_reuses_provider_ref_as_bot_uuid_for_allowed_switc
         .await
         .expect("bot should use provider ref as uuid");
     assert_eq!(bot.created_by.as_deref(), Some("alice"));
+}
+
+#[tokio::test]
+async fn provider_bot_attributes_require_an_allowlisted_provider_admin_and_bound_bot() {
+    let provider_id = "prv_internal_attributes".to_string();
+    let admin_token = "admin-token";
+    let TestApp {
+        app,
+        provider_repo,
+        provider_credentials,
+        internal_bot_attributes,
+        _temp_dir,
+        ..
+    } = test_app_with_allowed_switch_provider_ids(vec![provider_id.clone()]);
+    provider_repo
+        .insert_provider(ProviderRecord {
+            provider_id: provider_id.clone(),
+            name: "Provider".to_string(),
+            config: json!({
+                "downlink": {
+                    "enabled": true,
+                    "webhook_url": "https://provider.example.com/bcs/webhook",
+                    "auth_mode": "static_bearer",
+                    "protocol_version": "1.0"
+                }
+            })
+            .to_string(),
+            created_by: "11111111".to_string(),
+            owners: r#"["11111111"]"#.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed provider");
+    provider_credentials
+        .insert_credential(ProviderCredential {
+            provider_id: provider_id.clone(),
+            credential_kind: "provider_admin".to_string(),
+            secret_value: admin_token.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed provider admin credential");
+
+    let register = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/providers/{provider_id}/bots"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "name": "Teamclaw Bot",
+                        "owners": ["alice"],
+                        "provider_bot_ref": "teamclaw-bot:alice"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(register.status(), StatusCode::OK);
+
+    let get = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/providers/{provider_id}/bots/teamclaw-bot:alice/attributes"
+                ))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(get.status(), StatusCode::OK);
+    let get_body = response_json(get).await;
+    assert_eq!(get_body["user_visibility"], "protected");
+    assert_eq!(get_body["friend_ext"], json!({}));
+    assert_eq!(get_body["friend_check_in_strategy"], "APPROVAL");
+
+    let patch = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!(
+                    "/providers/{provider_id}/bots/teamclaw-bot:alice/attributes"
+                ))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "user_visibility": "public",
+                        "friend_ext": {"department_code": "TECH"},
+                        "friend_check_in_strategy": "DEPT_FREE"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(patch.status(), StatusCode::OK);
+    let patch_body = response_json(patch).await;
+    assert_eq!(patch_body["user_visibility"], "public");
+    assert_eq!(patch_body["friend_ext"]["department_code"], "TECH");
+    assert_eq!(patch_body["friend_check_in_strategy"], "DEPT_FREE");
+
+    for body in [
+        json!({}),
+        json!({"user_visibility": "public", "forged": true}),
+        json!({"user_visibility": null}),
+        json!({"friend_ext": []}),
+    ] {
+        let invalid = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!(
+                        "/providers/{provider_id}/bots/teamclaw-bot:alice/attributes"
+                    ))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    }
+
+    let patches = internal_bot_attributes.patches.lock().await;
+    assert_eq!(patches.len(), 1);
+    assert_eq!(patches[0].bot_id, "teamclaw-bot:alice");
+    assert_eq!(patches[0].user_visibility, Some(UserVisibility::Public));
+    assert_eq!(
+        patches[0].friend_check_in_strategy,
+        Some(FriendCheckInStrategy::DeptFree)
+    );
+}
+
+#[tokio::test]
+async fn provider_bot_attributes_fail_closed_when_provider_is_not_allowlisted() {
+    let TestApp { app, _temp_dir, .. } = test_app();
+    let provider = register_provider_as(&app, "11111111").await;
+    let provider_id = provider["provider_id"].as_str().expect("provider id");
+    let admin_token = provider["provider_admin_token"]
+        .as_str()
+        .expect("provider admin token");
+    let registered_bot = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/providers/{provider_id}/bots"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "name": "Code Reviewer",
+                        "owners": ["11111111"],
+                        "provider_bot_ref": "reviewer"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bot_uuid = response_json(registered_bot).await["bot_uuid"]
+        .as_str()
+        .expect("bot uuid")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/providers/{provider_id}/bots/{bot_uuid}/attributes"))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
