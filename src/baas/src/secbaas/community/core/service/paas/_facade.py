@@ -1443,8 +1443,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
             result = await service.extend_ttl(raw_paas_device_id, ttl_minutes)
 
             self._logger.info(
-                f"Device TTL extended: {paas_device_id}, "
-                f"success={result}"
+                f"Device TTL extended: {paas_device_id}, success={result}"
             )
             return result
 

@@ -12,8 +12,6 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
-from secbaas.community.core.utils.env_utils import get_current_env
-
 from secbaas.community.api.device_manage import (
     DestroyDeviceResponse,
     DeviceConfig,
