@@ -1,18 +1,19 @@
-"""Schemas for the caller group — the verified caller's own identity."""
+"""Schemas for the org group — the verified caller's own identity."""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class CallerIdentity(BaseModel):
+class OrgUserIdentity(BaseModel):
     """The end user the caller's credential names, as resolved at the gateway.
 
     Every field is read off the verified principal — nothing is taken from the
     request, so the answer cannot be steered. The display attributes are
     optional because absence is a real state of the identity contract: an
     identity provider may not supply them, and they are null rather than
-    invented when absent.
+    invented when absent. The department attributes are optional the same way:
+    they are null until the identity provider supplies them.
     """
 
     # The docstring above is published verbatim as the schema's description
@@ -26,6 +27,9 @@ class CallerIdentity(BaseModel):
                 "display_name": "Alice",
                 "full_name": "Alice Zhang",
                 "tenant": "acme-tenant",
+                "dept_no": "D-1001",
+                "dept_name": "Platform Engineering",
+                "dept_path": "Ant Group/Platform",
             }
         }
     )
@@ -48,4 +52,16 @@ class CallerIdentity(BaseModel):
     )
     tenant: str = Field(
         description="The tenant this caller's requests are scoped to."
+    )
+    dept_no: str | None = Field(
+        description="The caller's department number, when the identity provider "
+        "supplied one; null otherwise."
+    )
+    dept_name: str | None = Field(
+        description="The caller's department name, when the identity provider "
+        "supplied one; null otherwise."
+    )
+    dept_path: str | None = Field(
+        description="The caller's department lineage path, when the identity "
+        "provider supplied one; null otherwise."
     )

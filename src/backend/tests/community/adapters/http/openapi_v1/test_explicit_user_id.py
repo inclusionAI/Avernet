@@ -280,6 +280,8 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers/{{server_code}}"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
+    # The department directory is a tenant-wide catalogue — not the caller's.
+    ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
     # Tenant-identical marketplace searches expose no user-scoped state.
@@ -334,12 +336,12 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: ``path`` then moved 54 → 56 when the two Bot Chats operations were added.
 #:
-#: ``none`` then moved 35 → 36 with the caller-identity read: it answers who
+#: ``none`` then moved 35 → 36 with the user-identity read: it answers who
 #: the caller is and addresses no bot.
 #:
 #: The combined Bot Workshop surface then adds a net 27 bot-addressed operations
 #: and five account-level operations. The trace filter remains the sole query
-#: placement. Together with the caller-identity read, the combined contract is
+#: placement. Together with the user-identity read, the combined contract is
 #: 83/1/45. Channels adds six Bot-addressed operations, and the Bot Space
 #: reassignment endpoint adds one more, yielding 90/1/45. Session Favorites then
 #: adds three Bot-addressed operations, Caller preparation adds one more, and the
