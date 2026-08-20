@@ -1,0 +1,245 @@
+"""TaskExecutor:三模态派发(single_bot/coop_group/bbs)+ 旁路 poller 登记入口。
+
+dispatch(async):上游 start_run caller loop 上 gather+Semaphore await 端口 IO,拿到 run_id 即返回
+(不等待结果);bbs 仅记日志。form_coop_group(async):BCS 建群壳。poller 为独立 daemon sidecar(同 TaskHarness)。
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from typing import Any
+
+from agentclaw.community.core.task.domain.models import TaskNode
+from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
+from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+
+from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import BcsCreateGroupRequest
+from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
+    OpenApiAuthError, OpenApiBadRequestError,
+)
+from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+    BcsGroupHandle, SingleBotHandle,
+)
+
+logger = logging.getLogger(__name__)
+_DISPATCH_CONCURRENCY = 8
+_BCS_PARTICIPANT_ROLES = {"driver", "consultant", "manager", "worker", "observer"}
+
+
+class TaskExecutor:
+    def __init__(self, *, bot, bcs, formatter, context, sink, poller, identity_resolver=None) -> None:
+        """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
+        context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
+        R0 骨架允许 None;bbs 路径不依赖任何端口。"""
+        self._bot = bot
+        self._bcs = bcs
+        self._formatter = formatter
+        self._context = context
+        self._sink = sink
+        self._poller = poller
+        self._identity_resolver = identity_resolver
+        self._group_meta: dict[str, dict[str, Any]] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
+
+    async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[bool]:
+        sem = asyncio.Semaphore(_DISPATCH_CONCURRENCY)
+
+        async def _one(node: TaskNode) -> bool:
+            mode = node.run_info.run_mode
+            if mode == "bbs":
+                logger.info("[task_executor] bbs node dispatched (no-op): task=%s node=%s assignee=%s",
+                            node.task_id, node.node_id, node.run_info.assignee)
+                return True
+            if mode == "single_bot":
+                return await self._dispatch_single_bot(node, sem)
+            if mode == "coop_group":
+                return await self._dispatch_coop_group(node, sem)
+            return False
+
+        return list(await asyncio.gather(*[_one(n) for n in toDoTaskList]))
+
+    async def _dispatch_single_bot(self, node: TaskNode, sem: asyncio.Semaphore) -> bool:
+        bot_id = node.run_info.assignee
+        loop_task_id = f"{node.task_id}::{node.node_id}"
+        async with sem:
+            try:
+                await self._bot.ensure_grant(bot_id)
+                ctx = self._context.build(node.task_id, node.node_id)
+                message = self._formatter.format_execute(ctx, node)
+                run_id = await self._bot.send_message(
+                    bot_id=bot_id, message=message,
+                    metadata={"biz_task_id": node.task_id},
+                )
+            except (OpenApiAuthError, OpenApiBadRequestError):
+                return False
+            self._poller.register(SingleBotHandle(
+                loop_task_id=loop_task_id, run_id=run_id, bot_id=bot_id,
+                registered_at=time.monotonic(),
+            ))
+            return True
+
+    async def _dispatch_coop_group(self, node: TaskNode, sem: asyncio.Semaphore) -> bool:
+        group_id = node.run_info.assignee
+        meta = self._group_meta.get(group_id)
+        collab_mode = (meta or {}).get("collab_mode", "chat")
+        loop_task_id = f"{node.task_id}::{node.node_id}"
+        async with sem:
+            if collab_mode == "state_machine":
+                return await self._dispatch_state_machine(node, group_id, meta, loop_task_id)
+            ctx = self._context.build(node.task_id, node.node_id)
+            prompt = self._formatter.format_execute(ctx, node)
+            session_id = await self._bcs.create_session(group_id, bootstrap_prompt=prompt)
+            self._poller.register(BcsGroupHandle(
+                loop_task_id=loop_task_id, group_id=group_id, collab_mode=collab_mode,
+                registered_at=time.monotonic(), session_id=session_id, run_id=None,
+            ))
+            return True
+
+    async def _dispatch_state_machine(self, node, group_id, meta, loop_task_id) -> bool:
+        ctx = self._context.build(node.task_id, node.node_id)
+        prompt = self._formatter.format_execute(ctx, node)
+        definition_ref = (meta or {}).get("definition_ref")
+        run_id = await self._bcs.start_state_machine_run(
+            group_id, definition_yaml=None, definition_ref=definition_ref,
+            session_id=None, input={"query": prompt},
+        )
+        self._poller.register(BcsGroupHandle(
+            loop_task_id=loop_task_id, group_id=group_id, collab_mode="state_machine",
+            registered_at=time.monotonic(), session_id=None, run_id=run_id,
+        ))
+        return True
+
+    async def form_coop_group(self, gf: GroupFormation) -> str:
+        bot_ids = list(dict.fromkeys(gf.bot_ids))
+        if not bot_ids:
+            raise BotIdentityResolutionError("cannot form a group without bots")
+        if self._identity_resolver is None:
+            raise BotIdentityResolutionError("BCS Bot identity resolver is not configured")
+        mode = gf.collab_mode
+        member_roles = {
+            str(member.get("bot_id")): str(member.get("role"))
+            for member in (gf.members_info or [])
+            if isinstance(member, dict) and member.get("bot_id") and member.get("role")
+        }
+        raw_bindings = self._state_machine_bindings(gf) if mode == "state_machine" else {}
+        manager_bot_id = gf.extend_props.get("manager_bot_id") if mode == "manager_worker" else None
+        originator_bot_id = gf.extend_props.get("originator_bot_id")
+        referenced_ids = list(bot_ids)
+        if manager_bot_id:
+            referenced_ids.append(str(manager_bot_id))
+        if originator_bot_id:
+            referenced_ids.append(str(originator_bot_id))
+        for spec in raw_bindings.values():
+            referenced_ids.extend(spec["bot_ids"])
+        referenced_ids = list(dict.fromkeys(referenced_ids))
+        if any(bot_id not in bot_ids for bot_id in referenced_ids):
+            unknown = [bot_id for bot_id in referenced_ids if bot_id not in bot_ids]
+            raise BotIdentityResolutionError(
+                f"group bindings reference bots outside GroupFormation.bot_ids: {unknown}"
+            )
+        resolved = self._identity_resolver.resolve_many(referenced_ids)
+
+        def bcs_uuid(product_bot_id: str) -> str:
+            try:
+                return resolved[product_bot_id]
+            except KeyError as exc:
+                raise BotIdentityResolutionError(
+                    f"BCS identity resolver omitted bot_id: {product_bot_id}"
+                ) from exc
+
+        participants = []
+        for index, product_bot_id in enumerate(bot_ids):
+            participant: dict[str, Any] = {"bot_uuid": bcs_uuid(product_bot_id)}
+            requested_role = member_roles.get(product_bot_id, "")
+            if mode == "state_machine":
+                # workflow 逻辑 binding 与 BCS ParticipantRole 是两套概念；researcher 等 binding
+                # 只进 participant_bindings，群成员角色保持 BCS 合法 driver/consultant。
+                participant["role"] = "driver" if index == 0 else "consultant"
+            elif requested_role in _BCS_PARTICIPANT_ROLES:
+                participant["role"] = requested_role
+            else:
+                participant["role"] = "driver" if index == 0 else "consultant"
+            participants.append(participant)
+        req_kwargs: dict[str, Any] = {
+            "driver_bot": bcs_uuid(bot_ids[0]),
+            "participants": participants,
+        }
+        if mode == "manager_worker":
+            mgr = str(manager_bot_id or bot_ids[0])
+            req_kwargs["group_strategy"] = "manager_worker"
+            req_kwargs["driver_bot"] = bcs_uuid(mgr)
+            req_kwargs["participants"] = [
+                {"bot_uuid": bcs_uuid(mgr), "role": "manager"}] + [
+                {"bot_uuid": bcs_uuid(b), "role": "worker"} for b in bot_ids if b != mgr]
+        elif mode == "state_machine":
+            req_kwargs["group_strategy"] = "state_machine"
+            # GroupFormation.extend_props["definition_yaml"] → BCS collaboration_definition_yaml
+            def_yaml = gf.extend_props.get("definition_yaml") or gf.extend_props.get("collaboration_definition_yaml")
+            if def_yaml is not None:
+                req_kwargs["collaboration_definition_yaml"] = def_yaml
+            if raw_bindings:
+                req_kwargs["participant_bindings"] = {
+                    binding: {
+                        "source": spec["source"],
+                        "bot_ids": [bcs_uuid(bot_id) for bot_id in spec["bot_ids"]],
+                    }
+                    for binding, spec in raw_bindings.items()
+                }
+            req_kwargs["start_initial_run"] = False
+        if originator_bot_id:
+            req_kwargs["originator"] = bcs_uuid(str(originator_bot_id))
+        service_spec = gf.extend_props.get("service_spec")
+        if service_spec:
+            req_kwargs["service_spec"] = service_spec
+        req = BcsCreateGroupRequest(**req_kwargs)
+        res = await self._bcs.create_group(req)
+        self._group_meta[res.group_id] = {
+            "collab_mode": mode, "gf": gf,
+            "definition_ref": res.definition_ref, "session_id": res.session_id,
+        }
+        return res.group_id
+
+    @staticmethod
+    def _state_machine_bindings(gf: GroupFormation) -> dict[str, dict[str, Any]]:
+        """返回 workflow 逻辑 binding → 产品 Bot IDs；绝不使用 Bot ID 充当 binding key。"""
+        explicit = gf.extend_props.get("participant_bindings")
+        bindings: dict[str, dict[str, Any]] = {}
+        if explicit is not None:
+            if not isinstance(explicit, dict):
+                raise BotIdentityResolutionError("participant_bindings must be a mapping")
+            for binding, raw_spec in explicit.items():
+                name = str(binding).strip()
+                if not name:
+                    raise BotIdentityResolutionError("participant binding name must not be empty")
+                if isinstance(raw_spec, dict):
+                    ids = raw_spec.get("bot_ids") or []
+                    source = str(raw_spec.get("source") or "manual")
+                else:
+                    ids = raw_spec
+                    source = "manual"
+                if isinstance(ids, str):
+                    ids = [ids]
+                if not isinstance(ids, list) or not ids:
+                    raise BotIdentityResolutionError(
+                        f"participant binding must contain bot_ids: {name}"
+                    )
+                bindings[name] = {
+                    "source": source,
+                    "bot_ids": [str(bot_id) for bot_id in ids],
+                }
+            return bindings
+
+        for member in gf.members_info or []:
+            if not isinstance(member, dict):
+                continue
+            role = str(member.get("role") or "").strip()
+            bot_id = str(member.get("bot_id") or "").strip()
+            if not role or not bot_id:
+                continue
+            binding = bindings.setdefault(role, {"source": "manual", "bot_ids": []})
+            binding["bot_ids"].append(bot_id)
+        return bindings
+
+    async def aclose(self) -> None:
+        if self._poller is not None:
+            self._poller.stop()

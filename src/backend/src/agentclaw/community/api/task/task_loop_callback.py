@@ -18,5 +18,5 @@ class TaskLoopCallbackProtocol(Protocol):
     async def report_result(self, data: TaskCallbackData) -> None:
         """任务完成或失败(success/data or fail_detail):适配层组装 TaskNodePatch
         → 编排核 on_report(await) → graph.update_task_node_info → 按 verdict 翻态/传播/补救。
-        协程化:on_report async,回投不阻塞调用方(任务执行耗时,回投驱动编排核 async)。"""
+        协程化:on_report async,回投不阻塞调用方(任务执行是耗时任务,回投驱动编排核 async)。"""
         ...
