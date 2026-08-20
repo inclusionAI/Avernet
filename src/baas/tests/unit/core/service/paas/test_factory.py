@@ -103,7 +103,7 @@ def factory():
     from secbaas.community.core.service.paas import PaasSandboxPlugins
     from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin
     from secbaas.community.plugins.sandbox.desktop import StubDesktopSandboxPlugin
-    from secbaas.community.plugins.sandbox.teclaw import StubTeClawBotPlugin
+    from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
 
     return PaasServiceFactory(
         template_service=MagicMock(),

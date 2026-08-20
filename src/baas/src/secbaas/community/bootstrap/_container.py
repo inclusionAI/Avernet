@@ -50,46 +50,6 @@ from .plugins import PluginContainer  # noqa: E402
 logger = get_logger("bootstrap")
 
 
-def _build_db_config(config) -> DatabaseConfig:
-    """Construct DatabaseConfig from the DI Configuration provider."""
-    from secbaas.community.spi.database import PluginDatabaseType
-
-    plugin_type = PluginDatabaseType(_read_config(config, ConfigKey.PLUGIN_DATABASE))
-    try:
-        db_url = _read_config(config, ConfigKey.DATABASE_URL)
-    except ConfigError:
-        if plugin_type == PluginDatabaseType.SQLITE_ORM:
-            raise
-        db_url = ""
-
-    def _opt(key: ConfigKey) -> str:
-        try:
-            return _read_config(config, key)
-        except ConfigError:
-            return ""
-
-    def _opt_bool_default_false(key: ConfigKey, default: bool = False) -> bool:
-        try:
-            val = _read_config(config, key)
-        except ConfigError:
-            return default
-        if isinstance(val, bool):
-            return val
-        return str(val).strip().lower() in {"1", "true", "yes", "on"}
-
-    return DatabaseConfig(
-        plugin_type=plugin_type,
-        db_url=db_url,
-        create_schema=_opt_bool_default_false(ConfigKey.CREATE_SCHEMA),
-        seed_data=_opt_bool_default_false(ConfigKey.SEED_DATA),
-        mariadb_host=_opt(ConfigKey.MARIADB_HOST) or "127.0.0.1",
-        mariadb_port=int(_opt(ConfigKey.MARIADB_PORT) or 3306),
-        mariadb_database=_opt(ConfigKey.MARIADB_DATABASE),
-        mariadb_user=_opt(ConfigKey.MARIADB_USER),
-        mariadb_password=_opt(ConfigKey.MARIADB_PASSWORD),
-    )
-
-
 def _provider_label(provider) -> str:
     """Human-readable label: ``Singleton → DefaultPublishAdminService``."""
     label = type(provider).__name__
@@ -244,18 +204,12 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ),
     )
 
-    # ── Database config (resolved lazily, used by DatabaseManagerLifecycle) ──
-    db_config = providers.Singleton(
-        _build_db_config,
-        config=config,
-    )
-
     # ── Lifecycle-ordered component list ─────────────────────────────────────
     # Start order: DatabaseManager → ConnectionManager → InstanceRouter →
     #   WorkerRouter → CronLifecycle → BotRequestWorker → LocalProcessManager.
     # Stop order: reverse of above.
     lifecycle_components = providers.List(
-        providers.Singleton(DatabaseManagerLifecycle, db_config=db_config),
+        providers.Singleton(DatabaseManagerLifecycle),
         services.connection_management,
         services.instance_router,
         services.worker_router,

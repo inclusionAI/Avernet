@@ -1,6 +1,6 @@
 # 基础配置
 app_name: "secbaas"
-workers: 8
+workers: 1
 
 log_config:
   trace_log_dir: ""
@@ -16,14 +16,14 @@ user_config:
   # 插件配置
   plugins:
     auth: "stub"
-    secret: "stub"          # stub | real
-    cache: "stub"           # stub | real
-    bot_service: "stub"     # real | local | stub
+    secret: "env"          # stub | real
+    cache: "redis"           # stub | real
+    bot_service: "stub"  # real | local | stub
     engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
     file_transfer: "stub"  # stub | real
-    database: "sqlite"
+    database: "mariadb"
     sandbox:
-      arca: stub #  arca_sdk or stub
+      arca: aliyun_ack #  arca_sdk or stub
       desktop: stub # real or stub
       k8s: stub # real or stub
       docker: stub # real or stub
@@ -31,10 +31,17 @@ user_config:
     bot:
       teclaw: stub # real or stub
 
+  # 数据库连接配置
   database:
-    database_url: "sqlite:////tmp/secbaas.db"
-    create_schema: true
-    seed_data: true
+    database_url: "${DATABASE_URL}"
+    create_schema: false
+    seed_data: false
+
+  # Redis 缓存配置（plugins.cache = "redis" 时需要）
+  cache_redis:
+    url: "${REDIS_URL}"
+    socket_timeout: 5.0
+    socket_connect_timeout: 5.0
 
   # Aliyun ACK 沙箱模板配置（第二类模板，用于 plugins.sandbox.arca = "aliyun_ack"）
   # 默认使用 dummy 值，启用该后端时才需填充 cluster 与 pod 真实值，无需新增配置键。
@@ -60,8 +67,8 @@ user_config:
       envs: {}
 
   bot_service:
-    proxy_base_url: "https://proxy.example.com"
-    proxy_ws_base_url: "wss://proxy.example.com"
+    proxy_base_url: "https://bot_service.example.com"
+    proxy_ws_base_url: "wss://bot_service.example.com"
     adapter_port: 20003
     ws_path: "/api/openclaw/ws"
     connect_timeout: 10
@@ -86,17 +93,17 @@ user_config:
     default_timeout: 30.0            # 请求默认超时秒数（metadata 未指定 timeout 时使用）
     origin: "https://teamclaw.example.com"
 
+  # BotRun 队列 Worker 配置
+  bot_run_queue:
+    enabled: false                    # 是否启用队列 Worker
+
   teamclaw:
     base_url: "https://teamclaw.example.com"
     timeout: 30
 
-  # OAuth 客户端配置（单机模式）
+  # OAuth 客户端配置
   oauth:
     base_url: "https://oauth.example.com"
-
-  # 续期调度器引擎选择（"legacy" 用 DeviceTtlTimerTask，"deadline" 用 DeadlineRenewalScheduler）
-  renewal_scheduler:
-    engine: "legacy"
 
   # 设备 TTL 定时器配置（每 30 分钟扫描整个到期队列并续期+探活）
   device_ttl_timer:
@@ -109,47 +116,6 @@ user_config:
     lock_expire_seconds: 1750  # 分布式锁租约（秒），须 < cron 间隔以允许其它实例在轮次间获取，默认: 1750
     dry_run: false  # 测试模式：只打印日志
 
-  # BotRun 队列恢复配置（周期性重置心跳过期的 RUNNING 请求回 PENDING）
-  bot_run_recovery:
-    enabled: true  # 是否启用定时任务
-    cron_interval_seconds: 60  # 执行间隔（秒），默认: 60
-    lock_name: "bot_run_recovery_lock"  # 分布式锁名称
-    lock_expire_seconds: 120  # 分布式锁过期时间（秒），默认: 120
-    lock_renew_interval_seconds: 30  # 分布式锁自动续期间隔（秒），默认: 30（0 表示禁用续期）
-    stale_seconds: 120  # RUNNING 超过此时长无心跳视为悬挂（秒），默认: 120
-    dry_run: false  # 测试模式：只打印日志
-
-  # 文件传输轮询器配置（定期检测 OSS 上传完成并触发 device 下载）
-  file_transfer_poller:
-    enabled: true  # 是否启用定时任务
-    cron_interval_seconds: 10  # 执行间隔（秒），默认: 10
-    upload_timeout_seconds: 3600  # 上传超时（秒），超时未完成写入的 ticket 标记 FAILED
-    lock_expire_seconds: 300  # per-ticket 分布式锁过期时间（秒），默认: 300
-    max_concurrent_tickets: 5  # 单次扫描并发处理的 ticket 数上限
-    dry_run: false  # 测试模式：只打印日志
-
-  # BotRun 队列 Worker 配置（单机模式）
-  bot_run_queue:
-    enabled: false
-    session_lock_expire_seconds: 300
-    session_lock_renew_seconds: 60
-    qpm_refresh_seconds: 30.0
-    poll_interval_seconds: 0.1
-    discover_limit: 50
-    candidates_per_bot: 5
-    max_concurrent: 50
-    heartbeat_interval_seconds: 30.0
-    machine_count: 1
-    bucket_sweep_interval_seconds: 300.0
-    bucket_idle_ttl_seconds: 600.0
-
-  # BCN 下行协议配置
-  bcn:
-    api_key:
-      prefix: "9acXMLaU"
-    uplink:
-      base_url: "https://bcn.example.com"
-      provider_id: "prv_4b7fce5b"
 
   # Bot Health Checker 配置
   bot_health_checker:
@@ -160,7 +126,6 @@ user_config:
       extend_when_remaining_hours: 16  # 剩余时间 ≤ 16 小时才续期
       target_ttl_hours: 24             # 续期目标 TTL（小时）
 
-  # 聊天日志关联后端配置
   bot_chat_log_relation:
     base_url: "https://backend.example.com"
     timeout: 10
@@ -170,9 +135,31 @@ user_config:
   # 用于 proxypass URL 和 WS relay 构造。
   agentclawproxy:
     host:
-      dev: "agentclawproxy-dev.secbaas.ai"
-      pre: "agentclawproxy-pre.secbaas.ai"
-      prod: "agentclawproxy-prod.secbaas.ai"
+      dev: "agentclawproxy-dev.example.com"
+      pre: "agentclawproxy-pre.example.com"
+      prod: "agentclawproxy-prod.example.com"
+
+  # Poolab API 端点（按环境）
+  poolab:
+    endpoint:
+      dev: "https://poolab-dev.example.com"
+      pre: "https://poolab-pre.example.com"
+      prod: "https://poolab-prod.example.com"
+
+# File transfer OSS storage backend configuration (enterprise/prod deployments only)
+  file_transfer_oss:
+    endpoint: ""
+    external_endpoint: ""
+    bucket_name: ""
+    staging_root_path: "baas-file-transfer"
+    secret_name: ""
+
+  secbaas:
+    callback:
+      host:
+        dev: "https://secbaas-dev.example.com"
+        pre: "https://secbaas-pre.example.com"
+        prod: "https://secbaas-prod.example.com"
 
   # API Gateway 配置
   api_gateway:
@@ -180,33 +167,12 @@ user_config:
       - "operator-001"
       - "operator-002"
       - "operator-003"
+      - "000001"
 
-  # 部署环境探测配置（单机模式使用通用环境变量名称）
+  # 部署环境探测配置
   env:
-    deploy_env_var: "DEPLOY_ENV"
-
-  # SecBaaS 回调服务器 URL（按环境）
-  # 设备 start hook 完成后通过此 URL 回调状态。
-  secbaas:
-    callback:
-      host:
-        dev: "https://secbaas-dev.secbaas.ai"
-        pre: "https://secbaas-pre.secbaas.ai"
-        prod: "https://secbaas-prod.secbaas.ai"
-
-  # File transfer OSS storage backend configuration (enterprise/prod deployments only)
-  file_transfer_oss:
-    endpoint: ""
-    external_endpoint: ""
-    bucket_name: ""
-    staging_root_path: "baas-file-transfer"
-    secret_name: ""
-  # Poolab API 端点（按环境，单机模式）
-  poolab:
-    endpoint:
-      dev: "https://poolab-dev.example.com"
-      pre: "https://poolab-pre.example.com"
-      prod: "https://poolab-prod.example.com"
+    # 用于探测当前部署环境的环境变量名称
+    deploy_env_var: "ALI_YUN_ACK"
 
   # 应用级动态调试/展示标记
   app:
