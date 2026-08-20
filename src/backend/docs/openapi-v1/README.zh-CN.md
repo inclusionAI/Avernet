@@ -1082,6 +1082,10 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
+- **2026-08-20** —— **新增认证 Bot Catalog 查询。** 提供
+  `GET /openapi/v1/bots/catalog/search` 与 `/discover`；User 和 App 身份读取
+  相同的公开白名单投影，不再接受 `user_id` 或返回用户 `friendship`。
+
 - **2026-08-19** —— **新增 Bot 归属空间变更能力。** 新增
   `PUT /openapi/v1/bots/{bot_id}/space`：显式传 `user_id` 和数值型目标
   `space_id`；校验 Bot owner、目标空间成员关系，应用按

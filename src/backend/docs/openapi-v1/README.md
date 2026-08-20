@@ -983,19 +983,19 @@ literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-all  approvals  authorized  ceiling  check-name  connection  engine  identity
+all  approvals  authorized  catalog  ceiling  check-name  connection  engine  identity
 loadtest  local  logs  market  mcp  models  resources  routines  sessions  skills  spaces
 work-order-notifications  work-orders
 ```
 
-Nine of those twenty-one — `approvals`, `connection`, `engine`, `identity`,
+Nine of those twenty-two — `approvals`, `connection`, `engine`, `identity`,
 `models`, `resources`, `routines`, `sessions`, `skills` — are held **only by the
 retiring addresses**. Bot-first addressing moved every bot-scoped component out
 of that segment, so once the deprecated addresses are removed the list is the
 twelve that remain:
 
 ```text
-all  authorized  ceiling  check-name  loadtest  local  logs  market  mcp  spaces
+all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  mcp  spaces
 work-order-notifications  work-orders
 ```
 
@@ -2077,3 +2077,10 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   a body field holding a credential, add its name substring to
   `_SENSITIVE_NAME_PARTS`.** No status code, response body, or envelope shape
   changed.
+
+
+## Changelog
+
+- **2026-08-20** — Added authenticated Bot catalog reads at
+  `GET /openapi/v1/bots/catalog/search` and `/discover`. User and App
+  principals see the same allowlisted public projection.
