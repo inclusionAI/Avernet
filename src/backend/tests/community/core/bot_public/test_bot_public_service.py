@@ -83,6 +83,104 @@ def _make_catalog_bot(bot_id: str, entity_id: str):
 
 
 # ---------------------------------------------------------------------------
+# public_bcs_bot – new-version BCS-delegated publish
+# ---------------------------------------------------------------------------
+
+class TestPublicBcsBot:
+    def test_starts_approval_with_public_scope_in_context_no_ac_bots_lookup(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True,
+            "puid": "p1",
+            "state": "PROCESSING",
+        }
+        bot_repo = MagicMock()
+        svc = _make_service(process_service=process, bot_repository=bot_repo)
+
+        result = svc.public_bcs_bot(
+            bot_id="bot-in-bcs:entity1",
+            owner_id="u1",
+            public_scope="user",
+            operator=_make_operator(staff_id="op_user"),
+        )
+
+        assert result["puid"] == "p1"
+        process.start_approval.assert_called_once()
+        kw = process.start_approval.call_args.kwargs
+        assert kw["applicant"] == "op_user"            # operator.staff_id
+        assert kw["biz_type"] == "botpublic"           # reused from the legacy flow
+        assert "process_code" not in kw                # reuses the default
+        assert kw["context"]["bot_id"] == "bot-in-bcs:entity1"
+        assert kw["context"]["owner_id"] == "u1"
+        assert kw["context"]["public_scope"] == "user"
+        # bot_id is the BCS bot identity, not ac_bots.bot_id — the legacy
+        # reverse-lookup is untouched (its interface is pending a BCS-side API).
+        bot_repo.get_by_id_and_owner.assert_not_called()
+
+    def test_completed_runs_callback_inline_with_public_scope(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True,
+            "puid": "p1",
+            "state": "COMPLETED",
+            "lastOperate": "AGREE",
+        }
+        svc = _make_service(process_service=process)
+        with patch.object(svc, "handle_public_approval_callback") as cb:
+            svc.public_bcs_bot(
+                bot_id="b1",
+                owner_id="u1",
+                public_scope="user",
+                operator=_make_operator(),
+            )
+        cb.assert_called_once()
+        ckw = cb.call_args.kwargs
+        assert ckw["bot_id"] == "b1"
+        assert ckw["owner_id"] == "u1"
+        assert ckw["puid"] == "p1"
+        assert ckw["last_operate"] == "agree"
+        assert ckw["public_scope"] == "user"
+
+    def test_not_completed_does_not_invoke_callback(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True,
+            "puid": "p1",
+            "state": "PROCESSING",
+        }
+        svc = _make_service(process_service=process)
+        with patch.object(svc, "handle_public_approval_callback") as cb:
+            svc.public_bcs_bot(
+                bot_id="b1", owner_id="u1", public_scope="user",
+                operator=_make_operator(),
+            )
+        cb.assert_not_called()
+
+    def test_failed_start_raises_service_error(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": False,
+            "error_msg": "workflow unavailable",
+        }
+        svc = _make_service(process_service=process)
+        with pytest.raises(BotPublicServiceError, match="workflow unavailable"):
+            svc.public_bcs_bot(
+                bot_id="b1", owner_id="u1", public_scope="user",
+                operator=_make_operator(),
+            )
+
+    def test_rejects_empty_owner_id(self):
+        svc = _make_service()
+        with pytest.raises(BotPublicServiceError, match="Owner ID"):
+            svc.public_bcs_bot("b1", "", "user", _make_operator())
+
+    def test_rejects_empty_public_scope(self):
+        svc = _make_service()
+        with pytest.raises(BotPublicServiceError, match="public_scope"):
+            svc.public_bcs_bot("b1", "u1", "", _make_operator())
+
+
+# ---------------------------------------------------------------------------
 # public_bot – input validation
 # ---------------------------------------------------------------------------
 
@@ -371,35 +469,35 @@ class TestHandlePublicApprovalCallback:
         result = svc.handle_public_approval_callback("bot1", "owner1", "puid1", "agree")
         assert result["success"] is False
 
-    # -- bcs_pub: new-version publish short-circuits the legacy ac_bots path --
+    # -- public_scope: new-version publish short-circuits the legacy ac_bots path --
 
-    def test_bcs_pub_user_skips_ac_bots_and_logs(self):
+    def test_public_scope_user_skips_ac_bots_and_logs(self):
         svc, _, bot_repo = self._make_svc_with_bot({
             "public_approval": {"puid": "puid1", "status": "PROCESSING",
                                 "permission_owner": "owner", "public": "1",
                                 "applicant": "op_user"}
         })
         result = svc.handle_public_approval_callback(
-            "bot1", "owner1", "puid1", "agree", bcs_pub="user",
+            "bot1", "owner1", "puid1", "agree", public_scope="user",
         )
         assert result["success"] is True
         assert result["public"] is None
-        assert "bcs_pub=user" in result["message"]
+        assert "public_scope=user" in result["message"]
         # New-version path must NOT touch ac_bots at all.
         bot_repo.get_by_id_and_owner.assert_not_called()
         bot_repo.update_by_owner.assert_not_called()
 
-    def test_bcs_pub_agent_also_new_version(self):
+    def test_public_scope_agent_also_new_version(self):
         svc = _make_service()
         result = svc.handle_public_approval_callback(
-            "bot1", "owner1", "puid1", "disagree", bcs_pub="agent",
+            "bot1", "owner1", "puid1", "disagree", public_scope="agent",
         )
         assert result["success"] is True
         assert result["public"] is None
-        assert "bcs_pub=agent" in result["message"]
+        assert "public_scope=agent" in result["message"]
 
-    def test_bcs_pub_empty_string_runs_legacy(self):
-        # bcs_pub="" must fall through to the legacy path (here: bot lookup).
+    def test_public_scope_empty_string_runs_legacy(self):
+        # public_scope="" must fall through to the legacy path (here: bot lookup).
         svc, _, bot_repo = self._make_svc_with_bot({
             "public_approval": {"puid": "puid1", "status": "PROCESSING",
                                 "permission_owner": "owner", "public": "1",
@@ -407,29 +505,14 @@ class TestHandlePublicApprovalCallback:
         })
         with patch.object(svc, "_sync_access_mode_and_relations_or_raise"):
             svc.handle_public_approval_callback(
-                "bot1", "owner1", "puid1", "agree", bcs_pub="",
+                "bot1", "owner1", "puid1", "agree", public_scope="",
             )
         bot_repo.get_by_id_and_owner.assert_called()
 
 
 # ---------------------------------------------------------------------------
-# _build_public_approval_context — bcs_pub stamping
+# _build_public_approval_context
 # ---------------------------------------------------------------------------
-
-class TestBuildApprovalContextBcsPub:
-    def test_includes_bcs_pub_when_set(self):
-        svc = _make_service()
-        ctx = svc._build_public_approval_context(
-            _make_bot(), _make_operator(), bcs_pub="user",
-        )
-        assert ctx["bcs_pub"] == "user"
-
-    def test_omits_bcs_pub_when_none(self):
-        svc = _make_service()
-        ctx = svc._build_public_approval_context(
-            _make_bot(), _make_operator(), bcs_pub=None,
-        )
-        assert "bcs_pub" not in ctx
 
 
 # ---------------------------------------------------------------------------

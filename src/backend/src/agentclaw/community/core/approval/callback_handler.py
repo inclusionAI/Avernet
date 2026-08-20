@@ -30,13 +30,13 @@ def handle_approval_callback(
     last_operate = (data.get("last_operate") or "").upper()
     owner_id = data.get("owner_id") or ""
     bot_id = data.get("bot_id") or ""
-    # bcs_pub 区分新版发布(走 BCS, 值如 user/agent)与老版发布(写 ac_bots)；
+    # public_scope 区分新版发布(走 BCS, 值如 user/agent)与老版发布(写 ac_bots)；
     # 平台回传字符串，非空即新版、空即老版，原样透传给 service 分支。
-    bcs_pub = (data.get("bcs_pub") or "").strip()
+    public_scope = (data.get("public_scope") or "").strip()
 
     logger.info(
-        "[回调] global_unique_id=%s, last_operate=%s, bcs_pub=%s",
-        global_unique_id, last_operate, bcs_pub or "(legacy)",
+        "[回调] global_unique_id=%s, last_operate=%s, public_scope=%s",
+        global_unique_id, last_operate, public_scope or "(legacy)",
     )
 
     # 从 global_unique_id 提取 publish_id（取 _ 分隔的最后部分）
@@ -46,5 +46,5 @@ def handle_approval_callback(
 
     return bot_public_service.handle_public_approval_callback(
         bot_id=bot_id, owner_id=owner_id, puid=global_unique_id,
-        last_operate=last_operate, bcs_pub=bcs_pub,
+        last_operate=last_operate, public_scope=public_scope,
     )
