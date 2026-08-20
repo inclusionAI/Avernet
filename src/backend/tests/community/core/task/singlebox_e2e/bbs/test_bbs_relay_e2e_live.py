@@ -47,7 +47,8 @@ from fastapi_injector import attach_injector
 from fastapi.testclient import TestClient
 from injector import Injector, Module, provider, singleton
 
-from agentclaw.community.adapters.http.task.router import router as task_router
+from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
+from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.core.task.domain.models import (
@@ -140,6 +141,7 @@ def _build_client() -> tuple[TestClient, Injector]:
     injector = Injector([TaskModule(), _StubDiscoverModule()])
     app = FastAPI()
     app.include_router(task_router)
+    app.include_router(task_internal_router)
     attach_injector(app, injector)
     return TestClient(app), injector
 
@@ -202,7 +204,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
         adapter = SingleboxEngineAdapter(backend_base_url=_BACKEND, user_id=_USER_ID)
 
         def _dash() -> dict:
-            return client.get("/api/task/dashboard", params={"task_id": TASK_ID}).json()["data"]
+            return client.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": TASK_ID}).json()["data"]
 
         def _node(g: dict, nid: str) -> dict | None:
             return next((n for n in g["tasks"] if n["node_id"] == nid), None)
@@ -213,7 +215,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
             for i, sub in enumerate(SUB_DOMAINS):
 
                 # 步② CAS 占根(同 bot 幂等;前段 result 已释放 claim,这里重新 claim)
-                r = client.post("/api/task/bbs/claim", json={"task_id": TASK_ID, "bot_id": jy_id})
+                r = client.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": TASK_ID, "bot_id": jy_id})
                 self.assertEqual(r.status_code, 200, f"claim 未成功(@{sub}):{r.text}")
                 # 接单确认:claim 后根 bbs_owner == 金庸
                 g = _dash()
@@ -224,7 +226,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                 )
                 # CAS 排他确认:owner 再 claim 同任务应 409(仅首段验一次)
                 if i == 0:
-                    r2 = client.post("/api/task/bbs/claim", json={"task_id": TASK_ID, "bot_id": owner_id})
+                    r2 = client.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": TASK_ID, "bot_id": owner_id})
                     self.assertEqual(r2.status_code, 409, f"第二 bot claim 未被 CAS 拒(应 409):{r2.text}")
                     print(f"[relay@{sub}] claim 200 bbs_owner=金庸 (CAS: owner→409 ✓)")
                 else:
@@ -232,7 +234,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
 
                 # 步④ 挂一个 scoped 节点(该方向找架构师)+ start
                 r = client.post(
-                    "/api/task/bbs/attach",
+                    "/api/v1/collaboration/tasks/bbs/attach",
                     json={
                         "task_id": TASK_ID,
                         "parent_node_id": TASK_ID,  # 根
@@ -294,7 +296,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
 
                 # 步⑤ 回投:PASS + checkpoint;根收口由框架经 owner 复核自判(非 bot 声明,无 root_verified)
                 r = client.post(
-                    "/api/task/bbs/result",
+                    "/api/v1/collaboration/tasks/bbs/result",
                     json={
                         "task_id": TASK_ID,
                         "node_id": node_id,
@@ -328,7 +330,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
         # 5) 断言:各方向 scoped bbs 节点 DONE(assignee=金庸,带架构师 checkpoint)+ bbs_mode 已置。
         # 根/图是否 DONE 由框架复核根 gap 自判(无 root_verified);本 in-process 编排无 owner bot→不收口,
         # 故不断言图 DONE(根收口见 natual live 测 ``test_bbs_relay_e2e_natual``)。
-        g = client.get("/api/task/dashboard", params={"task_id": TASK_ID}).json()["data"]
+        g = client.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": TASK_ID}).json()["data"]
         self.assertTrue(g["extend_props"].get("bbs_mode"), "图未置 bbs_mode")
         self.assertGreater(
             total_architects, 0,

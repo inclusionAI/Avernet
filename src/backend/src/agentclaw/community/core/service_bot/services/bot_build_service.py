@@ -18,7 +18,7 @@ import json
 import subprocess
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from injector import inject
@@ -29,7 +29,7 @@ from agentclaw.community.core.bot_management.engines.registry import (
     resolve_bot_engine,
 )
 from agentclaw.community.core.bot_management.services.engine_resolver import (
-    resolve_engine_for_bot,
+    resolve_runtime_engine_for_bot,
 )
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import DeviceService
@@ -165,7 +165,7 @@ class BotBuildService:
             owner_id = bot.get("owner_id") or bot.get("entity_id")
             if self._bot_repository is not None:
                 try:
-                    resolved_engine = resolve_engine_for_bot(
+                    resolved_engine = resolve_runtime_engine_for_bot(
                         bot_id,
                         owner_id,
                         bot_repo=self._bot_repository,
@@ -717,6 +717,75 @@ class BotBuildService:
 
         return result
 
+    @staticmethod
+    def _normalize_extra_include_file(rel_path: str) -> str:
+        if not rel_path or "\x00" in rel_path:
+            raise BotBuildMigrationError(f"invalid extra include file path: {rel_path!r}")
+        parsed = PurePosixPath(rel_path)
+        if parsed.is_absolute() or ".." in parsed.parts or str(parsed) == ".":
+            raise BotBuildMigrationError(f"invalid extra include file path: {rel_path}")
+        return str(parsed)
+
+    def _sync_extra_include_files(
+        self,
+        *,
+        source_dir: Path,
+        target_dir: Path,
+        build_plan: EngineBuildPlan | None,
+        command_name: str,
+        error_message: str,
+        chown: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        if not build_plan or not build_plan.extra_include_files:
+            return
+
+        for rel_path in build_plan.extra_include_files:
+            try:
+                normalized = self._normalize_extra_include_file(rel_path)
+                source_file = source_dir / normalized
+                if not source_file.exists():
+                    logger.info(
+                        "[BotBuildService._sync_extra_include_files] "
+                        "Skip missing extra include file: %s",
+                        source_file,
+                    )
+                    continue
+                if not source_file.is_file():
+                    logger.warning(
+                        "[BotBuildService._sync_extra_include_files] "
+                        "Skip non-file extra include path: %s",
+                        source_file,
+                    )
+                    continue
+
+                target_file = target_dir / normalized
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                cmd = [
+                    "sudo",
+                    "rsync",
+                    "-av",
+                ]
+                if chown:
+                    cmd.append(f"--chown={chown}")
+                cmd.extend([str(source_file), str(target_file)])
+                self._run_local_command(
+                    cmd=cmd,
+                    command_name=f"{command_name} ({normalized})",
+                    error_message=error_message,
+                    timeout_seconds=timeout_seconds,
+                )
+            except Exception as exc:  # best-effort: do not block publish/restore
+                logger.warning(
+                    "[BotBuildService._sync_extra_include_files] "
+                    "Failed to sync extra include file %r from %s to %s: %s",
+                    rel_path,
+                    source_dir,
+                    target_dir,
+                    exc,
+                    exc_info=True,
+                )
+
     def _migrate_bot_instance(
         self,
         device_id: str,
@@ -807,6 +876,14 @@ class BotBuildService:
                 cmd=cmd,
                 command_name="rsync",
                 error_message="rsync migration failed",
+            )
+
+            self._sync_extra_include_files(
+                source_dir=source_dir,
+                target_dir=target_dir,
+                build_plan=build_plan,
+                command_name="rsync extra include",
+                error_message="rsync extra include file failed",
             )
 
             # 额外同步目录：例如 claude_code 需要把 source_dir 同级的 .claude
@@ -1255,6 +1332,16 @@ class BotBuildService:
             ],
             command_name="rsync draft restore",
             error_message="restore draft workspace failed",
+            timeout_seconds=remaining_timeout(),
+        )
+
+        self._sync_extra_include_files(
+            source_dir=artifact_dir,
+            target_dir=draft_dir,
+            build_plan=build_plan,
+            command_name="rsync draft restore extra include",
+            error_message="restore draft extra include file failed",
+            chown="1000:1000",
             timeout_seconds=remaining_timeout(),
         )
 

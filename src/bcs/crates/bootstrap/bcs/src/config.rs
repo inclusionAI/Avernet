@@ -683,6 +683,11 @@ pub struct BcsConfig {
     #[serde(default)]
     pub group_logger: Option<ding_logger::GroupLoggerConfig>,
 
+    /// Default execution deadline for HTTP Provider `chat.send` runs that do
+    /// not provide an explicit `timeout_ms`. Applied at process startup.
+    #[serde(default = "default_provider_chat_run_timeout_ms")]
+    pub provider_chat_run_timeout_ms: u64,
+
     /// Async chat run (bcs-cli chat-async) — max wall-clock a single run may
     /// be pending/running before the cleanup task marks it failed("timeout").
     /// Default 2 h 5 min, configurable up to 24 h.
@@ -798,6 +803,10 @@ fn default_max_group_messages() -> i64 {
 
 fn default_register_path() -> String {
     "/bcn/register".to_string()
+}
+
+fn default_provider_chat_run_timeout_ms() -> u64 {
+    bcs_service_api::DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS
 }
 
 fn default_async_chat_run_timeout_ms() -> u64 {
@@ -1018,6 +1027,7 @@ impl Default for BcsConfig {
             auth: AuthChainConfig::default(),
             cors: CorsConfig::default(),
             group_logger: None,
+            provider_chat_run_timeout_ms: default_provider_chat_run_timeout_ms(),
             async_chat_run_timeout_ms: default_async_chat_run_timeout_ms(),
             async_chat_run_retention_ms: default_async_chat_run_retention_ms(),
             async_chat_poll_wait_max_ms: default_async_chat_poll_wait_max_ms(),
@@ -1413,6 +1423,12 @@ impl BcsConfig {
 }
 
 fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::Error>> {
+    if config.provider_chat_run_timeout_ms == 0 {
+        return Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "provider_chat_run_timeout_ms must be greater than zero",
+        )));
+    }
     config.gateway_principal.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -1481,12 +1497,42 @@ mod tests {
         assert_eq!(config.bots_base_dir, PathBuf::from("/bots"));
         assert!(config.fusion_provider.is_none());
         assert_eq!(config.max_history_per_session, 1000);
+        assert_eq!(config.provider_chat_run_timeout_ms, 10_800_000);
         assert_eq!(config.async_chat_run_timeout_ms, 7_500_000);
         assert!(config.security.outbound_url.block_private_networks);
         assert!(!config.security.outbound_url.allow_loopback);
         assert_eq!(
             config.group_session_ws.signing_key_secret,
             "bcn-group-session-ws-jwt"
+        );
+    }
+
+    #[test]
+    fn provider_chat_run_timeout_can_be_configured() {
+        let toml = r#"
+            bots_base_dir = "/bots"
+            provider_chat_run_timeout_ms = 14_400_000
+        "#;
+
+        let config: BcsConfig = toml::from_str(toml).expect("parse provider chat run timeout");
+
+        assert_eq!(config.provider_chat_run_timeout_ms, 14_400_000);
+    }
+
+    #[test]
+    fn provider_chat_run_timeout_rejects_zero() {
+        let toml = r#"
+            bots_base_dir = "/bots"
+            provider_chat_run_timeout_ms = 0
+        "#;
+
+        let config: BcsConfig = toml::from_str(toml).expect("parse provider chat run timeout");
+        let error = validate_loaded_config(&config).expect_err("zero timeout must be rejected");
+
+        assert!(
+            error
+                .to_string()
+                .contains("provider_chat_run_timeout_ms must be greater than zero")
         );
     }
 

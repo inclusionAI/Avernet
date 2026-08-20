@@ -128,7 +128,10 @@ from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skills_pool.reconcile_task import (
     SkillsPoolReconcileWakeupListener,
 )
-from agentclaw.community.core.skills_pool.models import pool_paths_for_engine
+from agentclaw.community.core.skills_pool.models import (
+    FILESYSTEM_POOL_ENGINES,
+    pool_paths_for_engine,
+)
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
@@ -154,7 +157,6 @@ from agentclaw.community.core.skill_center.services.local_skill_delete_service i
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
 )
-from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
@@ -178,7 +180,6 @@ from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.core.repository.implementations.skill_center.sync_log import SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository
 from agentclaw.community.core.repository.implementations.skill_center.propagation_log import SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository
-from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
 
 
 def _template_service_cls():
@@ -196,7 +197,7 @@ def _build__ext_info_provider(injector: Injector):
         )
         if not isinstance(template_config, dict):
             return None
-        return {"aicoding": {"template_config": template_config}}
+        return {"template_config": template_config}
 
     return provider
 
@@ -316,7 +317,6 @@ class SkillCenterModule(Module):
         skill_set_service_factory: SkillSetServiceFactory,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
-        cleanup_repo: LocalSkillCleanupRepository,
         injector: Injector,
     ) -> LocalSkillUploadServiceProtocol:
         return LocalSkillUploadService(
@@ -328,17 +328,8 @@ class SkillCenterModule(Module):
             skill_set_service_factory,
             audit_log_repo,
             edit_guard,
-            cleanup_repo,
             lambda: injector.get(DeviceContextResolver),
         )
-
-    @singleton
-    @provider
-    @inject
-    def local_skill_cleanup_repository(
-        self, db: DatabasePlugin
-    ) -> LocalSkillCleanupRepository:
-        return SqlLocalSkillCleanupRepository(db)
 
     @singleton
     @provider
@@ -378,7 +369,6 @@ class SkillCenterModule(Module):
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
         edit_guard: SkillsPoolEditGuard,
-        cleanup_repo: LocalSkillCleanupRepository,
         injector: Injector,
     ) -> LocalSkillDeleteServiceProtocol:
         return LocalSkillDeleteService(
@@ -388,7 +378,6 @@ class SkillCenterModule(Module):
             collaborator_service,
             skill_service_factory,
             edit_guard,
-            cleanup_repo,
             lambda: injector.get(DeviceContextResolver),
         )
 
@@ -554,13 +543,10 @@ class SkillCenterModule(Module):
         def resolve_pool_paths(
             owner_id: str,
             bot_id: str,
-            _requested_engine: str,
+            requested_runtime_engine: str,
         ) -> tuple[str, str, str] | None:
             bot = bot_repo.get_by_id_and_owner(bot_id, owner_id)
             if bot is None:
-                return None
-            engine = bot.get("active_engine")
-            if not isinstance(engine, str):
                 return None
             state = layout_repository.get(
                 BotSkillLayoutScope(
@@ -571,11 +557,21 @@ class SkillCenterModule(Module):
             )
             if not runtime_uses_pool_paths(state):
                 return None
-            paths = pool_paths_for_engine(engine)
+            if requested_runtime_engine not in FILESYSTEM_POOL_ENGINES:
+                logger.warning(
+                    "[SkillCenterModule] unsupported Pool runtime engine: "
+                    "owner_id=%s bot_id=%s engine=%s; falling back to legacy paths",
+                    owner_id,
+                    bot_id,
+                    requested_runtime_engine,
+                )
+                return None
+            paths = pool_paths_for_engine(requested_runtime_engine)
             return paths.active, paths.pool_local, paths.pool_repo
 
         return SkillServiceFactory(
             skill_repo=skill_repo,
+            bot_repo=bot_repo,
             skill_repo_sync=skill_repo_sync,
             category_repo=category_repo,
             device_fs_dispatcher=device_fs_dispatcher,

@@ -27,8 +27,7 @@ use bcs_service_api::application::session_files::{
     ShareMintCommand,
 };
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity,
-    CompleteSessionFile, SessionFileActorKind, SessionFileStatus, SessionFileView,
+    ApplicationError, CompleteSessionFile, SessionFileActorKind, SessionFileStatus, SessionFileView,
 };
 use bcs_service_api::port::repo::SessionFileListParams;
 use serde::Deserialize;
@@ -36,7 +35,9 @@ use serde_json::json;
 
 use bcs_storage_api::{ByteStream, ByteStreamTrait};
 
-use crate::routes::group_messages::{resolve_group_chat_caller, GroupChatCaller};
+use crate::routes::group_messages::{
+    GroupChatCaller, application_caller, resolve_group_chat_caller,
+};
 use crate::state::HttpAppState;
 
 /// Adapts an axum `Body` data stream into a `ByteStream` for proxy upload
@@ -316,39 +317,6 @@ fn caller_to_actor_ref(caller: &GroupChatCaller) -> ActorRef {
         GroupChatCaller::Human(h) => ActorRef {
             actor_kind: ActorKind::Human,
             actor_id: h.actor_id.clone(),
-        },
-    }
-}
-
-fn application_caller(caller: &GroupChatCaller) -> AuthenticatedCaller {
-    match caller {
-        GroupChatCaller::Bot { bot_uuid } => AuthenticatedCaller {
-            // The legacy bearer path authenticates exactly one Bot. Owner
-            // consistency applies only when Gateway supplies User and Bot
-            // identities together, so this adapter does not need a registry
-            // lookup merely to reconstruct an unused owner claim.
-            tenant: Some("legacy".to_string()),
-            user: None,
-            bot: Some(AuthenticatedBotIdentity {
-                bot_uuid: bot_uuid.clone(),
-                owner_id: String::new(),
-                app_id: 0,
-                agent_code: "legacy".to_string(),
-            }),
-            app: None,
-            access_key: None,
-        },
-        GroupChatCaller::Human(human) => AuthenticatedCaller {
-            tenant: None,
-            user: Some(AuthenticatedUserIdentity {
-                id: human.staff_no.clone(),
-                username: human.staff_no.clone(),
-                display_name: human.nick_name.clone(),
-                full_name: None,
-            }),
-            bot: None,
-            app: None,
-            access_key: None,
         },
     }
 }

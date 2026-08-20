@@ -46,7 +46,8 @@ from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
-    require_granted_bot,
+    refuse_app_only_caller,
+    require_granted_own_bot,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
@@ -63,6 +64,7 @@ from agentclaw.community.api.skill_set_service_factory import (
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
     AuthStatus,
+    AuthStatusUnavailableError,
     BotCreateSpec,
     complete_bot_authorization,
     create_bot_with_authorization,
@@ -97,6 +99,7 @@ from .schemas import (
     Bot,
     BotAuthPending,
     BotAuthStatus,
+    BotAuthStatusPoll,
     BotCreate,
     BotStatus,
     BotType,
@@ -119,7 +122,10 @@ logger = get_logger()
 #: application outright rather than authorize it. ``admission.py`` is the
 #: authority on which route is which; ``test_principal_seam.py`` fails if a
 #: declaration and a mode disagree.
-_GRANT_CHECKED = [Depends(require_granted_bot)]
+_GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
+
+#: What a ``REFUSED`` operation declares: no caller without an end user.
+_REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
 
@@ -242,6 +248,9 @@ def _sync_passport_identity(
     "",
     status_code=201,
     response_model=Envelope[Bot],
+    # REFUSED to a machine caller: no bot exists yet for a grant to cover, and
+    # creation spends the user's quota — see the mode's entry in `admission.py`.
+    dependencies=_REFUSES_APP_ONLY,
     responses={
         **USER_SCOPED_403,
         202: {
@@ -493,7 +502,7 @@ async def get_bots_ceiling(
     "/{bot_id}",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def get_bot(
@@ -511,7 +520,7 @@ async def get_bot(
     "/{bot_id}",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def update_bot(
@@ -567,7 +576,7 @@ async def update_bot(
     "/{bot_id}",
     response_model=Envelope[Deleted],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def delete_bot(
@@ -591,7 +600,7 @@ async def delete_bot(
     "/{bot_id}/restart",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def restart_bot(
@@ -611,98 +620,64 @@ async def restart_bot(
     return envelope(_to_bot(bot), request)
 
 
-@router.get(
-    "/{bot_id}/auth-status",
-    response_model=Envelope[BotAuthStatus],
-    responses={
-        **USER_SCOPED_403,
-        # This route's 400 is the one documented exception to the surface-wide
-        # ErrorEnvelope (whose ``data`` is null): a terminal authorization state
-        # is reported as a failure, but the state itself is the actionable part,
-        # so it stays in ``data``. Declared here so generated clients
-        # deserialize it against the model it actually returns.
-        400: {
-            "model": Envelope[BotAuthStatus],
-            "description": "Authorization did not complete; `data.status` "
-            "carries the terminal state (e.g. REJECTED, EXPIRED)",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "code": 400000,
-                        "message": "Authorization did not complete",
-                        "data": {
-                            "status": "REJECTED",
-                            "message": None,
-                            "bot": None,
-                        },
-                        "request_id": EXAMPLE_TRACE_ID,
-                    }
+#: Response table shared by the auth-status poll and its retiring GET spelling
+#: (``deprecated/auth_status.py``) — one declaration, so the two cannot drift.
+#:
+#: The 400 is the one documented exception to the surface-wide ErrorEnvelope
+#: (whose ``data`` is null): a terminal authorization state is reported as a
+#: failure, but the state itself is the actionable part, so it stays in
+#: ``data``. Declared here so generated clients deserialize it against the
+#: model it actually returns.
+AUTH_STATUS_RESPONSES = {
+    **USER_SCOPED_403,
+    400: {
+        "model": Envelope[BotAuthStatus],
+        "description": "Authorization did not complete; `data.status` "
+        "carries the terminal state (e.g. REJECTED, EXPIRED)",
+        "content": {
+            "application/json": {
+                "example": {
+                    "code": 400000,
+                    "message": "Authorization did not complete",
+                    "data": {
+                        "status": "REJECTED",
+                        "message": None,
+                        "bot": None,
+                    },
+                    "request_id": EXAMPLE_TRACE_ID,
                 }
-            },
+            }
         },
     },
-    dependencies=_GRANT_CHECKED,
-)
-@envelope_errors
-async def get_bot_auth_status(
-    bot_id: BotIdPath,
+}
+
+
+def _complete_auth_status(
+    *,
+    bot_id: str,
     request: Request,
-    owner_id: UserIdDep,
-    engine: Annotated[
-        str | None,
-        Query(
-            description="Echo of the engine the bot was requested with. "
-            "Required in practice on the 202 flow: creation completes here, "
-            "and an omitted value falls back to the deployment default."
-        ),
-    ] = None,
-    # Enum, not a bare str: validate_engine_cluster accepts only ACRA/ANDC,
-    # so a plain string would let a generated client compile
-    # ``cluster_name=foo`` that the server always rejects — the same
-    # contract/behaviour gap as F29/F35/F41. Create already models it this way.
-    cluster_name: Annotated[
-        ClusterName | None,
-        Query(
-            description="Echo of the cluster the bot was requested with; "
-            "validated against the engine exactly as on create."
-        ),
-    ] = None,
-    bot_name: Annotated[
-        str | None,
-        Query(description="Echo of the name the bot was requested with."),
-    ] = None,
-    bot_desc: Annotated[
-        str | None,
-        Query(description="Echo of the description the bot was requested with."),
-    ] = None,
-    bot_type: Annotated[
-        BotType | None,
-        Query(
-            description="Echo of the bot type the bot was requested with; "
-            "defaults to 'personal' when omitted."
-        ),
-    ] = None,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    passport_plugin: PassportPlugin = Injected(PassportPlugin),
-    auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
-) -> Envelope[BotAuthStatus]:
-    """Poll authorization for a pending creation; the bot is created on ISSUED.
+    owner_id: str,
+    engine: str | None,
+    cluster_name: ClusterName | None,
+    bot_name: str | None,
+    bot_desc: str | None,
+    bot_type: BotType | None,
+    bot_service: BotServiceProtocol,
+    passport_plugin: PassportPlugin,
+    auth_rel_plugin: AuthRelationshipPlugin,
+) -> Envelope[BotAuthStatus] | JSONResponse:
+    """Validate the echoed attributes, poll Passport, and map the outcome.
 
-    On the 202 create flow the bot is only actually created here, so the
-    caller must re-supply the attributes it created with — the optional query
-    parameters mirror the create body and are forwarded to completion. Omit
-    them and the bot is created with defaults that contradict what was
-    requested, so always echo back engine, cluster_name, bot_name, bot_desc
-    and bot_type when polling.
-
-    Every restriction create enforces is re-applied to the echoed values:
-    the same engine registry check, the same engine/cluster pairing, and the
-    same personal/service restriction on bot_type.
+    The one implementation behind both spellings of the poll — the POST (body)
+    and the retiring GET (query parameters). The two must answer identically,
+    and sharing the body is what makes that a property rather than a promise.
+    That includes the passport-not-ready answer below: a wait must not read as
+    an outage on either spelling.
     """
     # Validate against the engine completion will actually use, not against the
-    # query param: omitting ``engine`` does not mean "no engine", it means the
-    # default one. Checking only when ``engine`` was supplied let
-    # ``?cluster_name=ANDC`` alone through, and the bot was then provisioned on
+    # supplied value: omitting ``engine`` does not mean "no engine", it means
+    # the default one. Checking only when ``engine`` was supplied let
+    # ``cluster_name=ANDC`` alone through, and the bot was then provisioned on
     # the ACRA default — a success response contradicting the request.
     effective_engine = engine if engine is not None else DEFAULT_ENGINE_TYPE
     # Check the engine completion will actually use, supplied or defaulted. A
@@ -715,21 +690,39 @@ async def get_bot_auth_status(
         raise UnsupportedEngineError(effective_engine)
     if cluster_name is not None:
         validate_engine_cluster(effective_engine, cluster_name)
-    result = complete_bot_authorization(
-        user_id=owner_id,
-        nick_name=owner_id,
-        bot_id=bot_id,
-        spec=BotCreateSpec(
-            entity_id=owner_id,
-            engine_type=engine or DEFAULT_ENGINE_TYPE,
-            bot_type=bot_type or "personal",
-            bot_name=bot_name,
-            bot_desc=bot_desc,
-        ),
-        bot_service=bot_service,
-        passport_plugin=passport_plugin,
-        auth_rel_plugin=auth_rel_plugin,
-    )
+    try:
+        result = complete_bot_authorization(
+            user_id=owner_id,
+            nick_name=owner_id,
+            bot_id=bot_id,
+            spec=BotCreateSpec(
+                entity_id=owner_id,
+                engine_type=engine or DEFAULT_ENGINE_TYPE,
+                bot_type=bot_type or "personal",
+                bot_name=bot_name,
+                bot_desc=bot_desc,
+            ),
+            bot_service=bot_service,
+            passport_plugin=passport_plugin,
+            auth_rel_plugin=auth_rel_plugin,
+        )
+    except AuthStatusUnavailableError:
+        # The passport service answered with no status at all — typically the
+        # apply is still propagating and the Passport is not ready yet. On this
+        # public surface that is a wait, not a fault: the 502 it used to map to
+        # made every caller's first poll after a 202 look like an outage.
+        # PENDING keeps the documented poll loop intact — PENDING/ISSUED are
+        # the two non-terminal states — and the message says what the wait is.
+        # The internal /api/bots/auth-status route keeps raising; only this
+        # surface's two spellings answer the wait as a wait.
+        return envelope(
+            BotAuthStatus(
+                status=AuthStatus.PENDING,
+                message="Passport is not ready yet; keep polling.",
+                bot=None,
+            ),
+            request,
+        )
     # PENDING (still waiting) and ISSUED (done) are successful outcomes of the
     # poll. Any other state — REJECTED, EXPIRED, anything the passport service
     # adds later — is a terminal failure: reporting it as 200/OK would let a
@@ -742,11 +735,60 @@ async def get_bot_auth_status(
     return envelope(BotAuthStatus(status=result.status, bot=bot), request)
 
 
+@router.post(
+    "/{bot_id}/auth-status",
+    response_model=Envelope[BotAuthStatus],
+    responses=AUTH_STATUS_RESPONSES,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
+)
+@envelope_errors
+async def poll_bot_auth_status(
+    bot_id: BotIdPath,
+    body: BotAuthStatusPoll,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    passport_plugin: PassportPlugin = Injected(PassportPlugin),
+    auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
+) -> Envelope[BotAuthStatus]:
+    """Poll authorization for a pending creation; the bot is created on ISSUED.
+
+    A POST because this operation is not a read: on the 202 create flow the
+    bot is only actually created here, once authorization is granted. The
+    caller must re-supply the attributes it created with — the body fields
+    mirror the create body and are forwarded to completion. Omit them and the
+    bot is created with defaults that contradict what was requested, so
+    always echo back engine, cluster_name, bot_name, bot_desc and bot_type
+    when polling.
+
+    Every restriction create enforces is re-applied to the echoed values:
+    the same engine registry check, the same engine/cluster pairing, and the
+    same personal/service restriction on bot_type.
+
+    While the authorization service has no status for the bot yet — the
+    Passport is not ready — the poll answers PENDING with a message saying
+    so, rather than an error: keep polling.
+    """
+    return _complete_auth_status(
+        bot_id=bot_id,
+        request=request,
+        owner_id=owner_id,
+        engine=body.engine,
+        cluster_name=body.cluster_name,
+        bot_name=body.bot_name,
+        bot_desc=body.bot_desc,
+        bot_type=body.bot_type,
+        bot_service=bot_service,
+        passport_plugin=passport_plugin,
+        auth_rel_plugin=auth_rel_plugin,
+    )
+
+
 @router.get(
     "/{bot_id}/status",
     response_model=Envelope[BotStatus],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def get_bot_status(
@@ -774,7 +816,7 @@ async def get_bot_status(
     "/{bot_id}/passport",
     response_model=Envelope[Passport],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def get_bot_passport(
@@ -819,7 +861,7 @@ def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
     "/{bot_id}/startup-script",
     response_model=Envelope[StartupScript],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def get_bot_startup_script(
@@ -847,7 +889,7 @@ async def get_bot_startup_script(
     "/{bot_id}/startup-script",
     response_model=Envelope[StartupScript],
     responses=STARTUP_SCRIPT_WRITE_RESPONSES,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def update_bot_startup_script(
@@ -898,7 +940,7 @@ async def update_bot_startup_script(
     "/{bot_id}/startup-script",
     response_model=Envelope[Deleted],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def delete_bot_startup_script(
@@ -923,5 +965,3 @@ async def delete_bot_startup_script(
         raise BotNotFoundError("bot has no associated entity")
     startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
     return deleted_envelope(request)
-
-

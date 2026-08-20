@@ -174,7 +174,7 @@ Bots have a `created_by` field set during onboard when a user identity is availa
 
 ### Protected Endpoints (write operations)
 - `DELETE /bots/{id}`, `POST /bots/status`, `POST /bots/{id}/chat-async`
-- `POST /groups/request`, `POST /groups`, `POST /groups/{id}/members`
+- `POST /groups/request`, `POST /groups`, `POST /groups/{id}/members`, `PATCH /groups/{id}`
 - `DELETE /groups/{id}`, `POST /groups/{id}/chat`
 - `POST /sessions/{id}/state-machine-runs` requires an authenticated Bot and
   delegates current-session authorization to the collaboration runtime
@@ -387,6 +387,7 @@ export BOT_DATA_DIR=/path/to/bot/data
 | `/groups` | GET | List all groups |
 | `/groups/my` | GET | List formal groups for the authenticated human or bot |
 | `/groups/{id}` | GET | Get group details |
+| `/groups/{id}` | PATCH | Update `name`, `context`, `visibility`, or delivery policy (legacy compatibility route) |
 | `/groups/{id}` | DELETE | Delete group |
 | `/groups/{id}/members` | POST | Add member to group |
 | `/groups/{id}/chat` | POST | Send group chat message |
@@ -528,6 +529,9 @@ bcs-cli collaborate run workflow.yaml --session <session_id> \
 
 # Fuse contexts
 bcs-cli fuse --group <group_id> --question "如何协调？" --participants bot1,bot2
+
+# Resolve DingTalk conversation IDs from a BCS session ID
+bcs-cli channel conversation-id --session <session_id>
 ```
 
 ## Scenario Testing

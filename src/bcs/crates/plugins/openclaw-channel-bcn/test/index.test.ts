@@ -40,7 +40,7 @@ function listSourceFiles(dir: string): string[] {
 }
 
 describe('openclaw-channel-bcn', () => {
-  it('stages a pure file message and uses facts-first media when available', async () => {
+  it('stages a pure file message from HTTP and uses facts-first media when available', async () => {
     const mediaDir = await mkdtemp(join(tmpdir(), 'bcn-inbound-file-'));
     const savedPath = join(mediaDir, 'design.pdf');
     let inboundContext: Record<string, unknown> | undefined;
@@ -107,7 +107,7 @@ describe('openclaw-channel-bcn', () => {
             file_name: 'design.pdf',
             mime_type: 'application/pdf',
             size: 11,
-            url: 'https://download.example/temporary-token',
+            url: 'http://download.example/temporary-token',
           }],
         },
       }, client as any, {

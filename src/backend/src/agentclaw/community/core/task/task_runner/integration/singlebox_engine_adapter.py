@@ -32,7 +32,7 @@ import httpx
 import websockets
 
 from agentclaw.community.core.task.task_runner.integration.ports import OpenApiBotPort
-from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.core.task.task_runner.integration.protocols import BotPublicServiceProtocol
 
 _WS_PATH = "/api/openclaw/ws"
 _CONNECT_PARAMS = {
@@ -43,7 +43,7 @@ _CONNECT_PARAMS = {
 }
 
 
-class SingleboxEngineAdapter(OpenApiBotPort):
+class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singlebox per-bot engine (WebSocket round-trip); needs a real singlebox backend, exercised by singlebox acceptance / 联调, not CI LOCAL line coverage
     """singlebox 直连 per-bot 引擎的 OpenApiBotPort 实现(WebSocket)。
 
     构造期收 backend(LocalAuth)地址 + user_id;per-bot 引擎 target 经 backend 解析并缓存。
@@ -253,7 +253,7 @@ class SingleboxEngineAdapter(OpenApiBotPort):
             return {"status": "FAILED", "error": f"{type(e).__name__}: {e}"}
 
 
-class SingleboxBotProvisioner:
+class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provisioning helper (HTTP create bot / install skill); exercises a real singlebox backend, not CI LOCAL line coverage
     """singlebox 本地集成测试 provisioning 助手(建 bot + 装 skill),非框架运行时。
 
     framework 运行时(``SingleboxEngineAdapter``)不感知 bot/skill 存在;本类复刻产品界面操作,

@@ -731,6 +731,7 @@ async fn relay_final_chat_event(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
+                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -865,6 +866,7 @@ async fn handle_task_bot_event(
             run_id: manager_result_run_id.clone(),
             frame,
             delivery_kind,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await?;

@@ -485,6 +485,17 @@ CreateCollaborationGroup:
         $ref: "#/CreateParticipant"
     collaboration:
       $ref: "#/CreateCollaborationConfiguration"
+    originator:
+      type: string
+      description: >
+        Optional caller-designated originator. Omitted (or set to the
+        authenticated user `human_<staff_no>`) sets the originator to the
+        calling user. When set to any other value, it must identify either
+        the caller-self or a registered Bot the caller owns (`created_by`
+        matches the caller); otherwise the request is rejected. When it is
+        a caller-owned Bot distinct from the driver, the driver must be
+        reachable from that originator (public visibility, or a friend of
+        it). The `dm` group kind does not carry an originator.
 
 CreateDirectMessageGroup:
   type: object

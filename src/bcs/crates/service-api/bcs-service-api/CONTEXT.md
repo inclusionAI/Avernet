@@ -11,6 +11,10 @@
   AccessKey context without retaining transport metadata or credentials.
 - Session-scoped Workbench connection-token use cases, exact-session connect
   reauthorization contracts, and the outbound token signing/verification port.
+- Channel conversation mapping lookup by BCS session id, with optional channel-type filtering.
+- Transport-neutral Session launch commands that receive adapter-normalized
+  Human or Bot identity while keeping credential parsing and protocol response
+  projection outside the application boundary.
 - The state-machine run repository contract includes an atomic
   `create_run_if_session_idle` operation for one-shot session launch
   serialization; production stores must override its compatibility default

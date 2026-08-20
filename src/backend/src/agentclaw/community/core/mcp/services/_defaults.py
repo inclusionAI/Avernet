@@ -13,6 +13,7 @@ from agentclaw.community.core.default_capabilities import (
     resolve_default_capabilities_engine_type,
 )
 from agentclaw.community.core.bot_management.engines.registry import (
+    get_cli_defaults_resolver_registry,
     get_mcp_defaults_resolver_registry,
 )
 
@@ -45,6 +46,23 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "hitl"},
     ],
     "moltis": [],
+    "teclaw": [
+        {"server_code": "mcp.ant.lwawchat.cogmessagemcp", "name": "蚂蚁钉协作群消息相关-MCP服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingreportmcpserver", "name": "蚂蚁钉日志服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdinggroupmcpserver", "name": "蚂蚁钉群服务"},
+        {"server_code": "mcp.ant.lwawchat.cogdocumentmcp", "name": "蚂蚁钉协作群文档相关-MCP服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingeventmcpserver", "name": "蚂蚁钉日程相关-MCP服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingrobotmcpserver", "name": "蚂蚁钉机器人相关-MCP服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingmessagemcpserver", "name": "蚂蚁钉消息相关-MCP服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingtodomcpserver", "name": "蚂蚁钉待办服务"},
+        {"server_code": "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver", "name": "语雀 MCP"},
+        {"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima-MCP服务"},
+        {"server_code": "mcp.ant.homistudio.recordmcp", "name": "会中会话记录查询服务"},
+        {"server_code": "mcp.ant.rpc.dcanttouch.adminservice", "name": "行政小宝MCP服务"},
+        # Local/stdio; resolved through LocalMCPRegistry, not MCP Center. Kept
+        # last to match the other engines' lists.
+        {"server_code": "hitl", "name": "HITL"},
+    ],
     "claude_code": [
         {"server_code": "mcp.ant.antprocessai.anttaskmcp", "name": "任务中心MCP", "description": "任务中心待办任务，已办任务等相关任务查询MCP"},
         {"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima MCP", "description": "Dima MCP"},
@@ -145,6 +163,20 @@ class _EngineMcpDefaultsResolver:
 
 
 _DEFAULT_MCP_RESOLVER = _EngineMcpDefaultsResolver()
+
+
+class _EngineCliDefaultsResolver:
+    """Default hook for deriving effective CLI configs."""
+
+    def resolve(
+        self,
+        default_items: List[dict],
+        ext_info: Optional[Mapping[str, Any]] = None,
+    ) -> List[dict]:
+        return [dict(item) for item in default_items]
+
+
+_DEFAULT_CLI_RESOLVER = _EngineCliDefaultsResolver()
 
 
 def _resolve_default_mcp_engine_bucket(
@@ -253,21 +285,31 @@ _DEFAULT_CLI_ITEMS_BY_ENGINE: Dict[str, List[dict]] = {
 }
 
 
+def _cli_defaults_resolver(engine_bucket: str):
+    return (
+        get_cli_defaults_resolver_registry().resolve(engine_bucket)
+        or _DEFAULT_CLI_RESOLVER
+    )
+
+
 def get_default_cli_items(
     engine_type: Optional[str] = None,
     template_type: Optional[str] = None,
+    *,
+    ext_info: Optional[Mapping[str, Any]] = None,
 ) -> List[dict]:
     """返回默认 CLI 列表（CliItem dict 形式）。
 
     默认能力分桶规则由对应引擎维护；CLI 这里只按分桶结果读取默认
     CLI 列表，未知桶返回空列表（fail-closed，避免误授权 CLI）。
+    引擎可通过 resolver 基于 ext_info 合并模板预置 CLI。
     """
-    from agentclaw.community.core.default_capabilities import (
-        resolve_default_capabilities_engine_type,
-    )
-
     key = resolve_default_capabilities_engine_type(
         engine_type,
         template_type,
     )
-    return [dict(item) for item in _DEFAULT_CLI_ITEMS_BY_ENGINE.get(key, [])]
+    resolver = _cli_defaults_resolver(key)
+    return resolver.resolve(
+        _DEFAULT_CLI_ITEMS_BY_ENGINE.get(key, []),
+        ext_info,
+    )

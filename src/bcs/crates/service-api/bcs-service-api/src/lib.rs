@@ -61,6 +61,10 @@ pub use application::session::{
     CreateOrReactivateCommand, CreateOrReactivateOutcome, SessionManagementService,
     SessionUseCaseError,
 };
+pub use application::session_launch::{
+    CreateSessionLaunch, ReactivateSessionLaunch, RequestedSessionRole, SessionCaller,
+    SessionLaunchError, SessionLaunchOutcome, SessionLaunchRequest, SessionLaunchService,
+};
 pub use application::session_files::{
     CapabilitiesView, DeleteFileCommand, DownloadRoute, PrepareUploadCommand, PrepareUploadResult,
     SessionFileService, SessionFileUseCaseError, ShareConsumeResult, ShareMintCommand,
@@ -169,7 +173,7 @@ pub use port::{
     BotDeliveryResult, BotMetricCount, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
     BotControlPlaneRepoPort,
     BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort, BotTerminalState,
-    CompositeBotTerminalObserver, ProviderRunTransport,
+    CompositeBotTerminalObserver, ProviderRunTransport, ProviderTransportPreference,
     NoopBotTerminalObserver, NoopChannelBindingCleanupPort, ChatRunCleanupPort,
     ChatRunEventPort, ChatRunMetricCount, DeliveryBlockContext,
     DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind, DeliveryMetricTarget,

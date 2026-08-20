@@ -52,6 +52,7 @@ pub struct BcsMessageFlow {
     pub interceptors: Arc<InterceptorChain>,
     pub session_management: Option<Arc<dyn SessionManagementService>>,
     pub bot_run_context: Option<Arc<dyn BotRunContextPort>>,
+    pub provider_chat_run_timeout_ms: u64,
     pub system_message: Option<Arc<dyn SystemMessageService>>,
     pub message_repo: Option<Arc<dyn MessageRepoPort>>,
     pub message_tracker: Arc<crate::message_tracker::MessageTracker>,
@@ -81,6 +82,7 @@ impl BcsMessageFlow {
             interceptors: Arc::new(InterceptorChain::new()),
             session_management: None,
             bot_run_context: None,
+            provider_chat_run_timeout_ms: DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
             system_message: None,
             message_repo: None,
             message_tracker: Arc::new(crate::message_tracker::MessageTracker::new()),
@@ -122,6 +124,11 @@ impl BcsMessageFlow {
 
     pub fn with_bot_run_context(mut self, run_context: Arc<dyn BotRunContextPort>) -> Self {
         self.bot_run_context = Some(run_context);
+        self
+    }
+
+    pub fn with_provider_chat_run_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.provider_chat_run_timeout_ms = timeout_ms;
         self
     }
 
@@ -177,8 +184,7 @@ impl BcsMessageFlow {
                     bot_id: bot_id.to_string(),
                     group_id: group_id.to_string(),
                     bcs_session_id: bcs_session_id.map(str::to_string),
-                    deadline_ms: now_ms()
-                        .saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS),
+                    deadline_ms: now_ms().saturating_add(self.provider_chat_run_timeout_ms),
                     terminal: false,
                 })
                 .await;
@@ -648,6 +654,7 @@ pub async fn handle_web_send(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
+                provider_transport: Default::default(),
                 provider_bypass_headers: cmd.provider_bypass_headers.clone(),
             })
             .await;
@@ -1105,6 +1112,7 @@ pub async fn handle_persistent_group_send(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
+                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -1514,6 +1522,7 @@ pub async fn handle_group_callback(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
+                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -1641,6 +1650,7 @@ pub async fn handle_chat_abort(
                 run_id: delivery_run_id,
                 frame: build_chat_abort_frame(&session_key, cmd.run_id.as_deref()),
                 delivery_kind: BotDeliveryKind::Abort,
+                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await;

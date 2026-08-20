@@ -106,26 +106,26 @@ def _body(node=False, **kw):
 class TestRouter:
     def test_workflow_result_success(self, client):
         c, svc = client
-        r = c.post("/task_loop/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
         assert r.status_code == 200, r.text
         assert svc.callback.calls[0][0] == "result"
 
     def test_node_result_success(self, client):
         c, svc = client
-        r = c.post("/task_loop/callback/node_result", json=_body(node=True))
+        r = c.post("/api/v1/collaboration/tasks/callback/node_result", json=_body(node=True))
         assert r.status_code == 200, r.text
         assert svc.callback.calls[0][1].loop_task_id == "t1::c1"
 
     def test_workflow_start_success(self, client):
         c, svc = client
-        r = c.post("/task_loop/callback/workflow_start",
+        r = c.post("/api/v1/collaboration/tasks/callback/workflow_start",
                    json=_body(loop_task_id="t1::root1", status="RUNNING"))
         assert r.status_code == 200, r.text
         assert svc.callback.calls[0][0] == "start"
 
     def test_node_start_success(self, client):
         c, svc = client
-        r = c.post("/task_loop/callback/node_start", json=_body(node=True, status="RUNNING"))
+        r = c.post("/api/v1/collaboration/tasks/callback/node_start", json=_body(node=True, status="RUNNING"))
         assert r.status_code == 200, r.text
         assert svc.callback.calls[0][0] == "start"
 
@@ -133,35 +133,35 @@ class TestRouter:
         c, svc = client
         svc.callback.report_result = _raise(TaskStateError("DONE->DONE"))
         svc.set_node_status("t1", "root1", Status.DONE)
-        r = c.post("/task_loop/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
         assert r.status_code == 200, r.text  # 幂等 ack
 
     def test_result_409_when_illegal(self, client):
         c, svc = client
         svc.callback.report_result = _raise(TaskStateError("PENDING->DONE"))
         svc.set_node_status("t1", "root1", Status.PENDING)  # 非终态→409
-        r = c.post("/task_loop/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
         assert r.status_code == 409, r.text
 
     def test_start_409_on_stale(self, client):
         c, svc = client
         svc.callback.start_run = _raise(TaskStateError("stale"))
-        r = c.post("/task_loop/callback/node_start", json=_body(node=True, status="RUNNING"))
+        r = c.post("/api/v1/collaboration/tasks/callback/node_start", json=_body(node=True, status="RUNNING"))
         assert r.status_code == 409, r.text
 
     def test_not_found_404(self, client):
         c, svc = client
         svc.callback.report_result = _raise(NodeNotFoundError("x"))
-        r = c.post("/task_loop/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
         assert r.status_code == 404, r.text
 
     def test_correlation_error_400(self, client):
         c, _ = client
         # task 级无回声 + 空 registry → CallbackCorrelationError → 400
-        r = c.post("/task_loop/callback/workflow_result", json=_body())  # 无 loop_task_id,registry 空
+        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body())  # 无 loop_task_id,registry 空
         assert r.status_code == 400, r.text
 
     def test_validation_422(self, client):
         c, _ = client
-        r = c.post("/task_loop/callback/node_result", json={"task_id": "t1"})  # 缺必填
+        r = c.post("/api/v1/collaboration/tasks/callback/node_result", json={"task_id": "t1"})  # 缺必填
         assert r.status_code == 422, r.text

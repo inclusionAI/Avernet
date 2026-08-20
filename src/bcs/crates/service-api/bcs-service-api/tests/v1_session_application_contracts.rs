@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
     ActorKind, AddSessionParticipant, ApplicationError, AuthenticatedCaller,
-    AuthenticatedUserIdentity, BotParticipantMode, CollectSession, CompleteSession,
-    CreateSession, CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant,
-    GetSession, ListSessionMessages, ListSessions, Page, ParticipantMode,
-    SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionMessageService,
-    SessionParticipant, SessionService, SessionStatus, UncollectSession, UpdateSession,
+    AuthenticatedUserIdentity, CollectSession, CompleteSession, CreateSession,
+    CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant, GetSession,
+    ListSessionMessages, ListSessions, Page, ParticipantMode, SessionCollectionResult,
+    SessionCompletionResult, SessionDetail, SessionMessageService, SessionParticipant,
+    SessionCaller, SessionService, SessionStatus, UncollectSession, UpdateSession,
     UpdateSessionParticipant,
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};
@@ -123,10 +123,19 @@ fn session_service_is_object_safe() {
 fn session_commands_carry_caller_and_no_raw_credentials() {
     let caller = human_caller();
     let create = CreateSession {
-        caller: caller.clone(),
+        caller: SessionCaller::Human {
+            actor_id: "human_staff-1".into(),
+            owner_id: "staff-1".into(),
+            display_name: None,
+        },
         group_id: "g1".into(),
         title: Some("plan".into()),
+        kind: None,
+        acting_bot_id: None,
+        creator_role: None,
         input: None,
+        meta: None,
+        context_delivery: None,
     };
     let list = ListSessions {
         caller: caller.clone(),
@@ -172,16 +181,21 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
     let update_p = UpdateSessionParticipant {
         caller: caller.clone(),
         session_id: "s1".into(),
-        bot_uuid: "bot-3".into(),
-        mode: BotParticipantMode::Auto,
+        bot_uuid: "human_staff-1".into(),
+        mode: ParticipantMode::Present,
     };
     let remove_p = DeleteSessionParticipant {
         caller,
         session_id: "s1".into(),
         bot_uuid: "bot-3".into(),
     };
+    let create_caller = format!("{:?}", &create.caller);
+    assert!(
+        !create_caller.contains("Cookie")
+            && !create_caller.contains("Bearer")
+            && !create_caller.contains("sender")
+    );
     for cmd in [
-        &create.caller,
         &list.caller,
         &get.caller,
         &update.caller,
@@ -268,19 +282,12 @@ fn session_message_service_uses_legacy_group_message_wire_shape() {
 }
 
 #[test]
-fn bot_participant_mode_is_narrower_than_domain_participant_mode() {
-    let auto = serde_json::to_value(BotParticipantMode::Auto).expect("serialize Auto");
-    let muted = serde_json::to_value(BotParticipantMode::Muted).expect("serialize Muted");
-    assert_eq!(auto, "auto");
-    assert_eq!(muted, "muted");
-    // Round-trip the entire vocabulary to prove V1 only has two variants.
-    for raw in ["\"auto\"", "\"muted\""] {
-        let parsed: BotParticipantMode =
-            serde_json::from_str(raw).expect("deserialize BotParticipantMode");
+fn session_participant_update_mode_round_trips_bot_and_human_values() {
+    for raw in ["\"auto\"", "\"muted\"", "\"present\"", "\"absent\""] {
+        let parsed: ParticipantMode =
+            serde_json::from_str(raw).expect("deserialize ParticipantMode");
         assert_eq!(serde_json::to_string(&parsed).unwrap(), raw);
     }
-    assert!(serde_json::from_str::<BotParticipantMode>("\"present\"").is_err());
-    assert!(serde_json::from_str::<BotParticipantMode>("\"absent\"").is_err());
 }
 
 #[test]

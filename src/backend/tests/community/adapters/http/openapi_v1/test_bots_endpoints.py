@@ -25,6 +25,9 @@ from agentclaw.community.adapters.http.openapi_v1.bots.engine_config import (
     router as engine_config_router,
 )
 from agentclaw.community.adapters.http.openapi_v1.bots.router import router
+from agentclaw.community.adapters.http.openapi_v1.deprecated.auth_status import (
+    router as legacy_auth_status_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
@@ -140,6 +143,9 @@ def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, au
     # Engine config is bots-component work served at an engine-component
     # address, so it hangs off its own router and has to be mounted alongside.
     app.include_router(engine_config_router)
+    # The retiring GET spelling of the auth-status poll, mounted so the GET
+    # tests keep exercising the frozen contract beside its POST replacement.
+    app.include_router(legacy_auth_status_router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "u1"}
     attach_injector(app, Injector([_M()]))
     mount_public_error_handlers(app)
@@ -372,6 +378,102 @@ def test_auth_status_engine_cluster_mismatch_400(client, svc):
     svc.create_bot.assert_not_called()
 
 
+# ----- POST auth-status (the current spelling; GET above is retiring) -------
+
+
+def test_post_auth_status_pending(client, passport):
+    passport.query_auth_status.return_value = {"status": "PENDING"}
+    data = _ok(client.post("/openapi/v1/bots/b1/auth-status", json={}))
+    assert data["status"] == "PENDING"
+    assert data["bot"] is None
+
+
+def test_post_auth_status_issued(client, svc, passport):
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.return_value = {"agent_code": "ac"}
+    data = _ok(client.post("/openapi/v1/bots/b1/auth-status", json={}))
+    assert data["status"] == "ISSUED"
+    assert data["bot"]["bot_id"] == "b1"
+    svc.create_bot.assert_called_once()
+
+
+def test_post_auth_status_preserves_create_attributes(client, svc, passport):
+    """The body fields reach completion so the bot isn't downgraded."""
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.return_value = {"agent_code": "ac"}
+    with patch.object(
+        bots_router, "_get_engine_types", return_value=["openclaw", "teclaw"]
+    ):
+        _ok(client.post(
+            "/openapi/v1/bots/b1/auth-status",
+            json={
+                "engine": "teclaw", "cluster_name": "ANDC",
+                "bot_name": "NewBot", "bot_desc": "d", "bot_type": "service",
+            },
+        ))
+    kw = svc.create_bot.call_args.kwargs
+    assert kw["engine_type"] == "teclaw"  # not defaulted to openclaw
+    assert kw["bot_name"] == "NewBot"
+    assert kw["bot_desc"] == "d"
+    assert kw["bot_type"] == "service"
+
+
+def test_post_auth_status_engine_cluster_mismatch_400(client, svc):
+    with patch.object(
+        bots_router, "_get_engine_types", return_value=["openclaw", "teclaw"]
+    ):
+        resp = client.post(
+            "/openapi/v1/bots/b1/auth-status",
+            json={"engine": "teclaw", "cluster_name": "ACRA"},
+        )
+    assert resp.status_code == 400
+    svc.create_bot.assert_not_called()
+
+
+def test_post_auth_status_rejects_unknown_engine(client, svc, passport):
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    resp = client.post(
+        "/openapi/v1/bots/b1/auth-status",
+        json={"engine": "not-a-real-engine", "cluster_name": "ACRA"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["code"] == 400000
+    svc.create_bot.assert_not_called()
+
+
+def test_post_auth_status_rejects_desktop_bot_type(client, svc, passport):
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    resp = client.post(
+        "/openapi/v1/bots/b1/auth-status", json={"bot_type": "desktop"}
+    )
+    assert resp.status_code == 422
+    svc.create_bot.assert_not_called()
+
+
+def test_post_auth_status_terminal_state_is_400(client, passport):
+    passport.query_auth_status.return_value = {"status": "REJECTED"}
+    resp = client.post("/openapi/v1/bots/b1/auth-status", json={})
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["code"] == 400000
+    assert body["data"]["status"] == "REJECTED"  # caller can still see why
+
+
+def test_post_auth_status_passport_not_ready_is_pending(client, svc, passport):
+    """A passport service with no status yet answers PENDING, not an error.
+
+    Both public spellings answer this way (the GET's twin is
+    test_missing_auth_status_is_pending_not_an_error); the internal /api/bots
+    route keeps raising. Nothing may be created on this answer.
+    """
+    passport.query_auth_status.return_value = None
+    data = _ok(client.post("/openapi/v1/bots/b1/auth-status", json={}))
+    assert data["status"] == "PENDING"
+    assert "not ready" in data["message"]
+    assert data["bot"] is None
+    svc.create_bot.assert_not_called()
+
+
 # ----- round-1 review regressions ------------------------------------------
 
 
@@ -532,14 +634,17 @@ def test_desktop_bot_type_rejected(client, svc):
     svc.create_bot.assert_not_called()
 
 
-def test_missing_auth_status_is_enveloped(client, passport):
-    """R3/F18: a null query_auth_status must not escape as a raw 500 detail."""
+def test_missing_auth_status_is_pending_not_an_error(client, svc, passport):
+    """R3/F18 successor: a null query_auth_status must not escape as a 500 —
+    and on this public surface it is not an error at all. The GET answers the
+    not-ready wait exactly as its POST replacement does (shared completion
+    body); the internal /api/bots route keeps raising."""
     passport.query_auth_status.return_value = None
-    resp = client.get("/openapi/v1/bots/b1/auth-status")
-    assert resp.status_code == 502
-    body = resp.json()
-    assert body["code"] == 502000
-    assert body["data"] is None
+    data = _ok(client.get("/openapi/v1/bots/b1/auth-status"))
+    assert data["status"] == "PENDING"
+    assert "not ready" in data["message"]
+    assert data["bot"] is None
+    svc.create_bot.assert_not_called()
 
 
 def test_rejected_authorization_is_not_reported_as_success(client, passport):

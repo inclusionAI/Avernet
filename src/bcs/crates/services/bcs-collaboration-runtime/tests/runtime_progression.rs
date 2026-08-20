@@ -2230,6 +2230,8 @@ async fn single_node_run_completes_session_with_bot_final_text() {
 
 #[tokio::test]
 async fn state_machine_bot_delivery_registers_message_flow_run_context() {
+    const CONFIGURED_TIMEOUT_MS: u64 = 7_200_000;
+
     let group = Arc::new(GroupStore::new());
     group.upsert(test_group()).await.expect("seed group");
     let store = Arc::new(MemoryCollaborationStore::new());
@@ -2245,7 +2247,67 @@ async fn state_machine_bot_delivery_registers_message_flow_run_context() {
         delivery.clone(),
         noop_judge(),
     )
+    .with_provider_chat_run_timeout_ms(CONFIGURED_TIMEOUT_MS)
     .with_bot_run_context(run_context.clone());
+
+    let definition_yaml = single_node_yaml()
+        .replace("      node_timeout_ms: 120000\n", "")
+        .replace("        node_timeout_ms: 60000\n", "");
+    let before_start_ms = bcs_protocol::now_ms();
+    runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(definition_yaml),
+            definition: None,
+            definition_ref: None,
+            participant_bindings: None,
+            input: json!({"question": "stream this"}),
+            caller_id: None,
+            authenticated_human: None,
+        })
+        .await
+        .expect("start run");
+    let after_start_ms = bcs_protocol::now_ms();
+
+    let delivery_run_id = delivery.commands.lock().await[0].run_id.clone();
+    let context = run_context
+        .get_context(&delivery_run_id)
+        .await
+        .expect("state-machine delivery run context");
+    assert_eq!(context.bot_id, "driver-bot");
+    assert!(context.group_id.is_empty());
+    assert!(context.bcs_session_id.is_none());
+    assert!(!context.terminal);
+    assert!(
+        context.deadline_ms
+            >= before_start_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
+    );
+    assert!(
+        context.deadline_ms
+            <= after_start_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
+    );
+}
+
+#[tokio::test]
+async fn state_machine_explicit_node_timeout_overrides_provider_chat_default() {
+    const CONFIGURED_TIMEOUT_MS: u64 = 7_200_000;
+
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        test_sessions(),
+        delivery.clone(),
+        noop_judge(),
+    )
+    .with_provider_chat_run_timeout_ms(CONFIGURED_TIMEOUT_MS);
 
     runtime
         .start_state_machine_run(StartStateMachineRunCommand {
@@ -2262,16 +2324,19 @@ async fn state_machine_bot_delivery_registers_message_flow_run_context() {
         .await
         .expect("start run");
 
-    let delivery_run_id = delivery.commands.lock().await[0].run_id.clone();
-    let context = run_context
-        .get_context(&delivery_run_id)
-        .await
-        .expect("state-machine delivery run context");
-    assert_eq!(context.bot_id, "driver-bot");
-    assert!(context.group_id.is_empty());
-    assert!(context.bcs_session_id.is_none());
-    assert!(!context.terminal);
-    assert!(context.deadline_ms > bcs_protocol::now_ms());
+    let commands = delivery.commands.lock().await;
+    let BcsFrame::Request(request) = &commands[0].frame else {
+        panic!("state-machine bot delivery must use a request frame");
+    };
+    let timeout_ms = request
+        .params
+        .as_ref()
+        .and_then(|params| params.get("timeout_ms"))
+        .and_then(Value::as_u64)
+        .expect("explicit node timeout must reach Provider chat.send");
+    assert!(timeout_ms > 0);
+    assert!(timeout_ms <= 60_000);
+    assert_ne!(timeout_ms, CONFIGURED_TIMEOUT_MS);
 }
 
 #[tokio::test]

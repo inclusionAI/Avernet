@@ -31,7 +31,8 @@ from fastapi_injector import attach_injector
 from fastapi.testclient import TestClient
 from injector import Injector, Module, provider, singleton
 
-from agentclaw.community.adapters.http.task.router import router as task_router
+from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
+from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.core.task.domain.models import (
@@ -160,8 +161,8 @@ def _result_body(
 
 
 def _dashboard_tasks(c: TestClient, task_id: str) -> tuple[dict, dict[str, dict]]:
-    """GET /api/task/dashboard → (graph_data, {node_id: node_dto})。"""
-    data = c.get("/api/task/dashboard", params={"task_id": task_id}).json()["data"]
+    """GET /openapi/v1/collaboration/tasks/dashboard → (graph_data, {node_id: node_dto})。"""
+    data = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": task_id}).json()["data"]
     return data, {n["node_id"]: n for n in data["tasks"]}
 
 
@@ -183,6 +184,7 @@ def client():
     injector = Injector([TaskModule(), _StubDiscoverModule()])
     app = FastAPI()
     app.include_router(task_router)
+    app.include_router(task_internal_router)
     attach_injector(app, injector)
     return TestClient(app), injector
 
@@ -192,8 +194,8 @@ def test_c_two_bots_claim_same_bbs_task_exactly_one_wins(client):
     c, inj = client
     task_id = f"bbs-c-{uuid.uuid4().hex[:6]}"
     _seed_bbs_planning(inj, task_id)
-    r1 = c.post("/api/task/bbs/claim", json={"task_id": task_id, "bot_id": "botA"})
-    r2 = c.post("/api/task/bbs/claim", json={"task_id": task_id, "bot_id": "botB"})
+    r1 = c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botA"})
+    r2 = c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botB"})
     assert {r1.status_code, r2.status_code} == {200, 409}, f"{r1.status_code}/{r2.status_code} {r1.text} {r2.text}"
     win = r1 if r1.status_code == 200 else r2
     assert win.json()["data"]["root_node_id"] == task_id
@@ -207,13 +209,13 @@ def test_b_fail_deletes_scoped_then_next_bot_relays_fresh(client):
     task_id = f"bbs-b-{uuid.uuid4().hex[:6]}"
     _seed_bbs_planning(inj, task_id, execution_config={"BBS_MAX_DEPTH": 5})
 
-    # botA 接力第一段:claim → attach → result(FAIL+gaps)→ scoped 节点被删 + 释放 claim
-    assert c.post("/api/task/bbs/claim", json={"task_id": task_id, "bot_id": "botA"}).status_code == 200
-    r_attach_a = c.post("/api/task/bbs/attach", json=_attach_body(task_id, task_id, "botA"))
+    # botA 接力第一段:claim → attach → result(FAIL+gaps+output_patch checkpoint)→ 释放 claim
+    assert c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botA"}).status_code == 200
+    r_attach_a = c.post("/api/v1/collaboration/tasks/bbs/attach", json=_attach_body(task_id, task_id, "botA"))
     assert r_attach_a.status_code == 200, r_attach_a.text
     node_a = r_attach_a.json()["data"]["node_id"]
     assert node_a.startswith("bbs-")
-    r_fail = c.post("/api/task/bbs/result", json=_result_body(
+    r_fail = c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(
         task_id, node_a, "botA", verdict="FAIL", gaps=["need_data"], output_patch={"progress": 30}))
     assert r_fail.status_code == 200, r_fail.text
 
@@ -223,15 +225,15 @@ def test_b_fail_deletes_scoped_then_next_bot_relays_fresh(client):
     assert _root_owner(nodes1, task_id) is None, "botA result 后 claim 应已释放"
     assert d1["extend_props"].get("bbs_relay_count") == 1, "botA attach 后 relay_count 应 +1(删节点不回扣)"
 
-    # botB 接力第二段:claim(owner 已清,CAS 成功)→ attach 新 scoped 节点(从零做起,新 node_id)
-    assert c.post("/api/task/bbs/claim", json={"task_id": task_id, "bot_id": "botB"}).status_code == 200
-    r_attach_b = c.post("/api/task/bbs/attach", json=_attach_body(task_id, task_id, "botB"))
+    # botB 接力第二段:claim(owner 已清,CAS 成功)→ attach 新 scoped 节点(接力不重做,新 node_id)
+    assert c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botB"}).status_code == 200
+    r_attach_b = c.post("/api/v1/collaboration/tasks/bbs/attach", json=_attach_body(task_id, task_id, "botB"))
     assert r_attach_b.status_code == 200, r_attach_b.text
     node_b = r_attach_b.json()["data"]["node_id"]
-    assert node_b != node_a, "接力应挂新 scoped 节点(从零做起)"
-    # botB 续做:PASS → 本 scoped DONE + claim 释放(根收口由框架经 owner 复核自判;in-process 无 owner
-    # bot→不收图 DONE,见 natual live 测)。这里验接力机制:FAIL 丢弃 + 下段从零 + claim 释放。
-    r_pass = c.post("/api/task/bbs/result", json=_result_body(
+    assert node_b != node_a, "接力应挂新 scoped 节点,不重做 botA 段"
+    # botB 续做:PASS → 本 scoped DONE + claim 释放(根收口由框架经 owner 复核自判,非 bot 声明;单测无 owner
+    # bot→不收图 DONE,见 natual live 测)。这里验接力机制:接力不重做 + checkpoint 留存 + claim 释放。
+    r_pass = c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(
         task_id, node_b, "botB", verdict="PASS"))
     assert r_pass.status_code == 200, r_pass.text
 
@@ -255,8 +257,8 @@ def test_d_crash_lease_relay(client):
     _seed_bbs_planning(inj, task_id, execution_config={"SLA_TIMEOUT": 10, "BBS_MAX_DEPTH": 5})
 
     # botA claim + attach,不 result(模拟崩溃)
-    assert c.post("/api/task/bbs/claim", json={"task_id": task_id, "bot_id": "botA"}).status_code == 200
-    r_attach = c.post("/api/task/bbs/attach", json=_attach_body(task_id, task_id, "botA"))
+    assert c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botA"}).status_code == 200
+    r_attach = c.post("/api/v1/collaboration/tasks/bbs/attach", json=_attach_body(task_id, task_id, "botA"))
     assert r_attach.status_code == 200, r_attach.text
     node_a = r_attach.json()["data"]["node_id"]
 
@@ -285,11 +287,11 @@ def test_d_crash_lease_relay(client):
 
     # botB claim 接管(owner 已清 → CAS 成功)并完成接力段 → 本 scoped DONE + claim 释放
     # (根收口由框架自判;in-process 无 owner bot 不收图 DONE,见 natual live 测)
-    assert c.post("/api/task/bbs/claim", json={"task_id": task_id, "bot_id": "botB"}).status_code == 200
-    r_attach_b = c.post("/api/task/bbs/attach", json=_attach_body(task_id, task_id, "botB"))
+    assert c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botB"}).status_code == 200
+    r_attach_b = c.post("/api/v1/collaboration/tasks/bbs/attach", json=_attach_body(task_id, task_id, "botB"))
     assert r_attach_b.status_code == 200, r_attach_b.text
     node_b = r_attach_b.json()["data"]["node_id"]
-    assert c.post("/api/task/bbs/result", json=_result_body(
+    assert c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(
         task_id, node_b, "botB", verdict="PASS")).status_code == 200
     _, nodes_done = _dashboard_tasks(c, task_id)
     assert nodes_done[node_b]["status"] == "DONE"
@@ -305,11 +307,11 @@ def test_g_graph_hung_attach_rejected(client):
     _seed_bbs_hung(inj, task_id)
 
     # claim 仍 200(claim 仅校验 bbs_mode + CAS,不看根/图态)
-    r_claim = c.post("/api/task/bbs/claim", json={"task_id": task_id, "bot_id": "botA"})
+    r_claim = c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botA"})
     assert r_claim.status_code == 200, r_claim.text
 
     # attach 应 409(根 HUNG 非 _DELEGATABLE_PARENT;_assert_add_trigger a/b/c/d 均不满足)
-    r_attach = c.post("/api/task/bbs/attach", json=_attach_body(task_id, task_id, "botA"))
+    r_attach = c.post("/api/v1/collaboration/tasks/bbs/attach", json=_attach_body(task_id, task_id, "botA"))
     assert r_attach.status_code == 409, r_attach.text
 
     # bot 未把任何 RUNNING 节点挂到 HUNG 图上:图仍 HUNG,仅根,无 scoped 子节点附着

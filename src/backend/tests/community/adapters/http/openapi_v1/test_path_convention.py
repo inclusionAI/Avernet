@@ -81,6 +81,20 @@ def _segments(path: str) -> list[str]:
     return [s for s in path[len(_BASE) :].split("/") if s]
 
 
+def _bots_paths() -> list[str]:
+    """Published addresses under the ``/openapi/v1/bots`` base only."""
+    return [p for p in _paths() if p == _BASE or p.startswith(f"{_BASE}/")]
+
+
+def _current_bots_paths() -> list[str]:
+    """Current-contract addresses under the ``/openapi/v1/bots`` base only."""
+    return [
+        p
+        for p in _current_paths()
+        if p == _BASE or p.startswith(f"{_BASE}/")
+    ]
+
+
 #: The groups that address no single bot, so they keep a literal in the segment
 #: a bot id is otherwise read from. Everything else is ``{bot_id}``-first.
 #:
@@ -100,7 +114,7 @@ def _components() -> set[str]:
     """
     return {
         segments[0]
-        for path in _paths()
+        for path in _bots_paths()
         if (segments := _segments(path)) and not segments[0].startswith("{")
     }
 
@@ -109,9 +123,15 @@ def test_every_path_lives_under_the_bots_base():
     """The gateway resolves by the segment after the version base.
 
     A path outside ``/openapi/v1/bots`` would route to a different upstream —
-    or to none — and the mistake is invisible until deploy.
+    or to none — and the mistake is invisible until deploy. The harness group
+    used to be the one exception under its own ``/openapi/v1/harness`` base;
+    it moved beneath the addressed bot, so the rule is now absolute.
     """
-    offenders = [p for p in _paths() if p != _BASE and not p.startswith(f"{_BASE}/")]
+    offenders = [
+        p
+        for p in _paths()
+        if p != _BASE and not p.startswith(f"{_BASE}/")
+    ]
     assert not offenders, f"paths outside {_BASE}: {offenders}"
 
 
@@ -140,7 +160,7 @@ def test_every_bot_scoped_operation_names_the_bot_first():
     """
     offenders = [
         path
-        for path in _current_paths()
+        for path in _current_bots_paths()
         if (segments := _segments(path))
         and not segments[0].startswith("{")
         and segments[0] not in _BOT_FREE
@@ -155,7 +175,7 @@ def test_only_the_bots_component_owns_the_bare_wildcard():
     """Exactly one path may open with a parameter, and it is the bot itself."""
     wildcards = {
         segments[0]
-        for p in _paths()
+        for p in _bots_paths()
         if (segments := _segments(p)) and segments[0].startswith("{")
     }
     assert wildcards <= {"{bot_id}"}, f"unexpected top-level parameters: {wildcards}"

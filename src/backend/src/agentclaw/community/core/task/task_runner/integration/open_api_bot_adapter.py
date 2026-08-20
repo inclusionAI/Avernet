@@ -61,7 +61,7 @@ def _map_status(resp: httpx.Response) -> None:
         raise OpenApiServerError(f"{resp.status_code} {resp.text}")
 
 
-class OpenApiBotAdapter(OpenApiBotPort):
+class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenApi HTTP client; exercised by singlebox/corp acceptance / 联调, not CI LOCAL line coverage
     def __init__(self, keys: ApiKeyProvider, *, http_client: httpx.AsyncClient | None = None) -> None:
         self._k = keys
         self._client = http_client or httpx.AsyncClient(base_url=keys.base_url)

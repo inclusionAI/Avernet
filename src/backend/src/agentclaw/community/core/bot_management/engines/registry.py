@@ -11,9 +11,15 @@ from .aicoding.strategy import (
     AicodingProvisioningStrategy,
     CODING_TEMPLATE_TYPES,
 )
+from .aicoding.cli_defaults import AicodingCliDefaultsResolver
 from .aicoding.mcp_defaults import AicodingMcpDefaultsResolver
+from .aicoding.default_skill_set_selection import AicodingDefaultSkillSetSelectionResolver
 from .default import DefaultProvisioningStrategy
 from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
+from agentclaw.community.core.skill_center.policies.default_skill_set_selection import (
+    DefaultSkillSetSelectionPolicy,
+    DefaultSkillSetSelectionResolver,
+)
 
 from agentclaw.community.log import get_logger
 
@@ -107,32 +113,63 @@ class DefaultCapabilitiesEngineBucketResolverRegistry:
         return normalized_engine
 
 
-class McpDefaultsResolver(Protocol):
-    """Bucket-specific hook for deriving effective default MCP configs."""
+class DefaultItemsResolver(Protocol):
+    """Bucket-specific hook for deriving effective default capability configs."""
 
     def resolve(
         self,
-        default_servers: list[dict],
+        default_items: list[dict],
         ext_info: dict | None = None,
     ) -> list[dict]:
-        """Return effective default MCP configs for one engine bucket."""
+        """Return effective default capability configs for one engine bucket."""
 
 
-class McpDefaultsResolverRegistry:
-    """Registry for engine-contributed MCP default resolvers."""
+class DefaultItemsResolverRegistry:
+    """Registry for engine-contributed default capability resolvers."""
 
-    def __init__(self) -> None:
-        self._resolvers: dict[str, McpDefaultsResolver] = {}
+    def __init__(self, capability_name: str) -> None:
+        self._capability_name = capability_name
+        self._resolvers: dict[str, DefaultItemsResolver] = {}
 
-    def register(self, engine_bucket: str, resolver: McpDefaultsResolver) -> None:
+    def register(self, engine_bucket: str, resolver: DefaultItemsResolver) -> None:
         if engine_bucket in self._resolvers:
             raise ValueError(
-                f"MCP defaults resolver already registered: {engine_bucket}"
+                f"{self._capability_name} defaults resolver already registered: "
+                f"{engine_bucket}"
             )
         self._resolvers[engine_bucket] = resolver
 
-    def resolve(self, engine_bucket: str) -> McpDefaultsResolver | None:
+    def resolve(self, engine_bucket: str) -> DefaultItemsResolver | None:
         return self._resolvers.get(engine_bucket)
+
+
+class CliDefaultsResolverRegistry(DefaultItemsResolverRegistry):
+    """Registry for engine-contributed CLI default resolvers."""
+
+    def __init__(self) -> None:
+        super().__init__("CLI")
+
+
+class McpDefaultsResolverRegistry(DefaultItemsResolverRegistry):
+    """Registry for engine-contributed MCP default resolvers."""
+
+    def __init__(self) -> None:
+        super().__init__("MCP")
+
+
+
+
+class DefaultSkillSetSelectionResolverRegistry:
+    """Registry for engine-contributed default SkillSet selection resolvers."""
+
+    def __init__(self) -> None:
+        self._resolvers: list[DefaultSkillSetSelectionResolver] = []
+
+    def register(self, resolver: DefaultSkillSetSelectionResolver) -> None:
+        self._resolvers.append(resolver)
+
+    def build_policy(self) -> DefaultSkillSetSelectionPolicy:
+        return DefaultSkillSetSelectionPolicy(self._resolvers)
 
 
 class EngineProvisioningRegistry:
@@ -292,6 +329,27 @@ def resolve_default_capabilities_engine_bucket(
     )
 
 
+
+
+def _build_default_skill_set_selection_resolver_registry() -> (
+    DefaultSkillSetSelectionResolverRegistry
+):
+    """Assemble the process-wide default SkillSet selection resolver registry."""
+    registry = DefaultSkillSetSelectionResolverRegistry()
+    registry.register(AicodingDefaultSkillSetSelectionResolver())
+    return registry
+
+
+_DEFAULT_SKILL_SET_SELECTION_RESOLVER_REGISTRY = (
+    _build_default_skill_set_selection_resolver_registry()
+)
+
+
+def get_default_skill_set_selection_policy() -> DefaultSkillSetSelectionPolicy:
+    """Return the process-wide default SkillSet selection policy."""
+    return _DEFAULT_SKILL_SET_SELECTION_RESOLVER_REGISTRY.build_policy()
+
+
 def _build_mcp_defaults_resolver_registry() -> McpDefaultsResolverRegistry:
     """Assemble the process-wide MCP defaults resolver registry."""
     registry = McpDefaultsResolverRegistry()
@@ -305,6 +363,21 @@ _MCP_DEFAULTS_RESOLVER_REGISTRY = _build_mcp_defaults_resolver_registry()
 def get_mcp_defaults_resolver_registry() -> McpDefaultsResolverRegistry:
     """Return the process-wide MCP defaults resolver registry."""
     return _MCP_DEFAULTS_RESOLVER_REGISTRY
+
+
+def _build_cli_defaults_resolver_registry() -> CliDefaultsResolverRegistry:
+    """Assemble the process-wide CLI defaults resolver registry."""
+    registry = CliDefaultsResolverRegistry()
+    registry.register(AICODING_ENGINE_TYPE, AicodingCliDefaultsResolver())
+    return registry
+
+
+_CLI_DEFAULTS_RESOLVER_REGISTRY = _build_cli_defaults_resolver_registry()
+
+
+def get_cli_defaults_resolver_registry() -> CliDefaultsResolverRegistry:
+    """Return the process-wide CLI defaults resolver registry."""
+    return _CLI_DEFAULTS_RESOLVER_REGISTRY
 
 
 def resolve_provisioning(
@@ -481,9 +554,12 @@ __all__ = [
     "BotProvisioningContext",
     "DefaultCapabilitiesEngineBucketResolver",
     "DefaultCapabilitiesEngineBucketResolverRegistry",
+    "DefaultSkillSetSelectionResolverRegistry",
     "EngineProvisioningRegistry",
     "get_baas_engine_bucket_resolver_registry",
+    "get_cli_defaults_resolver_registry",
     "get_default_capabilities_engine_bucket_resolver_registry",
+    "get_default_skill_set_selection_policy",
     "get_mcp_defaults_resolver_registry",
     "get_engine_provisioning_registry",
     "normalize_engine_type",

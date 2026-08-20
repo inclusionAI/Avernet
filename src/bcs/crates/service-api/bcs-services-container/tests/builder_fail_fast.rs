@@ -12,8 +12,8 @@ use bcs_test_support::{
     NoopOrganizationManagementService, NoopProposalCoreService,
     NoopProviderBotCoreService, NoopProviderBotEventService, NoopProviderCoreService,
     NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
-    NoopSecretService, NoopSessionFileService, NoopSessionManagementService,
-    NoopSystemMessageService, NoopWorkbenchSessionService,
+    NoopSecretService, NoopSessionFileService, NoopSessionLaunchService,
+    NoopSessionManagementService, NoopSystemMessageService, NoopWorkbenchSessionService,
 };
 use bcs_test_support::NoopInteractionService;
 use std::sync::Arc;
@@ -76,6 +76,7 @@ fn build_succeeds_when_all_required_services_set() {
         .system_message(Arc::new(NoopSystemMessageService))
         .group_fusion(Arc::new(NoopGroupFusionService))
         .session_management(Arc::new(NoopSessionManagementService))
+        .session_launch(Arc::new(NoopSessionLaunchService))
         .channel(Arc::new(NoopChannelService))
         .secret(Arc::new(NoopSecretService))
         .session_files(Arc::new(NoopSessionFileService))
@@ -122,6 +123,7 @@ fn fully_wired_builder_without_organization_management() -> ServicesBuilder {
         .system_message(Arc::new(NoopSystemMessageService))
         .group_fusion(Arc::new(NoopGroupFusionService))
         .session_management(Arc::new(NoopSessionManagementService))
+        .session_launch(Arc::new(NoopSessionLaunchService))
         .channel(Arc::new(NoopChannelService))
         .secret(Arc::new(NoopSecretService))
         .session_files(Arc::new(NoopSessionFileService))

@@ -70,7 +70,7 @@ _HDRS = {"x-user-id": _USER_ID, "accept": "application/json"}
 
 
 def _execute_body(owner_id: str) -> dict:
-    """``POST /api/task/execute`` 请求体(存储行业尽调案例)。MAX_DEPTH=1 → N_field_interview MISS@MAX 升 BBS。"""
+    """``POST /openapi/v1/collaboration/tasks/execute`` 请求体(存储行业尽调案例)。MAX_DEPTH=1 → N_field_interview MISS@MAX 升 BBS。"""
     return {
         "task_spec": {
             "metadata": {
@@ -108,13 +108,13 @@ def _wake_prompt() -> str:
         f"任务 task_id={TASK_ID} 已自然升 BBS(bbs_mode=true、根 PLANNING、图空闲),"
         "等待你自主接力收口。\n"
         f"task API backend base url: {_BACKEND}(用 exec+curl 直调,"
-        f"例 curl {_BACKEND}/api/task/list --json ...)。\n"
+        f"例 curl {_BACKEND}/openapi/v1/collaboration/tasks/list --json ...)。\n"
         "按 bbs-relay-pickup SKILL.md 6 步自驱:\n"
-        "  步① GET /api/task/list 客户端筛 bbs_mode==true,GET /api/task/dashboard 取整图;\n"
-        "  步② POST /api/task/bbs/claim 占根;\n"
+        "  步① GET /openapi/v1/collaboration/tasks/list 客户端筛 bbs_mode==true,GET /openapi/v1/collaboration/tasks/dashboard 取整图;\n"
+        "  步② POST /api/v1/collaboration/tasks/bbs/claim 占根;\n"
         "  步③ 读根 goal + 已 DONE 叶子 + 前序 scoped 节点 checkpoint 自判 full/partial/skip;\n"
-        "  步④ POST /api/task/bbs/attach 挂一个 run_mode=bbs 节点 + 用你自身能力执行该节点指令;\n"
-        "  步⑤ POST /api/task/bbs/result 写回(verdict=PASS、acceptances_metric 列出达成的 AC、"
+        "  步④ POST /api/v1/collaboration/tasks/bbs/attach 挂一个 run_mode=bbs 节点 + 用你自身能力执行该节点指令;\n"
+        "  步⑤ POST /api/v1/collaboration/tasks/bbs/result 写回(verdict=PASS、acceptances_metric 列出达成的 AC、"
         "gaps=[]、带 output_patch={完整产出}、root_verified=true 收口全图)→ claim 自动释放。\n"
         "本案例自判 full:剩余尽调目标你一次唤醒做满 → root_verified=true 收口全图 DONE。"
     )
@@ -155,8 +155,8 @@ class TestTaskIntegrationE2E(unittest.TestCase):
         self.addCleanup(lambda: loop.run_until_complete(adapter._aclose()))
 
         async with httpx.AsyncClient(timeout=300.0, headers=_HDRS) as cli:
-            # 2) POST /api/task/execute → backend 进程内真实 engine 后台推进首帧
-            r = await cli.post(f"{_BACKEND}/api/task/execute", json=_execute_body(owner_id))
+            # 2) POST /openapi/v1/collaboration/tasks/execute → backend 进程内真实 engine 后台推进首帧
+            r = await cli.post(f"{_BACKEND}/openapi/v1/collaboration/tasks/execute", json=_execute_body(owner_id))
             r.raise_for_status()
             print(f"[execute] {r.json().get('message')} data={r.json().get('data')}")
 
@@ -168,7 +168,7 @@ class TestTaskIntegrationE2E(unittest.TestCase):
             wakes = 0
             _MAX_WAKES = 3
             while time.monotonic() < deadline:
-                r = await cli.get(f"{_BACKEND}/api/task/dashboard", params={"task_id": TASK_ID})
+                r = await cli.get(f"{_BACKEND}/openapi/v1/collaboration/tasks/dashboard", params={"task_id": TASK_ID})
                 r.raise_for_status()
                 g = r.json().get("data") or {}
                 ep = g.get("extend_props") or {}
