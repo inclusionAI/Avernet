@@ -85,6 +85,17 @@ class _Repo:
         self.created.clear()
         return True
 
+    def list_bot_active_assets(self, **_kwargs):
+        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+
+        return [
+            RegisteredSkillAsset(
+                skill_id=int(row["id"]), name=row["name"], git_path=row["git_path"]
+            )
+            for row in self.created
+            if row.get("active")
+        ]
+
 
 class _Sets:
     def __init__(self, fail_at=None, default_exists=True):
@@ -361,7 +372,7 @@ class _RuntimeFactory:
     def create(self, **kwargs):
         return self
 
-    def sync_runtime(self):
+    def sync_runtime(self, *, desired_skills=None):
         return True
 
 
@@ -372,6 +383,17 @@ class _ReplacementRepo(_Repo):
         self.updates = []
         self.atomic_replacements = []
         self.cleanup = None
+
+    def list_bot_active_assets(self, **_kwargs):
+        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+
+        return [
+            RegisteredSkillAsset(
+                skill_id=int(row["id"]), name=row["name"], git_path=row["git_path"]
+            )
+            for row in self.rows
+            if row.get("active")
+        ]
 
     def list_bot_local_by_name(self, **_kwargs):
         return self.rows
@@ -460,7 +482,7 @@ class _ReplacementRuntime:
     def create(self, **_kwargs):
         return self
 
-    def sync_runtime(self):
+    def sync_runtime(self, *, desired_skills=None):
         self.calls += 1
         return next(self.results)
 
