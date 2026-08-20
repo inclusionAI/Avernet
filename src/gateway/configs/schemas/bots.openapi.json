@@ -5666,6 +5666,48 @@
         "title": "Envelope[Page[SpaceMemberItem]]",
         "type": "object"
       },
+      "Envelope_Page_SpaceSkillItem__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_SpaceSkillItem_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[SpaceSkillItem]]",
+        "type": "object"
+      },
       "Envelope_Page_WorkOrderListItem__": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -9377,6 +9419,31 @@
         "title": "Page[SpaceMemberItem]",
         "type": "object"
       },
+      "Page_SpaceSkillItem_": {
+        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/SpaceSkillItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "example": 1,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[SpaceSkillItem]",
+        "type": "object"
+      },
       "Page_WorkOrderListItem_": {
         "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
         "properties": {
@@ -11205,6 +11272,27 @@
         "title": "SkillMarketSearchRequest",
         "type": "object"
       },
+      "SkillRole": {
+        "description": "Role held by the current user for one Space Skill.",
+        "enum": [
+          "OWNER",
+          "MANAGER"
+        ],
+        "title": "SkillRole",
+        "type": "string",
+        "x-enum-descriptions": [
+          "Owns the Skill and may manage its edit grants.",
+          "May edit the Skill without managing its ownership."
+        ],
+        "x-enum-varnames": [
+          "OWNER",
+          "MANAGER"
+        ],
+        "x-enumNames": [
+          "OWNER",
+          "MANAGER"
+        ]
+      },
       "SkillState": {
         "description": "Result of an idempotent Skill desired-state command.",
         "example": {
@@ -11634,6 +11722,117 @@
           "OWNER",
           "MEMBER"
         ]
+      },
+      "SpaceSkillItem": {
+        "description": "Skill card data owned by one Space.",
+        "properties": {
+          "can_apply_edit": {
+            "description": "Whether the current user is eligible to apply for team Skill edit access; this does not represent a pending application state.",
+            "title": "Can Apply Edit",
+            "type": "boolean"
+          },
+          "can_edit": {
+            "description": "Whether the current user may edit this Skill.",
+            "title": "Can Edit",
+            "type": "boolean"
+          },
+          "can_grant": {
+            "description": "Whether the current user may grant team Skill edit access.",
+            "title": "Can Grant",
+            "type": "boolean"
+          },
+          "current_user_skill_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillRole"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current user's active Skill grant, or null when ungranted."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Skill description projected from SKILL.md.",
+            "title": "Description"
+          },
+          "draft_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current draft status, when available.",
+            "title": "Draft Status"
+          },
+          "gmt_created": {
+            "description": "UTC time when the Skill was created.",
+            "format": "date-time",
+            "title": "Gmt Created",
+            "type": "string"
+          },
+          "gmt_modified": {
+            "description": "UTC time when the Skill metadata was last modified.",
+            "format": "date-time",
+            "title": "Gmt Modified",
+            "type": "string"
+          },
+          "name": {
+            "description": "Skill name projected from SKILL.md.",
+            "title": "Name",
+            "type": "string"
+          },
+          "skill_id": {
+            "description": "Unique numeric Skill identifier.",
+            "title": "Skill Id",
+            "type": "string"
+          },
+          "skill_uuid": {
+            "description": "Stable Skill identity across versions.",
+            "title": "Skill Uuid",
+            "type": "string"
+          },
+          "space_type": {
+            "$ref": "#/components/schemas/SpaceType",
+            "description": "Whether the Skill belongs to a personal or team Space."
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current Skill lifecycle status, when available.",
+            "title": "Status"
+          }
+        },
+        "required": [
+          "skill_id",
+          "skill_uuid",
+          "name",
+          "space_type",
+          "can_edit",
+          "can_grant",
+          "can_apply_edit",
+          "gmt_created",
+          "gmt_modified"
+        ],
+        "title": "SpaceSkillItem",
+        "type": "object"
       },
       "SpaceType": {
         "description": "Kind of Space and its ownership model.",
@@ -27557,6 +27756,219 @@
           }
         },
         "summary": "Update Space Member Role",
+        "tags": [
+          "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/bots/spaces/{space_id}/skills": {
+      "get": {
+        "operationId": "list_space_skills_openapi_v1_bots_spaces__space_id__skills_get",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Optional Skill-name or description search text.",
+            "in": "query",
+            "name": "keyword",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional Skill-name or description search text.",
+              "title": "Keyword"
+            }
+          },
+          {
+            "description": "One-based page number.",
+            "in": "query",
+            "name": "page_no",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "One-based page number.",
+              "minimum": 1,
+              "title": "Page No",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum items returned per page.",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Maximum items returned per page.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_SpaceSkillItem__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "List Space Skills",
         "tags": [
           "spaces"
         ]
