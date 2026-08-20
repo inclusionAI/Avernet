@@ -387,14 +387,16 @@ def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
 
     # ── Device-service overlay (registered deferred factories) ─────────────
     # Extensions register device-service factories at import time; apply
-    # each as an instance-level provider override so every consumer baked
-    # with the device_service provider reference (publish_service, router
-    # Provide chains) sees the wrapped service. Instance-level only — the
-    # class-level variant does not exist at runtime. Must run here, before
-    # initialize_services resolves providers — never after.
+    # each as an instance-level, singleton-cached provider override so
+    # every consumer baked with the device_service provider reference
+    # (publish_service, router Provide chains) resolves the SAME wrapped
+    # instance. A plain Factory here would construct a fresh wrapper per
+    # resolution call and break consumer identity. Instance-level only —
+    # the class-level variant does not exist at runtime. Must run here,
+    # before initialize_services resolves providers — never after.
     from secbaas.community.task_registry import get_device_service_factories
 
     for factory in get_device_service_factories():
         container.services().override_providers(
-            device_service=providers.Factory(factory)
+            device_service=providers.Singleton(factory)
         )
