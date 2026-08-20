@@ -286,6 +286,12 @@ _SUBGROUPS = [
     # creation/authorization pair remains human-only. Dependencies are declared
     # per route in the local router.
     local_router,
+    # Editors are human-only, while render screens mix an app-readable GET with
+    # human-only writes. Their route dependencies enforce those distinctions;
+    # mounting either whole group under the addressed-Bot grant would make the
+    # assembly disagree with the admission table.
+    editors_router,
+    render_screens_router,
 ]
 
 # These groups may address a shared Bot. ``OwnerIdDep`` performs the same grant
@@ -298,8 +304,6 @@ _ADDRESSED_BOT_SUBGROUPS = [
     containers_router,
     diagnostics_router,
     channels_router,
-    editors_router,
-    render_screens_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
