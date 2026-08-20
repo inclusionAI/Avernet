@@ -35,6 +35,8 @@ from agentclaw.community.core.skill_center.services.skill_set_control_plane impo
 )
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
+from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -160,6 +162,8 @@ def _seed(world, *, member: bool = False) -> None:
         mutation_guard=world.get(BotCapabilityMutationGuard),
         edit_guard=world.get(SkillsPoolEditGuard),
         audit_log_repo=world.get(BotCollabLogRepositoryProtocol),
+        mcp_center=world.get(MCPCenterPlugin),
+        mcp_auth=world.get(MCPAuthPlugin),
     )
     world.injector.binder.bind(
         SkillSetControlPlaneServiceProtocol, to=control_plane, scope=None
@@ -203,7 +207,7 @@ def _case(
         expect=expect,
         input=CaseInput(
             path_params=path_params
-            or {"bot_id": _BOT_ID, "set_id": "1", "skill_id": "1"},
+            or {"bot_id": _BOT_ID, "set_id": "1", "skill_id": "1", "server_code": "mcp.test"},
             query_params={"user_id": _OWNER},
             headers=headers,
             json_body=json_body,
@@ -461,4 +465,92 @@ def deactivate_happy():
     path_params={"bot_id": _BOT_ID, "set_id": "999"},
 )
 def deactivate_error():
+    pass
+
+
+def _seed_mcp_member(world) -> None:
+    _seed(world)
+    with avernet_tenant_scope(_TENANT):
+        world.get(SkillSetControlPlaneRepositoryProtocol).add_mcp(
+            bot_id=_BOT_ID, set_id="1", server_code="mcp.test", engine_type="openclaw"
+        )
+
+
+@_case("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps", "lists_mcps", ExpectSuccess(status=200, json_contains={"data": []}))
+def list_mcps_happy():
+    pass
+
+
+@_case("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps", "missing_set", ExpectError(status=404), path_params={"bot_id": _BOT_ID, "set_id": "999", "server_code": "mcp.test"})
+def list_mcps_error():
+    pass
+
+
+@_case("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}", "adds_mcp", ExpectSuccess(status=200, json_contains={"data": {"changed": True}}))
+def add_mcp_happy():
+    pass
+
+
+@_case("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}", "missing_set", ExpectError(status=404), path_params={"bot_id": _BOT_ID, "set_id": "999", "server_code": "mcp.test"})
+def add_mcp_error():
+    pass
+
+
+@_case("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}", "removes_mcp", ExpectSuccess(status=200, json_contains={"data": {"changed": True}}), seed=_seed_mcp_member)
+def remove_mcp_happy():
+    pass
+
+
+@_case("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}", "missing_set", ExpectError(status=404), path_params={"bot_id": _BOT_ID, "set_id": "999", "server_code": "mcp.test"})
+def remove_mcp_error():
+    pass
+
+
+@_case("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permissions", "lists_mcp_permissions", ExpectSuccess(status=200, json_contains={"data": []}))
+def mcp_permissions_happy():
+    pass
+
+
+@_case("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permissions", "missing_set", ExpectError(status=404), path_params={"bot_id": _BOT_ID, "set_id": "999", "server_code": "mcp.test"})
+def mcp_permissions_error():
+    pass
+
+
+@_case("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permission-requests", "requests_mcp_permissions", ExpectSuccess(status=200, json_contains={"data": []}), json_body={"reason": "coverage"})
+def request_mcp_permissions_happy():
+    pass
+
+
+@_case("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permission-requests", "missing_set", ExpectError(status=404), json_body={"reason": "coverage"}, path_params={"bot_id": _BOT_ID, "set_id": "999", "server_code": "mcp.test"})
+def request_mcp_permissions_error():
+    pass
+
+
+@_case("GET", "/openapi/v1/bots/{bot_id}/mcps", "lists_bot_mcps", ExpectSuccess(status=200, json_contains={"data": []}))
+def list_bot_mcps_happy():
+    pass
+
+
+@_case("GET", "/openapi/v1/bots/{bot_id}/mcps", "missing_bot", ExpectError(status=404), seed=lambda world: init_principal_verifier_config(_Resolver(), "test-key", strict=False))
+def list_bot_mcps_error():
+    pass
+
+
+@_case("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate", "activates_direct_mcp", ExpectSuccess(status=200, json_contains={"data": {"active": True}}), extra=(_assert_reconciled,))
+def activate_direct_mcp_happy():
+    pass
+
+
+@_case("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate", "missing_bot", ExpectError(status=404), seed=lambda world: init_principal_verifier_config(_Resolver(), "test-key", strict=False))
+def activate_direct_mcp_error():
+    pass
+
+
+@_case("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate", "deactivates_direct_mcp", ExpectSuccess(status=200, json_contains={"data": {"active": False}}), extra=(_assert_reconciled,))
+def deactivate_direct_mcp_happy():
+    pass
+
+
+@_case("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate", "missing_bot", ExpectError(status=404), seed=lambda world: init_principal_verifier_config(_Resolver(), "test-key", strict=False))
+def deactivate_direct_mcp_error():
     pass

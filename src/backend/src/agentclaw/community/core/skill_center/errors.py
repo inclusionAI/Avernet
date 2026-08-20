@@ -119,3 +119,7 @@ class SkillSetControlPlaneLockUnavailableError(Exception):
 
 class SkillSetManagedResourceError(Exception):
     """A Direct command targets a resource managed by an ordinary SkillSet."""
+
+
+class McpPermissionDeniedError(Exception):
+    """The actor cannot install or activate the addressed MCP server."""
