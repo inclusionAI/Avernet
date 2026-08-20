@@ -207,17 +207,43 @@ def test_wildcard_origin_is_refused_at_config_load() -> None:
         UserConfig.model_validate({"cors": {"allow_origins": ["*"]}})
 
 
-def test_a_regex_that_admits_an_arbitrary_origin_is_refused_at_config_load() -> None:
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        ".*",
+        ".+",
+        "https://.*",
+        # A catch-all is a catch-all whichever scheme it names — `http://.*` is
+        # the shape an operator reaches for when they mean "localhost, any port".
+        "http://.*",
+        # ...and pinning a port does not narrow the HOST at all.
+        "https://.*:8443",
+    ],
+)
+def test_a_regex_that_admits_an_arbitrary_origin_is_refused_at_config_load(
+    pattern: str,
+) -> None:
     """The sibling check points operators here, so this field cannot be the way back in."""
-    for pattern in (".*", ".+", "https://.*"):
-        with pytest.raises(ValueError, match=r"matches the arbitrary origin"):
-            CorsConfig(allow_origin_regex=[pattern])
+    with pytest.raises(ValueError, match=r"matches the arbitrary origin"):
+        CorsConfig(allow_origin_regex=[pattern])
 
+
+def test_the_regex_refusal_reaches_a_real_config_load() -> None:
     with pytest.raises(ValueError, match=r"matches the arbitrary origin"):
         UserConfig.model_validate({"cors": {"allow_origin_regex": [".*"]}})
 
-    # A pattern pinned to a host suffix an environment actually serves is fine.
-    CorsConfig(allow_origin_regex=[r"https://[a-z0-9-]+\.preview\.example\.com"])
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        r"https://[a-z0-9-]+\.preview\.example\.com",
+        # What an operator actually means by "localhost on any port": the host is
+        # pinned, so no probe matches and the pattern is admitted.
+        r"http://localhost:[0-9]+",
+    ],
+)
+def test_a_pattern_that_pins_a_real_host_still_validates(pattern: str) -> None:
+    assert CorsConfig(allow_origin_regex=[pattern]).allow_origin_regex == [pattern]
 
 
 def test_a_malformed_regex_fails_at_config_load_not_at_boot() -> None:

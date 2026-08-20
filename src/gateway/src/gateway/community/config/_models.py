@@ -70,10 +70,19 @@ class PrincipalSignerPluginConfig(BaseModel):
     ttl_seconds: int = 60
 
 
-#: Probe for a CORS pattern that admits origins its author never enumerated.
-#: Under ``.invalid`` (RFC 2606), which no real deployment can serve from, so a
-#: pattern pinned to a real host suffix cannot match it by accident.
-_CANARY_ORIGIN = "https://canary-origin.invalid"
+#: Probes for a CORS pattern that admits origins its author never enumerated.
+#: Every host is under ``.invalid`` (RFC 2606), which no real deployment can
+#: serve from, so a pattern pinned to a real host suffix cannot match one by
+#: accident. Both schemes a browser origin can carry are probed, with and
+#: without a port: a catch-all is a catch-all whether it is written
+#: ``https://.*``, ``http://.*`` or ``https://.*:8443``, and probing only one
+#: shape would refuse that shape while admitting its neighbours.
+_CANARY_ORIGINS = (
+    "https://canary-origin.invalid",
+    "http://canary-origin.invalid",
+    "https://canary-origin.invalid:8443",
+    "http://canary-origin.invalid:8080",
+)
 
 
 class CorsConfig(BaseModel):
@@ -139,12 +148,15 @@ class CorsConfig(BaseModel):
         localhost port" — admits every site on the internet exactly as ``"*"``
         would, and boots just as quietly.
 
-        The probe is a canary rather than a proof: a pattern that ``fullmatch``es
-        a host under the reserved ``.invalid`` TLD (RFC 2606 — never resolvable,
-        so no real allow-list names it) is matching things its author did not
-        enumerate. That catches the ``.*`` / ``.+`` shapes an operator actually
-        writes; a deliberately broad pattern that dodges the canary is not
-        claimed to be caught.
+        The probes are canaries rather than a proof: a pattern that
+        ``fullmatch``es a host under the reserved ``.invalid`` TLD (RFC 2606 —
+        never resolvable, so no real allow-list names it) is matching things its
+        author did not enumerate. Both schemes are probed, with and without a
+        port, so a catch-all is caught however it is spelled. That covers the
+        ``.*`` / ``.+`` / ``<scheme>://.*`` shapes an operator actually writes;
+        a deliberately broad pattern that dodges every probe is not claimed to
+        be caught. A pattern that pins anything real — ``http://localhost:[0-9]+``,
+        a host suffix — matches no probe and passes.
 
         Compiling here is the second half of the boundary: a malformed pattern
         fails at config load, naming the entry, rather than at middleware
@@ -158,14 +170,15 @@ class CorsConfig(BaseModel):
                     f"cors.allow_origin_regex entry {pattern!r} is not a valid "
                     f"regular expression: {exc}"
                 ) from exc
-            if compiled.fullmatch(_CANARY_ORIGIN):
-                raise ValueError(
-                    f"cors.allow_origin_regex entry {pattern!r} matches the "
-                    f"arbitrary origin {_CANARY_ORIGIN!r}: the gateway sends "
-                    "Access-Control-Allow-Credentials: true, so a pattern this "
-                    "broad admits every origin to credentialed calls. Pin the "
-                    "scheme and the host suffix each environment actually serves."
-                )
+            for canary in _CANARY_ORIGINS:
+                if compiled.fullmatch(canary):
+                    raise ValueError(
+                        f"cors.allow_origin_regex entry {pattern!r} matches the "
+                        f"arbitrary origin {canary!r}: the gateway sends "
+                        "Access-Control-Allow-Credentials: true, so a pattern "
+                        "this broad admits every origin to credentialed calls. "
+                        "Pin the host suffix each environment actually serves."
+                    )
         return patterns
 
 

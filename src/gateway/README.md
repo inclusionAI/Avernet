@@ -164,10 +164,11 @@ regex (matched against the whole origin — scheme, host and port; each pattern 
 compiled on its own, so a pattern's inline flags apply to that pattern alone).
 `allow_origins: ["*"]` is refused at load time — with credentials enabled a
 wildcard silently admits every origin rather than failing loudly — and so is a
-catch-all regex such as `.*` or `https://.*`, which reaches the same place; pin
-the host suffix the environment serves. A malformed regex is refused there too,
-naming the entry, rather than taking the gateway down at boot. An overlay
-replaces a list rather than extending it.
+catch-all regex, whichever scheme or port it names (`.*`, `https://.*`,
+`http://.*`, `https://.*:8443`), since all of them reach the same place. Pin the
+host: `http://localhost:[0-9]+` is accepted, `http://.*` is not. A malformed
+regex is refused there too, naming the entry, rather than taking the gateway
+down at boot. An overlay replaces a list rather than extending it.
 
 A 500 that escapes the app is answered by Starlette above every installed
 middleware, so `install_cors` also registers the handler that stamps the origin
