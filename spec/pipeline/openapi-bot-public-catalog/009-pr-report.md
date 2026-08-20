@@ -10,7 +10,8 @@
   / `code.alipay.com/mirrors/Avernet`
 - Head / base: `feat/openapi-bot-public-catalog` /
   `dev_refactory_collaboration` in both independent repositories.
-- Avernet PR: [#1238](https://github.com/inclusionAI/Avernet/pull/1238), OPEN.
+- Avernet PR: [#1238](https://github.com/inclusionAI/Avernet/pull/1238), MERGED;
+  the BCS metadata-port follow-up is local-only pending a decision on a new PR.
 - Conflict-resolution merge: `e9d4b4ed8` merges current
   `dev_refactory_collaboration` (`3d6531c5`) into the topic without rewriting
   or force-pushing branch history.
@@ -105,3 +106,11 @@ PR head `e595d27ef` 的首次 Backend unit tests 失败已收敛为三个测试�
 - 本轮仅 `test_explicit_user_id.py` 发生内容冲突。保留 base 新增的 `94/1/46` operation 变化，并叠加 catalog 的两个无 Bot、无 user 维度读接口，最终 Bot ID placement 为 `94/1/48`；user-scoped operation 数保持 base 的 `130`。
 - 重新生成 Gateway `bots.openapi.json`，保留最新 base 的 token、session-favorites 等 schema，同时保留 catalog search/discover。
 - 验证：Backend catalog/admission/principal/path/coverage 合并回归 74 passed；Gateway route-security/served-schema/domain-map 184 passed；无新的 active review thread。
+
+## BCS 元信息端口后续（2026-08-20）
+
+- GitHub 已确认 PR #1238 为 `MERGED`，合并 head 为 `c41c927020070a5828fd3e0c84376f252750642b`；远端 `feat/openapi-bot-public-catalog` 已删除，因此本次后续不能追加到原 PR。
+- 本地主题分支仅保留新增后续提交，并重放到最新 `origin/dev_refactory_collaboration@efa0b7da3`：`f717ebd5d`（BCS metadata port）和 `50434a1b6`（固定 502 OpenAPI 契约）。唯一冲突为英文 OpenAPI changelog，已保留 base 的 Editors/Spaces/Render Screen 内容并叠加本功能说明。
+- 当前实现不调用或猜测 BCS HTTP API；production/local/test 均绑定 fail-closed unavailable service，Catalog Search 固定返回 `502000`。Legacy Search 与 Discover 保持原行为。
+- 本地最终验证：Backend 184 passed；Gateway schema/auth/forwarding 222 passed；Ruff、JSON、OpenAPI 重生成和 `git diff --check` 通过。仅存在既有依赖弃用和 schema 生成告警。
+- 当前结论：后续 PR `NOT_CREATED`。创建新的远端分支/PR 需要用户确认；未强推、未合并、未回复或 resolve review thread。
