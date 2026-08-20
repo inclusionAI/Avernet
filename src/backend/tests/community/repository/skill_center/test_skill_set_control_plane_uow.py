@@ -120,6 +120,37 @@ def test_activation_rejects_runtime_name_conflict_before_installation_write():
         assert [row.skill_id for row in installations] == [1]
 
 
+def test_legacy_switch_rejects_direct_runtime_name_conflict_before_writes():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        target = SkillSet(name="target", bolt_id="bot", is_active=False, env="dev")
+        direct = Skill(name="same", git_path="git://direct", env="dev")
+        candidate = Skill(name="same", git_path="git://candidate", env="dev")
+        session.add_all([target, direct, candidate])
+        session.flush()
+        session.add_all(
+            [
+                BotSkillInstallation(bot_id="bot", skill_id=direct.id, env="dev"),
+                SkillSetSkill(
+                    skill_set_id=target.id,
+                    skill_id=candidate.id,
+                    bot_id="bot",
+                    env="dev",
+                ),
+            ]
+        )
+
+    with pytest.raises(SkillRuntimeNameConflictError):
+        SkillSetControlPlaneRepository(db).replace_active_set(
+            bot_id="bot", set_id="1"
+        )
+
+    with db.orm_session() as session:
+        assert session.query(SkillSet).one().is_active is False
+        installations = session.query(BotSkillInstallation).all()
+        assert [row.skill_id for row in installations] == [1]
+
+
 def test_create_idempotency_replays_the_original_set_without_a_second_row():
     db = _Database()
     repository = SkillSetControlPlaneRepository(db)

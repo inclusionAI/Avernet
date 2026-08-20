@@ -461,6 +461,44 @@ async def test_skill_set_mutation_fails_closed_for_unsupported_bot_engine_pair()
     assert repository.set_active_calls == []
 
 
+def test_skill_set_metadata_mutations_share_the_runtime_matrix_gate():
+    service = SkillSetControlPlaneService(
+        repository=_Repository(),
+        bot_repo=_UnsupportedBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+    )
+
+    operations = [
+        lambda: service.create_set(
+            bot_id="bot-1",
+            actor_id="true-owner",
+            name="set",
+            description=None,
+            idempotency_key="request-1",
+        ),
+        lambda: service.update_set(
+            bot_id="bot-1",
+            actor_id="true-owner",
+            set_id="set-1",
+            name="new-name",
+            description=None,
+        ),
+        lambda: service.delete_set(
+            bot_id="bot-1", actor_id="true-owner", set_id="set-1"
+        ),
+    ]
+
+    for operation in operations:
+        with pytest.raises(SkillEngineNotSupportedError):
+            operation()
+
+
 def test_mutation_guard_heartbeat_fails_closed_and_stops_on_release(monkeypatch):
     cache = _Cache()
     guard = BotCapabilityMutationGuard(cache)

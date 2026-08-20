@@ -146,6 +146,7 @@ class SkillSetControlPlaneService:
         idempotency_key: str,
     ) -> dict:
         bot = self._bot(bot_id, actor_id)
+        self._require_mutable_bot(bot)
         scope = self._scope(bot, bot_id)
         try:
             mutation_lease = self._mutation_guard.acquire(scope=scope)
@@ -260,6 +261,7 @@ class SkillSetControlPlaneService:
         description: str | None,
     ) -> dict:
         bot = self._bot(bot_id, actor_id)
+        self._require_mutable_bot(bot)
         scope = self._scope(bot, bot_id)
         try:
             mutation_lease = self._mutation_guard.acquire(scope=scope)
@@ -288,6 +290,7 @@ class SkillSetControlPlaneService:
 
     def delete_set(self, *, bot_id: str, actor_id: str, set_id: str) -> None:
         bot = self._bot(bot_id, actor_id)
+        self._require_mutable_bot(bot)
         scope = self._scope(bot, bot_id)
         try:
             mutation_lease = self._mutation_guard.acquire(scope=scope)
@@ -500,9 +503,7 @@ class SkillSetControlPlaneService:
             except SkillsPoolEditLockUnavailableError as exc:
                 raise SkillSetControlPlaneLockUnavailableError() from exc
             try:
-                if not is_bot_ready(bot):
-                    raise LocalSkillNotReadyError()
-                require_supported_bot_skill_runtime(bot)
+                self._require_mutable_bot(bot)
                 self._ensure_mutation_lease(mutation_lease)
                 mutation_result = mutation()
                 self._ensure_mutation_lease(mutation_lease)
@@ -588,3 +589,9 @@ class SkillSetControlPlaneService:
     @staticmethod
     def _engine(bot: dict) -> str:
         return str(bot["active_engine"])
+
+    @staticmethod
+    def _require_mutable_bot(bot: dict) -> None:
+        if not is_bot_ready(bot):
+            raise LocalSkillNotReadyError()
+        require_supported_bot_skill_runtime(bot)

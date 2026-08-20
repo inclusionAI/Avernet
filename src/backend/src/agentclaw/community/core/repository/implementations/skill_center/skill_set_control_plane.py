@@ -513,6 +513,12 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
             }
             for row in sets:
                 row.is_active = int(row.id) == int(target.id)
+            self._require_unique_runtime_names(
+                session,
+                bot_id=bot_id,
+                candidate_ids=target_member_ids,
+                retired_ids=active_member_ids,
+            )
             if active_member_ids:
                 self._scope(
                     session.query(BotSkillInstallation), BotSkillInstallation
@@ -701,10 +707,17 @@ class SkillSetControlPlaneRepository(SkillSetControlPlaneRepositoryProtocol):
         }
 
     def _require_unique_runtime_names(
-        self, session, *, bot_id: str, candidate_ids: set[int]
+        self,
+        session,
+        *,
+        bot_id: str,
+        candidate_ids: set[int],
+        retired_ids: set[int] | None = None,
     ) -> None:
         """Validate the complete post-command projection before any write."""
-        selected_ids = self._installations(session, bot_id) | candidate_ids
+        selected_ids = (
+            self._installations(session, bot_id) - (retired_ids or set())
+        ) | candidate_ids
         if not selected_ids:
             return
         rows = (
