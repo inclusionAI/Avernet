@@ -42,7 +42,12 @@ class SkillAssetKind(StrEnum):
 
 class _AssetAdapter(Protocol):
     def resolve(
-        self, *, skill: dict[str, Any], bot_id: str, actor_id: str
+        self,
+        *,
+        skill: dict[str, Any],
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
     ) -> tuple[dict[str, Any], dict[str, Any], str]: ...
 
 
@@ -52,7 +57,13 @@ class _LocalSkillStatePort(Protocol):
     ) -> dict[str, Any]: ...
 
     async def set_repo_skill_active(
-        self, *, skill_id: str, bot_id: str, actor_id: str, active: bool
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        active: bool,
     ) -> dict[str, Any]: ...
 
 
@@ -84,11 +95,14 @@ class BotSkillAssetService:
         }
 
     def get_skill(
-        self, *, skill_id: str, bot_id: str, actor_id: str
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str
     ) -> dict[str, Any]:
         """Resolve the item once at the Bot-facing control-plane boundary."""
         skill, bot, _owner_id = self._resolve(
-            skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
         )
         installed = self._skill_repo.list_bot_installed_skills(
             env=str(bot["env"]), bot_id=bot_id
@@ -107,7 +121,8 @@ class BotSkillAssetService:
         skill_reference: str,
         source_path: str,
         bot_id: str,
-        actor_id: str,
+        owner_id: str,
+        user_id: str,
     ) -> str:
         """Translate Legacy path/link references to the decimal public id.
 
@@ -120,7 +135,12 @@ class BotSkillAssetService:
             if not reference:
                 continue
             if reference.isdecimal():
-                self.get_skill(skill_id=reference, bot_id=bot_id, actor_id=actor_id)
+                self.get_skill(
+                    skill_id=reference,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    user_id=user_id,
+                )
                 return reference
             candidates = [reference]
             if not reference.startswith(("git://", "local://", "center://")):
@@ -129,31 +149,61 @@ class BotSkillAssetService:
                 skill = self._skill_repo.get_by_git_path(candidate)
                 if skill is not None:
                     skill_id = str(skill["id"])
-                    self.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+                    self.get_skill(
+                        skill_id=skill_id,
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        user_id=user_id,
+                    )
                     return skill_id
             link_name = reference.rsplit("://", 1)[-1].strip("/").replace("/", "_")
             skill = self._skill_repo.get_by_link_name(link_name, bolt_id=bot_id)
             if skill is not None:
                 skill_id = str(skill["id"])
-                self.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+                self.get_skill(
+                    skill_id=skill_id,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    user_id=user_id,
+                )
                 return skill_id
         raise LocalSkillNotFoundError()
 
     async def set_active(
-        self, *, skill_id: str, bot_id: str, actor_id: str, active: bool
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        active: bool,
     ) -> dict[str, Any]:
-        skill = self.get_skill(skill_id=skill_id, bot_id=bot_id, actor_id=actor_id)
+        skill = self.get_skill(
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
+        )
         if self._kind_for(skill) is SkillAssetKind.REPO:
             return await self._local_state_service.set_repo_skill_active(
-                skill_id=skill_id, bot_id=bot_id, actor_id=actor_id, active=active
+                skill_id=skill_id,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                actor_id=user_id,
+                active=active,
             )
         return await self._local_state_service.set_local_skill_active(
-            skill_id=skill_id, actor_id=actor_id, active=active
+            skill_id=skill_id, actor_id=user_id, active=active
         )
 
-    async def get_content(self, *, skill_id: str, bot_id: str, actor_id: str) -> str:
+    async def get_content(
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str
+    ) -> str:
         skill, bot, owner_id = self._resolve(
-            skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
         )
         if self._kind_for(skill) is SkillAssetKind.REPO:
             # Repo assets are read from the global skills-repo corpus, never a
@@ -162,7 +212,9 @@ class BotSkillAssetService:
                 skill_id
             )
         else:
-            content = await self._local_storage(skill, bot, owner_id).read_file("SKILL.md")
+            content = await self._local_storage(skill, bot, owner_id).read_file(
+                "SKILL.md"
+            )
         if content is None:
             raise LocalSkillNotFoundError()
         if isinstance(content, str):
@@ -170,10 +222,13 @@ class BotSkillAssetService:
         return SkillParser.decode_content_for_display(content)
 
     async def get_parameters(
-        self, *, skill_id: str, bot_id: str, actor_id: str
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str
     ) -> dict[str, Any]:
         skill, bot, owner_id = self._resolve(
-            skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
         )
         parameter_service = await self._parameter_service_factory.create(
             bot_id=bot_id, user_id=owner_id
@@ -185,14 +240,21 @@ class BotSkillAssetService:
         *,
         skill_id: str,
         bot_id: str,
-        actor_id: str,
+        owner_id: str,
+        user_id: str,
         parameters: dict[str, Any],
     ) -> dict[str, Any]:
         skill, bot, owner_id = self._resolve(
-            skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
         )
         manifest = await self.get_content(
-            skill_id=skill_id, bot_id=bot_id, actor_id=actor_id
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
         )
         self._validate_parameters(manifest, parameters)
         parameter_service = await self._parameter_service_factory.create(
@@ -205,7 +267,7 @@ class BotSkillAssetService:
         return parameters
 
     def _resolve(
-        self, *, skill_id: str, bot_id: str, actor_id: str
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str
     ) -> tuple[dict[str, Any], dict[str, Any], str]:
         if not skill_id.isdecimal():
             raise LocalSkillNotFoundError()
@@ -213,21 +275,33 @@ class BotSkillAssetService:
         if skill is None:
             raise LocalSkillNotFoundError()
         return self._adapters[self._kind_for(skill)].resolve(
-            skill=skill, bot_id=bot_id, actor_id=actor_id
+            skill=skill,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
         )
 
     def _resolve_local(
-        self, *, skill: dict[str, Any], bot_id: str, actor_id: str
+        self,
+        *,
+        skill: dict[str, Any],
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
     ) -> tuple[dict[str, Any], dict[str, Any], str]:
-        owner_id = str(skill.get("user_id") or "")
-        if not owner_id or str(skill.get("bolt_id")) != bot_id:
+        skill_owner_id = str(skill.get("user_id") or "")
+        if (
+            not skill_owner_id
+            or skill_owner_id != owner_id
+            or str(skill.get("bolt_id")) != bot_id
+        ):
             raise LocalSkillNotFoundError()
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
-        if actor_id != owner_id:
+        if user_id != owner_id:
             permission = self._collaborators.check_collaborator_permission(
-                bot_id, owner_id, actor_id, PermissionLevel.MEMBER
+                bot_id, owner_id, user_id, PermissionLevel.MEMBER
             )
             if not permission.get("has_permission"):
                 raise LocalSkillNotFoundError()
@@ -244,9 +318,7 @@ class BotSkillAssetService:
             return SkillAssetKind.SPACE
         raise LocalSkillNotFoundError()
 
-    def _local_storage(
-        self, skill: dict[str, Any], bot: dict[str, Any], owner_id: str
-    ):
+    def _local_storage(self, skill: dict[str, Any], bot: dict[str, Any], owner_id: str):
         locator = str(skill["git_path"])[len("local://") :]
         context = self._device_context_resolver_provider().resolve_for_bot(
             str(skill["bolt_id"]), owner_id
@@ -286,9 +358,19 @@ class _LocalAssetAdapter:
     def __init__(self, service: BotSkillAssetService) -> None:
         self._service = service
 
-    def resolve(self, *, skill: dict[str, Any], bot_id: str, actor_id: str):
+    def resolve(
+        self,
+        *,
+        skill: dict[str, Any],
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+    ):
         return self._service._resolve_local(
-            skill=skill, bot_id=bot_id, actor_id=actor_id
+            skill=skill,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
         )
 
 
@@ -298,21 +380,29 @@ class _RepoAssetAdapter:
     def __init__(self, service: BotSkillAssetService) -> None:
         self._service = service
 
-    def resolve(self, *, skill: dict[str, Any], bot_id: str, actor_id: str):
+    def resolve(
+        self,
+        *,
+        skill: dict[str, Any],
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+    ):
         # Legacy Repo rows are system-owned.  Their repository implementation
         # persists a historical ``bolt_id='default'`` sentinel, so ownership
         # must be determined by the governed source scheme, never that column.
-        if skill.get("user_id") or not str(skill.get("git_path") or "").startswith("git://"):
+        if skill.get("user_id") or not str(skill.get("git_path") or "").startswith(
+            "git://"
+        ):
             raise LocalSkillNotFoundError()
-        bot = self._service._bot_repo.get_unique_by_id(bot_id)
+        bot = self._service._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
-        owner_id = str(bot.get("user_id") or bot.get("owner_id") or "")
-        if not owner_id:
+        if str(bot.get("owner_id") or "") != owner_id:
             raise LocalSkillNotFoundError()
-        if actor_id != owner_id:
+        if user_id != owner_id:
             permission = self._service._collaborators.check_collaborator_permission(
-                bot_id, owner_id, actor_id, PermissionLevel.MEMBER
+                bot_id, owner_id, user_id, PermissionLevel.MEMBER
             )
             if not permission.get("has_permission"):
                 raise LocalSkillNotFoundError()
@@ -324,5 +414,12 @@ class _RepoAssetAdapter:
 class _UnavailableAssetAdapter:
     """Explicit P1-01 registration point for P1-02/Phase-2 asset readers."""
 
-    def resolve(self, *, skill: dict[str, Any], bot_id: str, actor_id: str):
+    def resolve(
+        self,
+        *,
+        skill: dict[str, Any],
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+    ):
         raise LocalSkillNotFoundError()

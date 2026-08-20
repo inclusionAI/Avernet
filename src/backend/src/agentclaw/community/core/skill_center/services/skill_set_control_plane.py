@@ -87,20 +87,29 @@ class SkillSetControlPlaneService:
         self._mcp_center = mcp_center
         self._mcp_auth = mcp_auth
 
-    def _bot(self, bot_id: str, actor_id: str) -> dict:
-        # Resolve the record before authorizing.  ``actor_id`` is an audit and
-        # ACL subject, never a substitute for the Bot's durable owner: a
-        # collaborator (or an app delegated by one) must reconcile using the
-        # true owner and its runtime layout.
-        bot = self._bot_repo.get_unique_by_id(bot_id)
+    def _bot(self, *, bot_id: str, owner_id: str, user_id: str) -> dict:
+        """Resolve the exact addressed Bot before applying caller policy."""
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
-        owner_id = str(bot["owner_id"])
         if not self._authorization.can_manage_bot(
-            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=user_id,
         ):
             raise SkillSetAccessDeniedError()
         return bot
+
+    def _legacy_bot(self, *, bot_id: str, user_id: str) -> dict:
+        """Resolve the owner only for a released wire that cannot name one."""
+        bot = self._bot_repo.get_unique_by_id(bot_id)
+        if bot is None:
+            raise LocalSkillNotFoundError()
+        return self._bot(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            user_id=user_id,
+        )
 
     @staticmethod
     def _scope(bot: dict, bot_id: str) -> BotSkillLayoutScope:
@@ -108,20 +117,21 @@ class SkillSetControlPlaneService:
             env=str(bot["env"]), entity_id=str(bot["entity_id"]), bot_id=bot_id
         )
 
-    def list_sets(self, *, bot_id: str, actor_id: str) -> list[dict]:
-        bot = self._bot(bot_id, actor_id)
+    def list_sets(self, *, bot_id: str, owner_id: str, user_id: str) -> list[dict]:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.list_sets(bot_id=bot_id, engine_type=self._engine(bot))
 
     def create_set(
         self,
         *,
         bot_id: str,
-        actor_id: str,
+        owner_id: str,
+        user_id: str,
         name: str,
         description: str | None,
         idempotency_key: str,
     ) -> dict:
-        bot = self._bot(bot_id, actor_id)
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         self._require_mutable_bot(bot)
         scope = self._scope(bot, bot_id)
         try:
@@ -143,7 +153,7 @@ class SkillSetControlPlaneService:
             self._audit(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
-                actor_id=actor_id,
+                actor_id=user_id,
                 action="skill_set_create",
             )
             return item
@@ -168,9 +178,11 @@ class SkillSetControlPlaneService:
         SkillSet creation for caller-supplied Bot ids.
         """
         if self._bot_repo.get_unique_by_id(bot_id) is not None or bot_id != "default":
+            bot = self._legacy_bot(bot_id=bot_id, user_id=actor_id)
             return self.create_set(
                 bot_id=bot_id,
-                actor_id=actor_id,
+                owner_id=str(bot["owner_id"]),
+                user_id=actor_id,
                 name=name,
                 description=description,
                 idempotency_key=idempotency_key,
@@ -205,8 +217,8 @@ class SkillSetControlPlaneService:
         finally:
             self._mutation_guard.release(mutation_lease)
 
-    def get_set(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
-        bot = self._bot(bot_id, actor_id)
+    def get_set(self, *, bot_id: str, owner_id: str, user_id: str, set_id: str) -> dict:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.get_set(
             bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
         )
@@ -215,7 +227,12 @@ class SkillSetControlPlaneService:
         """Read a pre-Bot-record legacy set; canonical reads remain strict."""
         bot = self._bot_repo.get_unique_by_id(bot_id)
         if bot is not None:
-            return self.get_set(bot_id=bot_id, actor_id=actor_id, set_id=set_id)
+            return self.get_set(
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                user_id=actor_id,
+                set_id=set_id,
+            )
         if bot_id != "default":
             raise LocalSkillNotFoundError()
         item = self._repository.get_set(
@@ -231,12 +248,13 @@ class SkillSetControlPlaneService:
         self,
         *,
         bot_id: str,
-        actor_id: str,
+        owner_id: str,
+        user_id: str,
         set_id: str,
         name: str | None,
         description: str | None,
     ) -> dict:
-        bot = self._bot(bot_id, actor_id)
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         self._require_mutable_bot(bot)
         scope = self._scope(bot, bot_id)
         try:
@@ -257,15 +275,17 @@ class SkillSetControlPlaneService:
             self._audit(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
-                actor_id=actor_id,
+                actor_id=user_id,
                 action="skill_set_update",
             )
             return item
         finally:
             self._mutation_guard.release(mutation_lease)
 
-    def delete_set(self, *, bot_id: str, actor_id: str, set_id: str) -> None:
-        bot = self._bot(bot_id, actor_id)
+    def delete_set(
+        self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
+    ) -> None:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         item = self._repository.get_set(
             bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
         )
@@ -290,14 +310,16 @@ class SkillSetControlPlaneService:
             self._audit(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
-                actor_id=actor_id,
+                actor_id=user_id,
                 action="skill_set_delete",
             )
         finally:
             self._mutation_guard.release(mutation_lease)
 
-    def list_skills(self, *, bot_id: str, actor_id: str, set_id: str) -> list[dict]:
-        bot = self._bot(bot_id, actor_id)
+    def list_skills(
+        self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
+    ) -> list[dict]:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.list_skills(
             bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
         )
@@ -315,7 +337,7 @@ class SkillSetControlPlaneService:
         requests never call this method and therefore never create assets from
         a name/path.
         """
-        bot = self._bot(bot_id, actor_id)
+        bot = self._legacy_bot(bot_id=bot_id, user_id=actor_id)
         try:
             return self._repository.resolve_legacy_skill_id(
                 bot_id=bot_id, identifier=identifier
@@ -338,13 +360,19 @@ class SkillSetControlPlaneService:
             raise SkillSetControlPlaneNotFoundError() from exc
 
     async def add_skill(
-        self, *, bot_id: str, actor_id: str, set_id: str, skill_id: str
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        set_id: str,
+        skill_id: str,
     ) -> dict:
-        bot = self._bot(bot_id, actor_id)
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
-            actor_id=actor_id,
+            actor_id=user_id,
             action="skill_set_add_skill",
             mutation=lambda: self._repository.add_skill(
                 bot_id=bot_id,
@@ -355,13 +383,19 @@ class SkillSetControlPlaneService:
         )
 
     async def remove_skill(
-        self, *, bot_id: str, actor_id: str, set_id: str, skill_id: str
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        set_id: str,
+        skill_id: str,
     ) -> dict:
-        bot = self._bot(bot_id, actor_id)
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
-            actor_id=actor_id,
+            actor_id=user_id,
             action="skill_set_remove_skill",
             command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.remove_skill(
@@ -372,35 +406,53 @@ class SkillSetControlPlaneService:
             ),
         )
 
-    def list_mcps(self, *, bot_id: str, actor_id: str, set_id: str) -> list[dict]:
-        bot = self._bot(bot_id, actor_id)
+    def list_mcps(
+        self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
+    ) -> list[dict]:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.list_mcps(
             bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
         )
 
     def mcp_permissions(
-        self, *, bot_id: str, actor_id: str, set_id: str
+        self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> list[dict]:
-        mcps = self.list_mcps(bot_id=bot_id, actor_id=actor_id, set_id=set_id)
+        mcps = self.list_mcps(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
+            set_id=set_id,
+        )
         return [
             {
                 "server_code": item["server_code"],
                 **self._mcp_center.check_mcp_permission_detail(
-                    actor_id, str(item["server_code"])
+                    user_id, str(item["server_code"])
                 ),
             }
             for item in mcps
         ]
 
     def request_mcp_permissions(
-        self, *, bot_id: str, actor_id: str, set_id: str, reason: str
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        set_id: str,
+        reason: str,
     ) -> list[dict]:
-        mcps = self.list_mcps(bot_id=bot_id, actor_id=actor_id, set_id=set_id)
+        mcps = self.list_mcps(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
+            set_id=set_id,
+        )
         return [
             {
                 "server_code": item["server_code"],
                 **self._mcp_auth.apply_permission(
-                    staff_no=actor_id,
+                    staff_no=user_id,
                     service_code=str(item["server_code"]),
                     tool_list=[],
                     is_public=self._is_public_mcp(str(item["server_code"])),
@@ -411,100 +463,124 @@ class SkillSetControlPlaneService:
         ]
 
     async def add_mcp(
-        self, *, bot_id: str, actor_id: str, set_id: str, server_code: str
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        set_id: str,
+        server_code: str,
     ) -> dict:
-        bot = self._bot(bot_id, actor_id)
-        self._require_mcp_permission(actor_id=actor_id, server_code=server_code)
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
+        self._require_mcp_permission(actor_id=user_id, server_code=server_code)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
-            actor_id=actor_id,
+            actor_id=user_id,
             action="skill_set_add_mcp",
             mutation=lambda: self._repository.add_mcp(
-                bot_id=bot_id, set_id=set_id, server_code=server_code,
+                bot_id=bot_id,
+                set_id=set_id,
+                server_code=server_code,
                 engine_type=self._engine(bot),
             ),
         )
 
     async def remove_mcp(
-        self, *, bot_id: str, actor_id: str, set_id: str, server_code: str
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        set_id: str,
+        server_code: str,
     ) -> dict:
-        bot = self._bot(bot_id, actor_id)
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
-            actor_id=actor_id,
+            actor_id=user_id,
             action="skill_set_remove_mcp",
             command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.remove_mcp(
-                bot_id=bot_id, set_id=set_id, server_code=server_code,
+                bot_id=bot_id,
+                set_id=set_id,
+                server_code=server_code,
                 engine_type=self._engine(bot),
             ),
         )
 
     async def activate_mcp_direct(
-        self, *, bot_id: str, actor_id: str, server_code: str
+        self, *, bot_id: str, owner_id: str, user_id: str, server_code: str
     ) -> dict:
-        bot = self._bot(bot_id, actor_id)
-        self._require_mcp_permission(actor_id=actor_id, server_code=server_code)
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
+        self._require_mcp_permission(actor_id=user_id, server_code=server_code)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
-            actor_id=actor_id,
+            actor_id=user_id,
             action="mcp_direct_activate",
             mutation=lambda: self._repository.activate_mcp_direct(
-                bot_id=bot_id, server_code=server_code,
+                bot_id=bot_id,
+                server_code=server_code,
                 engine_type=self._engine(bot),
             ),
         )
 
     async def deactivate_mcp_direct(
-        self, *, bot_id: str, actor_id: str, server_code: str
+        self, *, bot_id: str, owner_id: str, user_id: str, server_code: str
     ) -> dict:
-        bot = self._bot(bot_id, actor_id)
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
-            actor_id=actor_id,
+            actor_id=user_id,
             action="mcp_direct_deactivate",
             command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.deactivate_mcp_direct(
-                bot_id=bot_id, server_code=server_code,
+                bot_id=bot_id,
+                server_code=server_code,
                 engine_type=self._engine(bot),
             ),
         )
 
-    def list_installed_mcps(self, *, bot_id: str, actor_id: str) -> set[str]:
-        bot = self._bot(bot_id, actor_id)
+    def list_installed_mcps(
+        self, *, bot_id: str, owner_id: str, user_id: str
+    ) -> set[str]:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.list_installed_mcps(
             bot_id=bot_id, engine_type=self._engine(bot)
         )
 
-    async def activate(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
-        bot = self._bot(bot_id, actor_id)
+    async def activate(
+        self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
+    ) -> dict:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         target = self._repository.get_set(
             bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
         )
         if not target["is_default"]:
             self._require_set_mcp_permissions(
-                bot_id=bot_id, actor_id=actor_id, set_id=set_id, bot=bot
+                bot_id=bot_id, actor_id=user_id, set_id=set_id, bot=bot
             )
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
-            actor_id=actor_id,
+            actor_id=user_id,
             action="skill_set_activate",
             mutation=lambda: self._repository.set_active(
                 bot_id=bot_id, set_id=set_id, active=True, engine_type=self._engine(bot)
             ),
         )
 
-    async def deactivate(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
-        bot = self._bot(bot_id, actor_id)
+    async def deactivate(
+        self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
+    ) -> dict:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
-            actor_id=actor_id,
+            actor_id=user_id,
             action="skill_set_deactivate",
             command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.set_active(
@@ -517,7 +593,7 @@ class SkillSetControlPlaneService:
 
     async def switch(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
         """Compatibility command for the deprecated single-select switch API."""
-        bot = self._bot(bot_id, actor_id)
+        bot = self._legacy_bot(bot_id=bot_id, user_id=actor_id)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
@@ -530,7 +606,7 @@ class SkillSetControlPlaneService:
 
     async def sync(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
         """Compatibility command that adds this Set without disabling peers."""
-        bot = self._bot(bot_id, actor_id)
+        bot = self._legacy_bot(bot_id=bot_id, user_id=actor_id)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
@@ -544,8 +620,8 @@ class SkillSetControlPlaneService:
             ),
         )
 
-    def resources(self, *, bot_id: str, actor_id: str) -> list[dict]:
-        bot = self._bot(bot_id, actor_id)
+    def resources(self, *, bot_id: str, owner_id: str, user_id: str) -> list[dict]:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         owner_id = str(bot["owner_id"])
         legacy = self._legacy_factory.create(
             user_id=owner_id,
@@ -570,7 +646,9 @@ class SkillSetControlPlaneService:
                 # MCP membership is canonical desired state, not a legacy BFF
                 # association, so BFF reads observe the same rows as OpenAPI.
                 "mcps": (
-                    legacy.get_set_mcp_servers(item["id"], user_id=owner_id, bot_id=bot_id)
+                    legacy.get_set_mcp_servers(
+                        item["id"], user_id=owner_id, bot_id=bot_id
+                    )
                     if item["is_default"]
                     else self._repository.list_mcps(
                         bot_id=bot_id, set_id=item["id"], engine_type=self._engine(bot)

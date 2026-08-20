@@ -277,12 +277,8 @@ _SUBGROUPS = [
     # owner/collaborator adjudication. Their own route dependency checks an
     # app-only caller's grant against the addressed owner.
     chats_router,
-    # Mixed, like `bots`: its two collection operations declare the grant check
-    # per route, and its four `{skill_id}` operations resolve the bot's owner
-    # from the skill record and check it themselves. A group-level dependency
-    # here would refuse an application holding a valid grant on a *shared* bot,
-    # because it would look the grant up against the delegating user rather than
-    # the owner. See `skills/router.py` and `admission.SKILL_SCOPED_OPERATIONS`.
+    # Every current Skill operation carries the addressed owner at its public
+    # boundary, so collection and item operations share one grant model.
     skills_router,
     # Local workflows are mixed: listings filter grants, device discovery is
     # user-gated, existing Bot operations check the own-Bot grant, and only the
@@ -307,6 +303,8 @@ _ADDRESSED_BOT_SUBGROUPS = [
     containers_router,
     diagnostics_router,
     channels_router,
+    skill_sets_router,
+    bot_mcp_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
@@ -330,8 +328,6 @@ _GRANT_CHECKED_SUBGROUPS = [
     # rather than the engine-runtime one, and mounting it here is what gives it
     # both. See ``bots/engine_config.py``.
     engine_config_router,
-    skill_sets_router,
-    bot_mcp_router,
     identity_router,
     resources_router,
     routines_router,

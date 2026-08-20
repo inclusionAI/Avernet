@@ -96,15 +96,16 @@ async def test_local_content_and_parameters_use_one_skill_id_resolver() -> None:
     service, parameters = _service()
 
     assert "# Report" in await service.get_content(
-        skill_id="42", bot_id="bot", actor_id="owner"
+        skill_id="42", bot_id="bot", owner_id="owner", user_id="owner"
     )
     assert await service.get_parameters(
-        skill_id="42", bot_id="bot", actor_id="owner"
+        skill_id="42", bot_id="bot", owner_id="owner", user_id="owner"
     ) == {"region": "cn"}
     assert await service.replace_parameters(
         skill_id="42",
         bot_id="bot",
-        actor_id="owner",
+        owner_id="owner",
+        user_id="owner",
         parameters={"region": "cn"},
     ) == {"region": "cn"}
     assert parameters.parameters.saved == ("weekly-report", {"region": "cn"})
@@ -118,7 +119,8 @@ async def test_parameter_persistence_failure_is_not_reported_as_success() -> Non
         await service.replace_parameters(
             skill_id="42",
             bot_id="bot",
-            actor_id="owner",
+            owner_id="owner",
+            user_id="owner",
             parameters={"region": "cn"},
         )
 
@@ -144,4 +146,12 @@ config:
 def test_resolved_bot_skill_uses_installation_projection_for_active_state() -> None:
     service, _parameters = _service()
 
-    assert service.get_skill(skill_id="42", bot_id="bot", actor_id="owner")["active"] is True
+    assert (
+        service.get_skill(
+            skill_id="42",
+            bot_id="bot",
+            owner_id="owner",
+            user_id="owner",
+        )["active"]
+        is True
+    )

@@ -139,6 +139,10 @@ class _Bots:
             "status": "ACTIVE",
         }
 
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict | None:
+        bot = self.get_unique_by_id(bot_id)
+        return bot if owner_id == bot["owner_id"] else None
+
 
 class _Collaborators:
     def __init__(self) -> None:
@@ -538,7 +542,12 @@ async def test_collaborator_command_keeps_one_guard_through_restore_and_uses_tru
     )
 
     with pytest.raises(SkillSetRuntimeReconcileError):
-        await service.activate(bot_id="bot-1", actor_id="collaborator", set_id="set-1")
+        await service.activate(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="collaborator",
+            set_id="set-1",
+        )
 
     assert collaborators.calls == [
         {
@@ -576,11 +585,21 @@ async def test_legacy_bot_uses_layout_neutral_fence_for_the_full_runtime_window(
     )
 
     first = __import__("asyncio").create_task(
-        service.activate(bot_id="bot-1", actor_id="true-owner", set_id="set-1")
+        service.activate(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="true-owner",
+            set_id="set-1",
+        )
     )
     await started.wait()
     with pytest.raises(Exception, match="BOT_MUTATION_BUSY"):
-        await service.deactivate(bot_id="bot-1", actor_id="true-owner", set_id="set-1")
+        await service.deactivate(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="true-owner",
+            set_id="set-1",
+        )
     unblock.set()
     await first
     assert cache.held == {}
@@ -670,13 +689,12 @@ def test_legacy_virtual_default_read_is_owner_scoped():
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    assert service.get_legacy_set(
-        bot_id="default", actor_id="owner", set_id="set-1"
-    )["id"] == "set-1"
+    assert (
+        service.get_legacy_set(bot_id="default", actor_id="owner", set_id="set-1")["id"]
+        == "set-1"
+    )
     with pytest.raises(SkillSetAccessDeniedError):
-        service.get_legacy_set(
-            bot_id="default", actor_id="other", set_id="set-1"
-        )
+        service.get_legacy_set(bot_id="default", actor_id="other", set_id="set-1")
 
 
 @pytest.mark.asyncio
@@ -724,7 +742,11 @@ def test_skill_set_acl_denial_is_forbidden_not_not_found():
     )
 
     with pytest.raises(SkillSetAccessDeniedError):
-        service.list_sets(bot_id="bot-1", actor_id="collaborator")
+        service.list_sets(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="collaborator",
+        )
 
 
 @pytest.mark.asyncio
@@ -746,7 +768,10 @@ async def test_skill_set_mutation_fails_closed_for_unsupported_bot_engine_pair()
 
     with pytest.raises(SkillEngineNotSupportedError):
         await service.activate(
-            bot_id="bot-1", actor_id="true-owner", set_id="set-1"
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="true-owner",
+            set_id="set-1",
         )
 
     assert repository.set_active_calls == []
@@ -770,7 +795,12 @@ async def test_historical_bot_skill_set_deactivate_uses_cleanup_projection():
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    await service.deactivate(bot_id="bot-1", actor_id="true-owner", set_id="set-1")
+    await service.deactivate(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+    )
 
     assert repository.set_active_calls == [
         {
@@ -801,14 +831,16 @@ def test_skill_set_metadata_mutations_share_the_runtime_matrix_gate():
     operations = [
         lambda: service.create_set(
             bot_id="bot-1",
-            actor_id="true-owner",
+            owner_id="true-owner",
+            user_id="true-owner",
             name="set",
             description=None,
             idempotency_key="request-1",
         ),
         lambda: service.update_set(
             bot_id="bot-1",
-            actor_id="true-owner",
+            owner_id="true-owner",
+            user_id="true-owner",
             set_id="set-1",
             name="new-name",
             description=None,
@@ -835,7 +867,12 @@ def test_historical_bot_may_delete_an_inactive_skill_set_without_new_runtime_wri
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    service.delete_set(bot_id="bot-1", actor_id="true-owner", set_id="set-1")
+    service.delete_set(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+    )
 
 
 def test_mutation_guard_heartbeat_fails_closed_and_stops_on_release(monkeypatch):
@@ -876,7 +913,12 @@ async def test_skill_set_releases_mutation_lease_when_pool_release_fails():
     )
 
     with pytest.raises(RuntimeError, match="pool release failed"):
-        await service.activate(bot_id="bot-1", actor_id="true-owner", set_id="set-1")
+        await service.activate(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="true-owner",
+            set_id="set-1",
+        )
     assert cache.held == {}
 
 
@@ -935,7 +977,10 @@ async def test_mcp_direct_activation_checks_permission_before_writing_desired_st
     )
 
     await service.activate_mcp_direct(
-        bot_id="bot-1", actor_id="true-owner", server_code="mcp.weather"
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        server_code="mcp.weather",
     )
 
     assert mcp_center.calls == [("true-owner", "mcp.weather")]
@@ -963,7 +1008,10 @@ async def test_mcp_direct_activation_denies_before_writing_desired_state():
 
     with pytest.raises(McpPermissionDeniedError):
         await service.activate_mcp_direct(
-            bot_id="bot-1", actor_id="true-owner", server_code="mcp.weather"
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="true-owner",
+            server_code="mcp.weather",
         )
     assert repository.direct_calls == []
 
@@ -1217,9 +1265,7 @@ async def test_non_skill_projection_never_writes_skill_mappings():
         passport=_RuntimePassport(),
     )
 
-    await runtime.reconcile_non_skill_projection(
-        bot_id="bot-1", owner_id="true-owner"
-    )
+    await runtime.reconcile_non_skill_projection(bot_id="bot-1", owner_id="true-owner")
 
     assert factory.service.desired_skills is None
     assert factory.service.mcp_codes is not None

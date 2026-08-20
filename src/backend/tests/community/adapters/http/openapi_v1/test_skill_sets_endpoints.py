@@ -20,14 +20,34 @@ class _ControlPlane:
         self.created: dict | None = None
 
     def list_sets(self, **_kwargs):
-        return [{"id": "1", "name": "Default", "description": None, "is_default": True, "is_active": True}]
+        return [
+            {
+                "id": "1",
+                "name": "Default",
+                "description": None,
+                "is_default": True,
+                "is_active": True,
+            }
+        ]
 
     def create_set(self, **kwargs):
         self.created = kwargs
-        return {"id": "2", "name": kwargs["name"], "description": kwargs.get("description"), "is_default": False, "is_active": False}
+        return {
+            "id": "2",
+            "name": kwargs["name"],
+            "description": kwargs.get("description"),
+            "is_default": False,
+            "is_active": False,
+        }
 
     def get_set(self, **_kwargs):
-        return {"id": "2", "name": "New", "description": None, "is_default": False, "is_active": False}
+        return {
+            "id": "2",
+            "name": "New",
+            "description": None,
+            "is_default": False,
+            "is_active": False,
+        }
 
     def update_set(self, **_kwargs):
         return self.get_set()
@@ -45,10 +65,24 @@ class _ControlPlane:
         return {"changed": False}
 
     async def activate(self, **_kwargs):
-        return {"id": "2", "name": "New", "description": None, "is_default": False, "is_active": True, "changed": True}
+        return {
+            "id": "2",
+            "name": "New",
+            "description": None,
+            "is_default": False,
+            "is_active": True,
+            "changed": True,
+        }
 
     async def deactivate(self, **_kwargs):
-        return {"id": "2", "name": "New", "description": None, "is_default": False, "is_active": False, "changed": True}
+        return {
+            "id": "2",
+            "name": "New",
+            "description": None,
+            "is_default": False,
+            "is_active": False,
+            "changed": True,
+        }
 
     def resources(self, **_kwargs):
         return []
@@ -82,8 +116,12 @@ def test_create_is_inactive_and_requires_an_idempotency_key():
     assert response.status_code == 201
     assert response.json()["data"]["is_active"] is False
     assert control.created == {
-        "bot_id": "bot-1", "actor_id": "actor", "name": "New",
-        "description": "Description", "idempotency_key": "request-1",
+        "bot_id": "bot-1",
+        "owner_id": "actor",
+        "user_id": "actor",
+        "name": "New",
+        "description": "Description",
+        "idempotency_key": "request-1",
     }
 
 

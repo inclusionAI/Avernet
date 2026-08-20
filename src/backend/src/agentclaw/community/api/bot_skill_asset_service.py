@@ -7,7 +7,9 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class BotSkillAssetServiceProtocol(Protocol):
-    def get_skill(self, *, skill_id: str, bot_id: str, actor_id: str) -> dict[str, Any]: ...
+    def get_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str
+    ) -> dict[str, Any]: ...
 
     def resolve_legacy_skill_id(
         self,
@@ -15,19 +17,26 @@ class BotSkillAssetServiceProtocol(Protocol):
         skill_reference: str,
         source_path: str,
         bot_id: str,
-        actor_id: str,
+        owner_id: str,
+        user_id: str,
     ) -> str: ...
 
     async def set_active(
-        self, *, skill_id: str, bot_id: str, actor_id: str, active: bool
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        active: bool,
     ) -> dict[str, Any]: ...
 
     async def get_content(
-        self, *, skill_id: str, bot_id: str, actor_id: str
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str
     ) -> str: ...
 
     async def get_parameters(
-        self, *, skill_id: str, bot_id: str, actor_id: str
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str
     ) -> dict[str, Any]: ...
 
     async def replace_parameters(
@@ -35,6 +44,7 @@ class BotSkillAssetServiceProtocol(Protocol):
         *,
         skill_id: str,
         bot_id: str,
-        actor_id: str,
+        owner_id: str,
+        user_id: str,
         parameters: dict[str, Any],
     ) -> dict[str, Any]: ...

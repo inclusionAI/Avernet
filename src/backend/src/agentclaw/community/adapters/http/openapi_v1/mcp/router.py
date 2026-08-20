@@ -34,9 +34,13 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_principal,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+)
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     UserIdDep,
     refuse_app_only_caller,
+    require_granted_addressed_bot,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
@@ -77,7 +81,13 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/openapi/v1/bots/mcp", tags=["mcp"])
-bot_mcp_router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/mcps", tags=["mcp"])
+_GRANT_CHECKED_ADDRESSED_BOT = [Depends(require_granted_addressed_bot)]
+
+bot_mcp_router = APIRouter(
+    prefix="/openapi/v1/bots/{bot_id}/mcps",
+    tags=["mcp"],
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+)
 
 #: What the *configuration* operations declare: ``REFUSED`` to a machine
 #: caller. They read and write account-level state with no bot dimension — a
@@ -108,16 +118,24 @@ _ENTITY_TYPE = "staff"
 @envelope_errors
 async def list_bot_mcps(
     bot_id: BotIdPath,
-    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
     request: Request,
     service: SkillSetControlPlaneServiceProtocol = Injected(
         SkillSetControlPlaneServiceProtocol
     ),
 ) -> Envelope[list[BotMcpItem]]:
     return envelope(
-        [BotMcpItem(server_code=code, active=True) for code in sorted(
-            service.list_installed_mcps(bot_id=bot_id, actor_id=actor_id)
-        )],
+        [
+            BotMcpItem(server_code=code, active=True)
+            for code in sorted(
+                service.list_installed_mcps(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    user_id=user_id,
+                )
+            )
+        ],
         request,
     )
 
@@ -127,14 +145,18 @@ async def list_bot_mcps(
 async def activate_bot_mcp(
     bot_id: BotIdPath,
     server_code: Annotated[str, Path(description="Opaque MCP server identifier.")],
-    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
     request: Request,
     service: SkillSetControlPlaneServiceProtocol = Injected(
         SkillSetControlPlaneServiceProtocol
     ),
 ) -> Envelope[BotMcpItem]:
     await service.activate_mcp_direct(
-        bot_id=bot_id, actor_id=actor_id, server_code=server_code
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+        server_code=server_code,
     )
     return envelope(BotMcpItem(server_code=server_code, active=True), request)
 
@@ -144,14 +166,18 @@ async def activate_bot_mcp(
 async def deactivate_bot_mcp(
     bot_id: BotIdPath,
     server_code: Annotated[str, Path(description="Opaque MCP server identifier.")],
-    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
     request: Request,
     service: SkillSetControlPlaneServiceProtocol = Injected(
         SkillSetControlPlaneServiceProtocol
     ),
 ) -> Envelope[BotMcpItem]:
     await service.deactivate_mcp_direct(
-        bot_id=bot_id, actor_id=actor_id, server_code=server_code
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+        server_code=server_code,
     )
     return envelope(BotMcpItem(server_code=server_code, active=False), request)
 
@@ -262,9 +288,7 @@ async def list_mcp_servers(
     # The list projects to McpServer, which carries no tools — so there is no
     # extInfo to strip here (that matters only on the detail path, which does
     # expose tools). Keeping tools out of the list is also what keeps it light.
-    items = [
-        _to_server(s) for s in (result.get("data") or []) if isinstance(s, dict)
-    ]
+    items = [_to_server(s) for s in (result.get("data") or []) if isinstance(s, dict)]
     return page(result.get("total", len(items)), items, request)
 
 
