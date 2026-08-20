@@ -128,6 +128,8 @@ PhysicalBot:
     - reachability
     - created_at
     - updated_at
+    - task_claim_mode
+    - task_dream_mode
   properties:
     bot_id:
       type: string
@@ -170,6 +172,12 @@ PhysicalBot:
       format: int64
       minimum: 0
       description: Unix milliseconds mapped from gmt_modified.
+    task_claim_mode:
+      type: boolean
+      description: Task-claim opt-in toggle. Defaults to false when never set.
+    task_dream_mode:
+      type: boolean
+      description: Task-dream opt-in toggle. Defaults to false when never set.
   description: >-
     A physical software Bot. descriptor and reachability are normalized even
     when their legacy source columns are incomplete.

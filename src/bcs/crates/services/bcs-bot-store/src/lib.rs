@@ -30,7 +30,8 @@ use bcs_db_api::{
 use bcs_service_api::{
     BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRecord, BotControlPlaneRepoPort, BotDynamicStatus, BotMetricCount,
+    BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch,
+    BotDynamicStatus, BotMetricCount,
     BotMetricsSnapshotPort, RegisteredBot, ServiceError, ServiceResult, Skill,
 };
 
@@ -2599,6 +2600,14 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
     let agent_code = db_get_column_opt::<String>(row, "agent_code")
         .map_err(|error| ServiceError::InternalError(error.to_string()))?
         .or(bot_info.agent_code);
+    let task_claim_mode = db_get_column_opt::<i64>(row, "task_claim_mode")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .map(|value| value != 0)
+        .unwrap_or(false);
+    let task_dream_mode = db_get_column_opt::<i64>(row, "task_dream_mode")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .map(|value| value != 0)
+        .unwrap_or(false);
     let created_at = db_get_column::<i64>(row, "gmt_create_ms")
         .map_err(|error| ServiceError::InternalError(error.to_string()))?
         .max(0) as u64;
@@ -2621,6 +2630,8 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
             scopes: bot_info.scopes,
         },
         agent_code,
+        task_claim_mode,
+        task_dream_mode,
         created_at,
         updated_at,
     })
@@ -2635,7 +2646,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
     ) -> ServiceResult<Option<BotControlPlaneRecord>> {
         let sql = format!(
             "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, \
-                    created_by, agent_code, ({}) * 1000 AS gmt_create_ms, \
+                    created_by, agent_code, task_claim_mode, task_dream_mode, ({}) * 1000 AS gmt_create_ms, \
                     ({}) * 1000 AS gmt_modified_ms \
              FROM bcs_bots \
              WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 \
@@ -2689,6 +2700,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             "{common}\
              SELECT b.bot_uuid, b.name, b.bot_info, b.visibility, b.status, \
                     b.actor_kind, b.env, b.created_by, b.agent_code, \
+                    b.task_claim_mode, b.task_dream_mode, \
                     ({} ) * 1000 AS gmt_create_ms, \
                     ({} ) * 1000 AS gmt_modified_ms, \
                     CASE WHEN f.bot_uuid IS NULL THEN 0 ELSE 1 END AS is_friend \
@@ -2760,7 +2772,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
     ) -> ServiceResult<Vec<BotControlPlaneRecord>> {
         let mut sql = format!(
             "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, \
-                    created_by, agent_code, ({}) * 1000 AS gmt_create_ms, \
+                    created_by, agent_code, task_claim_mode, task_dream_mode, ({}) * 1000 AS gmt_create_ms, \
                     ({}) * 1000 AS gmt_modified_ms \
              FROM bcs_bots \
              WHERE created_by = ? AND env = ? AND COALESCE(is_deleted, 0) = 0",
@@ -2802,6 +2814,50 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         rows.iter().map(control_plane_record_from_row).collect()
     }
 
+    async fn list_control_plane_by_task_modes(
+        &self,
+        query: BotTaskModesQuery,
+    ) -> ServiceResult<Vec<BotControlPlaneRecord>> {
+        let mut sql = format!(
+            "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, \
+                    created_by, agent_code, task_claim_mode, task_dream_mode, \
+                    ({}) * 1000 AS gmt_create_ms, ({}) * 1000 AS gmt_modified_ms \
+             FROM bcs_bots \
+             WHERE env = ? AND COALESCE(is_deleted, 0) = 0 \
+             AND COALESCE(actor_kind, 'bot') = 'bot'",
+            self.flavor.unix_ts("gmt_create"),
+            self.flavor.unix_ts("gmt_modified")
+        );
+        let mut params = vec![Value::from(query.env.as_str())];
+        match (query.task_claim_mode, query.task_dream_mode, query.match_mode) {
+            (Some(claim), Some(dream), TaskModeMatch::All) => {
+                sql.push_str(" AND task_claim_mode = ? AND task_dream_mode = ?");
+                params.push(Value::from(if claim { 1 } else { 0 }));
+                params.push(Value::from(if dream { 1 } else { 0 }));
+            }
+            (Some(claim), Some(dream), TaskModeMatch::Any) => {
+                sql.push_str(" AND (task_claim_mode = ? OR task_dream_mode = ?)");
+                params.push(Value::from(if claim { 1 } else { 0 }));
+                params.push(Value::from(if dream { 1 } else { 0 }));
+            }
+            (Some(claim), None, _) => {
+                sql.push_str(" AND task_claim_mode = ?");
+                params.push(Value::from(if claim { 1 } else { 0 }));
+            }
+            (None, Some(dream), _) => {
+                sql.push_str(" AND task_dream_mode = ?");
+                params.push(Value::from(if dream { 1 } else { 0 }));
+            }
+            (None, None, _) => {}
+        }
+        sql.push_str(" ORDER BY gmt_create DESC, bot_uuid ASC");
+        let rows = self
+            .db_query(&sql, params)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        rows.iter().map(control_plane_record_from_row).collect()
+    }
+
     async fn patch_control_plane(
         &self,
         bot_id: &str,
@@ -2829,6 +2885,14 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
                 bcs_service_api::ActorStatus::Online => "online",
                 bcs_service_api::ActorStatus::Hidden => "hidden",
             }));
+        }
+        if let Some(task_claim_mode) = patch.task_claim_mode {
+            assignments.push("task_claim_mode = ?");
+            params.push(Value::from(if task_claim_mode { 1 } else { 0 }));
+        }
+        if let Some(task_dream_mode) = patch.task_dream_mode {
+            assignments.push("task_dream_mode = ?");
+            params.push(Value::from(if task_dream_mode { 1 } else { 0 }));
         }
         if let Some(descriptor) = patch.descriptor.as_ref() {
             let rows = self

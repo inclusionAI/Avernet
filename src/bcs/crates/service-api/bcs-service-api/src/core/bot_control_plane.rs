@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use crate::types::{
     BotCandidateReadQuery, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRecord, ServiceResult,
+    BotControlPlaneRecord, BotTaskModesQuery, ServiceResult,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +54,17 @@ pub trait BotControlPlaneCoreService: Send + Sync {
         &self,
         query: BotControlPlaneOwnedQuery,
     ) -> ServiceResult<Vec<BotControlPlaneView>>;
+
+    /// Read physical bots by the task-mode toggles. Internal capability; the default
+    /// returns an empty result so test stubs keep compiling. Concrete core services
+    /// override this to delegate to the repo port and hydrate providers.
+    async fn list_by_task_modes(
+        &self,
+        query: BotTaskModesQuery,
+    ) -> ServiceResult<Vec<BotControlPlaneView>> {
+        let _ = query;
+        Ok(Vec::new())
+    }
 
     async fn patch(
         &self,

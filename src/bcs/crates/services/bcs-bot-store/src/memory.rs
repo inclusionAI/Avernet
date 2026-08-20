@@ -17,6 +17,7 @@ use bcs_service_api::port::repo::BotRepoPort;
 use bcs_service_api::{
     BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotTaskModesQuery, TaskModeMatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotDynamicStatus, BotMetricCount,
     BotMetricsSnapshotPort, RegisteredBot, ServiceError, ServiceResult, Skill,
 };
@@ -92,6 +93,8 @@ pub struct MemoryBotRepo {
     bots_base_dir: PathBuf,
     /// Pending one-shot request-response channels: request_id -> oneshot sender.
     pending_requests: RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>>,
+    /// Control-plane task-mode toggles: (`task_claim_mode`, `task_dream_mode`).
+    task_modes: RwLock<HashMap<String, (bool, bool)>>,
 }
 
 /// Persisted capabilities format.
@@ -253,6 +256,7 @@ impl MemoryBotRepo {
             bot_info_overrides: RwLock::new(HashMap::new()),
             bots_base_dir,
             pending_requests: RwLock::new(HashMap::new()),
+            task_modes: RwLock::new(HashMap::new()),
         }
     }
 
@@ -375,6 +379,7 @@ impl Default for MemoryBotRepo {
             bot_info_overrides: RwLock::new(HashMap::new()),
             bots_base_dir: PathBuf::from("."),
             pending_requests: RwLock::new(HashMap::new()),
+            task_modes: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -1674,6 +1679,13 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
         else {
             return Ok(None);
         };
+        let (task_claim_mode, task_dream_mode) = self
+            .task_modes
+            .read()
+            .await
+            .get(bot_id)
+            .copied()
+            .unwrap_or((false, false));
         Ok(Some(BotControlPlaneRecord {
             bot_id: bot.bot_id.clone(),
             kind: bot.actor_kind,
@@ -1693,6 +1705,8 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
                 scopes: bot.capabilities.scopes.clone(),
             },
             agent_code: bot.capabilities.agent_code.clone(),
+            task_claim_mode,
+            task_dream_mode,
             created_at: audit.0,
             updated_at: audit.1,
         }))
@@ -1776,6 +1790,43 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
                 continue;
             }
             records.push(bot);
+        }
+        records.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| left.bot_id.cmp(&right.bot_id))
+        });
+        Ok(records)
+    }
+
+    async fn list_control_plane_by_task_modes(
+        &self,
+        query: BotTaskModesQuery,
+    ) -> ServiceResult<Vec<BotControlPlaneRecord>> {
+        let ids = self.bots.read().await.keys().cloned().collect::<Vec<_>>();
+        let mut records = Vec::new();
+        for bot_id in ids {
+            let Some(bot) = self.get_control_plane(&bot_id, &query.env).await? else {
+                continue;
+            };
+            if bot.kind != bcs_service_api::ActorKind::Bot {
+                continue;
+            }
+            let passes = match (query.task_claim_mode, query.task_dream_mode, query.match_mode) {
+                (Some(claim), Some(dream), TaskModeMatch::All) => {
+                    bot.task_claim_mode == claim && bot.task_dream_mode == dream
+                }
+                (Some(claim), Some(dream), TaskModeMatch::Any) => {
+                    bot.task_claim_mode == claim || bot.task_dream_mode == dream
+                }
+                (Some(claim), None, _) => bot.task_claim_mode == claim,
+                (None, Some(dream), _) => bot.task_dream_mode == dream,
+                (None, None, _) => true,
+            };
+            if passes {
+                records.push(bot);
+            }
         }
         records.sort_by(|left, right| {
             right
@@ -1874,6 +1925,16 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
             bot.env = Some(record_env);
             if let Some(status) = patch.status {
                 bot.status = status;
+            }
+        }
+        {
+            let mut task_modes = self.task_modes.write().await;
+            let entry = task_modes.entry(bot_id.to_string()).or_insert((false, false));
+            if let Some(claim) = patch.task_claim_mode {
+                entry.0 = claim;
+            }
+            if let Some(dream) = patch.task_dream_mode {
+                entry.1 = dream;
             }
         }
         self.control_plane_audit

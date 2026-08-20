@@ -566,3 +566,13 @@ UpdateBotRequest:
       $ref: ../domain-models.yaml#/BotStatus
     descriptor:
       $ref: "#/UpdateBotDescriptor"
+    task_claim_mode:
+      type: boolean
+      description: >-
+        Task-claim opt-in toggle. Omit to leave the stored value unchanged;
+        defaults to false when never set. Physical bots only.
+    task_dream_mode:
+      type: boolean
+      description: >-
+        Task-dream opt-in toggle. Omit to leave the stored value unchanged;
+        defaults to false when never set. Physical bots only.

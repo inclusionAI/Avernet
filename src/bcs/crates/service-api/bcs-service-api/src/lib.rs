@@ -211,6 +211,7 @@ pub use types::{
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
     BotControlPlanePatch, BotControlPlaneRecord,
+    BotTaskModesQuery, TaskModeMatch,
     BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, CoordinationMode,
     CoordinationSurface, ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig,
     ProviderCredential, ProviderOrganizationManagementConfig, ProviderRecord, RedactedToken,

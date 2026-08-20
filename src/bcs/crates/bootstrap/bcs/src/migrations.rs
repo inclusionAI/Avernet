@@ -41,7 +41,9 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         actor_kind TEXT NOT NULL DEFAULT 'bot',
         status TEXT NOT NULL DEFAULT 'online',
         is_deleted INTEGER NOT NULL DEFAULT 0,
-        agent_code TEXT DEFAULT NULL
+        agent_code TEXT DEFAULT NULL,
+        task_claim_mode INTEGER NOT NULL DEFAULT 0,
+        task_dream_mode INTEGER NOT NULL DEFAULT 0
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_session_token ON bcs_bots(session_token)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_bot_env ON bcs_bots(bot_uuid, env)",
@@ -723,6 +725,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 8,
         name: "human_input_im_requests",
     },
+    SqliteMigration {
+        version: 9,
+        name: "add_bot_task_modes",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -824,6 +830,7 @@ pub async fn run_sqlite_bootstrap_tables(db: &dyn DbPlugin) -> DbResult<()> {
     ensure_sqlite_message_owner_bot_id(db).await?;
     ensure_sqlite_session_collected_column(db).await?;
     ensure_bcs_session_files(db).await?;
+    ensure_sqlite_bot_task_modes(db).await?;
     Ok(())
 }
 
@@ -849,6 +856,37 @@ async fn ensure_sqlite_message_owner_bot_id(db: &dyn DbPlugin) -> DbResult<()> {
          ON bcs_messages(session_id, owner_bot_id, created_at, session_seq)",
     ))
     .await?;
+    Ok(())
+}
+
+async fn ensure_sqlite_bot_task_modes(db: &dyn DbPlugin) -> DbResult<()> {
+    let columns = db
+        .query(DbStatement::new("PRAGMA table_info(bcs_bots)"))
+        .await?;
+    let mut has_claim = false;
+    let mut has_dream = false;
+    for row in &columns {
+        match row.get_string("name")?.as_deref() {
+            Some("task_claim_mode") => has_claim = true,
+            Some("task_dream_mode") => has_dream = true,
+            _ => {}
+        }
+        if has_claim && has_dream {
+            break;
+        }
+    }
+    if !has_claim {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN task_claim_mode INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await?;
+    }
+    if !has_dream {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN task_dream_mode INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await?;
+    }
     Ok(())
 }
 
@@ -989,6 +1027,10 @@ async fn apply_sqlite_migration_body(
         // Startup DDL creates the HumanInput request table and indexes before
         // versioned migrations are recorded.
         8 => Ok(()),
+        // task_claim_mode / task_dream_mode columns are added by
+        // ensure_sqlite_bot_task_modes in run_sqlite_bootstrap_tables;
+        // version 9 only records progress.
+        9 => Ok(()),
         _ => Ok(()),
     }
 }
@@ -1211,6 +1253,8 @@ mod tests {
 
         let columns = column_names(&db, "bcs_bots").await?;
         assert!(columns.iter().any(|column| column == "agent_code"));
+        assert!(columns.iter().any(|column| column == "task_claim_mode"));
+        assert!(columns.iter().any(|column| column == "task_dream_mode"));
         let node_columns = column_names(&db, "bcs_state_machine_node_runs").await?;
         assert!(node_columns.iter().any(|column| column == "outcome"));
         assert!(node_columns.iter().any(|column| column == "responded_by"));
@@ -1252,6 +1296,11 @@ mod tests {
                     8,
                     "human_input_im_requests".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    9,
+                    "add_bot_task_modes".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1264,7 +1313,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 8);
+        assert_eq!(report.pending_versions.len(), 9);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1295,6 +1344,8 @@ mod tests {
             report.pending_versions[7].name,
             "human_input_im_requests"
         );
+        assert_eq!(report.pending_versions[8].version, 9);
+        assert_eq!(report.pending_versions[8].name, "add_bot_task_modes");
         Ok(())
     }
 
@@ -1330,6 +1381,11 @@ mod tests {
                 (
                     8,
                     "human_input_im_requests".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    9,
+                    "add_bot_task_modes".to_string(),
                     "sqlite".to_string()
                 )
             ]
