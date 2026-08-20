@@ -89,7 +89,7 @@ class TestGetSymlinkMappings:
         assert symlinks[0].source == "/workspace/skills-local/direct-local"
         assert symlinks[0].target.endswith("/workspace/skills/direct-local")
         mock_skill_repo.list_bot_installed_skills.assert_called_once_with(
-            env="dev", bot_id="default"
+            env="dev", owner_id="100015", bot_id="default"
         )
 
     def test_pool_locator_is_used_as_mapping_source_without_legacy_rewrite(
