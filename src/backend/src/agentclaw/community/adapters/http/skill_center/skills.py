@@ -1179,7 +1179,8 @@ async def activate_skill_set(
 
     item = await control_plane.activate(
         bot_id=effective_bot_id,
-        actor_id=ctx.user_id,
+        owner_id=effective_entity_id,
+        user_id=ctx.user_id,
         set_id=request.skill_set_id,
     )
 
@@ -1234,7 +1235,8 @@ async def deactivate_skill_set(
 
     item = await control_plane.deactivate(
         bot_id=effective_bot_id,
-        actor_id=ctx.user_id,
+        owner_id=effective_entity_id,
+        user_id=ctx.user_id,
         set_id=request.skill_set_id,
     )
 
@@ -1286,7 +1288,9 @@ async def get_active_skill_sets(
     active_sets = [
         item
         for item in control_plane.list_sets(
-            bot_id=effective_bot_id, actor_id=ctx.user_id
+            bot_id=effective_bot_id,
+            owner_id=effective_entity_id,
+            user_id=ctx.user_id,
         )
         if item.get("is_active") or item.get("is_default")
     ]
@@ -1934,9 +1938,9 @@ async def sync_skills_from_git(
     # the contract scanner false-positives because the API endpoint above
     # shares the name as an async def. allow-run-in-threadpool suppresses
     # only this contract check, not other lint rules.
-    results = await run_in_threadpool(
+    results = await run_in_threadpool(  # allow-run-in-threadpool
         service.sync_skills_from_git, user_id=request.user_id
-    )  # allow-run-in-threadpool
+    )
     return SyncSkillsResponse(
         success=True,
         data=SyncSkillsResult(**results),

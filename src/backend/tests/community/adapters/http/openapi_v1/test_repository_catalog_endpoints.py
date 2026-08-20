@@ -30,7 +30,12 @@ class _Catalog:
         self.calls: list[tuple[str, object]] = []
         self.items = [
             {"id": "1", "name": "report", "description": "weekly", "category": "ops"},
-            {"id": "2", "name": "report-two", "description": "monthly", "category": "ops"},
+            {
+                "id": "2",
+                "name": "report-two",
+                "description": "monthly",
+                "category": "ops",
+            },
             {"id": "3", "name": "other", "description": "other", "category": "dev"},
         ]
 
@@ -38,7 +43,9 @@ class _Catalog:
         self.calls.append(("list", (path, orderby)))
         return self.items
 
-    def list_page(self, *, path=None, orderby=None, keyword="", page: int, page_size: int):
+    def list_page(
+        self, *, path=None, orderby=None, keyword="", page: int, page_size: int
+    ):
         self.calls.append(("list_page", (path, orderby, keyword, page, page_size)))
         items = [item for item in self.items if keyword.lower() in item["name"].lower()]
         start = (page - 1) * page_size
@@ -80,7 +87,7 @@ def _client(catalog: _Catalog) -> TestClient:
 def test_repository_list_has_real_filtered_pagination_and_sort_mapping() -> None:
     catalog = _Catalog()
     response = _client(catalog).get(
-        "/openapi/v1/skills/repository?keyword=report&sort=hottest&page=2&page_size=1"
+        "/openapi/v1/bots/skills/repository?keyword=report&sort=hottest&page=2&page_size=1"
     )
 
     assert response.status_code == 200
@@ -95,15 +102,18 @@ def test_repository_tree_and_detail_use_the_single_catalog_service() -> None:
     catalog = _Catalog()
     client = _client(catalog)
 
-    assert client.get("/openapi/v1/skills/repository/tree").json()["data"] == [
+    assert client.get("/openapi/v1/bots/skills/repository/tree").json()["data"] == [
         {"name": "ops", "children": []}
     ]
-    assert client.get("/openapi/v1/skills/1").json()["data"] == catalog.items[0]
+    assert (
+        client.get("/openapi/v1/bots/skills/repository/1").json()["data"]
+        == catalog.items[0]
+    )
     assert catalog.calls == [("tree", None), ("detail", "1")]
 
 
 def test_repository_missing_detail_uses_stable_envelope() -> None:
-    response = _client(_Catalog()).get("/openapi/v1/skills/999")
+    response = _client(_Catalog()).get("/openapi/v1/bots/skills/repository/999")
 
     assert response.status_code == 404
     assert response.json()["code"] == 404000
@@ -111,17 +121,22 @@ def test_repository_missing_detail_uses_stable_envelope() -> None:
     assert response.json()["data"] is None
 
 
-def test_repository_sync_conflict_and_failure_do_not_leak_http_exception_detail() -> None:
+def test_repository_sync_conflict_and_failure_do_not_leak_http_exception_detail() -> (
+    None
+):
     conflict = _client(_Catalog(sync_status="in_progress")).post(
-        "/openapi/v1/skills/repository/sync"
+        "/openapi/v1/bots/skills/repository/sync"
     )
     failed = _client(_Catalog(sync_status="failed")).post(
-        "/openapi/v1/skills/repository/sync"
+        "/openapi/v1/bots/skills/repository/sync"
     )
 
     assert conflict.status_code == 409
     assert conflict.json()["code"] == 409108
-    assert conflict.json()["message"] == "Repository synchronization is already in progress"
+    assert (
+        conflict.json()["message"]
+        == "Repository synchronization is already in progress"
+    )
     assert failed.status_code == 502
     assert failed.json()["code"] == 502103
     assert failed.json()["message"] == "Repository synchronization failed"
@@ -131,7 +146,10 @@ def test_repository_sync_conflict_and_failure_do_not_leak_http_exception_detail(
 @pytest.mark.parametrize(
     ("handler", "kwargs"),
     [
-        (list_repository_skills, {"page": PageParams(), "keyword": "", "path": None, "sort": "latest"}),
+        (
+            list_repository_skills,
+            {"page": PageParams(), "keyword": "", "path": None, "sort": "latest"},
+        ),
         (repository_tree, {}),
         (get_repository_skill, {"skill_id": "1"}),
     ],

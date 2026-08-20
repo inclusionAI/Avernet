@@ -387,9 +387,7 @@ def _service(
 
         guard.acquire_for_edit = fail_acquire
     runtime = _Runtime(sync_success)
-    runtime_reconciler = _RuntimeReconciler(
-        runtime, skills, pool_layout=pool_layout
-    )
+    runtime_reconciler = _RuntimeReconciler(runtime, skills, pool_layout=pool_layout)
     factory = _Factory(runtime)
     service = LocalSkillStateService(
         skills,
@@ -461,9 +459,7 @@ async def test_activate_changes_desired_state_then_reconciles_under_bot_layout_l
     assert sets.events == ["remove"]
     assert runtime.calls == 1
     assert guard.events == ["acquire:pre:owner:bot", "release"]
-    assert service._runtime_reconciler.calls == [
-        {"bot_id": "bot", "owner_id": "owner"}
-    ]
+    assert service._runtime_reconciler.calls == [{"bot_id": "bot", "owner_id": "owner"}]
 
 
 @pytest.mark.asyncio
@@ -607,7 +603,7 @@ async def test_repo_direct_accepts_shared_scanner_sentinel_and_reconciles():
     service, _skills, installations, runtime = _repo_service()
 
     result = await service.set_repo_skill_active(
-        skill_id="9", bot_id="bot", actor_id="owner", active=True
+        skill_id="9", bot_id="bot", owner_id="owner", actor_id="owner", active=True
     )
 
     assert result["active"] is True
@@ -623,15 +619,15 @@ async def test_repo_deactivate_publishes_complete_projection_with_retired_repo_l
     service, _skills, installations, runtime = _repo_service(active=True)
 
     result = await service.set_repo_skill_active(
-        skill_id="9", bot_id="bot", actor_id="owner", active=False
+        skill_id="9", bot_id="bot", owner_id="owner", actor_id="owner", active=False
     )
 
     assert result["active"] is False
     assert installations.events == ["uninstall:pre:bot:9"]
     assert runtime.calls == 0
-    assert [mapping.to_dict() for mapping in runtime.publish_calls[0]["retired_mappings"]] == [
-        {"corpus": "repo", "relative_path": "tools/repo", "link_name": "repo"}
-    ]
+    assert [
+        mapping.to_dict() for mapping in runtime.publish_calls[0]["retired_mappings"]
+    ] == [{"corpus": "repo", "relative_path": "tools/repo", "link_name": "repo"}]
 
 
 @pytest.mark.asyncio
@@ -642,7 +638,7 @@ async def test_repo_direct_rejects_normal_skill_set_membership_before_writing_st
 
     with pytest.raises(SkillManagedBySkillSetError):
         await service.set_repo_skill_active(
-            skill_id="9", bot_id="bot", actor_id="owner", active=True
+            skill_id="9", bot_id="bot", owner_id="owner", actor_id="owner", active=True
         )
 
     assert installations.events == []
@@ -656,7 +652,7 @@ async def test_repo_direct_fails_closed_for_unsupported_bot_engine_pair():
 
     with pytest.raises(SkillEngineNotSupportedError):
         await service.set_repo_skill_active(
-            skill_id="9", bot_id="bot", actor_id="owner", active=True
+            skill_id="9", bot_id="bot", owner_id="owner", actor_id="owner", active=True
         )
 
     assert installations.events == []
@@ -683,7 +679,9 @@ async def test_historical_aicoding_local_skill_can_deactivate_but_cannot_activat
     assert runtime.publish_calls == []
 
     with pytest.raises(SkillEngineNotSupportedError):
-        await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
+        await service.set_local_skill_active(
+            skill_id="9", actor_id="owner", active=True
+        )
     assert installations.events == ["add"]
 
 
@@ -695,7 +693,7 @@ async def test_historical_aicoding_repo_skill_can_deactivate_but_cannot_activate
     )
 
     result = await service.set_repo_skill_active(
-        skill_id="9", bot_id="bot", actor_id="owner", active=False
+        skill_id="9", bot_id="bot", owner_id="owner", actor_id="owner", active=False
     )
 
     assert result["active"] is False
@@ -707,7 +705,7 @@ async def test_historical_aicoding_repo_skill_can_deactivate_but_cannot_activate
 
     with pytest.raises(SkillEngineNotSupportedError):
         await service.set_repo_skill_active(
-            skill_id="9", bot_id="bot", actor_id="owner", active=True
+            skill_id="9", bot_id="bot", owner_id="owner", actor_id="owner", active=True
         )
 
 
@@ -722,7 +720,7 @@ async def test_repo_direct_rejects_runtime_name_conflict_before_writing_state():
 
     with pytest.raises(SkillRuntimeNameConflictError):
         await service.set_repo_skill_active(
-            skill_id="9", bot_id="bot", actor_id="owner", active=True
+            skill_id="9", bot_id="bot", owner_id="owner", actor_id="owner", active=True
         )
 
     assert installations.events == []
@@ -737,7 +735,7 @@ async def test_repo_direct_idempotent_runtime_failure_preserves_old_installation
 
     with pytest.raises(LocalSkillRuntimeSyncError):
         await service.set_repo_skill_active(
-            skill_id="9", bot_id="bot", actor_id="owner", active=True
+            skill_id="9", bot_id="bot", owner_id="owner", actor_id="owner", active=True
         )
 
     assert skills.active is True
@@ -753,9 +751,7 @@ async def test_runtime_sync_delegates_the_stable_bot_identity():
 
     await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
 
-    assert service._runtime_reconciler.calls == [
-        {"bot_id": "bot", "owner_id": "owner"}
-    ]
+    assert service._runtime_reconciler.calls == [{"bot_id": "bot", "owner_id": "owner"}]
 
 
 @pytest.mark.asyncio
@@ -870,8 +866,12 @@ async def test_center_projection_uses_v3_adapter_contract_without_current_locato
 
     await service.set_local_skill_active(skill_id="9", actor_id="owner", active=False)
 
-    assert runtime.publish_calls[0]["mapping_contract_version"] == "skills-pool-mapping-v3"
-    assert runtime.verify_calls[0]["mapping_contract_version"] == "skills-pool-mapping-v3"
+    assert (
+        runtime.publish_calls[0]["mapping_contract_version"] == "skills-pool-mapping-v3"
+    )
+    assert (
+        runtime.verify_calls[0]["mapping_contract_version"] == "skills-pool-mapping-v3"
+    )
     assert runtime.publish_calls[0]["mappings"][0].to_dict() == {
         "corpus": "center",
         "skill_uuid": "skill-uuid",

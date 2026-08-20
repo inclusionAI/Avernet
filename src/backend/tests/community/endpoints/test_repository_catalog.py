@@ -85,25 +85,25 @@ def _input(*, user_id: str = _USER_ID, path_params=None, query_params=None) -> C
 for _method, _path, _input_kwargs, _success in (
     (
         "GET",
-        "/openapi/v1/skills/repository",
+        "/openapi/v1/bots/skills/repository",
         {"query_params": {"keyword": "report", "page": 1, "page_size": 20}},
         {"data": {"total": 1, "items": [{"id": "7", "name": "report"}]}},
     ),
     (
         "GET",
-        "/openapi/v1/skills/repository/tree",
+        "/openapi/v1/bots/skills/repository/tree",
         {},
         {"data": [{"name": "ops"}]},
     ),
     (
         "GET",
-        "/openapi/v1/skills/{skill_id}",
+        "/openapi/v1/bots/skills/repository/{skill_id}",
         {"path_params": {"skill_id": "7"}},
         {"data": {"id": "7", "name": "report"}},
     ),
     (
         "POST",
-        "/openapi/v1/skills/repository/sync",
+        "/openapi/v1/bots/skills/repository/sync",
         {},
         {"data": {"synced": True}},
     ),
