@@ -163,6 +163,13 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ws_relay_session_repository=repository.ws_relay_session_repository,
     )
 
+    # ── Shared enterprise repository (used by both services and tasks) ──
+    ttl_renewal_schedule_repo = (
+        providers.Singleton(TtlRenewalScheduleRepository, database=_db_manager)
+        if _HAS_ENTERPRISE_RENEWAL
+        else providers.Object(None)
+    )
+
     services = providers.Container(
         CoreServiceContainer,
         config=config,
@@ -205,6 +212,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
             DeviceCallbackHandler,
             publish_service_factory=_lazy_publish_service,
         ),
+        ttl_renewal_schedule_repository=ttl_renewal_schedule_repo,
     )
 
     tasks = providers.Container(
@@ -217,11 +225,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ticket_repository=repository.ticket_repository,
         paas_service_facade=services.paas_facade,
         file_transfer_backend=services.file_transfer_backend,
-        ttl_renewal_schedule_repository=(
-            providers.Singleton(TtlRenewalScheduleRepository, database=_db_manager)
-            if _HAS_ENTERPRISE_RENEWAL
-            else providers.Object(None)
-        ),
+        ttl_renewal_schedule_repository=ttl_renewal_schedule_repo,
     )
 
     cron_lifecycle = providers.Singleton(
