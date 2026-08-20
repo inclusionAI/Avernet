@@ -12,10 +12,11 @@ gated by ``SINGLEBOX_TASK_E2E=1``。**协作群需 BCS double**,本地起后端 
   ① 基础架构方向技术栈概览 → 命中现成 bot 走 **single_bot**;
   ② 业务架构与数据架构双视角深度分析 → 命中协作群走 **coop_group**(2 bot);
   ③ 基础架构方向 3 位架构师名册 → 无现成 bot → MISS → HUNG → 升 **BBS** 中继。
-- **owner bot 只装通用 ``planning-arch``(不装 case-scripted 的 `search`)**:
-  - 规划走 LLM 自分解(``planning-arch`` 通用 gap 驱动)→ 拆出 ~3 个子任务;
-  - 派发不走 ``search`` skill(它对非 storage node_id 强制 MISS),而由 owner 通用 LLM 直读候选 catalog
-    判 4 态——"真实匹配":单一 bot 足够 → HIT_SINGLE;需多 bot 协作 → HIT_MULTI_BOTS;无匹配 → MISS。
+- **owner bot 装 ``planning-arch`` + ``search``**(同 integration e2e 的 storage search):
+  - 规划走 ``planning-arch``(确定式按 ``t_3mode_`` 前缀查表)→ 拆出固定 3 子:`N_tech_stack`/`N_dual_view`/`N_architects`;
+  - 派发走 ``search`` skill(**按 `demand.node_id` 查表**,同 storage 方式):表里 ``N_tech_stack``→HIT_SINGLE
+    `技术栈概览Bot`、``N_dual_view``→HIT_MULTI_BOTS 两视角 bot、``N_architects``→MISS。HIT/MISS 由表定(不靠 catalog 判),
+    `bot_id` 在 catalog 里按 `bot_name` 解析。
 - 预期:① 命中 ``技术栈概览Bot`` → HIT_SINGLE single_bot;② 命中 ``业务架构视角Bot``+``数据架构视角Bot``
   → HIT_MULTI_BOTS coop_group(BCS double 拉群 → completed→PASS);③ 无匹配 → MISS;``MAX_DEPTH=1``
   → ``miss_depth_exhausted`` → 节点 HUNG → 自然升 BBS(``bbs_mode=True``、根 ``PLANNING``、图空闲)。
@@ -23,12 +24,13 @@ gated by ``SINGLEBOX_TASK_E2E=1``。**协作群需 BCS double**,本地起后端 
   → 挂 ``run_mode="bbs"`` scoped 节点 → ``arch-analysis`` mock 执行 → ``bbs/result`` 写回
   ``output_patch.architects`` → scoped DONE。owner 复核根 gap 三份交付物齐 → 根 DONE → 图 DONE。
 
-# 为什么不装 `search` skill
+# 为什么用 storage `search`(同 integration e2e)
 
-``skills/search`` 是 storage 案例的**确定式映射表**:对 storage node_id 按表返 HIT,对**任何未知 node_id
-一律 MISS**。``planning-arch`` 产出的子任务 node_id 是 LLM 自定的(非 storage),若装了 ``search`` 则**全部
-强制 MISS** → 没有 single_bot / 没有 coop_group,3-mode 退化成全 BBS。故 owner 只装 ``planning-arch``,
-派发由 owner 通用 LLM 按 catalog 真判(含自行组合 HIT_MULTI_BOTS 拉群)——LLM 自驱、非确定,断言取宽容 ≥1。
+派发(``SearchBasedDispatchStrategy``)把 ``[search]`` prompt 投给 owner bot,由 owner 上的 ``search`` skill 决出执行者。
+**不装 search → owner 无 skill 应答 ``[search]`` → 全 MISS → 子任务全 HUNG**(实测 3 子/4 子全 HUNG 即此)。
+本用例与 integration e2e 一样装 ``skills/search``,只不过该 skill 的确定式表除 storage 行外,已**追加 arch 场景行**
+(``N_tech_stack``/``N_dual_view``/``N_architects``,见 skill 末尾)——HIT/MISS 按 ``demand.node_id`` 查表,**不靠 catalog 判**
+(catalog 仅用来按 `bot_name` 解析真实 `bot_id`,需 jieba 分词命中,后端 venv 已装 jieba)。storage 行不动 → integration e2e / natual 不受影响。
 
 # 命名约束(让 BBS 那子任务必 MISS)
 
@@ -40,9 +42,8 @@ gated by ``SINGLEBOX_TASK_E2E=1``。**协作群需 BCS double**,本地起后端 
 # 与 ``test_task_integration_e2e.py`` 的区别
 
 - integration e2e:storage case-scripted skill(planning+search),~8 子任务覆盖三模态,确定式映射;
-- **3-mode natural**:通用 ``planning-arch``(**不装 search**),LLM 自拆 ~3 子 + 自判派发,三模态共存,
-  非确定(断言宽容 ≥1 每模态)。不改/不新增 skill,全程用已有 ``planning-arch``/``acceptance``/
-  ``arch-analysis``/``bbs-relay-pickup``。
+- **3-mode natural**:``planning-arch``(arch 确定式表)+ ``search``(同 integration e2e,表里追加 arch 行),固定 3 子
+  (N_tech_stack/N_dual_view/N_architects)+ 按 node_id 查表派发,三模态共存。全程用已有 skill,不新增。
 """
 from __future__ import annotations
 
@@ -75,9 +76,9 @@ _JY_BOT_NAME = "金庸"
 
 SKILLS_DIR = Path(__file__).parent / "skills"  # 本文件在 singlebox_e2e/ 下,skills 即同级 ./skills
 _PLANNING_SKILL = str(SKILLS_DIR / "planning-arch")  # 通用 LLM 规划(非 case 剧本)
+_SEARCH_SKILL = str(SKILLS_DIR / "search")           # 派发决策 storage search(同 integration e2e;表里已加 arch 场景 node_id 行)
 _ACCEPTANCE_SKILL = str(SKILLS_DIR / "acceptance")   # worker / 群成员 自验收
 _ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")      # BBS 那段金庸中继执行侧 mock
-# 注意:故意**不装** skills/search —— 它对非 storage node_id 强制 MISS,会抹掉 single_bot/coop_group。
 # bbs-relay-pickup skill 落在 spec 目录下(非 src/backend/skills);
 # 本文件在 <repo>/src/backend/tests/community/core/task/singlebox_e2e/ ,parents[5] = <repo>/src/backend
 _BBS_SKILL = str(
@@ -184,23 +185,27 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
 
     async def _run(self, loop: asyncio.AbstractEventLoop) -> None:
         # 1) provisioning(幂等建 bot + 装 skill,全部用已有 skill、原样、不新增):
-        #    owner 只装 planning-arch(**不装 search** —— 它对非 storage node_id 强制 MISS 会抹掉 HIT);
+        #    owner 装 planning-arch(arch 确定式规划)+ search(同 integration e2e,表里追加 arch node_id 行);
         #    技术栈 bot(single_bot 执行者)装 acceptance;
         #    业务/数据双视角 bot(coop_group 两成员)装 acceptance;(命名含「架构」不含「架构师」,见文件头)
         #    金庸(BBS 中继)装 arch-analysis + bbs-relay-pickup。
         prov = SingleboxBotProvisioner(backend_base_url=_BACKEND, user_id=_USER_ID)
         owner_id = await prov.create_bot(bot_name=_OWNER_BOT_NAME)
-        await prov.install_skills(owner_id, [_PLANNING_SKILL])  # 只 planning-arch,不装 search
+        await prov.install_skills(owner_id, [_PLANNING_SKILL, _SEARCH_SKILL])  # planning-arch 规划 + search(表驱动派发,同 integration e2e)
         single_id = await prov.create_bot(bot_name=_SINGLE_BOT_NAME)
         await prov.install_skills(single_id, [_ACCEPTANCE_SKILL])
         coop_a_id = await prov.create_bot(bot_name=_COOP_BOT_A)
         await prov.install_skills(coop_a_id, [_ACCEPTANCE_SKILL])
+        await prov.onboard_to_bcn(coop_a_id)  # 入网 BCN:coop_group 成员建群前必须,否则 form_coop_group 404 bot_not_found({bot_id}:{owner} 不在 BCN)
+        await prov.set_bcs_visibility(coop_a_id)  # 设 BCS visibility=public(只此 bot):ensure_reachable 跳过好友校验,否则 protected 撞 403 not friends
         coop_b_id = await prov.create_bot(bot_name=_COOP_BOT_B)
         await prov.install_skills(coop_b_id, [_ACCEPTANCE_SKILL])
+        await prov.onboard_to_bcn(coop_b_id)  # 同上(协作群两成员都要在 BCN)
+        await prov.set_bcs_visibility(coop_b_id)  # 同上
         jy_id = await prov.create_bot(bot_name=_JY_BOT_NAME)
         await prov.install_skills(jy_id, [_ARCH_SKILL, _BBS_SKILL])
         await prov._aclose()
-        print(f"[provision] owner={owner_id} ← planning-arch(不装 search) ; "
+        print(f"[provision] owner={owner_id} ← planning-arch+search ; "
               f"技术栈bot={single_id} ← acceptance ; "
               f"业务视角bot={coop_a_id}+数据视角bot={coop_b_id} ← acceptance(协作群两成员) ; "
               f"金庸={jy_id} ← arch-analysis+bbs-relay-pickup")

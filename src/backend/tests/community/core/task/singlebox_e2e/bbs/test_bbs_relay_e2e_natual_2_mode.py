@@ -9,34 +9,35 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
 # 剧本(natural 2-mode:依赖 LLM 自规划 + 真实匹配)
 
 - 主任务含**两份交付物**:① 基础架构方向技术栈概览;② 基础架构方向 3 位架构师名册。
-- **owner bot 只装通用 ``planning-arch``(不装 case-scripted 的 `search`)**:
-  - 规划走 LLM 自分解(``planning-arch`` 是通用 gap 驱动,非 case 剧本)→ 拆出 ~2 个子任务;
-  - 派发不走 ``search`` skill(它对非 storage node_id 强制 MISS),而由 owner 通用 LLM 直读候选 catalog
-    判 HIT/MISS——即"真实匹配":候选里有匹配 bot → HIT_SINGLE,无 → MISS。
-- 预期正好:**技术栈概览**子任务的 token 命中新 ``基础架构技术栈概览Bot`` → HIT single_bot 正常执行;
+- **owner bot 装 ``planning-arch`` + ``search``**(同 integration e2e 的 storage search):
+  - 规划走 ``planning-arch``(确定式按 ``t_2mode_`` 前缀查表)→ 拆出固定 2 子:`N_tech_stack`/`N_architects`;
+  - 派发走 ``search`` skill(**按 `demand.node_id` 查表**,同 storage 方式):``N_tech_stack``→HIT_SINGLE
+    `技术栈概览Bot`、``N_architects``→MISS。HIT/MISS 由表定(不靠 catalog 判),`bot_id` 在 catalog 按 `bot_name` 解析。
+- 预期正好:**技术栈概览**子任务 ``N_tech_stack`` 查表 → HIT_SINGLE ``技术栈概览Bot`` → single_bot 正常执行;
   **架构师名册**子任务匹配不到任何 bot → MISS;``MAX_DEPTH=1`` → ``miss_depth_exhausted`` → 节点 HUNG →
   自然升 BBS(``bbs_mode=True``、根 ``PLANNING``、图空闲,spec §10.5 可恢复态)。
 - 升 BBS 后唤醒一次金庸(``bbs-relay-pickup``):claim(recover 清掉 HUNG 死分支)→ 自判"架构师名册"段
   full → 挂 ``run_mode="bbs"`` scoped 节点 → ``arch-analysis`` mock 执行 → ``bbs/result`` 写回
   ``output_patch.architects`` → scoped DONE。owner 复核根 gap 两份交付物齐 → 根 DONE → 图 DONE。
 
-# 为什么不装 `search` skill
+# 为什么用 storage `search`(同 integration e2e)
 
-``skills/search`` 是 storage 案例的**确定式映射表**:对 storage node_id(N_overview 等)按表返 HIT,
-对**任何未知 node_id 一律 MISS**(表末行)。``planning-arch`` 产出的子任务 node_id 是 LLM 自定的(非 storage),
-若装了 ``search`` 则**全部强制 MISS** → 没有 HIT,2-mode 退化成 natual 全 MISS。
-故 owner 只装 ``planning-arch``,派发由 owner 通用 LLM 按 catalog 真判(LLM 自驱、非确定,断言取宽容 ≥1)。
+派发(``SearchBasedDispatchStrategy``)把 ``[search]`` prompt 投给 owner bot,由 owner 上的 ``search`` skill 决出执行者。
+**不装 search → owner 无 skill 应答 ``[search]`` → 全 MISS → 子任务全 HUNG**。本用例与 integration e2e 一样装
+``skills/search``,该 skill 的确定式表除 storage 行外已**追加 arch 场景行**(``N_tech_stack``/``N_architects``)——
+HIT/MISS 按 ``demand.node_id`` 查表(catalog 仅按 `bot_name` 解析 `bot_id`,需 jieba 分词命中,后端 venv 已装 jieba)。
+storage 行不动 → integration e2e / natual 不受影响。
 
 # 与 ``test_bbs_relay_e2e_natual.py`` 的区别
 
-- natual:单一交付物,owner 装 planning-arch+search → search 强制全 MISS → 全 BBS,金庸一段收口。
-- **2-mode natural**:两份交付物,owner **不装 search** → 一子任务真匹配 bot(single_bot HIT)、一子任务
-  MISS→HUNG→BBS 中继(bbs);断言图里**同时**存在 single_bot 的 HIT 节点与 bbs scoped 中继节点。
+- natual:单一交付物,owner 装 planning-arch+search → ``N_architects`` 查表 MISS → 全 BBS,金庸一段收口。
+- **2-mode natural**:两份交付物,owner 装 planning-arch+search(表里追加 arch 行)→ ``N_tech_stack`` 查表 HIT
+  (single_bot)、``N_architects`` 查表 MISS→HUNG→BBS 中继(bbs);断言图里**同时**存在 single_bot 的 HIT 节点与 bbs scoped 中继节点。
 
-# 不改/不新增 skill
+# skill 说明
 
-全程只用已有 skill(``planning-arch`` / ``acceptance`` / ``arch-analysis`` / ``bbs-relay-pickup``),均原样;
-不装 ``search``/``planning``(那两个是 storage case-scripted,会强制 MISS)。
+全程用已有 skill(``planning-arch`` / ``search`` / ``acceptance`` / ``arch-analysis`` / ``bbs-relay-pickup``),
+不新增;``search`` 表里追加 arch 场景 node_id 行,storage 行不动。
 """
 from __future__ import annotations
 
@@ -60,15 +61,15 @@ _USER_ID = os.environ.get("SINGLEBOX_USER_ID", "146836")
 _TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "1500"))
 # 独立 owner 名:避免与其它 e2e 的 task-owner-* 共用 bot 造成 skill 串扰
 _OWNER_BOT_NAME = "task-owner-2mode-bot"
-# N_hit 的现成执行者:bot_name 含「技术栈概览」token,供该子任务预查候选命中(owner 通用 LLM 据此 HIT)
-_HIT_BOT_NAME = "基础架构技术栈概览Bot"
+# N_hit 的现成执行者:bot_name「技术栈概览Bot」,与 search 表 N_tech_stack→技术栈概览Bot 对名(catalog 按名解析 bot_id)
+_HIT_BOT_NAME = "技术栈概览Bot"
 _JY_BOT_NAME = "金庸"
 
 SKILLS_DIR = Path(__file__).parent / "../skills"
 _PLANNING_SKILL = str(SKILLS_DIR / "planning-arch")  # 通用 LLM 规划(非 case 剧本)
+_SEARCH_SKILL = str(SKILLS_DIR / "search")           # 派发决策 storage search(同 integration e2e;表里已加 arch 场景 node_id 行)
 _ACCEPTANCE_SKILL = str(SKILLS_DIR / "acceptance")   # N_hit worker 自验收
 _ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")      # N_miss 升 BBS 后金庸中继执行侧 mock
-# 注意:故意**不装** skills/search —— 它对非 storage node_id 强制 MISS,会抹掉 HIT。
 # bbs-relay-pickup skill 落在 spec 目录下(非 src/backend/skills);
 # test 文件在 <repo>/src/backend/tests/community/core/task/singlebox_e2e/bbs/ ,parents[6] = <repo>/src/backend
 _BBS_SKILL = str(
@@ -107,7 +108,7 @@ async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
 def _execute_body(owner_id: str) -> dict:
     """``POST /openapi/v1/collaboration/tasks/execute`` 请求体(TaskInfoDTO):基础架构方向「技术栈概览 + 架构师名册」两份交付物。
 
-    planning-arch(通用 LLM)读根 goal 自拆 ~2 子:技术栈概览(命中 ``基础架构技术栈概览Bot`` → HIT)、
+    planning-arch 按 ``t_2mode_`` 前缀查表拆固定 2 子:N_tech_stack(查表 HIT ``技术栈概览Bot``)、
     架构师名册(无匹配 bot → MISS)。``MAX_DEPTH=1`` → 架构师名册 MISS@depth-1 直走 miss_depth_exhausted 升 BBS。
     """
     return {
@@ -170,19 +171,19 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
             loop.close()
 
     async def _run(self, loop: asyncio.AbstractEventLoop) -> None:
-        # 1) provisioning(幂等建 bot + 装 skill,全部用已有 skill、原样、不新增):
-        #    owner 只装 planning-arch(通用 LLM 规划)**不装 search**(它对非 storage node_id 强制 MISS 会抹掉 HIT);
+        # 1) provisioning(幂等建 bot + 装 skill):
+        #    owner 装 planning-arch(arch 确定式规划)+ search(同 integration e2e,表里追加 arch 行);
         #    技术栈 bot(现成执行者)装 acceptance(N_hit worker 自验收,用自身 LLM 知识产技术栈概览);
         #    金庸(中继)装 arch-analysis(N_miss 执行侧 mock)+ bbs-relay-pickup。
         prov = SingleboxBotProvisioner(backend_base_url=_BACKEND, user_id=_USER_ID)
         owner_id = await prov.create_bot(bot_name=_OWNER_BOT_NAME)
-        await prov.install_skills(owner_id, [_PLANNING_SKILL])  # 只 planning-arch,不装 search
+        await prov.install_skills(owner_id, [_PLANNING_SKILL, _SEARCH_SKILL])  # planning-arch 规划 + search(表驱动派发)
         hit_id = await prov.create_bot(bot_name=_HIT_BOT_NAME)
         await prov.install_skills(hit_id, [_ACCEPTANCE_SKILL])
         jy_id = await prov.create_bot(bot_name=_JY_BOT_NAME)
         await prov.install_skills(jy_id, [_ARCH_SKILL, _BBS_SKILL])
         await prov._aclose()
-        print(f"[provision] owner={owner_id} ← planning-arch(不装 search) ; "
+        print(f"[provision] owner={owner_id} ← planning-arch+search ; "
               f"技术栈bot={hit_id} ← acceptance ; "
               f"金庸={jy_id} ← arch-analysis+bbs-relay-pickup")
 

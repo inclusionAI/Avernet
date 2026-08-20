@@ -75,7 +75,7 @@ tags: [task, bbs, relay, autonomous]
 ```
 - **`verdict=PASS` + 完成全部剩余**:scoped 节点 `DONE`,claim 释放。**根是否收口由框架自行判定**(经 owner 复核根 gap 满足→根 `DONE`+图 `DONE`),bot **不**声明根收口(无 `root_verified` 字段)。你只管把本 scoped 节点做完并如实报 PASS/FAIL。
 - **`verdict=PASS` 但仅完成本 scoped 节点、根目标仍未满足**:scoped 节点 `DONE`,claim 释放,下个 bot 接力(框架复核根 gap 未闭→根仍 `PLANNING`)。
-- **`verdict=FAIL` + `gaps=[剩余差距]` + `output_patch={部分产出 checkpoint}`** → scoped 节点 `FAILED`,claim 释放,下个 bot 读 `gaps` + 节点 `run_info.output`(你的 checkpoint)续做。**这是 partial 交棒。**
+- **`verdict=FAIL` + `gaps=[剩余差距]`** → **scoped 节点被删除**(丢弃本次接力尝试:不翻 `FAILED`、`output_patch` 不留存),claim 释放,图回 root `PLANNING`+`bbs_mode` 可恢复态等下段重 claim。**FAIL 即作废本次尝试,下个 bot 从零做起、不读你的 checkpoint(无 partial 交棒)**。故只在你确信能做完时才 attach 挂节点;做不完宁可 `skip` 不 attach,别挂大节点报 FAIL 白浪费接力深度(attach 已 `bbs_relay_count++`,删节点不回扣)。
 - **409** = 非持有者(claim 可能已被 SLA 清) → 放弃本次写回。
 - **硬约束**:`bbs/result` 返回 200 时**服务端 `finally` 无条件清根 `bbs_owner`**,claim 释放。故**一次 pass 只发一次 `bbs/result`**——发了即结束本次 pass。**绝不要在干活中途为"打 checkpoint"调 `bbs/result`**:它会立即释放你的 claim、结束本次 pass,之后你不是持有者,再写回会 409。
 
@@ -95,9 +95,11 @@ tags: [task, bbs, relay, autonomous]
 5. **接力只读不重做**:下个 bot 读已 DONE 叶子 + 前序 scoped 节点 `run_info.output` checkpoint,绝不重复已 DONE 的工作。
 6. **深度闸**:每次成功 attach 消耗 1 个 `bbs_relay_count`;`>= BBS_MAX_DEPTH`(默认 3) → 图 `HUNG(stuck)` 人工入口、拒 attach。故 scoped 节点宜少宜准。
 
-## 长活 = 分段接力
+## 长活 = 分段接力(每段 PASS 留产,勿用 FAIL 交棒)
 
-单次 scoped 节点应在 harness SLA 窗口内能做完。**长活不要在一个节点里"周期性调 `bbs/result` 打 checkpoint"(那会释放 claim)**;改为**分段接力**:做完一段 → 报 `FAIL+gaps+output_patch`(checkpoint 落进节点 `run_info.output`)→ claim 释放 → (同 bot 或他 bot)重新 claim → attach 新节点 → 读 checkpoint 续做。每段都 durably 落 checkpoint,SLA 切断也不丢。注意每段消耗 1 个接力深度(受 `BBS_MAX_DEPTH` 约束)。
+单次 scoped 节点应在 harness SLA 窗口内能做完。**长活不要在一个节点里"周期性调 `bbs/result` 打 checkpoint"(那会释放 claim)**;改为**分段接力**:每段把步④ `task_spec` 收窄到**本段能一次做完的子 scope** → 做完报 `verdict=PASS` + `output_patch`(本段产出 fold 进 DONE 节点 `run_info.output` 留存)→ claim 释放 → (同 bot 或他 bot)重新 claim → attach 新节点 → 读已 DONE 叶子 + 前序 DONE scoped 节点 `run_info.output` 续做。每段 PASS 都 durably 落产,SLA 切断也不丢。注意每段消耗 1 个接力深度(受 `BBS_MAX_DEPTH` 约束)。
+
+> **FAIL 不再用于交棒**:`verdict=FAIL` 会**删 scoped 节点并丢弃 `output_patch`**(无 checkpoint 留存,见步⑤),本次进度全丢、接力深度仍 `+1`。故长活分段一律走 PASS(留产),勿用 FAIL+checkpoint 分段(进度会丢)。
 
 ## 参考
 

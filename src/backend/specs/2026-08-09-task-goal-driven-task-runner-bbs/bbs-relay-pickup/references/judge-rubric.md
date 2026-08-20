@@ -15,7 +15,7 @@
 
 **剩余 = 根 `goal.acceptances` 全部 AC 的并集 − {已 DONE 节点产出的并集}**,再以前序 scoped 节点 checkpoint 细化:
 - 逐条 AC 判:该 AC 是否已被某个 DONE 节点的 `output` 完全覆盖?未覆盖 → 剩余。
-- 前序 FAIL+gaps 的 scoped 节点 `output_patch` 可能已**部分**覆盖某条 AC——读其 `output` 与 `gaps` 细化该 AC 的剩余(如"已做第1、2节,缺第3节"→ 剩余 = 第3节)。
+- 前序 FAIL 的 scoped 节点**已被删除**(不留 checkpoint,见步⑤ FAIL 语义);故剩余仅按根 `goal` + 已 `DONE` 叶子产出计算,不从 FAIL 节点读 checkpoint。
 
 ## full / partial / skip
 
@@ -27,10 +27,10 @@
 ### partial — 剩余里我只能做一部分
 - **判据**:剩余的 AC 中,你能做一部分(某几条 AC、或某条 AC 的一部分),其余超你的能力 / 超单次 SLA 窗口。
 - **行动**:
-  - 步④ `task_spec` 只封装**你能做的那部分**——`goal.objective` / `instruction` 精确圈定范围,不要假装覆盖全部剩余。
-  - 步⑤ `verdict=FAIL`、`gaps=[剩余你未做的 AC / 差距描述]`、`output_patch={本次部分产出 checkpoint}`。
-- **交棒**:claim 释放,下个 bot 读你的 `gaps` + 节点 `run_info.output`(你的 `output_patch`)续。
-- **长活**:一段做不完 → 现在做能做的一段、报 partial 交棒、(下次或同 bot)重新 claim 续下一段 = **分段接力**。每段一次 attach,消耗 1 接力深度(受 `BBS_MAX_DEPTH` 约束)。
+  - **优先**:把步④ `task_spec` 收窄到**你能一次做完的那部分**(`goal.objective` / `instruction` 精确圈定),做完报 `verdict=PASS`(scoped 节点 DONE,产出 `output_patch` 留存)。
+  - 确有无法收窄到可做完的 scope → 步⑤ `verdict=FAIL`、`gaps=[剩余你未做的 AC / 差距描述]`。**注意:FAIL 会被删节点并丢弃 `output_patch`(无 checkpoint 交棒)**,本次产出不留存,claim 释放,下个 bot 从零重做。
+- **不再有 partial 交棒**:FAIL = 作废本次尝试(节点删除、进度丢弃,接力深度仍 `+1`)。故宁可把 scope 收窄到能 PASS,也别挂大节点报 FAIL 白浪费深度。
+- **长活**:做不完一段 → 收窄到本段能 PASS 的子 scope 一次做完;**勿用 FAIL+checkpoint 分段(已废,进度会丢)**。每段一次 attach,消耗 1 接力深度(受 `BBS_MAX_DEPTH` 约束)。
 
 ### skip — 剩余我一点都不做
 - **判据**:剩余全部 AC 都不在你的能力范围内(或剩余已为零、你无新增贡献)。
@@ -46,8 +46,8 @@
 - 写法宜具体可执行(如 `"缺报告第3节:NAND 层数演进数据"`,而非 `"没做完"`)。
 
 ### output_patch(checkpoint)
-- `output_patch`:对象,**本次 scoped 节点的产出 / 进度增量**;服务端 fold 进节点 `run_info.output`,供下个 bot 续做时读。
-- partial **必填**——哪怕部分产出也要落 checkpoint,否则下个 bot 无以为继、前面的活白做。
+- `output_patch`:对象,**本次 scoped 节点的产出 / 进度增量**;仅 `verdict=PASS`(节点 DONE)时服务端 fold 进节点 `run_info.output`,供下个 bot 续做时读。
+- `verdict=FAIL` 时节点被删除,`output_patch` **不留存**(本次进度丢弃);故 FAIL 不再承担 checkpoint 交棒,收窄 scope 走 PASS 才留产出。
 - full 收口时 `output_patch` 放完整产出。
 - **约定建议**(稳定结构,便于接力者解析):
   ```json
@@ -56,7 +56,7 @@
    "progress":30,                  // 0-100 进度(可选)
    "notes":"下一段从第3节起"}        // 给接力者的提示(可选)
   ```
-- 长活分段接力:每段 `output_patch` 记"已完成哪些段 / 部分草稿",下段据此接着做,SLA 切断也不丢。
+- 长活分段:每段收窄到一次能 PASS 的子 scope,`output_patch` 记本段产出(留存于 DONE 节点),下段读已 DONE 叶子接着做;**勿用 FAIL 分段(FAIL 删节点、进度丢)**。
 
 ## 能力判定原则
 
