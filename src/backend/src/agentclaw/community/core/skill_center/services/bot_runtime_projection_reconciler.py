@@ -172,7 +172,7 @@ class BotRuntimeProjectionReconciler:
             if item.get("server_code") or item.get("serverCode")
         )
         try:
-            # CLI removal is currently persisted by AgentPass itself.  Its
+            # CLI removal is currently persisted by the authorization service. Its
             # current scope is therefore the only effective Default CLI fact;
             # merging static engine defaults here would undo that removal.
             effective_cli_items = self._passport.query_passport_clis(
