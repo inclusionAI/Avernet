@@ -54,6 +54,16 @@ class ChatRequestError(Exception):
         self.retryable = retryable
 
 
+class ChatErrorStateError(Exception):
+    """WebSocket event state 为 error 时 chat 结束抛出。
+
+    当 agent/chat/error 事件的 state 为 "error" 时，
+    _SessionState.state 被设为 "error" 且 chat_complete 被唤醒。
+    AsyncChatClient.send_message 在检测到此状态后抛出此异常，
+    使上层能区分正常完成与错误终态。
+    """
+
+
 class BotWebSocketClient:
     """Bot WebSocket 客户端（纯异步版本）
 

@@ -25,7 +25,11 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.logger import get_logger
 from secbaas.community.tracer import get_tracer_plugin
 
-from ._bot_websocket_client import BotWebSocketClient, ChatRequestError
+from ._bot_websocket_client import (
+    BotWebSocketClient,
+    ChatErrorStateError,
+    ChatRequestError,
+)
 from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import _SessionState
 
@@ -396,6 +400,9 @@ class AsyncChatClient:
                     # 无超时等待
                     await state.chat_complete.wait()
 
+                if state.state == "error":
+                    raise ChatErrorStateError(state.error_message)
+
                 return state.content, state.agent_payloads
 
             finally:
@@ -641,6 +648,7 @@ class AsyncChatClient:
         msg = error_msg or f"{source} error"
         logger.warning("[%s] error: sessionKey=%s, errMsg=%s", source, session_key, msg)
         state.state = "error"
+        state.error_message = msg
         state.chat_complete.set()
         AsyncChatClient._emit_stream_chunk(
             state, StreamChunk(type="error", content=msg)
@@ -723,6 +731,7 @@ class AsyncChatClient:
         elif chat_state == "error":
             state.content = text
             state.state = chat_state
+            state.error_message = text or "chat error"
             state.chat_complete.set()
             self._emit_stream_chunk(state, StreamChunk(type="error", content=text))
             if self.verbose:

@@ -2185,8 +2185,15 @@ class TestListSessions:
         context = MagicMock()
 
         with (
-            patch.object(service, "_resolve_ws_connection_for_binding", new_callable=AsyncMock, return_value=_make_conn_info()),
-            patch.object(service, "_create_session_client", return_value=session_client),
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                new_callable=AsyncMock,
+                return_value=_make_conn_info(),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
         ):
             result = await service.list_sessions(
                 binding_info=binding,
@@ -2217,7 +2224,9 @@ class TestListSessions:
             new_callable=AsyncMock,
             side_effect=RuntimeError("conn failed"),
         ):
-            with pytest.raises(BotServiceError, match="Failed to resolve WS connection"):
+            with pytest.raises(
+                BotServiceError, match="Failed to resolve WS connection"
+            ):
                 await service.list_sessions(
                     binding_info=binding,
                     context=context,
@@ -2237,8 +2246,15 @@ class TestListSessions:
         context = MagicMock()
 
         with (
-            patch.object(service, "_resolve_ws_connection_for_binding", new_callable=AsyncMock, return_value=_make_conn_info()),
-            patch.object(service, "_create_session_client", return_value=session_client),
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                new_callable=AsyncMock,
+                return_value=_make_conn_info(),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
         ):
             with pytest.raises(BotServiceError, match="Failed to list sessions"):
                 await service.list_sessions(
@@ -2260,8 +2276,15 @@ class TestListSessions:
         context = MagicMock()
 
         with (
-            patch.object(service, "_resolve_ws_connection_for_binding", new_callable=AsyncMock, return_value=_make_conn_info()),
-            patch.object(service, "_create_session_client", return_value=session_client),
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                new_callable=AsyncMock,
+                return_value=_make_conn_info(),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
         ):
             with pytest.raises(BotServiceError, match="already wrapped"):
                 await service.list_sessions(

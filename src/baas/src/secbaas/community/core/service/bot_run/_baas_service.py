@@ -51,6 +51,7 @@ from ._async_chat_client_pool import AsyncChatClientPool
 from ._async_session_client import AsyncSessionClient
 from ._async_session_client import SessionInfo as AdapterSessionInfo
 from ._bot_run_utils import resolve_user_id
+from ._bot_websocket_client import ChatErrorStateError
 from ._internal_protocols import BotService
 
 if TYPE_CHECKING:
@@ -410,6 +411,11 @@ class BaasBotService(BotService):
             return BotResponse(content=content)
         except TimeoutError:
             raise
+        except ChatErrorStateError as e:
+            self._mark_session_failed(baas_session_id, err_msg=f"Chat error state: {e}")
+            raise BotServiceError(
+                f"Chat error state on session {session_id}: {e}"
+            ) from e
         except ConcurrentSessionError as e:
             self._mark_session_failed(
                 baas_session_id, err_msg=f"Concurrent request: {e}"
@@ -462,6 +468,7 @@ class BaasBotService(BotService):
         app_id = context.app_id if context else None
 
         try:
+            stream_ended_with_error = False
             async for chunk in client.send_message_stream(
                 message=message,
                 session_key=session_id,
@@ -469,8 +476,20 @@ class BaasBotService(BotService):
                 auth_token=auth_token,
                 app_id=app_id,
             ):
+                if chunk.type in ("error",):
+                    stream_ended_with_error = True
                 yield replace(chunk, engine_type=engine_type)
-            self._mark_session_completed(baas_session_id)
+            if stream_ended_with_error:
+                self._mark_session_failed(
+                    baas_session_id, err_msg="Stream ended with error chunk"
+                )
+            else:
+                self._mark_session_completed(baas_session_id)
+        except ChatErrorStateError as e:
+            self._mark_session_failed(baas_session_id, err_msg=f"Chat error state: {e}")
+            raise BotServiceError(
+                f"Chat error state on session {session_id}: {e}"
+            ) from e
         except ConcurrentSessionError as e:
             self._mark_session_failed(
                 baas_session_id, err_msg=f"Concurrent request: {e}"

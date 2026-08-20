@@ -16,6 +16,7 @@ class _SessionState:
 
     content: str = ""
     state: str = ""
+    error_message: str = ""
     agent_payloads: list[dict[str, Any]] = field(default_factory=list)
     last_stream_is_assistant: bool = False
     chat_complete: asyncio.Event = field(default_factory=asyncio.Event)

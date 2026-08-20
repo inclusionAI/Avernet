@@ -37,6 +37,7 @@ from ._async_chat_client_pool import AsyncChatClientPool
 from ._async_session_client import AsyncSessionClient
 from ._async_session_client import SessionInfo as AdapterSessionInfo
 from ._bot_run_utils import resolve_user_id
+from ._bot_websocket_client import ChatErrorStateError
 from ._internal_protocols import BotService
 
 if TYPE_CHECKING:
@@ -247,6 +248,10 @@ class ClawBotService(BotService):
             return BotResponse(content=content)
         except TimeoutError:
             raise
+        except ChatErrorStateError as e:
+            raise BotServiceError(
+                f"Chat error state on session {session_id}: {e}"
+            ) from e
         except ConcurrentSessionError as e:
             raise BotServiceError(
                 f"Concurrent request on session {session_id}: {e}"
@@ -293,6 +298,10 @@ class ClawBotService(BotService):
                 app_id=app_id,
             ):
                 yield replace(chunk, engine_type=engine_type)
+        except ChatErrorStateError as e:
+            raise BotServiceError(
+                f"Chat error state on session {session_id}: {e}"
+            ) from e
         except BotServiceError:
             raise
         except ConcurrentSessionError as e:
