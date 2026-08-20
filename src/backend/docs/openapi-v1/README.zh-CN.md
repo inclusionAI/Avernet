@@ -1365,9 +1365,9 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 - **2026-08-19 —— Bot Editors 协作者 CRUD。** 公共面新增
   `GET/POST /openapi/v1/bots/{bot_id}/editors`、
   `PATCH/DELETE /openapi/v1/bots/{bot_id}/editors/{editor_id}` 与
-  `DELETE /openapi/v1/bots/{bot_id}/editors/me`。五个操作均只允许真人调用；
-  App grant 只授权使用 Bot，不授权枚举或修改真人协作者集合。当前调用人仍通过必填的
-  `user_id` query 参数表达，新增目标成员则在 body 中使用 `editor_user_id`。角色收紧为
+  `DELETE /openapi/v1/bots/{bot_id}/editors/me`。五个操作都允许持有目标 Bot 有效 grant
+  的 App 调用；App 以委托用户的实时权限执行，并在每次请求重新判定。当前调用人仍通过
+  必填的 `user_id` query 参数表达，新增目标成员则在 body 中使用 `editor_user_id`。角色收紧为
   `admin | member` 闭集。读取需要 Member 权限，增删改需要 Owner/Admin；非 Owner 的
   Admin 要退出时必须调用 `/me`，不能通过管理删除接口删掉自己。所有带 `{editor_id}`
   的写操作都会在执行前把记录重新绑定到被寻址 Bot 的主键、Bot id、Owner 和环境，任一
@@ -1390,8 +1390,8 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   `GET/POST /openapi/v1/bots/{bot_id}/render-screens` 与
   `PATCH/DELETE /openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}`。
   GET 返回副屏渲染所需的“组件库名称 → UMD CDN URL”非敏感映射：已认证真人可读取
-  显式寻址的 Bot，不要求 Editor；App 只有在该 Bot 存在有效 grant 时才能读取。写操作
-  只允许真人，并要求 Bot 的实时有效 Editor 权限达到 `MEMBER+`，Team Editor 会同步
+  显式寻址的 Bot，不要求 Editor；App 只有在该 Bot 存在有效 grant 时才能调用。写操作
+  要求委托用户的实时有效 Editor 权限达到 `MEMBER+`，Team Editor 会同步
   复核当前 Space 成员身份。所有公开 `render_screen_id` 在修改或删除前都会重新绑定到
   当前 Bot id、Owner 和环境，任一不符均返回与不存在相同的固定 404。请求 body 为严格
   模型，CDN 地址只接受 HTTP(S) URL。

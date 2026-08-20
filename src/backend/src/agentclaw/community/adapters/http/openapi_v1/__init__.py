@@ -286,12 +286,6 @@ _SUBGROUPS = [
     # creation/authorization pair remains human-only. Dependencies are declared
     # per route in the local router.
     local_router,
-    # Editors are human-only, while render screens mix an app-readable GET with
-    # human-only writes. Their route dependencies enforce those distinctions;
-    # mounting either whole group under the addressed-Bot grant would make the
-    # assembly disagree with the admission table.
-    editors_router,
-    render_screens_router,
 ]
 
 # These groups may address a shared Bot. ``OwnerIdDep`` performs the same grant
@@ -299,6 +293,12 @@ _SUBGROUPS = [
 # declares it explicitly so the admission rule is visible where the public
 # surface is assembled. FastAPI caches the shared dependency per request.
 _ADDRESSED_BOT_SUBGROUPS = [
+    # Bot grants lend the delegating user's live Bot permissions. Editors and
+    # render screens therefore use the same addressed-owner grant boundary as
+    # the other shared-Bot configuration groups; their services still enforce
+    # the caller's effective Owner/Admin/Member level for each operation.
+    editors_router,
+    render_screens_router,
     service_lifecycle_router,
     service_edit_lock_router,
     containers_router,

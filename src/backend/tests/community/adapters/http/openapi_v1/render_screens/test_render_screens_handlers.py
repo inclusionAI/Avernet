@@ -22,7 +22,6 @@ from agentclaw.community.adapters.http.openapi_v1.render_screens.router import (
     create_render_screen,
     delete_render_screen,
     list_render_screens,
-    resolve_render_screen_write_owner_id,
     update_render_screen,
 )
 from agentclaw.community.adapters.http.openapi_v1.render_screens.schemas import (
@@ -224,22 +223,6 @@ def test_record_id_is_bound_to_bot_owner_and_environment(overrides):
         )
 
 
-@pytest.mark.asyncio
-async def test_write_owner_defaults_to_actor_or_accepts_explicit_owner():
-    assert (
-        await resolve_render_screen_write_owner_id(
-            actor_id="member-1", owner_id=None
-        )
-        == "member-1"
-    )
-    assert (
-        await resolve_render_screen_write_owner_id(
-            actor_id="member-1", owner_id="owner-1"
-        )
-        == "owner-1"
-    )
-
-
 def test_requests_reject_unknown_fields_and_non_http_urls():
     with pytest.raises(ValidationError):
         RenderScreenCreate(
@@ -254,25 +237,21 @@ def test_requests_reject_unknown_fields_and_non_http_urls():
         )
 
 
-def test_admission_allows_only_the_read_for_app_only_callers():
+def test_admission_allows_all_operations_for_app_callers_with_a_bot_grant():
     collection = "/openapi/v1/bots/{bot_id}/render-screens"
     item = f"{collection}/{{render_screen_id}}"
 
     assert ADMISSION[("GET", collection)] is AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT
-    assert ADMISSION[("POST", collection)] is AdmissionMode.REFUSED
-    assert ADMISSION[("PATCH", item)] is AdmissionMode.REFUSED
-    assert ADMISSION[("DELETE", item)] is AdmissionMode.REFUSED
+    assert ADMISSION[("POST", collection)] is AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT
+    assert ADMISSION[("PATCH", item)] is AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT
+    assert ADMISSION[("DELETE", item)] is AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT
 
 
-def test_assembled_app_resolves_render_screen_services(
-    app_with_testing_modules, world
-):
+def test_assembled_app_resolves_render_screen_services(app_with_testing_modules, world):
     make_bot(world, bot_id="bot-render-screen", owner_id="owner-1")
     repository = world.get(RenderScreenRepository)
     with repository._db.orm_session() as session:
-        RenderScreenModel.__table__.create(
-            bind=session.get_bind(), checkfirst=True
-        )
+        RenderScreenModel.__table__.create(bind=session.get_bind(), checkfirst=True)
     repository.insert(
         bot_id="bot-render-screen",
         owner_id="owner-1",
@@ -285,9 +264,7 @@ def test_assembled_app_resolves_render_screen_services(
     }
     try:
         client = user_scoped_client(app_with_testing_modules, "owner-1")
-        response = client.get(
-            "/openapi/v1/bots/bot-render-screen/render-screens"
-        )
+        response = client.get("/openapi/v1/bots/bot-render-screen/render-screens")
     finally:
         app_with_testing_modules.dependency_overrides.pop(require_principal, None)
 

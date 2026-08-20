@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Path, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
@@ -14,10 +14,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import (
-    UserIdDep,
-    refuse_app_only_caller,
-)
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     deleted,
@@ -49,33 +46,12 @@ router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/render-screens",
     tags=["render-screens"],
 )
-_REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 RenderScreenIdPath = Annotated[
     int,
     Path(
         ge=1,
         description="Render-screen mapping identifier returned by this collection.",
     ),
-]
-
-
-async def resolve_render_screen_write_owner_id(
-    actor_id: UserIdDep,
-    owner_id: Annotated[
-        str | None,
-        Query(
-            min_length=1,
-            description="Owner of the Bot whose render-screen configuration is addressed. "
-            "Defaults to the current user; editors name the Bot Owner.",
-        ),
-    ] = None,
-) -> str:
-    """Resolve the owner for a human-only render-screen mutation."""
-    return owner_id if owner_id is not None else actor_id
-
-
-RenderScreenWriteOwnerIdDep = Annotated[
-    str, Depends(resolve_render_screen_write_owner_id)
 ]
 
 
@@ -111,7 +87,6 @@ async def list_render_screens(
     "",
     status_code=201,
     response_model=Envelope[RenderScreen],
-    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def create_render_screen(
@@ -119,11 +94,9 @@ async def create_render_screen(
     body: RenderScreenCreate,
     request: Request,
     actor_id: UserIdDep,
-    owner_id: RenderScreenWriteOwnerIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    collaborators: CollaboratorServiceProtocol = Injected(
-        CollaboratorServiceProtocol
-    ),
+    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     service: RenderScreenServiceProtocol = Injected(RenderScreenServiceProtocol),
 ) -> Envelope[RenderScreen]:
     """Add a CDN mapping; Bot Owner or live Editor Member access is required."""
@@ -156,7 +129,6 @@ async def create_render_screen(
 @router.patch(
     "/{render_screen_id}",
     response_model=Envelope[RenderScreen],
-    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def update_render_screen(
@@ -165,11 +137,9 @@ async def update_render_screen(
     body: RenderScreenUpdate,
     request: Request,
     actor_id: UserIdDep,
-    owner_id: RenderScreenWriteOwnerIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    collaborators: CollaboratorServiceProtocol = Injected(
-        CollaboratorServiceProtocol
-    ),
+    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     service: RenderScreenServiceProtocol = Injected(RenderScreenServiceProtocol),
 ) -> Envelope[RenderScreen]:
     """Replace one mapping after binding its id to the addressed Bot."""
@@ -206,7 +176,6 @@ async def update_render_screen(
 @router.delete(
     "/{render_screen_id}",
     response_model=Envelope[Deleted],
-    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def delete_render_screen(
@@ -214,11 +183,9 @@ async def delete_render_screen(
     render_screen_id: RenderScreenIdPath,
     request: Request,
     actor_id: UserIdDep,
-    owner_id: RenderScreenWriteOwnerIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    collaborators: CollaboratorServiceProtocol = Injected(
-        CollaboratorServiceProtocol
-    ),
+    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     service: RenderScreenServiceProtocol = Injected(RenderScreenServiceProtocol),
 ) -> Envelope[Deleted]:
     """Soft-delete one mapping after Bot and record authorization."""
@@ -243,11 +210,9 @@ async def delete_render_screen(
 
 
 __all__ = [
-    "RenderScreenWriteOwnerIdDep",
     "create_render_screen",
     "delete_render_screen",
     "list_render_screens",
-    "resolve_render_screen_write_owner_id",
     "router",
     "update_render_screen",
 ]

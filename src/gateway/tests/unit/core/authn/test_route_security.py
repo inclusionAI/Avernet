@@ -75,14 +75,6 @@ _HUMAN_ONLY = [
     ("GET", "/openapi/v1/org/user/iam-token"),
     ("POST", "/openapi/v1/bots/bot-123/caller-identity"),
     ("POST", "/openapi/v1/bots"),
-    ("GET", "/openapi/v1/bots/bot-123/editors"),
-    ("POST", "/openapi/v1/bots/bot-123/editors"),
-    ("PATCH", "/openapi/v1/bots/bot-123/editors/7"),
-    ("DELETE", "/openapi/v1/bots/bot-123/editors/7"),
-    ("DELETE", "/openapi/v1/bots/bot-123/editors/me"),
-    ("POST", "/openapi/v1/bots/bot-123/render-screens"),
-    ("PATCH", "/openapi/v1/bots/bot-123/render-screens/7"),
-    ("DELETE", "/openapi/v1/bots/bot-123/render-screens/7"),
     ("POST", "/openapi/v1/bots/local"),
     ("GET", "/openapi/v1/bots/bot-123/local/auth-status"),
     ("GET", "/openapi/v1/bots/bot-123/authorized-apps"),
@@ -153,11 +145,27 @@ def test_shipped_config_lets_an_application_discover_its_own_scope() -> None:
     assert req[PrincipalType.APP] is Presence.REQUIRED
 
 
-def test_shipped_config_allows_app_identity_for_render_screen_reads() -> None:
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/openapi/v1/bots/bot-123/editors"),
+        ("POST", "/openapi/v1/bots/bot-123/editors"),
+        ("PATCH", "/openapi/v1/bots/bot-123/editors/7"),
+        ("DELETE", "/openapi/v1/bots/bot-123/editors/7"),
+        ("DELETE", "/openapi/v1/bots/bot-123/editors/me"),
+        ("GET", "/openapi/v1/bots/bot-123/render-screens"),
+        ("POST", "/openapi/v1/bots/bot-123/render-screens"),
+        ("PATCH", "/openapi/v1/bots/bot-123/render-screens/7"),
+        ("DELETE", "/openapi/v1/bots/bot-123/render-screens/7"),
+    ],
+)
+def test_shipped_config_allows_app_identity_for_bot_configuration(
+    method: str, path: str
+) -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
 
-    req = rs.resolve("GET", "/openapi/v1/bots/bot-123/render-screens")
+    req = rs.resolve(method, path)
 
     assert req is not None
     assert req[PrincipalType.USER] is Presence.OPTIONAL

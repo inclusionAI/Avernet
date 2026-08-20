@@ -157,22 +157,6 @@ user_config:
       user: optional
       app: optional
 
-    # Bot editor management is a human authorization action. Application grants
-    # authorize use of a Bot, not reading or mutating its human editor set.
-    "/openapi/v1/bots/{bot_id}/editors":
-      user: required
-    "/openapi/v1/bots/{bot_id}/editors/**":
-      user: required
-
-    # Render-screen mappings are readable by an application with a Bot grant,
-    # but changing the Bot's CDN configuration remains a human Editor action.
-    "POST /openapi/v1/bots/{bot_id}/render-screens":
-      user: required
-    "PATCH /openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}":
-      user: required
-    "DELETE /openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}":
-      user: required
-
     # ── The refusals: operations that still require a human on the wire ──────
 
     # The caller-identity read: its answer IS the end user, so a caller with no

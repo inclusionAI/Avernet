@@ -14,8 +14,11 @@ from agentclaw.community.adapters.http.openapi_v1.editors.router import (
     leave_editors,
     list_editors,
     remove_editor,
-    resolve_editor_owner_id,
     update_editor,
+)
+from agentclaw.community.adapters.http.openapi_v1.admission import (
+    ADMISSION,
+    AdmissionMode,
 )
 from agentclaw.community.adapters.http.openapi_v1.editors.schemas import (
     EditorCreate,
@@ -145,19 +148,25 @@ async def test_mutations_delegate_to_bot_first_service_methods():
     )
 
 
-@pytest.mark.asyncio
-async def test_editor_owner_defaults_to_actor_or_accepts_explicit_owner():
-    assert await resolve_editor_owner_id(actor_id="u-1", owner_id=None) == "u-1"
-    assert (
-        await resolve_editor_owner_id(actor_id="u-1", owner_id="owner-1") == "owner-1"
-    )
-
-
 def test_editor_requests_reject_unknown_fields_and_roles():
     with pytest.raises(ValidationError):
         EditorCreate(editor_user_id="u-1", role="owner")
     with pytest.raises(ValidationError):
         EditorUpdate(role="member", user_id="unexpected")
+
+
+def test_editor_operations_admit_app_callers_with_an_addressed_bot_grant():
+    collection = "/openapi/v1/bots/{bot_id}/editors"
+    item = f"{collection}/{{editor_id}}"
+
+    assert ADMISSION[("GET", collection)] is AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT
+    assert ADMISSION[("POST", collection)] is AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT
+    assert ADMISSION[("PATCH", item)] is AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT
+    assert ADMISSION[("DELETE", item)] is AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT
+    assert (
+        ADMISSION[("DELETE", f"{collection}/me")]
+        is AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT
+    )
 
 
 def test_assembled_app_resolves_editor_service_and_space_access_protocol(

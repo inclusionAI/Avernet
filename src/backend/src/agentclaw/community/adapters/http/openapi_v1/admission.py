@@ -589,23 +589,30 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/local/open-folder",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    # Editor membership is an authorization mutation. The first public version
-    # requires a human on the wire for reads and writes alike; an application
-    # grant authorizes Bot use, not enumeration or mutation of its human access.
-    ("GET", "/openapi/v1/bots/{bot_id}/editors"): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/bots/{bot_id}/editors"): AdmissionMode.REFUSED,
+    # A Bot grant lends the delegating user's live Bot permissions. Editor and
+    # render-screen operations therefore admit an application only after the
+    # addressed Bot/owner grant is proven; the domain services still enforce
+    # the delegator's effective Owner/Admin/Member level for the requested act.
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/editors",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/editors",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "PATCH",
         "/openapi/v1/bots/{bot_id}/editors/{editor_id}",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/editors/{editor_id}",
-    ): AdmissionMode.REFUSED,
-    ("DELETE", "/openapi/v1/bots/{bot_id}/editors/me"): AdmissionMode.REFUSED,
-    # Render-screen CDN mappings are non-sensitive runtime inputs. An
-    # application with a live grant may read them for panel rendering, while
-    # configuration mutations remain human-only Editor actions.
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/editors/me",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/render-screens",
@@ -613,15 +620,15 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/render-screens",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "PATCH",
         "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # ── REFUSED — each for its own reason ────────────────────────────────────
     # The caller's own identity. An app-only caller names no end user, so there
     # is nothing to return — its scope question is answered by

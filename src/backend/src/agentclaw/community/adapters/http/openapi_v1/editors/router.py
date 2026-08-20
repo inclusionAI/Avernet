@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
     Deleted,
     Envelope,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import (
-    UserIdDep,
-    refuse_app_only_caller,
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
 )
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     deleted,
@@ -29,29 +29,10 @@ from .schemas import Editor, EditorCreate, EditorList, EditorRole, EditorUpdate
 
 
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/editors", tags=["editors"])
-_REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 EditorIdPath = Annotated[
     int,
     Path(ge=1, description="Editor-relation identifier returned by this collection."),
 ]
-
-
-async def resolve_editor_owner_id(
-    actor_id: UserIdDep,
-    owner_id: Annotated[
-        str | None,
-        Query(
-            min_length=1,
-            description="Owner of the Bot whose editor set is addressed. "
-            "Defaults to the current user; collaborators name the Bot Owner.",
-        ),
-    ] = None,
-) -> str:
-    """Resolve a human-only addressed owner without application grant logic."""
-    return owner_id if owner_id is not None else actor_id
-
-
-EditorOwnerIdDep = Annotated[str, Depends(resolve_editor_owner_id)]
 
 
 def _editor(record: CollaboratorRecord) -> Editor:
@@ -70,14 +51,13 @@ def _editor(record: CollaboratorRecord) -> Editor:
 @router.get(
     "",
     response_model=Envelope[EditorList],
-    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def list_editors(
     bot_id: BotIdPath,
     request: Request,
     actor_id: UserIdDep,
-    owner_id: EditorOwnerIdDep,
+    owner_id: OwnerIdDep,
     role: Annotated[
         EditorRole | None, Query(description="Optional editor-role filter.")
     ] = None,
@@ -97,7 +77,6 @@ async def list_editors(
     "",
     status_code=201,
     response_model=Envelope[Editor],
-    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def add_editor(
@@ -105,7 +84,7 @@ async def add_editor(
     body: EditorCreate,
     request: Request,
     actor_id: UserIdDep,
-    owner_id: EditorOwnerIdDep,
+    owner_id: OwnerIdDep,
     service: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
 ) -> Envelope[Editor]:
     record = service.add_editor(
@@ -122,7 +101,6 @@ async def add_editor(
 @router.patch(
     "/{editor_id}",
     response_model=Envelope[Editor],
-    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def update_editor(
@@ -131,7 +109,7 @@ async def update_editor(
     body: EditorUpdate,
     request: Request,
     actor_id: UserIdDep,
-    owner_id: EditorOwnerIdDep,
+    owner_id: OwnerIdDep,
     service: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
 ) -> Envelope[Editor]:
     record = service.update_editor(
@@ -147,14 +125,13 @@ async def update_editor(
 @router.delete(
     "/me",
     response_model=Envelope[Deleted],
-    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def leave_editors(
     bot_id: BotIdPath,
     request: Request,
     actor_id: UserIdDep,
-    owner_id: EditorOwnerIdDep,
+    owner_id: OwnerIdDep,
     service: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
 ) -> Envelope[Deleted]:
     service.leave_editors(
@@ -168,7 +145,6 @@ async def leave_editors(
 @router.delete(
     "/{editor_id}",
     response_model=Envelope[Deleted],
-    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def remove_editor(
@@ -176,7 +152,7 @@ async def remove_editor(
     editor_id: EditorIdPath,
     request: Request,
     actor_id: UserIdDep,
-    owner_id: EditorOwnerIdDep,
+    owner_id: OwnerIdDep,
     service: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
 ) -> Envelope[Deleted]:
     service.remove_editor(

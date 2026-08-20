@@ -2097,10 +2097,10 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 - **2026-08-19 — Bot Editors CRUD.** The public surface now exposes
   `GET/POST /openapi/v1/bots/{bot_id}/editors`,
   `PATCH/DELETE /openapi/v1/bots/{bot_id}/editors/{editor_id}`, and
-  `DELETE /openapi/v1/bots/{bot_id}/editors/me`. All five operations require a
-  human caller; an application grant authorizes use of a Bot, not enumeration
-  or mutation of its human editor set. The acting user remains the required
-  `user_id` query parameter, while a create body names its target as
+  `DELETE /openapi/v1/bots/{bot_id}/editors/me`. All five operations admit an
+  application with a live grant on the addressed Bot; the App acts with the
+  delegating user's current permission, re-adjudicated on every request. The
+  acting user remains the required `user_id` query parameter, while a create body names its target as
   `editor_user_id`. Roles are the closed `admin | member` enum. Reads require
   Member access; mutations require Owner/Admin, and a non-owner Admin leaves
   through `/me` rather than deleting their own record through the admin route.
@@ -2132,9 +2132,9 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   The collection read returns the non-sensitive component-library name → UMD
   CDN URL mappings needed to render a Bot's side panels. An authenticated human
   may read an explicitly addressed Bot without being its Editor; an application
-  may read only while a live grant covers that Bot. Mutations require a human
-  caller and the Bot's live effective Editor permission at `MEMBER` or above,
-  including the Team Space membership recheck. Every public record id is bound
+  may call every operation only while a live grant covers that Bot. Mutations
+  require the delegating user's live effective Editor permission at `MEMBER` or
+  above, including the Team Space membership recheck. Every public record id is bound
   back to the addressed Bot id, Owner and environment before update or delete;
   mismatches use the same fixed 404 as absence. Request bodies are strict and
   accept only HTTP(S) CDN URLs.
