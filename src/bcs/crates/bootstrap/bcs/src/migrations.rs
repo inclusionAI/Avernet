@@ -266,6 +266,7 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         env TEXT NOT NULL,
         routing_policy_json TEXT DEFAULT NULL,
         context TEXT DEFAULT NULL,
+        opening_message_json TEXT DEFAULT NULL,
         group_kind TEXT NOT NULL DEFAULT 'normal',
         dm_pair_key TEXT DEFAULT NULL,
         service_group_uuid TEXT DEFAULT NULL,
@@ -919,6 +920,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 10,
         name: "eventing_plaintext_endpoint",
     },
+    SqliteMigration {
+        version: 11,
+        name: "group_opening_message",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1020,6 +1025,23 @@ pub async fn run_sqlite_bootstrap_tables(db: &dyn DbPlugin) -> DbResult<()> {
     ensure_sqlite_message_owner_bot_id(db).await?;
     ensure_sqlite_session_collected_column(db).await?;
     ensure_bcs_session_files(db).await?;
+    Ok(())
+}
+
+async fn ensure_sqlite_group_opening_message_column(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_groups").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_groups").await?;
+    if !columns
+        .iter()
+        .any(|column| column == "opening_message_json")
+    {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_groups ADD COLUMN opening_message_json TEXT DEFAULT NULL",
+        ))
+        .await?;
+    }
     Ok(())
 }
 
@@ -1196,6 +1218,7 @@ async fn apply_sqlite_migration_body(
         // encrypted endpoint storage were removed. Repair empty local schemas
         // without discarding any persisted Subscription configuration.
         10 => migrate_sqlite_eventing_plaintext_endpoint(db).await,
+        11 => ensure_sqlite_group_opening_message_column(db).await,
         _ => Ok(()),
     }
 }
@@ -1208,10 +1231,7 @@ async fn migrate_sqlite_eventing_plaintext_endpoint(db: &dyn DbPlugin) -> DbResu
     if columns.iter().any(|column| column == "endpoint_url") {
         return Ok(());
     }
-    if !columns
-        .iter()
-        .any(|column| column == "endpoint_ciphertext")
-    {
+    if !columns.iter().any(|column| column == "endpoint_ciphertext") {
         return Err(DbError::InvalidInput(
             "unsupported bcs_event_subscription_revisions schema".to_string(),
         ));
@@ -1528,6 +1548,11 @@ mod tests {
                     10,
                     "eventing_plaintext_endpoint".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    11,
+                    "group_opening_message".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1540,7 +1565,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 10);
+        assert_eq!(report.pending_versions.len(), 11);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1575,6 +1600,8 @@ mod tests {
             report.pending_versions[9].name,
             "eventing_plaintext_endpoint"
         );
+        assert_eq!(report.pending_versions[10].version, 11);
+        assert_eq!(report.pending_versions[10].name, "group_opening_message");
         Ok(())
     }
 
@@ -1621,8 +1648,56 @@ mod tests {
                     10,
                     "eventing_plaintext_endpoint".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    11,
+                    "group_opening_message".to_string(),
+                    "sqlite".to_string()
                 )
             ]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_eventing_database_upgrades_to_group_opening_message() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        run_sqlite_migrations(&db).await?;
+        db.execute(DbStatement::new(
+            "DELETE FROM bcs_schema_migrations WHERE version = 11",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_groups DROP COLUMN opening_message_json",
+        ))
+        .await?;
+
+        let before = check_sqlite_migrations(&db).await?;
+        assert_eq!(before.current_version, Some(10));
+        assert_eq!(
+            before
+                .pending_versions
+                .iter()
+                .map(|migration| (migration.version, migration.name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(11, "group_opening_message")]
+        );
+
+        run_sqlite_migrations(&db).await?;
+
+        assert!(
+            column_names(&db, "bcs_groups")
+                .await?
+                .iter()
+                .any(|column| column == "opening_message_json")
+        );
+        assert_eq!(
+            migration_rows(&db).await?.last(),
+            Some(&(
+                11,
+                "group_opening_message".to_string(),
+                "sqlite".to_string()
+            ))
         );
         Ok(())
     }
@@ -1812,6 +1887,8 @@ mod eventing_migration_tests {
 
     const MYSQL_EVENTING_MIGRATION: &str =
         include_str!("../../../../migrations/mysql/009_eventing.sql");
+    const MYSQL_GROUP_OPENING_MIGRATION: &str =
+        include_str!("../../../../migrations/mysql/010_group_opening_message.sql");
 
     const EVENTING_TABLES: &[&str] = &[
         "bcs_event_subscriptions",
@@ -1878,6 +1955,14 @@ mod eventing_migration_tests {
     {
         let db = LocalSqliteDbPlugin::new()?;
         run_sqlite_migrations(&db).await?;
+
+        let group_columns = sqlite_table_columns(&db, "bcs_groups").await?;
+        assert!(
+            group_columns
+                .iter()
+                .any(|column| column == "opening_message_json"),
+            "bcs_groups missing opening_message_json"
+        );
 
         for table in EVENTING_TABLES {
             assert!(
@@ -2007,5 +2092,9 @@ mod eventing_migration_tests {
         assert!(!MYSQL_EVENTING_MIGRATION.contains("bcs_event_offsets"));
         assert!(!MYSQL_EVENTING_MIGRATION.contains("bcs_event_global_cursor"));
         assert!(!MYSQL_EVENTING_MIGRATION.contains("ALTER TABLE"));
+        assert!(
+            MYSQL_GROUP_OPENING_MIGRATION
+                .contains("ADD COLUMN `opening_message_json` text DEFAULT NULL")
+        );
     }
 }

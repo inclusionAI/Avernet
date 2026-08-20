@@ -1000,6 +1000,17 @@ impl GroupManagementService for GroupManagement {
             participant_ids.push(bot_id);
         }
         let requested_strategy = cmd.group_strategy.unwrap_or_default();
+        if let Some(opening_message) = &cmd.opening_message {
+            if requested_strategy != GroupStrategy::StateMachine {
+                return Err(GroupUseCaseError::InvalidProposal(
+                    "invalid_opening_message: opening_message is only supported for state_machine groups"
+                        .to_string(),
+                ));
+            }
+            opening_message.validate().map_err(|error| {
+                GroupUseCaseError::InvalidProposal(format!("invalid_opening_message: {error}"))
+            })?;
+        }
         validate_participants_for_strategy(requested_strategy, &participants)?;
         validate_human_constraints(requested_strategy, &participants, &cmd.driver_bot_id)?;
         self.ensure_manager_worker_accepts_participants(requested_strategy, &participants)
@@ -1035,6 +1046,7 @@ impl GroupManagementService for GroupManagement {
             }
         };
         group.context = cmd.context.clone();
+        group.opening_message = cmd.opening_message;
         group.routing_policy = cmd.routing_policy;
         group.group_kind = cmd.group_kind.unwrap_or(GroupKind::Normal);
         group.service_spec = cmd.service_spec.clone();
@@ -2234,6 +2246,7 @@ fn group_to_detail_with_context(group: DomainGroup, context_injected: u64) -> Gr
         status: group.status,
         driver_bot_id: group.driver_bot,
         context: group.context,
+        opening_message: group.opening_message,
         participants: group
             .participants
             .into_iter()

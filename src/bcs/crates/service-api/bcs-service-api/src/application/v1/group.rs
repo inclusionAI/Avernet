@@ -9,7 +9,7 @@ use crate::types::{
     EventActor, EventPayload, EventSubscriptionScope, EventSubscriptionScopeType, Group, Session,
 };
 
-pub use bcs_domain::{ActorKind, ParticipantMode, ParticipantRole};
+pub use bcs_domain::{ActorKind, OpeningMessage, ParticipantMode, ParticipantRole};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -206,6 +206,8 @@ pub struct CollaborationGroupDetail {
     pub visibility: GroupVisibility,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening_message: Option<OpeningMessage>,
     pub originator_actor_id: String,
     pub participants: Vec<Participant>,
     pub driver_bot_uuid: String,
@@ -272,6 +274,7 @@ pub struct CreateParticipant {
 pub struct CreateCollaborationGroup {
     pub name: Option<String>,
     pub context: Option<String>,
+    pub opening_message: Option<OpeningMessage>,
     pub visibility: GroupVisibility,
     pub driver_bot_uuid: String,
     pub participants: Vec<CreateParticipant>,
@@ -412,6 +415,8 @@ pub struct GetGroup {
 pub struct GroupPatch {
     pub name: Option<String>,
     pub context: Option<String>,
+    /// Outer `None` leaves the field unchanged; `Some(None)` restores the default.
+    pub opening_message: Option<Option<OpeningMessage>>,
     pub visibility: Option<GroupVisibility>,
     pub delivery_policy: Option<GroupDeliveryPolicy>,
 }
@@ -420,6 +425,7 @@ impl GroupPatch {
     pub fn is_empty(&self) -> bool {
         self.name.is_none()
             && self.context.is_none()
+            && self.opening_message.is_none()
             && self.visibility.is_none()
             && self.delivery_policy.is_none()
     }

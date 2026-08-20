@@ -97,6 +97,7 @@ fn group_detail() -> GroupDetail {
         status: GroupStatus::Active,
         visibility: GroupVisibility::Private,
         context: Some("diagnostic".into()),
+        opening_message: None,
         originator_actor_id: "human_staff-1".into(),
         participants: vec![Participant {
             actor_id: "driver-bot".into(),

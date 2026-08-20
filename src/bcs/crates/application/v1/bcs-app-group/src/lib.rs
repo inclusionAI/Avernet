@@ -925,6 +925,7 @@ impl GroupServiceImpl {
             status: common.status,
             visibility: common.visibility,
             context: common.context,
+            opening_message: group.opening_message,
             originator_actor_id: common.originator_actor_id,
             participants: common.participants,
             driver_bot_uuid: group.driver_bot,
@@ -1100,6 +1101,17 @@ impl GroupServiceImpl {
         };
         let (strategy, routing_policy, state_machine) =
             map_create_collaboration(request.collaboration.clone());
+        if let Some(opening_message) = &request.opening_message {
+            if strategy != GroupStrategy::StateMachine {
+                return Err(ApplicationError::invalid(
+                    "invalid_opening_message",
+                    "opening_message is only supported for StateMachine Groups",
+                ));
+            }
+            opening_message.validate().map_err(|error| {
+                ApplicationError::invalid("invalid_opening_message", error.to_string())
+            })?;
+        }
         let lead_role = strategy.lead_role();
         if request
             .participants
@@ -1203,6 +1215,7 @@ impl GroupServiceImpl {
                 label: request.name,
                 topic: None,
                 context: request.context,
+                opening_message: request.opening_message,
                 routing_policy,
                 participants,
                 member_bot_ids: Vec::new(),
@@ -1951,6 +1964,12 @@ impl GroupService for GroupServiceImpl {
         let mut group = self
             .load_manageable_group(&principal, &command.group_id)
             .await?;
+        if group.group_kind == GroupKind::Dm && command.patch.opening_message.is_some() {
+            return Err(ApplicationError::invalid(
+                "invalid_opening_message",
+                "opening_message is not supported for DM Groups",
+            ));
+        }
         if group.group_kind == GroupKind::Dm
             && (command.patch.delivery_policy.is_some()
                 || command.patch.visibility == Some(GroupVisibility::Public))
@@ -1968,6 +1987,19 @@ impl GroupService for GroupServiceImpl {
                 "delivery_policy may be updated only for Chat Groups",
             ));
         }
+        if let Some(opening_message) = &command.patch.opening_message {
+            if group.group_strategy != GroupStrategy::StateMachine {
+                return Err(ApplicationError::invalid(
+                    "invalid_opening_message",
+                    "opening_message is only supported for StateMachine Groups",
+                ));
+            }
+            if let Some(opening_message) = opening_message {
+                opening_message.validate().map_err(|error| {
+                    ApplicationError::invalid("invalid_opening_message", error.to_string())
+                })?;
+            }
+        }
         let patch = command.patch;
         let mut persistence_patch = GroupMutableFieldsPatch::default();
         if let Some(name) = patch.name {
@@ -1977,6 +2009,10 @@ impl GroupService for GroupServiceImpl {
         if let Some(context) = patch.context {
             group.context = Some(context.clone());
             persistence_patch.context = Some(context);
+        }
+        if let Some(opening_message) = patch.opening_message {
+            group.opening_message = opening_message.clone();
+            persistence_patch.opening_message = Some(opening_message);
         }
         if let Some(visibility) = patch.visibility {
             if visibility == GroupVisibility::Public {

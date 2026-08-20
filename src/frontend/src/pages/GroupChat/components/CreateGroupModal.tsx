@@ -86,6 +86,10 @@ import {
   type CollaborationParticipantDefinition,
 } from '../utils/collaborationValidation';
 import {
+  buildGroupOpeningMessage,
+  getGroupOpeningMessageError,
+} from '../utils/groupOpeningMessage';
+import {
   buildGroupWebhookSubscriptions,
   getGroupWebhookUrlError,
 } from '../utils/groupWebhook';
@@ -243,6 +247,14 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const [topic, setTopic] = useState('');
   const [description, setDescription] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
+  const [openingMessage, setOpeningMessage] = useState('');
+  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
+  const [advancedFieldErrors, setAdvancedFieldErrors] = useState<{
+    webhook?: string;
+    openingMessage?: string;
+  }>({});
+  const webhookInputRef = useRef<HTMLInputElement>(null);
+  const openingMessageInputRef = useRef<HTMLTextAreaElement>(null);
   const [consultantBots, setConsultantBots] = useState<string[]>([]);
   const [botSearch, setBotSearch] = useState('');
   const [error, setError] = useState<string>('');
@@ -1107,6 +1119,9 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     setTopic('');
     setDescription('');
     setWebhookUrl('');
+    setOpeningMessage('');
+    setAdvancedSettingsOpen(false);
+    setAdvancedFieldErrors({});
     setConsultantBots([]);
     setBotSearch('');
     setError('');
@@ -1605,11 +1620,27 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     const isManagerWorker = groupStrategy === 'manager_worker';
     const isStateMachine = groupStrategy === 'state_machine';
     const webhookUrlError = getGroupWebhookUrlError(webhookUrl);
+    const openingMessageError = isStateMachine
+      ? getGroupOpeningMessageError(openingMessage)
+      : undefined;
 
-    if (webhookUrlError) {
-      setError(webhookUrlError);
+    if (webhookUrlError || openingMessageError) {
+      setAdvancedFieldErrors({
+        webhook: webhookUrlError,
+        openingMessage: openingMessageError,
+      });
+      setAdvancedSettingsOpen(true);
+      setError('请检查高级设置');
+      window.requestAnimationFrame(() => {
+        if (webhookUrlError) {
+          webhookInputRef.current?.focus();
+        } else {
+          openingMessageInputRef.current?.focus();
+        }
+      });
       return;
     }
+    setAdvancedFieldErrors({});
     const eventSubscriptions = buildGroupWebhookSubscriptions(webhookUrl);
 
     if (!originator) {
@@ -1737,6 +1768,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         group_strategy: 'state_machine',
         auto_start_on_service_invocation: true,
         collaboration_definition_yaml: collaborationDefinitionYaml,
+        opening_message: buildGroupOpeningMessage(openingMessage),
         event_subscriptions: eventSubscriptions,
       });
       if (result) {
@@ -2607,27 +2639,112 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
           {/* 下方：Bot 选择区（flex-1，撑满剩余空间） */}
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-6 py-2">
-            <div className="mb-3 flex-shrink-0">
-              <label
-                htmlFor="create-group-webhook-url"
-                className="mb-1 block text-sm font-medium text-slate-700"
+            <div className="mb-3 flex-shrink-0 rounded-xl border border-slate-200/80 bg-slate-50/60">
+              <Button
+                type="button"
+                variant="ghost"
+                className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium text-slate-700"
+                aria-expanded={advancedSettingsOpen}
+                onClick={() => setAdvancedSettingsOpen((current) => !current)}
               >
-                Webhook URL
-                <span className="ml-1 text-xs font-normal text-slate-400">
-                  （可选）
-                </span>
-              </label>
-              <input
-                id="create-group-webhook-url"
-                type="url"
-                inputMode="url"
-                autoComplete="off"
-                spellCheck={false}
-                value={webhookUrl}
-                onChange={(event) => setWebhookUrl(event.target.value)}
-                placeholder="http://127.0.0.1:28082/events"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-lavender-400 focus:ring-2 focus:ring-lavender-100"
-              />
+                <span>高级设置</span>
+                <ChevronDown
+                  className={cn(
+                    'h-4 w-4 transition-transform',
+                    advancedSettingsOpen && 'rotate-180',
+                  )}
+                />
+              </Button>
+              {advancedSettingsOpen && (
+                <div className="space-y-3 border-t border-slate-200/80 px-3 py-3">
+                  <div>
+                    <label
+                      htmlFor="create-group-webhook-url"
+                      className="mb-1 block text-sm font-medium text-slate-700"
+                    >
+                      Webhook URL
+                      <span className="ml-1 text-xs font-normal text-slate-400">
+                        （可选）
+                      </span>
+                    </label>
+                    <input
+                      ref={webhookInputRef}
+                      id="create-group-webhook-url"
+                      type="url"
+                      inputMode="url"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={webhookUrl}
+                      onChange={(event) => {
+                        setWebhookUrl(event.target.value);
+                        setAdvancedFieldErrors((current) => ({
+                          ...current,
+                          webhook: undefined,
+                        }));
+                      }}
+                      placeholder="http://127.0.0.1:28082/events"
+                      aria-invalid={Boolean(advancedFieldErrors.webhook)}
+                      className={cn(
+                        'w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:ring-2',
+                        advancedFieldErrors.webhook
+                          ? 'border-red-400 focus:border-red-400 focus:ring-red-100'
+                          : 'border-slate-200 focus:border-lavender-400 focus:ring-lavender-100',
+                      )}
+                    />
+                    {advancedFieldErrors.webhook && (
+                      <p className="mt-1 text-xs text-red-500">
+                        {advancedFieldErrors.webhook}
+                      </p>
+                    )}
+                  </div>
+                  {groupStrategy === 'state_machine' && (
+                    <div>
+                      <label
+                        htmlFor="create-group-opening-message"
+                        className="mb-1 block text-sm font-medium text-slate-700"
+                      >
+                        自定义开场白
+                        <span className="ml-1 text-xs font-normal text-slate-400">
+                          （可选）
+                        </span>
+                      </label>
+                      <textarea
+                        ref={openingMessageInputRef}
+                        id="create-group-opening-message"
+                        rows={4}
+                        value={openingMessage}
+                        onChange={(event) => {
+                          setOpeningMessage(event.target.value);
+                          setAdvancedFieldErrors((current) => ({
+                            ...current,
+                            openingMessage: undefined,
+                          }));
+                        }}
+                        placeholder="协作群 {{bcs.group_name}} 已开始执行，Run ID：{{bcs.run_id}}"
+                        aria-invalid={Boolean(
+                          advancedFieldErrors.openingMessage
+                        )}
+                        className={cn(
+                          'w-full resize-y rounded-lg border bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:ring-2',
+                          advancedFieldErrors.openingMessage
+                            ? 'border-red-400 focus:border-red-400 focus:ring-red-100'
+                            : 'border-slate-200 focus:border-lavender-400 focus:ring-lavender-100',
+                        )}
+                      />
+                      <p className="mt-1 text-xs text-slate-400">
+                        支持 {'{{bcs.group_id}}'}、{'{{bcs.session_id}}'}、
+                        {'{{bcs.run_id}}'}、{'{{bcs.group_name}}'} 和
+                        {'{{bcs.session_name}}'}。
+                      </p>
+                      {advancedFieldErrors.openingMessage && (
+                        <p className="mt-1 text-xs text-red-500">
+                          {advancedFieldErrors.openingMessage}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             {groupStrategy === 'state_machine' ? (
               <div className="flex-1 min-h-0 flex flex-col gap-3">

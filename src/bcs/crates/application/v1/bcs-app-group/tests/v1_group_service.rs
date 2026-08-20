@@ -23,7 +23,7 @@ use bcs_service_api::application::v1::{
     GroupVisibility, InlineGroupEventSubscriptionRequest, ListGroups, Membership, MembershipFilter,
     PendingGroupEventSubscriptions, PreparedGroupEventSubscriptions, UpdateGroup,
 };
-use bcs_service_api::types::{EventActor, EventActorType, EventPayload};
+use bcs_service_api::types::{EventActor, EventActorType, EventPayload, OpeningMessage};
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand,
     ChannelBindingCleanupPort, CollaborationDefinition, CollaborationDefinitionRef,
@@ -734,6 +734,7 @@ fn collaboration_create_command() -> CreateGroup {
             originator: None,
             name: Some("Provisioned Group".to_string()),
             context: None,
+            opening_message: None,
             visibility: GroupVisibility::Private,
             driver_bot_uuid: "driver".to_string(),
             participants: Vec::new(),
@@ -1338,6 +1339,7 @@ async fn create_uses_the_authenticated_human_as_originator() {
                 originator: None,
                 name: Some("Planning".into()),
                 context: Some("Plan the release".into()),
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -1833,6 +1835,7 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
                 originator: None,
                 name: Some("Protected collaboration".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![
@@ -1994,6 +1997,7 @@ async fn create_group_propagates_quota_lookup_database_failure() {
                 driver_bot_uuid: "driver".into(),
                 name: Some("quota lookup failure".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 participants: Vec::new(),
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
@@ -2031,6 +2035,7 @@ async fn create_group_propagates_non_driver_registry_database_failure() {
                 driver_bot_uuid: "driver".into(),
                 name: Some("registry failure".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
@@ -2127,6 +2132,7 @@ async fn create_rejects_non_bot_driver_and_dm_target_with_declared_code() {
                 originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "human_staff-1".into(),
                 participants: Vec::new(),
@@ -2178,6 +2184,7 @@ async fn state_machine_create_without_runtime_fails_before_persisting_group() {
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2224,6 +2231,7 @@ async fn state_machine_create_rejects_duplicate_participant_binding_names() {
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2281,6 +2289,7 @@ async fn state_machine_runtime_failure_rolls_back_created_group() {
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2325,6 +2334,7 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
                 originator: None,
                 name: Some("State machine".into()),
                 context: Some("Execute the workflow".into()),
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2424,6 +2434,7 @@ async fn state_machine_create_with_inline_yaml_returns_persisted_definition_ref(
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2485,6 +2496,7 @@ async fn state_machine_create_defers_initial_run_until_required_channel_is_bound
                 originator: None,
                 name: Some("Human review".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2532,6 +2544,7 @@ async fn state_machine_create_rejects_human_actors_in_bot_bindings() {
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2583,6 +2596,7 @@ async fn state_machine_create_preserves_authenticated_human_in_audit_and_start()
                 originator: None,
                 name: Some("State machine".into()),
                 context: Some("Review the release".into()),
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2652,6 +2666,7 @@ async fn state_machine_create_does_not_reread_runtime_for_its_response() {
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2693,6 +2708,7 @@ async fn state_machine_start_failure_removes_runtime_session_and_group() {
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2761,6 +2777,7 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
                 originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2990,6 +3007,7 @@ async fn tenant_metadata_does_not_restrict_bot_collaboration() {
                 originator: None,
                 name: Some("Cross-tenant collaboration".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -3107,6 +3125,7 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
                 originator: None,
                 name: Some("Before".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -3185,6 +3204,7 @@ async fn create_does_not_friendship_check_driver_against_caller() {
                 originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: Vec::new(),
@@ -3218,6 +3238,7 @@ async fn create_propagates_protected_participant_friendship_lookup_failure() {
                 originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -3282,6 +3303,147 @@ async fn update_rejects_delivery_policy_for_non_chat_strategy() {
 }
 
 #[tokio::test]
+async fn update_opening_message_preserves_patch_states_and_strategy_guard() {
+    let runtime = Arc::new(RecordingRuntime::default());
+    let fixture = Fixture::new_with_runtime(runtime.clone()).await;
+    for bot in ["driver", "helper"] {
+        fixture.add_public_bot(bot).await;
+    }
+    fixture
+        .service
+        .create(CreateGroup {
+            caller: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
+                name: Some("StateMachine".into()),
+                context: None,
+                opening_message: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "helper".into(),
+                    role: ParticipantRole::Consultant,
+                }],
+                collaboration: CollaborationConfiguration::StateMachine(
+                    bcs_service_api::application::v1::StateMachineConfiguration {
+                        definition:
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                    definition_id: "definition-1".into(),
+                                    version: 1,
+                                },
+                            ),
+                        participant_bindings: Vec::new(),
+                    },
+                ),
+            }),
+        })
+        .await
+        .expect("create StateMachine Group");
+    let group_id = runtime
+        .configured
+        .lock()
+        .expect("runtime lock")
+        .as_ref()
+        .expect("configured runtime")
+        .group_id
+        .clone();
+
+    let configured = OpeningMessage::Text("Run {{bcs.run_id}}".to_string());
+    fixture
+        .service
+        .update(UpdateGroup {
+            caller: bot_principal("driver"),
+            group_id: group_id.clone(),
+            patch: GroupPatch {
+                opening_message: Some(Some(configured.clone())),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("configure opening message");
+    assert_eq!(
+        fixture
+            .groups
+            .get(&group_id)
+            .await
+            .expect("stored StateMachine Group")
+            .opening_message,
+        Some(configured.clone())
+    );
+
+    fixture
+        .service
+        .update(UpdateGroup {
+            caller: bot_principal("driver"),
+            group_id: group_id.clone(),
+            patch: GroupPatch {
+                name: Some("Renamed".into()),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("omit opening-message patch");
+    assert_eq!(
+        fixture
+            .groups
+            .get(&group_id)
+            .await
+            .expect("stored StateMachine Group")
+            .opening_message,
+        Some(configured)
+    );
+
+    fixture
+        .service
+        .update(UpdateGroup {
+            caller: bot_principal("driver"),
+            group_id: group_id.clone(),
+            patch: GroupPatch {
+                opening_message: Some(None),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("clear opening message");
+    assert_eq!(
+        fixture
+            .groups
+            .get(&group_id)
+            .await
+            .expect("stored StateMachine Group")
+            .opening_message,
+        None
+    );
+
+    let mut chat = normal_group(
+        "chat",
+        "driver",
+        vec![Participant::bot("driver", ParticipantRole::Driver)],
+        GroupStrategy::Chat,
+        1,
+    );
+    chat.opening_message = None;
+    fixture.groups.upsert(chat).await.expect("store Chat Group");
+    let error = fixture
+        .service
+        .update(UpdateGroup {
+            caller: bot_principal("driver"),
+            group_id: "chat".into(),
+            patch: GroupPatch {
+                opening_message: Some(Some(OpeningMessage::Text("hello".into()))),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect_err("Chat Group must reject opening message");
+    assert!(matches!(
+        error,
+        ApplicationError::InvalidInput { code, .. } if code == "invalid_opening_message"
+    ));
+}
+
+#[tokio::test]
 async fn create_rejects_duplicate_participant_actor_ids() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "helper"] {
@@ -3296,6 +3458,7 @@ async fn create_rejects_duplicate_participant_actor_ids() {
                 originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![
@@ -3338,6 +3501,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
                 originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -3365,6 +3529,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
                 originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![
@@ -3533,6 +3698,7 @@ async fn client_caused_group_errors_map_to_documented_4xx_classes() {
                 originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Public,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -3692,6 +3858,7 @@ mod originator_v1_policy {
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("Planning".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: driver.into(),
                 participants,

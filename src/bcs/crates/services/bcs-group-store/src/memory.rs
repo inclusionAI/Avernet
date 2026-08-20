@@ -222,6 +222,9 @@ impl GroupRepoPort for MemoryGroupRepo {
         if let Some(context) = patch.context {
             group.context = Some(context);
         }
+        if let Some(opening_message) = patch.opening_message {
+            group.opening_message = opening_message;
+        }
         if let Some(visibility) = patch.visibility {
             group.visibility = visibility;
         }
@@ -659,6 +662,9 @@ fn apply_memory_group_mutation(
             if let Some(context) = &patch.context {
                 group.context = Some(context.clone());
             }
+            if let Some(opening_message) = &patch.opening_message {
+                group.opening_message = opening_message.clone();
+            }
             if let Some(visibility) = &patch.visibility {
                 group.visibility = visibility.clone();
             }
@@ -792,6 +798,7 @@ impl GroupBuilder {
             originator: self.originator,
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants: self.participants,
             messages: Vec::new(),
             workspace: Workspace::default(),

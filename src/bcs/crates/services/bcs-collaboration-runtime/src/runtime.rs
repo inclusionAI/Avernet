@@ -9,7 +9,8 @@ use bcs_domain::{
     BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
     CollaborationDefinition, CollaborationDefinitionRef, CollaborationRuntimeDefinition, Group,
     GroupKind, GroupMessage, GroupMessageType, GroupRuntimeBinding, GroupStatus, GroupStrategy,
-    MessageRole, NewMessage, Participant, ParticipantMode, ParticipantRole, ResolvedParticipant,
+    MessageOwnerFilter, MessageQuery, MessageRole, NewMessage, OpeningMessageRenderContext,
+    Participant, ParticipantMode, ParticipantRole, RenderedOpeningMessage, ResolvedParticipant,
     ResolvedParticipantBinding, RuntimeParticipantBinding, STATE_MACHINE_PANEL_MESSAGE_TYPE,
     SenderType, Session, StateMachineAssignee, StateMachineDeliveryCorrelation,
     StateMachineNodeKind, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
@@ -576,8 +577,20 @@ impl CollaborationRuntime {
         if !marked {
             return Ok(());
         }
-        self.publish_state_machine_panel_event(group, run, None)
-            .await;
+        match self.opening_message_for_existing_run(run).await {
+            Ok(opening_message) => {
+                self.publish_state_machine_panel_event(group, run, &opening_message)
+                    .await;
+            }
+            Err(error) => {
+                warn!(
+                    run_id = %run.run_id,
+                    session_id = %run.session_id,
+                    error = %error,
+                    "state_machine: failed to reload opening message for frontend publication"
+                );
+            }
+        }
         let Some(notification) = node.notification.as_ref() else {
             return Ok(());
         };
@@ -961,13 +974,13 @@ impl CollaborationRuntime {
         &self,
         group: &Group,
         run: &StateMachineRun,
-        session_title: Option<&str>,
+        opening_message: &RenderedOpeningMessage,
     ) {
         let Some(frontend_delivery) = self.frontend_delivery.as_ref() else {
             return;
         };
-        let content = format_state_machine_panel_message(&run.run_id, session_title);
-        let metadata = state_machine_panel_metadata(run);
+        let content = opening_message.content.clone();
+        let metadata = state_machine_panel_metadata(run, opening_message.component.as_deref());
         let payload = serde_json::json!({
             "run_id": run.run_id.clone(),
             "bcs_group_id": group.id.clone(),
@@ -1034,7 +1047,7 @@ impl CollaborationRuntime {
     async fn persist_state_machine_panel_message(
         &self,
         run: &StateMachineRun,
-        session_title: Option<&str>,
+        opening_message: &RenderedOpeningMessage,
     ) -> Result<(), CollaborationRuntimeError> {
         let Some(message_repo) = self.message_repo.as_ref() else {
             return Err(CollaborationRuntimeError::Internal(
@@ -1045,7 +1058,6 @@ impl CollaborationRuntime {
             ));
         };
         let message_id = format!("{}:000-panel", run.run_id);
-        let content = format_state_machine_panel_message(&run.run_id, session_title);
         message_repo
             .append_message(NewMessage {
                 group_id: run.group_id.clone(),
@@ -1054,9 +1066,12 @@ impl CollaborationRuntime {
                 sender_type: SenderType::Bot,
                 message_type: STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string(),
                 content: serde_json::json!({
-                    "text": content,
+                    "text": opening_message.content,
                     "bot_name": BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
-                    "metadata": state_machine_panel_metadata(run),
+                    "metadata": state_machine_panel_metadata(
+                        run,
+                        opening_message.component.as_deref(),
+                    ),
                 }),
                 client_msg_id: Some(message_id),
                 owner_bot_id: None,
@@ -1070,6 +1085,70 @@ impl CollaborationRuntime {
                 )))
             })?;
         Ok(())
+    }
+
+    async fn persisted_state_machine_opening_message(
+        &self,
+        run: &StateMachineRun,
+    ) -> Result<Option<RenderedOpeningMessage>, CollaborationRuntimeError> {
+        let Some(message_repo) = self.message_repo.as_ref() else {
+            return Ok(None);
+        };
+        let page = message_repo
+            .query_messages(MessageQuery {
+                group_id: run.group_id.clone(),
+                session_id: run.session_id.clone(),
+                cursor: None,
+                limit: 1_000,
+                keyword: None,
+                sender_id: Some(BCS_STATE_MACHINE_MESSAGE_SENDER.to_string()),
+                message_type: Some(STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string()),
+                owner_filter: MessageOwnerFilter::Any,
+                time_range: Some((run.created_at, run.created_at)),
+                visible_from_seq: None,
+            })
+            .await
+            .map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(format!(
+                    "state-machine opening message load failed: {error}"
+                )))
+            })?;
+        let expected_client_msg_id = format!("{}:000-panel", run.run_id);
+        Ok(page
+            .messages
+            .into_iter()
+            .find(|message| {
+                message.run_id == run.run_id
+                    || message.client_msg_id.as_deref() == Some(expected_client_msg_id.as_str())
+            })
+            .map(|message| {
+                let content = message
+                    .content
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let component = message
+                    .content
+                    .pointer("/metadata/state_machine/component")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                RenderedOpeningMessage { content, component }
+            }))
+    }
+
+    async fn opening_message_for_existing_run(
+        &self,
+        run: &StateMachineRun,
+    ) -> Result<RenderedOpeningMessage, CollaborationRuntimeError> {
+        if let Some(message) = self.persisted_state_machine_opening_message(run).await? {
+            return Ok(message);
+        }
+        let session_title = self.session_title(&run.session_id).await;
+        Ok(default_state_machine_opening_message(
+            &run.run_id,
+            session_title.as_deref(),
+        ))
     }
 
     async fn publish_state_machine_bot_event(
@@ -1253,21 +1332,28 @@ impl CollaborationRuntime {
         }
     }
 
-    async fn state_machine_panel_message(&self, run: &StateMachineRun) -> GroupMessage {
-        let session_title = self.session_title(&run.session_id).await;
-        GroupMessage {
+    async fn state_machine_panel_message(
+        &self,
+        run: &StateMachineRun,
+    ) -> Result<GroupMessage, CollaborationRuntimeError> {
+        let opening_message = self.opening_message_for_existing_run(run).await?;
+        let RenderedOpeningMessage { content, component } = opening_message;
+        Ok(GroupMessage {
             id: format!("{}:000-panel", run.run_id),
             timestamp: run.created_at,
             sender: BCS_STATE_MACHINE_MESSAGE_SENDER.to_string(),
-            content: format_state_machine_panel_message(&run.run_id, session_title.as_deref()),
+            content,
             message_type: GroupMessageType::Bot,
             bot_name: Some(BCS_STATE_MACHINE_MESSAGE_SENDER_NAME.to_string()),
             role: MessageRole::Assistant,
             history_meta: None,
-            metadata: Some(state_machine_panel_metadata(run)),
+            metadata: Some(state_machine_panel_metadata(
+                run,
+                component.as_deref(),
+            )),
             run_id: String::new(),
             attachments: None,
-        }
+        })
     }
 
     async fn state_machine_messages_from_snapshot(
@@ -1288,7 +1374,7 @@ impl CollaborationRuntime {
             }
         };
         let mut messages = Vec::new();
-        messages.push(self.state_machine_panel_message(run).await);
+        messages.push(self.state_machine_panel_message(run).await?);
         for node in nodes {
             if let Some(artifact_text) = node.artifact_text.as_ref() {
                 let is_human = node.responded_by.is_some();
@@ -2769,16 +2855,25 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             node_count = node_count,
             "state_machine: run started"
         );
-        if is_one_shot_session_run {
-            if let Err(error) = self
-                .persist_state_machine_panel_message(&run, session_title.as_deref())
-                .await
-            {
+        let opening_message = match render_state_machine_opening_message(
+            &group,
+            &run,
+            session_title.as_deref(),
+        ) {
+            Ok(message) => message,
+            Err(error) => {
                 self.fail_run(&run, error.to_string()).await?;
                 return Err(error);
             }
+        };
+        if let Err(error) = self
+            .persist_state_machine_panel_message(&run, &opening_message)
+            .await
+        {
+            self.fail_run(&run, error.to_string()).await?;
+            return Err(error);
         }
-        self.publish_state_machine_panel_event(&group, &run, session_title.as_deref())
+        self.publish_state_machine_panel_event(&group, &run, &opening_message)
             .await;
         for node_id in &compiled.initial_nodes {
             self.dispatch_node(&compiled, &group, &run, node_id).await?;
@@ -5417,19 +5512,23 @@ fn state_machine_message_metadata(
     })
 }
 
-fn state_machine_panel_metadata(run: &StateMachineRun) -> Value {
-    serde_json::json!({
-        "state_machine": {
-            "run_id": run.run_id.clone(),
-            "definition_id": run.definition_id.clone(),
-            "definition_version": run.definition_version,
-            "event": "panel",
-            "component": "bcsPanel.StateMachineRunView",
-        }
-    })
+fn state_machine_panel_metadata(run: &StateMachineRun, component: Option<&str>) -> Value {
+    let mut state_machine = serde_json::json!({
+        "run_id": run.run_id.clone(),
+        "definition_id": run.definition_id.clone(),
+        "definition_version": run.definition_version,
+        "event": "panel",
+    });
+    if let Some(component) = component {
+        state_machine["component"] = Value::String(component.to_string());
+    }
+    serde_json::json!({ "state_machine": state_machine })
 }
 
-fn format_state_machine_panel_message(run_id: &str, session_title: Option<&str>) -> String {
+fn default_state_machine_opening_message(
+    run_id: &str,
+    session_title: Option<&str>,
+) -> RenderedOpeningMessage {
     let title_suffix = session_title
         .map(str::trim)
         .filter(|title| !title.is_empty())
@@ -5441,9 +5540,38 @@ fn format_state_machine_panel_message(run_id: &str, session_title: Option<&str>)
         json_string(&title)
     ));
     let params_json = single_quoted_json_attr(format!("{{\"runId\":{}}}", json_string(run_id)));
-    format!(
-        "<AixUI\n  type=\"panel\"\n  component=\"bcsPanel.StateMachineRunView\"\n  tab='{tab_json}'\n  params='{params_json}'\n/>"
-    )
+    RenderedOpeningMessage {
+        content: format!(
+            "<AixUI\n  type=\"panel\"\n  component=\"bcsPanel.StateMachineRunView\"\n  tab='{tab_json}'\n  params='{params_json}'\n/>"
+        ),
+        component: Some("bcsPanel.StateMachineRunView".to_string()),
+    }
+}
+
+fn render_state_machine_opening_message(
+    group: &Group,
+    run: &StateMachineRun,
+    session_title: Option<&str>,
+) -> Result<RenderedOpeningMessage, CollaborationRuntimeError> {
+    let Some(opening_message) = group.opening_message.as_ref() else {
+        return Ok(default_state_machine_opening_message(
+            &run.run_id,
+            session_title,
+        ));
+    };
+    opening_message
+        .render(OpeningMessageRenderContext {
+            group_id: &group.id,
+            session_id: &run.session_id,
+            run_id: &run.run_id,
+            group_name: group.label.as_deref(),
+            session_name: session_title,
+        })
+        .map_err(|error| {
+            CollaborationRuntimeError::InvalidRequest(format!(
+                "invalid_opening_message: {error}"
+            ))
+        })
 }
 
 fn json_string(value: &str) -> String {
@@ -5525,6 +5653,25 @@ mod tests {
     #[test]
     fn default_judge_timeout_is_ninety_seconds() {
         assert_eq!(DEFAULT_JUDGE_TIMEOUT_MS, 90_000);
+    }
+
+    #[test]
+    fn default_opening_message_keeps_the_existing_state_machine_panel() {
+        assert_eq!(
+            default_state_machine_opening_message("run-1", Some("发布检查")),
+            RenderedOpeningMessage {
+                content: concat!(
+                    "<AixUI\n",
+                    "  type=\"panel\"\n",
+                    "  component=\"bcsPanel.StateMachineRunView\"\n",
+                    "  tab='{\"id\":\"state-machine-run-run-1\",\"title\":\"State Machine - 发布检查\",\"closable\":true}'\n",
+                    "  params='{\"runId\":\"run-1\"}'\n",
+                    "/>"
+                )
+                .to_string(),
+                component: Some("bcsPanel.StateMachineRunView".to_string()),
+            }
+        );
     }
 
     #[test]

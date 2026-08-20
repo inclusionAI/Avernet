@@ -8,8 +8,8 @@ pub mod bot_control_plane;
 pub mod error;
 pub mod event;
 
-pub use bot_control_plane::*;
 pub use bcs_domain::*;
+pub use bot_control_plane::*;
 pub use error::{ServiceError, ServiceResult};
 pub use event::*;
 
@@ -22,6 +22,8 @@ pub use event::*;
 pub struct GroupMutableFieldsPatch {
     pub label: Option<String>,
     pub context: Option<String>,
+    /// Outer `None` leaves the field unchanged; `Some(None)` restores the default.
+    pub opening_message: Option<Option<OpeningMessage>>,
     pub visibility: Option<String>,
     pub default_bot_final_delivery: Option<DefaultDelivery>,
 }

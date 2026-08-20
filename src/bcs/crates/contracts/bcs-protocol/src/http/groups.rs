@@ -2,6 +2,8 @@ use std::{collections::BTreeMap, fmt};
 
 use serde::{Deserialize, Serialize};
 
+use bcs_domain::OpeningMessage;
+
 /// Context for a proposal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposalContext {
@@ -133,6 +135,9 @@ pub struct CreateGroupRequest {
     /// User-provided group context (optional description of collaboration goal/background).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    /// Optional StateMachine Run opening-message template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening_message: Option<OpeningMessage>,
     /// Group topic (sets the group label as "Group: {topic}").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub topic: Option<String>,

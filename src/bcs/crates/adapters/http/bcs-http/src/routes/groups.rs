@@ -155,10 +155,20 @@ pub struct LegacyUpdateGroupRequest {
     pub name: Option<String>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub context: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_nullable")]
+    pub opening_message: Option<Option<bcs_service_api::types::OpeningMessage>>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub visibility: Option<GroupVisibility>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub delivery_policy: Option<LegacyGroupDeliveryPolicyRequest>,
+}
+
+fn deserialize_present_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 fn deserialize_present_non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -174,6 +184,7 @@ impl From<LegacyUpdateGroupRequest> for GroupPatch {
         Self {
             name: value.name,
             context: value.context,
+            opening_message: value.opening_message,
             visibility: value.visibility,
             delivery_policy: value.delivery_policy.map(|policy| GroupDeliveryPolicy {
                 bot_final_delivery: policy.bot_final_delivery,
@@ -236,6 +247,7 @@ async fn create_group_without_inline_subscriptions(
 ) -> Result<Json<Value>, HttpAdapterError> {
     let start_initial_run = req.start_initial_run.unwrap_or(true);
     let caller_actor_id = resolve_group_create_caller(&state, &headers, &uri).await?;
+    validate_legacy_opening_message(&req)?;
     let collaboration_definition_yaml = req.collaboration_definition_yaml.clone();
     let auto_start_on_service_invocation = req.auto_start_on_service_invocation.unwrap_or(false);
     let group_kind = req
@@ -359,6 +371,7 @@ async fn create_group_without_inline_subscriptions(
         label: req.label,
         topic: req.topic,
         context: req.context,
+        opening_message: req.opening_message,
         routing_policy: routing_policy_from_protocol_value(req.routing_policy)?,
         participants,
         member_bot_ids,
@@ -435,6 +448,9 @@ async fn create_group_with_inline_subscriptions(
         Ok(caller) => application_caller(&caller),
         Err(error) => return error.into_response(),
     };
+    if let Err(error) = validate_legacy_opening_message(&req) {
+        return error.into_response();
+    }
     let Some(application) = state.group_application.as_ref() else {
         return legacy_group_error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -485,6 +501,23 @@ async fn create_group_with_inline_subscriptions(
         }
         Err(error) => group_application_error_response(error),
     }
+}
+
+fn validate_legacy_opening_message(req: &CreateGroupRequest) -> Result<(), HttpAdapterError> {
+    let Some(opening_message) = req.opening_message.as_ref() else {
+        return Ok(());
+    };
+    let is_state_machine = req.group_kind.as_deref() != Some("dm")
+        && (req.collaboration_definition_yaml.is_some()
+            || req.group_strategy.as_deref() == Some("state_machine"));
+    if !is_state_machine {
+        return Err(HttpAdapterError::InvalidOpeningMessage(
+            "opening_message is only supported for StateMachine Groups".to_string(),
+        ));
+    }
+    opening_message
+        .validate()
+        .map_err(|error| HttpAdapterError::InvalidOpeningMessage(error.to_string()))
 }
 
 fn legacy_create_group_spec(
@@ -649,6 +682,7 @@ fn legacy_create_group_spec(
     Ok(CreateGroupSpec::Collaboration(CreateCollaborationGroup {
         name,
         context: req.context.clone(),
+        opening_message: req.opening_message.clone(),
         visibility,
         driver_bot_uuid: driver_bot,
         participants,
@@ -725,7 +759,8 @@ fn v1_group_detail_to_legacy_create_json(
     botchat_url: Option<&str>,
 ) -> Value {
     match group {
-        V1GroupDetail::Collaboration(group) => {
+        V1GroupDetail::Collaboration(mut group) => {
+            let opening_message = group.opening_message.take();
             let chat_url = botchat_url.map(|base| {
                 build_group_chat_url(
                     base,
@@ -734,7 +769,7 @@ fn v1_group_detail_to_legacy_create_json(
                     session_id.as_deref(),
                 )
             });
-            serde_json::json!({
+            let mut response = serde_json::json!({
                 "id": group.group_id,
                 "context": group.context,
                 "driver_bot": group.driver_bot_uuid,
@@ -746,7 +781,9 @@ fn v1_group_detail_to_legacy_create_json(
                 "dm_pair_key": Value::Null,
                 "created": created,
                 "event_subscriptions": event_subscriptions,
-            })
+            });
+            insert_opening_message(&mut response, opening_message);
+            response
         }
         V1GroupDetail::DirectMessage(group) => {
             let driver_bot = group
@@ -2025,8 +2062,9 @@ fn build_group_chat_url(
     url
 }
 
-fn group_detail_to_create_json(result: GroupDetailResult, created: bool) -> Value {
-    serde_json::json!({
+fn group_detail_to_create_json(mut result: GroupDetailResult, created: bool) -> Value {
+    let opening_message = result.opening_message.take();
+    let mut response = serde_json::json!({
         "id": result.group_id,
         "context": result.context,
         "driver_bot": result.driver_bot_id,
@@ -2037,13 +2075,41 @@ fn group_detail_to_create_json(result: GroupDetailResult, created: bool) -> Valu
         "group_kind": result.group_kind,
         "dm_pair_key": result.dm_pair_key,
         "created": created
-    })
+    });
+    insert_opening_message(&mut response, opening_message);
+    response
+}
+
+fn insert_opening_message(
+    response: &mut Value,
+    opening_message: Option<bcs_service_api::types::OpeningMessage>,
+) {
+    if let Some(opening_message) = opening_message {
+        response
+            .as_object_mut()
+            .expect("Group response must be a JSON object")
+            .insert(
+                "opening_message".to_string(),
+                serde_json::json!(opening_message),
+            );
+    }
 }
 
 fn group_use_case_error_to_http(error: GroupUseCaseError) -> HttpAdapterError {
     match error {
         GroupUseCaseError::Unauthorized(message) => HttpAdapterError::Unauthorized(message),
         GroupUseCaseError::Forbidden(message) => HttpAdapterError::Forbidden(message),
+        GroupUseCaseError::InvalidProposal(message)
+            if message.starts_with("invalid_opening_message:") =>
+        {
+            HttpAdapterError::InvalidOpeningMessage(
+                message
+                    .strip_prefix("invalid_opening_message:")
+                    .unwrap_or(&message)
+                    .trim()
+                    .to_string(),
+            )
+        }
         GroupUseCaseError::InvalidGroupId(message)
         | GroupUseCaseError::InvalidGroupStatus(message)
         | GroupUseCaseError::InvalidProposal(message) => HttpAdapterError::BadRequest(message),
@@ -2406,8 +2472,9 @@ fn bot_group_list_entry_to_legacy_json(group: GroupListEntry) -> Value {
     })
 }
 
-fn group_to_detail_json(group: GroupDetailResult) -> Value {
-    serde_json::json!({
+fn group_to_detail_json(mut group: GroupDetailResult) -> Value {
+    let opening_message = group.opening_message.take();
+    let mut response = serde_json::json!({
         "id": group.group_id,
         "label": group.label,
         "status": group.status,
@@ -2427,7 +2494,9 @@ fn group_to_detail_json(group: GroupDetailResult) -> Value {
         "latest_running_session_id": group.latest_running_session_id,
         "originator": group.originator,
         "visibility": group.visibility,
-    })
+    });
+    insert_opening_message(&mut response, opening_message);
+    response
 }
 
 async fn resolve_driver_bot_owner(

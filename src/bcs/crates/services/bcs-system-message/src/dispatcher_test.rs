@@ -223,6 +223,7 @@ async fn dispatch_bot_joined_delivers_to_all_participants() {
         originator: Some(existing_bot_id.clone()),
         routing_policy: None,
         context: None,
+        opening_message: None,
         participants: vec![
             Participant {
                 bot_uuid: existing_bot_id.clone(),
@@ -317,6 +318,7 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
         originator: Some(existing_bot_id.clone()),
         routing_policy: None,
         context: None,
+        opening_message: None,
         participants: vec![
             Participant {
                 bot_uuid: existing_bot_id.clone(),
@@ -403,7 +405,7 @@ async fn dispatch_bot_left_with_no_recipients_persists_public_record_and_pushes_
     let group = Group {
         id: "group-left".into(), label: None, status: GroupStatus::Active,
         driver_bot: leaving.clone(), originator: Some(leaving.clone()),
-        routing_policy: None, context: None,
+        routing_policy: None, context: None, opening_message: None,
         participants: vec![Participant {
             bot_uuid: leaving.clone(), bot_name: Some("Solo".into()), kind: None,
             role: ParticipantRole::Driver, actor_kind: ActorKind::Bot,
@@ -814,6 +816,7 @@ async fn dispatch_send_system_message_records_run_context_for_provider_callback(
         originator: Some("bot-provider".to_string()),
         routing_policy: None,
         context: None,
+        opening_message: None,
         participants: vec![Participant {
             bot_uuid: "bot-provider".to_string(),
             bot_name: Some("Provider".to_string()),
@@ -895,6 +898,7 @@ async fn deprecated_stream_gray_setting_keeps_system_message_send_delivery() {
         originator: Some("bot-provider".to_string()),
         routing_policy: None,
         context: None,
+        opening_message: None,
         participants: vec![Participant {
             bot_uuid: "bot-provider".to_string(),
             bot_name: Some("Provider".to_string()),
@@ -959,6 +963,7 @@ async fn dispatch_send_system_message_to_websocket_does_not_record_run_context()
         originator: Some("bot-ws".to_string()),
         routing_policy: None,
         context: None,
+        opening_message: None,
         participants: vec![Participant {
             bot_uuid: "bot-ws".to_string(),
             bot_name: Some("WebSocket".to_string()),
@@ -1022,6 +1027,7 @@ async fn dispatch_failed_send_system_message_does_not_record_run_context() {
         originator: Some("bot-provider".to_string()),
         routing_policy: None,
         context: None,
+        opening_message: None,
         participants: vec![Participant {
             bot_uuid: "bot-provider".to_string(),
             bot_name: Some("Provider".to_string()),
@@ -1096,6 +1102,7 @@ async fn dispatch_errored_send_system_message_does_not_record_run_context() {
         originator: Some("bot-provider".to_string()),
         routing_policy: None,
         context: None,
+        opening_message: None,
         participants: vec![Participant {
             bot_uuid: "bot-provider".to_string(),
             bot_name: Some("Provider".to_string()),
@@ -1170,6 +1177,7 @@ async fn dispatch_inject_system_message_does_not_record_run_context() {
         originator: Some("bot-provider".to_string()),
         routing_policy: None,
         context: None,
+        opening_message: None,
         participants: vec![Participant {
             bot_uuid: "bot-provider".to_string(),
             bot_name: Some("Provider".to_string()),

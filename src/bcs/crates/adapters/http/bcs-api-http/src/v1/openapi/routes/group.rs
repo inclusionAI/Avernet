@@ -14,7 +14,8 @@ use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
 };
 use crate::v1::openapi::dto::group::{
-    AddParticipantRequest, CreateGroupRequest, DeleteGroupQuery, ListGroupsQuery, UpdateGroupRequest,
+    AddParticipantRequest, CreateGroupRequest, DeleteGroupQuery, ListGroupsQuery,
+    UpdateGroupRequest,
 };
 
 pub fn router() -> Router<ApiState> {
@@ -72,7 +73,9 @@ async fn create_group(
     body: Result<Json<CreateGroupRequest>, JsonRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
-    let (group, event_subscriptions) = body.into_parts();
+    let (group, event_subscriptions) = body
+        .into_parts()
+        .map_err(|error| application_error_response(&request_id, error))?;
     let result = state
         .group_service
         .create_with_event_subscriptions(CreateGroup { caller, group }, event_subscriptions)
@@ -115,10 +118,7 @@ async fn get_group(
     let Path(group_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .group_service
-        .get(GetGroup {
-            caller,
-            group_id,
-        })
+        .get(GetGroup { caller, group_id })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((

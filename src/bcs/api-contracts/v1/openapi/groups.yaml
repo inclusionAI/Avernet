@@ -134,6 +134,7 @@ GroupsPath:
         description: Invalid group definition.
         x-error-codes:
           - invalid_request
+          - invalid_opening_message
           - invalid_participant
           - invalid_participant_binding
           - invalid_event_filter
@@ -267,6 +268,7 @@ GroupPath:
         description: Invalid patch.
         x-error-codes:
           - invalid_request
+          - invalid_opening_message
         content:
           application/json:
             schema:
@@ -511,6 +513,10 @@ CreateCollaborationGroup:
       type: string
     context:
       type: string
+    opening_message:
+      oneOf:
+        - $ref: ../domain-models.yaml#/OpeningMessage
+        - type: "null"
     driver_bot_uuid:
       type: string
     participants:
@@ -565,6 +571,10 @@ UpdateGroup:
   properties:
     name:
       type: string
+    opening_message:
+      oneOf:
+        - $ref: ../domain-models.yaml#/OpeningMessage
+        - type: "null"
     visibility:
       type: string
       enum:

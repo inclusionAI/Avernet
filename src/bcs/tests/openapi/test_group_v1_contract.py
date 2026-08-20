@@ -123,6 +123,7 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         ]
     ) == {
         "invalid_request",
+        "invalid_opening_message",
         "invalid_participant",
         "invalid_participant_binding",
         "invalid_event_filter",
@@ -139,6 +140,11 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         ]
         == ["invalid_request"]
     )
+    assert set(
+        contract["paths"][GROUP_PATH]["patch"]["responses"]["400"][
+            "x-error-codes"
+        ]
+    ) == {"invalid_request", "invalid_opening_message"}
     assert set(
         contract["paths"][GROUP_PATH]["patch"]["responses"][
             "404"
@@ -159,6 +165,38 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         ]["x-error-codes"]
         == ["invalid_request"]
     )
+
+
+def test_group_opening_message_contract_is_state_machine_scoped_and_nullable() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    request_variants = contract["paths"][GROUPS_PATH]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["schema"]["oneOf"]
+    collaboration_request, dm_request = request_variants
+
+    opening_create = collaboration_request["properties"]["opening_message"]
+    assert opening_create["oneOf"][1] == {"type": "null"}
+    assert "opening_message" not in dm_request["properties"]
+
+    opening_patch = contract["paths"][GROUP_PATH]["patch"]["requestBody"][
+        "content"
+    ]["application/json"]["schema"]["properties"]["opening_message"]
+    assert opening_patch["oneOf"][1] == {"type": "null"}
+
+    detail_variants = contract["paths"][GROUP_PATH]["get"]["responses"]["200"][
+        "content"
+    ]["application/json"]["schema"]["properties"]["data"]["oneOf"]
+    collaboration_detail, dm_detail = detail_variants
+    assert "opening_message" in collaboration_detail["properties"]
+    assert "opening_message" not in collaboration_detail["required"]
+    assert "opening_message" not in dm_detail["properties"]
+
+    opening_schema = collaboration_detail["properties"]["opening_message"]
+    text_schema, aixui_schema = opening_schema["oneOf"]
+    assert text_schema["maxLength"] == 65_536
+    assert aixui_schema["additionalProperties"] is False
+    assert set(aixui_schema["required"]) == {"type", "component"}
+    assert aixui_schema["properties"]["type"]["enum"] == ["card", "panel"]
     assert (
         contract["paths"][GROUPS_PATH]["post"]["responses"]["200"]["content"][
             "application/json"

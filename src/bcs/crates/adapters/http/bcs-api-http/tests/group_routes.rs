@@ -14,10 +14,10 @@ use bcs_service_api::application::v1::{
 use bcs_service_api::application::v1::{
     AddGroupParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
     BotFinalDelivery, ChatConfiguration, CollaborationConfiguration, CollaborationGroupDetail,
-    CreateGroup, CreateGroupOutcome, CreateGroupSpec,
-    DeleteGroup, DeleteGroupParticipant, DeleteResult, GetGroup, GroupDeliveryPolicy, GroupDetail,
-    GroupService, GroupStatus, GroupStrategy, GroupVisibility, ListGroups, MembershipFilter, Page,
-    InlineGroupEventSubscriptionRequest, Participant, UpdateGroup, UpdateGroupParticipant,
+    CreateGroup, CreateGroupOutcome, CreateGroupSpec, DeleteGroup, DeleteGroupParticipant,
+    DeleteResult, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupService, GroupStatus,
+    GroupStrategy, GroupVisibility, InlineGroupEventSubscriptionRequest, ListGroups,
+    MembershipFilter, Page, Participant, UpdateGroup, UpdateGroupParticipant,
 };
 use bcs_service_api::application::v1::{
     AddSessionParticipant, CompleteSession, CreateSession, CreateSessionOutcome, DeleteSession,
@@ -346,6 +346,7 @@ fn group_detail() -> GroupDetail {
         status: GroupStatus::Active,
         visibility: GroupVisibility::Private,
         context: None,
+        opening_message: None,
         originator_actor_id: "bot-1".into(),
         participants: vec![Participant {
             actor_id: "bot-1".into(),
@@ -625,6 +626,28 @@ async fn create_group_accepts_inline_event_subscriptions_for_normal_and_dm() {
             }
         );
     }
+}
+
+#[tokio::test]
+async fn create_dm_rejects_opening_message_with_declared_error_code() {
+    let service = Arc::new(FakeGroupService::default());
+    let response = test_router(service.clone())
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/groups",
+            json!({
+                "group_kind": "dm",
+                "target_actor_id": "bot-2",
+                "opening_message": "hello"
+            }),
+        ))
+        .await
+        .expect("DM opening-message rejection");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_opening_message");
+    assert!(service.created.lock().expect("create lock").is_none());
 }
 
 #[tokio::test]
@@ -1057,5 +1080,8 @@ async fn create_group_threads_explicit_originator() {
         .await
         .expect("create response");
     assert_eq!(response.status(), StatusCode::CREATED);
-    assert_eq!(captured_originator(&service).as_deref(), Some("human_staff-1"));
+    assert_eq!(
+        captured_originator(&service).as_deref(),
+        Some("human_staff-1")
+    );
 }

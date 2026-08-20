@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use bcs_db_api::{DbPlugin, DbStatement, DbValue, db_get_column};
 use bcs_db_local::LocalSqliteDbPlugin;
+use bcs_domain::{AixUiOpeningMessage, AixUiOpeningMessageType, AixUiOpeningTab, OpeningMessage};
 use bcs_event_store::{DbEventStore, MemoryEventStore};
 use bcs_group_store::{GroupBuilder, MemoryGroupRepo, MySqlGroupStore};
 use bcs_service_api::port::NewEvent;
@@ -17,7 +18,8 @@ use bcs_service_api::types::{
     EventSubject, EventSubscriptionScope, EventSubscriptionScopeType, EventSubscriptionStatus,
 };
 use bcs_service_api::{
-    GroupKind, GroupStatus, GroupStrategy, Participant, ParticipantRole, ServiceError,
+    GroupKind, GroupMutableFieldsPatch, GroupStatus, GroupStrategy, Participant, ParticipantRole,
+    ServiceError,
 };
 
 #[path = "../../../bootstrap/bcs/src/migrations.rs"]
@@ -85,6 +87,117 @@ async fn mysql_group_store_sqlite_smoke_contract() {
     let repo = MySqlGroupStore::new(db, "contract".to_string());
 
     assert!(repo.get("bcs-contract-missing-group").await.is_none());
+}
+
+#[tokio::test]
+async fn sqlite_group_opening_message_round_trips_and_can_be_cleared() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref())
+        .await
+        .expect("migrate sqlite");
+    let repo = MySqlGroupStore::sqlite(db, "contract".to_string());
+    let mut group = GroupBuilder::new("driver").id("opening-group").build();
+    group.group_strategy = GroupStrategy::StateMachine;
+    group.opening_message = Some(OpeningMessage::Text("Run {{bcs.run_id}}".to_string()));
+    repo.upsert(group).await.expect("persist group");
+
+    assert_eq!(
+        repo.try_get("opening-group")
+            .await
+            .expect("load group")
+            .expect("group")
+            .opening_message,
+        Some(OpeningMessage::Text("Run {{bcs.run_id}}".to_string()))
+    );
+
+    let structured = OpeningMessage::AixUi(AixUiOpeningMessage {
+        message_type: AixUiOpeningMessageType::Panel,
+        component: "releasePanel.RunOverview".to_string(),
+        params: Some(BTreeMap::from([(
+            "runId".to_string(),
+            serde_json::Value::String("{{bcs.run_id}}".to_string()),
+        )])),
+        tab: Some(AixUiOpeningTab {
+            id: Some("run-{{bcs.run_id}}".to_string()),
+            title: None,
+            closable: Some(true),
+        }),
+    });
+    repo.patch_mutable_fields(
+        "opening-group",
+        GroupMutableFieldsPatch {
+            opening_message: Some(Some(structured.clone())),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("replace opening message with structured AixUI");
+    assert_eq!(
+        repo.try_get("opening-group")
+            .await
+            .expect("reload structured group")
+            .expect("group")
+            .opening_message,
+        Some(structured)
+    );
+
+    repo.patch_mutable_fields(
+        "opening-group",
+        GroupMutableFieldsPatch {
+            opening_message: Some(None),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("clear opening message");
+    assert_eq!(
+        repo.try_get("opening-group")
+            .await
+            .expect("reload group")
+            .expect("group")
+            .opening_message,
+        None
+    );
+}
+
+#[tokio::test]
+async fn sqlite_group_opening_message_rejects_invalid_persisted_json() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref())
+        .await
+        .expect("migrate sqlite");
+    let repo = MySqlGroupStore::sqlite(db.clone(), "contract".to_string());
+    let group = GroupBuilder::new("driver")
+        .id("invalid-opening-group")
+        .build();
+    repo.upsert(group).await.expect("persist group");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_groups SET opening_message_json = ? WHERE group_id = ? AND env = ?",
+        vec![
+            DbValue::from("{invalid-json"),
+            DbValue::from("invalid-opening-group"),
+            DbValue::from("contract"),
+        ],
+    ))
+    .await
+    .expect("corrupt persisted opening message");
+
+    let reloaded = MySqlGroupStore::sqlite(db, "contract".to_string());
+    let error = reloaded
+        .try_get("invalid-opening-group")
+        .await
+        .expect_err("invalid persisted JSON must not fall back to the default opening message");
+    assert!(
+        error
+            .to_string()
+            .contains("deserialize opening_message_json")
+    );
+
+    let listed = reloaded.list().await;
+    assert!(
+        listed.is_empty(),
+        "an infallible legacy list must fail the whole read instead of returning a Group with the default opening message"
+    );
 }
 
 #[tokio::test]

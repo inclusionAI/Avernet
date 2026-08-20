@@ -1,18 +1,17 @@
 use async_trait::async_trait;
 use bcs_service_api::{
-    CallerContext, DefaultDelivery, DmCreateCommand, DmCreateResult, GroupAddMemberCommand, GroupAddMemberResult,
-    GroupCreateCommand, GroupCreateParticipantCommand,
-    GroupDeleteCommand, GroupDetailResult, GroupHistoryCommand, GroupHistoryResult,
-    GroupManagementService, GroupMessageHistoryService, GroupParticipantModeCommand,
-    GroupParticipantView, GroupProposalConfirmCommand, GroupProposalConfirmResult,
-    GroupProposalCreateCommand, GroupProposalCreateResult, GroupProposalPreviewCommand,
-    GroupProposalService, GroupRoutingPolicyCommand, GroupStatus, GroupStatusCommand,
-    GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateWorkspaceCommand, GroupUseCaseError,
-    ParticipantMode, ProposalContext, RoutingMode, RoutingPolicy, ServiceError, Workspace,
+    CallerContext, DefaultDelivery, DmCreateCommand, DmCreateResult, GroupAddMemberCommand,
+    GroupAddMemberResult, GroupCreateCommand, GroupCreateParticipantCommand, GroupDeleteCommand,
+    GroupDetailResult, GroupHistoryCommand, GroupHistoryResult, GroupManagementService,
+    GroupMessageHistoryService, GroupParticipantModeCommand, GroupParticipantView,
+    GroupProposalConfirmCommand, GroupProposalConfirmResult, GroupProposalCreateCommand,
+    GroupProposalCreateResult, GroupProposalPreviewCommand, GroupProposalService,
+    GroupRoutingPolicyCommand, GroupStatus, GroupStatusCommand, GroupTerminateCommand,
+    GroupUpdateLabelCommand, GroupUpdateWorkspaceCommand, GroupUseCaseError, ParticipantMode,
+    ProposalContext, RoutingMode, RoutingPolicy, ServiceError, Workspace,
 };
 use bcs_test_support::{
-    NoopGroupManagementService, NoopGroupMessageHistoryService,
-    NoopGroupProposalService,
+    NoopGroupManagementService, NoopGroupMessageHistoryService, NoopGroupProposalService,
 };
 
 #[test]
@@ -25,6 +24,7 @@ fn group_create_command_carries_caller_and_members() {
         label: Some("Incident Room".to_string()),
         topic: Some("debug incident".to_string()),
         context: Some("prod checkout outage".to_string()),
+        opening_message: None,
         routing_policy: Some(RoutingPolicy {
             mode: RoutingMode::Hybrid,
             default_bot_final_delivery: DefaultDelivery::SendToDriver,
@@ -91,6 +91,7 @@ fn dm_create_command_and_result_carry_create_or_reuse_semantics() {
             status: GroupStatus::Active,
             driver_bot_id: "assistant".to_string(),
             context: cmd.context.clone(),
+            opening_message: None,
             participants: Vec::new(),
             message_count: 0,
             workspace: Workspace::default(),
@@ -113,7 +114,10 @@ fn dm_create_command_and_result_carry_create_or_reuse_semantics() {
 
     assert!(!result.created);
     assert_eq!(result.group.group_kind, bcs_service_api::GroupKind::Dm);
-    assert_eq!(result.group.dm_pair_key.as_deref(), Some("assistant|human_123"));
+    assert_eq!(
+        result.group.dm_pair_key.as_deref(),
+        Some("assistant|human_123")
+    );
 }
 
 #[test]
@@ -200,6 +204,7 @@ fn group_result_dtos_are_route_friendly_views() {
         status: GroupStatus::Active,
         driver_bot_id: "driver".to_string(),
         context: Some("debug incident".to_string()),
+        opening_message: None,
         participants: vec![participant],
         message_count: 1,
         workspace: Workspace::default(),
@@ -306,6 +311,7 @@ async fn noop_group_management_service_fails_closed() {
             label: None,
             topic: Some("debug incident".to_string()),
             context: None,
+            opening_message: None,
             routing_policy: None,
             participants: vec![GroupCreateParticipantCommand {
                 bot_id: "bot-a".to_string(),

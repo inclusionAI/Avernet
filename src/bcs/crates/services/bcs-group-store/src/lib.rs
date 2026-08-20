@@ -28,6 +28,7 @@ use tracing::{debug, error, info, warn};
 use bcs_service_api::port::repo::{
     CommitGroupEventfulMutation, FinalizeGroupProvisioning, GroupEventfulMutation,
 };
+use bcs_service_api::types::OpeningMessage;
 use bcs_service_api::{
     ActorKind, DefaultDelivery, Group, GroupMessage, GroupMetricCount, GroupMetricsSnapshotPort,
     GroupMutableFieldsPatch, GroupStatus, GroupStrategy, Participant, ParticipantKind,
@@ -129,6 +130,12 @@ fn apply_db_group_mutation_candidate(
                 && group.context.as_ref() != Some(context)
             {
                 group.context = Some(context.clone());
+                changed = true;
+            }
+            if let Some(opening_message) = &patch.opening_message
+                && group.opening_message != *opening_message
+            {
+                group.opening_message = opening_message.clone();
                 changed = true;
             }
             if let Some(visibility) = &patch.visibility
@@ -530,12 +537,39 @@ impl MySqlGroupStore {
         })
     }
 
+    fn deserialize_opening_message(
+        json_str: Option<String>,
+    ) -> ServiceResult<Option<OpeningMessage>> {
+        match json_str.as_deref() {
+            None => Ok(None),
+            Some(json) => serde_json::from_str(json).map(Some).map_err(|error| {
+                ServiceError::InternalError(format!("deserialize opening_message_json: {error}"))
+            }),
+        }
+    }
+
+    fn opening_message_from_row(
+        row: &DbRow,
+        group_id: &str,
+    ) -> ServiceResult<Option<OpeningMessage>> {
+        let json = db_get_column_opt(row, "opening_message_json").map_err(|error| {
+            ServiceError::InternalError(format!(
+                "read Group '{group_id}' opening_message_json: {error}"
+            ))
+        })?;
+        Self::deserialize_opening_message(json).map_err(|error| {
+            ServiceError::InternalError(format!(
+                "read Group '{group_id}' opening_message_json: {error}"
+            ))
+        })
+    }
+
     /// Load session from MySQL.
     async fn load_group_from_mysql(&self, group_id: &str) -> ServiceResult<Option<Group>> {
         // Task G.2 / migration 005: read group_kind + dm_pair_key from DB so
         // dm groups round-trip through `get()` without losing their identity.
         let sql = format!(
-            "SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, \
+            "SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
              service_group_uuid, service_mode, service_spec, version, record_status, \
              {} AS created_ts, {} AS updated_ts, \
              group_kind, dm_pair_key, group_strategy, visibility \
@@ -569,6 +603,7 @@ impl MySqlGroupStore {
             let routing_policy_json: Option<String> =
                 db_get_column_opt(row, "routing_policy_json").ok().flatten();
             let context: Option<String> = db_get_column_opt(row, "context").ok().flatten();
+            let opening_message = Self::opening_message_from_row(row, group_id)?;
             let service_group_uuid: Option<String> =
                 db_get_column_opt(row, "service_group_uuid").ok().flatten();
             let service_mode: Option<String> =
@@ -611,6 +646,7 @@ impl MySqlGroupStore {
                 originator,
                 routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                 context,
+                opening_message,
                 participants,
                 messages: Vec::new(),            // Not persisted
                 workspace: Workspace::default(), // Not persisted
@@ -698,7 +734,7 @@ impl MySqlGroupStore {
         let _start = std::time::Instant::now();
         let sql = format!(
             "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, \
+                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     {} AS created_ts, {} AS updated_ts, \
                     gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
@@ -740,6 +776,13 @@ impl MySqlGroupStore {
             let group_id: String = match db_get_column(row, "group_id") {
                 Ok(v) => v,
                 Err(_) => continue,
+            };
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
             };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
@@ -784,13 +827,14 @@ impl MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -967,6 +1011,14 @@ impl GroupRepoPort for MySqlGroupStore {
             .routing_policy
             .as_ref()
             .and_then(|rp| serde_json::to_string(rp).ok());
+        let opening_message_json = group
+            .opening_message
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| {
+                ServiceError::InternalError(format!("serialize opening_message: {error}"))
+            })?;
         // Task G.2 / migration 005: persist `group_kind` + `dm_pair_key`.
         // - `group_kind` is always written (defaults to "normal" via the
         //   in-memory enum default, but we still write the explicit value
@@ -987,6 +1039,7 @@ impl GroupRepoPort for MySqlGroupStore {
         let g_driver_bot = group.driver_bot.clone();
         let g_originator: Option<String> = group.originator.clone();
         let g_context: Option<String> = group.context.clone();
+        let g_opening_message_json = opening_message_json;
         let g_dm_pair_key: Option<String> = group.dm_pair_key.clone();
         let g_group_strategy_str = Self::group_strategy_to_str(group.group_strategy);
         let g_service_group_uuid: Option<String> = group.service_group_uuid.clone();
@@ -1025,6 +1078,7 @@ impl GroupRepoPort for MySqlGroupStore {
                 "originator",
                 "routing_policy_json",
                 "context",
+                "opening_message_json",
                 "service_spec",
                 "version",
                 "record_status",
@@ -1033,8 +1087,8 @@ impl GroupRepoPort for MySqlGroupStore {
             &[("gmt_modified", self.flavor.now())],
         );
         let upsert_sql = format!(
-            "INSERT INTO bcs_groups (group_id, label, status, driver_bot, originator, env, routing_policy_json, context, group_kind, dm_pair_key, group_strategy, service_group_uuid, service_mode, service_spec, version, record_status, visibility, gmt_create, gmt_modified) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {now}, {now}) \
+            "INSERT INTO bcs_groups (group_id, label, status, driver_bot, originator, env, routing_policy_json, context, opening_message_json, group_kind, dm_pair_key, group_strategy, service_group_uuid, service_mode, service_spec, version, record_status, visibility, gmt_create, gmt_modified) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {now}, {now}) \
              {upsert}",
             now = self.flavor.now(),
             upsert = upsert_clause,
@@ -1053,6 +1107,7 @@ impl GroupRepoPort for MySqlGroupStore {
                 Value::from(env.as_str()),
                 Value::from(routing_policy_json.as_deref()),
                 Value::from(g_context.as_deref()),
+                Value::from(g_opening_message_json.as_deref()),
                 Value::from(group_kind_str),
                 Value::from(g_dm_pair_key.as_deref()),
                 Value::from(g_group_strategy_str),
@@ -1226,6 +1281,19 @@ impl GroupRepoPort for MySqlGroupStore {
                 if let Some(context) = &patch.context {
                     assignments.push("context = ?".to_string());
                     params.push(DbTransactionParam::value(context.as_str()));
+                }
+                if let Some(opening_message) = &patch.opening_message {
+                    let json = opening_message
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(|error| {
+                            ServiceError::InternalError(format!(
+                                "serialize opening_message: {error}"
+                            ))
+                        })?;
+                    assignments.push("opening_message_json = ?".to_string());
+                    params.push(DbTransactionParam::value(json));
                 }
                 if let Some(visibility) = &patch.visibility {
                     assignments.push("visibility = ?".to_string());
@@ -1488,6 +1556,17 @@ impl GroupRepoPort for MySqlGroupStore {
         if let Some(context) = patch.context {
             assignments.push("context = ?".to_string());
             params.push(Value::from(context.as_str()));
+        }
+        if let Some(opening_message) = patch.opening_message {
+            let json = opening_message
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| {
+                    ServiceError::InternalError(format!("serialize opening_message: {error}"))
+                })?;
+            assignments.push("opening_message_json = ?".to_string());
+            params.push(Value::from(json.as_deref()));
         }
         if let Some(visibility) = patch.visibility {
             assignments.push("visibility = ?".to_string());
@@ -1974,11 +2053,11 @@ impl GroupRepoPort for MySqlGroupStore {
         let _start = std::time::Instant::now();
         let paginated_sql = format!(
             "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, \
+                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     gs.created_ts, gs.updated_ts, \
                     gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
-             FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, \
+             FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                           service_group_uuid, service_mode, service_spec, version, record_status, \
                           {} AS created_ts, {} AS updated_ts, \
                           group_kind, dm_pair_key, group_strategy, visibility \
@@ -2021,6 +2100,13 @@ impl GroupRepoPort for MySqlGroupStore {
             let group_id: String = match db_get_column(row, "group_id") {
                 Ok(v) => v,
                 Err(_) => continue,
+            };
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
             };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
@@ -2065,13 +2151,14 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -2134,7 +2221,7 @@ impl GroupRepoPort for MySqlGroupStore {
         let sql = format!(
             "SELECT \
                 gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, \
+                gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                 gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                 {} AS created_ts, {} AS updated_ts, \
                 gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, \
@@ -2189,6 +2276,13 @@ impl GroupRepoPort for MySqlGroupStore {
                 Err(_) => continue,
             };
 
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
+            };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
                 let status_str: String = db_get_column(row, "status").unwrap_or_default();
@@ -2232,13 +2326,14 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -2343,7 +2438,7 @@ impl GroupRepoPort for MySqlGroupStore {
         let mut sql = format!(
             "SELECT \
                 gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, \
+                gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                 gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                 {} AS created_ts, {} AS updated_ts, \
                 gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, \
@@ -2394,6 +2489,13 @@ impl GroupRepoPort for MySqlGroupStore {
                 Err(_) => continue,
             };
 
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
+            };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
                 let status_str: String = db_get_column(row, "status").unwrap_or_default();
@@ -2437,13 +2539,14 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -2572,11 +2675,11 @@ impl GroupRepoPort for MySqlGroupStore {
             None => {
                 let sql = format!(
                     "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                            gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, \
+                            gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                             gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                             gs.created_ts, gs.updated_ts, \
                             gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
-                     FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, \
+                     FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                                   service_group_uuid, service_mode, service_spec, version, record_status, \
                                   {} AS created_ts, {} AS updated_ts, \
                                   group_kind, dm_pair_key, group_strategy, visibility \
@@ -2601,11 +2704,11 @@ impl GroupRepoPort for MySqlGroupStore {
                 let kind_str = Self::group_kind_to_str(k);
                 let sql = format!(
                     "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                            gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, \
+                            gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                             gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                             gs.created_ts, gs.updated_ts, \
                             gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
-                     FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, \
+                     FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                                   service_group_uuid, service_mode, service_spec, version, record_status, \
                                   {} AS created_ts, {} AS updated_ts, \
                                   group_kind, dm_pair_key, group_strategy, visibility \
@@ -2643,6 +2746,13 @@ impl GroupRepoPort for MySqlGroupStore {
             let group_id: String = match db_get_column(row, "group_id") {
                 Ok(v) => v,
                 Err(_) => continue,
+            };
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
             };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
@@ -2687,13 +2797,14 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -2782,7 +2893,7 @@ impl GroupRepoPort for MySqlGroupStore {
         // and outer SELECT so dm groups remain tagged through pagination.
         let participant_paginated_sql = format!(
             "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                    gp2.bot_uuid, gp2.role, gs.routing_policy_json, gs.context, \
+                    gp2.bot_uuid, gp2.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     gs.created_ts, gs.updated_ts, \
                     gp2.actor_kind, gp2.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
@@ -2831,6 +2942,13 @@ impl GroupRepoPort for MySqlGroupStore {
                 Ok(v) => v,
                 Err(_) => continue,
             };
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
+            };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
                 let status_str: String = db_get_column(row, "status").unwrap_or_default();
@@ -2874,13 +2992,14 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -3291,7 +3410,7 @@ impl GroupRepoPort for MySqlGroupStore {
         label: Option<&str>,
     ) -> Vec<Group> {
         let mut inner_sql = format!(
-            "SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, \
+            "SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                               service_group_uuid, service_mode, service_spec, version, record_status, \
                               {} AS created_ts, {} AS updated_ts, \
                               group_kind, dm_pair_key, group_strategy, visibility \
@@ -3325,7 +3444,7 @@ impl GroupRepoPort for MySqlGroupStore {
 
         let sql = format!(
             "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, \
+                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     gs.created_ts, gs.updated_ts, \
                     gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
@@ -3348,6 +3467,13 @@ impl GroupRepoPort for MySqlGroupStore {
             let group_id: String = match db_get_column(row, "group_id") {
                 Ok(v) => v,
                 Err(_) => continue,
+            };
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
             };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
@@ -3392,13 +3518,14 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -3573,6 +3700,17 @@ mod tests {
             assert_empty_logical_db("legacy-db"),
             Err(DbError::InvalidInput(_))
         ));
+    }
+
+    #[test]
+    fn empty_opening_message_json_is_invalid_persisted_data() {
+        let error = MySqlGroupStore::deserialize_opening_message(Some(String::new()))
+            .expect_err("an empty persisted value is not valid JSON");
+        assert!(
+            error
+                .to_string()
+                .contains("deserialize opening_message_json")
+        );
     }
 
     #[tokio::test]

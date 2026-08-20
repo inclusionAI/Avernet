@@ -504,6 +504,11 @@ fn prepare_group_mutation(
             {
                 changed_fields.push("context");
             }
+            if let Some(opening_message) = &patch.opening_message
+                && group.opening_message != *opening_message
+            {
+                changed_fields.push("opening_message");
+            }
             if let Some(visibility) = &patch.visibility
                 && group.visibility != *visibility
             {

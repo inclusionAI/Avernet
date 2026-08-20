@@ -4,7 +4,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-
 use bcs_service_api::{
     ActorKind, AgentCredentials, BotCapabilities, BotDynamicStatus, BotRegistryCoreService,
     ChannelBindingCleanupPort,
@@ -23,6 +22,7 @@ use bcs_service_api::{
     SessionManagementService, SessionStatus, SessionUseCaseError, WorkbenchChatAuthorizationCommand,
     WorkbenchConnectCommand, WorkbenchSessionService, WorkbenchUseCaseError, Workspace,
 };
+use bcs_service_api::types::OpeningMessage;
 
 #[tokio::test]
 async fn interaction_resolve_uses_current_exact_session_relationships() {
@@ -311,6 +311,9 @@ async fn create_state_machine_group_auto_creates_service_invocation_session() {
     cmd.label = Some("BCN 宣传".to_string());
     cmd.topic = Some("BCN 宣传会话".to_string());
     cmd.context = Some("写一篇宣传 BCN 的文章".to_string());
+    cmd.opening_message = Some(OpeningMessage::Text(
+        "开始 {{bcs.run_id}}".to_string(),
+    ));
 
     let created = service.create_group(cmd).await.unwrap();
 
@@ -319,6 +322,17 @@ async fn create_state_machine_group_auto_creates_service_invocation_session() {
         Some("group-under-test:abcdef12")
     );
     assert_eq!(created.context_injected, 0);
+    assert_eq!(
+        fixture
+            .group
+            .get("group-under-test")
+            .await
+            .expect("created group")
+            .opening_message,
+        Some(OpeningMessage::Text(
+            "开始 {{bcs.run_id}}".to_string()
+        ))
+    );
     let commands = session_management.commands.lock().await;
     assert_eq!(commands.len(), 1);
     let params = &commands[0].params;
@@ -328,6 +342,24 @@ async fn create_state_machine_group_auto_creates_service_invocation_session() {
         Some(&serde_json::json!({ "query": "写一篇宣传 BCN 的文章" }))
     );
     assert_eq!(params.session_title.as_deref(), Some("新会话"));
+}
+
+#[tokio::test]
+async fn create_chat_group_rejects_opening_message() {
+    let fixture = Fixture::new().with_bot("driver", "Driver", "public", Some("alice"));
+    let service = fixture.service_with_limits(5, 10, 10);
+    let mut cmd = create_cmd(
+        Some("driver"),
+        "driver",
+        vec![participant("driver", Some("driver"))],
+    );
+    cmd.opening_message = Some(OpeningMessage::Text("hello".to_string()));
+
+    let error = service
+        .create_group(cmd)
+        .await
+        .expect_err("Chat Group must reject opening_message");
+    assert!(error.to_string().contains("invalid_opening_message"));
 }
 
 #[tokio::test]
@@ -2455,6 +2487,7 @@ fn create_cmd(
         label: None,
         topic: Some("debug incident".to_string()),
         context: Some("prod checkout outage".to_string()),
+        opening_message: None,
         routing_policy: None,
         member_bot_ids: Vec::new(),
         participants,
@@ -3568,6 +3601,7 @@ async fn list_groups_filters_by_visibility() {
         label: Some("Translation".to_string()),
         topic: None,
         context: None,
+        opening_message: None,
         routing_policy: None,
         member_bot_ids: Vec::new(),
         participants: vec![participant("bot_b", Some("driver"))],
