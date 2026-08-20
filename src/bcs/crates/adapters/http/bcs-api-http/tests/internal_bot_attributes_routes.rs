@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use bcs_api_http::v1::internal::{
-    InternalProviderAuthError, InternalProviderAuthenticator, router,
+    InternalProviderAuthError, InternalProviderAuthenticator, bot_attributes_router as router,
 };
 use bcs_service_api::application::v1::{
     ApplicationError, BotInternalAttributes, FriendCheckInStrategy, InternalBotAttributesService,

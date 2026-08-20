@@ -16,10 +16,10 @@ use crate::v1::common::{
     Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
 };
 
-pub fn router(
+pub fn router<S>(
     service: Arc<dyn InternalBotAttributesService>,
     authenticator: Arc<dyn InternalProviderAuthenticator>,
-) -> Router {
+) -> Router<S> {
     Router::new()
         .route(
             "/internal/v1/bots/{bot_id}/attributes",
