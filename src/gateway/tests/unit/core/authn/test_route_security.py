@@ -39,6 +39,8 @@ def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
         ("POST", "/openapi/v1/bots/market/skills"),
         ("POST", "/openapi/v1/bots/market/mcp-servers"),
         ("POST", "/openapi/v1/bots/market/skill-center/skills"),
+        ("GET", "/openapi/v1/bots/catalog/search"),
+        ("GET", "/openapi/v1/bots/catalog/discover"),
     ],
 )
 def test_shipped_config_admits_app_only_market_queries(method: str, path: str) -> None:

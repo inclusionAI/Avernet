@@ -99,6 +99,7 @@ _BOT_FREE = frozenset(
         "authorized",
         "ceiling",
         "check-name",
+        "catalog",
         "loadtest",
         "local",
         "logs",

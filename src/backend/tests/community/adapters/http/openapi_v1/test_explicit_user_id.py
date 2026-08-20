@@ -280,6 +280,8 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers/{{server_code}}"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
     # The load-test endpoint answers a constant. It reads nothing and writes
     # nothing, so there is no scope for a user id to name — and a synthetic
     # endpoint measuring the shared path must not be the one exception that
@@ -338,8 +340,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: reassignment endpoint adds one more, yielding 90/1/45. Session Favorites then
 #: adds three Bot-addressed operations, Caller preparation adds one more, and the
 #: account-level IAM-token read adds one operation with no ``bot_id``. The Space
-#: Skill list adds one more operation with no ``bot_id``, yielding 94/1/47.
-_BOT_ID_PLACEMENT = {"path": 94, "query": 1, "none": 47}
+#: Skill list adds one more, and the Bot catalog contributes two more account-level
+#: reads, yielding 94/1/49.
+_BOT_ID_PLACEMENT = {"path": 94, "query": 1, "none": 49}
 
 
 def _schema() -> dict:

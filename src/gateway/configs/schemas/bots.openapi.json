@@ -2515,6 +2515,79 @@
         "title": "DingTalkChannelConfigUpdate",
         "type": "object"
       },
+      "DiscoveredPublicBot": {
+        "description": "A public catalog Bot enriched with recommendation information.",
+        "properties": {
+          "bot_id": {
+            "description": "Stable public Bot identifier.",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "bot_type": {
+            "description": "Published kind of Bot.",
+            "enum": [
+              "personal",
+              "service",
+              "desktop"
+            ],
+            "title": "Bot Type",
+            "type": "string"
+          },
+          "description": {
+            "description": "Public Bot description.",
+            "title": "Description",
+            "type": "string"
+          },
+          "engine": {
+            "description": "Engine that runs the Bot.",
+            "title": "Engine",
+            "type": "string"
+          },
+          "entity_id": {
+            "description": "Public entity identifier for the Bot owner.",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Public Bot display name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional public owner name.",
+            "title": "Owner Name"
+          },
+          "recommendation": {
+            "$ref": "#/components/schemas/Recommendation",
+            "description": "Public recommendation details."
+          },
+          "status": {
+            "description": "Public Bot lifecycle status.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "entity_id",
+          "bot_type",
+          "name",
+          "description",
+          "engine",
+          "status",
+          "recommendation"
+        ],
+        "title": "DiscoveredPublicBot",
+        "type": "object"
+      },
       "EditLock": {
         "description": "Current collaborative edit-lock state.",
         "properties": {
@@ -4921,6 +4994,48 @@
         "title": "Envelope[Page[Bot]]",
         "type": "object"
       },
+      "Envelope_Page_DiscoveredPublicBot__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_DiscoveredPublicBot_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[DiscoveredPublicBot]]",
+        "type": "object"
+      },
       "Envelope_Page_FileEntry__": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -5213,6 +5328,48 @@
           "request_id"
         ],
         "title": "Envelope[Page[Model]]",
+        "type": "object"
+      },
+      "Envelope_Page_PublicBot__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_PublicBot_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[PublicBot]]",
         "type": "object"
       },
       "Envelope_Page_RoutineRun__": {
@@ -8820,6 +8977,31 @@
         "title": "Page[Bot]",
         "type": "object"
       },
+      "Page_DiscoveredPublicBot_": {
+        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredPublicBot"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "example": 1,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[DiscoveredPublicBot]",
+        "type": "object"
+      },
       "Page_FileEntry_": {
         "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
         "properties": {
@@ -8993,6 +9175,31 @@
           "items"
         ],
         "title": "Page[Model]",
+        "type": "object"
+      },
+      "Page_PublicBot_": {
+        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/PublicBot"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "example": 1,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[PublicBot]",
         "type": "object"
       },
       "Page_RoutineRun_": {
@@ -9355,6 +9562,109 @@
           "content_type"
         ],
         "title": "Preview",
+        "type": "object"
+      },
+      "PublicBot": {
+        "description": "The allowlisted public projection of a catalog Bot.",
+        "properties": {
+          "bot_id": {
+            "description": "Stable public Bot identifier.",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "bot_type": {
+            "description": "Published kind of Bot.",
+            "enum": [
+              "personal",
+              "service",
+              "desktop"
+            ],
+            "title": "Bot Type",
+            "type": "string"
+          },
+          "description": {
+            "description": "Public Bot description.",
+            "title": "Description",
+            "type": "string"
+          },
+          "engine": {
+            "description": "Engine that runs the Bot.",
+            "title": "Engine",
+            "type": "string"
+          },
+          "entity_id": {
+            "description": "Public entity identifier for the Bot owner.",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Public Bot display name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional public owner name.",
+            "title": "Owner Name"
+          },
+          "status": {
+            "description": "Public Bot lifecycle status.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "entity_id",
+          "bot_type",
+          "name",
+          "description",
+          "engine",
+          "status"
+        ],
+        "title": "PublicBot",
+        "type": "object"
+      },
+      "Recommendation": {
+        "description": "Public recommendation information for a discovered Bot.",
+        "properties": {
+          "reasons": {
+            "description": "Public reasons for the recommendation.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "score": {
+            "description": "Recommendation relevance score.",
+            "title": "Score",
+            "type": "number"
+          },
+          "short_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional short public recommendation profile.",
+            "title": "Short Profile"
+          }
+        },
+        "required": [
+          "score"
+        ],
+        "title": "Recommendation",
         "type": "object"
       },
       "ResourceType": {
@@ -13660,6 +13970,364 @@
         "summary": "List Authorized Bots",
         "tags": [
           "authorized-apps"
+        ]
+      }
+    },
+    "/openapi/v1/bots/catalog/discover": {
+      "get": {
+        "operationId": "discover_public_bots_openapi_v1_bots_catalog_discover_get",
+        "parameters": [
+          {
+            "description": "Keyword used for discovery.",
+            "in": "query",
+            "name": "keyword",
+            "required": true,
+            "schema": {
+              "description": "Keyword used for discovery.",
+              "minLength": 1,
+              "title": "Keyword",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum recommendations.",
+            "in": "query",
+            "name": "top_k",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Maximum recommendations.",
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Top K",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Minimum recommendation score.",
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "default": 0.1,
+              "description": "Minimum recommendation score.",
+              "maximum": 1,
+              "minimum": 0,
+              "title": "Min Score",
+              "type": "number"
+            }
+          },
+          {
+            "description": "Runtime state filter.",
+            "in": "query",
+            "name": "runtime_state",
+            "required": false,
+            "schema": {
+              "default": "online",
+              "description": "Runtime state filter.",
+              "enum": [
+                "draft",
+                "verify",
+                "online"
+              ],
+              "title": "Runtime State",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_DiscoveredPublicBot__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Discover Public Bots",
+        "tags": [
+          "bot-catalog"
+        ]
+      }
+    },
+    "/openapi/v1/bots/catalog/search": {
+      "get": {
+        "operationId": "search_public_bots_openapi_v1_bots_catalog_search_get",
+        "parameters": [
+          {
+            "description": "Bot or owner name keyword.",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bot or owner name keyword.",
+              "title": "Search"
+            }
+          },
+          {
+            "description": "1-based page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_PublicBot__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Search Public Bots",
+        "tags": [
+          "bot-catalog"
         ]
       }
     },

@@ -206,6 +206,7 @@ from .market import router as market_router
 from .mcp import router as mcp_router
 from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
+from .bot_public import router as bot_public_router
 from .resources import router as resources_router
 from .routines import router as routines_router
 from .skills import router as skills_router
@@ -406,6 +407,13 @@ def build_public_router() -> APIRouter:
     # before the ``{bot_id}`` wildcard router below.
     public.include_router(
         market_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Tenant-identical Bot catalog queries. The catalog has no user dimension,
+    # so it publishes the base error table and admits User or App principals.
+    public.include_router(
+        bot_public_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )

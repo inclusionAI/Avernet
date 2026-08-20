@@ -723,6 +723,21 @@ class TestCreateFriendRequestApproval:
 # ---------------------------------------------------------------------------
 
 class TestSearchPublicBotsByKeyword:
+    def test_catalog_read_without_user_skips_friendship_lookup(self):
+        bot_service = MagicMock()
+        bot_service.list_bots_by_search.return_value = {
+            "total": 1,
+            "items": [{"bot_id": "bot1", "owner_id": "owner1"}],
+        }
+        repo = MagicMock()
+        svc = _make_service(bot_service=bot_service, bot_friend_repo=repo)
+
+        result = svc.search_public_bots_by_keyword()
+
+        assert result["total"] == 1
+        assert "friend_record_approval" not in result["items"][0]
+        repo.get_by_entity_ids_batch.assert_not_called()
+
     def test_returns_empty_if_no_items(self):
         bot_service = MagicMock()
         bot_service.list_bots_by_search.return_value = {"total": 0, "items": []}

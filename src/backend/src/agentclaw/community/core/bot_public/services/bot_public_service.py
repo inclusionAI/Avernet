@@ -1022,7 +1022,7 @@ class BotPublicService:
 
     def search_public_bots_by_keyword(
         self,
-        user_id: str,
+        user_id: str | None = None,
         search: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
@@ -1067,7 +1067,10 @@ class BotPublicService:
                         ext[key] = None
                 bot["ext"] = ext
 
-        # 查询好友申请记录
+        # 查询好友申请记录。公开 catalog 不携带用户作用域，因此不读取关系数据。
+        if not user_id:
+            return public_bot_result
+
         query_keys: list[BotFriendQueryKey] = []
         for bot in items:
             bot_id = bot.get("bot_id")
