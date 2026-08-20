@@ -164,10 +164,13 @@ class EngineRuntimeRelay:
         """
         return await asyncio.to_thread(self.resolve_bot, bot_id, owner_id, caller_id)
 
-    def _resolve_device(
-        self, bot_id: str, owner_id: str, facts: BotFacts, stage: str
-    ) -> DeviceContext:
+    def _resolve_device(self, facts: BotFacts, stage: str) -> DeviceContext:
         """Resolve the bot's device, translating "not reachable" to one error.
+
+        ``facts`` is the sole source of the bot's identity. It carries the
+        *resolved* ``bot_id``/``owner_id`` — the values :meth:`resolve_bot`
+        proved ownership against — so there is no second pair of identity
+        parameters here that could disagree with it.
 
         ``stage`` picks which of a ``service`` bot's runtimes this call
         addresses. :data:`~agentclaw.community.core.engine_runtime.stage.\
@@ -203,17 +206,17 @@ resolve_stage_bind_id`. The draft lookup is the same owner-scoped
             # bot, not an unmapped error from the record scan.
             require_stage_addressable(facts.bot_type, stage)
             if facts.bot_type == _SERVICE_BOT_TYPE and stage != STAGE_DRAFT:
-                return self._resolve_published_device(facts, owner_id, stage)
-            return self._resolver.resolve_for_bot(bot_id, owner_id)
+                return self._resolve_published_device(facts, stage)
+            return self._resolver.resolve_for_bot(facts.bot_id, facts.owner_id)
         except (DeviceNotBoundError, ConnInfoBuildError) as exc:
             raise EngineDeviceNotReadyError(
-                f"device not ready for bot={bot_id}"
+                f"device not ready for bot={facts.bot_id}"
             ) from exc
         except (EngineStageNotLiveError, UnknownProviderError):
             raise
 
     def _resolve_published_device(
-        self, facts: BotFacts, owner_id: str, stage: str
+        self, facts: BotFacts, stage: str
     ) -> DeviceContext:
         """Resolve a ``service`` bot through a published stage's runtime binding.
 
@@ -266,7 +269,7 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         # binding at call time and this only has to carry the routing fields. It
         # falls through to full resolution for the providers that need it.
         return self._resolver.resolve_for_binding_invoke(
-            bind_id, owner_id, bot_id=facts.bot_id
+            bind_id, facts.owner_id, bot_id=facts.bot_id
         )
 
     def _resolve_bot_and_device(
@@ -285,7 +288,7 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
             if facts is not None
             else self.resolve_bot(bot_id, owner_id, owner_id)
         )
-        return self._resolve_device(bot_id, owner_id, resolved, stage)
+        return self._resolve_device(resolved, stage)
 
     # ── forwarding ────────────────────────────────────────────────────────
 
@@ -317,7 +320,9 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         the owner as the caller, which is what every ungated (owner-scoped)
         route does. It is **not** a way to supply bot facts from outside: the
         only safe value is one this relay returned for the same
-        ``bot_id``/``owner_id``, since it stands in for the ownership proof.
+        ``bot_id``/``owner_id``, since it stands in for the ownership proof —
+        and it is the identity device resolution reads, so facts resolved for
+        another bot would address that bot's device.
 
         ``stage`` names which of a ``service`` bot's runtimes this call
         addresses — see :meth:`_resolve_device` for the rule. Required, with
