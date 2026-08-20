@@ -181,6 +181,7 @@ from .caller import router as caller_router
 from .channels import router as channels_router
 from .containers import router as containers_router
 from .diagnostics import router as diagnostics_router
+from .editors import router as editors_router
 from .deprecated import (
     ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
     GRANT_CHECKED_GROUPS as _LEGACY_GRANT_CHECKED,
@@ -198,6 +199,7 @@ from .engine_runtime.approvals import router as engine_approvals_router
 from .engine_runtime.connection import router as engine_connection_router
 from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
+from .engine_runtime.nodes import router as engine_nodes_router
 from .engine_runtime.sessions import router as engine_sessions_router
 from .identity import router as identity_router
 from .local import router as local_router
@@ -208,6 +210,7 @@ from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
 from .bot_public import router as bot_public_router
 from .resources import router as resources_router
+from .render_screens import router as render_screens_router
 from .routines import router as routines_router
 from .skills import router as skills_router
 from .service_publications import (
@@ -290,6 +293,12 @@ _SUBGROUPS = [
 # declares it explicitly so the admission rule is visible where the public
 # surface is assembled. FastAPI caches the shared dependency per request.
 _ADDRESSED_BOT_SUBGROUPS = [
+    # Bot grants lend the delegating user's live Bot permissions. Editors and
+    # render screens therefore use the same addressed-owner grant boundary as
+    # the other shared-Bot configuration groups; their services still enforce
+    # the caller's effective Owner/Admin/Member level for each operation.
+    editors_router,
+    render_screens_router,
     service_lifecycle_router,
     service_edit_lock_router,
     containers_router,
@@ -337,6 +346,7 @@ _ENGINE_RUNTIME_GROUPS = [
     engine_sessions_router,
     engine_engine_router,
     engine_models_router,
+    engine_nodes_router,
     engine_approvals_router,
     engine_connection_router,
 ]

@@ -339,10 +339,14 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: 83/1/45. Channels adds six Bot-addressed operations, and the Bot Space
 #: reassignment endpoint adds one more, yielding 90/1/45. Session Favorites then
 #: adds three Bot-addressed operations, Caller preparation adds one more, and the
+
 #: account-level IAM-token read adds one operation with no ``bot_id``. The Space
-#: Skill list adds one more, and the Bot catalog contributes two more account-level
-#: reads, yielding 94/1/49.
-_BOT_ID_PLACEMENT = {"path": 94, "query": 1, "none": 49}
+#: Skill list adds one more account-level operation. Editors and render screens
+#: add another nine Bot-addressed operations, while the Bot catalog contributes
+#: two account-level reads, and the read-only Node inventory adds one more
+#: Bot-addressed operation, yielding 104/1/49.
+_BOT_ID_PLACEMENT = {"path": 104, "query": 1, "none": 49}
+
 
 
 def _schema() -> dict:
@@ -415,6 +419,9 @@ def test_the_pinned_number_of_operations_take_it():
 
     61 → 77 with the service-Bot lifecycle surface: conversion, approval config,
     version reads/actions and edit-lock operations all act for an explicit user.
+    The five bot-first Editors operations bring the total to 119, and the four
+    render-screen operations bring the total to 123, and the read-only Node
+    inventory brings the current total to 124.
     """
     taking = [
         1
@@ -428,9 +435,13 @@ def test_the_pinned_number_of_operations_take_it():
     # for the Bot Chats operations. The combined Bot Workshop surface adds a
     # further net 32 user-scoped operations (27 bot-addressed and five
     # account-level operations), then +6 for Bot-scoped Channels CRUD/status,
+
     # then +1 for Bot Space reassignment, +3 for Session Favorites, +2 for
-    # IAM-token retrieval and Caller preparation, and +1 for Space Skill list.
-    assert len(taking) == 131
+    # IAM-token retrieval and Caller preparation, +1 for Space Skill list, then
+    # +5 for Editors and +4 for render screens. The read-only Node inventory adds
+    # the final operation.
+    assert len(taking) == 141
+
 
 
 def test_the_exempt_operations_take_none():

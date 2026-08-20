@@ -175,6 +175,7 @@ class BotRepository(Protocol):
         owner_id: Optional[str] = None,
         engine: Optional[str] = None,
         status: Optional[str] = None,
+        space_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
         bot_ids: list[str] | None = None,
@@ -186,10 +187,10 @@ class BotRepository(Protocol):
         distinguishable — collapsing them would turn "this caller may reach no
         bots" into "show everything".
 
-        ``owner_id`` scopes to a single owner (exact), ``engine`` filters on the
-        active engine (exact), ``status`` filters on lifecycle status (exact).
-        All are optional and additive — omitting them reproduces the prior
-        result set and count exactly.
+        ``owner_id`` scopes to a single owner (exact), ``space_id`` to a
+        business Space (exact after canonical string persistence), ``engine``
+        filters on the active engine (exact), and ``status`` filters on lifecycle
+        status (exact). All are optional and additive.
         """
         ...
 

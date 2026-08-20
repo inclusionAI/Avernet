@@ -362,6 +362,17 @@ def test_list_by_conditions_owner_engine_status_filters(repo):
     assert repo.list_by_conditions(owner_id="alice", bot_name="Alpha")[0] == 1
 
 
+def test_list_by_conditions_space_filter_spans_owners(repo):
+    repo.insert(_data(bot_id="b1", owner_id="alice", space_id="22"))
+    repo.insert(_data(bot_id="b2", owner_id="bob", space_id="22"))
+    repo.insert(_data(bot_id="b3", owner_id="carol", space_id="23"))
+
+    total, rows = repo.list_by_conditions(space_id="22")
+
+    assert total == 2
+    assert {row["bot_id"] for row in rows} == {"b1", "b2"}
+
+
 def test_count_by_owner_excludes_desktop(repo):
     repo.insert(_data(bot_id="b1", bot_type="personal"))
     repo.insert(_data(bot_id="b2", bot_type="desktop"))

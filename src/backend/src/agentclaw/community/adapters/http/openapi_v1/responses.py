@@ -71,6 +71,16 @@ from agentclaw.community.core.bot_app_grant.errors import (
     GrantNotFoundError,
     GrantOwnerConflictError,
 )
+from agentclaw.community.core.bot_collaborator.errors import (
+    BotNotFoundError as CollaboratorBotNotFoundError,
+    BotNotServiceTypeError,
+    CannotRemoveSelfError,
+    CollaboratorAlreadyExistsError,
+    CollaboratorNotFoundError,
+    CollaboratorSpaceMembershipError,
+    InvalidCollaboratorRoleError,
+    PermissionDeniedError as CollaboratorPermissionDeniedError,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
     BotLimitExceededError,
@@ -86,6 +96,10 @@ from agentclaw.community.core.channel.errors import (
     ChannelEditLockedError,
     ChannelNotFoundError,
     ChannelSyncError,
+)
+from agentclaw.community.core.bot_management.render_screen.errors import (
+    RenderScreenConflictError,
+    RenderScreenNotFoundError,
 )
 from agentclaw.community.core.bot_chat.errors import (
     InvalidBotLogQueryError,
@@ -360,6 +374,19 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         409,
         "Another authorization for this bot id is already live",
     ),
+    CollaboratorBotNotFoundError: (404, "Not found"),
+    CollaboratorPermissionDeniedError: (404, "Not found"),
+    CollaboratorNotFoundError: (404, "Not found"),
+    CollaboratorAlreadyExistsError: (409, "Editor already exists"),
+    CannotRemoveSelfError: (409, "Use the leave operation to remove yourself"),
+    BotNotServiceTypeError: (409, "Editors are not supported for this bot"),
+    InvalidCollaboratorRoleError: (400, "Invalid editor role"),
+    CollaboratorSpaceMembershipError: (
+        409,
+        "Editor must be a member of the Bot Team Space",
+    ),
+    RenderScreenNotFoundError: (404, "Not found"),
+    RenderScreenConflictError: (409, "Render-screen mapping already exists"),
     BotPermissionError: (404, "Not found"),
     ServiceContainerNotFoundError: (404, "Not found"),
     ServiceContainerConflictError: (

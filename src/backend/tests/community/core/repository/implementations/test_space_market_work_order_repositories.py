@@ -89,6 +89,8 @@ def test_space_repository_full_member_lifecycle(db) -> None:
         == "sc-Team-owner-1"
     )
     assert repository.get_space(space_id=999, env="dev") is None
+    assert repository.get_space_by_code(space_code=team.space_code, env="dev") == team
+    assert repository.get_space_by_code(space_code="missing", env="dev") is None
 
     other_env_personal, _ = repository.initialize_personal(
         user_id="user-other-env", env="pre"
