@@ -15,18 +15,26 @@ _SUPPORTED_BOT_SKILL_RUNTIMES = {
     "service": frozenset({"openclaw", "claude_code", "teclaw"}),
 }
 
-# AICoding images implement the Claude Code logical Skill contract.  Runtime
-# probes/adapters, not a second product matrix, decide their physical layout.
-_LOGICAL_ENGINE_ALIASES = {"aicoding": "claude_code"}
+_CLAUDE_CODE_WRITABLE_TEMPLATES = frozenset(
+    {"personalCoding", "applicationCoding"}
+)
 
 
 def require_supported_bot_skill_runtime(bot: dict[str, Any]) -> None:
     """Fail closed outside the product-approved Bot × Engine matrix."""
     bot_type = str(bot.get("bot_type") or "")
-    engine = _LOGICAL_ENGINE_ALIASES.get(
-        str(bot.get("active_engine") or ""), str(bot.get("active_engine") or "")
-    )
+    # New AICoding-image Bots still expose the logical ``claude_code`` engine
+    # (their template_type selects the physical image). Historical rows whose
+    # active_engine is literally ``aicoding`` retain safe read/delete only and
+    # must not silently gain new mutation/runtime support.
+    engine = str(bot.get("active_engine") or "")
     if engine not in _SUPPORTED_BOT_SKILL_RUNTIMES.get(bot_type, frozenset()):
+        raise SkillEngineNotSupportedError()
+    if (
+        engine == "claude_code"
+        and str(bot.get("template_type") or "")
+        not in _CLAUDE_CODE_WRITABLE_TEMPLATES
+    ):
         raise SkillEngineNotSupportedError()
 
 
