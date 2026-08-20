@@ -1089,8 +1089,8 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 - **2026-08-20** —— **新增认证 Bot Catalog 查询。** 提供
   `GET /openapi/v1/bots/catalog/search` 与 `/discover`；User 和 App 身份读取
-  相同的公开白名单投影，不再接受 `user_id` 或返回用户 `friendship`。`/search`
-  通过租户范围的 `(bot_id, entity_id)` BCS 元信息端口做内连接；当前端口未配置，固定返回
+  相同的公开白名单投影，不再接受 `user_id` 或返回用户 `friendship`。
+  `/search` 通过租户范围的 `(bot_id, entity_id)` BCS 元信息端口做内连接；当前端口未配置，固定返回
   `502000 / Catalog service unavailable`，不会降级为 Backend-only 结果。
 
 - **2026-08-19** —— **新增 Bot 归属空间变更能力。** 新增

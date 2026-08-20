@@ -124,3 +124,10 @@ PR head `e595d27ef` 的首次 Backend unit tests 失败已收敛为三个测试�
 - ACI/CI: PASS；BCS E2E、Singlebox coverage、BCS/Backend/Engine/BaaS/Gateway unit tests 共 7 个 jobs 全部 SUCCESS，0 pending/failing/cancelled。Singlebox coverage 16m47s，Backend unit 9m30s。
 - 人工意见: CLEAR；最终刷新未发现人工 review 或 comment。
 - 下一步: 等待仓库侧必需条件或审批解除 `mergeStateStatus=BLOCKED`；未自动合并、回复或 resolve thread。本次终态报告提交只修改本报告，不改变已通过远端门禁的实现与测试代码。
+
+### PR #1293 最小差异复审（2026-08-20）
+
+- 按用户要求撤销本功能不需要的纯格式化、邻近清理和共享重构；legacy sanitizer、既有分页查询分支、DI 基线空行、测试基线 import 与旧 helper 约定均恢复为 base 形态。最终 reviewer 未发现纯格式化、推测性扩展或无关重构。
+- 首轮复审因本地 change-line coverage `91/103=88.35%` REJECT；只新增 3 个行为断言后，独立复审为 PASS。Fresh focused suite `157/157`，`report_check.py` 为 case pass `100%`、change-line coverage `103/103=100%`。
+- 改动 Python 文件的增量 Ruff、F401/F841、E203/E211/E265 与 `git diff --check` 通过。`test_sync_bot_config_uses_resolver.py` 的唯一 F401 与 base 完全相同，按最小变更要求保留，未作为本功能顺手清理。
+- 本节所述 diff 尚待形成新 head 并推送；此前 7/7 SUCCESS 属于旧 head，不作为新 head 的远端 ACI 证据。推送后重新监控全部远端检查与评论。

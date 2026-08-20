@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
 from agentclaw.community.core.devices.services.device_context import DeviceContext
 

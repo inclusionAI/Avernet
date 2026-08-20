@@ -1,30 +1,31 @@
-> **SUPERSEDED HISTORICAL REVIEW — DO NOT USE AS CURRENT IMPLEMENTATION OR SHIP INSTRUCTION.**
->
-> This report records the rejected BCSFuse HTTP batch design only. The current binding design is
-> the tenant-scoped metadata port with a fixed unavailable response in
-> [004-implementation-plan.md](004-implementation-plan.md); it deliberately has no BCS HTTP
-> URL, path, payload, credentials, base-URL configuration, or network call.
-
 ---
 agent: tc-code-reviewer
 status: completed
-created: 2026-08-20T15:35:00+08:00
-iteration: 2
+created: 2026-08-20T21:57:27+08:00
+iteration: 5
 ---
 
-# 已废弃的 BCSFuse HTTP batch 代码评审报告（历史记录）
+# 代码评审报告
 
 ## 评审范围
 
 - Worktree: `/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog`
 - 分支: `feat/openapi-bot-public-catalog`
-- 范围: 当前未提交的 Backend-candidates → BCSFuse `/v1/workers/batch` catalog join 改动。
+- Base: `origin/dev_refactory_collaboration@efa0b7da330d8f928b364de2b84a9012f9bbcedc`
+- Committed HEAD: `8de5e1d25bc5c593bde1e2c301edf15c623169ee`
+- 本轮修复增量: 仅 `src/backend/tests/community/core/bot_public/test_bot_public_service.py` 新增 3 个行为测试；无生产代码改动。
+- `.superpowers/` 未修改、未暂存、未删除；未 commit、push 或修改 PR。
 
-## 验证证据
+## 结论先行
 
-- `uv run pytest -q tests/community/core/bot_public/test_bot_public_service.py tests/community/adapters/http/openapi_v1/bot_public/test_bot_public_router.py tests/community/core/bot_public/services/test_sync_bot_config_uses_resolver.py --cov=...`：**100 passed**, failed=0。
-- `uv run ruff check`（全部改动 Python 文件）及 `git diff --check`：通过。
-- 局部覆盖率：`BotPublicService` 484/551（88%）、catalog router 52/66（79%）、新增 BCSFuse DI module 29/43（67%）。新 BCS parse 失败分支 [bot_public_service.py:1139](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py:1139) 和 [bot_public_service.py:1142](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py:1142) 未覆盖。
+**结论: PASS**
+
+iteration 4 的唯一阻塞项已关闭：独立复跑 focused suite 为 `157/157`，按项目
+`report_check.py` 同口径计算的当前工作树变更可执行行覆盖率为 `103/103 = 100.00%`，达到
+`>= 90%`。新增测试均有直接业务断言，不是无断言覆盖率填充，也没有扩大功能或修改生产设计。
+
+远端 ACI 对当前仍含 tracked uncommitted diff 的最终 head 仍为 **PENDING**；本报告的 PASS 是代码
+复审结论，不得替代最终远端 ACI 三项门禁。
 
 ## 逐条评审意见
 
@@ -32,65 +33,81 @@ iteration: 2
 
 | 维度 | 结论 | 说明 |
 |---|---|---|
-| 正确性 | FAIL | Backend 全量有序候选、100 条分批、join 后 total/page 已实现；但 BCS membership key 无 tenant 维度，且未验证返回的是 physical Bot。 |
-| 安全性 | FAIL | Backend response 仍经 allowlist 投影且新日志只记录失败类型/计数。独立安全复核未发现置信度 >=0.8 的新增高/中危漏洞；但本 Review Spec 的强制 tenant-scoped membership 仍无法证明：BCSFuse 按全局 worker ID 查询且未携带 verified caller/tenant，不能排除跨 tenant 同 key 的错误命中。 |
-| 性能 | PASS | 采用可注入 client、每批最多 100 条、单次 5 秒 timeout，未见重试或 N+1。 |
-| 代码风格 | PASS | Ruff 和 `git diff --check` 通过。 |
-| 测试覆盖 | FAIL | 100 个 focused cases 均通过，但改动核心 module 仅 88%，并漏掉 malformed BCS envelope/item 与 tenant collision 等行为断言。 |
-| ACI 覆盖率门禁 | PENDING | 没有指定 PR base/head、远端 junit/coverage job 或 ACI report；不能宣称 PASS。 |
-| 静态检查 | PASS | 未发现本次新增的 unused import/variable 或 Python whitespace 告警。 |
+| 正确性 | PASS | 三个新增测试真实驱动 Catalog 生产方法，覆盖 unexpected metadata exception、Catalog 脱敏和 blank Backend address 过滤，并断言对外行为。 |
+| 安全性 | PASS | 无生产代码变化；上轮 caller/tenant、exact address、fail-closed、allowlist、ORM 参数化结论不变。新增日志测试还断言私有上游错误细节不进入日志。 |
+| 性能 | PASS | 本轮只有 focused unit tests，无运行时代码或查询行为变化。 |
+| 代码风格 | PASS | 新增测试结构沿用现有 fixture/`MagicMock` 风格；无跳过、xfail、`no cover`、阈值调整或无关辅助抽象。 |
+| 测试覆盖 | PASS | `157/157` 通过；current-tree change-line coverage `103/103 = 100.00%`，原 12 条未覆盖变更行现均命中。 |
+| ACI 覆盖率门禁 | PENDING | 本地 case 与 change-line 预检通过；项目全量总行覆盖率及当前最终 committed head 的远端 ACI job 尚不可得。 |
+| 静态检查 | PASS | `ruff check test_bot_public_service.py` 通过；`git diff --check origin/dev_refactory_collaboration` 通过；未新增 unused import/variable 或 whitespace 告警。 |
+
+### 本轮三项行为断言核验
+
+| 测试 | 结论 | 独立核验 |
+|---|---|---|
+| `test_catalog_search_fails_closed_on_unexpected_metadata_error` | PASS | 令 metadata port 抛带唯一私密 sentinel 的 `RuntimeError`；断言转为无详情 `BotCatalogSearchUnavailableError`，日志含 request ID、候选数、固定 `invalid_metadata` 类别，且不含 sentinel。真实命中原缺口 `1135,1136,1142`。 |
+| `test_catalog_search_redacts_sensitive_fields_and_malformed_ext` | PASS | 同时构造 malformed JSON ext 与字符串 ext；断言 `device_id=None`、malformed ext 变 `{}`、passport token/`iam_token` 变 `None`，非敏感字段保留。真实命中原缺口 `1152,1155-1158,1161,1164`。 |
+| `test_catalog_search_filters_blank_backend_addresses` | PASS | 同时提供 blank `bot_id`、blank `entity_id` 和 valid address；断言 port 只收到 valid exact address，结果也只含 valid Bot。真实命中原缺口 `1183,1185`。 |
+
+三项均调用真实 `search_catalog_public_bots_by_keyword`，并对异常、日志、port 入参或返回数据作明确断言；
+没有直接调用仅为刷行的内部 helper，没有 `skip`/`xfail`/`pragma: no cover`，也没有与本功能无关的测试。
+
+## 测试与覆盖率证据
+
+- Focused pytest:
+  - `test_bot_public_service.py`
+  - `test_bot_catalog_metadata_service.py`
+  - `test_bot_public_router.py`
+  - `test_bot_repository_unified.py`
+  - `test_sync_bot_config_uses_resolver.py`
+- 用例: `157/157 (100.00%)`，skipped=0，failed=0。
+- 局部覆盖率: `1057/2907 = 36.36%`。该分母包含历史大文件，只用于定位缺口，不能替代项目全量 ACI 总行覆盖率。
+- 当前工作树变更可执行行覆盖率: `103/103 = 100.00%`，threshold `>= 90%`，PASS。
+- 未覆盖变更可执行行: 无。
 
 ### ACI 覆盖率证据
 
-- Base / Head: 未提供 / 当前 worktree 未提交改动。
-- 用例: 本地 100/100（100%），skipped=0，failed=0；非远端 ACI casePassRate。
-- 总行覆盖率: selected modules 839/2907（29%）；它包含大模块历史行，不能替代 change-line 指标。核心改动 module `BotPublicService` 为 484/551（88%）。
-- 变更行覆盖率: PENDING；无可用 base/head/远端 coverage artifact。
-- 远端 ACI job: PENDING。
+- Base / Current tree: `efa0b7da330d8f928b364de2b84a9012f9bbcedc` / `8de5e1d25bc5c593bde1e2c301edf15c623169ee + tracked uncommitted diff`。
+- 用例: 本地 focused `157/157 (100.00%)`；远端 ACI casePassRate `PENDING`，threshold = 100%。
+- 总行覆盖率: 远端/项目全量 `PENDING`，threshold `>= 70%`；局部 `1057/2907` 不作为该门禁结论。
+- 变更行覆盖率: 本地当前工作树 `103/103 (100.00%)`，threshold `>= 90%`，PASS。
+- 远端 ACI job: `PENDING`。当前工作树尚未形成最终 committed head，不得沿用较早 head 的远端 PASS。
 
-### Review Spec 检查项
+## 最小性与回归核验
+
+- 本轮仅在已有 Catalog service 测试类中新增 3 个与 iteration-4 REJECT 一一对应的行为测试。
+- 未新增通用 fixture、测试框架、生产 helper、配置、依赖或 CI 排除规则。
+- 生产文件 blob 与上轮评审一致：
+  - `bot_public_service.py`: `83e0b7bf4a53cf1adedeacf202a7d0a64747c50b`
+  - repository `bot.py`: `1c1dc32f46bc83663838e3dd639378dba26f30ac`
+  - `bot_public_module.py`: `17cc60b01b7cdfd0f610161de7c90a83c20585e9`
+- iteration 4 已通过的最小性结论保持不变：legacy sanitizer、原 paginated query 行为、DI 空行和
+  base 既有 `pytest` F401 均保持恢复状态；没有要求顺手清理 base 告警。
+
+## Review Spec 检查项
 
 | 编号 | 检查项 | 结论 | 说明 |
 |---|---|---|---|
-| R-01 | BCS request 由 Backend tenant-scoped public candidates 派生 | PASS | [service:1049](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py:1049) 先以 tenant-scoped ORM Backend 搜索枚举，再生成 worker IDs。 |
-| R-02 | canonical composite key、100 条 batch、physical Bot 校验 | FAIL | composite ID 与 colon bot ID 生成正确，batch size=100；但 BCSFuse response 不含/代码不验证 worker type，无法排除非 physical Bot，且 key 不含 tenant。 |
-| R-03 | join 后分页、total、stable order | PASS | [service:1055](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py:1055) 内连接后才在 [service:1084](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py:1084) 计算 total/slice；101 条跨批测试已通过。 |
-| R-04 | 5s fail-closed 固定 502、无 fallback | PASS | [service:1130](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py:1130) 使用 5 秒单次调用；异常转领域错误并由 [router:88](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_public/router.py:88) 固定映射为 502。 |
-| R-05 | caller/tenant BCS 语义 | FAIL | router 的 verified principal 仅触发 admission；batch 调用只传 Content-Type。BCSFuse endpoint [worker_routes.py:285](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/bcsfuse/src/interfaces/api/worker_routes.py:285) 按 `store.get_by_id` 全局查找且没有 tenant/caller dependency。 |
-| R-06 | App-only 安全兼容性 | FAIL | App-only 仍可到达 Backend，但没有 BCSFuse scoped membership contract 或 authorization conformance evidence，无法与 tenant collision 隔离共同成立。 |
-| R-07 | public schema/response/log | PASS | Gateway public fields未扩张；router allowlist 投影，catalog 日志仅含计数/失败类别，未记录 BCS response、worker list、keyword 或认证头。 |
-| R-08 | adapter/core/DI 边界 | PASS | router 薄；HttpClient 通过 `QUALIFIER_BCSFUSE` 在 DI 注入，core 未直接构建 HTTP client 或读取环境。 |
-| R-09 | 改动文件覆盖 >90% | FAIL | 核心 service 88%，router 79%，且 BCS malformed-response 分支无断言覆盖。 |
+| R-01 | unexpected metadata exception 必须 fail closed 且不泄露详情 | PASS | 异常类型、空公开错误详情、固定低敏日志与 sentinel 不泄露均有断言。 |
+| R-02 | Catalog sanitizer 行为有直接断言 | PASS | malformed ext、device、passport token、IAM token 和非敏感字段保留均覆盖。 |
+| R-03 | blank Backend address 不得进入 port 或结果 | PASS | blank bot/entity 两个分支均命中，port 入参和最终结果同时断言。 |
+| R-04 | 测试修复保持最小 | PASS | 只加 3 个目标测试；生产、协议、DI、schema、文档均无本轮变化。 |
+| R-05 | changeLineCoverage `>= 90%` | PASS | `103/103 = 100.00%`，原 12 行缺口全部关闭。 |
+| R-06 | 远端 ACI 不得误报 | PASS | 明确标记当前最终 committed head 的远端 ACI 为 PENDING。 |
 
 ## 具体问题列表
 
-### 问题 1: 无 tenant/caller 维度的 BCSFuse membership 可跨 tenant 错配
-
-- 文件: [bot_public_service.py:1121](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py:1121), [worker_routes.py:285](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/bcsfuse/src/interfaces/api/worker_routes.py:285)
-- 严重程度: 必须修复
-- 描述: Backend `(bot_id, owner_id)` 仅在 tenant 内唯一，而 BCSFuse batch endpoint 没有 tenant 或 verified-caller input，并以 `store.get_by_id(worker_id)` 全局查找。tenant A 和 B 若存在同一 pair，A 未注册 BCS worker 也可能因 B 的 worker 存在而通过 inner join。
-- 建议修复方式: 使用 tenant/caller-scoped BCS contract，或将可信 tenant 纳入 BCS worker identity 与存储/查询约束；在 BCS side 增加 User+App/App-only authorization conformance tests，并增加 A/B same-pair regression。
-
-### 问题 2: 仅以 response map key 判定 membership，未验证 physical Bot/metadata shape
-
-- 文件: [bot_public_service.py:1137](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py:1137)
-- 严重程度: 必须修复
-- 描述: 代码只验证 `data` 是 dict，并把请求内 key 直接加入 available set；不验证 item 是有效 metadata 或 physical Bot。`{"success":true,"data":{"id":null}}` 会被视为命中。现有 batch response 本身也没有 worker `type`，故无法满足 Review Spec 的 physical-bot 防错配约束。
-- 建议修复方式: 将 batch contract 收紧为 tenant-scoped physical-Bot membership，并逐项校验 required fields/type；无效 item/envelope 均转 `BotCatalogSearchUnavailableError`。覆盖 missing data、invalid item、human/non-Bot、requested-key mismatch。
-
-### 问题 3: 共享 service 方法意外改变既有内部搜索 API
-
-- 文件: [bot_public_service.py:1027](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py:1027), [router_auth.py:117](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog/src/backend/src/agentclaw/community/adapters/http/bot_public/router_auth.py:117)
-- 严重程度: 必须修复
-- 描述: `/api/v1/bot-public/search` 也调用同一个 `search_public_bots_by_keyword`；本次使它依赖 BCSFuse 且在上游失败时进入其 generic 500/error body，并非只修改 catalog `/openapi/v1/.../search`。没有该现有 API 的兼容性或 failure mapping 测试。
-- 建议修复方式: 将 catalog join 编排拆成专用 service method/port，仅由 OpenAPI catalog router 调用；或明确更新 internal API 契约、固定错误映射并补齐兼容性测试。
+无。
 
 ## 整体结论
 
-**结论: REJECT**
+**结论: PASS**
 
 ### 必须修复项
 
-1. 使 BCS metadata membership 按可信 tenant/caller 隔离，并验证 physical Bot；不得以全局 worker ID 查询替代。
-2. 隔离或显式兼容 `/api/v1/bot-public/search` 的既有行为。
-3. 补足 BCS malformed/type、cross-tenant collision、internal route failure 与新增分支测试，使改动覆盖达到 >90%，再提供远端 ACI 证据。
+无。
+
+### 下一步
+
+继续 `tc-engine-regression`，并在当前 tracked diff 提交形成最终 head 后重新执行远端 ACI；只有
+`casePassRate >= 100%`、`lineCoverage >= 70%`、`changeLineCoverage >= 90%` 三项门禁均通过后才可部署。

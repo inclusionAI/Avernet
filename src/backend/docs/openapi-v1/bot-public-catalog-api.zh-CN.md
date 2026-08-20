@@ -28,7 +28,7 @@ Backend-only 搜索。未来配置端口后，`total` 与分页仍将基于完�
 
 | 参数 | 必填 | 规则 |
 |---|---:|---|
-| `search` | 否 | Bot 名称或 owner 名称的模糊关键词；由 Backend 检索 |
+| `search` | 否 | Bot 名称或 owner 名称关键词 |
 | `page` | 否 | 默认 1，最小 1 |
 | `page_size` | 否 | 默认 20，范围 1–100 |
 

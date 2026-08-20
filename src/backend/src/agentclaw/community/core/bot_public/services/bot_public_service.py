@@ -1056,7 +1056,26 @@ class BotPublicService:
         if not items:
             return public_bot_result
 
-        self._sanitize_public_bots(items)
+        # Sanitize sensitive fields to avoid leaking them through the public search API.
+        EXT_SENSITIVE_KEYS = {"iam_token"}
+        for bot in items:
+            # Redact top-level device_id
+            if "device_id" in bot:
+                bot["device_id"] = None
+            # Redact sensitive fields inside ext
+            ext = bot.get("ext")
+            if isinstance(ext, str):
+                try:
+                    ext = json.loads(ext)
+                except json.JSONDecodeError:
+                    ext = {}
+            if isinstance(ext, dict):
+                if isinstance(ext.get("passport"), dict) and "token" in ext["passport"]:
+                    ext["passport"]["token"] = None
+                for key in EXT_SENSITIVE_KEYS:
+                    if key in ext:
+                        ext[key] = None
+                bot["ext"] = ext
 
         # 查询好友申请记录。公开 catalog 不携带用户作用域，因此不读取关系数据。
         if not user_id:
@@ -1126,7 +1145,24 @@ class BotPublicService:
             for bot in candidates
             if self._catalog_address(bot) in admitted
         ]
-        self._sanitize_public_bots(items)
+        # Sanitize sensitive fields before pagination and public projection.
+        EXT_SENSITIVE_KEYS = {"iam_token"}
+        for bot in items:
+            if "device_id" in bot:
+                bot["device_id"] = None
+            ext = bot.get("ext")
+            if isinstance(ext, str):
+                try:
+                    ext = json.loads(ext)
+                except json.JSONDecodeError:
+                    ext = {}
+            if isinstance(ext, dict):
+                if isinstance(ext.get("passport"), dict) and "token" in ext["passport"]:
+                    ext["passport"]["token"] = None
+                for key in EXT_SENSITIVE_KEYS:
+                    if key in ext:
+                        ext[key] = None
+                bot["ext"] = ext
         total = len(items)
         page_items = items[(page - 1) * page_size:page * page_size]
         logger.info(
@@ -1182,27 +1218,6 @@ class BotPublicService:
                 raise BotCatalogMetadataUnavailableError()
             admitted.add(address)
         return admitted
-
-    @staticmethod
-    def _sanitize_public_bots(items: list[dict[str, Any]]) -> None:
-        """Redact fields that must not leave either public-search path."""
-        EXT_SENSITIVE_KEYS = {"iam_token"}
-        for bot in items:
-            if "device_id" in bot:
-                bot["device_id"] = None
-            ext = bot.get("ext")
-            if isinstance(ext, str):
-                try:
-                    ext = json.loads(ext)
-                except json.JSONDecodeError:
-                    ext = {}
-            if isinstance(ext, dict):
-                if isinstance(ext.get("passport"), dict) and "token" in ext["passport"]:
-                    ext["passport"]["token"] = None
-                for key in EXT_SENSITIVE_KEYS:
-                    if key in ext:
-                        ext[key] = None
-                bot["ext"] = ext
 
     def list_my_bot_friends(
         self,

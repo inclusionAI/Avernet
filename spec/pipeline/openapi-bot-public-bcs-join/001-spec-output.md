@@ -2,7 +2,7 @@
 agent: tc-review
 status: superseded-by-004
 created: 2026-08-20T00:00:00+08:00
-iteration: 3
+iteration: 4
 ---
 
 # 系分 Spec：Public Bot Catalog BCS 元信息端口
@@ -34,6 +34,16 @@ BCS HTTP 接口。
   `502000 / Catalog service unavailable`。
 - [x] Legacy `/api/v1/bot-public/search` 保持 Backend-only；Discover 保持既有 BCSFuse 行为与日志。
 
+## 最小完整变更边界
+
+- 只保留实现上述端口、严格 inner join、fixed-502、DI、公开文档和行为测试所必需的改动。
+- 撤销与本功能无关的纯格式化、重排、重命名、注释润色和邻近代码清理；即使格式化工具建议修改，
+  也不得扩大到未承担本次行为变化的行。
+- 必须修改共享签名或仓储分页行为时，保留最小的类型与实现改动，并用直接行为测试证明它是
+  join-before-pagination 所必需；不得顺手重构其他调用方。
+- 评审必须逐文件对照 base diff，明确证明每个生产代码变更都能追溯到本 Spec；发现仅改变排版而
+  不改变所需行为的 diff 即 REJECT。
+
 ## 验收标准
 
 - 任何未配置或不可用的 metadata port（包括空候选）均令 `/search` 返回固定 `502000` envelope。
@@ -51,6 +61,7 @@ BCS HTTP 接口。
 | TC-02 | metadata 含非 Bot、重复、未知或空白地址 | fail closed，不返回部分结果。 |
 | TC-03 | 同一 bot_id、不同 entity_id | 仅 exact address 可 join。 |
 | TC-04 | 502 OpenAPI response | 有 `ErrorEnvelope` 与固定 `502000` 示例。 |
+| TC-05 | 对照 base 审查生产代码 diff | 不含与本功能无关的纯格式化或邻近清理。 |
 
 ## Ship Spec
 

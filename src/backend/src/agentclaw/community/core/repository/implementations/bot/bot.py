@@ -451,10 +451,17 @@ class BotRepository(
                     )
                 )
             total = query.count()
-            query = query.order_by(self.Model.gmt_create.desc(), self.Model.id.desc())
-            if page is not None and page_size is not None:
-                query = query.offset((page - 1) * page_size).limit(page_size)
-            bots = query.all()
+            if page is None or page_size is None:
+                bots = query.order_by(
+                    self.Model.gmt_create.desc(), self.Model.id.desc()
+                ).all()
+            else:
+                bots = (
+                    query.order_by(self.Model.gmt_create.desc())
+                    .offset((page - 1) * page_size)
+                    .limit(page_size)
+                    .all()
+                )
             return total, [b.to_dict() for b in bots]
 
     # ── updates (single conditional statements) ─────────────────

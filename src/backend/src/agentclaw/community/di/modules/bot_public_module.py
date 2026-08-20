@@ -19,6 +19,7 @@ through the injector.
 """
 from __future__ import annotations
 
+
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
