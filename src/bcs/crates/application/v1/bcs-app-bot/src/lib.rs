@@ -58,18 +58,6 @@ impl InternalBotAttributesServiceImpl {
         Ok(())
     }
 
-    fn validate_visibility(visibility: Option<&str>) -> Result<(), ApplicationError> {
-        if let Some(visibility) = visibility
-            && !matches!(visibility, "public" | "protected" | "private")
-        {
-            return Err(ApplicationError::invalid(
-                "invalid_request",
-                "visibility must be public, protected, or private",
-            ));
-        }
-        Ok(())
-    }
-
     async fn load_record(&self, bot_id: &str) -> Result<BotControlPlaneRecord, ApplicationError> {
         self.control_plane
             .get_record(bot_id, &self.config.env)
@@ -99,7 +87,6 @@ impl InternalBotAttributesService for InternalBotAttributesServiceImpl {
         command: PatchBotInternalAttributes,
     ) -> Result<bcs_service_api::BotInternalAttributes, ApplicationError> {
         Self::validate_bot_id(&command.bot_id)?;
-        Self::validate_visibility(command.visibility.as_deref())?;
         if command.is_empty() {
             return Err(ApplicationError::invalid(
                 "invalid_request",
@@ -112,7 +99,6 @@ impl InternalBotAttributesService for InternalBotAttributesServiceImpl {
                 &command.bot_id,
                 &self.config.env,
                 BotControlPlanePatch {
-                    visibility: command.visibility,
                     user_visibility: command.user_visibility,
                     friend_ext: command.friend_ext,
                     friend_check_in_strategy: command.friend_check_in_strategy,
@@ -275,8 +261,6 @@ impl BotServiceImpl {
                     reachability,
                     provider,
                     agent_code: record.agent_code,
-                    task_claim_mode: record.task_claim_mode,
-                    task_dream_mode: record.task_dream_mode,
                     created_at: record.created_at,
                     updated_at: record.updated_at,
                 }))
@@ -500,14 +484,10 @@ impl BotService for BotServiceImpl {
                 command.bot_id
             )));
         }
-        if record.kind == ActorKind::Human
-            && (command.patch.descriptor.is_some()
-                || command.patch.task_claim_mode.is_some()
-                || command.patch.task_dream_mode.is_some())
-        {
+        if record.kind == ActorKind::Human && command.patch.descriptor.is_some() {
             return Err(ApplicationError::invalid(
                 "invalid_bot_kind",
-                "Human rows do not support descriptor or task-mode patches",
+                "Human rows do not have a descriptor",
             ));
         }
 
@@ -563,8 +543,6 @@ impl BotService for BotServiceImpl {
                     visibility: command.patch.visibility.map(visibility_value),
                     status: command.patch.status.map(domain_status),
                     descriptor,
-                    task_claim_mode: command.patch.task_claim_mode,
-                    task_dream_mode: command.patch.task_dream_mode,
                     ..Default::default()
                 },
             )

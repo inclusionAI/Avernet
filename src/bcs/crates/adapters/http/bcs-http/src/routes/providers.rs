@@ -1,13 +1,13 @@
 use axum::{
     Json,
-    extract::{Path, Query, State, rejection::JsonRejection},
+    extract::{Path, State, rejection::JsonRejection},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
 use bcs_protocol::{
-    BCN_PROVIDER_ID_HEADER, PatchProviderBotRequest, PatchProviderRequest, ProviderAuthModeDto,
-    ProviderBotConnectionModeDto, ProviderCoordinationConfigDto, ProviderCoordinationModeDto,
-    ProviderInfoResponse, ProviderOrganizationManagementConfigDto, RegisterProviderBotRequest,
+    BCN_PROVIDER_ID_HEADER, PatchProviderRequest, ProviderAuthModeDto,
+    ProviderCoordinationConfigDto, ProviderCoordinationModeDto, ProviderInfoResponse,
+    ProviderOrganizationManagementConfigDto, RegisterProviderBotRequest,
     RegisterProviderBotResponse, RegisterProviderRequest, RegisterProviderResponse,
 };
 use bcs_service_api::application::v1::{
@@ -16,17 +16,15 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::{
     BotUseCaseError, CoordinationMode, DeleteProviderBotCommand, ProviderAuthMode,
-    ProviderBotBinding, ProviderBotConnectionMode, ProviderBotRosterItem,
-    ProviderBotTaskModesFilter, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
+    ProviderBotBinding, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
     ProviderRecord, RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
-    SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult, TaskModeMatch,
-    UpdateProviderBotCommand, UpdateProviderCommand,
+    SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult, UpdateProviderCommand,
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value, json};
 use tracing::{info, warn};
 
-use crate::mapping::capabilities::{to_core_skill, to_wire_skill};
+use crate::mapping::capabilities::to_core_skill;
 use crate::state::HttpAppState;
 
 #[derive(Debug, serde::Deserialize)]
@@ -45,8 +43,6 @@ pub struct ProviderStreamGrayResponse {
 #[serde(deny_unknown_fields)]
 pub struct PatchProviderBotAttributesRequest {
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
-    pub visibility: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub user_visibility: Option<UserVisibility>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub friend_ext: Option<Map<String, Value>>,
@@ -56,8 +52,7 @@ pub struct PatchProviderBotAttributesRequest {
 
 impl PatchProviderBotAttributesRequest {
     fn is_empty(&self) -> bool {
-        self.visibility.is_none()
-            && self.user_visibility.is_none()
+        self.user_visibility.is_none()
             && self.friend_ext.is_none()
             && self.friend_check_in_strategy.is_none()
     }
@@ -65,7 +60,6 @@ impl PatchProviderBotAttributesRequest {
     fn into_command(self, bot_id: String) -> PatchBotInternalAttributes {
         PatchBotInternalAttributes {
             bot_id,
-            visibility: self.visibility,
             user_visibility: self.user_visibility,
             friend_ext: self.friend_ext,
             friend_check_in_strategy: self.friend_check_in_strategy,
@@ -226,16 +220,6 @@ pub async fn register_provider_bot(
 ) -> Result<Json<RegisterProviderBotResponse>, ProviderRouteError> {
     let provider_admin_token = bearer_token(&headers)?;
     let allowed_switch_provider = state.allowed_switch_provider_ids.contains(&provider_id);
-    let connection_mode = req
-        .connection_mode
-        .unwrap_or(ProviderBotConnectionModeDto::Gateway);
-    // plugin mode is accepted only for allow-listed providers (§3.0 admission gate).
-    if matches!(connection_mode, ProviderBotConnectionModeDto::Plugin) && !allowed_switch_provider {
-        return Err(ProviderRouteError::bad_request(
-            "connection_mode plugin requires an allow-listed provider",
-        ));
-    }
-    let plugin_mode = matches!(connection_mode, ProviderBotConnectionModeDto::Plugin);
     let bot_uuid = allowed_switch_provider.then(|| req.provider_bot_ref.clone());
     let outcome = state
         .services
@@ -251,12 +235,7 @@ pub async fn register_provider_bot(
             skills: req.skills.into_iter().map(to_core_skill).collect(),
             scopes: req.scopes,
             bot_uuid,
-            // Gateway mode over an allow-listed provider rejects a collision where
-            // provider_bot_ref is already used as a bot_uuid; plugin mode relaxes
-            // this so W-before-P /补注册 over an existing real-token bot proceeds to
-            // the token-preserving soft-merge path.
-            reject_existing_bot_uuid: allowed_switch_provider && !plugin_mode,
-            connection_mode: connection_mode_from_wire(connection_mode),
+            reject_existing_bot_uuid: allowed_switch_provider,
         })
         .await
         .map_err(provider_error)?;
@@ -283,40 +262,6 @@ pub async fn list_provider_bots(
         .await
         .map_err(provider_error)?;
     let items: Vec<Value> = bindings.into_iter().map(binding_to_json).collect();
-    Ok(Json(json!({ "items": items })))
-}
-
-/// `GET /providers/{provider_id}/bots/by-task-modes` — internal (non-OpenAPI)
-/// roster consumed by backend task discovery/dispatch. Mirrors
-/// `list_provider_bots` admin-token validation, then intersects the provider's
-/// bot bindings with bots whose control-plane toggles satisfy the filter.
-pub async fn list_provider_bots_by_task_modes(
-    State(state): State<HttpAppState>,
-    Path(provider_id): Path<String>,
-    headers: HeaderMap,
-    Query(params): Query<TaskModesQueryParams>,
-) -> Result<Json<Value>, ProviderRouteError> {
-    let provider_admin_token = bearer_token(&headers)?;
-    let filter = ProviderBotTaskModesFilter {
-        task_claim_mode: parse_task_mode_toggle("task_claim_mode", &params.task_claim_mode)?,
-        task_dream_mode: parse_task_mode_toggle("task_dream_mode", &params.task_dream_mode)?,
-        match_mode: match params
-            .match_mode
-            .as_deref()
-            .map(str::trim)
-            .map(|value| value.eq_ignore_ascii_case("all"))
-        {
-            Some(true) => TaskModeMatch::All,
-            _ => TaskModeMatch::Any,
-        },
-    };
-    let items = state
-        .services
-        .provider_management
-        .list_provider_bots_by_task_modes(&provider_id, &provider_admin_token, filter)
-        .await
-        .map_err(provider_error)?;
-    let items: Vec<Value> = items.into_iter().map(roster_item_to_json).collect();
     Ok(Json(json!({ "items": items })))
 }
 
@@ -361,7 +306,6 @@ pub async fn patch_provider_bot_attributes(
     info!(
         provider_id,
         bot_uuid,
-        has_visibility = body.visibility.is_some(),
         has_user_visibility = body.user_visibility.is_some(),
         has_friend_ext = body.friend_ext.is_some(),
         friend_ext_key_count = body.friend_ext.as_ref().map(|value| value.len()),
@@ -438,45 +382,6 @@ fn delete_provider_bot_response(
         body["message"] = json!(message);
     }
     Json(body)
-}
-
-pub async fn patch_provider_bot(
-    State(state): State<HttpAppState>,
-    Path((provider_id, provider_bot_ref)): Path<(String, String)>,
-    headers: HeaderMap,
-    Json(req): Json<PatchProviderBotRequest>,
-) -> Result<Json<Value>, ProviderRouteError> {
-    let provider_admin_token = bearer_token(&headers)?;
-    let outcome = state
-        .services
-        .provider_management
-        .update_provider_bot(UpdateProviderBotCommand {
-            provider_id,
-            provider_admin_token,
-            provider_bot_ref,
-            name: req.name,
-            summary: req.summary,
-            domains: req.domains,
-            skills: req
-                .skills
-                .map(|skills| skills.into_iter().map(to_core_skill).collect()),
-            scopes: req.scopes,
-            visibility: req.visibility,
-        })
-        .await
-        .map_err(provider_error)?;
-
-    Ok(Json(json!({
-        "bot_uuid": outcome.bot_uuid,
-        "provider_id": outcome.provider_id,
-        "provider_bot_ref": outcome.provider_bot_ref,
-        "name": outcome.name,
-        "summary": outcome.summary,
-        "domains": outcome.domains,
-        "skills": outcome.skills.into_iter().map(to_wire_skill).collect::<Vec<_>>(),
-        "scopes": outcome.scopes,
-        "visibility": outcome.visibility,
-    })))
 }
 
 pub async fn resolve_agentpass_bot(
@@ -564,13 +469,6 @@ fn auth_mode_from_wire(mode: ProviderAuthModeDto) -> ProviderAuthMode {
         ProviderAuthModeDto::StaticBearer => ProviderAuthMode::StaticBearer,
         ProviderAuthModeDto::AgentPass => ProviderAuthMode::AgentPass,
         ProviderAuthModeDto::ProviderAdmin => ProviderAuthMode::ProviderAdmin,
-    }
-}
-
-fn connection_mode_from_wire(mode: ProviderBotConnectionModeDto) -> ProviderBotConnectionMode {
-    match mode {
-        ProviderBotConnectionModeDto::Gateway => ProviderBotConnectionMode::Gateway,
-        ProviderBotConnectionModeDto::Plugin => ProviderBotConnectionMode::Plugin,
     }
 }
 
@@ -863,42 +761,6 @@ fn binding_to_json(binding: ProviderBotBinding) -> Value {
         "created_at": binding.created_at,
         "updated_at": binding.updated_at,
     })
-}
-
-fn roster_item_to_json(item: ProviderBotRosterItem) -> Value {
-    json!({
-        "bot_id": item.bot_id,
-        "name": item.name,
-        "env": item.env,
-        "task_claim_mode": item.task_claim_mode,
-        "task_dream_mode": item.task_dream_mode,
-    })
-}
-
-/// Query params for `GET /providers/{provider_id}/bots/by-task-modes`. Toggles
-/// arrive as strings so empty/absent values can be tolerated as "do not filter".
-#[derive(Debug, Default, serde::Deserialize)]
-pub struct TaskModesQueryParams {
-    pub task_claim_mode: Option<String>,
-    pub task_dream_mode: Option<String>,
-    #[serde(rename = "match")]
-    pub match_mode: Option<String>,
-}
-
-/// Parse a task-mode toggle query param. `None`/empty => do not filter on this
-/// toggle; `true`/`1` => filter for the toggle ON; `false`/`0` => filter OFF.
-fn parse_task_mode_toggle(
-    name: &str,
-    value: &Option<String>,
-) -> Result<Option<bool>, ProviderRouteError> {
-    match value.as_deref().map(str::trim) {
-        None | Some("") => Ok(None),
-        Some("true") | Some("1") => Ok(Some(true)),
-        Some("false") | Some("0") => Ok(Some(false)),
-        Some(other) => Err(ProviderRouteError::bad_request(format!(
-            "invalid {name} value '{other}'; expected true|false"
-        ))),
-    }
 }
 
 #[derive(Debug, serde::Deserialize)]

@@ -24,10 +24,8 @@ pub enum FriendCheckInStrategy {
     DeptFree,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct BotInternalAttributes {
-    #[serde(default = "default_visibility")]
-    pub visibility: String,
     pub user_visibility: UserVisibility,
     #[serde(default)]
     pub friend_ext: Map<String, Value>,
@@ -37,7 +35,6 @@ pub struct BotInternalAttributes {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PatchBotInternalAttributes {
     pub bot_id: String,
-    pub visibility: Option<String>,
     pub user_visibility: Option<UserVisibility>,
     pub friend_ext: Option<Map<String, Value>>,
     pub friend_check_in_strategy: Option<FriendCheckInStrategy>,
@@ -45,15 +42,10 @@ pub struct PatchBotInternalAttributes {
 
 impl PatchBotInternalAttributes {
     pub fn is_empty(&self) -> bool {
-        self.visibility.is_none()
-            && self.user_visibility.is_none()
+        self.user_visibility.is_none()
             && self.friend_ext.is_none()
             && self.friend_check_in_strategy.is_none()
     }
-}
-
-fn default_visibility() -> String {
-    "protected".to_string()
 }
 
 #[async_trait]

@@ -26,8 +26,6 @@ pub struct BotControlPlaneRecord {
     pub created_by: Option<String>,
     pub descriptor: BotControlPlaneDescriptor,
     pub agent_code: Option<String>,
-    pub task_claim_mode: bool,
-    pub task_dream_mode: bool,
     pub created_at: u64,
     pub updated_at: u64,
     pub user_visibility: UserVisibility,
@@ -67,25 +65,6 @@ pub struct BotControlPlaneOwnedQuery {
     pub status: Option<ActorStatus>,
 }
 
-/// How to combine `task_claim_mode` / `task_dream_mode` filters in a task-mode roster query.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TaskModeMatch {
-    /// A bot qualifies if any listed mode matches (OR).
-    Any,
-    /// A bot qualifies only if every listed mode matches (AND).
-    All,
-}
-
-/// Roster query for physical bots by the task-mode toggles. Each mode is optional;
-/// when both are omitted the query returns all physical bots in the environment.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BotTaskModesQuery {
-    pub env: String,
-    pub task_claim_mode: Option<bool>,
-    pub task_dream_mode: Option<bool>,
-    pub match_mode: TaskModeMatch,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BotControlPlaneDescriptorPatch {
     pub summary: Option<String>,
@@ -100,8 +79,6 @@ pub struct BotControlPlanePatch {
     pub visibility: Option<String>,
     pub status: Option<ActorStatus>,
     pub descriptor: Option<BotControlPlaneDescriptorPatch>,
-    pub task_claim_mode: Option<bool>,
-    pub task_dream_mode: Option<bool>,
     pub user_visibility: Option<UserVisibility>,
     pub friend_ext: Option<Map<String, Value>>,
     pub friend_check_in_strategy: Option<FriendCheckInStrategy>,
@@ -110,7 +87,6 @@ pub struct BotControlPlanePatch {
 impl BotControlPlaneRecord {
     pub fn internal_attributes(&self) -> BotInternalAttributes {
         BotInternalAttributes {
-            visibility: self.visibility.clone(),
             user_visibility: self.user_visibility,
             friend_ext: self.friend_ext.clone(),
             friend_check_in_strategy: self.friend_check_in_strategy,

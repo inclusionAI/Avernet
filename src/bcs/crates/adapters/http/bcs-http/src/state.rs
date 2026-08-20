@@ -7,7 +7,7 @@ use bcs_route_security::OutboundUrlGuard;
 use axum::http::{HeaderMap, HeaderName};
 pub use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort};
 use bcs_service_api::application::v1::{
-    InternalBotAttributesService, GroupService, SessionFileApplicationService
+    InternalBotAttributesService, SessionFileApplicationService,
 };
 use bcs_service_api::{ProviderCredentialRepoPort, ProviderStreamGrayList};
 use bcs_services_container::Services;
@@ -433,7 +433,6 @@ fn purge_expired(runs: &mut HashMap<String, AdminInvocationRun>) {
 #[derive(Clone)]
 pub struct HttpAppState {
     pub services: Services,
-    pub group_application: Option<Arc<dyn GroupService>>,
     pub session_file_application: Option<Arc<dyn SessionFileApplicationService>>,
     pub internal_bot_attributes_service: Option<Arc<dyn InternalBotAttributesService>>,
     pub health: Arc<dyn HealthPort>,
@@ -477,19 +476,12 @@ pub struct HttpAppState {
     pub auth_config: bcs_auth_api::AuthConfig,
     pub outbound_url_guard: OutboundUrlGuard,
     pub admin_invocation_runs: Arc<AdminInvocationStore>,
-    /// Edge-permission connect use case (friend request lifecycle).
-    /// Transitional: Noop until Installment 3 wires the real service.
-    pub connect: Arc<dyn bcs_service_api::application::ConnectService>,
-    /// Edge-permission admission use case (`GET /bots/{id}/admission`).
-    /// Transitional: Noop until Installment 3 wires the real service.
-    pub admission: Arc<dyn bcs_service_api::application::AdmissionService>,
 }
 
 impl HttpAppState {
     pub fn new(services: Services) -> Self {
         Self {
             services,
-            group_application: None,
             session_file_application: None,
             internal_bot_attributes_service: None,
             health: Arc::new(DefaultHealthPort),
@@ -535,8 +527,6 @@ impl HttpAppState {
             auth_config: bcs_auth_api::AuthConfig::default(),
             outbound_url_guard: OutboundUrlGuard::strict(),
             admin_invocation_runs: Arc::new(AdminInvocationStore::default()),
-            connect: Arc::new(bcs_test_support::NoopConnectService),
-            admission: Arc::new(bcs_test_support::NoopAdmissionService),
         }
     }
 
@@ -550,11 +540,6 @@ impl HttpAppState {
         service: Option<Arc<dyn SessionFileApplicationService>>,
     ) -> Self {
         self.session_file_application = service;
-        self
-    }
-
-    pub fn with_group_application(mut self, service: Arc<dyn GroupService>) -> Self {
-        self.group_application = Some(service);
         self
     }
 
@@ -756,26 +741,6 @@ impl HttpAppState {
 
     pub fn with_admin_invocation_runs(mut self, runs: Arc<AdminInvocationStore>) -> Self {
         self.admin_invocation_runs = runs;
-        self
-    }
-
-    /// Inject the edge-permission `ConnectService` (friend request lifecycle).
-    /// Transitional: defaults to Noop; real impl wired in Installment 3.
-    pub fn with_connect(
-        mut self,
-        connect: Arc<dyn bcs_service_api::application::ConnectService>,
-    ) -> Self {
-        self.connect = connect;
-        self
-    }
-
-    /// Inject the edge-permission `AdmissionService` (`GET /bots/{id}/admission`).
-    /// Transitional: defaults to Noop; real impl wired in Installment 3.
-    pub fn with_admission(
-        mut self,
-        admission: Arc<dyn bcs_service_api::application::AdmissionService>,
-    ) -> Self {
-        self.admission = admission;
         self
     }
 
