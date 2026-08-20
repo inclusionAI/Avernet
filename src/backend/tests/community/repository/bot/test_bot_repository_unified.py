@@ -322,7 +322,7 @@ def test_list_by_search_can_return_complete_ordered_candidate_set(repo):
     total, rows = repo.list_by_search(public="1", page=None, page_size=None)
 
     assert total == 3
-    assert {row["bot_id"] for row in rows} == {"b1", "b2", "b3"}
+    assert [row["bot_id"] for row in rows] == ["b3", "b2", "b1"]
 
 
 def test_list_by_conditions_owner_engine_status_filters(repo):
