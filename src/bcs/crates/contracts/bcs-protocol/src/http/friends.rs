@@ -6,14 +6,17 @@
 use serde::{Deserialize, Serialize};
 
 /// Request body for creating a friend (connect) request.
+/// Old `/friends/*` path uses `from_bot`; new `/v2/friends/*` path uses `from_actor` + `actor_kind`.
+/// Both fields coexist for backward compat (old clients send `from_bot`, v2 clients send `from_actor`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateFriendRequestBody {
-    /// Caller actor id (raw staff_no or bot_uuid; fallback when no Bearer).
-    /// `alias = "from_bot"` for backward compat with old bcs-cli and old /friends/* path.
-    #[serde(default, alias = "from_bot")]
+    /// Old path: caller bot UUID (fallback when no Bearer). Used by bcs-cli.
+    #[serde(default)]
+    pub from_bot: Option<String>,
+    /// V2 path: caller actor id (raw staff_no or bot_uuid; fallback when no Bearer).
+    #[serde(default)]
     pub from_actor: Option<String>,
-    /// Caller actor kind: "human" → prefix `human_`, "bot" → use as-is.
-    /// When omitted, the id is used as-is (backward compat with `human_` prefix).
+    /// V2 path: caller actor kind: "human" → prefix `human_`, "bot" → use as-is.
     #[serde(default)]
     pub actor_kind: Option<String>,
     pub to_bot: String,
