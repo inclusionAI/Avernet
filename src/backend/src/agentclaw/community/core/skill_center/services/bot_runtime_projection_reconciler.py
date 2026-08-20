@@ -28,7 +28,9 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeProjectionResolver,
 )
 from agentclaw.community.core.skill_center.runtime_policy import (
+    require_cleanup_capable_bot_skill_runtime,
     require_supported_bot_skill_runtime,
+    runtime_layout_engine_for_bot,
 )
 from agentclaw.community.core.skills_pool.mapping_intent import mapping_contract_for
 from agentclaw.community.core.skills_pool.models import (
@@ -120,6 +122,36 @@ class BotRuntimeProjectionReconciler:
             effective_cli_items=effective_cli_items,
         )
 
+    async def reconcile_cleanup(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+    ) -> None:
+        """Safely remove legacy state without granting new runtime writes.
+
+        Historical engines use their existing full legacy synchronizer for
+        Local/Repo removal.  Center requires the Pool v3 contract and is never
+        permitted on this compatibility path.
+        """
+        service, _bot, engine, projection, effective_cli_items = (
+            self._resolve_cleanup_plan(bot_id=bot_id, owner_id=owner_id)
+        )
+        if any(mapping.corpus == "center" for mapping in projection.skill_mappings):
+            raise SkillSetRuntimeReconcileError()
+        if not service.sync_runtime(
+            desired_skills=self._desired_skills(projection)
+        ):
+            raise SkillSetRuntimeReconcileError()
+        await self._apply_non_skill_projection(
+            service=service,
+            engine=engine,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            projection=projection,
+            effective_cli_items=effective_cli_items,
+        )
+
     def _resolve_plan(
         self,
         *,
@@ -132,6 +164,33 @@ class BotRuntimeProjectionReconciler:
             raise LocalSkillNotFoundError()
         require_supported_bot_skill_runtime(bot)
 
+        return self._build_plan(
+            bot=bot,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            retired_mappings=retired_mappings,
+        )
+
+    def _resolve_cleanup_plan(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+    ):
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if bot is None:
+            raise LocalSkillNotFoundError()
+        require_cleanup_capable_bot_skill_runtime(bot)
+        return self._build_plan(bot=bot, bot_id=bot_id, owner_id=owner_id)
+
+    def _build_plan(
+        self,
+        *,
+        bot: dict,
+        bot_id: str,
+        owner_id: str,
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+    ):
         engine = str(bot.get("active_engine") or "openclaw")
         service = self._factory.create(
             user_id=owner_id,
@@ -218,16 +277,7 @@ class BotRuntimeProjectionReconciler:
             # MCP, Passport, probe, or mapping request is emitted.
             raise SkillSetRuntimeReconcileError()
 
-        desired_skills = [
-            {
-                "id": str(asset.skill_id),
-                "name": asset.name,
-                "git_path": asset.git_path,
-                "skill_uuid": asset.skill_uuid,
-                "sc_version_number": asset.sc_version_number,
-            }
-            for asset in projection.skill_assets
-        ]
+        desired_skills = self._desired_skills(projection)
         if engine == "teclaw":
             # Teclaw v4 consumes a complete Artifact projection through the
             # existing DeviceSync dispatcher. It has no Skills Pool mapping
@@ -256,7 +306,7 @@ class BotRuntimeProjectionReconciler:
             await self._apply_pool_mappings(
                 bot_id=bot_id,
                 owner_id=owner_id,
-                engine=engine,
+                layout_engine=runtime_layout_engine_for_bot(bot),
                 mappings=mappings,
                 retired_mappings=retired,
                 source_layout=(
@@ -303,7 +353,7 @@ class BotRuntimeProjectionReconciler:
         *,
         bot_id: str,
         owner_id: str,
-        engine: str,
+        layout_engine: str,
         mappings: list[PoolSkillMapping],
         retired_mappings: list[PoolSkillMapping],
         source_layout: SkillMappingSourceLayout,
@@ -315,7 +365,7 @@ class BotRuntimeProjectionReconciler:
                 probe = await self._pool_runtime.probe(
                     bot_id=bot_id,
                     user_id=owner_id,
-                    engine=engine,
+                    engine=layout_engine,
                 )
                 supported_versions = probe.evidence.get(
                     "supported_mapping_contract_versions"
@@ -341,6 +391,19 @@ class BotRuntimeProjectionReconciler:
             raise SkillSetRuntimeReconcileError() from exc
         if not verified:
             raise SkillSetRuntimeReconcileError()
+
+    @staticmethod
+    def _desired_skills(projection: RuntimeProjection) -> list[dict[str, str | None]]:
+        return [
+            {
+                "id": str(asset.skill_id),
+                "name": asset.name,
+                "git_path": asset.git_path,
+                "skill_uuid": asset.skill_uuid,
+                "sc_version_number": asset.sc_version_number,
+            }
+            for asset in projection.skill_assets
+        ]
 
 
 # Compatibility names for existing constructors and tests. They are aliases,

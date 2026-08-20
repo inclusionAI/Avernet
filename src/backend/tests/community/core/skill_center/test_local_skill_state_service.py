@@ -150,17 +150,26 @@ class _Installations:
 
 
 class _Bots:
-    def __init__(self, status: str, entity_id: str = "owner") -> None:
+    def __init__(
+        self,
+        status: str,
+        entity_id: str = "owner",
+        engine: str = "openclaw",
+        bot_type: str | None = None,
+    ) -> None:
         self.status = status
         self.entity_id = entity_id
+        self.engine = engine
+        self.bot_type = bot_type
 
     def get_by_id_and_owner(self, *_args):
         return {
             "status": self.status,
-            "active_engine": "openclaw",
+            "active_engine": self.engine,
             "env": "pre",
             "entity_id": self.entity_id,
             "entity_type": "staff",
+            **({"bot_type": self.bot_type} if self.bot_type is not None else {}),
         }
 
 
@@ -232,6 +241,7 @@ class _RuntimeReconciler:
         self.skills = skills
         self.pool_layout = pool_layout
         self.calls: list[dict] = []
+        self.cleanup_calls: list[dict] = []
 
     async def reconcile(self, **kwargs) -> None:
         self.calls.append(kwargs)
@@ -293,6 +303,25 @@ class _RuntimeReconciler:
         ):
             raise RuntimeError("runtime reconcile failed")
 
+    async def reconcile_cleanup(self, **kwargs) -> None:
+        self.cleanup_calls.append(kwargs)
+        if not self.runtime.sync_runtime(
+            desired_skills=[
+                {
+                    "id": str(asset.skill_id),
+                    "name": asset.name,
+                    "git_path": asset.git_path,
+                }
+                for asset in self.skills.list_bot_active_assets(
+                    env="pre",
+                    bot_id=kwargs["bot_id"],
+                    user_id=kwargs["owner_id"],
+                    engine="aicoding",
+                )
+            ]
+        ):
+            raise RuntimeError("runtime cleanup failed")
+
 
 class _Layouts:
     def __init__(self, *, pool: bool = False) -> None:
@@ -344,6 +373,8 @@ def _service(
     guard_error=None,
     guard_release_error: Exception | None = None,
     mutation_guard=None,
+    engine: str = "openclaw",
+    bot_type: str | None = None,
 ):
     skills = _Skills(active=active, git_path=git_path)
     sets = _Sets(skills, associated=associated)
@@ -363,7 +394,7 @@ def _service(
     service = LocalSkillStateService(
         skills,
         sets,
-        _Bots(status, entity_id),
+        _Bots(status, entity_id, engine=engine, bot_type=bot_type),
         collaborators or _Collaborators(),
         factory,
         mutation_guard,
@@ -629,6 +660,55 @@ async def test_repo_direct_fails_closed_for_unsupported_bot_engine_pair():
         )
 
     assert installations.events == []
+
+
+@pytest.mark.asyncio
+async def test_historical_aicoding_local_skill_can_deactivate_but_cannot_activate():
+    service, skills, installations, _guard, runtime, _factory = _service(
+        active=True,
+        engine="aicoding",
+        bot_type="personal",
+    )
+
+    result = await service.set_local_skill_active(
+        skill_id="9", actor_id="owner", active=False
+    )
+
+    assert result["active"] is False
+    assert skills.active is False
+    assert installations.events == ["add"]
+    assert service._runtime_reconciler.cleanup_calls == [
+        {"bot_id": "bot", "owner_id": "owner"}
+    ]
+    assert runtime.publish_calls == []
+
+    with pytest.raises(SkillEngineNotSupportedError):
+        await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
+    assert installations.events == ["add"]
+
+
+@pytest.mark.asyncio
+async def test_historical_aicoding_repo_skill_can_deactivate_but_cannot_activate():
+    service, _skills, installations, runtime = _repo_service(
+        active=True,
+        engine="aicoding",
+    )
+
+    result = await service.set_repo_skill_active(
+        skill_id="9", bot_id="bot", actor_id="owner", active=False
+    )
+
+    assert result["active"] is False
+    assert installations.events == ["uninstall:pre:bot:9"]
+    assert service._runtime_reconciler.cleanup_calls == [
+        {"bot_id": "bot", "owner_id": "owner"}
+    ]
+    assert runtime.publish_calls == []
+
+    with pytest.raises(SkillEngineNotSupportedError):
+        await service.set_repo_skill_active(
+            skill_id="9", bot_id="bot", actor_id="owner", active=True
+        )
 
 
 @pytest.mark.asyncio

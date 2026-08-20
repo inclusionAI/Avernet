@@ -26,6 +26,7 @@ provides:
   - "BotSkillAssetService"
   - "RuntimeProjectionResolver"
   - "BotRuntimeProjectionReconciler"
+  - "BotRuntimeProjectionReconcilerProtocol"
   - "LocalSkillCleanupWorkModel"
 consumes:
   - "BotRepository"
@@ -46,7 +47,6 @@ consumes:
   - "LocalSkillCleanupRepository"
   - "BotRuntimeProjectionReconcilerProtocol"
 internal_dependencies:
-  - agentclaw.community.api.bot_runtime_projection_reconciler
   - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module

@@ -29,5 +29,14 @@ class BotRuntimeProjectionReconcilerProtocol(Protocol):
         """Project MCP/CLI while an external authority owns Skill mappings."""
         ...
 
+    async def reconcile_cleanup(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+    ) -> None:
+        """Remove historical capability state through the legacy runtime path."""
+        ...
+
 
 __all__ = ["BotRuntimeProjectionReconcilerProtocol"]

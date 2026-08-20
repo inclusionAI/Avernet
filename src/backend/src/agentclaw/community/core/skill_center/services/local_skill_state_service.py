@@ -27,7 +27,9 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.skill_center.runtime_policy import (
-    require_supported_bot_skill_runtime,
+    BotSkillRuntimeCommand,
+    BotSkillRuntimeMutationMode,
+    require_bot_skill_runtime_command,
 )
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
@@ -124,6 +126,8 @@ class LocalSkillStateService:
                     raise LocalSkillNotFoundError()
                 if not is_bot_ready(bot):
                     raise LocalSkillNotReadyError()
+                command = self._runtime_command(active=active)
+                mode = require_bot_skill_runtime_command(bot, command)
                 changed = self._write_desired_state(
                     active=active,
                     env=str(bot["env"]),
@@ -134,13 +138,18 @@ class LocalSkillStateService:
 
                 if active:
                     synced = await self._reconcile_runtime(
-                        bot_id=bot_id, owner_id=owner_id
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        command=command,
+                        mode=mode,
                     )
                 else:
                     synced = await self._reconcile_deactivation(
                         skill=skill,
                         owner_id=owner_id,
                         bot_id=bot_id,
+                        command=command,
+                        mode=mode,
                     )
                 self._ensure_mutation_lease(mutation_lease)
                 if not synced:
@@ -159,7 +168,10 @@ class LocalSkillStateService:
                         # It owns each engine's actual active-root compatibility,
                         # including Claude Code's historical workspace root.
                         restored = await self._reconcile_runtime(
-                            bot_id=bot_id, owner_id=owner_id
+                            bot_id=bot_id,
+                            owner_id=owner_id,
+                            command=command,
+                            mode=mode,
                         )
                         self._ensure_mutation_lease(mutation_lease)
                         if not restored:
@@ -197,7 +209,8 @@ class LocalSkillStateService:
                 raise LocalSkillNotFoundError()
         if not is_bot_ready(bot):
             raise LocalSkillNotReadyError()
-        self._require_supported_repo_runtime(bot)
+        command = self._runtime_command(active=active)
+        mode = self._require_repo_runtime_command(bot, command)
         scope = self._scope_for(bot, bot_id)
         try:
             mutation_lease = self._mutation_guard.acquire(scope=scope)
@@ -243,13 +256,18 @@ class LocalSkillStateService:
                 self._ensure_mutation_lease(mutation_lease)
                 if active:
                     synced = await self._reconcile_runtime(
-                        owner_id=owner_id, bot_id=bot_id
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                        command=command,
+                        mode=mode,
                     )
                 else:
                     synced = await self._reconcile_deactivation(
                         skill=raw,
                         owner_id=owner_id,
                         bot_id=bot_id,
+                        command=command,
+                        mode=mode,
                     )
                 self._ensure_mutation_lease(mutation_lease)
                 if synced:
@@ -272,7 +290,10 @@ class LocalSkillStateService:
                     except Exception as exc:
                         raise LocalSkillStorageError() from exc
                     if not await self._reconcile_runtime(
-                        owner_id=owner_id, bot_id=bot_id
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                        command=command,
+                        mode=mode,
                     ):
                         raise LocalSkillRuntimeSyncError()
                     self._ensure_mutation_lease(mutation_lease)
@@ -360,8 +381,18 @@ class LocalSkillStateService:
         return self._installations.uninstall(env=env, bot_id=bot_id, skill_id=skill_id)
 
     @staticmethod
-    def _require_supported_repo_runtime(bot: dict[str, Any]) -> None:
-        require_supported_bot_skill_runtime(bot)
+    def _require_repo_runtime_command(
+        bot: dict[str, Any], command: BotSkillRuntimeCommand
+    ) -> BotSkillRuntimeMutationMode:
+        return require_bot_skill_runtime_command(bot, command)
+
+    @staticmethod
+    def _runtime_command(*, active: bool) -> BotSkillRuntimeCommand:
+        return (
+            BotSkillRuntimeCommand.WRITE
+            if active
+            else BotSkillRuntimeCommand.CLEANUP
+        )
 
     def _require_no_normal_skill_set_membership(
         self,
@@ -439,8 +470,16 @@ class LocalSkillStateService:
         owner_id: str,
         bot_id: str,
         retired_mappings=(),
+        command: BotSkillRuntimeCommand,
+        mode: BotSkillRuntimeMutationMode,
     ) -> bool:
         try:
+            if mode is BotSkillRuntimeMutationMode.CLEANUP_ONLY:
+                await self._runtime_reconciler.reconcile_cleanup(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                )
+                return True
             if retired_mappings:
                 await self._runtime_reconciler.reconcile(
                     bot_id=bot_id,
@@ -462,6 +501,8 @@ class LocalSkillStateService:
         skill: dict[str, Any],
         owner_id: str,
         bot_id: str,
+        command: BotSkillRuntimeCommand,
+        mode: BotSkillRuntimeMutationMode,
     ) -> bool:
         try:
             retired_mapping = list(
@@ -495,4 +536,6 @@ class LocalSkillStateService:
             owner_id=owner_id,
             bot_id=bot_id,
             retired_mappings=retired_mapping,
+            command=command,
+            mode=mode,
         )

@@ -8,6 +8,9 @@ from injector import inject, singleton
 from agentclaw.community.api.bot_runtime_projection_reconciler import (
     BotRuntimeProjectionReconcilerProtocol,
 )
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    BotRuntimeProjectionReconcilerProtocol as CoreBotRuntimeProjectionReconcilerProtocol,
+)
 from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
     BotRuntimeProjectionReconciler,
 )
@@ -25,6 +28,11 @@ class _RecordingReconciler:
 
     async def reconcile_non_skill_projection(self, **kwargs) -> None:
         self.calls.append({"operation": "non_skill", **kwargs})
+        if self.error is not None:
+            raise self.error
+
+    async def reconcile_cleanup(self, **kwargs) -> None:
+        self.calls.append({"operation": "cleanup", **kwargs})
         if self.error is not None:
             raise self.error
 
@@ -57,6 +65,9 @@ def test_world_wires_service_api_to_the_real_reconciler(world) -> None:
         world.get(BotRuntimeProjectionReconcilerProtocol),
         BotRuntimeProjectionReconciler,
     )
+    assert world.get(BotRuntimeProjectionReconcilerProtocol) is world.get(
+        CoreBotRuntimeProjectionReconcilerProtocol
+    )
 
 
 @pytest.mark.asyncio
@@ -82,6 +93,18 @@ async def test_non_skill_service_api_reaches_the_bound_implementation(world) -> 
 
     assert runtime.calls == [
         {"operation": "non_skill", "bot_id": "bot-1", "owner_id": "owner-1"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_service_api_reaches_the_bound_implementation(world) -> None:
+    runtime = _RecordingReconciler()
+    consumer = _consumer(world, runtime)
+
+    await consumer._runtime.reconcile_cleanup(bot_id="bot-1", owner_id="owner-1")
+
+    assert runtime.calls == [
+        {"operation": "cleanup", "bot_id": "bot-1", "owner_id": "owner-1"}
     ]
 
 

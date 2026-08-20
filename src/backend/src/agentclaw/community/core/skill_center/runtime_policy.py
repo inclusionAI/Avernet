@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any
 
 from agentclaw.community.core.skill_center.errors import (
@@ -20,22 +21,108 @@ _CLAUDE_CODE_WRITABLE_TEMPLATES = frozenset(
 )
 
 
-def require_supported_bot_skill_runtime(bot: dict[str, Any]) -> None:
-    """Fail closed outside the product-approved Bot × Engine matrix."""
-    bot_type = str(bot.get("bot_type") or "")
-    # New AICoding-image Bots still expose the logical ``claude_code`` engine
-    # (their template_type selects the physical image). Historical rows whose
-    # active_engine is literally ``aicoding`` retain safe read/delete only and
-    # must not silently gain new mutation/runtime support.
+class BotSkillRuntimeMutationMode(StrEnum):
+    """The mutation authority available to a persisted Bot runtime.
+
+    ``FULL`` is the product-supported matrix and may create or activate
+    capability state.  ``CLEANUP_ONLY`` deliberately exists for historical
+    records that can still safely *remove* existing Local/Repo/MCP state but
+    cannot receive a new Pool/Center projection.  A named mode is important:
+    callers must never turn this safety boundary into an ambiguous boolean.
+    """
+
+    FULL = "FULL"
+    CLEANUP_ONLY = "CLEANUP_ONLY"
+
+
+class BotSkillRuntimeCommand(StrEnum):
+    """Explicit command intent at a Bot capability mutation boundary."""
+
+    WRITE = "WRITE"
+    CLEANUP = "CLEANUP"
+
+
+def runtime_layout_engine_for_bot(bot: dict[str, Any]) -> str:
+    """Return the physical engine used exclusively for filesystem Pool I/O.
+
+    Coding templates retain ``claude_code`` as their domain/catalogue engine,
+    but their active skill directory belongs to the AICoding image.  Only the
+    runtime layout probe must see that physical identity; factories, catalogues
+    and Passport remain keyed by the logical engine.
+    """
+
     engine = str(bot.get("active_engine") or "")
-    if engine not in _SUPPORTED_BOT_SKILL_RUNTIMES.get(bot_type, frozenset()):
-        raise SkillEngineNotSupportedError()
     if (
         engine == "claude_code"
         and str(bot.get("template_type") or "")
-        not in _CLAUDE_CODE_WRITABLE_TEMPLATES
+        in _CLAUDE_CODE_WRITABLE_TEMPLATES
     ):
+        return "aicoding"
+    return engine
+
+
+def bot_skill_runtime_mutation_mode(
+    bot: dict[str, Any],
+) -> BotSkillRuntimeMutationMode:
+    """Classify the intentional mutation authority of a Bot record.
+
+    Historical plain Claude Code, literal AICoding, and Desktop Claude Code
+    records are not eligible for new capability writes.  They remain able to
+    reconcile an already-reduced legacy Local/Repo/MCP projection while users
+    remove old state.  Everything else outside the declared matrix stays
+    fail-closed.
+    """
+
+    # Historical Local rows predate a durable ``bot_type`` column.  Their
+    # released behaviour was personal-Bot semantics, so retain that narrow
+    # compatibility default instead of rejecting every old Local operation.
+    bot_type = str(bot.get("bot_type") or "personal")
+    engine = str(bot.get("active_engine") or "")
+    template_type = str(bot.get("template_type") or "")
+
+    if engine in _SUPPORTED_BOT_SKILL_RUNTIMES.get(bot_type, frozenset()):
+        if engine != "claude_code" or template_type in _CLAUDE_CODE_WRITABLE_TEMPLATES:
+            return BotSkillRuntimeMutationMode.FULL
+
+    if engine == "aicoding" or (engine == "claude_code" and bot_type == "desktop"):
+        return BotSkillRuntimeMutationMode.CLEANUP_ONLY
+    if engine == "claude_code" and bot_type in {"personal", "service"}:
+        return BotSkillRuntimeMutationMode.CLEANUP_ONLY
+    raise SkillEngineNotSupportedError()
+
+
+def require_supported_bot_skill_runtime(bot: dict[str, Any]) -> None:
+    """Fail closed outside the product-approved Bot × Engine matrix."""
+    if bot_skill_runtime_mutation_mode(bot) is not BotSkillRuntimeMutationMode.FULL:
         raise SkillEngineNotSupportedError()
 
 
-__all__ = ["require_supported_bot_skill_runtime"]
+def require_cleanup_capable_bot_skill_runtime(
+    bot: dict[str, Any],
+) -> BotSkillRuntimeMutationMode:
+    """Allow the explicit safe-cleanup subset without granting full writes."""
+
+    return bot_skill_runtime_mutation_mode(bot)
+
+
+def require_bot_skill_runtime_command(
+    bot: dict[str, Any],
+    command: BotSkillRuntimeCommand,
+) -> BotSkillRuntimeMutationMode:
+    """Authorize a named command without widening a cleanup-only record."""
+
+    mode = bot_skill_runtime_mutation_mode(bot)
+    if command is BotSkillRuntimeCommand.WRITE:
+        require_supported_bot_skill_runtime(bot)
+    return mode
+
+
+__all__ = [
+    "BotSkillRuntimeMutationMode",
+    "BotSkillRuntimeCommand",
+    "bot_skill_runtime_mutation_mode",
+    "require_bot_skill_runtime_command",
+    "require_cleanup_capable_bot_skill_runtime",
+    "require_supported_bot_skill_runtime",
+    "runtime_layout_engine_for_bot",
+]
