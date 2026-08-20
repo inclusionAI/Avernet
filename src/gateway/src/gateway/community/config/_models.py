@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
@@ -69,6 +70,12 @@ class PrincipalSignerPluginConfig(BaseModel):
     ttl_seconds: int = 60
 
 
+#: Probe for a CORS pattern that admits origins its author never enumerated.
+#: Under ``.invalid`` (RFC 2606), which no real deployment can serve from, so a
+#: pattern pinned to a real host suffix cannot match it by accident.
+_CANARY_ORIGIN = "https://canary-origin.invalid"
+
+
 class CorsConfig(BaseModel):
     """Browser CORS allow-list for the gateway's own edge (``user_config.cors``).
 
@@ -81,8 +88,9 @@ class CorsConfig(BaseModel):
     Neutral default = localhost origins only, so a single-box UI works out of the
     box; every deployment adds its own frontend origin through the ``cors`` block
     of its ``application-<env>.yaml`` overlay. Origins are enumerated exactly or
-    matched by one of ``allow_origin_regex``; a ``"*"`` wildcard is REFUSED at
-    load time (see :meth:`_reject_wildcard_origin`).
+    matched by one of ``allow_origin_regex``; either field is REFUSED at load
+    time when it would admit an arbitrary origin (see
+    :meth:`_reject_wildcard_origin` and :meth:`_reject_universal_regex`).
     """
 
     model_config = {"extra": "allow"}
@@ -119,6 +127,46 @@ class CorsConfig(BaseModel):
                 "them with cors.allow_origin_regex."
             )
         return origins
+
+    @field_validator("allow_origin_regex")
+    @classmethod
+    def _reject_universal_regex(cls, patterns: list[str]) -> list[str]:
+        """Refuse a pattern that would admit an origin nobody configured.
+
+        The sibling check above points an operator at this field, so this field
+        must not be the way back into the hole it closes: with credentials
+        enabled, ``allow_origin_regex: [".*"]`` — a plausible shorthand for "any
+        localhost port" — admits every site on the internet exactly as ``"*"``
+        would, and boots just as quietly.
+
+        The probe is a canary rather than a proof: a pattern that ``fullmatch``es
+        a host under the reserved ``.invalid`` TLD (RFC 2606 — never resolvable,
+        so no real allow-list names it) is matching things its author did not
+        enumerate. That catches the ``.*`` / ``.+`` shapes an operator actually
+        writes; a deliberately broad pattern that dodges the canary is not
+        claimed to be caught.
+
+        Compiling here is the second half of the boundary: a malformed pattern
+        fails at config load, naming the entry, rather than at middleware
+        construction — where it would take the whole gateway down at boot.
+        """
+        for pattern in patterns:
+            try:
+                compiled = re.compile(pattern)
+            except re.error as exc:
+                raise ValueError(
+                    f"cors.allow_origin_regex entry {pattern!r} is not a valid "
+                    f"regular expression: {exc}"
+                ) from exc
+            if compiled.fullmatch(_CANARY_ORIGIN):
+                raise ValueError(
+                    f"cors.allow_origin_regex entry {pattern!r} matches the "
+                    f"arbitrary origin {_CANARY_ORIGIN!r}: the gateway sends "
+                    "Access-Control-Allow-Credentials: true, so a pattern this "
+                    "broad admits every origin to credentialed calls. Pin the "
+                    "scheme and the host suffix each environment actually serves."
+                )
+        return patterns
 
 
 class PluginConfig(BaseSettings):

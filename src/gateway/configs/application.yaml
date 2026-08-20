@@ -118,7 +118,9 @@ user_config:
   # scheme, host and port — and compiled on its own, so its own inline flags
   # apply to it alone). `allow_origins: ["*"]` is REFUSED at load time: with
   # credentials enabled a wildcard does not fail loudly, it silently admits
-  # every origin on the internet to credentialed calls.
+  # every origin on the internet to credentialed calls. A catch-all regex
+  # (`.*`, `https://.*`) is refused for the same reason — pin the scheme and the
+  # host suffix the environment actually serves.
   #
   # Neutral default = localhost only, so a single-box UI works out of the box.
   # A deployment adds its own frontend origins in its `application-<env>.yaml`

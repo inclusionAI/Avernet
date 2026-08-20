@@ -205,3 +205,22 @@ def test_wildcard_origin_is_refused_at_config_load() -> None:
     # And the refusal reaches a real config load, not just direct construction.
     with pytest.raises(ValueError, match=r"must not contain"):
         UserConfig.model_validate({"cors": {"allow_origins": ["*"]}})
+
+
+def test_a_regex_that_admits_an_arbitrary_origin_is_refused_at_config_load() -> None:
+    """The sibling check points operators here, so this field cannot be the way back in."""
+    for pattern in (".*", ".+", "https://.*"):
+        with pytest.raises(ValueError, match=r"matches the arbitrary origin"):
+            CorsConfig(allow_origin_regex=[pattern])
+
+    with pytest.raises(ValueError, match=r"matches the arbitrary origin"):
+        UserConfig.model_validate({"cors": {"allow_origin_regex": [".*"]}})
+
+    # A pattern pinned to a host suffix an environment actually serves is fine.
+    CorsConfig(allow_origin_regex=[r"https://[a-z0-9-]+\.preview\.example\.com"])
+
+
+def test_a_malformed_regex_fails_at_config_load_not_at_boot() -> None:
+    """Compiled here, the entry is named; compiled by Starlette, the gateway dies."""
+    with pytest.raises(ValueError, match=r"is not a valid regular expression"):
+        CorsConfig(allow_origin_regex=["https://[unclosed"])
