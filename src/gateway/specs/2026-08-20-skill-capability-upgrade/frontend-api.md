@@ -109,10 +109,10 @@ Backend 真实路由自动生成并经过向前兼容检查，前端可据此查
 
 | Method | Path | 说明 |
 | --- | --- | --- |
-| GET | `/openapi/v1/skills/repository` | keyword/path/sort/page/page_size |
-| GET | `/openapi/v1/skills/repository/tree` | aiworkbench 目录树 |
-| GET | `/openapi/v1/skills/{skill_id}` | Repo 详情；Phase 2 additive 支持 Space |
-| POST | `/openapi/v1/skills/repository/sync` | 同步完成后返回 |
+| GET | `/openapi/v1/bots/skills/repository` | keyword/path/sort/page/page_size |
+| GET | `/openapi/v1/bots/skills/repository/tree` | aiworkbench 目录树 |
+| GET | `/openapi/v1/bots/skills/repository/{skill_id}` | Repo 详情；Phase 2 additive 支持 Space |
+| POST | `/openapi/v1/bots/skills/repository/sync` | 同步完成后返回 |
 
 Sync 是同步接口。前端 await 返回后刷新列表，不轮询新的 sync-status。并发同步返回
 `SYNC_IN_PROGRESS`。

@@ -142,6 +142,10 @@ def _grant_checked(shim):
             owner_id=kwargs.get("owner_id"),
             user_id=kwargs["user_id"],
         )
+        # The retiring wire has an optional owner_entity_id. Its historical
+        # omission means the caller's own Bot, exactly as OwnerIdDep does on
+        # the current address; do not pass the external None into Core.
+        kwargs["owner_id"] = kwargs.get("owner_id") or kwargs["user_id"]
         return await shim(**kwargs)
 
     caller_param = inspect.Parameter(

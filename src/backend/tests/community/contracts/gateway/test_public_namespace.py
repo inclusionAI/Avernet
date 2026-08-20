@@ -18,7 +18,6 @@ from fastapi import FastAPI
 #: matching gateway domain + route_security entries, never alone.
 _DECLARED_PREFIXES = (
     "/openapi/v1/bots",
-    "/openapi/v1/skills",
     # The verified caller's own identity — the one operation whose answer is
     # the user. Declared with its gateway domain + route_security entries.
     "/openapi/v1/caller",
