@@ -286,6 +286,8 @@ _NO_USER_DIMENSION = {
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/skills"),
+    # Publish status is tenant-identical Skill Center workflow state.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/skills/{{skill_code}}/publish/status"),
     # The load-test endpoint answers a constant. It reads nothing and writes
     # nothing, so there is no scope for a user id to name — and a synthetic
     # endpoint measuring the shared path must not be the one exception that
@@ -351,8 +353,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: three Bot-addressed operations. Repo Catalog then adds three more
 #: Bot-addressed plus eight account-level operations, yielding 110/1/57.
 #: The merged contract contains 126 path-addressed Bots, one legacy
-#: query-addressed operation, and 53 non-Bot operations.
-_BOT_ID_PLACEMENT = {"path": 126, "query": 1, "none": 53}
+#: query-addressed operation, and 53 non-Bot operations. The Skill Center tag
+#: and publish-status reads add two more non-Bot operations.
+_BOT_ID_PLACEMENT = {"path": 126, "query": 1, "none": 55}
 
 
 def _schema() -> dict:
@@ -446,8 +449,9 @@ def test_the_pinned_number_of_operations_take_it():
     # +5 for Editors and +4 for render screens. The read-only Node inventory adds
     # the final operation. Skill Installation adds three further Bot-addressed
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
-    # MCP adds eight operations.
-    assert len(taking) == 164
+    # MCP adds eight operations. The Skill Center tag read adds one more
+    # user-scoped operation; publish status is tenant-identical and exempt.
+    assert len(taking) == 165
 
 
 def test_the_exempt_operations_take_none():

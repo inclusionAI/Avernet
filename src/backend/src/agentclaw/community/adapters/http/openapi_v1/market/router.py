@@ -1,4 +1,5 @@
 """Unified public marketplace endpoints under ``/openapi/v1/bots/market``."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
@@ -6,10 +7,16 @@ from fastapi import APIRouter, Depends, Request
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
     Page,
+    USER_SCOPED_403,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.mcp.router import _to_server
-from agentclaw.community.adapters.http.openapi_v1.responses import envelope_errors, page
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    envelope,
+    envelope_errors,
+    page,
+)
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.skill_market_service import (
     SkillMarketSearchQuery,
@@ -28,6 +35,7 @@ from .schemas import (
     McpMarketSearchRequest,
     SkillCenterMarketItem,
     SkillCenterMarketSearchRequest,
+    SkillCenterTag,
     SkillMarketItem,
     SkillMarketSearchRequest,
 )
@@ -116,3 +124,21 @@ async def search_skill_center_skills(
     )
     items = [SkillCenterMarketItem.model_validate(item) for item in result.items]
     return page(result.total, items, request)
+
+
+@router.get(
+    "/skill-center/tags",
+    response_model=Envelope[list[SkillCenterTag]],
+    dependencies=_AUTH,
+    responses=USER_SCOPED_403,
+)
+@envelope_errors
+async def list_skill_center_tags(
+    request: Request,
+    _user_id: UserIdDep,
+    client: SkillCenterClient = Injected(SkillCenterClient),
+) -> Envelope[list[SkillCenterTag]]:
+    """List Skill Center tags for marketplace filter initialization."""
+    result = client.get_market_tags()
+    items = [SkillCenterTag.model_validate(item) for item in result]
+    return envelope(items, request)

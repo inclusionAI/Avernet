@@ -77,6 +77,68 @@ class Skill(BaseModel):
     )
 
 
+class SkillPublishStatus(BaseModel):
+    """Publish workflow status returned by Skill Center."""
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        extra="allow",
+        json_schema_extra={
+            "example": {
+                "skillCode": "demo-skill",
+                "name": "Demo Skill",
+                "status": "PUBLISHED",
+                "statusDesc": "发布成功",
+                "source": "teamclaw",
+                "version": "1.0.0",
+                "isCompleted": True,
+                "isSuccess": True,
+                "errorMsg": "",
+                "releaseTime": "2026-08-20 20:00:00",
+                "standardCheckResult": {},
+                "securityCheckReport": {},
+            }
+        },
+    )
+
+    skill_code: str | None = Field(
+        default=None, alias="skillCode", description="Skill Center skill code."
+    )
+    name: str | None = Field(default=None, description="Skill display name.")
+    status: str | None = Field(default=None, description="Current publish status.")
+    status_desc: str | None = Field(
+        default=None,
+        alias="statusDesc",
+        description="Human-readable status description.",
+    )
+    source: str | None = Field(default=None, description="Publishing source.")
+    version: str | None = Field(default=None, description="Published version.")
+    is_completed: bool = Field(
+        default=False,
+        alias="isCompleted",
+        description="Whether the publish workflow ended.",
+    )
+    is_success: bool = Field(
+        default=False,
+        alias="isSuccess",
+        description="Whether the publish workflow succeeded.",
+    )
+    error_msg: str | None = Field(
+        default=None,
+        alias="errorMsg",
+        description="Failure detail when provided by Skill Center.",
+    )
+    release_time: str | None = Field(
+        default=None, alias="releaseTime", description="Publish completion time."
+    )
+    standard_check_result: dict[str, Any] | None = Field(
+        default=None, alias="standardCheckResult", description="Standard-check report."
+    )
+    security_check_report: dict[str, Any] | None = Field(
+        default=None, alias="securityCheckReport", description="Security-check report."
+    )
+
+
 class SkillUpload(BaseModel):
     """Response for a Skill create or same-name package replacement."""
 

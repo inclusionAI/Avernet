@@ -52,8 +52,51 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.plugin_api.skill_center_client import (
+    SkillCenterClient,
+    SkillCenterPublishStatusError,
+)
 
-from .schemas import Skill, SkillContent, SkillParameters, SkillState, SkillUpload
+from .schemas import (
+    Skill,
+    SkillContent,
+    SkillParameters,
+    SkillPublishStatus,
+    SkillState,
+    SkillUpload,
+)
+
+publish_status_router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["skills"])
+
+
+@publish_status_router.get(
+    "/{skill_code}/publish/status",
+    response_model=Envelope[SkillPublishStatus],
+)
+@envelope_errors
+async def get_skill_publish_status(
+    request: Request,
+    skill_code: str = Path(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="Skill Center skill code.",
+    ),
+    client: SkillCenterClient = Injected(SkillCenterClient),
+) -> Envelope[SkillPublishStatus]:
+    """Query a Skill's publish status from Skill Center.
+
+    This is the new Skill Workbench entry point. It deliberately does not
+    consult or mutate OCB's legacy local Skill state machine.
+    """
+    upstream = client.query_publish_status(skill_code)
+    if not isinstance(upstream, dict) or upstream.get("success") is not True:
+        raise SkillCenterPublishStatusError()
+    data = upstream.get("data")
+    if not isinstance(data, dict):
+        raise SkillCenterPublishStatusError()
+    return envelope(SkillPublishStatus.model_validate(data), request)
+
 
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/skills", tags=["skills"])
 

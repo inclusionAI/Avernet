@@ -237,6 +237,7 @@ from agentclaw.community.core.service_bot.errors import (
 )
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterMarketSearchError,
+    SkillCenterPublishStatusError,
     SkillCenterTeamCreateError,
 )
 
@@ -324,6 +325,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
     ),
     SkillCenterMarketSearchError: (502, "Skill Center marketplace unavailable"),
+    SkillCenterPublishStatusError: (502, "Skill Center publish status unavailable"),
     WorkOrderAccessDeniedError: (403, WorkOrderPublicErrorMessage.FORBIDDEN),
     WorkOrderNotFoundError: (404, WorkOrderPublicErrorMessage.NOT_FOUND),
     WorkOrderNotificationNotFoundError: (
@@ -500,10 +502,19 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     SkillManagedBySkillSetError: (409, "Skill is managed by a SkillSet"),
-    SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with an active Skill"),
-    SkillEngineNotSupportedError: (409, "Skill is not supported by this bot type and engine"),
+    SkillRuntimeNameConflictError: (
+        409,
+        "Skill runtime name conflicts with an active Skill",
+    ),
+    SkillEngineNotSupportedError: (
+        409,
+        "Skill is not supported by this bot type and engine",
+    ),
     RepositoryCatalogNotFoundError: (404, "Not found"),
-    RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
+    RepositoryCatalogSyncInProgressError: (
+        409,
+        "Repository synchronization is already in progress",
+    ),
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
@@ -667,11 +678,17 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
 _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
     "RESOURCE_DIRECT_ACTIVE": (409201, "Resource is directly active"),
     "RESOURCE_MANAGED_BY_SKILL_SET": (409202, "Resource is managed by a SkillSet"),
-    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": (409203, "Resource belongs to another SkillSet"),
+    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": (
+        409203,
+        "Resource belongs to another SkillSet",
+    ),
     "SYSTEM_DEFAULT_IMMUTABLE": (409204, "System Default SkillSet is immutable"),
     "SKILL_SET_ACTIVE": (409205, "Active SkillSet cannot be deleted"),
     "SKILL_SET_NAME_CONFLICT": (409206, "SkillSet name already exists"),
-    "IDEMPOTENCY_KEY_REUSED": (409207, "Idempotency key was reused with a different request"),
+    "IDEMPOTENCY_KEY_REUSED": (
+        409207,
+        "Idempotency key was reused with a different request",
+    ),
     "BOT_MUTATION_BUSY": (409208, "Another SkillSet mutation is in progress"),
 }
 

@@ -577,6 +577,8 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skill-center/skills"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/market/skill-center/tags"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/catalog/search"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/catalog/discover"): AdmissionMode.OPEN,
     # ── Space and work-order APIs ───────────────────────────────────────────

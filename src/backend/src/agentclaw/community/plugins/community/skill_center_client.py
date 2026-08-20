@@ -15,6 +15,7 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterMarketSearchError,
     SkillCenterMarketSearchRequest,
     SkillCenterMarketSearchResult,
+    SkillCenterPublishStatusError,
     SkillCenterTeamCreateError,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamCreateResult,
@@ -49,7 +50,7 @@ class CommunitySkillCenterClient(SkillCenterClient):
         raise SkillCenterUnsupportedError(_MSG)
 
     def query_publish_status(self, skill_code: str) -> dict:
-        raise SkillCenterUnsupportedError(_MSG)
+        raise SkillCenterPublishStatusError(_MSG)
 
     def list_versions(self, skill_code: str) -> list[dict]:
         raise SkillCenterUnsupportedError(_MSG)
