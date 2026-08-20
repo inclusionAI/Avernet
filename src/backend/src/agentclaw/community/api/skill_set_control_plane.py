@@ -21,7 +21,6 @@ class SkillSetControlPlaneServiceProtocol(Protocol):
         user_id: str,
         name: str,
         description: str | None,
-        idempotency_key: str,
     ) -> dict[str, Any]: ...
 
     def get_set(

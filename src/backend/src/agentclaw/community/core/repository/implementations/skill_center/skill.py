@@ -1508,10 +1508,9 @@ class SkillSetRepository(
             )
             if skill_set is None or skill is None:
                 return False
-            # The F01 uniqueness migration makes an existing relation the
-            # successful, idempotent result required by the new control-plane
-            # contract.  Checking after both tenant-guarded parent lookups
-            # preserves the old cross-tenant false result.
+            # Existing membership remains the successful idempotent result.
+            # Canonical cross-Set uniqueness is enforced by the new control
+            # plane under its Bot mutation lease, not by this legacy writer.
             if (
                 db.query(self.SkillSetSkill)
                 .filter(
@@ -1527,9 +1526,6 @@ class SkillSetRepository(
                 self.SkillSetSkill(
                     skill_set_id=int(skill_set_id),
                     skill_id=int(skill_id),
-                    # System Default is a separate platform projection and is
-                    # deliberately excluded from ordinary-set uniqueness.
-                    bot_id=None if skill_set.is_default else skill_set.bolt_id,
                     user_id=_normalize_user_id(user_id),
                     env=get_current_env(),
                 )

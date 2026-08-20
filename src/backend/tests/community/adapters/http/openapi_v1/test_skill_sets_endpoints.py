@@ -100,17 +100,13 @@ def _client(control: _ControlPlane) -> TestClient:
     return user_scoped_client(app, "actor")
 
 
-def test_create_is_inactive_and_requires_an_idempotency_key():
+def test_create_is_inactive_without_an_idempotency_key():
     control = _ControlPlane()
     client = _client(control)
-
-    missing = client.post("/openapi/v1/bots/bot-1/skill-sets", json={"name": "New"})
-    assert missing.status_code == 422
 
     response = client.post(
         "/openapi/v1/bots/bot-1/skill-sets",
         json={"name": "New", "description": "Description"},
-        headers={"Idempotency-Key": "request-1"},
     )
 
     assert response.status_code == 201
@@ -121,7 +117,6 @@ def test_create_is_inactive_and_requires_an_idempotency_key():
         "user_id": "actor",
         "name": "New",
         "description": "Description",
-        "idempotency_key": "request-1",
     }
 
 

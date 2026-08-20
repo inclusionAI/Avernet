@@ -27,7 +27,6 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
         owner_id: str,
         name: str,
         description: str | None,
-        idempotency_key: str,
         engine_type: str | None = None,
     ) -> dict: ...
     @abstractmethod
@@ -108,7 +107,7 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
     ) -> SkillSetMutation: ...
     @abstractmethod
     def list_installed_mcps(
-        self, *, bot_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, engine_type: str | None = None
     ) -> set[str]: ...
     @abstractmethod
     def set_active(
