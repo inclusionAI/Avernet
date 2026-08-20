@@ -275,7 +275,11 @@ class BotRunRequestExecutor:
         )
         request_type = metadata.get("request_type", "chat")
         stream = metadata.get("stream", "false") == "true"
-        timeout_sec = metadata.get("timeout")
+        timeout_sec = (
+            metadata.get("timeout")
+            if metadata.get("timeout")
+            else queue_meta.get("timeout")
+        )
         chat_metadata = build_chat_metadata(metadata, run.run_id)
 
         context = _rebuild_context(
