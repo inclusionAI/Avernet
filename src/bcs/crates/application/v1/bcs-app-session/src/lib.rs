@@ -296,32 +296,38 @@ impl SessionServiceImpl {
         Ok(session)
     }
 
-    async fn load_owned_participant_bot(
+    async fn load_session_for_collection(
         &self,
         caller: &AuthenticatedCaller,
         session_id: &str,
         participant: &str,
     ) -> Result<Session, ApplicationError> {
         let user = require_authenticated_user(caller)?;
+        // The participant must be owned by the authenticated Human: one of the
+        // Human's own bots, OR the Human's own actor entry. `ensure_human_actor`
+        // registers the latter as `human_{staff_no}` with `created_by` =
+        // `staff_no` and `actor_kind = Human`. The legacy
+        // `resolve_collector_bot` admits both via `list_bots_by_creator`, which
+        // does not filter by actor kind — so a Human can collect a Session as
+        // itself, not only through an owned bot. Match that contract by keying
+        // ownership on `created_by` alone.
         let owned = self
             .registry
             .try_get(participant)
             .await
             .map_err(map_service_error)?
-            .is_some_and(|bot| {
-                bot.actor_kind == ActorKind::Bot
-                    && bot.created_by.as_deref() == Some(user.id.as_str())
-            });
+            .is_some_and(|bot| bot.created_by.as_deref() == Some(user.id.as_str()));
         if !owned {
             return Err(ApplicationError::forbidden(
-                "The target Bot is not owned by the authenticated Human",
+                "The target participant is not owned by the authenticated Human",
             ));
         }
 
         let session = self.load_session(session_id).await?;
-        let present = session.participants.iter().any(|entry| {
-            entry.actor_kind == ActorKind::Bot && entry.bot_uuid == participant
-        });
+        let present = session
+            .participants
+            .iter()
+            .any(|entry| entry.bot_uuid == participant);
         if !present {
             return Err(ApplicationError::not_found(
                 "session_not_found",
@@ -810,7 +816,7 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: CollectSession,
     ) -> Result<SessionCollectionResult, ApplicationError> {
-        self.load_owned_participant_bot(
+        self.load_session_for_collection(
             &command.caller,
             &command.session_id,
             &command.participant,
@@ -831,7 +837,7 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: UncollectSession,
     ) -> Result<SessionCollectionResult, ApplicationError> {
-        self.load_owned_participant_bot(
+        self.load_session_for_collection(
             &command.caller,
             &command.session_id,
             &command.participant,
