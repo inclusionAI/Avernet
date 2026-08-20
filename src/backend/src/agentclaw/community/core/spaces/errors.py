@@ -39,3 +39,15 @@ class SpaceCreatorInvariantError(SpaceError):
 
 class PersonalSpaceInvariantError(SpaceError):
     pass
+
+
+class SpaceScTeamRepairNotApplicableError(SpaceError):
+    """Raised when repair is requested for a non-team Space."""
+
+
+class SpaceScTeamBindingNotFoundError(SpaceError):
+    """Raised when SC has no Team for the Space external reference."""
+
+
+class SpaceScTeamRepairConflictError(SpaceError):
+    """Raised when a conditional backfill loses without a valid binding."""

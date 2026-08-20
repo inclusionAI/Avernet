@@ -5,18 +5,33 @@ from __future__ import annotations
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
-from agentclaw.community.core.spaces.errors import SpaceNameInvalidError
+from agentclaw.community.core.spaces.errors import (
+    SpaceNameInvalidError,
+    SpaceNotFoundError,
+    SpaceScTeamBindingNotFoundError,
+    SpaceScTeamRepairConflictError,
+    SpaceScTeamRepairNotApplicableError,
+)
 from agentclaw.community.core.spaces.models import (
     PersonalSpaceLookupRecord,
     SpaceRecord,
+    SpaceScTeamRepairResult,
+    SpaceScTeamRepairStatus,
     SpaceSummaryRecord,
     SpaceType,
 )
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
     SkillCenterTeamCreateRequest,
+    SkillCenterTeamQueryRequest,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+
+
+# SC registers OCB Space ids under this stable external-source namespace.
+# It is protocol identity, not caller input, so the repair endpoint must not allow
+# clients to select another source and accidentally bind an unrelated SC Team.
+_SC_SPACE_REF_SOURCE = "OCB"
 
 
 class SpaceService:
@@ -70,6 +85,63 @@ class SpaceService:
             )
             record.sc_team_id = result.team_id
         return record
+
+    def repair_sc_team_binding(self, *, space_id: int) -> SpaceScTeamRepairResult:
+        """Repair one historical TEAM Space by lookup only; never create in SC.
+
+        The operation is idempotent. Existing bindings are returned unchanged,
+        and the repository performs a conditional update so concurrent requests
+        cannot overwrite whichever binding was established first.
+        """
+        env = get_current_env()
+        space = self._repository.get_space(space_id=space_id, env=env)
+        if space is None:
+            raise SpaceNotFoundError(f"space {space_id} not found")
+        if space.space_type is not SpaceType.TEAM:
+            raise SpaceScTeamRepairNotApplicableError(
+                "SC Team binding repair applies only to TEAM spaces"
+            )
+        if space.sc_team_id:
+            return SpaceScTeamRepairResult(
+                space_id=space.id,
+                status=SpaceScTeamRepairStatus.ALREADY_BOUND,
+                sc_team_id=space.sc_team_id,
+            )
+
+        resolved = self._skill_center_client.get_team_by_ref_source(
+            SkillCenterTeamQueryRequest(
+                source=_SC_SPACE_REF_SOURCE,
+                ref_source_id=str(space.id),
+            )
+        )
+        if resolved is None:
+            # Repair is intentionally lookup-only. Automatically creating here
+            # could duplicate an SC Team whose external mapping is inconsistent.
+            raise SpaceScTeamBindingNotFoundError(
+                f"SC Team mapping for space {space.id} was not found"
+            )
+
+        if self._repository.backfill_sc_team_id(
+            space_id=space.id, env=env, sc_team_id=resolved.team_id
+        ):
+            return SpaceScTeamRepairResult(
+                space_id=space.id,
+                status=SpaceScTeamRepairStatus.REPAIRED,
+                sc_team_id=resolved.team_id,
+            )
+
+        # Another request may have won the conditional update. Re-read instead
+        # of overwriting it or falsely claiming that this request repaired it.
+        current = self._repository.get_space(space_id=space.id, env=env)
+        if current is not None and current.sc_team_id:
+            return SpaceScTeamRepairResult(
+                space_id=current.id,
+                status=SpaceScTeamRepairStatus.ALREADY_BOUND,
+                sc_team_id=current.sc_team_id,
+            )
+        raise SpaceScTeamRepairConflictError(
+            f"space {space.id} binding changed while repair was in progress"
+        )
 
     def list_spaces(
         self,

@@ -18,6 +18,9 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterTeamCreateError,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamCreateResult,
+    SkillCenterTeamQueryError,
+    SkillCenterTeamQueryRequest,
+    SkillCenterTeamQueryResult,
 )
 
 
@@ -36,6 +39,11 @@ class CommunitySkillCenterClient(SkillCenterClient):
         self, request: SkillCenterTeamCreateRequest
     ) -> SkillCenterTeamCreateResult:
         raise SkillCenterTeamCreateError(_MSG)
+
+    def get_team_by_ref_source(
+        self, request: SkillCenterTeamQueryRequest
+    ) -> SkillCenterTeamQueryResult | None:
+        raise SkillCenterTeamQueryError(_MSG)
 
     def upload_and_publish(self, payload: dict) -> dict:
         raise SkillCenterUnsupportedError(_MSG)

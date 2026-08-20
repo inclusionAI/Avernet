@@ -32,6 +32,11 @@ class SpaceRepositoryProtocol(Protocol):
     def get_space(self, *, space_id: int, env: str) -> SpaceRecord | None: ...
 
     @abstractmethod
+    def backfill_sc_team_id(
+        self, *, space_id: int, env: str, sc_team_id: str
+    ) -> bool: ...
+
+    @abstractmethod
     def get_space_by_code(self, *, space_code: str, env: str) -> SpaceRecord | None: ...
 
     @abstractmethod

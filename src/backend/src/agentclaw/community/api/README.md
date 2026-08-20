@@ -72,6 +72,7 @@ internal_dependencies:
   - agentclaw.community.core.service_bot.repository.models  # BotPublishRecord — typed in engine_config_service.py
   - agentclaw.community.core.resources.models        # Resource / ResourceType — typed in resource_service.py (Protocol signatures mirror slim ResourceService verbatim; round-2 review #4)
   - agentclaw.community.core.spaces.models           # Space/member records and enums — typed in space_service.py
+  - agentclaw.community.core.repository.protocols.skill_center_types # Space Skill query projection
   - agentclaw.community.core.market_favorites.models # Favorite records and target enum — typed in market_favorite_service.py
   - agentclaw.community.core.work_orders.models       # Work-order, notification, query, status, and event contracts
   - agentclaw.community.core.service_bot.services.baas_service  # BotWsConnectionInfoResponse / HttpConnectionInfo — typed in baas_service.py (BaasService is a plain core service)

@@ -10,6 +10,8 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterMarketSearchResult,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamCreateResult,
+    SkillCenterTeamQueryRequest,
+    SkillCenterTeamQueryResult,
 )
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
 from agentclaw.community.plugins.local._mock_seam import MockSeam
@@ -30,6 +32,18 @@ class LocalSkillCenterClient(MockSeam, SkillCenterClient):
     ) -> SkillCenterTeamCreateResult:
         logger.info("[LocalMock] create_team: %s", request.team_code)
         return SkillCenterTeamCreateResult(team_id=f"mock-{request.team_code}")
+
+    def get_team_by_ref_source(
+        self, request: SkillCenterTeamQueryRequest
+    ) -> SkillCenterTeamQueryResult | None:
+        logger.info(
+            "[LocalMock] get_team_by_ref_source: source=%s ref_source_id=%s",
+            request.source,
+            request.ref_source_id,
+        )
+        return SkillCenterTeamQueryResult(
+            team_id=f"mock-{request.source}-{request.ref_source_id}"
+        )
 
     def upload_and_publish(self, payload: dict) -> dict:
         skill_code = payload.get("skillCode", "local-mock")

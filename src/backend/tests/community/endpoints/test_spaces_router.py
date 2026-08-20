@@ -11,11 +11,15 @@ no principal — errors on an invalid body instead.
 from __future__ import annotations
 
 import time
+from datetime import datetime
 
 import jwt
 
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
+)
+from agentclaw.community.api.space_skill_query_service import (
+    SpaceSkillQueryServiceProtocol,
 )
 from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
@@ -25,6 +29,7 @@ from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketSource,
 )
+from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.models import SpaceRole
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -33,6 +38,8 @@ from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
+    bind_failing_method,
+    bind_overrides,
     endpoint_test,
 )
 
@@ -114,6 +121,45 @@ def _seed_team_with_favorite(world) -> None:
     )
 
 
+def _seed_space_skills(world) -> None:
+    _enable_public_auth(world)
+
+    def _list_space_skills(_self, **_kwargs):
+        return 1, [
+            {
+                "id": 10001,
+                "skill_uuid": "skill-endpoint-uuid",
+                "name": "Endpoint Skill",
+                "description": "A Skill for endpoint coverage.",
+                "status": "DEVELOPING",
+                "draft_status": "EDITING",
+                "space_type": "TEAM",
+                "current_user_skill_role": "OWNER",
+                "can_edit": True,
+                "can_grant": True,
+                "can_apply_edit": False,
+                "gmt_created": datetime(2026, 8, 20, 3, 30),
+                "gmt_modified": datetime(2026, 8, 20, 3, 40),
+            }
+        ]
+
+    bind_overrides(
+        world,
+        SpaceSkillQueryServiceProtocol,
+        {"list_space_skills": _list_space_skills},
+    )
+
+
+def _seed_space_skill_error(world) -> None:
+    _enable_public_auth(world)
+    bind_failing_method(
+        world,
+        SpaceSkillQueryServiceProtocol,
+        "list_space_skills",
+        SpaceAccessDeniedError("space membership required"),
+    )
+
+
 def _mismatched_user(path_params: dict | None = None, json_body: dict | None = None):
     """The uniform error case: naming someone other than the caller is a 403."""
     return CaseInput(
@@ -122,6 +168,47 @@ def _mismatched_user(path_params: dict | None = None, json_body: dict | None = N
         json_body=json_body,
         headers=_principal_headers(),
     )
+
+
+# ── GET /openapi/v1/bots/spaces/{space_id}/skills ────────────────────────────────
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/spaces/{space_id}/skills",
+    scenario="happy",
+    seed=_seed_space_skills,
+    input=CaseInput(
+        path_params={"space_id": 1},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"total": 1, "items": [{"skill_id": "10001"}]},
+        },
+    ),
+)
+def list_space_skills_happy():
+    """A space member receives the paged Skill card projection."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/spaces/{space_id}/skills",
+    scenario="membership_required",
+    seed=_seed_space_skill_error,
+    input=CaseInput(
+        path_params={"space_id": 1},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectError(status=403),
+)
+def list_space_skills_membership_required():
+    """A caller who is not a member is refused before the query result."""
 
 
 # ── GET /openapi/v1/bots/spaces ───────────────────────────────────────────────────
@@ -593,3 +680,35 @@ def batch_query_personal_spaces_happy():
 )
 def batch_query_personal_spaces_empty_user_list():
     """The framework owns invocation."""
+
+
+# ── POST /api/internal/spaces/{space_id}/sc-team-binding/repair ───────────────
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/internal/spaces/{space_id}/sc-team-binding/repair",
+    scenario="already_bound",
+    seed=_seed_team_space,
+    input=CaseInput(path_params={"space_id": 1}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"space_id": 1, "status": "ALREADY_BOUND"},
+        },
+    ),
+)
+def repair_space_sc_team_binding_already_bound():
+    """An idempotent retry returns the binding created with the Space."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/internal/spaces/{space_id}/sc-team-binding/repair",
+    scenario="invalid_space_id",
+    input=CaseInput(path_params={"space_id": "not-an-id"}),
+    expect=ExpectError(status=422),
+)
+def repair_space_sc_team_binding_invalid_space_id():
+    """The transport rejects an invalid path id before invoking the service."""

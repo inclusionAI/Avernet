@@ -38,8 +38,10 @@ consumes:
   - "LocalSkillCleanupRepository"
 internal_dependencies:
   - agentclaw.community.api.skill_market_service
+  - agentclaw.community.api.space_skill_query_service
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
   - agentclaw.community.core.access
   - agentclaw.community.core.base
@@ -51,6 +53,7 @@ internal_dependencies:
   - agentclaw.community.core.events
   - agentclaw.community.core.mcp
   - agentclaw.community.core.models
+  - agentclaw.community.core.spaces.services
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.workspace
   - agentclaw.community.di.modules
