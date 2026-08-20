@@ -1,4 +1,3 @@
-#[path = "routes/mod.rs"]
 mod routes;
 
 use axum::Router;

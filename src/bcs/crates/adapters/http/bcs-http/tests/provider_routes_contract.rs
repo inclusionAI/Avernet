@@ -1988,6 +1988,110 @@ async fn provider_bot_attributes_require_an_allowlisted_provider_admin_and_bound
 }
 
 #[tokio::test]
+async fn provider_bot_attributes_reject_a_disabled_provider_for_get_and_patch() {
+    let provider_id = "prv_disabled_attributes".to_string();
+    let admin_token = "admin-token";
+    let TestApp {
+        app,
+        provider_repo,
+        provider_credentials,
+        _temp_dir,
+        ..
+    } = test_app_with_allowed_switch_provider_ids(vec![provider_id.clone()]);
+    provider_repo
+        .insert_provider(ProviderRecord {
+            provider_id: provider_id.clone(),
+            name: "Provider".to_string(),
+            config: json!({
+                "downlink": {
+                    "enabled": true,
+                    "webhook_url": "https://provider.example.com/bcs/webhook",
+                    "auth_mode": "static_bearer",
+                    "protocol_version": "1.0"
+                }
+            })
+            .to_string(),
+            created_by: "11111111".to_string(),
+            owners: r#"["11111111"]"#.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed provider");
+    provider_credentials
+        .insert_credential(ProviderCredential {
+            provider_id: provider_id.clone(),
+            credential_kind: "provider_admin".to_string(),
+            secret_value: admin_token.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed provider admin credential");
+
+    let register = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/providers/{provider_id}/bots"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "name": "Teamclaw Bot",
+                        "owners": ["alice"],
+                        "provider_bot_ref": "teamclaw-bot:alice"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(register.status(), StatusCode::OK);
+
+    provider_repo
+        .update_provider_disabled(&provider_id, true, 2)
+        .await
+        .expect("disable provider");
+
+    let get = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/providers/{provider_id}/bots/teamclaw-bot:alice/attributes"
+                ))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(get.status(), StatusCode::FORBIDDEN);
+
+    let patch = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!(
+                    "/providers/{provider_id}/bots/teamclaw-bot:alice/attributes"
+                ))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(json!({ "user_visibility": "public" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(patch.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn provider_bot_attributes_fail_closed_when_provider_is_not_allowlisted() {
     let TestApp { app, _temp_dir, .. } = test_app();
     let provider = register_provider_as(&app, "11111111").await;

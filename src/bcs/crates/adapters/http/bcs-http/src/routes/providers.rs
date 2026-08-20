@@ -525,7 +525,7 @@ async fn require_provider_bot_attributes_access(
     state
         .services
         .provider_management
-        .get_provider(provider_id, &provider_admin_token)
+        .get_active_provider(provider_id, &provider_admin_token)
         .await
         .map_err(provider_error)?;
 

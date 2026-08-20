@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use bcs_service_api::application::v1::{
-    BotService, FriendshipService, GroupService, InternalBotAttributesService, InvitationService,
-    SessionFileApplicationService, SessionMessageService, SessionService,
+    BotService, FriendshipService, GroupService, InvitationService, SessionMessageService,
+    SessionFileApplicationService, SessionService,
 };
 
 use crate::v1::openapi::SessionFileUrlProjector;
@@ -24,7 +24,6 @@ pub struct ApiState {
     pub session_file_service: Option<Arc<dyn SessionFileApplicationService>>,
     pub session_file_url_projector: Option<SessionFileUrlProjector>,
     pub principal_verifier: Arc<dyn PrincipalVerifier>,
-    pub(crate) internal_bot_attributes_service: Option<Arc<dyn InternalBotAttributesService>>,
 }
 
 impl ApiState {
@@ -46,7 +45,6 @@ impl ApiState {
             session_file_service: None,
             session_file_url_projector: None,
             principal_verifier,
-            internal_bot_attributes_service: None,
         }
     }
 
@@ -67,22 +65,6 @@ impl ApiState {
         self.session_file_service = Some(service);
         self.session_file_url_projector = Some(url_projector);
         self
-    }
-
-    /// Retain the shared Bot-attributes application service for the legacy HTTP
-    /// adapter, which owns the Provider-scoped transport route.
-    pub fn with_internal_bot_attributes_service(
-        mut self,
-        service: Arc<dyn InternalBotAttributesService>,
-    ) -> Self {
-        self.internal_bot_attributes_service = Some(service);
-        self
-    }
-
-    pub fn internal_bot_attributes_service(
-        &self,
-    ) -> Option<Arc<dyn InternalBotAttributesService>> {
-        self.internal_bot_attributes_service.clone()
     }
 }
 

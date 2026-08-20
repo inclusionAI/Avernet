@@ -13,8 +13,8 @@ pub use group_session_connection::group_session_connection_router;
 
 /// Build the v1 router with an injected Principal verification boundary.
 ///
-/// Public collaboration routes that need caller verification share the same
-/// protected boundary.
+/// Public and internal collaboration routes that need caller verification share
+/// the same protected boundary.
 pub fn router(state: ApiState) -> Router {
     let protected = Router::new()
         .merge(openapi::protected_router())

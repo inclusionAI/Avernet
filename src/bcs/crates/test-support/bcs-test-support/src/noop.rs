@@ -461,6 +461,14 @@ impl ProviderManagementService for NoopProviderManagementService {
         Err(service_not_configured("provider management service"))
     }
 
+    async fn get_active_provider(
+        &self,
+        _provider_id: &str,
+        _provider_admin_token: &str,
+    ) -> ServiceResult<ProviderRecord> {
+        Err(service_not_configured("provider management service"))
+    }
+
     async fn update_provider(
         &self,
         _command: UpdateProviderCommand,
