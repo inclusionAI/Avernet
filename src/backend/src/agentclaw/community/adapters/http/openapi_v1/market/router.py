@@ -6,12 +6,10 @@ from fastapi import APIRouter, Depends, Request
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
     Page,
-    USER_SCOPED_403,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.mcp.router import _to_server
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope_errors, page
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.skill_market_service import (
     SkillMarketSearchQuery,
@@ -42,13 +40,11 @@ _AUTH = [Depends(require_principal)]
     "/skills",
     response_model=Envelope[Page[SkillMarketItem]],
     dependencies=_AUTH,
-    responses=USER_SCOPED_403,
 )
 @envelope_errors
 async def search_skills(
     body: SkillMarketSearchRequest,
     request: Request,
-    _user_id: UserIdDep,
     service: SkillMarketServiceProtocol = Injected(SkillMarketServiceProtocol),
 ) -> Envelope[Page[SkillMarketItem]]:
     """Search the built-in Skill marketplace."""
@@ -67,13 +63,11 @@ async def search_skills(
     "/mcp-servers",
     response_model=Envelope[Page[McpMarketItem]],
     dependencies=_AUTH,
-    responses=USER_SCOPED_403,
 )
 @envelope_errors
 async def search_mcp_servers(
     body: McpMarketSearchRequest,
     request: Request,
-    _user_id: UserIdDep,
     service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
 ) -> Envelope[Page[McpMarketItem]]:
     """Search the MCP marketplace without changing the existing MCP API."""
@@ -96,13 +90,11 @@ async def search_mcp_servers(
     "/skill-center/skills",
     response_model=Envelope[Page[SkillCenterMarketItem]],
     dependencies=_AUTH,
-    responses=USER_SCOPED_403,
 )
 @envelope_errors
 async def search_skill_center_skills(
     body: SkillCenterMarketSearchRequest,
     request: Request,
-    _user_id: UserIdDep,
     client: SkillCenterClient = Injected(SkillCenterClient),
 ) -> Envelope[Page[SkillCenterMarketItem]]:
     """Search public Skill Center Skills using server-managed credentials."""
