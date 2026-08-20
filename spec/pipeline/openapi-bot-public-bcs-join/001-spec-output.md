@@ -23,7 +23,7 @@ BCS HTTP 接口。
 
 ## 编码 Spec
 
-- [x] 在 Backend Service API 定义 frozen `BotCatalogAddress`、`BotCatalogCaller`、
+- [x] 在 Backend Core 内部端口定义 frozen `BotCatalogAddress`、`BotCatalogCaller`、
   `BotCatalogMetadata`、runtime-checkable metadata protocol 及 unavailable error。
 - [x] Catalog 专用 service 方法先读取完整、稳定排序的 Backend public candidate set，生成精确
   `(bot_id, entity_id)` 地址后才做内连接；`total` 与分页均基于完整 join 后结果。

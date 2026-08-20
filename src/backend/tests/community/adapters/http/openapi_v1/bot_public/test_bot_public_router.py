@@ -14,10 +14,10 @@ from injector import Injector, Module
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
-from agentclaw.community.api.bot_public_service import (
+from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogCaller,
     BotCatalogSearchUnavailableError,
-    BotPublicServiceProtocol,
 )
 from agentclaw.community.core.gateway_principal.models import (
     AppPrincipal,

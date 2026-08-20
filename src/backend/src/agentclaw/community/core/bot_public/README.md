@@ -17,7 +17,7 @@ consumes:
   - "PassportPlugin"
   - "SkillCenter factories"
 internal_dependencies:
-  - agentclaw.community.api.bot_public_service
+  - agentclaw.community.core.bot_public.catalog_metadata
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.devices

@@ -15,7 +15,7 @@
 
 Follow strict TDD: add focused tests first and run them to observe the expected failure before changing production code.
 
-1. Add frozen domain DTOs `BotCatalogAddress`, `BotCatalogCaller`, and `BotCatalogMetadata`, plus runtime-checkable `BotCatalogMetadataServiceProtocol.query_public_bot_metadata(...)` and `BotCatalogMetadataUnavailableError` in the Backend API layer.
+1. Add frozen domain DTOs `BotCatalogAddress`, `BotCatalogCaller`, and `BotCatalogMetadata`, plus runtime-checkable `BotCatalogMetadataServiceProtocol.query_public_bot_metadata(...)` and `BotCatalogMetadataUnavailableError` in the Backend Core internal-port layer, preserving the enforced `api -> core` dependency direction.
 2. Add `UnavailableBotCatalogMetadataService`. It must always log a low-sensitivity unconfigured category with request ID and candidate count, then raise `BotCatalogMetadataUnavailableError`, including for an empty address list.
 3. Inject the protocol into `BotPublicService`. Its dedicated Catalog Search method must:
    - query all current-tenant public Backend candidates in stable order;

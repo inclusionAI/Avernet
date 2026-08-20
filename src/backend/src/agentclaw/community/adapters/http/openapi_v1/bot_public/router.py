@@ -20,10 +20,10 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import error_response, page
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
-from agentclaw.community.api.bot_public_service import (
+from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogCaller,
     BotCatalogSearchUnavailableError,
-    BotPublicServiceProtocol,
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from agentclaw.community.api.bot_public_service import (
+from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogAddress,
     BotCatalogCaller,
     BotCatalogMetadata,

@@ -19,7 +19,7 @@ from agentclaw.community.utils.avernet_tenant import (
 from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.repository.models import BotFriendQueryKey, BotFriendStatus, ApprovalStatus, ApprovalType
 from agentclaw.community.core.operator_context import OperatorContext
-from agentclaw.community.api.bot_public_service import (
+from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogAddress,
     BotCatalogCaller,
     BotCatalogMetadata,

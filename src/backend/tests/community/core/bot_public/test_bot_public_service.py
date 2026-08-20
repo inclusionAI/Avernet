@@ -7,7 +7,7 @@ from agentclaw.community.core.bot_public.services.bot_public_service import (
     BotNotFoundError,
     BotPublicServiceError,
 )
-from agentclaw.community.api.bot_public_service import (
+from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogAddress,
     BotCatalogCaller,
     BotCatalogMetadata,
