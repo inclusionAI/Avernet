@@ -179,7 +179,11 @@ def _seed_active(world) -> None:
     _seed_member(world)
     with avernet_tenant_scope(_TENANT):
         world.get(SkillSetControlPlaneRepositoryProtocol).set_active(
-            bot_id=_BOT_ID, set_id="1", active=True, engine_type="openclaw"
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            set_id="1",
+            active=True,
+            engine_type="openclaw",
         )
 
 
