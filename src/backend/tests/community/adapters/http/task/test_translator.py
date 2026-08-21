@@ -4,7 +4,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskNodeCallbackRequest,
 )
 from agentclaw.community.adapters.http.task.translator import translate
-from agentclaw.community.core.errors import CallbackCorrelationError
+from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
@@ -44,7 +44,7 @@ class TestLoopTaskIdResolution:
 
     def test_task_level_no_echo_no_registry_raises(self):
         req = TaskCallbackRequest(**_base())
-        with pytest.raises(CallbackCorrelationError):
+        with pytest.raises(NotFound):
             translate(req, "result", InMemoryCallbackCorrelationRegistry())
 
 

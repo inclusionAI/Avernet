@@ -127,6 +127,7 @@ def test_batch_get_public_bots_returns_detail_and_is_tenant_scoped(repo):
                 owner_id="own-a",
                 bot_name="Alpha",
                 public="1",
+                bot_type="service",
                 ext={"owner_name": "Bob"},
             )
         )
@@ -143,6 +144,7 @@ def test_batch_get_public_bots_returns_detail_and_is_tenant_scoped(repo):
     assert bot_detail["public"] == "1"
     assert bot_detail["ext"] == {"owner_name": "Bob"}  # already parsed by to_dict
     assert bot_detail["owner_name"] == "Bob"
+    assert bot_detail["bot_type"] == "service"
     assert got_rec is rec
 
     # Under tenant-b: the ORM guard hides tenant-a's bot — the real leak the

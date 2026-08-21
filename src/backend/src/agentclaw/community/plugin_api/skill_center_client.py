@@ -9,13 +9,114 @@
 - GET  /api/v1/skills/{skillCode}/versions/{ver}/download （版本下载）
 """
 
-from typing import Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Any, Protocol, runtime_checkable
+
 from agentclaw.community.plugin_api.base import Plugin
+
+
+class SkillCenterTeamCreateError(RuntimeError):
+    """Raised when Skill Center rejects or cannot complete team creation."""
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamCreateRequest:
+    """Transport-neutral data required to mirror one OCB Space to SC."""
+
+    team_code: str
+    team_name: str
+    ref_source_id: str
+    description: str | None = None
+    icon: str | None = None
+    ref_source_platform: str | None = None
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamCreateResult:
+    """Confirmed SC team identity returned after a successful creation."""
+
+    team_id: str
+
+
+class SkillCenterTeamQueryError(RuntimeError):
+    """Raised when an SC team lookup fails or returns invalid data."""
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamQueryRequest:
+    """Transport-neutral identity used to find an SC team mapping."""
+
+    source: str
+    ref_source_id: str
+
+
+@dataclass(frozen=True)
+class SkillCenterTeamQueryResult:
+    """SC team identity resolved from ``source`` and ``ref_source_id``."""
+
+    team_id: str
+
+
+class SkillCenterMarketSearchError(RuntimeError):
+    """Raised when Skill Center market search fails or returns invalid data."""
+
+
+@dataclass(frozen=True)
+class SkillCenterMarketSearchRequest:
+    """Transport-neutral Skill Center market search request.
+
+    ``appKey`` and ``source`` are deployment configuration and deliberately do
+    not appear here. ``team_id`` is retained for trusted internal callers; the
+    public OPEN adapter always sends ``None`` and forces ``PUBLIC`` access.
+    """
+
+    keyword: str | None = None
+    page_num: int = 1
+    page_size: int = 20
+    is_official: bool | None = None
+    is_recommended: bool | None = None
+    tag_list: tuple[str, ...] = ()
+    sort_by: str | None = None
+    creator_name: str | None = None
+    creator_work_no: str | None = None
+    team_id: str | None = None
+    access_level: str | None = None
+    belong_to: str | None = None
+
+
+@dataclass(frozen=True)
+class SkillCenterMarketSearchResult:
+    """Validated page returned by Skill Center market search."""
+
+    total: int
+    items: tuple[dict[str, Any], ...]
 
 
 @runtime_checkable
 class SkillCenterClient(Plugin, Protocol):
     """SkillCenter 开放 API 客户端。"""
+
+    def create_team(
+        self, request: SkillCenterTeamCreateRequest
+    ) -> SkillCenterTeamCreateResult:
+        """Create the SC team corresponding to an OCB team Space.
+
+        Implementations obtain endpoint, appKey and source from deployment
+        configuration. A failed or rejected creation raises
+        :class:`SkillCenterTeamCreateError`; it must not return a false-success
+        result.
+        """
+        ...
+
+    def get_team_by_ref_source(
+        self, request: SkillCenterTeamQueryRequest
+    ) -> SkillCenterTeamQueryResult | None:
+        """Find an SC team by its external source identity.
+
+        ``None`` means that SC has no matching team. Upstream failures or
+        malformed responses raise :class:`SkillCenterTeamQueryError`.
+        """
+        ...
 
     def upload_and_publish(self, payload: dict) -> dict:
         """上传并发布技能（异步，返回后需轮询状态）。
@@ -48,10 +149,15 @@ class SkillCenterClient(Plugin, Protocol):
         ...
 
     def search_market_skills(
-        self, keyword: str = "", tag: str = "", page: int = 1, page_size: int = 20,
-        team_id: str | None = None,
-    ) -> dict:
-        """搜索公开市场技能。"""
+        self, request: SkillCenterMarketSearchRequest
+    ) -> SkillCenterMarketSearchResult:
+        """Search Skill Center and return a validated, transport-neutral page.
+
+        Implementations inject ``appKey`` and ``source`` from deployment
+        configuration. Rejected, unavailable, or malformed upstream responses
+        raise :class:`SkillCenterMarketSearchError`; they must not be converted
+        into an empty successful page.
+        """
         ...
 
     def get_market_tags(self) -> list[dict]:
@@ -81,7 +187,9 @@ class SkillCenterClient(Plugin, Protocol):
         """
         ...
 
-    def get_file_content(self, skill_code: str, file_path: str, version: str = "") -> dict:
+    def get_file_content(
+        self, skill_code: str, file_path: str, version: str = ""
+    ) -> dict:
         """获取技能指定文件内容。
 
         Args:

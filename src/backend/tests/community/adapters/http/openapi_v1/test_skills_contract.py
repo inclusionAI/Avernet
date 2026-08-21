@@ -11,7 +11,7 @@ def _schema() -> dict:
     return app.openapi()
 
 
-def test_openapi_exposes_exactly_the_six_ratified_skills_operations() -> None:
+def test_openapi_exposes_local_compatibility_and_skill_asset_operations() -> None:
     schema = _schema()
     skill_paths = {
         path: set(operations)
@@ -25,6 +25,8 @@ def test_openapi_exposes_exactly_the_six_ratified_skills_operations() -> None:
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}": {"get", "delete"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate": {"post"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate": {"post"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content": {"get"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters": {"get", "put"},
     }
 
 

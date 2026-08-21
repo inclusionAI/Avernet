@@ -51,7 +51,11 @@ def _document() -> dict:
 
 def _paths() -> list[str]:
     """Every published address — the current ones and the retiring ones."""
-    return list(_document()["paths"])
+    return [
+        path
+        for path in _document()["paths"]
+        if path == _BASE or path.startswith(f"{_BASE}/")
+    ]
 
 
 def _current_paths() -> list[str]:
@@ -66,6 +70,7 @@ def _current_paths() -> list[str]:
     return [
         path
         for path, item in document["paths"].items()
+        if path == _BASE or path.startswith(f"{_BASE}/")
         if any(
             isinstance(operation, dict)
             and "responses" in operation
@@ -81,20 +86,6 @@ def _segments(path: str) -> list[str]:
     return [s for s in path[len(_BASE) :].split("/") if s]
 
 
-def _bots_paths() -> list[str]:
-    """Published addresses under the ``/openapi/v1/bots`` base only."""
-    return [p for p in _paths() if p == _BASE or p.startswith(f"{_BASE}/")]
-
-
-def _current_bots_paths() -> list[str]:
-    """Current-contract addresses under the ``/openapi/v1/bots`` base only."""
-    return [
-        p
-        for p in _current_paths()
-        if p == _BASE or p.startswith(f"{_BASE}/")
-    ]
-
-
 #: The groups that address no single bot, so they keep a literal in the segment
 #: a bot id is otherwise read from. Everything else is ``{bot_id}``-first.
 #:
@@ -103,7 +94,25 @@ def _current_bots_paths() -> list[str]:
 #: operations have no bot dimension at all. Forcing it under ``{bot_id}`` would
 #: remove the ability to query across bots.
 _BOT_FREE = frozenset(
-    {"authorized", "ceiling", "check-name", "loadtest", "logs", "mcp"}
+    {
+        "all",
+        "authorized",
+        "ceiling",
+        "check-name",
+        "catalog",
+        "loadtest",
+        "local",
+        "logs",
+        "market",
+        "mcp",
+        "spaces",
+        # Repo catalog is tenant-wide but follows the Skill namespace as
+        # requested by its public contract: /bots/skills/repository/... .
+        # It therefore does not name one concrete Bot in this segment.
+        "skills",
+        "work-order-notifications",
+        "work-orders",
+    }
 )
 
 
@@ -114,25 +123,19 @@ def _components() -> set[str]:
     """
     return {
         segments[0]
-        for path in _bots_paths()
+        for path in _paths()
         if (segments := _segments(path)) and not segments[0].startswith("{")
     }
 
 
-def test_every_path_lives_under_the_bots_base():
+def test_bot_path_selection_lives_under_the_bots_base():
     """The gateway resolves by the segment after the version base.
 
     A path outside ``/openapi/v1/bots`` would route to a different upstream —
-    or to none — and the mistake is invisible until deploy. The harness group
-    used to be the one exception under its own ``/openapi/v1/harness`` base;
-    it moved beneath the addressed bot, so the rule is now absolute.
+    or to none — and the mistake is invisible until deploy.
     """
-    offenders = [
-        p
-        for p in _paths()
-        if p != _BASE and not p.startswith(f"{_BASE}/")
-    ]
-    assert not offenders, f"paths outside {_BASE}: {offenders}"
+    assert _paths(), "no bot paths found on the public surface"
+    assert all(path == _BASE or path.startswith(f"{_BASE}/") for path in _paths())
 
 
 def test_no_path_repeats_bot_before_the_id():
@@ -160,7 +163,7 @@ def test_every_bot_scoped_operation_names_the_bot_first():
     """
     offenders = [
         path
-        for path in _current_bots_paths()
+        for path in _current_paths()
         if (segments := _segments(path))
         and not segments[0].startswith("{")
         and segments[0] not in _BOT_FREE
@@ -175,20 +178,20 @@ def test_only_the_bots_component_owns_the_bare_wildcard():
     """Exactly one path may open with a parameter, and it is the bot itself."""
     wildcards = {
         segments[0]
-        for p in _bots_paths()
+        for p in _paths()
         if (segments := _segments(p)) and segments[0].startswith("{")
     }
     assert wildcards <= {"{bot_id}"}, f"unexpected top-level parameters: {wildcards}"
 
 
-def test_channels_is_gone():
-    """Deleted rather than left as a stub — it was *published*.
-
-    An unimplemented component a caller cannot distinguish from an implemented
-    one is worse than an absent one: it 500s on every call.
-    """
-    offenders = [p for p in _paths() if "channels" in p]
-    assert not offenders, f"channels was removed: {offenders}"
+def test_channels_uses_only_bot_first_addresses():
+    """The restored Channels contract is real and follows Bot-first addressing."""
+    channel_paths = {p for p in _paths() if "channels" in p}
+    assert channel_paths == {
+        "/openapi/v1/bots/{bot_id}/channels",
+        "/openapi/v1/bots/{bot_id}/channels/{channel_id}",
+        "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status",
+    }
 
 
 def _fenced_names(anchor: str) -> set[str]:

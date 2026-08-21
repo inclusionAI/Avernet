@@ -2,9 +2,14 @@ import pytest
 
 from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
+    logical_skill_mappings_from_evidence,
     local_locators_from_evidence,
+    mapping_contract_for,
 )
-from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+from agentclaw.community.core.skills_pool.models import (
+    PoolSkillMapping,
+    RegisteredSkillAsset,
+)
 
 
 def test_builds_logical_intent_without_engine_paths() -> None:
@@ -34,6 +39,87 @@ def test_builds_logical_intent_without_engine_paths() -> None:
             "relative_path": "business/reviewer",
             "link_name": "reviewer",
         },
+    ]
+
+
+def test_builds_structured_center_intent_without_runtime_paths() -> None:
+    mappings = build_logical_skill_mappings(
+        [
+            RegisteredSkillAsset(
+                skill_id=3,
+                name="risk-review",
+                git_path="center://2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+                skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+                sc_version_number="2026.8.19",
+            )
+        ]
+    )
+
+    assert [mapping.to_dict() for mapping in mappings] == [
+        {
+            "corpus": "center",
+            "skill_uuid": "2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+            "sc_version_number": "2026.8.19",
+            "link_name": "risk-review",
+        }
+    ]
+
+
+def test_rejects_center_mapping_without_structured_exact_version() -> None:
+    with pytest.raises(ValueError, match="structured identity"):
+        build_logical_skill_mappings(
+            [
+                RegisteredSkillAsset(
+                    skill_id=3,
+                    name="risk-review",
+                    git_path="center://2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+                )
+            ]
+        )
+
+
+def test_center_mapping_requires_explicit_runtime_v3_capability() -> None:
+    mappings = build_logical_skill_mappings(
+        [
+            RegisteredSkillAsset(
+                skill_id=3,
+                name="risk-review",
+                git_path="center://2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+                skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+                sc_version_number="2026.8.19",
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="explicitly support mapping v3"):
+        mapping_contract_for(mappings, ["skills-pool-mapping-v2"])
+
+    assert mapping_contract_for(
+        mappings,
+        ["skills-pool-mapping-v2", "skills-pool-mapping-v3"],
+    ) == "skills-pool-mapping-v3"
+
+
+def test_restores_structured_center_retirement_for_retry() -> None:
+    assert logical_skill_mappings_from_evidence(
+        {
+            "retired_mappings": [
+                {
+                    "corpus": "center",
+                    "skill_uuid": "2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+                    "sc_version_number": "2026.8.19",
+                    "link_name": "risk-review",
+                }
+            ]
+        }
+    ) == [
+        PoolSkillMapping(
+            corpus="center",
+            relative_path=None,
+            link_name="risk-review",
+            skill_uuid="2e0f2a89-5f8e-4df2-bc3e-797f5f02d26a",
+            sc_version_number="2026.8.19",
+        )
     ]
 
 
@@ -77,6 +163,74 @@ def test_rejects_duplicate_active_target() -> None:
                 ),
             ]
         )
+
+
+def test_repo_runtime_name_uses_skill_name_not_path_tail() -> None:
+    with pytest.raises(ValueError, match="duplicate managed target"):
+        build_logical_skill_mappings(
+            [
+                RegisteredSkillAsset(
+                    skill_id=1,
+                    name="report",
+                    git_path="git://ops/weekly-report",
+                ),
+                RegisteredSkillAsset(
+                    skill_id=2,
+                    name="report",
+                    git_path="git://finance/monthly-report",
+                ),
+            ]
+        )
+
+
+def test_repo_retirement_evidence_round_trips_when_name_differs_from_locator_tail() -> None:
+    current = build_logical_skill_mappings(
+        [
+            RegisteredSkillAsset(
+                skill_id=1,
+                name="incident-review",
+                git_path="git://ops/weekly-report",
+            )
+        ]
+    )
+
+    assert logical_skill_mappings_from_evidence(
+        {"retired_mappings": [current[0].to_dict()]}
+    ) == current
+
+
+def test_retirement_evidence_rejects_same_runtime_name_with_different_identities() -> None:
+    with pytest.raises(ValueError, match="ambiguous retired mapping evidence"):
+        logical_skill_mappings_from_evidence(
+            {
+                "retired_mappings": [
+                    {
+                        "corpus": "repo",
+                        "relative_path": "ops/weekly-report",
+                        "link_name": "incident-review",
+                    },
+                    {
+                        "corpus": "repo",
+                        "relative_path": "finance/monthly-report",
+                        "link_name": "incident-review",
+                    },
+                ]
+            }
+        )
+
+
+def test_legacy_retirement_evidence_with_matching_tail_remains_compatible() -> None:
+    assert logical_skill_mappings_from_evidence(
+        {
+            "retired_mappings": [
+                {
+                    "corpus": "local",
+                    "relative_path": "writer",
+                    "link_name": "writer",
+                }
+            ]
+        }
+    ) == [PoolSkillMapping(corpus="local", relative_path="writer", link_name="writer")]
 
 
 def test_validates_and_keys_engine_returned_locator_evidence() -> None:

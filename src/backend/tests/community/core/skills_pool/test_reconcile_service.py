@@ -367,9 +367,10 @@ class FakeSkillRepository:
         ]
 
     def list_bot_local_assets(
-        self, *, env: str, bot_id: str
+        self, *, env: str, owner_id: str, bot_id: str
     ) -> list[RegisteredSkillAsset]:
         assert (env, bot_id) == (SCOPE.env, SCOPE.bot_id)
+        assert owner_id == "owner-1"
         return self.registered
 
     def list_bot_active_assets(
@@ -377,11 +378,11 @@ class FakeSkillRepository:
         *,
         env: str,
         bot_id: str,
-        user_id: str,
+        owner_id: str,
         engine: str,
     ) -> list[RegisteredSkillAsset]:
         assert (env, bot_id) == (SCOPE.env, SCOPE.bot_id)
-        assert (user_id, engine) == ("owner-1", self.engine)
+        assert (owner_id, engine) == ("owner-1", self.engine)
         return self.active
 
 
@@ -577,6 +578,38 @@ async def test_ready_claimed_bot_completes_pool_activation() -> None:
         ),
         12: (
             "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-b"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("template_type", ("personalCoding", "applicationCoding"))
+async def test_coding_template_probes_aicoding_pool_layout_but_reads_claude_assets(
+    template_type: str,
+) -> None:
+    """The runtime layout is AICoding while the Skill catalogue stays Claude."""
+
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime(engine="aicoding")
+    skills = FakeSkillRepository("claude_code")
+    service = build_service(
+        layouts,
+        runtime,
+        engine="claude_code",
+        skills=skills,
+    )
+    service._bots.bot["template_type"] = template_type
+
+    result = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "cutover", "mapping", "verify"]
+    assert layouts.committed_locators == {
+        11: (
+            "local:///home/admin/.aicoding/workspace/skills-pool/skills-local/local-a"
+        ),
+        12: (
+            "local:///home/admin/.aicoding/workspace/skills-pool/skills-local/local-b"
         ),
     }
 

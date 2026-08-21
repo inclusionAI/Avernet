@@ -1,7 +1,7 @@
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, CreateSession, DeliveryType, IdentityPolicy,
-    ParticipantMode, ParticipantRole, Principal, SessionCaller, SessionKind, SessionStatus,
-    UpdateSession, select_principal,
+    ParticipantMode, ParticipantRole, Principal, SessionCaller, SessionInput, SessionKind,
+    SessionStatus, UpdateSession, select_principal,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value};

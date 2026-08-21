@@ -25,8 +25,8 @@ use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
     AddSessionParticipant, AuthenticatedAppIdentity, AuthenticatedBotIdentity, AuthenticatedCaller,
     AuthenticatedUserIdentity, CollectSession, CompleteSession, CreateSession, DeleteSession,
-    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, SessionMessageService,
-    SessionParticipantInput, SessionService,
+    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, SessionInput,
+    SessionMessageService, SessionParticipantInput, SessionService,
     SessionStatus as V1SessionStatus, UncollectSession, UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};

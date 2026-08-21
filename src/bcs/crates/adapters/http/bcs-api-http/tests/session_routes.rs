@@ -19,8 +19,9 @@ use bcs_service_api::application::v1::{
     DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, GetGroup,
     GetSession, GroupDetail, GroupService, GroupSummary, ListGroups, ListSessionMessages,
     ListSessions, Page, SessionCollectionResult, SessionCompletionResult, SessionDetail,
-    SessionMessageService, SessionParticipant, SessionService, SessionStatus, SessionSummary,
-    UncollectSession, UpdateGroup, UpdateGroupParticipant, UpdateSession, UpdateSessionParticipant,
+    SessionInput, SessionMessageService, SessionParticipant, SessionService, SessionStatus,
+    SessionSummary, UncollectSession, UpdateGroup, UpdateGroupParticipant, UpdateSession,
+    UpdateSessionParticipant,
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};
 use bcs_service_api::{

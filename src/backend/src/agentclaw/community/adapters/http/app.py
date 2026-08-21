@@ -151,6 +151,7 @@ from agentclaw.community.adapters.http.bot_management import router as bot_manag
 from agentclaw.community.adapters.http.caller_identity.router import router as caller_identity_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant.router import internal_router as bot_dormant_internal_router  # noqa: E402
+from agentclaw.community.adapters.http.spaces_internal import router as spaces_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_build import router as service_bot_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_publish import router as service_bot_publish_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_collaborator import router as bot_collaborator_router  # noqa: E402
@@ -811,6 +812,7 @@ app.include_router(bot_management_router.router)
 app.include_router(caller_identity_router)
 app.include_router(bot_dormant_router.router)
 app.include_router(bot_dormant_internal_router)
+app.include_router(spaces_internal_router)
 app.include_router(service_bot_router)
 app.include_router(service_bot_publish_router)
 app.include_router(bot_collaborator_router)

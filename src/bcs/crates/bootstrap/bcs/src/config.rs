@@ -745,8 +745,9 @@ pub struct BcsConfig {
     #[serde(default)]
     pub session_files: SessionFilesConfig,
 
-    /// Provider IDs allowed to call the switch-bot-delivery endpoint.
-    /// Empty list means no provider can switch bot delivery.
+    /// Provider IDs allowed to use backend-only Provider Bot operations,
+    /// including switch-bot-delivery and Bot attribute management.
+    /// Empty list means no Provider has either capability.
     #[serde(default)]
     pub allowed_switch_provider_ids: Vec<String>,
 

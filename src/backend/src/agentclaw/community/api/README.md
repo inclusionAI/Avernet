@@ -47,13 +47,17 @@ purpose: "Service API Protocols — transport-agnostic contracts between adapter
 provides:
   - "One Protocol per public service / factory"
   - "Structural conformance gate via tests/architecture/test_service_api_conformance.py"
+  - BotRuntimeProjectionReconcilerProtocol
 consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.bot_collaborator.models # Collaborator records, roles and permission levels — typed in collaborator_service.py
   - agentclaw.community.core.access.models            # UserInfoRecord — typed in user_service.py
   - agentclaw.community.core.bot_app_grant.models    # BotAppGrantRecord — typed in bot_app_grant_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.bot_chat.schemas        # ConversationDetail, HealthCheckData — typed in bot_chat_service.py
+  - agentclaw.community.core.bot_inventory.types   # Bot inventory/local workflow DTOs — typed in bot_inventory_service.py and local_bot_workflow_service.py
+  - agentclaw.community.core.bot_management.bot_space  # Bot Space assignment result typed in bot_space_service.py
   - agentclaw.community.core.bot_startup_script.repository.models  # BotStartupScriptRecord — typed in bot_startup_script_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.caller_identity.contracts  # Caller identity API DTOs and stable errors
   - agentclaw.community.core.caller_identity.credential  # CallerToken — typed in caller_credential.py
@@ -68,6 +72,10 @@ internal_dependencies:
   - agentclaw.community.core.quality.models          # QualityTaskRecord — typed in quality_service.py and task_processor_service.py
   - agentclaw.community.core.service_bot.repository.models  # BotPublishRecord — typed in engine_config_service.py
   - agentclaw.community.core.resources.models        # Resource / ResourceType — typed in resource_service.py (Protocol signatures mirror slim ResourceService verbatim; round-2 review #4)
+  - agentclaw.community.core.spaces.models           # Space/member records and enums — typed in space_service.py
+  - agentclaw.community.core.repository.protocols.skill_center_types # Space Skill query projection
+  - agentclaw.community.core.market_favorites.models # Favorite records and target enum — typed in market_favorite_service.py
+  - agentclaw.community.core.work_orders.models       # Work-order, notification, query, status, and event contracts
   - agentclaw.community.core.service_bot.services.baas_service  # BotWsConnectionInfoResponse / HttpConnectionInfo — typed in baas_service.py (BaasService is a plain core service)
   - agentclaw.community.core.service_bot.types       # PublishStage enum — typed in baas_service.py
   - agentclaw.community.core.skills_pool             # Skills Pool rollout/query/recovery domain DTOs used by operator Service API Protocols

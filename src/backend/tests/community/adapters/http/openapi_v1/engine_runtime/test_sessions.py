@@ -89,6 +89,48 @@ def test_list_does_not_publish_engine_only_fields(client, relay):
     assert "should not be published" not in str(item)
 
 
+def test_list_favorites_forwards_the_verified_user_and_page(client, relay):
+    relay.results = [EngineResult(data=[ENGINE_SESSION])]
+    data = ok(
+        client.get(
+            f"{_base()}/favorites",
+            params={"page": 2, "page_size": 3, "agent_id": "main"},
+        )
+    )
+    assert data["items"][0]["session_id"] == SESSION_ID
+    assert relay.calls[0]["path"] == "/api/session-favorites"
+    assert relay.calls[0]["params"] == {
+        "offset": 3,
+        "limit": 4,
+        "user_id": OWNER,
+        "agent_id": "main",
+    }
+
+
+def test_list_favorites_does_not_publish_engine_only_fields(client, relay):
+    relay.results = [EngineResult(data=[ENGINE_SESSION])]
+    item = ok(client.get(f"{_base()}/favorites"))["items"][0]
+    assert "user_id" not in item
+    assert "ext_info" not in item
+
+
+@pytest.mark.parametrize(
+    ("method", "favorited", "upstream_method"),
+    [("put", True, "PUT"), ("delete", False, "DELETE")],
+)
+def test_set_favorite_is_idempotent_and_encodes_only_the_upstream_path(
+    client, relay, method, favorited, upstream_method
+):
+    data = ok(getattr(client, method)(f"{_base()}/{SESSION_ID}/favorite"))
+    assert data == {"session_id": SESSION_ID, "favorited": favorited}
+    assert relay.calls[0]["method"] == upstream_method
+    assert relay.calls[0]["path"] == (
+        "/api/session-favorites/"
+        "session%3A2d20edc1-2f84-4524-8486-15bbd7078d42%3Auser%3A165137"
+    )
+    assert relay.calls[0]["params"] == {"user_id": OWNER}
+
+
 def test_create_session_fills_user_id_from_the_principal(client, relay):
     relay.results = [EngineResult(data=ENGINE_SESSION)]
     resp = client.post(_base(), json={"title": "T"})
@@ -184,9 +226,10 @@ def test_list_messages_drops_engine_metadata(client, relay):
 def test_unknown_message_role_does_not_500(client, relay):
     """A stub or newer engine returning an unlisted role must not break a read."""
     relay.results = [EngineResult(data=[{**ENGINE_MESSAGE, "role": "wat"}])]
-    assert ok(client.get(f"{_base()}/{SESSION_ID}/messages"))["items"][0][
-        "role"
-    ] == "system"
+    assert (
+        ok(client.get(f"{_base()}/{SESSION_ID}/messages"))["items"][0]["role"]
+        == "system"
+    )
 
 
 def test_clear_messages(client, relay):
@@ -234,7 +277,11 @@ def test_the_history_window_sends_no_offset_and_a_covering_limit(client, relay):
     """The history route tail-limits instead of paginating, so the offset is
     applied locally; sending it would cancel against the tail."""
     relay.results = [EngineResult(data=_messages(1))]
-    ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 3, "page_size": 50}))
+    ok(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages", params={"page": 3, "page_size": 50}
+        )
+    )
     assert relay.calls[0]["params"] == {"offset": 0, "limit": 151}
 
 
@@ -244,9 +291,17 @@ def test_history_pages_run_newest_first_without_repeating(client, relay):
     # 100 messages, page_size 20. Page 1 asks for the newest 21, page 2 the
     # newest 41 — the engine tail-limits, so that is m79-m99 and m59-m99.
     relay.results = [EngineResult(data=_messages(100)[-21:])]
-    first = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 1, "page_size": 20}))
+    first = ok(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages", params={"page": 1, "page_size": 20}
+        )
+    )
     relay.results = [EngineResult(data=_messages(100)[-41:])]
-    second = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}))
+    second = ok(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}
+        )
+    )
 
     def ids(d):
         return [i["message_id"] for i in d["items"]]
@@ -259,27 +314,43 @@ def test_history_pages_run_newest_first_without_repeating(client, relay):
 def test_the_newest_message_is_on_the_first_page(client, relay):
     """It used to be spent as the lookahead item and never shown."""
     relay.results = [EngineResult(data=_messages(100)[-21:])]
-    data = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 1, "page_size": 20}))
+    data = ok(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages", params={"page": 1, "page_size": 20}
+        )
+    )
     assert data["items"][-1]["message_id"] == "m99"
 
 
 def test_history_total_is_exact_once_the_tail_is_the_whole_history(client, relay):
     """A short tail proves nothing older exists, so the count is not a bound."""
     relay.results = [EngineResult(data=_messages(30))]
-    data = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}))
+    data = ok(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}
+        )
+    )
     assert data["total"] == 30
     assert [i["message_id"] for i in data["items"]] == [f"m{i}" for i in range(10)]
 
 
 def test_history_total_is_a_floor_while_older_messages_remain(client, relay):
     relay.results = [EngineResult(data=_messages(100)[-41:])]
-    data = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}))
+    data = ok(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}
+        )
+    )
     assert data["total"] == 41
 
 
 def test_paging_past_the_start_of_history_is_empty(client, relay):
     relay.results = [EngineResult(data=_messages(30))]
-    data = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 3, "page_size": 20}))
+    data = ok(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages", params={"page": 3, "page_size": 20}
+        )
+    )
     assert data["items"] == []
 
 
@@ -289,19 +360,24 @@ def test_a_page_number_cannot_amplify_into_device_load(client, relay):
     tenant's device for ~100M messages to answer with at most 100. The depth
     check now refuses it before the device is touched at all."""
     relay.results = [EngineResult(data=_messages(1))]
-    fails(client.get(
-        f"{_base()}/{SESSION_ID}/messages",
-        params={"page": 1000000, "page_size": 100},
-    ), 422)
+    fails(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages",
+            params={"page": 1000000, "page_size": 100},
+        ),
+        422,
+    )
     assert relay.calls == []
 
 
 def test_the_cap_does_not_bite_within_the_served_depth(client, relay):
     """A page inside the documented depth still asks for exactly its window."""
     relay.results = [EngineResult(data=_messages(1))]
-    ok(client.get(
-        f"{_base()}/{SESSION_ID}/messages", params={"page": 10, "page_size": 100}
-    ))
+    ok(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages", params={"page": 10, "page_size": 100}
+        )
+    )
     assert relay.calls[0]["params"] == {"offset": 0, "limit": 1001}
 
 
@@ -310,10 +386,13 @@ def test_a_page_past_the_capped_depth_is_refused_not_served_empty(client, relay)
     mean "the cap stopped me" — that reported ``total=5001`` on a history of any
     size. Past the depth the request is refused instead."""
     relay.results = [EngineResult(data=_messages(5001))]
-    fails(client.get(
-        f"{_base()}/{SESSION_ID}/messages",
-        params={"page": 1000, "page_size": 100},
-    ), 422)
+    fails(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages",
+            params={"page": 1000, "page_size": 100},
+        ),
+        422,
+    )
 
 
 def test_the_page_landing_on_the_cap_is_refused(client, relay):
@@ -325,10 +404,13 @@ def test_the_page_landing_on_the_cap_is_refused(client, relay):
     reporting an exact ``total``; the page is refused instead.
     """
     relay.results = [EngineResult(data=_messages(5001))]
-    fails(client.get(
-        f"{_base()}/{SESSION_ID}/messages",
-        params={"page": 51, "page_size": 100},
-    ), 422)
+    fails(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages",
+            params={"page": 51, "page_size": 100},
+        ),
+        422,
+    )
 
 
 def test_a_page_straddling_the_cap_is_refused(client, relay):
@@ -340,10 +422,13 @@ def test_a_page_straddling_the_cap_is_refused(client, relay):
     messages exist behind the cap.
     """
     relay.results = [EngineResult(data=_messages(5001))]
-    fails(client.get(
-        f"{_base()}/{SESSION_ID}/messages",
-        params={"page": 1667, "page_size": 3},
-    ), 422)
+    fails(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages",
+            params={"page": 1667, "page_size": 3},
+        ),
+        422,
+    )
 
 
 def test_the_depth_refusal_says_what_the_caller_hit(client, relay):
@@ -354,10 +439,13 @@ def test_the_depth_refusal_says_what_the_caller_hit(client, relay):
     ``HTTPException`` here would have told the caller only "Unprocessable
     Entity" however well its detail was written.
     """
-    body = fails(client.get(
-        f"{_base()}/{SESSION_ID}/messages",
-        params={"page": 51, "page_size": 100},
-    ), 422)
+    body = fails(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages",
+            params={"page": 51, "page_size": 100},
+        ),
+        422,
+    )
     assert body["message"] == (
         "Requested page is deeper than the message history this endpoint serves"
     )
@@ -367,10 +455,12 @@ def test_the_page_just_inside_the_cap_is_still_served_whole(client, relay):
     """The guard must not cost a page the depth does cover: page 1666 at
     ``page_size=3`` ends exactly on 4998 and is a full three messages."""
     relay.results = [EngineResult(data=_messages(4999))]
-    data = ok(client.get(
-        f"{_base()}/{SESSION_ID}/messages",
-        params={"page": 1666, "page_size": 3},
-    ))
+    data = ok(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages",
+            params={"page": 1666, "page_size": 3},
+        )
+    )
     assert len(data["items"]) == 3
 
 
@@ -378,10 +468,12 @@ def test_the_last_page_within_the_cap_is_still_whole(client, relay):
     """The floor must not eat into content the cap does cover: page 50 is the
     deepest served page and is a full 100 messages."""
     relay.results = [EngineResult(data=_messages(5001))]
-    data = ok(client.get(
-        f"{_base()}/{SESSION_ID}/messages",
-        params={"page": 50, "page_size": 100},
-    ))
+    data = ok(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages",
+            params={"page": 50, "page_size": 100},
+        )
+    )
     ids = [i["message_id"] for i in data["items"]]
     assert len(ids) == 100
     # Newest-first pages: page 50 is messages 4901..5000 counting back, which in
@@ -392,9 +484,11 @@ def test_the_last_page_within_the_cap_is_still_whole(client, relay):
 def test_an_uncapped_history_still_serves_its_final_short_page(client, relay):
     """The floor is inert below the cap — a genuinely short tail is unaffected."""
     relay.results = [EngineResult(data=_messages(30))]
-    data = ok(client.get(
-        f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}
-    ))
+    data = ok(
+        client.get(
+            f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}
+        )
+    )
     assert [i["message_id"] for i in data["items"]] == [f"m{i}" for i in range(10)]
 
 
@@ -412,15 +506,22 @@ def test_the_session_window_stays_page_sized(client, relay):
 @pytest.mark.parametrize(
     ("method", "suffix"),
     [
-        ("get", ""), ("post", ""), ("get", f"/{SESSION_ID}"),
-        ("patch", f"/{SESSION_ID}"), ("delete", f"/{SESSION_ID}"),
-        ("get", f"/{SESSION_ID}/messages"), ("delete", f"/{SESSION_ID}/messages"),
+        ("get", ""),
+        ("post", ""),
+        ("get", f"/{SESSION_ID}"),
+        ("patch", f"/{SESSION_ID}"),
+        ("delete", f"/{SESSION_ID}"),
+        ("get", f"/{SESSION_ID}/messages"),
+        ("delete", f"/{SESSION_ID}/messages"),
+        ("get", "/favorites"),
+        ("put", f"/{SESSION_ID}/favorite"),
+        ("delete", f"/{SESSION_ID}/favorite"),
     ],
 )
 def test_a_service_bot_is_served_and_addressed_at_its_draft_device(
     client, relay, method, suffix
 ):
-    """All seven routes serve a service bot at its DRAFT binding by default.
+    """All ten routes serve a service bot at its DRAFT binding by default.
 
     A request that names no stage must behave exactly as before stages were
     addressable: every forward carries ``stage == "draft"``, addressing the
@@ -473,15 +574,22 @@ def test_an_unknown_bot_type_gets_501_without_touching_the_device(
 @pytest.mark.parametrize(
     "method,suffix",
     [
-        ("get", ""), ("post", ""), ("get", f"/{SESSION_ID}"),
-        ("patch", f"/{SESSION_ID}"), ("delete", f"/{SESSION_ID}"),
-        ("get", f"/{SESSION_ID}/messages"), ("delete", f"/{SESSION_ID}/messages"),
+        ("get", ""),
+        ("post", ""),
+        ("get", f"/{SESSION_ID}"),
+        ("patch", f"/{SESSION_ID}"),
+        ("delete", f"/{SESSION_ID}"),
+        ("get", f"/{SESSION_ID}/messages"),
+        ("delete", f"/{SESSION_ID}/messages"),
+        ("get", "/favorites"),
+        ("put", f"/{SESSION_ID}/favorite"),
+        ("delete", f"/{SESSION_ID}/favorite"),
     ],
 )
 def test_a_collaborated_personal_bot_is_served_to_its_operators(
     make_client, relay, method, suffix
 ):
-    """The flip of the old shared-personal 501, on all seven routes.
+    """The flip of the old shared-personal 501, on all ten routes.
 
     A coding app's collaborators are its team: each of them — and the owner —
     operates the bot's workspace. The surface is an operator console, and the

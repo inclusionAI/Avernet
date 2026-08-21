@@ -1165,6 +1165,18 @@ story_provider_operator_publishes_agent() {
     assert_json_eq "provider agent keeps provider ref" "$RESPONSE" "provider_bot_ref" "$provider_bot_ref"
     [[ -n "$provider_bot_uuid" && -n "$runtime_token" ]] || return
 
+    # This fixture Provider is intentionally not in the backend-only allowlist.
+    # Exercise both endpoints and freeze the fail-closed boundary before any
+    # attribute write can reach the shared control-plane service.
+    api_request_headers GET "/providers/${provider_id}/bots/${provider_bot_uuid}/attributes" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "unapproved provider cannot read Bot attributes" "403" || return
+
+    api_request_headers PATCH "/providers/${provider_id}/bots/${provider_bot_uuid}/attributes" \
+        '{"user_visibility":"public"}' \
+        "Authorization: Bearer ${admin_token}"
+    require_status "unapproved provider cannot update Bot attributes" "403" || return
+
     _story_provider_manages_organization "$provider_id" "$admin_token" "$provider_bot_uuid" || return
 
     api_request_headers GET "/providers/${provider_id}/bots" "" \

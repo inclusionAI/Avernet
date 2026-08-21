@@ -280,6 +280,7 @@ class TestCronRelaySessionInitiatorHelpers:
 
 class TestTaskDiscoveryScheduler:
     def test_startup_auto_start_false(self):
+        pytest.importorskip("apscheduler")  # 调度器依赖 apscheduler;依赖未声明时跳过,而非 error
         from agentclaw.community.core.task.task_discovery.scheduler import (
             TaskDiscoveryScheduler,
         )
@@ -290,6 +291,7 @@ class TestTaskDiscoveryScheduler:
         assert sched._scheduler is None
 
     def test_startup_auto_start_true(self):
+        pytest.importorskip("apscheduler")  # 同上
         from agentclaw.community.core.task.task_discovery.scheduler import (
             TaskDiscoveryScheduler,
         )

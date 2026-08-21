@@ -1,7 +1,8 @@
-"""SkillParser - 统一的技能文件解析器
+"""Strict parser for Skill ``SKILL.md`` manifests.
 
-从 SKILL.md / README.md 文件中提取技能元数据。
-纯工具类，不依赖数据库或缓存。
+``SKILL.md`` is the sole source of authoritative Skill metadata.  This module
+intentionally does not fall back to README files, directory names, or body
+text when parsing ``name`` and ``description``.
 """
 
 import re
@@ -18,17 +19,27 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 
+class SkillManifestError(ValueError):
+    """Raised when a ``SKILL.md`` manifest violates the parser contract."""
+
+    def __init__(self, code: str, message: str, field: str | None = None) -> None:
+        self.code = code
+        self.field = field
+        super().__init__(message)
+
+
 @dataclass
 class SkillInfo:
     """技能信息数据模型 (文件系统层面)"""
+
     id: str
     name: str
     description: str = ""
     version: str = "1.0.0"
     category: str = "general"
     icon: str = "🔧"
-    path: str = ""  # 软链接路径 ~/.moltis/skills/{link_name}
-    source_path: str = ""  # 源路径 ~/.openclaw/skills-repo/{relative_path}
+    path: str = ""
+    source_path: str = ""
     is_active: bool = False
     is_installed: bool = False
     capabilities: list[dict] = field(default_factory=list)
@@ -58,10 +69,11 @@ class SkillInfo:
 @dataclass
 class SkillTreeNode:
     """技能市场树节点"""
+
     name: str
     path: str
-    type: str  # 'dir' or 'skill'
-    children: list['SkillTreeNode'] = field(default_factory=list)
+    type: str
+    children: list["SkillTreeNode"] = field(default_factory=list)
     skill_info: dict | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -76,189 +88,253 @@ class SkillTreeNode:
         return result
 
 
-def _extract_frontmatter_fields(fm_data: dict, skill_info: dict) -> None:
-    """从解析后的 YAML frontmatter dict 中提取字段到 skill_info。"""
-    if "name" in fm_data:
-        skill_info["name"] = fm_data["name"]
-    if "description" in fm_data:
-        skill_info["description"] = fm_data["description"]
-    if "version" in fm_data:
-        skill_info["version"] = fm_data["version"]
-    if "author" in fm_data:
-        skill_info["author"] = fm_data["author"]
-    if "tags" in fm_data:
-        tags = fm_data["tags"]
+def _extract_frontmatter(content: str) -> tuple[dict[str, Any], str]:
+    """Return strict YAML frontmatter and Markdown body."""
+    normalized = content.lstrip("\ufeff")
+    lines = normalized.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise SkillManifestError(
+            "MISSING_FRONTMATTER",
+            "SKILL.md must start with YAML frontmatter.",
+        )
+
+    closing_index = next(
+        (
+            index
+            for index, line in enumerate(lines[1:], start=1)
+            if line.strip() == "---"
+        ),
+        None,
+    )
+    if closing_index is None:
+        raise SkillManifestError(
+            "INVALID_FRONTMATTER",
+            "SKILL.md frontmatter is not closed.",
+        )
+
+    frontmatter_text = "".join(lines[1:closing_index])
+    body = "".join(lines[closing_index + 1 :])
+    try:
+        data = yaml.safe_load(frontmatter_text)
+    except yaml.YAMLError as exc:
+        raise SkillManifestError(
+            "INVALID_FRONTMATTER",
+            f"SKILL.md frontmatter is invalid: {exc}",
+        ) from exc
+    if not isinstance(data, dict):
+        raise SkillManifestError(
+            "INVALID_FRONTMATTER",
+            "SKILL.md frontmatter must be a YAML mapping.",
+        )
+    return data, body
+
+
+def _validate_manifest(data: dict[str, Any]) -> dict[str, Any]:
+    result = dict(data)
+    for field_name in ("name", "description"):
+        if field_name not in data:
+            raise SkillManifestError(
+                f"MISSING_{field_name.upper()}",
+                f"SKILL.md must contain required field: {field_name}.",
+                field_name,
+            )
+        value = data[field_name]
+        if not isinstance(value, str):
+            raise SkillManifestError(
+                f"INVALID_{field_name.upper()}_TYPE",
+                f"SKILL.md field '{field_name}' must be a string.",
+                field_name,
+            )
+        value = value.strip()
+        if not value:
+            raise SkillManifestError(
+                f"EMPTY_{field_name.upper()}",
+                f"SKILL.md field '{field_name}' cannot be empty.",
+                field_name,
+            )
+        result[field_name] = value
+
+    return result
+
+
+def _to_skill_info(data: dict[str, Any]) -> dict[str, Any]:
+    """Project validated frontmatter into the existing SkillInfo dictionary."""
+    skill_info: dict[str, Any] = {
+        "name": data["name"],
+        "description": data["description"],
+        "version": "1.0.0",
+        "category": "general",
+        "author": "",
+        "tags": [],
+        "input_schema": "",
+        "output_schema": "",
+        "capabilities": [],
+    }
+    if "version" in data:
+        skill_info["version"] = data["version"]
+    if "author" in data:
+        skill_info["author"] = data["author"]
+    if "tags" in data:
+        tags = data["tags"]
         if isinstance(tags, list):
             skill_info["tags"] = tags
         elif isinstance(tags, str):
-            skill_info["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
-
-
-def _extract_description_from_body(body: str) -> str:
-    """从 markdown body 中提取第一个标题后的描述文本。"""
-    lines = body.split('\n')
-    found_title = False
-    description_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            if found_title and description_lines:
-                break
-            continue
-        if stripped.startswith('#'):
-            if found_title:
-                break
-            found_title = True
-            continue
-        if found_title:
-            description_lines.append(stripped)
-            if len(description_lines) >= 2:
-                break
-    return ' '.join(description_lines)
+            skill_info["tags"] = [
+                item.strip() for item in tags.split(",") if item.strip()
+            ]
+    return skill_info
 
 
 class SkillParser:
-    """统一解析 SKILL.md / README.md"""
+    """Strict parser for ``SKILL.md`` metadata with UTF-8/GBK compatibility."""
+
+    @staticmethod
+    def decode_content(content: bytes) -> str:
+        """Decode SKILL.md without silently replacing invalid bytes."""
+        try:
+            return content.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                return content.decode("gbk")
+            except UnicodeDecodeError as exc:
+                raise SkillManifestError(
+                    "INVALID_ENCODING",
+                    "SKILL.md must be encoded as UTF-8 or GBK.",
+                ) from exc
+
+    @staticmethod
+    def decode_content_for_display(content: bytes) -> str:
+        """Decode legacy display content without making reads unavailable.
+
+        Upload and manifest validation use :meth:`decode_content` and remain
+        strict. Existing installed content may predate that contract, so the
+        read-only display path preserves the historical replacement fallback.
+        """
+        try:
+            return content.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                return content.decode("gbk")
+            except UnicodeDecodeError:
+                return content.decode("utf-8", errors="replace")
 
     @staticmethod
     def find_skill_file(skill_path: Path) -> Path | None:
-        """查找技能文件 (SKILL.md 优先，其次是 README.md)"""
+        """Return only the target directory's authoritative ``SKILL.md``."""
         skill_file = skill_path / "SKILL.md"
-        if skill_file.exists():
-            return skill_file
-        skill_file = skill_path / "README.md"
-        if skill_file.exists():
-            return skill_file
+        return skill_file if skill_file.is_file() else None
+
+    @staticmethod
+    def find_display_file(skill_path: Path) -> Path | None:
+        """Return the historical display document, preferring ``SKILL.md``."""
+        for filename in ("SKILL.md", "README.md"):
+            candidate = skill_path / filename
+            if candidate.is_file():
+                return candidate
         return None
 
     @staticmethod
     def has_skill_file(skill_path: Path) -> bool:
-        """检查目录是否包含 SKILL.md（严格的技能定义）"""
-        return (skill_path / "SKILL.md").exists()
+        return (skill_path / "SKILL.md").is_file()
 
     @classmethod
     def parse(cls, skill_path: Path) -> dict[str, Any] | None:
-        """解析技能文件，提取元数据"""
         skill_file = cls.find_skill_file(skill_path)
         if not skill_file:
             return None
-
         try:
-            try:
-                content = skill_file.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                content = skill_file.read_text(encoding="gbk", errors="replace")
-            stat = skill_file.stat()
-            created_at = datetime.fromtimestamp(stat.st_ctime).isoformat()
-            updated_at = datetime.fromtimestamp(stat.st_mtime).isoformat()
-        except Exception as e:
-            logger.error("[SkillParser] Error reading %s: %s", skill_file, e)
-            return None
+            content = cls.decode_content(skill_file.read_bytes())
+        except OSError as exc:
+            logger.error("[SkillParser] Error reading %s: %s", skill_file, exc)
+            raise SkillManifestError("SKILL_FILE_READ_ERROR", str(exc)) from exc
 
-        skill_info = {
-            "name": skill_path.name,
-            "description": "",
-            "version": "1.0.0",
-            "category": "general",
-            "author": "",
-            "tags": [],
-            "input_schema": "",
-            "output_schema": "",
-            "capabilities": [],
-            "created_at": created_at,
-            "updated_at": updated_at,
-        }
-
-        # 提取 YAML frontmatter
-        body = content
-        if content.strip().startswith("---"):
-            frontmatter_match = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", content, re.DOTALL)
-            if frontmatter_match:
-                frontmatter = frontmatter_match.group(1)
-                body = frontmatter_match.group(2)
-
-                # 使用 yaml 解析 frontmatter（支持多行字符串）
-                try:
-                    fm_data = yaml.safe_load(frontmatter)
-                    if fm_data and isinstance(fm_data, dict):
-                        _extract_frontmatter_fields(fm_data, skill_info)
-                except Exception as e:
-                    # yaml 解析失败时，回退到简单行解析（正常业务场景）
-                    logger.debug("[SkillParser] YAML parse error, fallback to line parsing: %s", e)
-                    for line in frontmatter.split("\n"):
-                        if ":" in line:
-                            key, value = line.split(":", 1)
-                            key = key.strip()
-                            value = value.strip()
-
-                            if key == "name":
-                                skill_info["name"] = value
-                            elif key == "description":
-                                skill_info["description"] = value
-                            elif key == "version":
-                                skill_info["version"] = value
-                            elif key == "author":
-                                skill_info["author"] = value
-                            elif key == "tags":
-                                tags_str = value.strip("[]")
-                                skill_info["tags"] = [t.strip().strip('"\'') for t in tags_str.split(",") if t.strip()]
-
-        # Note: 不再从 body 提取标题作为 name，因为代码块中的注释可能被误识别
-        # 如果 frontmatter 没有 name，则使用目录名（已在初始化时设置）
-
-        # 从 body 提取描述
-        if not skill_info["description"]:
-            skill_info["description"] = _extract_description_from_body(body)
-
-        # 提取能力
-        capability_sections = re.findall(r'^##\s+(.+)$', body, re.MULTILINE)
-        for cap in capability_sections:
-            skill_info["capabilities"].append({
-                "id": cap.lower().replace(' ', '_'),
-                "name": cap,
-            })
-
+        skill_info = cls.parse_content(content)
+        if skill_info["name"] != skill_path.name:
+            raise SkillManifestError(
+                "NAME_DIRECTORY_MISMATCH",
+                "Skill folder name must match SKILL.md field 'name'. "
+                f"Folder name: '{skill_path.name}', SKILL.md name: '{skill_info['name']}'.",
+                "name",
+            )
+        stat = skill_file.stat()
+        skill_info["created_at"] = datetime.fromtimestamp(stat.st_ctime).isoformat()
+        skill_info["updated_at"] = datetime.fromtimestamp(stat.st_mtime).isoformat()
+        body = _extract_frontmatter(content)[1]
+        for capability in re.findall(r"^##\s+(.+)$", body, re.MULTILINE):
+            skill_info["capabilities"].append(
+                {
+                    "id": capability.lower().replace(" ", "_"),
+                    "name": capability,
+                }
+            )
         return skill_info
 
     @staticmethod
     def parse_content(content: str) -> dict[str, Any] | None:
-        """解析 SKILL.md 内容字符串，提取元数据（不依赖文件系统）
+        """Parse strict UTF-8-decoded ``SKILL.md`` content."""
+        if not content:
+            return None
+        frontmatter, _body = _extract_frontmatter(content)
+        return _to_skill_info(_validate_manifest(frontmatter))
 
-        用于远程设备（如 Arca）场景，避免需要先写入文件再解析。
+    @staticmethod
+    def parse_config(content: str) -> list[dict[str, Any]]:
+        """Return the optional, raw ``config`` declaration from SKILL.md.
+
+        Config is an execution-time parameter contract, not catalog metadata;
+        it intentionally remains outside the #1221 catalog projection.
+        """
+        frontmatter, _body = _extract_frontmatter(content)
+        config = frontmatter.get("config", [])
+        if not isinstance(config, list) or not all(
+            isinstance(item, dict) for item in config
+        ):
+            raise SkillManifestError(
+                "INVALID_CONFIG", "SKILL.md config must be a list.", "config"
+            )
+        return config
+
+    @staticmethod
+    def parse_installed_content(content: str) -> dict[str, Any] | None:
+        """Project metadata from a legacy installed Skill for read-only lists.
+
+        Historical active Skills can have only ``name`` in frontmatter. They
+        remain visible, with an empty description, while new uploads continue
+        to use the strict :meth:`parse_content` contract.
         """
         if not content:
             return None
+        frontmatter, _body = _extract_frontmatter(content)
+        name = frontmatter.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise SkillManifestError(
+                "MISSING_NAME", "SKILL.md must contain a non-empty name.", "name"
+            )
+        normalized = dict(frontmatter)
+        normalized["name"] = name.strip()
+        description = normalized.get("description", "")
+        if description is None:
+            description = ""
+        if not isinstance(description, str):
+            raise SkillManifestError(
+                "INVALID_DESCRIPTION_TYPE",
+                "SKILL.md field 'description' must be a string.",
+                "description",
+            )
+        normalized["description"] = description.strip()
+        return _to_skill_info(normalized)
 
-        skill_info = {
-            "name": "",
-            "description": "",
-            "version": "1.0.0",
-            "category": "general",
-            "author": "",
-            "tags": [],
-            "input_schema": "",
-            "output_schema": "",
-            "capabilities": [],
-        }
-
-        # 提取 YAML frontmatter
-        body = content
-        if content.strip().startswith("---"):
-            frontmatter_match = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", content, re.DOTALL)
-            if frontmatter_match:
-                frontmatter = frontmatter_match.group(1)
-                body = frontmatter_match.group(2)
-
-                # 使用 yaml 解析 frontmatter
-                try:
-                    fm_data = yaml.safe_load(frontmatter)
-                    if fm_data and isinstance(fm_data, dict):
-                        _extract_frontmatter_fields(fm_data, skill_info)
-                except Exception as e:
-                    logger.debug(f"[SkillParser.parse_content] YAML parse error: {e}")
-
-        # 从 body 提取描述
-        if not skill_info["description"]:
-            skill_info["description"] = _extract_description_from_body(body)
-
-        return skill_info
+    @staticmethod
+    def parse_legacy_upload_content(content: str) -> dict[str, Any] | None:
+        """Parse the pre-frontmatter upload shape for endpoint compatibility."""
+        if not content:
+            return None
+        try:
+            data = yaml.safe_load(content)
+        except yaml.YAMLError as exc:
+            raise SkillManifestError(
+                "INVALID_FRONTMATTER", f"Legacy SKILL.md metadata is invalid: {exc}"
+            ) from exc
+        if not isinstance(data, dict):
+            return None
+        return _to_skill_info(_validate_manifest(data))
