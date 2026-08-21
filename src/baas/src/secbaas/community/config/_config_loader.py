@@ -83,6 +83,8 @@ class ConfigLoader:
             default = match.group("default")
             if default is not None:
                 return default
+            if not strict:
+                return match.group(0)
             msg = (
                 f"Environment variable '{name}' referenced by "
                 f"${{{name}}} in config is not set and has no default"

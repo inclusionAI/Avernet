@@ -86,7 +86,7 @@ class TestAliyunAckSelector:
             template_uuid="u",
             base_url="http://x",
             api_key="k",
-            arca_template_id="ALIYUN_ACK_OPENCLAW",
+            arca_template_id="ALIYUN_ACK_DEFAULT",
         )
         plugin = self._container().arca_sandbox_plugin_factory(creds)
         assert isinstance(plugin, AliyunAckSandboxPlugin)
