@@ -50,18 +50,24 @@ _api_authed() {
     RESPONSE=$(cat "$_RESPONSE_FILE")
 }
 
-# Set bot to protected + manual (forces pending path, not PublicNoEdge)
+# Set bot to protected + manual (forces pending path, not PublicNoEdge).
+# These are owner-gated writes: the caller must be the bot's `created_by`. The
+# bots were onboarded under the mock human owner (X-Mock-User-Id), so call via
+# `api_put` (mock-human owner) — NOT the bot's own Bearer token, which 403s
+# because bot_id != created_by. Without this, _set_protected_manual silently
+# no-ops, every connect auto-resolves to PublicNoEdge, and the accept→
+# edge_grants INSERT / AC-20 / duplicate-409 branches never execute.
 _set_protected_manual() {
-    local bot_uuid="$1" token="$2"
-    _api_authed "PUT" "/bots/$bot_uuid/visibility" '{"visibility":"protected"}' "$token" >/dev/null 2>&1 || true
-    _api_authed "PUT" "/bots/$bot_uuid/friend-approval" '{"friend_approval":"manual"}' "$token" >/dev/null 2>&1 || true
+    local bot_uuid="$1" _token="$2"
+    api_put "/bots/$bot_uuid/visibility" '{"visibility":"protected"}' >/dev/null 2>&1 || true
+    api_put "/bots/$bot_uuid/friend-approval" '{"friend_approval":"manual"}' >/dev/null 2>&1 || true
 }
 
-# Set bot back to public + auto (restore default)
+# Set bot back to public + auto (restore default) — same owner-gated reason.
 _restore_public_auto() {
-    local bot_uuid="$1" token="$2"
-    _api_authed "PUT" "/bots/$bot_uuid/friend-approval" '{"friend_approval":"auto"}' "$token" >/dev/null 2>&1 || true
-    _api_authed "PUT" "/bots/$bot_uuid/visibility" '{"visibility":"public"}' "$token" >/dev/null 2>&1 || true
+    local bot_uuid="$1" _token="$2"
+    api_put "/bots/$bot_uuid/friend-approval" '{"friend_approval":"auto"}' >/dev/null 2>&1 || true
+    api_put "/bots/$bot_uuid/visibility" '{"visibility":"public"}' >/dev/null 2>&1 || true
 }
 
 # Parse a pending request_id from a v2 GET /v2/friends/requests response
@@ -311,13 +317,9 @@ test_ep_v2_friend_requests_list() {
 # PUT /bots/{id}/human-addable
 test_ep_set_human_addable() {
     info "EdgePermission: set human-addable"
-    local ceo_token
-    ceo_token="$(get_bot_token CEO 2>/dev/null || echo '')"
-    if [[ -z "$ceo_token" ]]; then
-        skip_case "no CEO token for human-addable"; return 77
-    fi
-
-    _api_authed "PUT" "/bots/$BOT_CEO_UUID/human-addable" '{"human_addable":true}' "$ceo_token"
+    # Owner-gated write: call as the mock-human owner (api_put), not the bot
+    # token (which 403s). Exercises the set_human_addable write + ownership-pass.
+    api_put "/bots/$BOT_CEO_UUID/human-addable" '{"human_addable":true}'
     if [[ "$HTTP_STATUS" == "200" ]]; then
         pass "PUT human-addable returns 200"
         TESTS_PASSED=$((TESTS_PASSED + 1))
@@ -331,13 +333,7 @@ test_ep_set_human_addable() {
 # PUT /bots/{id}/friend-approval
 test_ep_set_friend_approval() {
     info "EdgePermission: set friend-approval"
-    local ceo_token
-    ceo_token="$(get_bot_token CEO 2>/dev/null || echo '')"
-    if [[ -z "$ceo_token" ]]; then
-        skip_case "no CEO token for friend-approval"; return 77
-    fi
-
-    _api_authed "PUT" "/bots/$BOT_CEO_UUID/friend-approval" '{"friend_approval":"auto"}' "$ceo_token"
+    api_put "/bots/$BOT_CEO_UUID/friend-approval" '{"friend_approval":"auto"}'
     if [[ "$HTTP_STATUS" == "200" ]]; then
         pass "PUT friend-approval returns 200"
         TESTS_PASSED=$((TESTS_PASSED + 1))
