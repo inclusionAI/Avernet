@@ -21,7 +21,7 @@ async fn permission_request_repo_contract_sqlite() {
 }
 
 /// Fresh LocalSqliteDbPlugin with the full 16-column `permission_requests`
-/// table (mirrors `migrations/mysql/009_edge_permission.sql` for SQLite;
+/// table (mirrors `migrations/mysql/011_edge_permission.sql` for SQLite;
 /// matches the inline `request_store()` helper in `src/lib.rs::tests`).
 async fn sqlite_with_schema() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("local sqlite"));

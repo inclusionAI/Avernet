@@ -44,7 +44,7 @@ pub use http::{
     FriendEntry, FriendListResponse, FusionRequest, FusionResponse,
     InlineEventPayloadInfo, InlineEventPayloadMode, InlineEventSinkInfo,
     InlineGroupEventSubscriptionInfo, JoinRequest, JoinResponse, LeaveResponse,
-    ListFriendRequestsQuery, ListRequestsQuery, OnboardRequest,
+    ListRequestsQuery, OnboardRequest,
     OnboardResponse, OrganizationCandidateBotDetailResponse,
     OrganizationCandidateBotListResponse, OrganizationCandidateBotResponse,
     OrganizationListResponse, OrganizationMemberBotResponse, OrganizationMemberDetailResponse,

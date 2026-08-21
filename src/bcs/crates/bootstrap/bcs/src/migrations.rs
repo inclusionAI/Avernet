@@ -1834,7 +1834,7 @@ assert_eq!(report.pending_versions[10].version, 11);
                 .iter()
                 .any(|column| column == "opening_message_json")
         );
-        // group_opening_message is no longer the tail migration (task_modes at v12
+// group_opening_message is no longer the tail migration (task_modes at v12
         // follows it), so assert it was re-applied as the version-11 row rather than
         // as the last row. The column check above already proves the migration
         // re-added opening_message_json; this row check pins it to the right version.

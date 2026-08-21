@@ -3,7 +3,7 @@
 -- 历史好友数据迁移到 08-12 边权限表 (edge_grants/permission_profiles/permission_requests).
 --
 -- 运行时: MySQL production. 所有 INSERT 用 INSERT IGNORE (幂等, 重复跑不报错).
--- 依赖: Phase 1 Build 已部署 (五表 DDL 009_edge_permission.sql 已 apply).
+-- 依赖: Phase 1 Build 已部署 (五表 DDL 011_edge_permission.sql 已 apply).
 -- 顺序: 脚本 0 → 1 → 2 → 3 → 4 → 5 → reconciliation.
 -- 来源: spec §8.4 + edge-permission-friend-migration-plan.md §3.
 
