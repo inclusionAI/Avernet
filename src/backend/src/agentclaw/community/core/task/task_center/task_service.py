@@ -150,11 +150,14 @@ class TaskService:
             return TaskOpResult(task_id=task_id, success=False,
                                 error=f"workflow trigger failed: {exc}", run_id=run_id)
         session_id = bot_result.session_id if bot_result is not None else None
+        run_extend = {"session_id": session_id}
         self._graph.update_task_node_info(TaskNodePatch(
             task_id=task_id, node_id=task_id, status=Status.RUNNING,
-            run_mode="single_bot", assignee=request.owner_bot_id))
+            run_mode="single_bot", assignee=request.owner_bot_id,
+            extend_props_patch=run_extend))
         self._persist_node_run(task_id, task_info, run_mode="single_bot",
-                               assignee=request.owner_bot_id, session_id=session_id)
+                               assignee=request.owner_bot_id, session_id=session_id,
+                               extend_props=run_extend)
         return TaskOpResult(task_id=task_id, success=True, run_id=run_id)
 
     async def _run_yaml(self, task_id, request, task_info, run_id):
@@ -172,14 +175,18 @@ class TaskService:
         except Exception as exc:
             return TaskOpResult(task_id=task_id, success=False,
                                 error=f"yaml group failed: {exc}", run_id=run_id)
+        run_extend = {"group_id": start.group_id, "session_id": start.session_id}
         self._graph.update_task_node_info(TaskNodePatch(
             task_id=task_id, node_id=task_id, status=Status.RUNNING,
-            run_mode="coop_group", assignee=start.group_id))
+            run_mode="coop_group", assignee=start.group_id,
+            extend_props_patch=run_extend))
         self._persist_node_run(task_id, task_info, run_mode="coop_group",
-                               assignee=start.group_id, session_id=start.session_id)
+                               assignee=start.group_id, session_id=start.session_id,
+                               extend_props=run_extend)
         return TaskOpResult(task_id=task_id, success=True, run_id=run_id)
 
-    def _persist_node_run(self, task_id, task_info, *, run_mode, assignee, session_id):
+    def _persist_node_run(self, task_id, task_info, *, run_mode, assignee, session_id,
+                          extend_props=None):
         if self._task_node_repo is not None:
             self._task_node_repo.insert(TaskNodeRecord(
                 id=0, task_id=task_id, node_id=task_id,
@@ -189,7 +196,7 @@ class TaskService:
             self._run_info_repo.insert(TaskNodeRunInfoRecord(
                 id=0, node_id=task_id, task_id=task_id, run_mode=run_mode, assignee=assignee,
                 output=None, acceptance_result=None, retry=0, session_id=session_id,
-                extend_props=None, start_time=now_ms, update_time=now_ms, end_time=None))
+                extend_props=extend_props, start_time=now_ms, update_time=now_ms, end_time=None))
 
     def _on_bg_done(self, bg: "asyncio.Task") -> None:
         """后台 on_execute 完成:脱离跟踪集 + 异常可见(记 log,不抛)。"""

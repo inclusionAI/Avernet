@@ -100,6 +100,11 @@ def test_execute_workflow_persists_session_id():
     node = node_repo.get("t1", "t1")
     assert node is not None and node.status is Status.RUNNING
     assert ("workflow", "t1", "b1", "/wf 1 2") in eng.calls
+    # session_id surfaces in the persisted run_info extend_props AND the dashboard
+    # (root node's in-memory run_info.extend_props, serialized by graph_to_dto).
+    assert run.extend_props == {"session_id": "wf-session-1"}
+    dash = svc.get_task_dashboard("t1")
+    assert dash.tasks[0].run_info.extend_props == {"session_id": "wf-session-1"}
 
 
 def test_execute_yaml_persists_session_id_with_state_machine():
@@ -116,6 +121,10 @@ def test_execute_yaml_persists_session_id_with_state_machine():
     run = run_repo.get_latest("t1", "t1")
     assert run.run_mode == "coop_group" and run.session_id == "yaml-session-1" and run.assignee == "grp-1"
     assert ("yaml", "state_machine", "def: x") in eng.calls
+    # group_id + session_id surface in run_info extend_props (DB + dashboard root node).
+    assert run.extend_props == {"group_id": "grp-1", "session_id": "yaml-session-1"}
+    dash = svc.get_task_dashboard("t1")
+    assert dash.tasks[0].run_info.extend_props == {"group_id": "grp-1", "session_id": "yaml-session-1"}
 
 
 def test_execute_yaml_without_yaml_uses_manager_worker():
