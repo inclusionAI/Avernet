@@ -27,6 +27,7 @@ from secbaas.community.core.service.bot_run._async_chat_client import (
     NotConnectedError,
     SessionState,
     _capture_trace_context,
+    _public_interaction_envelope,
 )
 from secbaas.community.core.service.bot_run._interaction_protocol import (
     EngineInteractionResolveExchange,
@@ -1351,6 +1352,52 @@ class TestCloseAdditional:
         await client.close()
         # Double close should not raise
         await client.close()
+
+
+class TestPublicInteractionEnvelope:
+    def test_rejects_non_object_payload(self):
+        with pytest.raises(
+            ValueError, match="interaction event envelope payload must be an object"
+        ):
+            _public_interaction_envelope(
+                {"type": "event", "payload": "not-an-object"},
+                baas_interaction_id="BAAS-INTERACTION-public-1",
+            )
+
+    def test_rewrites_legacy_id_without_mutating_engine_envelope(self):
+        engine_envelope = {
+            "type": "event",
+            "event": "interaction.resolved",
+            "payload": {
+                "sessionKey": "sk1",
+                "interactionId": "engine-interaction-1",
+                "id": "legacy-engine-interaction-1",
+            },
+        }
+
+        public_envelope = _public_interaction_envelope(
+            engine_envelope,
+            baas_interaction_id="BAAS-INTERACTION-public-1",
+        )
+
+        assert public_envelope == {
+            "type": "event",
+            "event": "interaction.resolved",
+            "payload": {
+                "sessionKey": "sk1",
+                "interactionId": "BAAS-INTERACTION-public-1",
+                "id": "BAAS-INTERACTION-public-1",
+            },
+        }
+        assert engine_envelope == {
+            "type": "event",
+            "event": "interaction.resolved",
+            "payload": {
+                "sessionKey": "sk1",
+                "interactionId": "engine-interaction-1",
+                "id": "legacy-engine-interaction-1",
+            },
+        }
 
 
 class TestInteractionEvents:
