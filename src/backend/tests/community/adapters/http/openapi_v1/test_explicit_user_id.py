@@ -284,6 +284,8 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
+    # Known-ID resolution is tenant-wide and returns display-only Bot metadata.
+    ("post", f"{PUBLIC_API_PREFIX}/bots/metadata/search"),
     # Tenant-identical marketplace searches expose no user-scoped state.
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
@@ -368,7 +370,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: The two IAM operations then merged into one Bot-addressed operation: the
 #: existing Caller path was renamed while the account-level IAM read went away,
 #: so ``path`` stays unchanged and ``none`` decreases by one.
-_BOT_ID_PLACEMENT = {"path": 139, "query": 1, "none": 56}
+_BOT_ID_PLACEMENT = {"path": 139, "query": 1, "none": 57}
 
 
 def _schema() -> dict:

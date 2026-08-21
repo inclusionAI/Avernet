@@ -121,6 +121,8 @@ from .startup_script_support import (
 )
 from .schemas import (
     Bot,
+    BotMetadata,
+    BotMetadataSearch,
     BotActivateResult,
     BotAuthPending,
     BotAuthStatus,
@@ -188,6 +190,18 @@ def _to_bot(d: dict[str, Any]) -> Bot:
         bot_type=d.get("bot_type") or "",
         status=d.get("status") or "",
         owner_entity_id=d.get("owner_id") or "",
+    )
+
+
+def _to_bot_metadata(d: dict[str, Any]) -> BotMetadata:
+    """Project a Bot record onto the deliberately display-only batch contract."""
+    return BotMetadata(
+        bot_id=d["bot_id"],
+        bot_name=d.get("bot_name") or "",
+        bot_desc=d.get("bot_desc") or "",
+        engine=d.get("active_engine") or "",
+        bot_type=d.get("bot_type") or "",
+        status=d.get("status") or "",
     )
 
 
@@ -483,6 +497,35 @@ async def list_bots(
         bot_ids=sorted(granted) if granted is not None else None,
     )
     items = [_to_bot(b) for b in result["items"]]
+    return page(result["total"], items, request)
+
+
+@router.post("/metadata/search", response_model=Envelope[Page[BotMetadata]])
+@envelope_errors
+async def search_bot_metadata(
+    body: BotMetadataSearch,
+    page_params: PageParamsDep,
+    request: Request,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+) -> Envelope[Page[BotMetadata]]:
+    """Resolve display metadata for a caller-supplied set of known Bot IDs.
+
+    The identifiers may originate from BCN, search, recommendations, persisted
+    client state, or another source. Authentication is required, but this is a
+    tenant-wide metadata lookup rather than an ownership check. The response is
+    intentionally limited to display fields and never exposes owners, device
+    bindings, runtime configuration, credentials, or extension payloads.
+
+    Unknown identifiers are omitted. Filtering happens in the repository before
+    pagination, so ``total`` is the number of matching Bot records.
+    """
+    bot_ids = list(dict.fromkeys(body.bot_ids))
+    result = bot_service.list_bots_by_conditions(
+        page=page_params.page,
+        page_size=page_params.page_size,
+        bot_ids=bot_ids,
+    )
+    items = [_to_bot_metadata(item) for item in result["items"]]
     return page(result["total"], items, request)
 
 
