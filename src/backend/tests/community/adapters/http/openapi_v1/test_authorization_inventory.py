@@ -331,3 +331,31 @@ def test_service_level_edit_locks_are_untouched():
 
     assert hasattr(channels, "_require_edit_lock")
     assert hasattr(publications.ServicePublicationFacade, "_require_draft_lock")
+
+
+def test_a_router_cannot_opt_out_of_the_route_class():
+    """Skipping ``route_class`` is the one way to be in the table but unchecked.
+
+    ``PublicAPIRoute`` cannot catch this itself — a route that never runs its
+    ``__init__`` never consults the table — so the assembly check is the only
+    thing standing between a group that quietly builds its own routes and a
+    surface that serves them unguarded. Distinct from
+    ``test_every_route_is_a_public_api_route``, which asserts today's surface is
+    clean: this asserts the mechanism would notice if it stopped being.
+    """
+    public = build_public_router()
+    opted_out = APIRouter()  # no route_class
+
+    @opted_out.get("/openapi/v1/bots/{bot_id}/built-its-own-way")
+    async def sneaky(bot_id: str) -> dict:  # pragma: no cover - never served
+        return {}
+
+    public.include_router(opted_out)
+    AUTHORIZATION[("GET", "/openapi/v1/bots/{bot_id}/built-its-own-way")] = OWNER_SCOPED
+    try:
+        with pytest.raises(PublicRouteNotAuthorized) as refusal:
+            assert_every_route_authorized(public)
+        assert "route_class=PublicAPIRoute" in str(refusal.value)
+        assert "built-its-own-way" in str(refusal.value)
+    finally:
+        AUTHORIZATION.pop(("GET", "/openapi/v1/bots/{bot_id}/built-its-own-way"), None)
