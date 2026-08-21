@@ -3,7 +3,7 @@
 re-export api 层 Protocol 供 SPI 消费者使用。
 """
 
-from secbaas.community.api.eval_env._protocols import (
+from secbaas.community.api.eval_env import (
     EvalBindingResolverProtocol,
     EvalConsistencyCheckProtocol,
     EvalSessionLogProtocol,

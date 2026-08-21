@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from secbaas.community.api.eval_env._protocols import EvalBindingResolverProtocol
+    from secbaas.community.api.eval_env import EvalBindingResolverProtocol
 
 # default_tag 键名（与 OCB 侧 device_props 中的键一致）
 DYNAMIC_ENV_TAG_KEY = "AGENTCLAW_DEFAULT_TAG"
