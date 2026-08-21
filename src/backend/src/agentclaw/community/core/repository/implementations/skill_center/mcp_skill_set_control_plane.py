@@ -7,6 +7,9 @@ from agentclaw.community.core.models.mcp import (
     SkillSetMCPServer,
 )
 from agentclaw.community.core.models.skill import SkillSet
+from agentclaw.community.core.repository.implementations.skill_center.default_skillset_projection import (
+    excluded_mcp_codes,
+)
 from agentclaw.community.core.repository.skill_set_control_plane_types import (
     SkillSetMutation,
 )
@@ -47,7 +50,7 @@ class McpSkillSetControlPlaneCommands:
                 .all()
             )
             if row.is_default:
-                excluded = self._default_excluded_mcp_codes(
+                excluded = excluded_mcp_codes(
                     session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
                 )
                 rows = [item for item in rows if item.server_code not in excluded]
