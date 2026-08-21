@@ -38,6 +38,7 @@ use bcs_ws::web::{
     WorkbenchConnectionRegistry, dispatch_client_frame,
 };
 use tokio::sync::{Mutex, mpsc};
+use tokio::time::{Duration, timeout};
 
 #[derive(Clone, Copy)]
 enum SessionHumanInputBehavior {
@@ -952,6 +953,63 @@ async fn session_bound_connect_replays_pending_interactions_after_ack() {
     assert_eq!(replay["event"], "interaction");
     assert_eq!(replay["bcsRunId"], "bcs-run-1");
     assert_eq!(replay["bcsSessionId"], "session-bound-1");
+    assert_eq!(replay["payload"]["interactionId"], "interaction-1");
+}
+
+#[tokio::test]
+async fn user_bound_connect_replays_pending_interactions_after_ack() {
+    let state = new_state();
+    state
+        .interactions
+        .pending
+        .lock()
+        .await
+        .push(InteractionFrontendEvent {
+            bcs_run_id: "bcs-run-1".to_string(),
+            bcs_session_id: "group-web-1:abcdef12".to_string(),
+            group_id: "group-web-1".to_string(),
+            bot_id: "bot-1".to_string(),
+            payload: serde_json::json!({
+                "runId":"provider-run-1",
+                "phase":"requested",
+                "interactionId":"interaction-1",
+                "kind":"ask_user"
+            }),
+        });
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-user-bound",
+        "connect",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "group-web-1:abcdef12"
+        })),
+    ));
+
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut connection_state,
+        &WorkbenchConnectionAuth::UserBound {
+            actor_id: Some("human_100001".to_string()),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(recv_response(&mut rx).await.ok);
+    let replay: serde_json::Value = serde_json::from_str(
+        &timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("pending interaction replay was not sent after connect")
+            .expect("interaction channel closed"),
+    )
+    .unwrap();
+    assert_eq!(replay["event"], "interaction");
+    assert_eq!(replay["bcsRunId"], "bcs-run-1");
+    assert_eq!(replay["bcsSessionId"], "group-web-1:abcdef12");
     assert_eq!(replay["payload"]["interactionId"], "interaction-1");
 }
 
