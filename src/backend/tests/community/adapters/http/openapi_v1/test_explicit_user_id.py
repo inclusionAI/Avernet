@@ -361,7 +361,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: ``none`` then moved 53 → 54 with the department directory search
 #: (``/openapi/v1/org/dept``), an account-level catalogue read that addresses no bot.
-_BOT_ID_PLACEMENT = {"path": 138, "query": 1, "none": 56}
+_BOT_ID_PLACEMENT = {"path": 138, "query": 1, "none": 57}
 
 
 def _schema() -> dict:
@@ -457,7 +457,7 @@ def test_the_pinned_number_of_operations_take_it():
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
     # MCP adds eight operations, the Harness surface adds six Bot-addressed
     # operations, and Session File adds six more.
-    assert len(taking) == 178
+    assert len(taking) == 177
 
 
 def test_the_exempt_operations_take_none():

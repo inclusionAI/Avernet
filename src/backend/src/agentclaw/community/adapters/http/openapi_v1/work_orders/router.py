@@ -241,7 +241,6 @@ def _legacy_review_response(result) -> WorkOrderLegacyReviewResponse:
 @router.post(
     "/openapi/v1/bots/work-orders/{work_order_id}/approval",
     response_model=Envelope[WorkOrderReviewResponse],
-    dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
 async def process_work_order_approval(

@@ -159,6 +159,8 @@ class SpaceJoinRequestCreated(BaseModel):
 
 
 class WorkOrderApprovalRequest(BaseModel):
+    """Decision submitted to the unified work-order approval endpoint."""
+
     decision: WorkOrderDecision = Field(description="Approval decision.")
     review_remark: str | None = Field(
         default=None,
@@ -197,11 +199,17 @@ class WorkOrderReviewResponse(_UtcResponseModel):
 
 
 class WorkOrderLegacyReviewResponse(_UtcResponseModel):
-    work_order_id: int
-    status: WorkOrderStatus
-    reviewer_user_id: str
-    review_remark: str | None
-    reviewed_at: datetime
+    """Compatibility response returned by the legacy review endpoints."""
+
+    work_order_id: int = Field(description="Identifier of the reviewed work order.")
+    status: WorkOrderStatus = Field(description="Status after the review decision.")
+    reviewer_user_id: str = Field(description="Identifier of the reviewer.")
+    review_remark: str | None = Field(
+        description="Reviewer comment, or null when no comment was supplied."
+    )
+    reviewed_at: datetime = Field(
+        description="UTC time when the review decision was recorded."
+    )
 
 
 class WorkOrderListItem(_UtcResponseModel):

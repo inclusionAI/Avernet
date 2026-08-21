@@ -215,6 +215,47 @@ def get_work_order_wrong_user():
     """The framework owns invocation."""
 
 
+# ── POST /openapi/v1/bots/work-orders/{work_order_id}/approval ───────────────────
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/work-orders/{work_order_id}/approval",
+    scenario="happy",
+    seed=_seed_pending_request_for_me,
+    input=CaseInput(
+        path_params={"work_order_id": 1},
+        query_params={"user_id": _USER_ID},
+        json_body={"decision": "APPROVED", "review_remark": "welcome aboard"},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"work_order_id": 1, "status": "APPROVED", "decision": "APPROVED"},
+        },
+    ),
+)
+def process_work_order_approval_happy():
+    """The framework owns invocation."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/work-orders/{work_order_id}/approval",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        path_params={"work_order_id": 1},
+        json_body={"decision": "APPROVED", "review_remark": "welcome"},
+    ),
+    expect=ExpectError(status=403),
+)
+def process_work_order_approval_wrong_user():
+    """The framework owns invocation."""
+
+
 # ── POST /openapi/v1/bots/work-orders/{work_order_id}/approve ─────────────────────
 
 
