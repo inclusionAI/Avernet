@@ -117,11 +117,17 @@ from agentclaw.community.adapters.http.skills_pool import router as skills_pool_
 from agentclaw.community.adapters.http.beta_quota.router import router as beta_quota_router  # noqa: E402
 from agentclaw.community.adapters.http.channel.router import router as channel_router  # noqa: E402
 from agentclaw.community.adapters.http.quality.router import router as quality_router  # noqa: E402
-from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router  # noqa: E402
-# The engine's task callbacks are an internal surface: they live under
-# ``/api/v1/collaboration/tasks/callback`` in ``adapters/http/task``, not on
-# the public ``/openapi/v1`` router next to execute/dashboard/list.
-from agentclaw.community.adapters.http.task import task_callback_router  # noqa: E402
+# The task surface is internal: execute/dashboard/list, the report and bbs
+# operations, the discovery phase and the engine's push callbacks all answer
+# under ``/api/v1/collaboration/tasks`` in ``adapters/http/task``. The
+# ``/openapi/v1`` namespace is reserved for the domains the gateway's shipped
+# configuration routes and secures (tests/community/contracts/gateway/
+# test_public_namespace.py), so ``openapi_v1/task`` stays unmounted until that
+# configuration declares the collaboration domain.
+from agentclaw.community.adapters.http.task import (  # noqa: E402
+    task_callback_router,
+    task_internal_router,
+)
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
@@ -147,7 +153,6 @@ from agentclaw.community.adapters.http.session_resources import (  # noqa: E402
 from agentclaw.community.adapters.http.mcp import router as mcp_router  # noqa: E402
 from agentclaw.community.adapters.http.cron import router as cron_router  # noqa: E402
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
-from agentclaw.community.adapters.http.openapi_v1.task.discovery import router as task_discovery_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding import notify_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding.architect_rebind_router import router as architect_rebind_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_management import router as bot_management_router  # noqa: E402
@@ -775,7 +780,7 @@ app.include_router(skills_pool_ops_router)
 app.include_router(beta_quota_router)
 app.include_router(channel_router)
 app.include_router(quality_router)
-app.include_router(task_router)
+app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 try:
     app.include_router(render_screen_router)
@@ -826,7 +831,6 @@ app.include_router(sync.router)
 app.include_router(batch_sync.router)
 app.include_router(cron_router)
 app.include_router(cron_noauth_router)
-app.include_router(task_discovery_router)
 app.include_router(notify_router)
 # Harness Engineering: patch template management & diagnosis
 app.include_router(harness_router)

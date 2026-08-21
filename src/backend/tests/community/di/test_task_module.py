@@ -1,6 +1,6 @@
 from injector import Injector, Module, provider, singleton
 
-from agentclaw.community.adapters.http.openapi_v1.task.auth import (
+from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator, NoopCallbackAuthenticator,
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol

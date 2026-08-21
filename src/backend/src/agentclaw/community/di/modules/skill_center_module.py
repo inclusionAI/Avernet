@@ -447,6 +447,14 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
     @singleton
     @provider
     @inject
+    def local_skill_cleanup_repository(
+        self, db: DatabasePlugin
+    ) -> LocalSkillCleanupRepository:
+        return SqlLocalSkillCleanupRepository(db)
+
+    @singleton
+    @provider
+    @inject
     def local_skill_state_service(
         self,
         skill_repo: SkillRepository,
