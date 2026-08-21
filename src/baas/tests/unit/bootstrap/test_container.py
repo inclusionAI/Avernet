@@ -155,6 +155,36 @@ class TestRepositoryContainer:
         assert items == []
 
 
+class TestBotRunInteractionMariadbSelector:
+    """WR-04: bot_run_interaction_repository must carry a MARIADB_ORM key
+    like every sibling selector, or MARIADB_ORM deployments abort container
+    resolution with ``Selector has no 'MARIADB_ORM' provider``."""
+
+    def test_resolves_under_mariadb_orm(self):
+        """Resolving the repository with plugin_database=MARIADB_ORM succeeds.
+
+        Hermetic: only the CoreRepositoryContainer is built, not the global
+        ApplicationContainer singleton, so the test cannot leak config state
+        into the other tests in this module.
+        """
+        from secbaas.community.bootstrap._core_repository import (
+            CoreRepositoryContainer,
+        )
+        from secbaas.community.core.repository.bot_run_interaction import (
+            OrmBotRunInteractionRepository,
+        )
+
+        container = CoreRepositoryContainer()
+        container.config.from_dict(
+            {"plugins": {"database": {"plugin_database": "MARIADB_ORM"}}}
+        )
+
+        repo = container.bot_run_interaction_repository()
+
+        assert isinstance(repo, OrmBotRunInteractionRepository)
+        assert repo._database is not None
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Service container
 # ═══════════════════════════════════════════════════════════════════════════

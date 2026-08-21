@@ -118,6 +118,7 @@ class CoreRepositoryContainer(containers.DeclarativeContainer):
         config.plugins.database.plugin_database,
         ZDAS_ORM=_orm_repo(OrmBotRunInteractionRepository),
         SQLITE_ORM=_orm_repo(OrmBotRunInteractionRepository),
+        MARIADB_ORM=_orm_repo(OrmBotRunInteractionRepository),
     )
     bot_run_queue_chunk_repository = providers.Selector(
         config.plugins.database.plugin_database,
