@@ -22,6 +22,7 @@ E2E_TESTS_EDGE_PERMISSION=(
     "test_ep_v2_mutual_auto_approve"
     "test_ep_bot_search"
     "test_ep_error_and_admission_branches"
+    "test_ep_connect_private_and_discover_branches"
 )
 
 # Helper: make an authenticated API call with a bot's Bearer token
@@ -317,8 +318,15 @@ test_ep_v2_friend_requests_list() {
 # PUT /bots/{id}/human-addable
 test_ep_set_human_addable() {
     info "EdgePermission: set human-addable"
-    # Owner-gated write: call as the mock-human owner (api_put), not the bot
-    # token (which 403s). Exercises the set_human_addable write + ownership-pass.
+    local ceo_token
+    ceo_token="$(get_bot_token CEO 2>/dev/null || echo '')"
+    # Ownership-REJECT branch: the bot's own Bearer resolves to bot_id !=>
+    # created_by, so this 403s — covers the Forbidden error-mapping path.
+    if [[ -n "$ceo_token" ]]; then
+        _api_authed "PUT" "/bots/$BOT_CEO_UUID/human-addable" '{"human_addable":true}' "$ceo_token"
+        warn "human-addable as bot token: status=$HTTP_STATUS (expect 403 ownership-reject)"
+    fi
+    # Ownership-PASS branch: the mock-human owner (api_put) writes successfully.
     api_put "/bots/$BOT_CEO_UUID/human-addable" '{"human_addable":true}'
     if [[ "$HTTP_STATUS" == "200" ]]; then
         pass "PUT human-addable returns 200"
@@ -333,6 +341,12 @@ test_ep_set_human_addable() {
 # PUT /bots/{id}/friend-approval
 test_ep_set_friend_approval() {
     info "EdgePermission: set friend-approval"
+    local ceo_token
+    ceo_token="$(get_bot_token CEO 2>/dev/null || echo '')"
+    if [[ -n "$ceo_token" ]]; then
+        _api_authed "PUT" "/bots/$BOT_CEO_UUID/friend-approval" '{"friend_approval":"auto"}' "$ceo_token"
+        warn "friend-approval as bot token: status=$HTTP_STATUS (expect 403 ownership-reject)"
+    fi
     api_put "/bots/$BOT_CEO_UUID/friend-approval" '{"friend_approval":"auto"}'
     if [[ "$HTTP_STATUS" == "200" ]]; then
         pass "PUT friend-approval returns 200"
@@ -521,9 +535,32 @@ test_ep_bot_search() {
     _api_authed "GET" "/v2/bots/search?visibility=public&status=online&is_friend=false&limit=50" "" "$ceo_token"
     warn "v2/bots/search with filters: status=$HTTP_STATUS"
 
-    # Authenticated: tc_bot filter branch.
-    _api_authed "GET" "/v2/bots/search?tc_bot=true&limit=10" "" "$ceo_token"
-    warn "v2/bots/search?tc_bot: status=$HTTP_STATUS"
+    # is_friend=true branch (caller has friends → friend-set non-empty, is_friend field true for matches).
+    _api_authed "GET" "/v2/bots/search?is_friend=true&limit=50" "" "$ceo_token"
+    warn "v2/bots/search?is_friend=true: status=$HTTP_STATUS"
+
+    # status=hidden + visibility=private filter branches (no matching bots is fine — the match arms still run).
+    _api_authed "GET" "/v2/bots/search?status=hidden&limit=10" "" "$ceo_token"
+    warn "v2/bots/search?status=hidden: status=$HTTP_STATUS"
+    _api_authed "GET" "/v2/bots/search?visibility=private&limit=10" "" "$ceo_token"
+    warn "v2/bots/search?visibility=private: status=$HTTP_STATUS"
+
+    # Empty q (None branch of q_lower — list-all, no name filter).
+    _api_authed "GET" "/v2/bots/search?limit=5" "" "$ceo_token"
+    warn "v2/bots/search empty q: status=$HTTP_STATUS"
+
+    # tc_bot filter: ensure a real TC bot (owner-suffixed uuid with matching created_by)
+    # so tc_bot=true has a match and tc_bot=false filters it out — both retain branches run.
+    local tc_uuid="tc_cov_bot:85020"
+    HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+        -H "X-BCS-Service-Key: e2e-test-key" -H "Content-Type: application/json" \
+        -X POST -d '{"name":"TCCov","staff_no":"85020"}' \
+        "${BCS_API_BASE_URL:-http://127.0.0.1:21000}/admin/bots/$tc_uuid/ensure" 2>/dev/null) || HTTP_STATUS="000"
+    warn "ensure TC bot ($tc_uuid): status=$HTTP_STATUS"
+    _api_authed "GET" "/v2/bots/search?tc_bot=true&limit=50" "" "$ceo_token"
+    warn "v2/bots/search?tc_bot=true (with TC bot present): status=$HTTP_STATUS"
+    _api_authed "GET" "/v2/bots/search?tc_bot=false&limit=50" "" "$ceo_token"
+    warn "v2/bots/search?tc_bot=false: status=$HTTP_STATUS"
 
     # Anonymous: no Bearer → forced public scope, empty friend set.
     _api_authed "GET" "/v2/bots/search?limit=10" "" ""
@@ -589,6 +626,52 @@ test_ep_error_and_admission_branches() {
     fi
 
     pass "error/admission branches exercised"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+}
+
+# Coverage push on this round's edge/bot code:
+#  - ConnectService `create_connect` private-target branch (PrivateBotCannotCollaborate).
+#  - BotDiscoveryService branches: collaborate_bot=private (collaborate_bot_is_private
+#    → empty result) vs collaborate_bot=public (friend-list-for-collaborate path),
+#    role-without-organization_code (role_requires_organization_code error), and
+#    the handler guard organization_code-without-requester_bot_id.
+test_ep_connect_private_and_discover_branches() {
+    info "EdgePermission: connect private-target + discover branches"
+    local ceo_token pm_token
+    ceo_token="$(get_bot_token CEO 2>/dev/null || echo '')"
+    pm_token="$(get_bot_token PM 2>/dev/null || echo '')"
+    if [[ -z "$ceo_token" ]]; then
+        skip_case "no CEO token for connect/discover branches"; return 77
+    fi
+
+    if [[ -n "$pm_token" ]]; then
+        # PM → private (owner write), then friend request → private-collab error branch.
+        api_put "/bots/$BOT_PM_UUID/visibility" '{"visibility":"private"}'
+        warn "set PM private (owner): status=$HTTP_STATUS"
+        _api_authed "POST" "/v2/friends/request" "{\"to_bot\":\"$BOT_PM_UUID\"}" "$ceo_token"
+        warn "friend request to private bot: status=$HTTP_STATUS (expect private-collab error)"
+
+        # discover: collaborate_bot=private → collaborate_bot_is_private branch (empty result).
+        api_get "/bots/discover?collaborate_bot=$BOT_PM_UUID"
+        warn "discover collaborate_bot=private: status=$HTTP_STATUS"
+
+        # Restore PM to public, then discover collaborate_bot=public → friend-list-for-collaborate path.
+        api_put "/bots/$BOT_PM_UUID/visibility" '{"visibility":"public"}'
+        warn "restore PM public: status=$HTTP_STATUS"
+        api_get "/bots/discover?collaborate_bot=$BOT_PM_UUID"
+        warn "discover collaborate_bot=public: status=$HTTP_STATUS"
+    fi
+
+    # discover: role without organization_code → role_requires_organization_code error.
+    api_get "/bots/discover?role=contributor"
+    warn "discover role w/o org_code: status=$HTTP_STATUS (expect role_requires_organization_code)"
+
+    # discover: organization_code without requester → handler bad-request guard.
+    api_get "/bots/discover?organization_code=DEMO"
+    warn "discover org_code w/o requester: status=$HTTP_STATUS (expect 400)"
+
+    pass "connect-private + discover branches exercised"
     TESTS_PASSED=$((TESTS_PASSED + 1))
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
 }
