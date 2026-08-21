@@ -69,6 +69,17 @@ class _AnyMutationGuard(_MutationGuard):
         return object()
 
 
+class _CreationMustNotAcquireMutationGuard:
+    def acquire(self, **_kwargs):
+        raise AssertionError("metadata-only SkillSet creation must not take mutation guard")
+
+    def release(self, _lease) -> bool:
+        raise AssertionError("creation must not release a lease it did not acquire")
+
+    def ensure_valid(self, _lease) -> None:
+        raise AssertionError("creation must not validate a mutation lease")
+
+
 class _Repository:
     def __init__(self) -> None:
         self.restore_calls = []
@@ -701,7 +712,6 @@ def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
 
 def test_legacy_create_retains_only_virtual_default_bot_compatibility():
     repository = _CreateRepository()
-    mutation_guard = _AnyMutationGuard()
     service = SkillSetControlPlaneService(
         repository=repository,
         bot_repo=_MissingBots(),
@@ -709,7 +719,7 @@ def test_legacy_create_retains_only_virtual_default_bot_compatibility():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=mutation_guard,
+        mutation_guard=_CreationMustNotAcquireMutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -725,7 +735,42 @@ def test_legacy_create_retains_only_virtual_default_bot_compatibility():
 
     assert result["bolt_id"] == "default"
     assert repository.create_calls[0]["owner_id"] == "actor"
-    assert mutation_guard.scope.entity_id == "actor"
+
+
+def test_addressed_create_does_not_take_mutation_guard() -> None:
+    repository = _CreateRepository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        mutation_guard=_CreationMustNotAcquireMutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    result = service.create_set(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        name="metadata-only",
+        description=None,
+    )
+
+    assert result["id"] == "set-1"
+    assert repository.create_calls == [
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "name": "metadata-only",
+            "description": None,
+            "engine_type": "openclaw",
+        }
+    ]
 
 
 def test_legacy_virtual_default_read_is_owner_scoped():
