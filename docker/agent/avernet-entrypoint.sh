@@ -77,7 +77,6 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     _sub OPENCLAW_OPENAI_MODEL_NAME OPENCLAW_OPENAI_MODEL_NAME
     _sub OPENCLAW_GATEWAY_TOKEN    OPENCLAW_GATEWAY_TOKEN
     _sub BCS_URL                   BCS_URL
-    _sub BCS_ENABLED               BCS_ENABLED
     _sub BCS_BOT_ID                BCS_BOT_ID
     _sub BCS_BOT_NAME              BCS_BOT_NAME
 
