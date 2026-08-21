@@ -268,18 +268,20 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
-    # The caller-identity read is how a client LEARNS the id it must thread
+    # The user-identity read is how a client LEARNS the id it must thread
     # everywhere else — requiring the parameter here would make the id a
     # precondition of discovering it. The answer is read off the verified
     # principal, so there is no caller-supplied user to compare against and no
     # 403 to answer.
-    ("get", f"{PUBLIC_API_PREFIX}/caller"),
+    ("get", f"{PUBLIC_API_PREFIX}/org/user"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
     # The marketplace catalogue is identical for every caller in the tenant.
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers/{{server_code}}"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
+    # The department directory is a tenant-wide catalogue — not the caller's.
+    ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
     # Tenant-identical marketplace searches expose no user-scoped state.
@@ -334,12 +336,12 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: ``path`` then moved 54 → 56 when the two Bot Chats operations were added.
 #:
-#: ``none`` then moved 35 → 36 with the caller-identity read: it answers who
+#: ``none`` then moved 35 → 36 with the user-identity read: it answers who
 #: the caller is and addresses no bot.
 #:
 #: The combined Bot Workshop surface then adds a net 27 bot-addressed operations
 #: and five account-level operations. The trace filter remains the sole query
-#: placement. Together with the caller-identity read, the combined contract is
+#: placement. Together with the user-identity read, the combined contract is
 #: 83/1/45. Channels adds six Bot-addressed operations, and the Bot Space
 #: reassignment endpoint adds one more, yielding 90/1/45. Session Favorites then
 #: adds three Bot-addressed operations, Caller preparation adds one more, and the
@@ -353,7 +355,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: The merged contract contains 132 path-addressed Bots, one legacy
 #: query-addressed operation, and 53 non-Bot operations — the six Harness
 #: operations are Bot-addressed under ``/bots/{bot_id}/harness``.
-_BOT_ID_PLACEMENT = {"path": 132, "query": 1, "none": 53}
+#:
+#: ``none`` then moved 53 → 54 with the department directory search
+#: (``/openapi/v1/org/dept``), an account-level catalogue read that addresses no bot.
+_BOT_ID_PLACEMENT = {"path": 132, "query": 1, "none": 54}
 
 
 def _schema() -> dict:

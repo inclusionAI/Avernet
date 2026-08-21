@@ -61,7 +61,7 @@ def test_shipped_config_admits_app_only_market_queries(method: str, path: str) -
 #: packages, so the agreement is kept by these tests plus the backend's own
 #: enumeration rather than by a shared import.
 _HUMAN_ONLY = [
-    ("GET", "/openapi/v1/caller"),
+    ("GET", "/openapi/v1/org/user"),
     ("GET", "/openapi/v1/bots/spaces"),
     ("POST", "/openapi/v1/bots/spaces/personal/initialize"),
     ("POST", "/openapi/v1/bots/spaces/create"),

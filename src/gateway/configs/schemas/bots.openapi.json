@@ -1137,66 +1137,6 @@
         "title": "BusinessSpace",
         "type": "object"
       },
-      "CallerIdentity": {
-        "description": "The end user the caller's credential names, as resolved at the gateway.\n\nEvery field is read off the verified principal — nothing is taken from the\nrequest, so the answer cannot be steered. The display attributes are\noptional because absence is a real state of the identity contract: an\nidentity provider may not supply them, and they are null rather than\ninvented when absent.",
-        "example": {
-          "display_name": "Alice",
-          "full_name": "Alice Zhang",
-          "tenant": "acme-tenant",
-          "user_id": "u-8f3a2c",
-          "username": "alice@example.com"
-        },
-        "properties": {
-          "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Short display name, when the identity provider supplied one; null otherwise.",
-            "title": "Display Name"
-          },
-          "full_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Full name, when the identity provider supplied one; null otherwise.",
-            "title": "Full Name"
-          },
-          "tenant": {
-            "description": "The tenant this caller's requests are scoped to.",
-            "title": "Tenant",
-            "type": "string"
-          },
-          "user_id": {
-            "description": "The caller's end-user id — the exact value to pass as the `user_id` query parameter on every user-scoped operation of this API.",
-            "title": "User Id",
-            "type": "string"
-          },
-          "username": {
-            "description": "The login name the identity provider resolved for the caller.",
-            "title": "Username",
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id",
-          "username",
-          "display_name",
-          "full_name",
-          "tenant"
-        ],
-        "title": "CallerIdentity",
-        "type": "object"
-      },
       "CallerIdentityReady": {
         "description": "Confirmation that Caller identity preparation completed successfully.",
         "properties": {
@@ -2318,6 +2258,33 @@
           }
         },
         "title": "Deleted",
+        "type": "object"
+      },
+      "DeptSearchItem": {
+        "description": "One department returned by a keyword search of the directory.\n\nAll three are present: a directory entry matched by the search has a number,\na name, and a lineage path. The list is empty when nothing matched (200), not\nwhen the service failed — failure raises and is answered 5xx.",
+        "properties": {
+          "dept_name": {
+            "description": "The department's display name (deptName).",
+            "title": "Dept Name",
+            "type": "string"
+          },
+          "dept_no": {
+            "description": "The department's number (deptNo) — unique within the tenant.",
+            "title": "Dept No",
+            "type": "string"
+          },
+          "dept_path": {
+            "description": "The department's lineage path (deptPath), root-to-this-dept.",
+            "title": "Dept Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dept_no",
+          "dept_name",
+          "dept_path"
+        ],
+        "title": "DeptSearchItem",
         "type": "object"
       },
       "DiagnoseStartResponse": {
@@ -4183,48 +4150,6 @@
         "title": "Envelope[CallerIdentityReady]",
         "type": "object"
       },
-      "Envelope_CallerIdentity_": {
-        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
-        "properties": {
-          "code": {
-            "description": "6-digit code: HTTP status (3) + business subcode (3).",
-            "example": 200000,
-            "title": "Code",
-            "type": "integer"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CallerIdentity"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Response payload; present but null on errors or empty results."
-          },
-          "message": {
-            "description": "Human-readable status; always English (e.g. \"OK\").",
-            "example": "OK",
-            "title": "Message",
-            "type": "string"
-          },
-          "request_id": {
-            "description": "Trace id; mirrors the X-Trace-Id response header.",
-            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
-            "title": "Request Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message",
-          "data",
-          "request_id"
-        ],
-        "title": "Envelope[CallerIdentity]",
-        "type": "object"
-      },
       "Envelope_Ceiling_": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -5987,6 +5912,48 @@
           "request_id"
         ],
         "title": "Envelope[NotificationsReadAllResponse]",
+        "type": "object"
+      },
+      "Envelope_OrgUserIdentity_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrgUserIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[OrgUserIdentity]",
         "type": "object"
       },
       "Envelope_Page_AuthorizedApp__": {
@@ -8437,6 +8404,52 @@
           "request_id"
         ],
         "title": "Envelope[list[Channel]]",
+        "type": "object"
+      },
+      "Envelope_list_DeptSearchItem__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DeptSearchItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results.",
+            "title": "Data"
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[list[DeptSearchItem]]",
         "type": "object"
       },
       "Envelope_list_EngineInfo__": {
@@ -11134,6 +11147,108 @@
           "updated_count"
         ],
         "title": "NotificationsReadAllResponse",
+        "type": "object"
+      },
+      "OrgUserIdentity": {
+        "description": "The end user the caller's credential names, as resolved at the gateway.\n\nEvery field is read off the verified principal — nothing is taken from the\nrequest, so the answer cannot be steered. The display attributes are\noptional because absence is a real state of the identity contract: an\nidentity provider may not supply them, and they are null rather than\ninvented when absent. The department attributes are optional the same way:\nthey are null until the identity provider supplies them.",
+        "example": {
+          "dept_name": "Platform Engineering",
+          "dept_no": "D-1001",
+          "dept_path": "Ant Group/Platform",
+          "display_name": "Alice",
+          "full_name": "Alice Zhang",
+          "tenant": "acme-tenant",
+          "user_id": "u-8f3a2c",
+          "username": "alice@example.com"
+        },
+        "properties": {
+          "dept_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The caller's department name, when the identity provider supplied one; null otherwise.",
+            "title": "Dept Name"
+          },
+          "dept_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The caller's department number, when the identity provider supplied one; null otherwise.",
+            "title": "Dept No"
+          },
+          "dept_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The caller's department lineage path, when the identity provider supplied one; null otherwise.",
+            "title": "Dept Path"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Short display name, when the identity provider supplied one; null otherwise.",
+            "title": "Display Name"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Full name, when the identity provider supplied one; null otherwise.",
+            "title": "Full Name"
+          },
+          "tenant": {
+            "description": "The tenant this caller's requests are scoped to.",
+            "title": "Tenant",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "The caller's end-user id — the exact value to pass as the `user_id` query parameter on every user-scoped operation of this API.",
+            "title": "User Id",
+            "type": "string"
+          },
+          "username": {
+            "description": "The login name the identity provider resolved for the caller.",
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "username",
+          "display_name",
+          "full_name",
+          "tenant",
+          "dept_no",
+          "dept_name",
+          "dept_path"
+        ],
+        "title": "OrgUserIdentity",
         "type": "object"
       },
       "Page_AuthorizedApp_": {
@@ -60264,16 +60379,31 @@
         ]
       }
     },
-    "/openapi/v1/caller": {
+    "/openapi/v1/org/dept": {
       "get": {
-        "description": "Return the end user the caller's credential names.\n\nThe identity the gateway resolved and signed: the id to use as `user_id`\non every user-scoped operation, plus the profile attributes the identity\nprovider supplied. Call it once per session and cache the result — the\nvalues only change when the session's credential does.",
-        "operationId": "get_caller_identity_openapi_v1_caller_get",
+        "description": "Fuzzy-search the department directory by name.\n\nA tenant-wide catalogue read — the match set does not depend on which user\nis asking — so it takes no user id and admits any authenticated caller.\nReturns the matching departments; an empty list means nothing matched (200,\nnot a failure). A directory that is unreachable or errors raises and is\nanswered 5xx, distinct from \"no match\" the way \"no dept\" is distinct from\n\"directory down\".",
+        "operationId": "search_depts_openapi_v1_org_dept_get",
+        "parameters": [
+          {
+            "description": "Department-name search text.",
+            "in": "query",
+            "name": "keyword",
+            "required": true,
+            "schema": {
+              "description": "Department-name search text.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Keyword",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_CallerIdentity_"
+                  "$ref": "#/components/schemas/Envelope_list_DeptSearchItem__"
                 }
               }
             },
@@ -60385,9 +60515,136 @@
             "description": "Upstream service error"
           }
         },
-        "summary": "Get Caller Identity",
+        "summary": "Search Depts",
         "tags": [
-          "caller"
+          "org"
+        ]
+      }
+    },
+    "/openapi/v1/org/user": {
+      "get": {
+        "description": "Return the end user the caller's credential names.\n\nThe identity the gateway resolved and signed: the id to use as `user_id`\non every user-scoped operation, plus the profile attributes the identity\nprovider supplied. Call it once per session and cache the result — the\nvalues only change when the session's credential does.\n\nDepartment attributes are not in that identity; they are looked up by the\ncaller's work number through the staff-dept service. A reader that is not\nwired leaves them null; a real reader returns them, or an all-null info\nwhen the person has no dept. A reader that fails (directory down) raises\nan error which propagates to a 5xx — so \"no dept\" and \"directory down\"\nstay distinguishable.",
+        "operationId": "get_user_identity_openapi_v1_org_user_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_OrgUserIdentity_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Get User Identity",
+        "tags": [
+          "org"
         ]
       }
     },

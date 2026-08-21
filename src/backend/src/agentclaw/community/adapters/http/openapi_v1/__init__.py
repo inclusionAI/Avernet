@@ -177,7 +177,8 @@ from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
 from .bots.engine_config import router as engine_config_router
-from .caller import router as caller_router
+from .org import dept_router as org_dept_router
+from .org import router as org_router
 from .channels import router as channels_router
 from .containers import router as containers_router
 from .diagnostics import router as diagnostics_router
@@ -403,7 +404,14 @@ def build_public_router() -> APIRouter:
     # table, not the user-scoped one. The caller is the sole top-level public
     # resource here because it describes the authenticated principal itself.
     public.include_router(
-        caller_router,
+        org_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Department directory search — a tenant-wide catalogue read (no ``user_id``),
+    # backed by the same StaffDeptPlugin as the whoami's dept fields.
+    public.include_router(
+        org_dept_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
