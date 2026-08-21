@@ -62,8 +62,13 @@ user_config:
       app_token: "stub"
       tenant: "stub"
     database:
-      plugin_database: "SQLITE_ORM"
+      plugin_database: "sqlite"
       database_url: ""
+      # create_schema / seed_data default to false (matching BaaS). Set them to
+      # true only in the E2E overlays (e.g. e2e-mariadb.yaml) so a freshly
+      # provisioned test database is created and seeded.
+      create_schema: false
+      seed_data: false
 
   # SecretResolver configuration. The community (env-backed) resolver reads
   # ``{env_prefix}{NAME}_VALUE`` / ``_USER`` from the process environment.

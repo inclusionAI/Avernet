@@ -8,7 +8,6 @@ import jwt
 import pytest
 
 from gateway.community.bootstrap import initialize_database
-from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.core.access_key import AccessKeyIssuer, AccessKeyRepository
 from gateway.community.core.access_key._issuer import IssuedAccessKey
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
@@ -24,9 +23,7 @@ _FIXED_NOW = 1_700_000_000
 
 @pytest.fixture
 def db() -> DataSourcePlugin:
-    return initialize_database(
-        SqliteDatabasePlugin(), DatabaseConfig(plugin_type="SQLITE_ORM", db_url="")
-    )
+    return initialize_database(SqliteDatabasePlugin())
 
 
 @pytest.fixture

@@ -18,7 +18,6 @@ import pytest
 from sqlalchemy import event
 
 from gateway.community.bootstrap import initialize_database
-from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.core.app import APIKeyGenerator, AppRepository, AppRow
 from gateway.community.core.app import _repository as app_repository
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
@@ -41,9 +40,7 @@ _API_KEY = APIKeyGenerator.generate()
 
 @pytest.fixture(scope="module")
 def db() -> DataSourcePlugin:
-    plugin = initialize_database(
-        SqliteDatabasePlugin(), DatabaseConfig(plugin_type="SQLITE_ORM", db_url="")
-    )
+    plugin = initialize_database(SqliteDatabasePlugin())
     with plugin.orm_session() as session:
         # Seeded the old way: a plaintext token, no api_key_* columns.
         session.add(

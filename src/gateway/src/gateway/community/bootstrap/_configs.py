@@ -24,11 +24,6 @@ class ConfigKey(StrEnum):
     DATABASE_URL = "plugins.database.database_url"
     CREATE_SCHEMA = "plugins.database.create_schema"
     SEED_DATA = "plugins.database.seed_data"
-    MARIADB_HOST = "plugins.database.mariadb_host"
-    MARIADB_PORT = "plugins.database.mariadb_port"
-    MARIADB_DATABASE = "plugins.database.mariadb_database"
-    MARIADB_USER = "plugins.database.mariadb_user"
-    MARIADB_PASSWORD = "plugins.database.mariadb_password"
     WEB_PORT = "web_port"
 
 
@@ -50,7 +45,7 @@ class ConfigSchema(BaseSettings):
 
 class DatabasePluginConfig(BaseSettings):
     model_config = _CFG
-    plugin_database: str = Field(default="SQLITE_ORM")
+    plugin_database: str = Field(default="sqlite")
     database_url: str = ""
 
 
@@ -138,11 +133,6 @@ class DatabaseConfig:
     db_url: str = ""
     create_schema: bool = False
     seed_data: bool = False
-    mariadb_host: str = "127.0.0.1"
-    mariadb_port: int = 3306
-    mariadb_database: str = ""
-    mariadb_user: str = ""
-    mariadb_password: str = ""
 
 
 def init_container_config(container: "ApplicationContainer") -> None:

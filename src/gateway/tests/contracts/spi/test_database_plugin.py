@@ -27,13 +27,10 @@ class DataSourcePluginContract:
         self.plugin.create_all()
         await self.plugin.close()
 
-    def test_init_database_defaults_to_memory(self) -> None:
-        from unittest.mock import MagicMock
-
-        mock_config = MagicMock()
-        mock_config.db_url = ""
-        mock_config.plugin_type = "SQLITE_ORM"
-        self.plugin.init_database(mock_config)
+    def test_init_database_accepts_no_args(self) -> None:
+        # The BaaS-aligned contract: connection params are sealed in __init__,
+        # so init_database() is a no-arg activation.
+        self.plugin.init_database()
 
 
 class TestSqliteDatabasePlugin(DataSourcePluginContract):
@@ -72,76 +69,27 @@ class TestSqliteDatabasePlugin(DataSourcePluginContract):
                 pytest.skip("greenlet not installed — async session unavailable")
 
 
-def _make_mariadb_config(host: str = "127.0.0.1", port: int = 3306):
-    from gateway.community.bootstrap import DatabaseConfig
-    from gateway.community.spi.database import PluginDatabaseType
-
-    return DatabaseConfig(
-        plugin_type=PluginDatabaseType.MARIADB_ORM,
-        mariadb_host=host,
-        mariadb_port=port,
-        mariadb_database="mydb",
-        mariadb_user="user",
-        mariadb_password="pass",
-    )
+def _mariadb_url(host: str = "127.0.0.1", port: int = 3306) -> str:
+    return f"mysql+aiomysql://user:pass@{host}:{port}/mydb?charset=utf8mb4"
 
 
-def _mariadb_config_no_db(db_url: str = "sqlite:////tmp/x.db"):
-    from gateway.community.bootstrap import DatabaseConfig
-    from gateway.community.spi.database import PluginDatabaseType
+class TestMariaDbOrmPlugin:
+    """Unit tests for MariaDbOrmPlugin (no live server needed)."""
 
-    return DatabaseConfig(
-        plugin_type=PluginDatabaseType.MARIADB_ORM,
-        db_url=db_url,
-        create_schema=False,
-        mariadb_host="127.0.0.1",
-        mariadb_port=3306,
-        mariadb_database="",
-        mariadb_user="",
-        mariadb_password="",
-    )
-
-
-class TestMariaDbOrmPluginUrlResolution:
-    """Unit tests for MariaDbOrmPlugin URL resolution (no live server needed)."""
-
-    def setup_method(self) -> None:
-        self.plugin = MariaDbOrmPlugin()
-
-    def test_resolve_url_from_structured_config(self) -> None:
-        cfg = _make_mariadb_config(host="db.internal", port=3307)
-        url = self.plugin._resolve_url(cfg)
-        assert url.startswith("mysql+aiomysql://")
-        assert "db.internal:3307/mydb" in url
-
-    def test_resolve_url_env_override(self, monkeypatch) -> None:
-        monkeypatch.setenv("MARIADB_HOST", "env-host")
-        monkeypatch.setenv("MARIADB_PORT", "4406")
-        monkeypatch.setenv("MARIADB_DATABASE", "env_db")
-        monkeypatch.setenv("MARIADB_USER", "env_user")
-        monkeypatch.setenv("MARIADB_PASSWORD", "env_pass")
-        url = self.plugin._resolve_url(_make_mariadb_config(host="cfg-host", port=3306))
-        assert "env-host:4406/env_db" in url
-        assert "env_user:env_pass" in url
-
-    def test_resolve_url_database_url_env_precedence(self, monkeypatch) -> None:
-        monkeypatch.setenv("DATABASE_URL", "mysql+aiomysql://u:p@h:3306/db")
-        url = self.plugin._resolve_url(_make_mariadb_config(host="cfg-host"))
-        assert url == "mysql+aiomysql://u:p@h:3306/db"
-
-    def test_resolve_url_raises_on_missing_database(self, monkeypatch) -> None:
-        monkeypatch.delenv("MARIADB_DATABASE", raising=False)
-        monkeypatch.delenv("DATABASE_URL", raising=False)
-        with pytest.raises(RuntimeError, match="requires a database"):
-            self.plugin._resolve_url(_mariadb_config_no_db())
+    def test_init_database_requires_url(self) -> None:
+        plugin = MariaDbOrmPlugin()
+        with pytest.raises(RuntimeError, match="requires database_url"):
+            plugin.init_database()
 
     def test_orm_session_raises_before_init(self) -> None:
+        plugin = MariaDbOrmPlugin(database_url=_mariadb_url())
         with pytest.raises(RuntimeError, match="not initialized"):
-            with self.plugin.orm_session():
+            with plugin.orm_session():
                 pass
 
     def test_database_label_omits_credentials(self) -> None:
-        label = self.plugin._resolve_database_label(
+        plugin = MariaDbOrmPlugin(database_url=_mariadb_url())
+        label = plugin._resolve_database_label(
             "mysql+aiomysql://user:secret@db.internal:3306/mydb?charset=utf8mb4"
         )
         assert "secret" not in label
@@ -151,14 +99,15 @@ class TestMariaDbOrmPluginUrlResolution:
 class TestMariaDbOrmPluginContract(DataSourcePluginContract):
     """Contract conformance for MariaDB, buildable without a live server.
 
-    The plugin's engines are built lazily in ``init_database``; a live DB is not
-    assumed. ``create_all`` needs initialized engines and a live DB, which the
-    connection-backed tests cover under the E2E overlay, so the inherited
-    connection-dependent contract tests are overridden here.
+    Engines are built in ``init_database``; ``create_all`` needs initialized
+    engines and a live DB, which the connection-backed tests cover under the
+    E2E overlay, so the connection-dependent contract tests are overridden here.
     """
 
     def setup_method(self) -> None:
-        self.plugin = MariaDbOrmPlugin()
+        self.plugin = MariaDbOrmPlugin(
+            database_url=_mariadb_url(), create_schema=False, seed_data=False
+        )
 
     def test_create_all_runs_without_error(self) -> None:
         # Requires a live DB and initialized engines; covered by E2E overlay.
@@ -181,15 +130,11 @@ class TestMariaDbOrmPluginContract(DataSourcePluginContract):
         await self.plugin.close()
 
     def test_init_database_builds_engines(self) -> None:
-        self.plugin.init_database(_make_mariadb_config())
+        self.plugin.init_database()
         assert self.plugin._sync_engine is not None
         assert self.plugin._async_engine is not None
 
-    def test_init_database_defaults_to_memory(self) -> None:
-        # No SQLite-style in-memory default for MariaDB; a real connection
-        # target is required. Covered by test_init_database_builds_engines.
-        pytest.skip("MariaDB has no in-memory default target")
-
-    def test_init_database_raises_without_database(self) -> None:
-        with pytest.raises(RuntimeError, match="requires a database"):
-            self.plugin.init_database(_mariadb_config_no_db())
+    def test_init_database_accepts_no_args(self) -> None:
+        # Overridden to avoid double init on the shared instance; the base
+        # contract asserts the signature, the builds-engines test exercises it.
+        pass

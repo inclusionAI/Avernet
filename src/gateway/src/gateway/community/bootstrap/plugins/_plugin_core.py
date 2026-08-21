@@ -86,8 +86,18 @@ class PluginContainer(containers.DeclarativeContainer):
 
     database = providers.Selector(
         config.plugins.database.plugin_database,
-        SQLITE_ORM=providers.Singleton(SqliteDatabasePlugin),
-        MARIADB_ORM=providers.Singleton(MariaDbOrmPlugin),
+        sqlite=providers.Singleton(
+            SqliteDatabasePlugin,
+            database_url=config.plugins.database.database_url,
+            create_schema=config.plugins.database.create_schema,
+            seed_data=config.plugins.database.seed_data,
+        ),
+        mariadb=providers.Singleton(
+            MariaDbOrmPlugin,
+            database_url=config.plugins.database.database_url,
+            create_schema=config.plugins.database.create_schema,
+            seed_data=config.plugins.database.seed_data,
+        ),
     )
 
     forwarder = providers.Selector(
