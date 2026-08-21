@@ -1,6 +1,9 @@
 from dependency_injector import containers, providers
 
 from secbaas.community.api.publish_manage import PublishService
+from secbaas.community.core.service.device_manage import (
+    ArcaScheduleAwareDeviceService,
+)
 from secbaas.community.core.service.paas import DeviceCallbackHandler
 from secbaas.community.core.service.paas.desktop import ConnectionManager
 from secbaas.community.logger import get_logger
@@ -146,21 +149,6 @@ def _select_renewal_task(engine, legacy_task, deadline_task):
     return legacy_task
 
 
-def _resolve_registered_task(name: str) -> object | None:
-    """Resolve a registered cron task factory by name, lazily.
-
-    Reads the generic task registry at container resolution time (via
-    ``providers.Callable``), never at import / class-body time: extensions
-    register factories only after this module has been imported.
-
-    Returns the factory product, or None when nothing is registered.
-    """
-    from secbaas.community.task_registry import get_cron_task_factories
-
-    factory = get_cron_task_factories().get(name)
-    return factory() if factory else None
-
-
 class ApplicationContainer(containers.DeclarativeContainer):
     config = providers.Configuration()
 
@@ -244,9 +232,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
                 _select_renewal_task,
                 config.renewal_scheduler.engine,
                 tasks.device_ttl_timer_task,
-                providers.Callable(
-                    _resolve_registered_task, "deadline_renewal_scheduler"
-                ),
+                tasks.deadline_renewal_task,
             ),
             tasks.bot_run_recovery_task,
             tasks.file_transfer_poller_task,
@@ -369,11 +355,27 @@ def _log_config_summary(container: containers.DeclarativeContainer) -> None:
     logger.info("Container config:\n%s", formatted)
 
 
-def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
-    """Inject enterprise plugin options into a container instance's Selectors.
+def _apply_enterprise_plugins(container: ApplicationContainer) -> None:
+    """Inject enterprise plugin options and apply engine-driven overlays.
 
     Runs at instance level (not class level) so that only this container
-    is affected.  Called after every container creation.
+    is affected.  Called after every container creation, before
+    ``initialize_services`` resolves providers — never after.
+
+    Part 1 — plugin injection: the ``plugin_registry`` path
+    (``has_enterprise_plugins`` + ``inject_into_plugin_container``)
+    serves ALL residual enterprise plugins (arca_sdk sandbox, ZDAS_ORM,
+    real cache/secret/auth/file_transfer, poolab/teclaw).  It must stay;
+    removing it broke enterprise DI with ``Selector has no "arca_sdk"
+    provider`` (Pitfall 3).
+
+    Part 2 — engine-switch device-service overlay (D-08'): when
+    ``config.renewal_scheduler.engine == "deadline"``, ``device_service``
+    is overridden with the schedule-aware wrapper (Singleton, five parent
+    dependencies + schedule_repo, same parameter group as the former
+    enterprise factory).  Under the legacy engine the native
+    ``DefaultDeviceService`` runs and the cold table is never written.
+    This is the ONLY config-driven switch point (Rule 14).
     """
     try:
         from secbaas.community.plugin_registry import (
@@ -386,18 +388,19 @@ def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
     except ImportError:
         pass
 
-    # ── Device-service overlay (registered deferred factories) ─────────────
-    # Extensions register device-service factories at import time; apply
-    # each as an instance-level, singleton-cached provider override so
-    # every consumer baked with the device_service provider reference
-    # (publish_service, router Provide chains) resolves the SAME wrapped
-    # instance. A plain Factory here would construct a fresh wrapper per
-    # resolution call and break consumer identity. Instance-level only —
-    # the class-level variant does not exist at runtime. Must run here,
-    # before initialize_services resolves providers — never after.
-    from secbaas.community.task_registry import get_device_service_factories
-
-    for factory in get_device_service_factories():
+    # Singleton, not Factory: every consumer baked with the device_service
+    # provider reference (publish_service, router Provide chains) must
+    # resolve the SAME wrapped instance. A Factory here would construct a
+    # fresh wrapper per resolution call and break consumer identity.
+    if container.config.renewal_scheduler.engine() == "deadline":
         container.services().override_providers(
-            device_service=providers.Singleton(factory)
+            device_service=providers.Singleton(
+                ArcaScheduleAwareDeviceService,
+                schedule_repo=container.repository().arca_ttl_schedule_repository(),
+                paas_facade=container.services().paas_facade(),
+                repository=container.repository().device_repository(),
+                device_template_service=container.services().device_template_service(),
+                secret_plugin=container.plugins().secret_plugin(),
+                callback_handler=container.services().device_callback_handler(),
+            )
         )
