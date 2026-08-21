@@ -141,30 +141,31 @@ class TestRouter:
         assert r.status_code == 200, r.text  # 幂等 ack
 
     def test_result_409_when_illegal(self, client):
-        # 非终态重投:report_result 抛 TaskStateError,非幂等 → 上抛。当前 callback router 未把
-        # TaskStateError 经 @envelope_errors 映射为 409(本 fixture 无中央 handler),异常经
-        # TestClient 直接上抛 → 断言领域错误上抛(等价"非法态重投被拒")而非 409 响应体。
+        # 非终态重投:report_result 抛 TaskStateError,非幂等 → 不进幂等分支。
+        # ``@envelope_errors`` 经 ``ENVELOPE_ERRORS`` 把它映射为 409 ErrorEnvelope,
+        # 该映射在 handler 帧内完成,不依赖本 fixture 的中央 handler。
         c, svc = client
         svc.callback.report_result = _raise(TaskStateError("PENDING->DONE"))
         svc.set_node_status("t1", "root1", Status.PENDING)  # 非终态
-        with pytest.raises(TaskStateError):
-            c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        assert r.status_code == 409, r.text
+        assert r.json()["code"] == 409000
 
     def test_start_409_on_stale(self, client):
-        # start 抛 TaskStateError;disposition!=result 不进幂等分支,直接上抛。当前未映射 409,
-        # 异常经 TestClient 上抛 → 断言领域错误上抛。
+        # start 抛 TaskStateError;disposition!=result 不进幂等分支 → 409 ErrorEnvelope。
         c, svc = client
         svc.callback.start_run = _raise(TaskStateError("stale"))
-        with pytest.raises(TaskStateError):
-            c.post("/api/v1/collaboration/tasks/callback/node_start", json=_body(node=True, status="RUNNING"))
+        r = c.post("/api/v1/collaboration/tasks/callback/node_start", json=_body(node=True, status="RUNNING"))
+        assert r.status_code == 409, r.text
+        assert r.json()["code"] == 409000
 
     def test_not_found_404(self, client):
-        # report_result 抛 NodeNotFoundError;未被 @envelope_errors 映射、本 fixture 无中央 handler,
-        # 异常经 TestClient 上抛 → 断言领域错误上抛。
+        # report_result 抛 NodeNotFoundError → ``ENVELOPE_ERRORS`` 映射为 404 ErrorEnvelope。
         c, svc = client
         svc.callback.report_result = _raise(NodeNotFoundError("x"))
-        with pytest.raises(NodeNotFoundError):
-            c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
+        assert r.status_code == 404, r.text
+        assert r.json()["code"] == 404000
 
     def test_correlation_error_400(self, client):
         # task 级无回声 + 空 registry → translate 抛 NotFound(core.errors;原计划 CallbackCorrelationError

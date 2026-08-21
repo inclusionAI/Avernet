@@ -247,11 +247,10 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                         resp.status,
                     )
                 return self._check_response_envelope(data)
-            except (TimeoutError, aiohttp.ClientError) as exc:
-                retryable = isinstance(
-                    exc, (TimeoutError, aiohttp.ClientConnectionError)
-                )
-                if retryable and attempt < _BINDING_MAX_ATTEMPTS:
+            except BaseException as exc:
+                if isinstance(exc, PaasError):
+                    raise
+                if attempt < _BINDING_MAX_ATTEMPTS:
                     logger.warning(
                         "[bot-service] get_binding transient request error; "
                         "retrying attempt=%d/%d bot_id=%s stage=%s error=%s",

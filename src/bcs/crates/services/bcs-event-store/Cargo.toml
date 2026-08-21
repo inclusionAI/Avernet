@@ -1,0 +1,29 @@
+[package]
+name = "bcs-event-store"
+description = "Transactional Event, Subscription, and delivery persistence for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-db-api = { workspace = true }
+bcs-service-api = { workspace = true }
+chrono = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+bcs-config-api = { workspace = true }
+bcs-db-local = { workspace = true }
+bcs-db-mysql = { workspace = true }
+bcs-test-support = { workspace = true }
+mysql_async = { workspace = true }
+hex = { workspace = true }
+
+[lints]
+workspace = true

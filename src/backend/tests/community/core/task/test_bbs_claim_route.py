@@ -92,7 +92,8 @@ def test_claim_route_200_then_409(client):
     assert body["code"] == 200000
     assert body["data"]["root_node_id"] == "r1"
     assert body["data"]["task_id"] == "r1"
-    # 再次 claim 同任务:CAS 输者。当前路由未把 TaskStateError 映射为 409 envelope,异常经
-    # TestClient 直接上抛——断言领域错误上抛(等价"CAS 输者被拒")而非 409 响应体。
-    with pytest.raises(TaskStateError):
-        c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": "r1", "bot_id": "botB"})
+    # 再次 claim 同任务:CAS 输者。``@envelope_errors`` 把 TaskStateError 映射为 409
+    # ErrorEnvelope(``ENVELOPE_ERRORS``),故断言 409 响应体而非领域错误上抛。
+    r2 = c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": "r1", "bot_id": "botB"})
+    assert r2.status_code == 409, r2.text
+    assert r2.json()["code"] == 409000

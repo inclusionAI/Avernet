@@ -1,9 +1,12 @@
 pub mod bot_connection;
 pub mod bot_terminal_observer;
-pub mod chat_run;
 pub mod channel_binding_cleanup;
 pub mod channel_delivery;
+pub mod chat_run;
 pub mod delivery;
+pub mod event_delivery;
+pub mod event_metrics;
+pub mod event_recording;
 pub mod group_context;
 pub mod group_session_token;
 pub mod interaction;
@@ -22,33 +25,32 @@ pub use bot_terminal_observer::{
     BotTerminalEvent, BotTerminalObserverPort, BotTerminalState, CompositeBotTerminalObserver,
     NoopBotTerminalObserver,
 };
-pub use chat_run::{
-    BotRunContext, BotRunContextPort, ChatRunCleanupPort, ChatRunEventPort,
-    ProviderRunTransport,
-};
-pub use channel_binding_cleanup::{
-    ChannelBindingCleanupPort, NoopChannelBindingCleanupPort,
-};
+pub use channel_binding_cleanup::{ChannelBindingCleanupPort, NoopChannelBindingCleanupPort};
 pub use channel_delivery::{
     ChannelBindingRef, ChannelDeliveryPort, ChannelDeliveryResult, ChannelOutboundEvent,
     ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
+};
+pub use chat_run::{
+    BotRunContext, BotRunContextPort, ChatRunCleanupPort, ChatRunEventPort, ProviderRunTransport,
 };
 pub use delivery::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult,
     FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryResult,
     FrontendDeliveryTarget, ProviderTransportPreference, RunFallbackDelivery,
 };
+pub use event_delivery::*;
+pub use event_metrics::*;
+pub use event_recording::*;
 pub use group_context::{GroupDispatchContextPort, GroupHistoryBotRequestPort};
 pub use group_session_token::{
-    GroupSessionTokenClaims, GroupSessionTokenError, GroupSessionTokenPort,
-    GroupSessionTokenScope, IssuedGroupSessionToken, GROUP_SESSION_TOKEN_MAX_COMPACT_LEN,
+    GROUP_SESSION_TOKEN_MAX_COMPACT_LEN, GroupSessionTokenClaims, GroupSessionTokenError,
+    GroupSessionTokenPort, GroupSessionTokenScope, IssuedGroupSessionToken,
 };
 pub use interaction::{
     CanResolveInteraction, CanResolveInteractionCommand, CanResolveInteractionPort,
     InteractionFrontendEvent, InteractionFrontendPort, InteractionInsertResult,
-    InteractionProviderAck, InteractionProviderCommand, InteractionProviderPort,
-    InteractionRecord, InteractionResolveClaim, InteractionResolveCommit,
-    InteractionStorePort,
+    InteractionProviderAck, InteractionProviderCommand, InteractionProviderPort, InteractionRecord,
+    InteractionResolveClaim, InteractionResolveCommit, InteractionStorePort,
 };
 pub use judge::{
     JudgeArtifact, JudgeCheckedCriterion, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,
@@ -70,16 +72,16 @@ pub use repo::{
     BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort,
     ChannelBindingRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
     CollaborationEventRepoPort, CollaborationTemplateEntry, CollaborationTemplateRepoPort,
-    CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
-    ListOrganizationsQuery, OrganizationCandidateReadPage, OrganizationCandidateReadPort,
-    OrganizationCandidateReadQuery, OrganizationMemberPage, OrganizationRepoPort, UpdateOrganizationRecord,
-    ConversationSessionRepoPort, FriendRepoPort, FriendRequestRepoPort, GroupRepoPort,
-    GroupRuntimeBindingRepoPort, ImParticipantRepoPort, MarkHumanNodeRunningCommand,
-    HumanInputEnqueueDisposition, HumanInputRequestRepoPort, NewSessionParams,
-    ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord,
+    ConversationSessionRepoPort, CreateOrganizationRecord, EventRepoPort, FriendRepoPort,
+    FriendRequestRepoPort, GroupRepoPort, GroupRuntimeBindingRepoPort,
+    HumanInputEnqueueDisposition, HumanInputRequestRepoPort, ImParticipantRepoPort,
+    ListOrganizationMembersPageQuery, ListOrganizationMembersQuery, ListOrganizationsQuery,
+    MarkHumanNodeRunningCommand, NewSessionParams, OrganizationCandidateReadPage,
+    OrganizationCandidateReadPort, OrganizationCandidateReadQuery, OrganizationMemberPage,
+    OrganizationRepoPort, ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord,
     ProviderBotDiscoverySelector, ProviderCredentialRepoPort, ProviderRepoPort, RelationRepoPort,
-    SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineRunRepoPort, UserIdentity,
-    UserIdentityRepoPort, UpsertOrganizationMemberRecord,
+    SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
+    UpdateOrganizationRecord, UpsertOrganizationMemberRecord, UserIdentity, UserIdentityRepoPort,
 };
 pub use secret::{SecretAccessError, SecretAccessPort, SecretRecord};
 pub use session_callback::SessionCallbackDispatchPort;
@@ -87,6 +89,4 @@ pub use session_channel_outbound::{
     HumanInputReadyEvent, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
     StateMachineTerminalEvent, StateMachineTerminalStatus,
 };
-pub use state_machine_result::{
-    StateMachineResultPublishCommand, StateMachineResultPublisherPort,
-};
+pub use state_machine_result::{StateMachineResultPublishCommand, StateMachineResultPublisherPort};

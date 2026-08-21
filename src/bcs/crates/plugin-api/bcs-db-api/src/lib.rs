@@ -18,8 +18,11 @@
 //! and MySQL-compatible backends must choose SQL supported by both targets. The shared
 //! `db_plugin_contract_tests` in `bcs-test-support` show the small common subset
 //! this contract itself relies on: positional `?` parameters, basic
-//! `CREATE TABLE`, `INSERT`, `DELETE`, and `SELECT` statements. Backend-specific
-//! UPSERTs, joins, and DDL belong in service-owned stores or repository code.
+//! `CREATE TABLE`, `INSERT`, `DELETE`, and `SELECT` statements. Transaction
+//! statements may additionally bind a parameter from an earlier query step;
+//! those bindings are resolved by the plugin on the same transaction
+//! connection. Backend-specific UPSERTs, joins, and DDL belong in service-owned
+//! stores or repository code.
 
 use std::collections::BTreeMap;
 use async_trait::async_trait;
@@ -368,11 +371,55 @@ impl DbRow {
     }
 }
 
+/// A positional parameter used only inside [`DbPlugin::transaction`].
+///
+/// Keeping result references separate from [`DbValue`] prevents unresolved
+/// transaction state from leaking into normal query and execute calls.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DbTransactionParam {
+    Value(DbValue),
+    QueryResult {
+        step_index: usize,
+        row_index: usize,
+        column: String,
+    },
+}
+
+impl DbTransactionParam {
+    pub fn value(value: impl Into<DbValue>) -> Self {
+        Self::Value(value.into())
+    }
+
+    /// Reference one column from a query step that precedes the current step.
+    pub fn query_result(step_index: usize, row_index: usize, column: impl Into<String>) -> Self {
+        Self::QueryResult {
+            step_index,
+            row_index,
+            column: column.into(),
+        }
+    }
+}
+
+impl From<DbValue> for DbTransactionParam {
+    fn from(value: DbValue) -> Self {
+        Self::Value(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DbTransactionBinding {
+    parameter_index: usize,
+    step_index: usize,
+    row_index: usize,
+    column: String,
+}
+
 /// SQL statement plus positional parameters.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DbStatement {
     sql: String,
     params: Vec<DbValue>,
+    transaction_bindings: Vec<DbTransactionBinding>,
 }
 
 impl DbStatement {
@@ -387,6 +434,7 @@ impl DbStatement {
         Self {
             sql: sql.into(),
             params: Vec::new(),
+            transaction_bindings: Vec::new(),
         }
     }
 
@@ -401,6 +449,47 @@ impl DbStatement {
         Self {
             sql: sql.into(),
             params,
+            transaction_bindings: Vec::new(),
+        }
+    }
+
+    /// Create a statement whose positional parameters may reference earlier
+    /// query results in the same transaction.
+    ///
+    /// Passing this statement to [`DbPlugin::query`] or [`DbPlugin::execute`]
+    /// is invalid. Query-result references must point to a strictly earlier
+    /// query step; missing steps, rows, or columns fail the whole transaction.
+    pub fn with_transaction_params(
+        sql: impl Into<String>,
+        params: Vec<DbTransactionParam>,
+    ) -> Self {
+        let mut values = Vec::with_capacity(params.len());
+        let mut transaction_bindings = Vec::new();
+        for (parameter_index, parameter) in params.into_iter().enumerate() {
+            match parameter {
+                DbTransactionParam::Value(value) => values.push(value),
+                DbTransactionParam::QueryResult {
+                    step_index,
+                    row_index,
+                    column,
+                } => {
+                    // Keep positional arity stable. This placeholder is never
+                    // sent to a backend because standalone calls reject bound
+                    // statements and transaction calls resolve it first.
+                    values.push(DbValue::Null);
+                    transaction_bindings.push(DbTransactionBinding {
+                        parameter_index,
+                        step_index,
+                        row_index,
+                        column,
+                    });
+                }
+            }
+        }
+        Self {
+            sql: sql.into(),
+            params: values,
+            transaction_bindings,
         }
     }
 
@@ -408,10 +497,77 @@ impl DbStatement {
         &self.sql
     }
 
+    /// Return the statement's literal parameter storage.
+    ///
+    /// Transaction result references occupy `DbValue::Null` placeholders
+    /// until [`Self::resolve_transaction_params`] is called. Plugin
+    /// implementations must use [`Self::standalone_params`] for standalone
+    /// execution and `resolve_transaction_params` inside a transaction.
     pub fn params(&self) -> &[DbValue] {
         &self.params
     }
 
+    /// Return literal parameters for a standalone query or execute call.
+    pub fn standalone_params(&self) -> DbResult<&[DbValue]> {
+        if self.transaction_bindings.is_empty() {
+            Ok(&self.params)
+        } else {
+            Err(DbError::InvalidInput(
+                "transaction result bindings require DbPlugin::transaction".to_string(),
+            ))
+        }
+    }
+
+    /// Resolve all transaction-only bindings against already completed steps.
+    pub fn resolve_transaction_params(
+        &self,
+        completed_steps: &[DbTransactionStepResult],
+        current_step_index: usize,
+    ) -> DbResult<Vec<DbValue>> {
+        let mut params = self.params.clone();
+        for binding in &self.transaction_bindings {
+            if binding.step_index >= current_step_index {
+                return Err(DbError::InvalidInput(format!(
+                    "transaction parameter {} references non-previous step {} from step {}",
+                    binding.parameter_index, binding.step_index, current_step_index
+                )));
+            }
+            let result = completed_steps.get(binding.step_index).ok_or_else(|| {
+                DbError::InvalidInput(format!(
+                    "transaction parameter {} references unavailable step {}",
+                    binding.parameter_index, binding.step_index
+                ))
+            })?;
+            let rows = match result {
+                DbTransactionStepResult::Rows(rows) => rows,
+                DbTransactionStepResult::Executed(_) => {
+                    return Err(DbError::InvalidInput(format!(
+                        "transaction parameter {} references execute step {} instead of a query",
+                        binding.parameter_index, binding.step_index
+                    )));
+                }
+            };
+            let row = rows.get(binding.row_index).ok_or_else(|| {
+                DbError::InvalidInput(format!(
+                    "transaction parameter {} references missing row {} from step {}",
+                    binding.parameter_index, binding.row_index, binding.step_index
+                ))
+            })?;
+            let value = row.get(&binding.column).ok_or_else(|| {
+                DbError::InvalidInput(format!(
+                    "transaction parameter {} references missing column '{}' from step {} row {}",
+                    binding.parameter_index, binding.column, binding.step_index, binding.row_index
+                ))
+            })?;
+            params[binding.parameter_index] = value.clone();
+        }
+        Ok(params)
+    }
+
+    /// Consume the statement and return its literal parameter storage.
+    ///
+    /// Like [`Self::params`], unresolved transaction bindings are represented
+    /// by `DbValue::Null` placeholders.
     pub fn into_params(self) -> Vec<DbValue> {
         self.params
     }
@@ -569,6 +725,48 @@ impl FromDbColumn for i32 {
     }
 }
 
+impl FromDbColumn for u64 {
+    fn from_db_value(column: &str, value: &DbValue) -> DbResult<Self> {
+        value.as_u64().ok_or_else(|| {
+            DbError::Conversion(format!("column '{}' is not a u64: {:?}", column, value))
+        })
+    }
+}
+
+impl FromDbColumn for u32 {
+    fn from_db_value(column: &str, value: &DbValue) -> DbResult<Self> {
+        let value = value.as_u64().ok_or_else(|| {
+            DbError::Conversion(format!("column '{}' is not a u32: {:?}", column, value))
+        })?;
+        u32::try_from(value).map_err(|error| {
+            DbError::Conversion(format!(
+                "column '{}' is out of u32 range: {}",
+                column, error
+            ))
+        })
+    }
+}
+
+impl FromDbColumn for bool {
+    fn from_db_value(column: &str, value: &DbValue) -> DbResult<Self> {
+        value.as_bool().ok_or_else(|| {
+            DbError::Conversion(format!("column '{}' is not a bool: {:?}", column, value))
+        })
+    }
+}
+
+impl FromDbColumn for Vec<u8> {
+    fn from_db_value(column: &str, value: &DbValue) -> DbResult<Self> {
+        match value {
+            DbValue::Bytes(value) => Ok(value.clone()),
+            other => Err(DbError::Conversion(format!(
+                "column '{}' is not bytes: {:?}",
+                column, other
+            ))),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,9 +803,65 @@ mod tests {
         assert_eq!(must(db_get_column::<String>(&row, "name")), "alice");
         assert_eq!(must(db_get_column_opt::<i64>(&row, "count")), Some(3));
         assert_eq!(must(db_get_column::<i32>(&row, "count")), 3);
+        assert_eq!(must(db_get_column::<u64>(&row, "count")), 3);
+        assert_eq!(must(db_get_column::<u32>(&row, "count")), 3);
+        assert!(must(db_get_column::<bool>(&row, "enabled")));
+        assert_eq!(must(db_get_column::<Vec<u8>>(&row, "payload")), b"blob");
         assert!(matches!(
             db_get_column::<i32>(&row, "big"),
             Err(DbError::Conversion(_))
+        ));
+    }
+
+    #[test]
+    fn transaction_params_resolve_only_prior_query_results() {
+        let statement = DbStatement::with_transaction_params(
+            "INSERT INTO target (name, payload, marker) VALUES (?, ?, ?)",
+            vec![
+                DbTransactionParam::query_result(0, 0, "name"),
+                DbTransactionParam::query_result(0, 0, "payload"),
+                DbTransactionParam::value("literal"),
+            ],
+        );
+        let completed = vec![DbTransactionStepResult::Rows(vec![DbRow::new(
+            BTreeMap::from([
+                ("name".to_string(), DbValue::from("alpha")),
+                ("payload".to_string(), DbValue::from(b"bytes".to_vec())),
+            ]),
+        )])];
+
+        assert_eq!(
+            must(statement.resolve_transaction_params(&completed, 1)),
+            vec![
+                DbValue::from("alpha"),
+                DbValue::from(b"bytes".to_vec()),
+                DbValue::from("literal"),
+            ]
+        );
+        assert!(matches!(
+            statement.standalone_params(),
+            Err(DbError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            statement.resolve_transaction_params(&completed, 0),
+            Err(DbError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn transaction_params_reject_execute_results() {
+        let statement = DbStatement::with_transaction_params(
+            "UPDATE target SET name = ?",
+            vec![DbTransactionParam::query_result(0, 0, "name")],
+        );
+        let completed = vec![DbTransactionStepResult::Executed(DbExecuteResult {
+            affected_rows: 1,
+            last_insert_id: None,
+        })];
+
+        assert!(matches!(
+            statement.resolve_transaction_params(&completed, 1),
+            Err(DbError::InvalidInput(_))
         ));
     }
 

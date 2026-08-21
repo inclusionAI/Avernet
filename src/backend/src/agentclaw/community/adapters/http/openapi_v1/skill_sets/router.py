@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, Path, Request, Response
+from fastapi import APIRouter, Depends, Path, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
@@ -54,15 +54,6 @@ McpServerCodePath = Annotated[
     str,
     Path(description="Opaque MCP server identifier."),
 ]
-IdempotencyKey = Annotated[
-    str,
-    Header(
-        alias="Idempotency-Key",
-        min_length=1,
-        description="Client key for idempotent SkillSet creation.",
-    ),
-]
-
 
 def _set(item: dict[str, Any]) -> SkillSetItem:
     return SkillSetItem(
@@ -98,7 +89,6 @@ async def list_skill_sets(
 async def create_skill_set(
     bot_id: BotIdPath,
     payload: CreateSkillSetRequest,
-    idempotency_key: IdempotencyKey,
     owner_id: OwnerIdDep,
     user_id: UserIdDep,
     request: Request,
@@ -113,7 +103,6 @@ async def create_skill_set(
         user_id=user_id,
         name=payload.name,
         description=payload.description,
-        idempotency_key=idempotency_key,
     )
     response.status_code = 201
     return envelope(_set(item), request, code=201000)

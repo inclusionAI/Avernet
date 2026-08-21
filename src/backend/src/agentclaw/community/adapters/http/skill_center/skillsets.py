@@ -5,7 +5,6 @@ SkillSet router for managing capability sets and their skills.
 """
 
 from pathlib import Path
-from uuid import uuid4
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 
@@ -57,10 +56,9 @@ from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_engine_for_bot,
+    resolve_runtime_engine_for_bot,
 )
-from agentclaw.community.core.mcp.services.passport_scope import (
-    filter_passport_mcp_codes,
-)
+from agentclaw.community.core.mcp.services.passport_scope import filter_passport_mcp_codes
 from agentclaw.community.di import Injected
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
 from agentclaw.community.api.skill_set_service_factory import (
@@ -158,7 +156,7 @@ def _get_path_params(
 
     Returns:
         Tuple of (effective_entity_id, effective_bot_id,
-                  effective_engine_type, effective_entity_type, is_desktop)
+                  effective_engine_type, runtime_engine_type, effective_entity_type, is_desktop)
     """
     # entity_id: use provided or default to user_id (pure ID, no prefix)
     effective_entity_id = (
@@ -180,6 +178,12 @@ def _get_path_params(
         override=engine_type,
         bot_repo=bot_repo,
     )
+    runtime_engine = resolve_runtime_engine_for_bot(
+        bot_id=effective_bot_id,
+        owner_id=owner_id_for_lookup,
+        override=engine_type,
+        bot_repo=bot_repo,
+    )
     is_desktop = False
     try:
         bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
@@ -194,13 +198,7 @@ def _get_path_params(
             e,
         )
 
-    return (
-        effective_entity_id,
-        effective_bot_id,
-        effective_engine,
-        effective_entity_type,
-        is_desktop,
-    )
+    return effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop
 
 
 # ==================== SkillSet Management APIs ====================
@@ -236,6 +234,7 @@ async def list_skill_sets(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         _is_desktop,
     ) = _get_path_params(
@@ -306,15 +305,20 @@ async def create_skill_set(
     # Priority: query param bot_id > request body bot_id > ctx.bot_id > default
     effective_bot_id = bot_id or request.bot_id or ctx.bot_id or "default"
     # Get effective path parameters (pass effective_bot_id directly)
-    effective_entity_id, _, effective_engine, effective_entity_type, _is_desktop = (
-        _get_path_params(
-            ctx,
-            request.user_id,
-            entity_type,
-            effective_bot_id,
-            engine_type,
-            bot_repo=bot_repo,
-        )
+    (
+        effective_entity_id,
+        _,
+        effective_engine,
+        runtime_engine,
+        effective_entity_type,
+        _is_desktop,
+    ) = _get_path_params(
+        ctx,
+        request.user_id,
+        entity_type,
+        effective_bot_id,
+        engine_type,
+        bot_repo=bot_repo,
     )
 
     try:
@@ -323,8 +327,6 @@ async def create_skill_set(
             actor_id=_legacy_actor(ctx, request.user_id),
             name=request.name,
             description=request.description,
-            # The historical wire has no idempotency field.
-            idempotency_key=f"legacy-{uuid4()}",
         )
         return SkillSetDetailResponse(success=True, data=_legacy_skill_set(skill_set))
     except Exception as e:
@@ -362,6 +364,7 @@ async def list_skill_sets_with_mcps(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -426,6 +429,7 @@ async def list_skill_set_resources(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -485,6 +489,7 @@ async def get_skill_set(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -528,15 +533,20 @@ async def update_skill_set(
     # Priority: query param bot_id > request body bot_id > ctx.bot_id > default
     effective_bot_id = bot_id or request.bot_id or ctx.bot_id or "default"
     # Get effective path parameters (pass effective_bot_id directly)
-    effective_entity_id, _, effective_engine, effective_entity_type, _is_desktop = (
-        _get_path_params(
-            ctx,
-            entity_id,
-            entity_type,
-            effective_bot_id,
-            engine_type,
-            bot_repo=bot_repo,
-        )
+    (
+        effective_entity_id,
+        _,
+        effective_engine,
+        runtime_engine,
+        effective_entity_type,
+        _is_desktop,
+    ) = _get_path_params(
+        ctx,
+        entity_id,
+        entity_type,
+        effective_bot_id,
+        engine_type,
+        bot_repo=bot_repo,
     )
 
     try:
@@ -588,6 +598,7 @@ async def delete_skill_set(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -638,6 +649,7 @@ async def get_skill_set_skills(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -700,15 +712,20 @@ async def add_skills_to_set(
     effective_bot_id = request.bot_id or bot_id or ctx.bot_id or "default"
     # entity_id 优先使用 request.user_id，否则使用传入的 entity_id
     effective_entity_id_param = request.user_id or entity_id
-    effective_entity_id, _, effective_engine, effective_entity_type, _is_desktop = (
-        _get_path_params(
-            ctx,
-            effective_entity_id_param,
-            entity_type,
-            effective_bot_id,
-            engine_type,
-            bot_repo=bot_repo,
-        )
+    (
+        effective_entity_id,
+        _,
+        effective_engine,
+        runtime_engine,
+        effective_entity_type,
+        _is_desktop,
+    ) = _get_path_params(
+        ctx,
+        effective_entity_id_param,
+        entity_type,
+        effective_bot_id,
+        engine_type,
+        bot_repo=bot_repo,
     )
 
     try:
@@ -804,6 +821,7 @@ async def remove_skill_from_set(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -858,6 +876,7 @@ async def ensure_default_skill_set(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -908,6 +927,7 @@ async def get_default_skill_set(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -969,6 +989,7 @@ async def init_and_sync_default_skills(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -1009,7 +1030,7 @@ async def init_and_sync_default_skills(
         local_dir=local_dir,
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
+        engine_type=runtime_engine,
     )
 
     # Step 1: Ensure default skill set exists
@@ -1147,6 +1168,7 @@ async def set_default_skills(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -1187,7 +1209,7 @@ async def set_default_skills(
         local_dir=local_dir,
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
+        engine_type=runtime_engine,
     )
 
     # Step 1: Ensure default skill set exists
@@ -1420,6 +1442,7 @@ async def set_default_skills_fast(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -1457,7 +1480,7 @@ async def set_default_skills_fast(
         local_dir=local_dir,
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
+        engine_type=runtime_engine,
     )
 
     # Step 1: Ensure default skill set exists
@@ -1618,6 +1641,7 @@ async def fix_git_path(
         entity_id="",
         bot_id="default",
         engine_type=DEFAULT_ENGINE_TYPE,
+        runtime_engine_type=DEFAULT_ENGINE_TYPE,
         entity_type="staff",
     )
 
@@ -1736,6 +1760,7 @@ async def get_skill_set_mcps(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -1812,6 +1837,7 @@ async def add_mcp_to_skill_set(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -1868,6 +1894,7 @@ async def remove_mcp_from_skill_set(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -1919,6 +1946,7 @@ async def remove_cli_from_default_skill_set(
         effective_entity_id,
         effective_bot_id,
         effective_engine,
+        runtime_engine,
         effective_entity_type,
         is_desktop,
     ) = _get_path_params(
@@ -2018,6 +2046,7 @@ async def sync_skills_to_device(
             effective_entity_id,
             effective_bot_id,
             effective_engine,
+            runtime_engine,
             effective_entity_type,
             _is_desktop,
         ) = _get_path_params(
@@ -2029,6 +2058,7 @@ async def sync_skills_to_device(
             entity_id=effective_entity_id,
             bot_id=effective_bot_id,
             engine_type=effective_engine,
+            runtime_engine_type=runtime_engine,
             entity_type=effective_entity_type,
         )
 

@@ -23,6 +23,7 @@ from agentclaw.community.core.bot_management.capabilities import (
 )
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
     AICODING_ENGINE_TYPE,
+    CLAUDE_CODE_ENGINE_TYPE,
 )
 from agentclaw.community.core.bot_management.engines.registry import (
     normalize_engine_type,
@@ -2218,8 +2219,8 @@ class BotService:
         self,
         public: Optional[str] = None,
         search: Optional[str] = None,
-        page: int = 1,
-        page_size: int = 20,
+        page: int | None = 1,
+        page_size: int | None = 20,
     ) -> Dict[str, Any]:
         """
         List bots with search and pagination.
@@ -5672,7 +5673,7 @@ class BotService:
         return self._workspace_hosting_service
 
     def ensure_hosted_workspace(self, bot_id: str, user_id: str) -> Optional[str]:
-        """为 applicationCoding bot 确保 DIMA workspace 存在（幂等）。
+        """为 Coding bot 确保 DIMA workspace 存在（幂等）。
 
         创建 bot 时若 DIMA 调用失败，bot 仍会成功落库但 template_config 缺少
         ``dima_space_id``。此方法暴露给前端做手动补救：
@@ -5690,16 +5691,23 @@ class BotService:
 
         Raises:
             BotNotFoundError: bot 不存在或当前用户无权访问
-            BotServiceError: bot 不是 applicationCoding 模板
+            BotServiceError: bot 不是可托管 DIMA 工作空间的 Coding Bot
         """
         bot = self._repository.get_by_id_and_owner(bot_id, user_id)
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
 
         template_type = bot.get("template_type")
-        if template_type != "applicationCoding":
+        active_engine = normalize_engine_type(
+            bot.get("active_engine") or bot.get("engine_type"),
+            default="",
+        )
+        is_legacy_application_coding = template_type == "applicationCoding"
+        is_coding_engine = active_engine in {AICODING_ENGINE_TYPE, CLAUDE_CODE_ENGINE_TYPE}
+        if not (is_legacy_application_coding or is_coding_engine):
             raise BotServiceError(
-                f"Bot {bot_id} 不是 applicationCoding 模板（template_type={template_type}），"
+                f"Bot {bot_id} 不是可创建 DIMA 工作空间的 Coding Bot"
+                f"（template_type={template_type}, active_engine={active_engine or None}），"
                 "无法创建 DIMA 工作空间"
             )
 

@@ -9,6 +9,9 @@ use bcs_service_api::{
     GroupDetailCommand, GroupHistoryCommand, GroupMessage, GroupMessageType, GroupUseCaseError,
     HumanActor, MessageDeliveryResult, MessageRole, PersistentGroupSendCommand, ServiceError,
 };
+use bcs_service_api::application::v1::{
+    AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -107,6 +110,38 @@ pub(crate) struct HttpGroupCaller {
 pub(crate) enum GroupChatCaller {
     Bot { bot_uuid: String },
     Human(HttpGroupCaller),
+}
+
+pub(crate) fn application_caller(caller: &GroupChatCaller) -> AuthenticatedCaller {
+    match caller {
+        GroupChatCaller::Bot { bot_uuid } => AuthenticatedCaller {
+            // The legacy bearer path authenticates exactly one Bot. Owner
+            // consistency applies only when Gateway supplies User and Bot
+            // identities together, so this adapter does not fabricate it.
+            tenant: Some("legacy".to_string()),
+            user: None,
+            bot: Some(AuthenticatedBotIdentity {
+                bot_uuid: bot_uuid.clone(),
+                owner_id: String::new(),
+                app_id: 0,
+                agent_code: "legacy".to_string(),
+            }),
+            app: None,
+            access_key: None,
+        },
+        GroupChatCaller::Human(human) => AuthenticatedCaller {
+            tenant: None,
+            user: Some(AuthenticatedUserIdentity {
+                id: human.staff_no.clone(),
+                username: human.staff_no.clone(),
+                display_name: human.nick_name.clone(),
+                full_name: None,
+            }),
+            bot: None,
+            app: None,
+            access_key: None,
+        },
+    }
 }
 
 pub async fn group_chat(

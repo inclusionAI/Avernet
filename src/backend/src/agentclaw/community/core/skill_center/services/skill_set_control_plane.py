@@ -129,7 +129,6 @@ class SkillSetControlPlaneService:
         user_id: str,
         name: str,
         description: str | None,
-        idempotency_key: str,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         self._require_mutable_bot(bot)
@@ -146,7 +145,6 @@ class SkillSetControlPlaneService:
                 owner_id=str(bot["owner_id"]),
                 name=name,
                 description=description,
-                idempotency_key=idempotency_key,
                 engine_type=self._engine(bot),
             )
             self._ensure_mutation_lease(mutation_lease)
@@ -167,7 +165,6 @@ class SkillSetControlPlaneService:
         actor_id: str,
         name: str,
         description: str | None,
-        idempotency_key: str,
     ) -> dict:
         """Preserve only the released virtual-Default compatibility case.
 
@@ -185,7 +182,6 @@ class SkillSetControlPlaneService:
                 user_id=actor_id,
                 name=name,
                 description=description,
-                idempotency_key=idempotency_key,
             )
 
         scope = BotSkillLayoutScope(
@@ -203,7 +199,6 @@ class SkillSetControlPlaneService:
                 owner_id=actor_id,
                 name=name,
                 description=description,
-                idempotency_key=idempotency_key,
                 engine_type="openclaw",
             )
             self._ensure_mutation_lease(mutation_lease)
@@ -376,6 +371,7 @@ class SkillSetControlPlaneService:
             action="skill_set_add_skill",
             mutation=lambda: self._repository.add_skill(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 skill_id=skill_id,
                 engine_type=self._engine(bot),
@@ -400,6 +396,7 @@ class SkillSetControlPlaneService:
             command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.remove_skill(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 skill_id=skill_id,
                 engine_type=self._engine(bot),
@@ -480,6 +477,7 @@ class SkillSetControlPlaneService:
             action="skill_set_add_mcp",
             mutation=lambda: self._repository.add_mcp(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 server_code=server_code,
                 engine_type=self._engine(bot),
@@ -504,6 +502,7 @@ class SkillSetControlPlaneService:
             command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.remove_mcp(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 server_code=server_code,
                 engine_type=self._engine(bot),
@@ -522,6 +521,7 @@ class SkillSetControlPlaneService:
             action="mcp_direct_activate",
             mutation=lambda: self._repository.activate_mcp_direct(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 server_code=server_code,
                 engine_type=self._engine(bot),
             ),
@@ -539,6 +539,7 @@ class SkillSetControlPlaneService:
             command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.deactivate_mcp_direct(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 server_code=server_code,
                 engine_type=self._engine(bot),
             ),
@@ -549,7 +550,9 @@ class SkillSetControlPlaneService:
     ) -> set[str]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.list_installed_mcps(
-            bot_id=bot_id, engine_type=self._engine(bot)
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            engine_type=self._engine(bot),
         )
 
     async def activate(
@@ -569,7 +572,11 @@ class SkillSetControlPlaneService:
             actor_id=user_id,
             action="skill_set_activate",
             mutation=lambda: self._repository.set_active(
-                bot_id=bot_id, set_id=set_id, active=True, engine_type=self._engine(bot)
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                set_id=set_id,
+                active=True,
+                engine_type=self._engine(bot),
             ),
         )
 
@@ -585,6 +592,7 @@ class SkillSetControlPlaneService:
             command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.set_active(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 active=False,
                 engine_type=self._engine(bot),
@@ -600,7 +608,10 @@ class SkillSetControlPlaneService:
             actor_id=actor_id,
             action="skill_set_switch",
             mutation=lambda: self._repository.replace_active_set(
-                bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                set_id=set_id,
+                engine_type=self._engine(bot),
             ),
         )
 
@@ -614,6 +625,7 @@ class SkillSetControlPlaneService:
             action="skill_set_sync",
             mutation=lambda: self._repository.set_active(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 active=True,
                 engine_type=self._engine(bot),
@@ -758,6 +770,7 @@ class SkillSetControlPlaneService:
             self._ensure_mutation_lease(mutation_lease)
             self._repository.restore_desired_state(
                 bot_id=bot_id,
+                owner_id=owner_id,
                 state=mutation.previous_state,
                 engine_type=self._engine(bot),
             )

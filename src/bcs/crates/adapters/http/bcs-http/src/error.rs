@@ -25,6 +25,9 @@ pub enum HttpAdapterError {
     BadRequest(String),            // → "bad_request"
 
     #[error("{0}")]
+    InvalidOpeningMessage(String), // → "invalid_opening_message"
+
+    #[error("{0}")]
     Unauthorized(String),          // → "unauthorized"
 
     #[error("{0}")]
@@ -70,7 +73,7 @@ impl HttpAdapterError {
             Self::Service(ServiceError::PendingRequestExists { .. }) => StatusCode::CONFLICT,
             Self::BadRequestStructured { .. } => StatusCode::BAD_REQUEST,
             Self::Service(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::BadRequest(_) | Self::InvalidOpeningMessage(_) => StatusCode::BAD_REQUEST,
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::Conflict(_) => StatusCode::CONFLICT,
@@ -101,6 +104,7 @@ impl HttpAdapterError {
             Self::Service(e) => e.error_params(),
             Self::BadRequestStructured { params, .. } => params.clone(),
             Self::BadRequest(reason)
+            | Self::InvalidOpeningMessage(reason)
             | Self::Unauthorized(reason)
             | Self::Forbidden(reason)
             | Self::Conflict(reason)

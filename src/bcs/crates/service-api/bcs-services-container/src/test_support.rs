@@ -15,7 +15,8 @@ use bcs_test_support::{
     NoopOrganizationManagementService, NoopProposalCoreService,
     NoopProviderBotCoreService, NoopProviderBotEventService, NoopProviderCoreService,
     NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
-    NoopSessionManagementService, NoopSystemMessageService, NoopWorkbenchSessionService,
+    NoopSessionLaunchService, NoopSessionManagementService, NoopSystemMessageService,
+    NoopWorkbenchSessionService,
 };
 use bcs_test_support::NoopInteractionService;
 
@@ -61,6 +62,7 @@ pub fn with_all_noop() -> ServicesBuilder {
         .group_fusion(Arc::new(NoopGroupFusionService))
         .system_message(Arc::new(NoopSystemMessageService))
         .session_management(Arc::new(NoopSessionManagementService))
+        .session_launch(Arc::new(NoopSessionLaunchService))
 }
 
 impl Services {

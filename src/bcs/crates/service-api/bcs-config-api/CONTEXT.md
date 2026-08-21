@@ -5,10 +5,12 @@
 - Typed configuration contract objects for BCS runtime assembly.
 - Config-facing value objects and secrets wrappers shared across bootstrap and services.
 - A stable schema boundary for configuration-related evolution.
+- Fail-fast validation and host-pattern matching semantics for Eventing private
+  endpoint allowlist entries.
 
 ## Consumes
 
-- Serialization and secrets primitives only.
+- Serialization, secrets, and CIDR parsing primitives only.
 
 ## Allowed dependencies
 

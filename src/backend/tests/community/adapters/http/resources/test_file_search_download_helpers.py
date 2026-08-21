@@ -400,7 +400,7 @@ class TestDownloadDirectoryDeviceFsDoubleJoin:
         resolver.resolve_for_bot.return_value = SimpleNamespace(provider=provider)
 
         with patch(
-            "agentclaw.community.adapters.http.resources.file_router.resolve_engine_for_bot",
+            "agentclaw.community.adapters.http.resources.file_router.resolve_runtime_engine_for_bot",
             return_value="openclaw",
         ), patch(
             "agentclaw.community.core.devices.services.device_info.get_device_info",
@@ -442,7 +442,7 @@ class TestDownloadDirectoryDeviceFsDoubleJoin:
         resolver.resolve_for_bot.return_value = SimpleNamespace(provider="arca")
 
         with patch(
-            "agentclaw.community.adapters.http.resources.file_router.resolve_engine_for_bot",
+            "agentclaw.community.adapters.http.resources.file_router.resolve_runtime_engine_for_bot",
             return_value="openclaw",
         ), patch(
             "agentclaw.community.core.devices.services.device_info.get_device_info",
@@ -510,7 +510,7 @@ class TestDownloadDirectoryZipMetadata:
         resolver.resolve_for_bot.return_value = SimpleNamespace(provider="arca")
 
         with patch(
-            "agentclaw.community.adapters.http.resources.file_router.resolve_engine_for_bot",
+            "agentclaw.community.adapters.http.resources.file_router.resolve_runtime_engine_for_bot",
             return_value="openclaw",
         ), patch(
             "agentclaw.community.core.devices.services.device_info.get_device_info",

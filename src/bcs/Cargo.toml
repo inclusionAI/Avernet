@@ -16,6 +16,7 @@ members = [
     "crates/contracts/bcs-protocol",
     # services
     "crates/services/bcs-config",
+    "crates/services/bcs-eventing",
     "crates/services/bcs-friend",
     "crates/services/bcs-friend-store",
     "crates/services/bcs-group",
@@ -26,6 +27,7 @@ members = [
     "crates/services/bcs-message",
     "crates/services/bcs-message-flow",
     "crates/services/bcs-message-store",
+    "crates/services/bcs-event-store",
     "crates/services/bcs-organization",
     "crates/services/bcs-organization-store",
     "crates/services/bcs-bot",
@@ -85,6 +87,7 @@ members = [
     "crates/plugins/bcs-auth-oauth",
     # external-clients
     "crates/external-clients/bcs-fuse-client",
+    "crates/external-clients/bcs-webhook-client",
     # tools
     "crates/tools/bcs-admin",
     "crates/tools/bcs-cli",
@@ -177,6 +180,7 @@ clap = { version = "4", features = ["derive", "env"] }
 
 # URL encoding
 urlencoding = "2"
+ipnet = "2"
 
 # Charset detection for text uploads (so the stored Content-Type carries charset
 # and browsers preview Chinese text without mojibake).
@@ -192,6 +196,9 @@ sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
 base64 = "0.22"
+httpdate = "1"
+ring = "0.17.14"
+zeroize = "1"
 ulid       = "1"
 
 # Crypto for Alipay RSA2 signing
@@ -248,6 +255,7 @@ bcs-routing    = { path = "crates/services/bcs-routing" }
 bcs-fusion      = { path = "crates/services/bcs-fusion" }
 bcs-leader-election = { path = "crates/services/bcs-leader-election" }
 bcs-fuse-client = { path = "crates/external-clients/bcs-fuse-client" }
+bcs-webhook-client = { path = "crates/external-clients/bcs-webhook-client" }
 bcs-security-gateway-local = { path = "crates/plugins/bcs-security-gateway-local" }
 bcs-security-gateway-api = { path = "crates/plugin-api/bcs-security-gateway-api" }
 bcs-secret-api             = { path = "crates/plugin-api/bcs-secret-api" }
@@ -271,6 +279,8 @@ bcs-provider-http = { path = "crates/adapters/http/bcs-provider-http" }
 bcs-ws           = { path = "crates/adapters/ws/bcs-ws" }
 # New in C6
 bcs-config                 = { path = "crates/services/bcs-config" }
+bcs-eventing               = { path = "crates/services/bcs-eventing" }
+bcs-event-store            = { path = "crates/services/bcs-event-store" }
 bcs-route-security         = { path = "crates/services/bcs-route-security" }
 bcs-session                = { path = "crates/services/bcs-session" }
 bcs-session-store          = { path = "crates/services/bcs-session-store" }

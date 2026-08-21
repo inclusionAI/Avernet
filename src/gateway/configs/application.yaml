@@ -101,6 +101,51 @@ user_config:
     bcs_server_url: http://127.0.0.1:21000
     engine_proxy_server_url: https://engineproxy.sample.com
     bcsfuse_server_url: http://127.0.0.1:8765
+    clawweb_server_url: https://clawweb.sample.com
+
+  # Browser CORS allow-list for the gateway's own edge.
+  #
+  # A page on another origin cannot call the gateway without it: the browser
+  # sends a credential-less `OPTIONS` preflight first and refuses to send the
+  # real request unless the answer carries `Access-Control-Allow-Origin`. That
+  # preflight is answered by the gateway itself, before routing and before
+  # `route_security` — an upstream's own allow-list governs callers that reach
+  # that component directly and cannot speak for this address.
+  #
+  # The gateway answers with `Access-Control-Allow-Credentials: true`, because a
+  # browser call through it carries the cookie or `Authorization` header it
+  # authenticates with. Every origin must therefore be listed exactly or matched
+  # by `allow_origin_regex` (a Python regex, matched against the WHOLE origin —
+  # scheme, host and port — and compiled on its own, so its own inline flags
+  # apply to it alone). `allow_origins: ["*"]` is REFUSED at load time: with
+  # credentials enabled a wildcard does not fail loudly, it silently admits
+  # every origin on the internet to credentialed calls. A catch-all regex is
+  # refused for the same reason, whichever scheme or port it names (`.*`,
+  # `https://.*`, `http://.*`, `https://.*:8443`) — pin the host suffix the
+  # environment actually serves. `http://localhost:[0-9]+` pins a host and is
+  # accepted; `http://.*` does not and is not.
+  #
+  # Neutral default = localhost only, so a single-box UI works out of the box.
+  # A deployment adds its own frontend origins in its `application-<env>.yaml`
+  # overlay (selected by `SERVER_ENV`), e.g.:
+  #
+  #   user_config:
+  #     cors:
+  #       allow_origins:
+  #         - "https://your-frontend.example.com"
+  #       allow_origin_regex:
+  #         - "https://[a-z0-9-]+\\.preview\\.example\\.com"
+  #
+  # An overlay REPLACES a list rather than extending it, so repeat any localhost
+  # origin the environment still needs.
+  cors:
+    allow_origins:
+      - "http://localhost"
+      - "http://localhost:3000"
+      - "http://localhost:8000"
+      - "http://localhost:8080"
+      - "http://localhost:8888"
+    allow_origin_regex: []
 
   # Per-identity strategy chain (system-level config).
   # Each identity type runs its strategies in order; the first to recognise the
@@ -315,6 +360,19 @@ user_config:
     "/openapi/v1/bcsfuse/**":
       user: required
 
+# The harness operations sit beneath the addressed bot, so the wide
+    # "/openapi/v1/bots/**" rule above would otherwise admit them with no user
+    # on the wire. They diagnose and patch a bot's live config files — a human
+    # stays on the boundary, and the extra literal segment outranks the prefix.
+    "/openapi/v1/bots/{bot_id}/harness/**":
+      user: required
+
+    # HarnessFlow (task escort) — served by clawweb. Authz is delegated to
+    # clawweb; the gateway passes through both identities when present.
+    "/openapi/v1/harnessflow/**":
+      user: optional
+      app: optional
+
     # BCN verifies the short-lived session credential carried by this exact
     # WebSocket handshake. Keep every other collaboration operation, including
     # session-token issuance, on the required User Principal boundary above.
@@ -475,6 +533,10 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
+      # The harness operations moved under /openapi/v1/bots/{bot_id}/harness/**:
+      # the bots domain routes them to the same backend verbatim, and a domain
+      # match cannot pin a path behind a path parameter, so no separate domain
+      # can claim them. Their published description rides in bots.openapi.json.
       collaboration:
         server: bcs
         protocols: [http, websocket]
@@ -518,6 +580,15 @@ user_config:
           source: file
           path: schemas/baas.openapi.json
           refresh_seconds: 300
+
+      # HarnessFlow (task escort) — served by clawweb.
+      harnessflow:
+        match: /openapi/v1/harnessflow/**
+        server: clawweb
+        protocols: [http]
+        rewrite:
+          from: /openapi/v1/harnessflow
+          to: /
 
       # The tenant bot socket. The backend's connection endpoint publishes
       # `wss://<gateway>/openapi/v1/bots/messages/ws/<target><engine-path>?x-proxypass-token=…`
@@ -602,3 +673,5 @@ user_config:
         base_url: "${bcsfuse_server_url}"
       engine_proxy:
         base_url: "${engine_proxy_server_url}"
+      clawweb:
+        base_url: "${clawweb_server_url}"

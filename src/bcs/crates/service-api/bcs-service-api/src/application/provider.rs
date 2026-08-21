@@ -10,7 +10,7 @@ use crate::ServiceResult;
 use super::message_flow::{BotEventOutcome, ChatEventState, ProviderEventIngestCommand};
 
 /// Default lifetime for an HTTP Provider `chat.send` callback correlation.
-pub const DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
+pub const DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS: u64 = 3 * 60 * 60 * 1_000;
 
 #[derive(Clone)]
 pub enum ProviderBotEventCredential {
@@ -196,6 +196,13 @@ pub trait ProviderManagementService: Send + Sync {
     ) -> ServiceResult<RegisterProviderOutcome>;
 
     async fn get_provider(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<ProviderRecord>;
+
+    /// Authenticate a Provider admin token for an enabled Provider.
+    async fn get_active_provider(
         &self,
         provider_id: &str,
         provider_admin_token: &str,

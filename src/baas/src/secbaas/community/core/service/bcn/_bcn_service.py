@@ -14,6 +14,8 @@ from typing import Any
 
 from secbaas.community.api.bcn import (
     BcnDownlinkService,
+    BcnInteractionResolveInput,
+    BcnInteractionResolveResult,
     ChatHistoryInput,
     ChatHistoryResult,
     ChatInjectInput,
@@ -21,6 +23,10 @@ from secbaas.community.api.bcn import (
     ChatSendInput,
     ChatSendResult,
     DownlinkMessage,
+)
+from secbaas.community.api.bot_interaction import (
+    BotInteractionService,
+    InteractionResolution,
 )
 from secbaas.community.api.bot_runtime import BotChatContext, BotRunner
 from secbaas.community.api.sse import StreamChunk
@@ -52,6 +58,70 @@ def _extract_message_text(message: DownlinkMessage) -> str:
     return "\n".join(parts)
 
 
+def _normalize_interaction_resolution(
+    resolve_input: BcnInteractionResolveInput,
+) -> InteractionResolution:
+    """Convert BCN fields to the Engine-neutral durable resolution."""
+    if resolve_input.kind != "ask_user":
+        decision = resolve_input.decision
+        if decision is None or not decision.strip():
+            raise ValueError(
+                f"{resolve_input.kind} interaction resolve requires decision"
+            )
+        return InteractionResolution(
+            kind=resolve_input.kind,
+            decision=decision,
+        )
+
+    action = resolve_input.action
+    if action not in {"submit", "cancel"}:
+        raise ValueError("ask_user interaction resolve requires action")
+    if action == "cancel":
+        return InteractionResolution(kind="ask_user", decision="cancel")
+
+    source_answers = resolve_input.answers
+    if not source_answers:
+        raise ValueError("ask_user submit requires answers")
+
+    summaries: list[str] = []
+    values: dict[str, str] = {}
+    answers: dict[str, str] = {}
+    selected_options: list[tuple[str, ...]] = []
+    for question_id, source_answer in source_answers.items():
+        if (
+            not question_id.strip()
+            or not source_answer.header.strip()
+            or not source_answer.question.strip()
+        ):
+            raise ValueError("ask_user answer identity must be non-empty")
+        if not source_answer.values or any(
+            not value.strip() for value in source_answer.values
+        ):
+            raise ValueError("ask_user answer values must be non-empty")
+        joined_values = "，".join(source_answer.values)
+        summaries.append(f"{source_answer.header}: {joined_values}")
+        if source_answer.header in values:
+            logger.warning(
+                "Interaction resolution warning: interaction_id=%s "
+                "field_path=answers.header error_type=duplicate_answer_header",
+                resolve_input.interaction_id,
+            )
+        values[source_answer.header] = joined_values
+        answers[source_answer.question] = joined_values
+        selected_options.append(tuple(source_answer.values))
+
+    summary = "；".join(summaries)
+    return InteractionResolution(
+        kind="ask_user",
+        decision="submit",
+        answer=summary,
+        message=summary,
+        values=values,
+        answers=answers,
+        selected_options=tuple(selected_options),
+    )
+
+
 class DefaultBcnDownlinkService(BcnDownlinkService):
     """BCN 下行协议服务默认实现
 
@@ -68,13 +138,29 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         bcn_api_key_prefix: str,
         uplink_client: UplinkClient,
         run_repository: BotRunRepository,
+        interaction_service: BotInteractionService,
     ):
         self._bot_runner = bot_runner
         self._api_key_repository = api_key_repository
         self._bcn_api_key_prefix = bcn_api_key_prefix
         self._uplink_client = uplink_client
         self._run_repository = run_repository
+        self._interaction_service = interaction_service
         self._uplink_callback = BcnUplinkCallback(uplink_client, run_repository)
+
+    async def handle_interaction_resolve(
+        self, resolve_input: BcnInteractionResolveInput
+    ) -> BcnInteractionResolveResult:
+        """Normalize and durably queue one BCS interaction resolution."""
+        resolution = _normalize_interaction_resolution(resolve_input)
+        self._interaction_service.resolve(
+            session_key=resolve_input.session_id,
+            interaction_id=resolve_input.interaction_id,
+            resolution=resolution,
+            request_envelope=resolve_input.request_envelope,
+            idempotency_key=resolve_input.idempotency_key,
+        )
+        return BcnInteractionResolveResult(ok=True)
 
     async def handle_chat_send(self, chat_send_input: ChatSendInput) -> ChatSendResult:
         """处理 chat.send 请求

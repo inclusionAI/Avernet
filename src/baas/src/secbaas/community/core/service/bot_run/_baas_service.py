@@ -268,8 +268,13 @@ class BaasBotService(BotService):
                     run_id=run_id,
                     session_id=session_id,
                 )
+            consistency_key = (
+                _strip_agent_main_prefix(session_consistency_key)
+                if session_consistency_key
+                else None
+            )
             conn_info = await self._resolve_ws_connection(
-                bot_id, tenant, engine_type, session_consistency_key
+                bot_id, tenant, engine_type, consistency_key
             )
         except BotNotFoundError:
             logger.error(
@@ -1130,7 +1135,7 @@ class BaasBotService(BotService):
         device. The persisted/returned session id contract is unchanged.
         """
         if session_id is not None:
-            return _strip_agent_main_prefix(session_id)
+            return session_id
 
         if engine_type == "openclaw":
             # Fixed prefix 'agent:main:'

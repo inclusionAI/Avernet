@@ -7,6 +7,8 @@ use crate::types::{
 };
 use std::collections::BTreeMap;
 
+use super::AppendEventRecord;
+
 #[derive(Debug, Clone)]
 pub struct MarkHumanNodeRunningCommand {
     pub run_id: String,
@@ -14,6 +16,50 @@ pub struct MarkHumanNodeRunningCommand {
     pub attempt: i32,
     pub started_at_ms: u64,
     pub timeout_deadline_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+pub enum StateMachineEventfulTransition {
+    StartRun {
+        run_id: String,
+        started_at_ms: u64,
+        events: Vec<AppendEventRecord>,
+    },
+    StartBotNode {
+        run_id: String,
+        node_id: String,
+        attempt: i32,
+        delivery_request_id: String,
+        started_at_ms: u64,
+        event: AppendEventRecord,
+    },
+    StartHumanNode {
+        command: MarkHumanNodeRunningCommand,
+        event: AppendEventRecord,
+    },
+    CompleteNode {
+        run_id: String,
+        node_id: String,
+        attempt: i32,
+        outcome: String,
+        artifact_text: String,
+        responded_by: Option<String>,
+        completed_at_ms: u64,
+        event: AppendEventRecord,
+    },
+    ScheduleNodeRetry {
+        run_id: String,
+        node_id: String,
+        failed_attempt: i32,
+        next_attempt: i32,
+        event: AppendEventRecord,
+    },
+    CompleteRun {
+        run_id: String,
+        output: Option<String>,
+        completed_at_ms: u64,
+        event: AppendEventRecord,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +152,17 @@ pub trait GroupRuntimeBindingRepoPort: Send + Sync {
 
 #[async_trait]
 pub trait StateMachineRunRepoPort: Send + Sync {
+    /// Atomically commit one state-machine transition and its public Event(s).
+    async fn commit_eventful_transition(
+        &self,
+        _transition: StateMachineEventfulTransition,
+    ) -> ServiceResult<bool> {
+        Err(crate::types::ServiceError::InvalidOperation {
+            message: "Eventful state-machine transitions are not configured".to_string(),
+            request_id: None,
+        })
+    }
+
     async fn create_run(
         &self,
         run: StateMachineRun,

@@ -19,9 +19,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_service_api::application::session::{
-    CreateOrReactivateCommand, SessionManagementService, SessionUseCaseError,
-};
+use bcs_service_api::application::session::{SessionManagementService, SessionUseCaseError};
+use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, Page, Principal,
     message::{ListSessionMessages, SessionMessageService},
@@ -29,19 +28,21 @@ use bcs_service_api::application::v1::{
     session::{
         AddSessionParticipant, CollectSession, CompleteSession, CreateSession, CreateSessionOutcome,
         DeleteSession, DeleteSessionParticipant, GetSession, ListSessions, SessionCollectionResult,
-        SessionCompletionResult, SessionDetail, SessionInput, SessionParticipant, SessionService,
+        SessionCompletionResult, SessionDetail, SessionParticipant, SessionService,
         SessionStatus as V1SessionStatus, SessionSummary, UncollectSession, UpdateSession,
         UpdateSessionParticipant,
     },
 };
-use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
+use bcs_service_api::port::repo::SessionRepoPort;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, CallerContext, CollaborationRuntimeError,
-    CollaborationRuntimeService, FriendCoreService, Group as DomainGroup, GroupCoreService,
-    GroupMessage, GroupMessageHistoryService, GroupStrategy, GroupUseCaseError, HumanActor,
-    Participant, ParticipantMode, ParticipantRole, RegisteredBot, RelationCoreService,
-    ServiceError, Session, SessionHistoryCommand, SessionKind,
-    SessionStatus as DomainSessionStatus, backfill_participant_names,
+    CollaborationRuntimeService, CreateSessionLaunch, FriendCoreService, Group as DomainGroup,
+    GroupCoreService, GroupMessage, GroupMessageHistoryService, GroupStrategy, GroupUseCaseError,
+    HumanActor, Participant, ParticipantMode, ParticipantRole, RegisteredBot, RelationCoreService,
+    RequestedSessionRole, ServiceError, Session, SessionHistoryCommand, SessionKind,
+    SessionLaunchError, SessionLaunchRequest, SessionLaunchService,
+    SessionStatus as DomainSessionStatus, StateMachineRunView, SystemMessageEvent,
+    backfill_participant_names,
 };
 
 #[derive(Debug, Clone)]
@@ -58,6 +59,7 @@ pub struct SessionServiceConfig {
 /// `SessionRepoPort` for V1 list/count queries, and transport-neutral history
 /// services for Session message reads.
 pub struct SessionServiceImpl {
+    launch: Arc<dyn SessionLaunchService>,
     sessions: Arc<dyn SessionManagementService>,
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
@@ -66,12 +68,14 @@ pub struct SessionServiceImpl {
     session_repo: Arc<dyn SessionRepoPort>,
     history: Arc<dyn GroupMessageHistoryService>,
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
+    system_message: Arc<dyn SystemMessageService>,
     config: SessionServiceConfig,
 }
 
 impl SessionServiceImpl {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        launch: Arc<dyn SessionLaunchService>,
         sessions: Arc<dyn SessionManagementService>,
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
@@ -80,9 +84,11 @@ impl SessionServiceImpl {
         session_repo: Arc<dyn SessionRepoPort>,
         history: Arc<dyn GroupMessageHistoryService>,
         collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
+        system_message: Arc<dyn SystemMessageService>,
         config: SessionServiceConfig,
     ) -> Self {
         Self {
+            launch,
             sessions,
             groups,
             registry,
@@ -91,6 +97,7 @@ impl SessionServiceImpl {
             session_repo,
             history,
             collaboration_runtime,
+            system_message,
             config,
         }
     }
@@ -248,20 +255,6 @@ impl SessionServiceImpl {
             })
     }
 
-    async fn load_manageable_group(
-        &self,
-        principal: &Principal,
-        group_id: &str,
-    ) -> Result<DomainGroup, ApplicationError> {
-        let group = self.load_group(group_id).await?;
-        if !self.can_manage_group(principal, &group).await? {
-            return Err(ApplicationError::forbidden(
-                "Only the Group originator, driver, or manager may manage Sessions",
-            ));
-        }
-        Ok(group)
-    }
-
     /// Load a session and its parent group, authorizing manage access.
     async fn load_session_for_manage(
         &self,
@@ -303,32 +296,38 @@ impl SessionServiceImpl {
         Ok(session)
     }
 
-    async fn load_owned_participant_bot(
+    async fn load_session_for_collection(
         &self,
         caller: &AuthenticatedCaller,
         session_id: &str,
         participant: &str,
     ) -> Result<Session, ApplicationError> {
         let user = require_authenticated_user(caller)?;
+        // The participant must be owned by the authenticated Human: one of the
+        // Human's own bots, OR the Human's own actor entry. `ensure_human_actor`
+        // registers the latter as `human_{staff_no}` with `created_by` =
+        // `staff_no` and `actor_kind = Human`. The legacy
+        // `resolve_collector_bot` admits both via `list_bots_by_creator`, which
+        // does not filter by actor kind — so a Human can collect a Session as
+        // itself, not only through an owned bot. Match that contract by keying
+        // ownership on `created_by` alone.
         let owned = self
             .registry
             .try_get(participant)
             .await
             .map_err(map_service_error)?
-            .is_some_and(|bot| {
-                bot.actor_kind == ActorKind::Bot
-                    && bot.created_by.as_deref() == Some(user.id.as_str())
-            });
+            .is_some_and(|bot| bot.created_by.as_deref() == Some(user.id.as_str()));
         if !owned {
             return Err(ApplicationError::forbidden(
-                "The target Bot is not owned by the authenticated Human",
+                "The target participant is not owned by the authenticated Human",
             ));
         }
 
         let session = self.load_session(session_id).await?;
-        let present = session.participants.iter().any(|entry| {
-            entry.actor_kind == ActorKind::Bot && entry.bot_uuid == participant
-        });
+        let present = session
+            .participants
+            .iter()
+            .any(|entry| entry.bot_uuid == participant);
         if !present {
             return Err(ApplicationError::not_found(
                 "session_not_found",
@@ -429,22 +428,29 @@ impl SessionServiceImpl {
         Ok(session)
     }
 
-    /// VSN7B: Mirror `bcs-app-group`'s `ensure_collaboration_eligible`. A
-    /// caller may add a Bot to a session only when that Bot is
-    /// collaboration-eligible for the caller:
-    /// - the target must be a Bot Actor that is not Hidden; AND
-    /// - the caller IS the target bot; OR the target is `public`; OR (for a
-    ///   Human caller) the caller owns the target via `created_by` or a
-    ///   creator relation edge; OR the caller and target are friends.
+    /// VSN7B: A caller may add a Bot to a session only when that Bot is
+    /// collaboration-eligible from the caller OR from at least one of the
+    /// parent Group's management anchors (driver, originator). A Hidden bot is
+    /// rejected outright regardless of which anchor could sponsor it.
     ///
-    /// Called for the session driver, every participant in `create`, and in
-    /// `add_participant` so a manager cannot pull a hidden / protected Bot
-    /// into a session without the required relation.
+    /// Eligibility from an anchor actor (a Human `human_{id}` or a Bot uuid) is:
+    /// - the target must be a Bot Actor that is not Hidden; AND
+    /// - the anchor IS the target bot; OR the target is `public`; OR (for a
+    ///   Human anchor) the anchor owns the target via `created_by` or a creator
+    ///   relation edge; OR the anchor and target are friends.
+    ///
+    /// This widens the sibling `bcs-app-group::ensure_collaboration_eligible`
+    /// (caller-only) check for the session-add case: a group's existing
+    /// driver/originator may legitimately sponsor a participant that the caller
+    /// itself cannot reach (e.g. a protected Bot that is the driver's friend
+    /// but not the caller's), so a manager cannot be blocked from pulling a Bot
+    /// the group already collaborates with.
     async fn ensure_collaboration_eligible(
         &self,
         principal: &Principal,
         bot_uuid: &str,
         field_name: &str,
+        group: &DomainGroup,
     ) -> Result<(), ApplicationError> {
         let bot = self.load_bot(bot_uuid).await?;
         if bot.actor_kind != ActorKind::Bot {
@@ -458,42 +464,78 @@ impl SessionServiceImpl {
                 "Bot '{bot_uuid}' is hidden and cannot collaborate"
             )));
         }
-        let principal_actor_id = principal.actor_id();
-        if principal_actor_id == bot_uuid || bot.capabilities.visibility == "public" {
+        if bot.capabilities.visibility == "public" {
             return Ok(());
         }
 
-        if let Principal::Human(human) = principal {
-            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
-                return Ok(());
-            }
-            let creator_edge = self
-                .relation
-                .get_edge(&principal_actor_id, bot_uuid, &self.config.relation_env)
-                .await
-                .map_err(map_service_error)?;
-            if creator_edge.is_some_and(|edge| edge.is_creator) {
-                return Ok(());
-            }
+        // Anchor set: the calling Principal plus the parent Group's driver and
+        // originator. Dedup so a Human originator that also equals the caller,
+        // or a driver that equals the originator, is not consulted twice.
+        let mut anchors = Vec::new();
+        anchors.push(principal.actor_id());
+        anchors.push(group.driver_bot.clone());
+        if let Some(originator) = group.originator.as_deref() {
+            anchors.push(originator.to_string());
         }
-
-        if self
-            .friends
-            .try_are_friends(&principal_actor_id, bot_uuid)
-            .await
-            .map_err(map_service_error)?
-        {
-            return Ok(());
+        let mut seen = HashSet::new();
+        for anchor in anchors {
+            if !seen.insert(anchor.clone()) {
+                continue;
+            }
+            if self.anchor_reaches_bot(&anchor, &bot).await? {
+                return Ok(());
+            }
         }
 
         Err(ApplicationError::forbidden(format!(
-            "Bot '{bot_uuid}' is not collaboration-eligible for this Principal"
+            "Bot '{bot_uuid}' is not collaboration-eligible for this Principal or the Group driver/originator"
         )))
+    }
+
+    /// Whether `bot` is collaboration-reachable from the anchor actor
+    /// `anchor_id`. An anchor is a `human_{id}` actor id or a Bot uuid; only a
+    /// Human anchor may sponsor via `created_by` or a creator relation edge
+    /// (ownership semantics), while any anchor may sponsor via self-identity or
+    /// direct friendship. The public/hidden gates are evaluated by the caller.
+    async fn anchor_reaches_bot(
+        &self,
+        anchor_id: &str,
+        bot: &RegisteredBot,
+    ) -> Result<bool, ApplicationError> {
+        if anchor_id == bot.bot_uuid {
+            return Ok(true);
+        }
+        if let Some(staff_no) = anchor_id.strip_prefix("human_") {
+            if bot.created_by.as_deref() == Some(staff_no) {
+                return Ok(true);
+            }
+            let creator_edge = self
+                .relation
+                .get_edge(anchor_id, &bot.bot_uuid, &self.config.relation_env)
+                .await
+                .map_err(map_service_error)?;
+            if creator_edge.is_some_and(|edge| edge.is_creator) {
+                return Ok(true);
+            }
+        }
+        if self
+            .friends
+            .try_are_friends(anchor_id, &bot.bot_uuid)
+            .await
+            .map_err(map_service_error)?
+        {
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     // ── projections ────────────────────────────────────────────────────
 
-    async fn project_detail(&self, session: &Session) -> Result<SessionDetail, ApplicationError> {
+    async fn project_detail(
+        &self,
+        session: &Session,
+        state_machine_run: Option<StateMachineRunView>,
+    ) -> Result<SessionDetail, ApplicationError> {
         let mut participants = session.participants.clone();
         backfill_participant_names(self.registry.as_ref(), &mut participants).await;
         let participants = participants
@@ -505,11 +547,17 @@ impl SessionServiceImpl {
             version: session.group_version.unwrap_or(1),
             group_id: session.group_id.clone(),
             status: project_status(session.status),
+            kind: session.session_kind,
             title: session.session_title.clone(),
-            input: project_input(&session.input),
+            input: session.input.clone(),
+            meta: session.meta.clone(),
             participants,
             created_at: session.created_at,
             updated_at: session.updated_at,
+            state_machine_run_id: state_machine_run
+                .as_ref()
+                .map(|view| view.run.run_id.clone()),
+            state_machine_run,
         })
     }
 
@@ -539,71 +587,26 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: CreateSession,
     ) -> Result<CreateSessionOutcome, ApplicationError> {
-        let principal = require_human(&command.caller)?;
-        let group = self
-            .load_manageable_group(&principal, &command.group_id)
-            .await?;
-
-        // The V1 create-session contract no longer accepts driver_bot_uuid or
-        // an explicit participant roster. A session inherits its driver and
-        // initial participants from the parent group so the HTTP contract cannot
-        // drift from the group topology already authorized at group creation.
-        if group.participants.is_empty() {
-            return Err(ApplicationError::invalid(
-                "invalid_participant",
-                "parent group must contain at least one participant",
-            ));
-        }
-
-        // Wrap the V1 SessionInput into the legacy arbitrary-JSON `input`. When
-        // no input is supplied, fall back to the parent group's `context` as
-        // the session task (design note).
-        let input = match command.input.as_ref() {
-            Some(session_input) => Some(serde_json::json!({ "query": session_input.query })),
-            None => group
-                .context
-                .as_ref()
-                .map(|ctx| serde_json::json!({ "query": ctx })),
-        };
-
-        let mut participants = group.participants.clone();
-
-        // Ensure the inherited group driver is present in the roster with the
-        // Driver role, preserving legacy routing expectations for sessions.
-        match participants
-            .iter()
-            .position(|p| p.bot_uuid == group.driver_bot)
-        {
-            Some(index) => participants[index].role = ParticipantRole::Driver,
-            None => participants.push(Participant::bot(
-                group.driver_bot.clone(),
-                ParticipantRole::Driver,
-            )),
-        }
-
-        let caller_actor_id = principal.actor_id();
-        let params = NewSessionParams {
-            session_kind: SessionKind::Chat,
-            participants,
-            group_version: Some(group.version),
-            caller_id: Some(caller_actor_id.clone()),
-            caller_principal: Some(caller_actor_id.clone()),
-            input,
-            created_by: Some(caller_actor_id),
-            session_title: command.title.clone(),
-            id: None,
-            meta: None,
-        };
         let outcome = self
-            .sessions
-            .create_or_reactivate(CreateOrReactivateCommand {
-                group_id: command.group_id.clone(),
-                session_id: None,
-                params,
+            .launch
+            .create(CreateSessionLaunch {
+                request: SessionLaunchRequest {
+                    caller: command.caller,
+                    group_id: command.group_id,
+                    requested_creator: command.acting_bot_id,
+                    title: command.title,
+                    kind: command.kind,
+                    input: command.input,
+                    meta: command.meta,
+                    public_creator_role: command.creator_role.map(RequestedSessionRole::from),
+                    context_delivery: command.context_delivery,
+                },
             })
             .await
-            .map_err(map_session_error)?;
-        let detail = self.project_detail(&outcome.session).await?;
+            .map_err(map_launch_error)?;
+        let detail = self
+            .project_detail(&outcome.session, outcome.state_machine_run)
+            .await?;
         Ok(CreateSessionOutcome {
             session: detail,
             created: outcome.created,
@@ -648,7 +651,33 @@ impl SessionService for SessionServiceImpl {
             .count_by_group(&command.group_id, status, None, participant_id)
             .await
             .map_err(map_service_error)?;
-        let items = sessions.iter().map(project_summary).collect::<Vec<_>>();
+        // Surface per-session collected state for the view actor, but only
+        // when the request explicitly names that actor (mirrors the legacy
+        // `list_sessions_for_group` gating: collected is only meaningful
+        // relative to a named participant). When `view_bot_id` is omitted the
+        // field stays `None` and is skipped on serialization.
+        let collected_set: HashSet<String> = if command.view_bot_id.is_some() {
+            let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+            self.sessions
+                .collected_at_map(&ids, &view_actor_id)
+                .await
+                .map_err(map_session_error)?
+                .into_iter()
+                .map(|(sid, _collected_at)| sid)
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        let items = sessions
+            .iter()
+            .map(|s| {
+                let mut summary = project_summary(s);
+                if command.view_bot_id.is_some() {
+                    summary.collected = Some(collected_set.contains(&s.id));
+                }
+                summary
+            })
+            .collect::<Vec<_>>();
         Ok(Page {
             items,
             total,
@@ -661,7 +690,7 @@ impl SessionService for SessionServiceImpl {
         let session = self
             .load_session_for_detail(&query.caller, &query.session_id)
             .await?;
-        self.project_detail(&session).await
+        self.project_detail(&session, None).await
     }
 
     async fn update(&self, command: UpdateSession) -> Result<SessionDetail, ApplicationError> {
@@ -681,7 +710,7 @@ impl SessionService for SessionServiceImpl {
             .update_title(&command.session_id, command.title)
             .await
             .map_err(map_session_error)?;
-        self.project_detail(&session).await
+        self.project_detail(&session, None).await
     }
 
     async fn delete(&self, command: DeleteSession) -> Result<DeleteResult, ApplicationError> {
@@ -787,7 +816,7 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: CollectSession,
     ) -> Result<SessionCollectionResult, ApplicationError> {
-        self.load_owned_participant_bot(
+        self.load_session_for_collection(
             &command.caller,
             &command.session_id,
             &command.participant,
@@ -808,7 +837,7 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: UncollectSession,
     ) -> Result<SessionCollectionResult, ApplicationError> {
-        self.load_owned_participant_bot(
+        self.load_session_for_collection(
             &command.caller,
             &command.session_id,
             &command.participant,
@@ -833,9 +862,10 @@ impl SessionService for SessionServiceImpl {
         let (session, group) = self
             .load_session_for_manage(&principal, &command.session_id)
             .await?;
-        // VSN7B: the added Bot must be collaboration-eligible for the caller
-        // (visible + friend/creator relation), not merely registered.
-        self.ensure_collaboration_eligible(&principal, &command.bot_uuid, "bot_uuid")
+        // VSN7B: the added Bot must be collaboration-eligible from the caller
+        // OR from the parent Group's driver/originator (visible + friend/creator
+        // relation), not merely registered.
+        self.ensure_collaboration_eligible(&principal, &command.bot_uuid, "bot_uuid", &group)
             .await?;
         // VfhG3: explicit 409 if the target Bot is already a session participant.
         // The legacy memory repo silently skipped duplicates (idempotent); the V1
@@ -882,6 +912,41 @@ impl SessionService for SessionServiceImpl {
             .add_participant(&command.session_id, participant)
             .await
             .map_err(map_session_error)?;
+        // Emit a `BotJoined` system message so the newly added participant (and
+        // the rest of the session) receives the join notification — mirroring
+        // the legacy `bcs_http::routes::sessions::add_session_participant` path,
+        // which the OpenAPI route previously lacked. Best-effort: a dispatch
+        // failure is logged and never surfaces to the caller.
+        if let Some(actor) = updated
+            .participants
+            .iter()
+            .find(|p| p.bot_uuid == command.bot_uuid)
+            .cloned()
+        {
+            let event = SystemMessageEvent::BotJoined {
+                group_id: updated.group_id.clone(),
+                actor,
+                session_id: command.session_id.clone(),
+                session_input: updated.input.clone(),
+            };
+            if let Err(error) = self
+                .system_message
+                .notify(
+                    &updated.group_id,
+                    event,
+                    &command.session_id,
+                    &updated.participants,
+                )
+                .await
+            {
+                tracing::warn!(
+                    session_id = %command.session_id,
+                    bot_uuid = %command.bot_uuid,
+                    error = %error,
+                    "notify bot joined failed"
+                );
+            }
+        }
         self.backfill_and_project_participant(&mut updated.participants, &command.bot_uuid)
             .await
     }
@@ -893,6 +958,34 @@ impl SessionService for SessionServiceImpl {
         let principal = require_human(&command.caller)?;
         let session = self.load_session(&command.session_id).await?;
         let group = self.load_group(&session.group_id).await?;
+        // Capture the participant's pre-update identity so a
+        // `ParticipantModeChanged` system message can be emitted when the
+        // mode actually changes — mirroring the legacy
+        // `bcs_http::routes::sessions::update_session_participant_mode` path
+        // (the OpenAPI route previously had no such notification).
+        let existing = session
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == command.bot_uuid)
+            .cloned();
+        let old_mode = existing.as_ref().and_then(|p| p.mode);
+        let actor_kind = existing
+            .as_ref()
+            .map(|p| p.actor_kind)
+            .unwrap_or_else(|| {
+                if command.bot_uuid.starts_with("human_") {
+                    ActorKind::Human
+                } else {
+                    ActorKind::Bot
+                }
+            });
+        let actor_name = self
+            .registry
+            .try_get(&command.bot_uuid)
+            .await
+            .map_err(map_service_error)?
+            .and_then(|bot| bot.capabilities.name)
+            .unwrap_or_else(|| command.bot_uuid.clone());
         if let Some(actor_kind) = session
             .participants
             .iter()
@@ -959,6 +1052,36 @@ impl SessionService for SessionServiceImpl {
             .update_participant_mode(&command.session_id, &command.bot_uuid, command.mode)
             .await
             .map_err(map_session_error)?;
+        // Emit the participant-mode-changed system message only when the mode
+        // actually changed (same gating as the legacy endpoint). Best-effort:
+        // a dispatch failure is logged and never surfaces to the caller.
+        if old_mode != Some(command.mode) {
+            let event = SystemMessageEvent::ParticipantModeChanged {
+                group_id: updated.group_id.clone(),
+                actor_id: command.bot_uuid.clone(),
+                actor_name: actor_name.clone(),
+                actor_kind,
+                from: old_mode,
+                to: command.mode,
+            };
+            if let Err(error) = self
+                .system_message
+                .notify(
+                    &updated.group_id,
+                    event,
+                    &command.session_id,
+                    &updated.participants,
+                )
+                .await
+            {
+                tracing::warn!(
+                    session_id = %command.session_id,
+                    bot_uuid = %command.bot_uuid,
+                    error = %error,
+                    "notify participant mode changed failed"
+                );
+            }
+        }
         match self
             .backfill_and_project_participant(&mut updated.participants, &command.bot_uuid)
             .await
@@ -983,20 +1106,52 @@ impl SessionService for SessionServiceImpl {
         let (session, _) = self
             .load_session_for_manage(&principal, &command.session_id)
             .await?;
+        // Capture the participant being removed (its real role/mode/actor_kind)
+        // before the mutation so the `BotLeft` event carries accurate identity
+        // — the legacy `remove_session_participant` hardcodes `Observer`/`None`.
+        let removed = session
+            .participants
+            .iter()
+            .find(|p| p.bot_uuid == command.bot_uuid)
+            .cloned();
         // Idempotent: if the target is not a current participant, return
         // `deleted: false` without invoking the legacy removal (which would
         // surface a `SessionInvalidParams` "not in session" error otherwise).
-        let present = session
-            .participants
-            .iter()
-            .any(|p| p.bot_uuid == command.bot_uuid);
-        if !present {
+        if removed.is_none() {
             return Ok(DeleteResult { deleted: false });
         }
-        self.sessions
+        let updated = self
+            .sessions
             .remove_participant(&command.session_id, &command.bot_uuid)
             .await
             .map_err(map_session_error)?;
+        // Emit a `BotLeft` system message so the remaining participants receive
+        // the leave notification — mirroring the legacy
+        // `remove_session_participant` path, which the OpenAPI route lacked.
+        // Best-effort: a dispatch failure is logged and never surfaces.
+        if let Some(actor) = removed {
+            let event = SystemMessageEvent::BotLeft {
+                group_id: updated.group_id.clone(),
+                actor,
+            };
+            if let Err(error) = self
+                .system_message
+                .notify(
+                    &updated.group_id,
+                    event,
+                    &command.session_id,
+                    &updated.participants,
+                )
+                .await
+            {
+                tracing::warn!(
+                    session_id = %command.session_id,
+                    bot_uuid = %command.bot_uuid,
+                    error = %error,
+                    "notify bot left failed"
+                );
+            }
+        }
         Ok(DeleteResult { deleted: true })
     }
 }
@@ -1091,18 +1246,6 @@ fn map_status_to_domain(status: V1SessionStatus) -> DomainSessionStatus {
     }
 }
 
-/// Extract the V1 `SessionInput` from the legacy arbitrary-JSON session
-/// `input`. Only the `{"query": "..."}` shape produced by `create` is
-/// recognized; any other shape yields `None`.
-fn project_input(input: &Option<serde_json::Value>) -> Option<SessionInput> {
-    let value = input.as_ref()?;
-    let query = value
-        .get("query")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    query.map(|query| SessionInput { query: Some(query) })
-}
-
 fn project_summary(session: &Session) -> SessionSummary {
     SessionSummary {
         session_id: session.id.clone(),
@@ -1113,6 +1256,7 @@ fn project_summary(session: &Session) -> SessionSummary {
         participant_count: Some(session.participants.len()),
         created_at: session.created_at,
         updated_at: session.updated_at,
+        collected: None,
     }
 }
 
@@ -1132,6 +1276,32 @@ fn map_session_error(error: SessionUseCaseError) -> ApplicationError {
         }
         SessionUseCaseError::Conflict(message) => ApplicationError::conflict("conflict", message),
         SessionUseCaseError::Internal(service_error) => map_service_error(service_error),
+    }
+}
+
+fn map_launch_error(error: SessionLaunchError) -> ApplicationError {
+    match error {
+        SessionLaunchError::GroupNotFound(group_id) => ApplicationError::not_found(
+            "group_not_found",
+            format!("Group '{group_id}' was not found"),
+        ),
+        SessionLaunchError::SessionNotFound(session_id) => ApplicationError::not_found(
+            "session_not_found",
+            format!("Session '{session_id}' was not found"),
+        ),
+        SessionLaunchError::Forbidden(message) => ApplicationError::forbidden(message),
+        SessionLaunchError::InvalidRole(message) => {
+            ApplicationError::invalid("invalid_participant", message)
+        }
+        SessionLaunchError::InvalidRequest(message) => {
+            ApplicationError::invalid("invalid_request", message)
+        }
+        SessionLaunchError::Conflict(message) => ApplicationError::conflict("conflict", message),
+        SessionLaunchError::CallbackPending(message) => {
+            ApplicationError::conflict("conflict", message)
+        }
+        SessionLaunchError::Runtime(error) => map_runtime_error(error),
+        SessionLaunchError::Internal(error) => map_service_error(error),
     }
 }
 
@@ -1293,21 +1463,6 @@ mod tests {
             map_runtime_error(CollaborationRuntimeError::JudgeUnavailable("offline".into())).code(),
             "internal_error"
         );
-    }
-
-    #[test]
-    fn project_input_extracts_query_string() {
-        assert_eq!(
-            project_input(&Some(serde_json::json!({ "query": "hello" }))),
-            Some(SessionInput {
-                query: Some("hello".into())
-            })
-        );
-        assert_eq!(
-            project_input(&Some(serde_json::json!({ "query": 42 }))),
-            None
-        );
-        assert_eq!(project_input(&None), None);
     }
 
     #[test]

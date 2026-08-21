@@ -157,7 +157,7 @@ class DraftRestoreOpsMixin:
                     f"草稿容器未就绪: binding_id={binding_id}, status={binding.status}"
                 )
 
-            behavior = self._provider_behavior(bot)
+            behavior = self.provider_behavior(bot)
             invalid_reason = behavior.validate_draft_restore_artifact(source_ext)
             if invalid_reason:
                 raise PublishFlowServiceError(invalid_reason)

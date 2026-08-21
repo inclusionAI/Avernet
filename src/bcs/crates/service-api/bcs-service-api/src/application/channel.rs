@@ -22,6 +22,8 @@ pub enum ChannelUseCaseError {
     NotFound(String),
     #[error("invalid channel params: {0}")]
     InvalidParams(String),
+    #[error("channel binding conflict: {0}")]
+    Conflict(String),
     #[error(transparent)]
     Internal(ServiceError),
 }

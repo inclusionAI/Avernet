@@ -461,6 +461,14 @@ impl ProviderManagementService for NoopProviderManagementService {
         Err(service_not_configured("provider management service"))
     }
 
+    async fn get_active_provider(
+        &self,
+        _provider_id: &str,
+        _provider_admin_token: &str,
+    ) -> ServiceResult<ProviderRecord> {
+        Err(service_not_configured("provider management service"))
+    }
+
     async fn update_provider(
         &self,
         _command: UpdateProviderCommand,
@@ -2101,7 +2109,7 @@ fn service_not_configured(name: &str) -> ServiceError {
     }
 }
 
-pub use bcs_session::NoopSessionManagementService;
+pub use bcs_session::{NoopSessionLaunchService, NoopSessionManagementService};
 
 pub use bcs_session_file::NoopSessionFileService;
 

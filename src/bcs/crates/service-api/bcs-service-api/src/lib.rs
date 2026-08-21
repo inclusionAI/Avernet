@@ -37,6 +37,10 @@ pub use core::{
     WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::SystemMessageService;
+pub use application::v1::{
+    BotInternalAttributes, FriendCheckInStrategy, InternalBotAttributesService,
+    PatchBotInternalAttributes, UserVisibility,
+};
 pub use application::system_message::resolve_session_topic;
 pub use application::interaction::{
     InteractionRequestedOutcome, InteractionService, InteractionServiceError,
@@ -60,6 +64,10 @@ pub use application::invite::{
 pub use application::session::{
     CreateOrReactivateCommand, CreateOrReactivateOutcome, SessionManagementService,
     SessionUseCaseError,
+};
+pub use application::session_launch::{
+    CreateSessionLaunch, ReactivateSessionLaunch, RequestedSessionRole, SessionCaller,
+    SessionLaunchError, SessionLaunchOutcome, SessionLaunchRequest, SessionLaunchService,
 };
 pub use application::session_files::{
     CapabilitiesView, DeleteFileCommand, DownloadRoute, PrepareUploadCommand, PrepareUploadResult,

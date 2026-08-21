@@ -20,8 +20,8 @@ class _Skills:
             "bolt_id": "bot",
         }
 
-    def list_bot_installed_skills(self, *, env: str, bot_id: str):
-        assert (env, bot_id) == ("pre", "bot")
+    def list_bot_installed_skills(self, *, env: str, owner_id: str, bot_id: str):
+        assert (env, owner_id, bot_id) == ("pre", "owner", "bot")
         return [{"id": "42"}]
 
 

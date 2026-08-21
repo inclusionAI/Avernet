@@ -25,8 +25,24 @@ jobs:
   bcs:
     name: BCS unit tests
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: bcs_contract
+          MYSQL_USER: bcs
+          MYSQL_PASSWORD: bcs_test_only
+          MYSQL_ROOT_PASSWORD: root_test_only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -proot_test_only"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       CARGO_TERM_COLOR: always
+      BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3306/bcs_contract
       # PR: actions/checkout checks out the synthetic merge commit, so compare
       # against its first parent (the exact base tree used for that merge).
       # push/dispatch: compare against dev (repo default branch) instead.
@@ -106,6 +122,18 @@ jobs:
       - name: Run unit tests with coverage
         if: steps.changes.outputs.skip-bcs != 'true'
         run: bash scripts/ci_test.sh --coverage
+
+      - name: Run MySQL DB plugin contract
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: cargo test -p bcs-db-mysql --test conformance_db_plugin -- --ignored
+
+      - name: Run MySQL Eventing migration contract
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: cargo test -p bcs-admin eventing_mysql_migration_applies_to_real_mysql -- --ignored
+
+      - name: Run MySQL Event Store and Delivery contracts
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: cargo test -p bcs-event-store --test conformance_event_store_mysql -- --ignored
 
       - name: Enforce coverage gates
         if: steps.changes.outputs.skip-bcs != 'true'

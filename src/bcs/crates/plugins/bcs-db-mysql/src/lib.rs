@@ -44,22 +44,24 @@ impl MysqlDbPlugin {
 #[async_trait]
 impl DbPlugin for MysqlDbPlugin {
     async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
-        let rows = if statement.params().is_empty() {
+        let params = statement.standalone_params()?;
+        let rows = if params.is_empty() {
             self.mysql.query(&self.db, statement.sql()).await?
         } else {
             self.mysql
-                .query_with(&self.db, statement.sql(), mysql_params(statement.params())?)
+                .query_with(&self.db, statement.sql(), mysql_params(params)?)
                 .await?
         };
         rows.into_iter().map(row_to_db_row).collect()
     }
 
     async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
-        let result = if statement.params().is_empty() {
+        let params = statement.standalone_params()?;
+        let result = if params.is_empty() {
             self.mysql.execute_result(&self.db, statement.sql()).await?
         } else {
             self.mysql
-                .execute_with_result(&self.db, statement.sql(), mysql_params(statement.params())?)
+                .execute_with_result(&self.db, statement.sql(), mysql_params(params)?)
                 .await?
         };
         Ok(DbExecuteResult {
@@ -74,25 +76,32 @@ impl DbPlugin for MysqlDbPlugin {
     ) -> DbResult<Vec<DbTransactionStepResult>> {
         let steps = steps
             .into_iter()
-            .map(PreparedTransactionStep::try_from)
-            .collect::<DbResult<Vec<_>>>()?;
+            .map(PreparedTransactionStep::from)
+            .collect::<Vec<_>>();
 
         self.mysql
             .with_transaction(&self.db, move |tx| {
                 Box::pin(async move {
                     let mut results = Vec::with_capacity(steps.len());
-                    for step in steps {
+                    for (step_index, step) in steps.into_iter().enumerate() {
                         match step {
-                            PreparedTransactionStep::Query { sql, params } => {
-                                let rows = tx.query(&sql, params).await?;
+                            PreparedTransactionStep::Query(statement) => {
+                                let params =
+                                    statement.resolve_transaction_params(&results, step_index)?;
+                                let rows =
+                                    tx.query(statement.sql(), mysql_params(&params)?).await?;
                                 let rows = rows
                                     .into_iter()
                                     .map(row_to_db_row)
                                     .collect::<DbResult<Vec<_>>>()?;
                                 results.push(DbTransactionStepResult::Rows(rows));
                             }
-                            PreparedTransactionStep::Execute { sql, params } => {
-                                let result = tx.execute_result(&sql, params).await?;
+                            PreparedTransactionStep::Execute(statement) => {
+                                let params =
+                                    statement.resolve_transaction_params(&results, step_index)?;
+                                let result = tx
+                                    .execute_result(statement.sql(), mysql_params(&params)?)
+                                    .await?;
                                 results.push(DbTransactionStepResult::Executed(DbExecuteResult {
                                     affected_rows: result.affected_rows,
                                     last_insert_id: result.last_insert_id,
@@ -117,29 +126,15 @@ impl DbPlugin for MysqlDbPlugin {
 }
 
 enum PreparedTransactionStep {
-    Query {
-        sql: String,
-        params: Vec<MysqlValue>,
-    },
-    Execute {
-        sql: String,
-        params: Vec<MysqlValue>,
-    },
+    Query(DbStatement),
+    Execute(DbStatement),
 }
 
-impl TryFrom<DbTransactionStep> for PreparedTransactionStep {
-    type Error = DbError;
-
-    fn try_from(step: DbTransactionStep) -> Result<Self, Self::Error> {
+impl From<DbTransactionStep> for PreparedTransactionStep {
+    fn from(step: DbTransactionStep) -> Self {
         match step {
-            DbTransactionStep::Query(statement) => Ok(Self::Query {
-                sql: statement.sql().to_string(),
-                params: mysql_params(statement.params())?,
-            }),
-            DbTransactionStep::Execute(statement) => Ok(Self::Execute {
-                sql: statement.sql().to_string(),
-                params: mysql_params(statement.params())?,
-            }),
+            DbTransactionStep::Query(statement) => Self::Query(statement),
+            DbTransactionStep::Execute(statement) => Self::Execute(statement),
         }
     }
 }

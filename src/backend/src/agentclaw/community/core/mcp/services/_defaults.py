@@ -46,6 +46,12 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "hitl"},
     ],
     "moltis": [],
+    # Intentionally empty: teclaw bots start with no default MCP servers and
+    # get every MCP from their owner's own skill-set configuration. The key
+    # stays declared (like ``moltis``) so teclaw keeps resolving its own
+    # bucket — dropping it would make teclaw indistinguishable from an
+    # unknown engine and hide a future bucket-aliasing regression.
+    "teclaw": [],
     "claude_code": [
         {"server_code": "mcp.ant.antprocessai.anttaskmcp", "name": "任务中心MCP", "description": "任务中心待办任务，已办任务等相关任务查询MCP"},
         {"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima MCP", "description": "Dima MCP"},

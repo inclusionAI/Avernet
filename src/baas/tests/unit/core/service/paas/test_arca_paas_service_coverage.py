@@ -1271,8 +1271,31 @@ class TestUpdateDeviceTtl:
         assert result.paas_device_id == "dev-001"
         assert result.old_expiration_time is not None
         assert result.new_expiration_time is not None
-        # New expiration should be ~24 hours from now
+        # New expiration should be ~23 hours from now
         assert result.new_expiration_time > result.old_expiration_time
+
+    def test_update_device_ttl_sync_target_points_to_now_plus_23h(
+        self, service, mock_sandbox
+    ):
+        """The requested TTL target is now() + 23h (headroom under Arca's 24h cap)."""
+        old_expiration = datetime.now() - timedelta(hours=1)
+        old_ts = int(old_expiration.timestamp() * 1000)
+        info = _make_sandbox_info(ttl_timestamp=old_ts)
+        mock_sandbox.get_info.return_value = info
+        mock_sandbox.extend_ttl.return_value = True
+
+        service._update_device_ttl_sync("dev-001")
+
+        # target = now() + 23h; ttl_minutes = (target - old) truncated to whole minutes.
+        # Recompute after the call; bound the drift to ±1 minute.
+        now = datetime.now()
+        target_expiration = now + timedelta(hours=23)
+        expected_minutes = int(
+            (target_expiration - old_expiration).total_seconds() / 60
+        )
+        actual = mock_sandbox.extend_ttl.call_args[0][0]
+        assert abs(actual - expected_minutes) <= 1
+        assert actual > 0
 
     def test_update_device_ttl_sync_with_at_suffix(self, service, mock_sandbox):
         """Test with @template_id suffix in paas_device_id."""

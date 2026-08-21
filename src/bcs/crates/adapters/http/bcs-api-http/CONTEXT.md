@@ -5,6 +5,9 @@
 - Versioned `/openapi/v1/collaboration/**` and `/api/v1/collaboration/**` HTTP delivery
   boundaries.
 - Request/response DTO translation and the common response envelope.
+- The ten-operation Event Subscription and Delivery management surface,
+  including write-only Webhook credentials, cursor pagination, optimistic
+  revisions, synchronous test, DLQ replay, and audited skip adaptation.
 - An injectable Gateway Principal verification boundary.
 - The focused authenticated
   `POST /openapi/v1/collaboration/sessions/{sid}/token` delivery slice.
@@ -38,7 +41,7 @@
 
 - Production bootstrap mounts this Router directly at its contract-owned
   `/openapi/v1/collaboration/**` paths and injects completed V1 application
-  services plus the Gateway Principal verifier.
+  services behind the Gateway Principal boundary.
 - Bootstrap injects the Session File application facade and a validated public
   collaboration base URL. The adapter does not infer public URLs from request
   headers.
@@ -53,7 +56,9 @@
 This crate owns HTTP parsing, versioned wire DTOs, Gateway token verification,
 request IDs, envelopes, no-store token responses, and HTTP error mapping.
 It also owns the public/protected Router split, raw file-body streaming, and
-OpenAPI upload/share URL projection. Identity-policy selection happens before
+OpenAPI upload/share URL projection. Event Subscription routes only translate
+verified callers and wire inputs into the injected application service; they
+do not import Event Store or Webhook implementations. Identity-policy selection happens before
 dispatch, while resource authorization remains in the application facade.
 Bootstrap owns concrete service selection, production trust selection, and
 Router mounting; application facades own resource authorization, Actor

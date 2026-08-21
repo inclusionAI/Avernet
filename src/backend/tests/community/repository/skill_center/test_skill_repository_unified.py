@@ -130,7 +130,6 @@ def test_delete_removes_all_associations_for_active_and_inactive_local_skills(
             SkillSetSkill(
                 skill_set_id=int(extra_set["id"]),
                 skill_id=int(active_skill["id"]),
-                bot_id=None,
                 env="dev",
             )
         )
@@ -552,7 +551,6 @@ def test_list_skill_set_references_includes_active_and_inactive_sets(
             SkillSetSkill(
                 skill_set_id=int(inactive_set["id"]),
                 skill_id=int(skill["id"]),
-                bot_id=None,
                 env="dev",
             )
         )
@@ -603,6 +601,7 @@ def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
             "name": "local-a",
             "git_path": "local:///legacy/local-a",
             "bolt_id": "bot-x",
+            "user_id": "owner-x",
         }
     )
     repo = skills.create(
@@ -617,6 +616,7 @@ def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
             "name": "other-local",
             "git_path": "local:///legacy/other-local",
             "bolt_id": "bot-y",
+            "user_id": "other-owner",
         }
     )
     skill_set = sets.create(
@@ -633,12 +633,13 @@ def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
 
     local_assets = skills.list_bot_local_assets(
         env=local["env"],
+        owner_id="owner-x",
         bot_id="bot-x",
     )
     active_assets = skills.list_bot_active_assets(
         env=local["env"],
         bot_id="bot-x",
-        user_id="owner-x",
+        owner_id="owner-x",
         engine="openclaw",
     )
 
@@ -686,7 +687,7 @@ def test_skills_pool_active_assets_include_system_default_without_exclusion_stat
     assets = skills.list_bot_active_assets(
         env=default_enabled["env"],
         bot_id="bot-x",
-        user_id="owner-x",
+        owner_id="owner-x",
         engine="openclaw",
     )
 

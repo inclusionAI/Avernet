@@ -53,6 +53,28 @@ const DEFAULT_CACHE_KEY_PREFIX: &str = "bcs:";
 /// Cache key namespace for bot status.
 const STATUS_CACHE_KEY_NAMESPACE: &str = "status:";
 
+fn bot_info_json_set(
+    updates: Vec<(&'static str, serde_json::Value)>,
+) -> ServiceResult<(String, Vec<Value>)> {
+    let mut expressions = Vec::with_capacity(updates.len());
+    let mut params = Vec::with_capacity(updates.len());
+    for (path, value) in updates {
+        expressions.push(format!("'{path}', json_extract(?, '$')"));
+        params.push(Value::from(serde_json::to_string(&value).map_err(|error| {
+            ServiceError::InternalError(error.to_string())
+        })?));
+    }
+    Ok((
+        format!(
+            "bot_info = JSON_SET(\
+             CASE WHEN JSON_VALID(bot_info) AND LOWER(JSON_TYPE(bot_info)) = 'object' \
+                  THEN bot_info ELSE JSON_OBJECT() END, {})",
+            expressions.join(", ")
+        ),
+        params,
+    ))
+}
+
 fn is_legacy_namespace(bot_uuid: &str, staff_no: &str) -> bool {
     let suffix = format!(":{}", staff_no);
     if !bot_uuid.ends_with(&suffix) {
@@ -96,6 +118,12 @@ pub struct BotInfo {
     /// AI安全网关授权token
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_token: Option<String>,
+    #[serde(default)]
+    pub user_visibility: bcs_service_api::UserVisibility,
+    #[serde(default)]
+    pub friend_ext: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub friend_check_in_strategy: bcs_service_api::FriendCheckInStrategy,
 }
 
 /// A bot streaming connection marker (process-local, not serializable).
@@ -355,6 +383,7 @@ impl PersistentBotRepo {
             hidden,
             agent_code: caps.agent_code.clone(),
             agent_token: caps.agent_token.clone(),
+            ..Default::default()
         };
         let bot_info_json = serde_json::to_string(&bot_info)
             .map_err(|e| ServiceError::InternalError(e.to_string()))?;
@@ -383,27 +412,47 @@ impl PersistentBotRepo {
             // use update_created_by_in_db() / save_created_by() for that.
             // Only overwrite session_token when we have a value; None means
             // the caller doesn't know the token — preserve whatever is in DB.
+            // Update only lifecycle-owned JSON fields so private control-plane
+            // attributes and forward-compatible keys remain authoritative.
+            let (bot_info_assignment, bot_info_params) = bot_info_json_set(vec![
+                ("$.summary", serde_json::to_value(&bot_info.summary)?),
+                ("$.domains", serde_json::to_value(&bot_info.domains)?),
+                ("$.skills", serde_json::to_value(&bot_info.skills)?),
+                ("$.scopes", serde_json::to_value(&bot_info.scopes)?),
+                (
+                    "$.binding_channels",
+                    serde_json::to_value(&bot_info.binding_channels)?,
+                ),
+                ("$.agent_code", serde_json::to_value(&bot_info.agent_code)?),
+                ("$.agent_token", serde_json::to_value(&bot_info.agent_token)?),
+            ])?;
             if let Some(token) = session_token {
-                let sql = "UPDATE bcs_bots SET name = ?, bot_info = ?, session_token = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?";
-                self.db_execute_affected(sql, vec![
-                    Value::from(name),
-                    Value::from(bot_info_json.as_str()),
+                let sql = format!(
+                    "UPDATE bcs_bots SET name = ?, {bot_info_assignment}, session_token = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
+                );
+                let mut params = vec![Value::from(name)];
+                params.extend(bot_info_params);
+                params.extend([
                     Value::from(token),
                     Value::from(visibility),
                     agent_code_value.clone(),
                     Value::from(bot_uuid),
                     Value::from(env.as_str()),
-                ]).await
+                ]);
+                self.db_execute_affected(&sql, params).await
             } else {
-                let sql = "UPDATE bcs_bots SET name = ?, bot_info = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?";
-                self.db_execute_affected(sql, vec![
-                    Value::from(name),
-                    Value::from(bot_info_json.as_str()),
+                let sql = format!(
+                    "UPDATE bcs_bots SET name = ?, {bot_info_assignment}, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
+                );
+                let mut params = vec![Value::from(name)];
+                params.extend(bot_info_params);
+                params.extend([
                     Value::from(visibility),
                     agent_code_value.clone(),
                     Value::from(bot_uuid),
                     Value::from(env.as_str()),
-                ]).await
+                ]);
+                self.db_execute_affected(&sql, params).await
             }
         } else {
             // INSERT new record — None maps to SQL NULL.
@@ -2623,6 +2672,9 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
         agent_code,
         created_at,
         updated_at,
+        user_visibility: bot_info.user_visibility,
+        friend_ext: bot_info.friend_ext,
+        friend_check_in_strategy: bot_info.friend_check_in_strategy,
     })
 }
 
@@ -2808,6 +2860,18 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         env: &str,
         patch: BotControlPlanePatch,
     ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        if patch.user_visibility.is_some()
+            || patch.friend_ext.is_some()
+            || patch.friend_check_in_strategy.is_some()
+        {
+            debug!(
+                bot_id = %bot_id,
+                has_user_visibility = patch.user_visibility.is_some(),
+                has_friend_ext = patch.friend_ext.is_some(),
+                has_friend_check_in_strategy = patch.friend_check_in_strategy.is_some(),
+                "Patching internal Bot attributes in persistent storage"
+            );
+        }
         let existing = self.get_control_plane(bot_id, env).await?;
         if existing.is_none() {
             return Ok(None);
@@ -2816,76 +2880,64 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         let mut assignments = Vec::new();
         let mut params = Vec::new();
         if let Some(name) = patch.name.as_deref() {
-            assignments.push("name = ?");
+            assignments.push("name = ?".to_string());
             params.push(Value::from(name));
         }
         if let Some(visibility) = patch.visibility.as_deref() {
-            assignments.push("visibility = ?");
+            assignments.push("visibility = ?".to_string());
             params.push(Value::from(visibility));
         }
         if let Some(status) = patch.status {
-            assignments.push("status = ?");
+            assignments.push("status = ?".to_string());
             params.push(Value::from(match status {
                 bcs_service_api::ActorStatus::Online => "online",
                 bcs_service_api::ActorStatus::Hidden => "hidden",
             }));
         }
-        if let Some(descriptor) = patch.descriptor.as_ref() {
-            let rows = self
-                .db_query(
-                    "SELECT bot_info FROM bcs_bots WHERE bot_uuid = ? AND env = ? \
-                     AND COALESCE(is_deleted, 0) = 0 LIMIT 1",
-                    vec![Value::from(bot_id), Value::from(env)],
-                )
-                .await
-                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-            let raw = rows
-                .first()
-                .map(|row| db_get_column_opt::<String>(row, "bot_info"))
-                .transpose()
-                .map_err(|error| ServiceError::InternalError(error.to_string()))?
-                .flatten();
-            let mut value = raw
-                .as_deref()
-                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-                .filter(serde_json::Value::is_object)
-                .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
-            let object = value.as_object_mut().ok_or_else(|| {
-                ServiceError::InternalError("Bot descriptor is not a JSON object".to_string())
-            })?;
-            if let Some(summary) = descriptor.summary.as_ref() {
-                object.insert(
-                    "summary".to_string(),
-                    serde_json::Value::String(summary.clone()),
-                );
+        if patch.descriptor.is_some()
+            || patch.user_visibility.is_some()
+            || patch.friend_ext.is_some()
+            || patch.friend_check_in_strategy.is_some()
+        {
+            let mut json_updates = Vec::new();
+            if let Some(descriptor) = patch.descriptor.as_ref() {
+                if let Some(summary) = descriptor.summary.as_ref() {
+                    json_updates.push(("$.summary", serde_json::to_value(summary)?));
+                }
+                if let Some(domains) = descriptor.domains.as_ref() {
+                    json_updates.push(("$.domains", serde_json::to_value(domains)?));
+                }
+                if let Some(skills) = descriptor.skills.as_ref() {
+                    json_updates.push(("$.skills", serde_json::to_value(skills)?));
+                }
+                if let Some(scopes) = descriptor.scopes.as_ref() {
+                    json_updates.push(("$.scopes", serde_json::to_value(scopes)?));
+                }
             }
-            if let Some(domains) = descriptor.domains.as_ref() {
-                object.insert(
-                    "domains".to_string(),
-                    serde_json::to_value(domains)
-                        .map_err(|error| ServiceError::InternalError(error.to_string()))?,
-                );
+            if let Some(user_visibility) = patch.user_visibility {
+                json_updates.push((
+                    "$.user_visibility",
+                    serde_json::to_value(user_visibility)?,
+                ));
             }
-            if let Some(skills) = descriptor.skills.as_ref() {
-                object.insert(
-                    "skills".to_string(),
-                    serde_json::to_value(skills)
-                        .map_err(|error| ServiceError::InternalError(error.to_string()))?,
-                );
+            if let Some(friend_ext) = patch.friend_ext.as_ref() {
+                json_updates.push(("$.friend_ext", serde_json::to_value(friend_ext)?));
             }
-            if let Some(scopes) = descriptor.scopes.as_ref() {
-                object.insert(
-                    "scopes".to_string(),
-                    serde_json::to_value(scopes)
-                        .map_err(|error| ServiceError::InternalError(error.to_string()))?,
-                );
+            if let Some(friend_check_in_strategy) = patch.friend_check_in_strategy {
+                json_updates.push((
+                    "$.friend_check_in_strategy",
+                    serde_json::to_value(friend_check_in_strategy)?,
+                ));
             }
-            assignments.push("bot_info = ?");
-            params.push(Value::from(value.to_string()));
+            if !json_updates.is_empty() {
+                let (assignment, json_params) = bot_info_json_set(json_updates)?;
+                assignments.push(assignment);
+                params.extend(json_params);
+            }
         }
 
-        assignments.push("gmt_modified = CURRENT_TIMESTAMP");
-        assignments.push("updated_at = CURRENT_TIMESTAMP");
+        assignments.push("gmt_modified = CURRENT_TIMESTAMP".to_string());
+        assignments.push("updated_at = CURRENT_TIMESTAMP".to_string());
         params.push(Value::from(bot_id));
         params.push(Value::from(env));
         let sql = format!(
@@ -2949,6 +3001,7 @@ mod tests {
             hidden: false,
             agent_code: None,
             agent_token: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&bot_info).unwrap();
@@ -3138,6 +3191,7 @@ mod tests {
             hidden: false,
             agent_code: None,
             agent_token: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&bot_info).unwrap();
@@ -3292,6 +3346,7 @@ mod tests {
             hidden: false,
             agent_code: None,
             agent_token: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&bot_info).unwrap();
@@ -3416,6 +3471,7 @@ mod tests {
             hidden: false,
             agent_code: None,
             agent_token: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&bot_info).unwrap();
         // JSON escaping handles most cases, but the SQL layer also does escaping
