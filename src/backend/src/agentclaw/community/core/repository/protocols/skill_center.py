@@ -158,8 +158,10 @@ class SkillRepository(Protocol):
         old_locator: str,
         new_locator: str,
         description: str,
-    ) -> dict | None:
-        """Atomically switch package authority at a canonical locator."""
+        requires_runtime_restore: bool,
+        cleanup_work_id: int,
+    ) -> int | None:
+        """Atomically switch package authority and commit old-package cleanup."""
         ...
 
     @abstractmethod
@@ -181,8 +183,10 @@ class SkillRepository(Protocol):
         skill_id: str,
         owner_id: str,
         bot_id: str,
-    ) -> bool | None:
-        """Atomically delete scoped Local Skill state."""
+        quarantine_locator: str,
+        cleanup_work_id: int,
+    ) -> int | None:
+        """Atomically delete scoped state and commit prepared cleanup work."""
         ...
 
     @abstractmethod
