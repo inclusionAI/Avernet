@@ -69,3 +69,34 @@ def test_build_hermes_ws_path() -> None:
 def test_build_claude_code_ws_path() -> None:
     registry = _real_engine_adapter_registry()
     assert registry.get("claude_code").ws_path() == "/api/claude_code/ws"
+
+
+# ── Registry.register_eval_support / get_eval_adapter ────────────────────
+
+
+def test_register_eval_support_registers_new_engine() -> None:
+    adapter = MockAICodingAdapter()
+    registry = BotEngineAdapterRegistry({})
+    registry.register_eval_support("eval_engine", adapter)
+    assert registry.has("eval_engine") is True
+    assert registry.get("eval_engine") is adapter
+
+
+def test_register_eval_support_does_not_overwrite_existing() -> None:
+    original = MockAICodingAdapter()
+    new_adapter = MockAICodingAdapter()
+    registry = BotEngineAdapterRegistry({"aicoding": original})
+    registry.register_eval_support("aicoding", new_adapter)
+    # 已存在的 adapter 不被覆盖
+    assert registry.get("aicoding") is original
+
+
+def test_get_eval_adapter_returns_registered() -> None:
+    adapter = MockAICodingAdapter()
+    registry = BotEngineAdapterRegistry({"eval_engine": adapter})
+    assert registry.get_eval_adapter("eval_engine") is adapter
+
+
+def test_get_eval_adapter_returns_none_for_unregistered() -> None:
+    registry = BotEngineAdapterRegistry({})
+    assert registry.get_eval_adapter("unknown_engine") is None

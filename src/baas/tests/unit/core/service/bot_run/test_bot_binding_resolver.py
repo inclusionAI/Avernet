@@ -1031,7 +1031,30 @@ class TestEvalSwitchControl:
             source_bot_id=BOT_ID, status="success", owner_id=ENTITY_ID
         )
 
-    # ---------- 6. online stage 不受 Plugin 影响 ----------
+    # ---------- 6. 降级走 online 但 online 也找不到 → 返回 None ----------
+
+    def test_eval_disabled_online_binding_not_found_returns_none(
+        self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        """Plugin disabled → 降级走 online，但 online binding 不存在 → 返回 None。"""
+        eval_plugin = _make_eval_binding_resolver_plugin(enabled=False)
+        resolver = self._make_resolver_with_plugin(
+            mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, eval_plugin
+        )
+        self._setup_service_bot(mock_ac_bot_repo)
+        # online binding 查不到
+        mock_publish_repo.get_binding_id.return_value = None
+
+        result = resolver.resolve(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            env=ENV,
+            lifecycle_stage="eval",
+        )
+
+        assert result is None
+
+    # ---------- 7. online stage 不受 Plugin 影响 ----------
 
     def test_online_stage_not_affected(
         self, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
