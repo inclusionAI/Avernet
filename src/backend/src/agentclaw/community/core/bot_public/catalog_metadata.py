@@ -37,12 +37,14 @@ class BotCatalogMetadataUnavailableError(Exception):
 
 @runtime_checkable
 class BotCatalogMetadataServiceProtocol(Protocol):
-    """Authoritative membership lookup for tenant-scoped catalog Bots."""
+    """Authoritative BCS page lookup for tenant-scoped catalog Bots."""
 
-    def query_public_bot_metadata(
+    def search_public_bot_metadata(
         self,
         *,
-        addresses: Sequence[BotCatalogAddress],
+        search: str | None,
+        page: int,
+        page_size: int,
         caller: BotCatalogCaller,
         request_id: str,
     ) -> Sequence[BotCatalogMetadata]: ...
