@@ -45,6 +45,7 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    BotAccessRefusedError,
     DeptLookupError,
     ClusterMismatchError,
     GrantNotResolvableError,
@@ -382,6 +383,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # enumeration oracle for every bot id in the tenant, so the refusal must be
     # the *same* refusal — same status, same message, same envelope.
     GrantNotResolvableError: (404, "Not found"),
+    # And byte-identical again, for the person rather than the application. The
+    # seam refuses a caller below an operation's collaborator level with this,
+    # and a caller who could tell "not permitted" from "no such bot" would have
+    # the same enumeration oracle. Registering it here is what makes that true:
+    # the app-level handler asks this table first, and an unmapped error falls
+    # through to the raw ``{"detail": ...}`` shape — a *different* body from the
+    # envelope a genuinely absent bot returns, which is the tell.
+    BotAccessRefusedError: (404, "Not found"),
     # Withdrawing an authorization that is not there. Shares the 404 shape with
     # an absent bot, and that is not a collision worth avoiding: an owner
     # reconciling their records needs "there was nothing to remove" to read

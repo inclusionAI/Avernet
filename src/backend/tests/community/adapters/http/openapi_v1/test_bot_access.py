@@ -178,16 +178,71 @@ def test_caller_below_the_bar_is_404_not_403():
     response = _get(client)
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "Not found"}
+    # The envelope shape, not the raw ``{"detail": ...}`` fallback: that is
+    # what a genuinely absent bot returns on this surface, and matching it is
+    # the point (see the byte-identity test below).
+    assert response.json()["message"] == "Not found"
+    assert response.json()["data"] is None
 
 
 def test_absent_bot_answers_exactly_as_a_refused_caller():
+    """Both paths through the seam produce one answer.
+
+    Weak on its own — both branches raise ``BotAccessRefusedError``, so they
+    are identical almost by construction. The check that carries the real
+    claim is the next one.
+    """
     permitted, _ = _surface(level=PermissionLevel.MEMBER, bar=PermissionLevel.ADMIN)
     missing, _ = _surface(level=PermissionLevel.OWNER, bots=_Bots(exists=False))
 
     refused, absent = _get(permitted), _get(missing)
 
     assert (refused.status_code, refused.json()) == (absent.status_code, absent.json())
+
+
+def test_refusal_is_byte_identical_to_the_rest_of_the_surface():
+    """The masking only works if it matches what *other* code returns.
+
+    A bot that genuinely does not exist is answered elsewhere on this surface
+    by ``BotNotFoundError`` / ``GrantNotResolvableError``, which are mapped
+    through ``ENVELOPE_ERRORS`` into the envelope shape. If the seam's own
+    refusal were not mapped there too it would fall through to the raw
+    ``{"detail": ...}`` body — same status, different shape — and a caller
+    could tell "not permitted" from "no such bot" by the response body alone.
+    That is the enumeration oracle the masking exists to close, and it would
+    open the instant any row adopted ``Check``.
+
+    Compared at the mapping layer rather than through a fixture app, because
+    the claim is about the shared table, not about one route's wiring.
+    """
+    from fastapi import Request
+
+    from agentclaw.community.adapters.http.openapi_v1.errors import (
+        BotAccessRefusedError,
+        GrantNotResolvableError,
+    )
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        mapped_error_response,
+    )
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": URL,
+            "headers": [],
+            "query_string": b"",
+            "app": None,
+        }
+    )
+
+    refused = mapped_error_response(BotAccessRefusedError("nope"), request)
+    absent = mapped_error_response(GrantNotResolvableError("nope"), request)
+
+    assert refused is not None, "BotAccessRefusedError is not in ENVELOPE_ERRORS"
+    assert absent is not None
+    assert bytes(refused.body) == bytes(absent.body)
+    assert refused.status_code == absent.status_code == 404
 
 
 # ── fail closed, on every failure ────────────────────────────────────────────
