@@ -82,6 +82,7 @@ class BotRuntimeProjectionReconciler:
         service, bot, engine, projection, effective_cli_items = self._resolve_plan(
             bot_id=bot_id,
             owner_id=owner_id,
+            materialize_active_skillset_installations=True,
             retired_mappings=retired_mappings,
         )
         await self._apply_skill_projection(
@@ -157,12 +158,20 @@ class BotRuntimeProjectionReconciler:
         *,
         bot_id: str,
         owner_id: str,
+        materialize_active_skillset_installations: bool = False,
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ):
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
         require_supported_bot_skill_runtime(bot)
+
+        if materialize_active_skillset_installations:
+            self._repository.ensure_active_skillset_installations(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=str(bot.get("active_engine") or "openclaw"),
+            )
 
         return self._build_plan(
             bot=bot,

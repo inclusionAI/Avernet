@@ -26,6 +26,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skills_pool    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skill_set_control_plane # lazy active SkillSet Installation materialization before a new artifact build
   - agentclaw.community.core.common_config
   - agentclaw.community.core.bot_collaborator    # collaborator permission and edit-lock enforcement for public lifecycle operations
   - agentclaw.community.core.bot_inventory.policies    # shared engine/deploy-mode combination policy for service upgrades

@@ -108,6 +108,77 @@ class SkillSetControlPlaneRepository(
             rows = query.order_by(SkillSet.is_default.desc(), SkillSet.id).all()
             return [_item(row) for row in rows]
 
+    def ensure_active_skillset_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None = None,
+    ) -> int:
+        """Insert only missing rows for legacy active ordinary SkillSet members.
+
+        The canonical mutation commands already keep Installation rows in sync.
+        This is intentionally a narrow cutover repair: it never reads the
+        Default Set, never removes rows, and never changes existing Direct
+        desired state.
+        """
+        with self._db.transactional_orm_session() as session:
+            # Ordinary legacy SkillSets have no engine discriminator.  Keep
+            # their compatible selection aligned with the historical reader:
+            # current environment (or pre-tenant-cutover NULL), same Bot and
+            # owner, current runtime engine (or legacy NULL). Engine-specific
+            # selection belongs only to ordinary Sets here; System Default is
+            # excluded and stays a Resolver-owned platform input.
+            sets = session.query(SkillSet).filter(
+                SkillSet.avernet_tenant == get_current_avernet_tenant(),
+                or_(SkillSet.env == get_current_env(), SkillSet.env.is_(None)),
+                SkillSet.bolt_id == bot_id,
+                SkillSet.user_id == owner_id,
+                SkillSet.is_default.is_(False),
+                SkillSet.is_active.is_(True),
+            )
+            if engine_type is not None:
+                sets = sets.filter(
+                    or_(
+                        SkillSet.engine_type == engine_type,
+                        SkillSet.engine_type.is_(None),
+                    )
+                )
+            active_set_ids = {int(row.id) for row in sets.all()}
+            if not active_set_ids:
+                return 0
+
+            member_ids = {
+                int(row.skill_id)
+                for row in session.query(SkillSetSkill)
+                .filter(
+                    SkillSetSkill.avernet_tenant == get_current_avernet_tenant(),
+                    or_(
+                        SkillSetSkill.env == get_current_env(),
+                        SkillSetSkill.env.is_(None),
+                    ),
+                    SkillSetSkill.skill_set_id.in_(active_set_ids),
+                )
+                .all()
+            }
+            if not member_ids:
+                return 0
+
+            existing_ids = self._installations(session, bot_id, owner_id)
+            missing_ids = member_ids - existing_ids
+            for skill_id in missing_ids:
+                session.add(
+                    BotSkillInstallation(
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        skill_id=skill_id,
+                        env=get_current_env(),
+                        avernet_tenant=get_current_avernet_tenant(),
+                    )
+                )
+            session.flush()
+            return len(missing_ids)
+
     def get_set(
         self, *, bot_id: str, set_id: str, engine_type: str | None = None
     ) -> dict:

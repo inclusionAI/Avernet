@@ -20,6 +20,16 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
         self, *, bot_id: str, owner_id: str, engine_type: str | None = None
     ) -> list[dict]: ...
     @abstractmethod
+    def ensure_active_skillset_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None = None,
+    ) -> int:
+        """Materialize missing active-only rows for ordinary active SkillSets."""
+        ...
+    @abstractmethod
     def create_set(
         self,
         *,
