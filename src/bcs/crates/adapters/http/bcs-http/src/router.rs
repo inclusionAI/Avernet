@@ -217,6 +217,7 @@ fn build_api_routes() -> Router<HttpAppState> {
         .route("/v2/friends/{actor}/revoke", post(routes::v2_friends::revoke_friend))
         .route("/v2/friends", get(routes::v2_friends::list_friends_by_actor))
         .route("/v2/bots/{id}/friends", get(routes::v2_friends::list_friends))
+        .route("/v2/bots/search", get(routes::bots::search_bots))
         .route(
             "/bots/{id}/admission",
             get(routes::admission::get_admission),
