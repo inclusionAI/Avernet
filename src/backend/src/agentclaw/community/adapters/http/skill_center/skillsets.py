@@ -56,10 +56,9 @@ from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_engine_for_bot,
+    resolve_runtime_engine_for_bot,
 )
-from agentclaw.community.core.mcp.services.passport_scope import (
-    filter_passport_mcp_codes,
-)
+from agentclaw.community.core.mcp.services.passport_scope import filter_passport_mcp_codes
 from agentclaw.community.di import Injected
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
 from agentclaw.community.api.skill_set_service_factory import (
@@ -157,7 +156,7 @@ def _get_path_params(
 
     Returns:
         Tuple of (effective_entity_id, effective_bot_id,
-                  effective_engine_type, effective_entity_type, is_desktop)
+                  effective_engine_type, runtime_engine_type, effective_entity_type, is_desktop)
     """
     # entity_id: use provided or default to user_id (pure ID, no prefix)
     effective_entity_id = (
@@ -179,6 +178,12 @@ def _get_path_params(
         override=engine_type,
         bot_repo=bot_repo,
     )
+    runtime_engine = resolve_runtime_engine_for_bot(
+        bot_id=effective_bot_id,
+        owner_id=owner_id_for_lookup,
+        override=engine_type,
+        bot_repo=bot_repo,
+    )
     is_desktop = False
     try:
         bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
@@ -193,13 +198,7 @@ def _get_path_params(
             e,
         )
 
-    return (
-        effective_entity_id,
-        effective_bot_id,
-        effective_engine,
-        effective_entity_type,
-        is_desktop,
-    )
+    return effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop
 
 
 # ==================== SkillSet Management APIs ====================
@@ -231,15 +230,7 @@ async def list_skill_sets(
 ) -> SkillSetListResponse:
     """List all skill sets with their skills. Default skill set is listed first."""
     # Get effective path parameters
-    (
-        effective_entity_id,
-        effective_bot_id,
-        effective_engine,
-        effective_entity_type,
-        _is_desktop,
-    ) = _get_path_params(
-        ctx, user_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
-    )
+    effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, _is_desktop = _get_path_params(ctx, user_id, entity_type, bot_id, engine_type, bot_repo=bot_repo))
 
     actor_id = _legacy_actor(ctx, user_id or entity_id)
     try:
@@ -1005,8 +996,7 @@ async def init_and_sync_default_skills(
         repo_dir=repo_dir,
         local_dir=local_dir,
         entity_id=effective_entity_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
+        bot_id=effective_bot_id
     )
 
     # Step 1: Ensure default skill set exists
@@ -1184,7 +1174,7 @@ async def set_default_skills(
         local_dir=local_dir,
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
+        engine_type=runtime_engine,
     )
 
     # Step 1: Ensure default skill set exists
@@ -1446,7 +1436,7 @@ async def set_default_skills_fast(
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
         engine_type=effective_engine,
-        entity_type=effective_entity_type,
+        entity_type=effective_entity_type
     )
     skill_service = skill_service_factory.create(
         active_dir=skills_dir,
@@ -1454,7 +1444,7 @@ async def set_default_skills_fast(
         local_dir=local_dir,
         entity_id=effective_entity_id,
         bot_id=effective_bot_id,
-        engine_type=effective_engine,
+        engine_type=runtime_engine,
     )
 
     # Step 1: Ensure default skill set exists
@@ -1615,7 +1605,8 @@ async def fix_git_path(
         entity_id="",
         bot_id="default",
         engine_type=DEFAULT_ENGINE_TYPE,
-        entity_type="staff",
+        runtime_engine_type=DEFAULT_ENGINE_TYPE,
+        entity_type="staff"
     )
 
     # Step 1: Build correct path mapping from skills-repo
@@ -2026,6 +2017,7 @@ async def sync_skills_to_device(
             entity_id=effective_entity_id,
             bot_id=effective_bot_id,
             engine_type=effective_engine,
+            runtime_engine_type=runtime_engine,
             entity_type=effective_entity_type,
         )
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+from dataclasses import asdict
 from typing import Any
 
 import jsonschema
@@ -27,9 +28,13 @@ from agentclaw.community.core.config_compose.models import (
     CollectedSkill,
     ComposeRequest,
     McpComposeInput,
+    StdioLaunch,
 )
 from agentclaw.community.core.config_compose.services.config_composer import ConfigComposer
-from agentclaw.community.core.config_compose.services.mcporter_composer import McporterComposer
+from agentclaw.community.core.config_compose.services.mcporter_composer import (
+    STDIO_TRANSPORT,
+    McporterComposer,
+)
 from agentclaw.community.core.service_bot.services.deploy.external_compose_producer import (
     ExternalComposeProducer,
 )
@@ -140,20 +145,76 @@ def _full_collector() -> _FakeCollector:
 # ── composer output conforms across the bot-state matrix ─────────────────────
 
 
+def _mixed_mcp_collector() -> _FakeCollector:
+    """A bot carrying both MCP forms — the shape a teclaw bot with ``hitl`` has."""
+    return _FakeCollector(
+        mcps=[
+            McpComposeInput(
+                mcp_data={
+                    "server_code": "github",
+                    "run_mode": "REMOTE",
+                    "endpoints": [
+                        {
+                            "networkType": "INTERNET", "env": "PROD",
+                            "transportProtocol": "STREAMABLE_HTTP",
+                            "url": "https://mcp/github",
+                        }
+                    ],
+                },
+                api_key=f"x-ling-auth={_SECRET}",
+                endpoint_env="PROD",
+            ),
+            McpComposeInput(
+                mcp_data={"server_code": "hitl", "run_mode": "LOCAL"},
+                stdio=StdioLaunch(
+                    command="python3",
+                    args=["/home/admin/hitl/hitl_mcp_server.py"],
+                    env={"MCP_TRANSPORT": "stdio"},
+                ),
+            ),
+        ],
+    )
+
+
 @pytest.mark.parametrize(
     "name,collector,version",
     [
         ("empty_live_bot", _FakeCollector(), None),
         ("full_published_bot", _full_collector(), 7),
+        ("mixed_remote_and_stdio_mcp", _mixed_mcp_collector(), 7),
     ],
 )
 def test_composed_artifact_conforms_to_schema(name, collector, version) -> None:
     """The artifact the real ``ConfigComposer`` assembles from inputs validates
-    against the schema oracle — for both a bare live bot and a fully-populated
-    published snapshot (skills + mcp-by-reference + resources + url + identity +
-    embedded stores + overrides)."""
+    against the schema oracle — for a bare live bot, a fully-populated published
+    snapshot (skills + mcp-by-reference + resources + url + identity + embedded
+    stores + overrides), and a bot mixing remote and stdio MCP servers."""
     artifact = _composer(collector).compose(_req(version=version))
     _validate(artifact)
+
+
+def test_composed_stdio_mcp_carries_launch_and_no_credential() -> None:
+    """Beyond raw schema shape: the stdio entry is the *local* form end-to-end.
+
+    The schema permits both forms on every entry, so it cannot express that a
+    stdio server must carry a launch instruction and must not carry endpoint or
+    credentials. Assert that here, against the real composer's output.
+    """
+    artifact = _composer(_mixed_mcp_collector()).compose(_req(version=7))
+    by_code = {s.server_code: s for s in artifact.mcp.servers}
+
+    assert set(by_code) == {"github", "hitl"}
+
+    local = by_code["hitl"]
+    assert local.transport == STDIO_TRANSPORT
+    assert local.command == "python3"
+    assert local.args == ["/home/admin/hitl/hitl_mcp_server.py"]
+    assert local.endpoint is None and local.headers == {}
+
+    # The remote entry is unaffected: it still inlines its secret.
+    remote = by_code["github"]
+    assert remote.command is None
+    assert _SECRET in json.dumps(asdict(remote), ensure_ascii=False)
 
 
 def test_composed_artifact_carries_channels_engine_override() -> None:

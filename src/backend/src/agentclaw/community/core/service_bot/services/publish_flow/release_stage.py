@@ -27,7 +27,6 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
-    RUNTIME_KIND_TECLAW,
     ServiceBotImagePin,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
@@ -37,9 +36,6 @@ from agentclaw.community.core.service_bot.services.publish_flow.ext_state import
 from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
     ProviderBehavior,
     ProviderBehaviorRouter,
-)
-from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
-    TECLAW_DEVICE_PROVIDER,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     PublishOperationRunner,
@@ -91,10 +87,9 @@ class ReleaseRecordOps(Protocol):
     def resolve_publish_image_pin(
         self,
         publish_record: BotPublishRecord,
+        *,
+        device_provider: str,
     ) -> ServiceBotImagePin: ...
-
-    def resolve_publish_runtime_kind(self, publish_record: BotPublishRecord) -> str: ...
-
 
 
 @dataclass(frozen=True)
@@ -158,14 +153,13 @@ class ReleaseStageRunner:
         self._ops = ops
         self._operation_runner = operation_runner
 
-    def _provider_behavior(self, publish_record: BotPublishRecord) -> ProviderBehavior:
-        """Provider behavior frozen by the target Publish contract."""
-        runtime_kind = self._ops.resolve_publish_runtime_kind(publish_record)
-        return self._provider_behaviors.resolve(
-            TECLAW_DEVICE_PROVIDER
-            if runtime_kind == RUNTIME_KIND_TECLAW
-            else "baas"
-        )
+    def _device_provider(self, bot: dict) -> str:
+        """``bot``'s container token — the same ``resolve_container_provider``
+        mapping the build stage uses to pick the artifact producer."""
+        return self._baas_service.resolve_container_provider(bot)
+
+    def _provider_behavior(self, device_provider: str) -> ProviderBehavior:
+        return self._provider_behaviors.resolve(device_provider)
 
     async def first_release(
         self,
@@ -183,7 +177,9 @@ class ReleaseStageRunner:
         publish_id = publish_record.id
         owner_id = self._ext_state.owner_id(publish_record)
         skills_env = service_publish_extra_envs(publish_record.ext, bot)
-        image_pin = self._ops.resolve_publish_image_pin(publish_record)
+        image_pin = self._ops.resolve_publish_image_pin(
+            publish_record, device_provider=self._device_provider(bot)
+        )
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
@@ -208,7 +204,6 @@ class ReleaseStageRunner:
                 delivery=delivery,
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
-                runtime_kind=self._ops.resolve_publish_runtime_kind(publish_record),
                 template_config=service_publish_template_config(bot),
             )
             if spec.first_release_passes_version:
@@ -285,7 +280,10 @@ class ReleaseStageRunner:
         version = f"{publish_record.version}"
         owner_id = self._ext_state.owner_id(publish_record)
         skills_env = service_publish_extra_envs(publish_record.ext, bot)
-        image_pin = self._ops.resolve_publish_image_pin(publish_record)
+        device_provider = self._device_provider(bot)
+        image_pin = self._ops.resolve_publish_image_pin(
+            publish_record, device_provider=device_provider
+        )
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
@@ -309,7 +307,6 @@ class ReleaseStageRunner:
                 delivery=delivery,
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
-                runtime_kind=self._ops.resolve_publish_runtime_kind(publish_record),
                 template_config=service_publish_template_config(bot),
             )
 
@@ -360,7 +357,7 @@ class ReleaseStageRunner:
         ext, expected_ext = self._ext_state.get_latest_ext_snapshot(publish_id)
         ext.setdefault("binding", {})[spec.stage.value] = existing_binding_id
         ext.setdefault("publish", {})[spec.stage.value] = baas_publish_id
-        self._provider_behavior(publish_record).persist_stage_promotion(
+        self._provider_behavior(device_provider).persist_stage_promotion(
             ext=ext, stage=spec.stage, engine_overrides=overrides
         )
         self._ops.refresh_publish_handle(existing_binding_id, baas_publish_id)

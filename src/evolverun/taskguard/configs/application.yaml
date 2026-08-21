@@ -1,0 +1,80 @@
+# TaskGuard Community Default Configuration
+# Default mode: API persistence with a sample clawweb endpoint.
+# Replace `api.baseUrl` with your real clawweb URL before running in production.
+# Set `api.apiKey` or override via the WORKFLOW_API_KEY environment variable.
+#
+# To switch back to local SQLite mode, set `database.mode` to "sqlite".
+#
+# Override these settings at runtime via environment variables (highest priority):
+#   DATABASE_MODE=sqlite|prod|api
+#   SQLITE_PATH=/path/to/engine.db
+#   CLAWWEB_API_URL=https://your-clawweb.example.com
+#   WORKFLOW_API_PORT=3210
+#   WORKFLOW_API_HOST=127.0.0.1
+#   WORKFLOW_API_KEY=your-api-key
+#   CLAWWEB_API_TIMEOUT=5000
+#   CLAWWEB_API_MAX_RETRIES=3
+
+database:
+  mode: "api"
+  sqlite:
+    path: ~/.taskguard/workflow/engine.db
+
+# Internal API base URL for clawweb communication
+api:
+  enabled: true
+  port: 3210
+  host: "127.0.0.1"
+  apiKey: ""
+  baseUrl: "https://clawweb.sample.com"
+
+alerts:
+  dingtalk:
+    enabled: false
+    webhook_url: ""
+  http_callback:
+    enabled: true
+    url: ""
+    sign_secret: ""
+
+approval:
+  provider: basic
+
+server:
+  port: 3001
+  host: "0.0.0.0"
+
+execution:
+  asyncRun: false
+  runTimeoutMs: 600000
+  flowTimeoutMinutes: 30
+  maxConcurrentFlows: 10
+
+contextCompression:
+  enabled: true
+  defaultMaxTokens: 8000
+
+llm:
+  defaultModel: "claude-sonnet-4-20250514"
+  maxTokens: 16384
+
+flowControl:
+  maxRetries: 3
+  retryDelayMs: 5000
+
+scheduler:
+  enabled: true
+  checkIntervalMs: 30000
+
+webhook:
+  enabled: false
+  port: 3002
+
+# NOT included (internal-only, provided by corp extensions):
+# - ZDAS/MySQL configuration
+# - BaaS keys
+# - YuQue knowledge source
+# - AgentMind knowledge source
+# - TeClaw configuration
+# - clawweb URL / IAM token / corpId
+# - DingTalk enterprise robot credentials

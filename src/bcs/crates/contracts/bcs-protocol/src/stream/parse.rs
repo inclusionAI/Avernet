@@ -290,6 +290,42 @@ mod tests {
     }
 
     #[test]
+    fn preserves_requested_mode_switch_target_and_recommendation() {
+        let data = json!({
+            "runId": "provider-run-3",
+            "seq": 9,
+            "phase": "requested",
+            "interactionId": "interaction-mode-switch",
+            "kind": "mode_switch",
+            "fromMode": "plan",
+            "targetMode": "execute",
+            "options": [
+                {
+                    "decision": "proceed",
+                    "label": "Continue to execution",
+                    "targetMode": "execute",
+                    "recommended": true
+                },
+                {
+                    "decision": "stay",
+                    "label": "Stay in planning"
+                }
+            ]
+        });
+
+        match parse_stream_event("interaction", data.clone()) {
+            StreamEvent::Interaction(interaction) => {
+                assert_eq!(interaction.kind, InteractionKind::ModeSwitch);
+                assert_eq!(interaction.raw["targetMode"], json!("execute"));
+                assert_eq!(interaction.raw["options"][0]["targetMode"], json!("execute"));
+                assert_eq!(interaction.raw["options"][0]["recommended"], json!(true));
+                assert_eq!(interaction.raw, data);
+            }
+            other => panic!("expected interaction, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_resolved_interaction_without_kind_specific_echo() {
         let data = json!({
             "runId": "provider-run-1",

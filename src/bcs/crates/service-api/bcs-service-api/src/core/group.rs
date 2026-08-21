@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 
 use super::{ActorKind, GroupMessage, ServiceResult};
+use crate::types::EventActor;
 
 pub use bcs_domain::{
     DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, Participant, ParticipantKind,
@@ -19,6 +20,41 @@ pub struct DmActorSpec {
 }
 
 pub use crate::types::GroupMutableFieldsPatch;
+
+#[derive(Debug, Clone)]
+pub enum GroupMutationKind {
+    PatchMutableFields(GroupMutableFieldsPatch),
+    UpdateStatus {
+        status: GroupStatus,
+        reason: String,
+    },
+    AddParticipant {
+        participant: Participant,
+        actor_is_public: bool,
+    },
+    RemoveParticipant {
+        actor_id: String,
+        reason: String,
+    },
+    UpdateParticipantMode {
+        actor_id: String,
+        mode: ParticipantMode,
+    },
+    UpdateRoutingPolicy(RoutingPolicy),
+    UpdateServiceSpec(Option<ServiceSpec>),
+    Delete {
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct GroupMutationCommand {
+    pub group_id: String,
+    pub actor: EventActor,
+    pub correlation_id: Option<String>,
+    pub trace_id: Option<String>,
+    pub mutation: GroupMutationKind,
+}
 
 /// Validate sender_routes against group participants.
 ///
@@ -125,6 +161,28 @@ pub fn validate_sender_routes(
 pub trait GroupCoreService: Send + Sync {
     /// Create or update a group.
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
+
+    async fn finalize_provisioning(
+        &self,
+        command: crate::port::repo::FinalizeGroupProvisioning,
+    ) -> ServiceResult<()> {
+        let _ = command;
+        Err(super::ServiceError::InvalidOperation {
+            message: "Group provisioning finalization is not configured".to_string(),
+            request_id: None,
+        })
+    }
+
+    /// Apply one Group lifecycle mutation and its public Event in the same
+    /// repository transaction. Implementations return the existing state for
+    /// idempotent no-ops without producing an Event.
+    async fn mutate(&self, command: GroupMutationCommand) -> ServiceResult<Group> {
+        let _ = command;
+        Err(super::ServiceError::InvalidOperation {
+            message: "Eventful Group mutation is not configured".to_string(),
+            request_id: None,
+        })
+    }
 
     /// Atomically patch only the mutable OpenAPI v1 fields that are present.
     async fn patch_mutable_fields(
@@ -411,6 +469,36 @@ pub trait GroupCoreService: Send + Sync {
         label: Option<String>,
         context: Option<String>,
     ) -> ServiceResult<(Group, bool)>;
+
+    #[allow(clippy::too_many_arguments)]
+    async fn create_or_reuse_actor_dm_group_with_record_status(
+        &self,
+        id: &str,
+        actor_a: DmActorSpec,
+        actor_b: DmActorSpec,
+        legacy_driver_bot: &str,
+        originator_actor_id: &str,
+        label: Option<String>,
+        context: Option<String>,
+        record_status: &str,
+    ) -> ServiceResult<(Group, bool)> {
+        if record_status != "active" {
+            return Err(super::ServiceError::InvalidOperation {
+                message: "provisioning DM creation is not configured".to_string(),
+                request_id: None,
+            });
+        }
+        self.create_or_reuse_actor_dm_group(
+            id,
+            actor_a,
+            actor_b,
+            legacy_driver_bot,
+            originator_actor_id,
+            label,
+            context,
+        )
+        .await
+    }
 
     /// Create-or-reuse a `Dm` group atomically (Task G.2 + CR-1 fix).
     ///

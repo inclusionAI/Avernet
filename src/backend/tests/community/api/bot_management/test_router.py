@@ -960,26 +960,56 @@ class TestSwitchEngine:
 # ---------------------------------------------------------------------------
 
 class TestRestartScheduler:
-    def test_success(self, client):
+    def test_rejects_non_admin(self, client):
         tc, svc, _ = client
-        resp = tc.post("/api/bots/restart-scheduler", json={"user_id": "test_user", "bot_id": "default"})
+
+        resp = tc.post(
+            "/api/bots/restart-scheduler",
+            json={"user_id": "test_user", "bot_id": "default"},
+        )
+
+        assert resp.json() == {
+            "success": False,
+            "message": "权限不足：您没有权限调用此接口",
+            "error_code": 403,
+            "data": None,
+        }
+        svc.restart_bot.assert_not_called()
+
+    def test_success(self, admin_client):
+        tc, svc, _, _ = admin_client
+        resp = tc.post(
+            "/api/bots/restart-scheduler",
+            json={"user_id": "test_user", "bot_id": "default"},
+        )
         assert resp.status_code == 200
         assert resp.json()["success"] is True
+        svc.restart_bot.assert_called_once_with(
+            bot_id="default",
+            user_id="test_user",
+            nick_name="test_user",
+        )
 
-    def test_bot_not_found(self, client):
-        tc, svc, _ = client
+    def test_bot_not_found(self, admin_client):
+        tc, svc, _, _ = admin_client
         svc.restart_bot.side_effect = BotNotFoundError("nope")
-        resp = tc.post("/api/bots/restart-scheduler", json={"user_id": "test_user", "bot_id": "missing"})
+        resp = tc.post(
+            "/api/bots/restart-scheduler",
+            json={"user_id": "test_user", "bot_id": "missing"},
+        )
         assert resp.json()["error_code"] == 404
 
-    def test_service_error(self, client):
-        tc, svc, _ = client
+    def test_service_error(self, admin_client):
+        tc, svc, _, _ = admin_client
         svc.restart_bot.side_effect = BotServiceError("fail")
-        resp = tc.post("/api/bots/restart-scheduler", json={"user_id": "test_user", "bot_id": "default"})
+        resp = tc.post(
+            "/api/bots/restart-scheduler",
+            json={"user_id": "test_user", "bot_id": "default"},
+        )
         assert resp.json()["error_code"] == 500
 
-    def test_recycled_bot_returns_conflict(self, client):
-        tc, svc, _ = client
+    def test_recycled_bot_returns_conflict(self, admin_client):
+        tc, svc, _, _ = admin_client
         svc.restart_bot.side_effect = BotInvalidLifecycleStateError(
             bot_id="default",
             current_status="RECYCLED",
@@ -993,8 +1023,8 @@ class TestRestartScheduler:
         assert resp.status_code == 409
         assert resp.json()["error_code"] == 409
 
-    def test_rejects_teclaw_bot(self, client):
-        tc, svc, _ = client
+    def test_rejects_teclaw_bot(self, admin_client):
+        tc, svc, _, _ = admin_client
         svc.restart_bot.side_effect = BotOperationNotAllowedError(
             "teclaw 类型的 Bot 不支持重启"
         )
@@ -1012,8 +1042,8 @@ class TestRestartScheduler:
             "data": None,
         }
 
-    def test_activation_in_progress_returns_accepted(self, client):
-        tc, svc, _ = client
+    def test_activation_in_progress_returns_accepted(self, admin_client):
+        tc, svc, _, _ = admin_client
         svc.restart_bot.return_value = {
             **BOT_SAMPLE,
             "status": "PENDING",

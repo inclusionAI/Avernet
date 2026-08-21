@@ -16,7 +16,10 @@ pub use noop::*;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bcs_cache_api::{CachePlugin, CacheSetMode, CacheTtl};
-use bcs_db_api::{DbPlugin, DbStatement, DbTransactionStep, DbTransactionStepResult, DbValue};
+use bcs_db_api::{
+    DbError, DbPlugin, DbStatement, DbTransactionParam, DbTransactionStep, DbTransactionStepResult,
+    DbValue,
+};
 use bcs_service_api::port::secret::{SecretAccessError, SecretAccessPort, SecretRecord};
 
 /// Contract tests every CachePlugin implementation must pass.
@@ -276,6 +279,229 @@ pub async fn db_plugin_contract_tests<P: DbPlugin>(plugin: &P) {
         }
         other => panic!("expected transaction query rows, got {:?}", other),
     }
+
+    let bound_results = plugin
+        .transaction(vec![
+            DbTransactionStep::Execute(DbStatement::with_params(
+                "INSERT INTO contract_items (id, name, active, payload) VALUES (?, ?, ?, ?)",
+                vec![
+                    DbValue::from("item-bound-source"),
+                    DbValue::from("alpha"),
+                    DbValue::from(1_i64),
+                    DbValue::from(b"payload-1".to_vec()),
+                ],
+            )),
+            DbTransactionStep::Query(DbStatement::with_params(
+                "SELECT name, payload, NULL AS optional_payload FROM contract_items WHERE id = ?",
+                vec![DbValue::from("item-bound-source")],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+                "INSERT INTO contract_items (id, name, active, payload) VALUES (?, ?, ?, ?)",
+                vec![
+                    DbTransactionParam::value("item-bound"),
+                    DbTransactionParam::query_result(1, 0, "name"),
+                    DbTransactionParam::value(1_i64),
+                    DbTransactionParam::query_result(1, 0, "payload"),
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+                "INSERT INTO contract_items (id, name, active, payload) VALUES (?, ?, ?, ?)",
+                vec![
+                    DbTransactionParam::value("item-bound-null"),
+                    DbTransactionParam::value("nullable"),
+                    DbTransactionParam::value(1_i64),
+                    DbTransactionParam::query_result(1, 0, "optional_payload"),
+                ],
+            )),
+            DbTransactionStep::Query(DbStatement::new(
+                "SELECT id, name, payload FROM contract_items \
+                 WHERE id IN ('item-bound', 'item-bound-null') ORDER BY id",
+            )),
+        ])
+        .await
+        .expect("transaction with prior query bindings");
+
+    match bound_results.get(4) {
+        Some(DbTransactionStepResult::Rows(rows)) => {
+            assert_eq!(rows.len(), 2);
+            assert_eq!(
+                rows[0].get_string("id").expect("bound id"),
+                Some("item-bound".to_string())
+            );
+            assert_eq!(
+                rows[0].get_string("name").expect("bound name"),
+                Some("alpha".to_string())
+            );
+            assert_eq!(
+                rows[0].get_bytes("payload").expect("bound payload"),
+                Some(b"payload-1".to_vec())
+            );
+            assert_eq!(
+                rows[1].get_string("id").expect("null id"),
+                Some("item-bound-null".to_string())
+            );
+            assert_eq!(rows[1].get_bytes("payload").expect("null payload"), None);
+        }
+        other => panic!("expected bound transaction query rows, got {:?}", other),
+    }
+
+    let missing_row = plugin
+        .transaction(vec![
+            DbTransactionStep::Execute(DbStatement::with_params(
+                "INSERT INTO contract_items (id, name, active, payload) VALUES (?, ?, ?, ?)",
+                vec![
+                    DbValue::from("item-missing-row-rollback"),
+                    DbValue::from("rollback"),
+                    DbValue::from(1_i64),
+                    DbValue::Null,
+                ],
+            )),
+            DbTransactionStep::Query(DbStatement::new(
+                "SELECT name FROM contract_items WHERE id = 'does-not-exist'",
+            )),
+            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+                "UPDATE contract_items SET name = ? WHERE id = ?",
+                vec![
+                    DbTransactionParam::query_result(1, 0, "name"),
+                    DbTransactionParam::value("item-missing-row-rollback"),
+                ],
+            )),
+        ])
+        .await;
+    assert!(
+        matches!(missing_row, Err(DbError::InvalidInput(_))),
+        "missing result row must be invalid input, got {missing_row:?}"
+    );
+    assert!(
+        plugin
+            .query(DbStatement::new(
+                "SELECT id FROM contract_items WHERE id = 'item-missing-row-rollback'",
+            ))
+            .await
+            .expect("query missing-row rollback")
+            .is_empty(),
+        "a binding error must roll back earlier transaction steps"
+    );
+
+    let missing_column = plugin
+        .transaction(vec![
+            DbTransactionStep::Query(DbStatement::new(
+                "SELECT name FROM contract_items WHERE id = 'item-1'",
+            )),
+            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+                "UPDATE contract_items SET name = ? WHERE id = ?",
+                vec![
+                    DbTransactionParam::query_result(0, 0, "missing_column"),
+                    DbTransactionParam::value("item-1"),
+                ],
+            )),
+        ])
+        .await;
+    assert!(
+        matches!(missing_column, Err(DbError::InvalidInput(_))),
+        "missing result column must be invalid input, got {missing_column:?}"
+    );
+
+    let future_reference = plugin
+        .transaction(vec![
+            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+                "UPDATE contract_items SET name = ? WHERE id = ?",
+                vec![
+                    DbTransactionParam::query_result(1, 0, "name"),
+                    DbTransactionParam::value("item-1"),
+                ],
+            )),
+            DbTransactionStep::Query(DbStatement::new(
+                "SELECT name FROM contract_items WHERE id = 'item-1'",
+            )),
+        ])
+        .await;
+    assert!(
+        matches!(future_reference, Err(DbError::InvalidInput(_))),
+        "future result reference must be invalid input, got {future_reference:?}"
+    );
+
+    let execute_reference = plugin
+        .transaction(vec![
+            DbTransactionStep::Execute(DbStatement::with_params(
+                "UPDATE contract_items SET name = ? WHERE id = ?",
+                vec![DbValue::from("must-roll-back"), DbValue::from("item-1")],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+                "UPDATE contract_items SET name = ? WHERE id = ?",
+                vec![
+                    DbTransactionParam::query_result(0, 0, "name"),
+                    DbTransactionParam::value("item-1"),
+                ],
+            )),
+        ])
+        .await;
+    assert!(
+        matches!(execute_reference, Err(DbError::InvalidInput(_))),
+        "an execute result cannot be used as a query row, got {execute_reference:?}"
+    );
+    let original = plugin
+        .query(DbStatement::new(
+            "SELECT name FROM contract_items WHERE id = 'item-1'",
+        ))
+        .await
+        .expect("query execute-reference rollback");
+    assert_eq!(
+        original[0].get_string("name").expect("original name"),
+        Some("alpha".to_string()),
+        "referencing an execute step must roll back earlier writes"
+    );
+
+    let standalone_binding = plugin
+        .execute(DbStatement::with_transaction_params(
+            "UPDATE contract_items SET name = ? WHERE id = ?",
+            vec![
+                DbTransactionParam::query_result(0, 0, "name"),
+                DbTransactionParam::value("item-1"),
+            ],
+        ))
+        .await;
+    assert!(
+        matches!(standalone_binding, Err(DbError::InvalidInput(_))),
+        "transaction bindings must be rejected outside a transaction, got {standalone_binding:?}"
+    );
+
+    let later_failure = plugin
+        .transaction(vec![
+            DbTransactionStep::Query(DbStatement::new(
+                "SELECT name, payload FROM contract_items WHERE id = 'item-1'",
+            )),
+            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+                "INSERT INTO contract_items (id, name, active, payload) VALUES (?, ?, ?, ?)",
+                vec![
+                    DbTransactionParam::value("item-later-failure-rollback"),
+                    DbTransactionParam::query_result(0, 0, "name"),
+                    DbTransactionParam::value(1_i64),
+                    DbTransactionParam::query_result(0, 0, "payload"),
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_params(
+                "INSERT INTO contract_items (id, name, active, payload) VALUES (?, ?, ?, ?)",
+                vec![
+                    DbValue::from("item-1"),
+                    DbValue::from("duplicate"),
+                    DbValue::from(1_i64),
+                    DbValue::Null,
+                ],
+            )),
+        ])
+        .await;
+    assert!(later_failure.is_err(), "duplicate insert must fail");
+    assert!(
+        plugin
+            .query(DbStatement::new(
+                "SELECT id FROM contract_items WHERE id = 'item-later-failure-rollback'",
+            ))
+            .await
+            .expect("query later-failure rollback")
+            .is_empty(),
+        "a later SQL failure must roll back a write that used a result binding"
+    );
 }
 
 /// Contract suite every `SecretAccessPort` implementation must satisfy.

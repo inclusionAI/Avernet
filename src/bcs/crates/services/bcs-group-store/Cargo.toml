@@ -11,7 +11,9 @@ version = { workspace = true }
 async-trait = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-domain = { workspace = true }
+bcs-event-store = { workspace = true }
 bcs-service-api = { workspace = true }
+chrono = "0.4"
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -20,6 +22,8 @@ uuid = { workspace = true }
 [dev-dependencies]
 bcs-db-local = { workspace = true }
 bcs-test-support = { workspace = true }
+hex = { workspace = true }
+sha2 = { workspace = true }
 tempfile = { workspace = true }
 tokio-test = "0.4"
 

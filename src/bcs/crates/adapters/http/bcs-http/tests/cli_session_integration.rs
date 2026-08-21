@@ -24,6 +24,7 @@ use bcs_service_api::{
     SessionUseCaseError,
 };
 use bcs_services_container::Services;
+use bcs_session::SessionLaunchApplication;
 use serde_json::Value;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
@@ -251,9 +252,17 @@ async fn start_server() -> ServerFixture {
     group_store.upsert(group).await.unwrap();
 
     let mut services = Services::noop();
-    services.registry = registry;
-    services.group = group_store;
-    services.session_management = Arc::new(MockSessions::default());
+    let sessions = Arc::new(MockSessions::default());
+    services.registry = registry.clone();
+    services.group = group_store.clone();
+    services.session_management = sessions.clone();
+    services.session_launch = Arc::new(SessionLaunchApplication::new(
+        registry,
+        group_store,
+        sessions,
+        services.collaboration_runtime.clone(),
+        services.system_message.clone(),
+    ));
     services.group_message_history = Arc::new(EmptyHistory);
 
     let app = build_router(HttpAppState::new(services));

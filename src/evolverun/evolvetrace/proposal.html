@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenSpec + Superpowers 提案：Evolvetrace 开源拆分</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --fg: #0f172a;
+      --muted: #475569;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --primary: #2563eb;
+      --primary-soft: #eff6ff;
+      --success: #16a34a;
+      --warning: #ea580c;
+      --danger: #dc2626;
+      --code-bg: #f1f5f9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.7;
+    }
+    header {
+      background: linear-gradient(90deg, #0f172a 0%, #1e293b 100%);
+      color: #fff;
+      padding: 48px 32px;
+    }
+    header h1 { margin: 0 0 8px; font-size: 32px; }
+    header p { margin: 0; color: #94a3b8; font-size: 16px; }
+    main { max-width: 1080px; margin: 0 auto; padding: 32px; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    h2 { margin-top: 0; font-size: 22px; color: var(--fg); border-left: 4px solid var(--primary); padding-left: 12px; }
+    h3 { margin-top: 28px; font-size: 17px; color: #1e293b; }
+    h4 { margin-top: 20px; font-size: 15px; color: #334155; }
+    p { margin: 8px 0; color: var(--muted); }
+    ul, ol { margin: 8px 0; padding-left: 22px; }
+    li { margin: 6px 0; }
+    code {
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      color: #334155;
+    }
+    pre {
+      background: var(--code-bg);
+      padding: 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 13px;
+      border: 1px solid var(--border);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--primary-soft); color: #1e3a8a; font-weight: 600; }
+    tr:nth-child(even) td { background: #fafafa; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .badge-phase { background: #dbeafe; color: #1e40af; }
+    .badge-scope { background: #dcfce7; color: #166534; }
+    .badge-risk { background: #fee2e2; color: #991b1b; }
+    .badge-keep { background: #f3e8ff; color: #6b21a8; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+    .card h4 { margin-top: 0; }
+    .highlight { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 14px; }
+    .footer { text-align: center; color: #94a3b8; font-size: 13px; margin-top: 40px; }
+    @media (max-width: 860px) {
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      main { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>OpenSpec + Superpowers 变更提案</h1>
+    <p>将 ClawWeb 任务护航 / TcLog 模块及其后端 API 拆分为独立开源版本 Evolvetrace</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. 变更概述</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h4>变更名称</h4>
+          <p><span class="badge badge-phase">evolvetrace-open-source-split</span></p>
+          <p><strong>目标路径：</strong><code>/Users/fudapeng/project/ClawFlow/OCB/Avernet/src/evolverun/evolvetrace</code></p>
+          <p><strong>来源仓库：</strong>clawweb（<code>/Users/fudapeng/project/ClawFlow/clawweb</code>）</p>
+        </div>
+        <div class="card">
+          <h4>变更性质</h4>
+          <p><span class="badge badge-scope">代码迁移</span> <span class="badge badge-scope">架构解耦</span> <span class="badge badge-scope">开源准备</span></p>
+          <p><strong>风险等级：</strong><span class="badge badge-risk">高</span>（涉及前后端解耦、API 边界重划、权限系统简化）</p>
+          <p><strong>预期版本：</strong>evolvetrace v0.1.0</p>
+        </div>
+      </div>
+
+      <h3>1.1 目标</h3>
+      <ol>
+        <li>从 clawweb 中抽取<strong>任务护航</strong>与<strong>TcLog</strong>两个前端模块，作为独立的开源前端应用 Evolvetrace UI。</li>
+        <li>将对应的<strong>外部 API</strong>（<code>/api/runs/*</code>、<code>/api/workflows/*</code>、<code>/api/tclog/*</code>、<code>/api/sandbox-query</code> 等）与<strong>内部 API</strong>（<code>/api/internal/*</code>，供 ClawMind 写入运行数据）同步迁移。</li>
+        <li>移除 clawweb 专属的蚂蚁内网依赖（antbuservice、Dima、语雀、审批、Bench 等），保留通用能力。</li>
+        <li>权限系统从简：由蚂蚁员工号 + admin 名单模型，切换为简单的基于 HTTP Header/Cookie 的 <code>ownerId</code> 识别，仅保留“是否管理员”开关，不再维护 bot 协作者、工作流 ACL 等复杂权限。</li>
+      </ol>
+
+      <h3>1.2 非目标</h3>
+      <ul>
+        <li>不迁移数据大盘、智能接入、审批、Dima、Dev-Workflow、Insight Center、Repair、Flow Control、Bench 等模块。</li>
+        <li>不保留 antbuservice 单点登录；开源版本使用简化的 local-auth / 可配置 Header 登录。</li>
+        <li>不做数据库 schema 重构，保持与 clawweb 现有 <code>flow_runs</code>、<code>node_executions</code>、<code>ac_otel_log_trace</code>、<code>aw_langfuse_traces</code> 等表兼容。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>2. 现状调研摘要</h2>
+      <h3>2.1 前端模块</h3>
+      <table>
+        <tr><th>模块</th><th>路由</th><th>入口文件</th><th>说明</th></tr>
+        <tr>
+          <td>任务护航</td>
+          <td><code>/workflows/workspace</code></td>
+          <td><code>src/pages/WorkflowWorkspace.tsx</code></td>
+          <td>工作流运维门户：选择、概览、编辑器、管理、进化 Tab。</td>
+        </tr>
+        <tr>
+          <td>TcLog</td>
+          <td><code>/tclog</code></td>
+          <td><code>src/pages/TCLog.tsx</code></td>
+          <td>Trace / Session / 业务任务日志查询，关联 workflow run。</td>
+        </tr>
+        <tr>
+          <td>TeamClawSupport（复用 TcLog）</td>
+          <td><code>/teamclaw-support</code></td>
+          <td><code>src/pages/TeamClawSupport/index.tsx</code></td>
+          <td>内嵌 TcLog 组件作为“会话日志”Tab，同时依赖语雀/系统日志/Sandbox。本次<strong>不迁移</strong>。</td>
+        </tr>
+      </table>
+
+      <h3>2.2 前端子组件与关键依赖</h3>
+      <ul>
+        <li><strong>任务护航子组件</strong>：<code>src/components/workflow-workspace/{Sidebar,OverviewTab,EditorTab,ManagementTab,EvolutionTab}.tsx</code>。</li>
+        <li><strong>EditorTab</strong> 直接复用 <code>src/pages/Editor</code>，编辑器能力需同步迁移（ WorkflowWorkspace 概览/管理/进化的核心入口）。</li>
+        <li><strong>状态管理</strong>：React Query（<code>@tanstack/react-query</code>），通过 <code>src/api/hooks.ts</code> 与 <code>src/api/client.ts</code> 封装。</li>
+        <li><strong>用户态</strong>：<code>src/hooks/useClientUser.ts</code> + <code>getClientUser()</code>，依赖蚂蚁 <code>staff_id</code> cookie；开源版改为读取可配置 Header。</li>
+        <li><strong>公共 UI 组件</strong>：StatusBadge、EmptyState、ErrorState、HealthScoreCard、SuccessTrendCard 等需要复制。</li>
+      </ul>
+
+      <h3>2.3 外部 API（Web 端调用）</h3>
+      <table>
+        <tr><th>路由前缀</th><th>实现文件</th><th>本次处理</th></tr>
+        <tr><td><code>/api/tclog/*</code></td><td><code>server/routes/tclog.ts</code></td><td><span class="badge badge-keep">完整迁移</span></td></tr>
+        <tr><td><code>/api/runs/*</code></td><td><code>server/routes/runs.ts</code></td><td><span class="badge badge-keep">完整迁移</span></td></tr>
+        <tr><td><code>/api/workflows/*</code></td><td><code>server/routes/workflows.ts</code></td><td><span class="badge badge-keep">完整迁移</span>（保留与工作流编辑器/管理相关端点）</td></tr>
+        <tr><td><code>/api/sandbox-query</code></td><td><code>server/routes/sandbox-query.ts</code> + <code>server/services/sandbox-query-service.ts</code></td><td><span class="badge badge-keep">完整迁移</span>（TcLog 详情页可能用到）</td></tr>
+        <tr><td><code>/api/auth/*</code></td><td><code>server/routes/auth.ts</code></td><td><span class="badge badge-risk">简化迁移</span>（去掉蚂蚁 SSO，保留本地登录态）</td></tr>
+        <tr><td><code>/api/knowledge-bases</code></td><td><code>server/routes/knowledge-bases.ts</code></td><td><span class="badge badge-risk">不迁移</span>（语雀依赖）</td></tr>
+        <tr><td><code>/api/log-analysis</code></td><td><code>server/routes/log-analysis.ts</code></td><td><span class="badge badge-risk">不迁移</span>（蚂蚁日志/分析服务依赖）</td></tr>
+        <tr><td><code>/api/analysis</code></td><td><code>server/routes/analysis.ts</code></td><td><span class="badge badge-risk">不迁移</span>（LLM 分析代理）</td></tr>
+      </table>
+
+      <h3>2.4 内部 API（ClawMind / ClawFlow Engine 调用）</h3>
+      <p>内部 API 统一挂载在 <code>/api/internal</code> 下，受 <code>signatureMiddleware</code> 签名保护。本次需迁移与运行数据写入相关的子路由：</p>
+      <table>
+        <tr><th>子路由</th><th>实现文件</th><th>功能</th><th>处理</th></tr>
+        <tr><td><code>/api/internal/runs</code></td><td><code>server/routes/internal/runs.ts</code></td><td>flow_runs 增删改查</td><td><span class="badge badge-keep">迁移</span></td></tr>
+        <tr><td><code>/api/internal/node-executions</code></td><td><code>server/routes/internal/node-executions.ts</code></td><td>节点执行写入/查询</td><td><span class="badge badge-keep">迁移</span></td></tr>
+        <tr><td><code>/api/internal/events</code></td><td><code>server/routes/internal/events.ts</code></td><td>flow_events 写入</td><td><span class="badge badge-keep">迁移</span></td></tr>
+        <tr><td><code>/api/internal/metrics</code></td><td><code>server/routes/internal/metrics.ts</code></td><td>运行指标写入</td><td><span class="badge badge-keep">迁移</span></td></tr>
+        <tr><td><code>/api/internal/scheduled-triggers</code></td><td><code>server/routes/internal/scheduled-triggers.ts</code></td><td>触发器元数据</td><td><span class="badge badge-keep">迁移</span></td></tr>
+        <tr><td><code>/api/internal/webhook-triggers</code></td><td><code>server/routes/internal/webhook-triggers.ts</code></td><td>Webhook 触发</td><td><span class="badge badge-risk">可选</span></td></tr>
+        <tr><td><code>/api/internal/facades</code></td><td><code>server/routes/internal/facades.ts</code></td><td>Facade 绑定</td><td><span class="badge badge-keep">迁移</span></td></tr>
+        <tr><td><code>/api/internal/deploy-history</code></td><td><code>server/routes/internal/deploy-history.ts</code></td><td>部署历史</td><td><span class="badge badge-keep">迁移</span></td></tr>
+        <tr><td><code>/api/internal/bot-workflow-permissions</code></td><td><code>server/routes/internal/bot-workflow-permissions.ts</code></td><td>bot-工作流权限</td><td><span class="badge badge-risk">简化</span>（表保留，规则从简）</td></tr>
+        <tr><td>其余 internal 子路由</td><td><code>server/routes/internal/*.ts</code></td><td>Langfuse、bench、approval、step-trace 等</td><td><span class="badge badge-risk">不迁移</span></td></tr>
+      </table>
+
+      <h3>2.5 依赖的外部服务</h3>
+      <table>
+        <tr><th>服务</th><th>用途</th><th>开源版处理</th></tr>
+        <tr><td>SQLite / MySQL（clawweb DB）</td><td>flow_runs、trace 表等</td><td>保留，作为唯一数据源</td></tr>
+        <tr><td>AntLogs / BaaS / OCB MCP 日志采集</td><td>TcLog 详情页补充日志</td><td>可选保留接口占位，默认关闭</td></tr>
+        <tr><td>语雀 OpenAPI</td><td>TeamClawSupport 知识搜索</td><td>不迁移</td></tr>
+        <tr><td>蚂蚁 SSO / antbuservice</td><td>登录态</td><td>替换为简单 Header/Cookie auth</td></tr>
+        <tr><td>阿里 OSS</td><td>会话分析附件、Evolve 产物</td><td>不迁移（任务护航进化 Tab 当前为演示数据，无 OSS 依赖）</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>3. 详细设计</h2>
+
+      <h3>3.1 目标目录结构</h3>
+      <pre>/Users/fudapeng/project/ClawFlow/OCB/Avernet/src/evolverun/evolvetrace
+├── package.json                  # 独立 npm 包 evolvetrace
+├── tsconfig.json
+├── vite.config.ts
+├── README.md
+├── openspec/
+│   └── changes/evolvetrace-oss/
+│       ├── .openspec.yaml
+│       ├── proposal.html          # 本文件
+│       ├── design.md
+│       └── tasks.md
+├── docs/
+│   └── architecture.md
+├── src/
+│   ├── main.tsx                  # React 入口
+│   ├── App.tsx                   # 简化路由（仅任务护航、TcLog）
+│   ├── index.css
+│   ├── api/
+│   │   ├── client.ts             # 精简后的 API 客户端
+│   │   └── hooks.ts              # React Query hooks
+│   ├── components/
+│   │   ├── common/               # StatusBadge、EmptyState、ErrorState 等
+│   │   ├── health/               # HealthScoreCard、SuccessTrendCard
+│   │   └── workflow-workspace/   # 任务护航子组件
+│   ├── hooks/
+│   │   └── useClientUser.ts      # 简化用户态
+│   ├── pages/
+│   │   ├── WorkflowWorkspace.tsx
+│   │   ├── TCLog.tsx
+│   │   └── Editor.tsx            # 复用的工作流编辑器
+│   ├── types.ts                  # 仅保留相关类型
+│   └── utils/
+│       └── time.ts
+└── server/
+    ├── index.ts                  # Express 入口，仅挂载目标 API
+    ├── db.ts                     # 数据库连接（保留 SQLite/MySQL）
+    ├── middleware/
+    │   ├── async-handler.ts
+    │   ├── admin-auth.ts         # 简化 admin 名单
+    │   ├── request-logger.ts
+    │   └── error-logger.ts
+    ├── repositories/             # 仅复制相关 repository
+    ├── routes/
+    │   ├── auth.ts               # 简化 auth
+    │   ├── runs.ts
+    │   ├── workflows.ts
+    │   ├── tclog.ts
+    │   └── sandbox-query.ts
+    ├── routes/internal/
+    │   ├── index.ts
+    │   ├── runs.ts
+    │   ├── node-executions.ts
+    │   ├── events.ts
+    │   ├── metrics.ts
+    │   ├── scheduled-triggers.ts
+    │   ├── facades.ts
+    │   ├── deploy-history.ts
+    │   └── bot-workflow-permissions.ts
+    └── services/
+        └── sandbox-query-service.ts</pre>
+
+      <h3>3.2 前端迁移策略</h3>
+      <div class="grid-3">
+        <div class="card">
+          <h4>保留</h4>
+          <ul>
+            <li>WorkflowWorkspace 四 Tab 结构</li>
+            <li>TcLog 三模式查询 UI</li>
+            <li>React Query 数据层</li>
+            <li>关键通用组件</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>裁剪</h4>
+          <ul>
+            <li>顶部导航仅保留 2 个入口</li>
+            <li>移除 isLogAdmin / isBenchAdmin 等角色</li>
+            <li>ManagementTab 移除语雀、审批、回调（可选保留）</li>
+            <li>EvolutionTab 当前为 Mock，保留占位</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>替换</h4>
+          <ul>
+            <li>用户态：Header <code>X-Evolvetrace-User-Id</code></li>
+            <li>管理员：env <code>ADMINS</code> 名单</li>
+            <li>路由基座：独立 Vite 应用</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>3.3 后端迁移策略</h3>
+      <h4>3.3.1 路由裁剪</h4>
+      <p>新的 <code>server/index.ts</code> 仅挂载以下路由：</p>
+      <pre>app.use("/api/auth", createAuthRouter());
+app.use("/api/runs", createRunsRouter(flowRunRepo, nodeExecRepo, eventRepo, metricsRepo, null, null, workflowSpecRepo, executionStepLogRepo));
+app.use("/api/workflows", createWorkflowsRouter(workflowSpecRepo, facadeRepo, null, notificationConfigRepo, wfdhRepo, httpCallbackConfigRepo));
+app.use("/api/tclog", createTCLogRouter(db, flowRunRepo, null));
+app.use("/api/sandbox-query", createSandboxQueryRouter({ sandboxQueryService }));
+app.use("/api/internal", signatureMiddleware(sigConfig), createInternalRouter(internalRepos));</pre>
+      <p>注释：权限 repo <code>botPermRepo</code> 传 <code>null</code>，开源版不再进行 bot 工作流 ACL 校验；admin 逻辑保留在 <code>adminAuthMiddleware</code> 中。</p>
+
+      <h4>3.3.2 权限系统简化</h4>
+      <table>
+        <tr><th>原 clawweb 模型</th><th>开源 evolvetrace 模型</th></tr>
+        <tr><td>蚂蚁 staff_id cookie + antbuservice</td><td>可配置 Header <code>X-Evolvetrace-User-Id</code> 或 Cookie <code>evolvetrace_user_id</code></td></tr>
+        <tr><td><code>isAdmin</code> / <code>isLogAdmin</code> / <code>isBenchAdmin</code></td><td>仅 <code>isAdmin</code>，由 <code>ADMIN_USER_IDS</code> 环境变量决定</td></tr>
+        <tr><td>bot 协作者表 <code>ac_bot_collaborator</code></td><td>不维护；仅 owner 可见自己的 bot 与 trace</td></tr>
+        <tr><td>bot-工作流 ACL 白名单</td><td>保留 repository 但不启用（传 null）</td></tr>
+        <tr><td>管理员可跨 owner 查询</td><td>保留：管理员可查任意 ownerId 数据</td></tr>
+      </table>
+
+      <h4>3.3.3 内部 API 签名鉴权</h4>
+      <p>保留 <code>server/middleware/signature.ts</code> 与 <code>resolveSignatureConfig</code>，内部 API 仍通过公私钥签名验证 ClawMind/Engine 身份。配置项改为：</p>
+      <pre>EVOLVETRACE_INTERNAL_PUBLIC_KEY_B64=...
+EVOLVETRACE_INTERNAL_SIGNATURE_TTL_SECONDS=300</pre>
+
+      <h3>3.4 数据库兼容性</h3>
+      <p>开源版本直接复用 clawweb 的 DB schema，不做迁移。关键表清单：</p>
+      <ul>
+        <li><code>flow_runs</code>、<code>node_executions</code>、<code>flow_events</code></li>
+        <li><code>workflow_specs</code>、<code>workflow_deploy_history</code>、<code>facade_bindings</code></li>
+        <li><code>ac_otel_log_trace</code>、<code>aw_langfuse_traces</code>、<code>ac_otel_log_observation</code>、<code>ac_otel_log_biz_ref</code></li>
+        <li><code>ac_bots</code>、<code>ac_entity_device_binding</code>（TcLog bot 列表、Sandbox Query 依赖）</li>
+        <li><code>metrics</code>、<code>alerts</code>、<code>scheduled_triggers</code>、<code>webhook_triggers</code>、<code>webhook_events</code></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>4. 任务清单（按 Superpowers 工作流）</h2>
+      <p>本提案对应 OpenSpec 阶段二输出。后续实施按 Superpowers 工作流拆分为 7 个并行/串行任务：</p>
+      <table>
+        <tr><th>#</th><th>任务</th><th>类型</th><th>依赖</th><th>验收标准</th></tr>
+        <tr><td>1</td><td>初始化 evolvetrace 仓库骨架（package.json、Vite、TS、基础路由）</td><td>并行</td><td>—</td><td><code>npm install</code> 成功，<code>npm run dev</code> 启动空白页</td></tr>
+        <tr><td>2</td><td>迁移公共 UI 组件与工具函数</td><td>并行</td><td>1</td><td>StatusBadge/EmptyState/ErrorState/HealthScoreCard/SuccessTrendCard 无编译错误</td></tr>
+        <tr><td>3</td><td>迁移任务护航前端模块（WorkflowWorkspace + 子组件 + Editor 复用）</td><td>并行</td><td>1, 2</td><td><code>/workflows/workspace</code> 可渲染，可切换 Tab</td></tr>
+        <tr><td>4</td><td>迁移 TcLog 前端模块（TCLog.tsx + hooks + types）</td><td>并行</td><td>1, 2</td><td><code>/tclog</code> 页面可渲染三种查询模式</td></tr>
+        <tr><td>5</td><td>迁移外部后端 API（runs / workflows / tclog / sandbox-query / 简化 auth）</td><td>并行</td><td>1</td><td><code>server/index.ts</code> 可启动，对应路由返回 200/503（DB 未配时）</td></tr>
+        <tr><td>6</td><td>迁移内部 API 及签名鉴权</td><td>并行</td><td>1, 5</td><td><code>/api/internal/health</code> 通过签名返回 <code>{status:"ok", signer:"verified"}</code></td></tr>
+        <tr><td>7</td><td>集成测试与权限简化验证</td><td>串行</td><td>3, 4, 5, 6</td><td>前端页面可查询本地 server；admin 与普通用户权限差异生效</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>5. 实施计划（Superpowers）</h2>
+      <div class="highlight">
+        <strong>阶段三实施方式：</strong>任务 1-6 相互独立，建议采用 <code>/superpowers:subagent-driven-development</code> 并行执行；任务 7 串行集成。
+      </div>
+      <ol>
+        <li><strong>Writing Plans：</strong>基于本提案生成 <code>docs/superpowers/plans/2026-08-20-evolvetrace-plan.md</code>，明确每个子任务的输入、输出、边界。</li>
+        <li><strong>Subagent 并行开发：</strong>为每个任务启动独立 subagent，分别负责前端组件、后端路由、内部 API、骨架初始化。</li>
+        <li><strong>代码审查：</strong>使用 <code>/superpowers:requesting-code-review</code> 审查增量代码，重点检查：
+          <ul>
+            <li>是否误把蚂蚁内网依赖带入开源目录；</li>
+            <li>权限中间件是否正确降级；</li>
+            <li>内部 API 签名中间件是否仍生效。</li>
+          </ul>
+        </li>
+        <li><strong>增量单测：</strong>使用 <code>/superpowers:test-driven-development</code>，为 tclog 路由、runs 路由、内部 runs 路由补测试，目标变更行覆盖率 ≥ 90%。</li>
+        <li><strong>验证交付：</strong><code>npm run build</code>、<code>npm run build:server</code>、<code>npm test</code> 全绿，输出 <code>TEST_REPORT.md</code>。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>6. 风险与应对</h2>
+      <table>
+        <tr><th>风险</th><th>影响</th><th>应对措施</th></tr>
+        <tr><td>EditorTab 复用 Editor 页面，依赖复杂</td><td>高</td><td>先复制 <code>src/pages/Editor</code> 及其依赖到 evolvetrace，再裁剪非工作流编辑功能</td></tr>
+        <tr><td>TCLog 依赖语雀/日志分析等外部能力</td><td>中</td><td>明确不迁移 TeamClawSupport；TCLog 自身不依赖语雀</td></tr>
+        <tr><td>权限降级后影响原 admin 查询逻辑</td><td>中</td><td>保留 <code>req.isAdmin</code>，移除 <code>req.isLogAdmin</code>，TCLog 路由中用 <code>isAdmin</code> 统一判断</td></tr>
+        <tr><td>内部 API 签名配置缺失导致 engine 无法写入</td><td>高</td><td>文档中明确 <code>EVOLVETRACE_INTERNAL_PUBLIC_KEY_B64</code> 必填，提供生成脚本</td></tr>
+        <tr><td>Repository 层复制遗漏导致运行时异常</td><td>中</td><td>通过编译检查与集成测试覆盖，缺失 repository 优先让路由返回 503 而非崩溃</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>7. 开源合规与后续演进</h2>
+      <ul>
+        <li>在 <code>README.md</code> 中注明：evolvetrace 是从 clawweb 拆分出的独立子项目，数据库 schema 与 clawweb 兼容。</li>
+        <li>所有源码文件保留原有许可证头；新增文件使用项目统一开源许可证。</li>
+        <li>后续可演进方向：
+          <ol>
+            <li>将内部 API 封装为 gRPC / OpenAPI，进一步与 ClawMind 解耦；</li>
+            <li>提供 Docker Compose 一键启动；</li>
+            <li>将 TcLog 数据源插件化，支持非蚂蚁 OCB trace 表。</li>
+          </ol>
+        </li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>8. 关键代码引用</h2>
+      <p>以下路径均相对于 <code>/Users/fudapeng/project/ClawFlow/clawweb</code>：</p>
+      <ul>
+        <li>任务护航入口：<code>src/pages/WorkflowWorkspace.tsx:23</code></li>
+        <li>TcLog 入口：<code>src/pages/TCLog.tsx</code></li>
+        <li>TCLog 外部 API：<code>server/routes/tclog.ts:1356</code>（<code>/api/tclog/bots</code>）</li>
+        <li>Runs 外部 API：<code>server/routes/runs.ts:105</code></li>
+        <li>内部 runs API：<code>server/routes/internal/runs.ts:15</code></li>
+        <li>内部路由聚合：<code>server/routes/internal/index.ts:94</code></li>
+        <li>Express 路由挂载：<code>server/index.ts:518</code>、<code>server/index.ts:715</code></li>
+      </ul>
+    </section>
+
+    <div class="footer">
+      生成时间：2026-08-20 · OpenSpec + Superpowers 工作流提案 · evolvetrace-open-source-split
+    </div>
+  </main>
+</body>
+</html>

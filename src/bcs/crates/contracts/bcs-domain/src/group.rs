@@ -333,6 +333,9 @@ pub struct Group {
     /// User-provided group context (optional description of collaboration goal/background).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    /// Optional StateMachine Run opening-message template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening_message: Option<crate::opening_message::OpeningMessage>,
     /// All participants.
     pub participants: Vec<Participant>,
     /// Message history (only stored if store_messages is enabled in config).
@@ -462,6 +465,7 @@ impl Group {
             originator: None, // Will be set to driver_bot by default
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants,
             messages: Vec::new(),
             workspace: Workspace::default(),

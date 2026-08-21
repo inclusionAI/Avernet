@@ -12,10 +12,27 @@ from typing import Any
 
 __all__ = [
     "McpComposeInput",
+    "StdioLaunch",
     "ComposeRequest",
     "CollectedSkill",
     "CollectedFile",
 ]
+
+
+@dataclass(frozen=True)
+class StdioLaunch:
+    """A local MCP server's launch instruction, as the collector resolved it.
+
+    Deliberately resolved **before** the composer runs: the launch instruction
+    comes from :class:`LocalMCPRegistry` (a local YAML read), not from the
+    best-effort MCP Center enrichment. So a Center outage cannot turn a local
+    server into a mis-classified remote one — see
+    ``ConfigComposerInputCollector._stdio_launch_for``.
+    """
+
+    command: str
+    args: list[str] = field(default_factory=list)
+    env: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -84,3 +101,9 @@ class McpComposeInput:
     ``("OFFICE", "INTERNET", "INTRANET")``). When set, the composer picks the
     endpoint deterministically by ``(network rank, transport rank)``; when None,
     it uses the legacy filter + ``transport_protocol`` preference."""
+    stdio: StdioLaunch | None = None
+    """Set for a LOCAL/stdio server, ``None`` for a remote one — this **is** the
+    composer's discriminator, so the local-vs-remote decision is made once, by the
+    collector, from a source that does not depend on MCP Center being reachable.
+    When set, the remote fields above are ignored (a stdio server has no endpoint
+    and needs no credential)."""

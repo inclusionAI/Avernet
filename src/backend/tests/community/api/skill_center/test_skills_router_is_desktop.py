@@ -46,8 +46,8 @@ def test_get_path_params_is_desktop_by_bot_type(bot_type, expect_desktop):
     mock_repo = _make_repo(bot_type)
     result = _get_path_params(ctx, None, None, "bot_x", None, bot_repo=mock_repo)
 
-    assert len(result) == 5, f"expected 5-tuple, got {len(result)}"
-    _, _, _, _, is_desktop = result
+    assert len(result) == 6, f"expected 6-tuple, got {len(result)}"
+    _, _, _, _, _, is_desktop = result
     assert is_desktop is expect_desktop, (
         f"bot_type={bot_type!r}: expected is_desktop={expect_desktop}, got {is_desktop}"
     )

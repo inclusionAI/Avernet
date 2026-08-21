@@ -9,9 +9,11 @@ Verifies:
 """
 from unittest.mock import MagicMock
 
-import pytest
 
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
+from agentclaw.community.core.bot_management.services.engine_resolver import (
+    resolve_engine_for_bot,
+    resolve_runtime_engine_for_bot,
+)
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 
 
@@ -70,18 +72,37 @@ class TestOwnerExactMatch:
 
 
 class TestClaudeCodeTemplateRouting:
-    def test_claude_code_non_normalcc_routes_to_aicoding(self):
+    def test_data_resolver_keeps_claude_code_for_non_normalcc(self):
         bot = {"active_engine": "claude_code", "template_type": "generalCC"}
         repo = _make_repo(owner_bot=bot)
         result = resolve_engine_for_bot(
             bot_id="bot_x", owner_id="owner_1", bot_repo=repo
+        )
+        assert result == "claude_code"
+
+    def test_runtime_resolver_routes_claude_code_non_normalcc_to_aicoding(self):
+        bot = {"active_engine": "claude_code", "template_type": "generalCC"}
+        repo = _make_repo(owner_bot=bot)
+        result = resolve_runtime_engine_for_bot(
+            bot_id="bot_x", owner_id="owner_1", bot_repo=repo
+        )
+        assert result == "aicoding"
+
+    def test_runtime_resolver_routes_override_with_bot_context(self):
+        bot = {"active_engine": "openclaw", "template_type": "generalCC"}
+        repo = _make_repo(owner_bot=bot)
+        result = resolve_runtime_engine_for_bot(
+            bot_id="bot_x",
+            owner_id="owner_1",
+            override="claude_code",
+            bot_repo=repo,
         )
         assert result == "aicoding"
 
     def test_claude_code_normalcc_stays_claude_code(self):
         bot = {"active_engine": "claude_code", "template_type": "normalCC"}
         repo = _make_repo(owner_bot=bot)
-        result = resolve_engine_for_bot(
+        result = resolve_runtime_engine_for_bot(
             bot_id="bot_x", owner_id="owner_1", bot_repo=repo
         )
         assert result == "claude_code"

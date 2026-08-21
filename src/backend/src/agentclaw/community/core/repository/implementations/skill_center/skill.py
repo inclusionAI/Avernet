@@ -44,7 +44,6 @@ statement shape and predicates:
 from __future__ import annotations
 
 import json
-from hashlib import sha256
 from datetime import datetime
 from typing import List, Optional
 
@@ -790,32 +789,10 @@ class SkillRepository(
         old_locator: str,
         new_locator: str,
         description: str,
-        requires_runtime_restore: bool,
-        cleanup_work_id: int,
-    ) -> int | None:
-        """Atomically switch one Local Skill and commit obsolete-package work."""
-        from agentclaw.community.core.skill_center.local_skill_cleanup import (
-            LocalSkillCleanupWorkModel,
-        )
+    ) -> dict | None:
+        """Atomically switch one Local Skill to its canonical package locator."""
 
         with self._db.transactional_orm_session() as db:
-            locator_hash = sha256(old_locator.encode("utf-8")).hexdigest()
-            cleanup = (
-                db.query(LocalSkillCleanupWorkModel)
-                .filter(
-                    LocalSkillCleanupWorkModel.id == cleanup_work_id,
-                    LocalSkillCleanupWorkModel.env == get_current_env(),
-                    LocalSkillCleanupWorkModel.owner_id == owner_id,
-                    LocalSkillCleanupWorkModel.bot_id == bot_id,
-                    LocalSkillCleanupWorkModel.package_locator == old_locator,
-                    LocalSkillCleanupWorkModel.package_locator_hash == locator_hash,
-                    LocalSkillCleanupWorkModel.status == "preparing",
-                )
-                .with_for_update()
-                .one_or_none()
-            )
-            if cleanup is None:
-                raise RuntimeError("Local Skill cleanup preparation is missing")
             skill = (
                 db.query(self.Skill)
                 .filter(
@@ -834,12 +811,8 @@ class SkillRepository(
             skill.git_path = f"local://{new_locator}"
             skill.user_id = _normalize_user_id(owner_id)
             skill.gmt_modified = func.now()
-            cleanup.requires_runtime_restore = requires_runtime_restore
-            cleanup.status = "pending"
-            cleanup.last_error = None
-            cleanup.cleaned_at = None
             db.flush()
-            return int(cleanup.id)
+            return _skill_to_dict(skill)
 
     @staticmethod
     def _delete_skill_set_associations(db, skill_id: int) -> None:
@@ -857,29 +830,12 @@ class SkillRepository(
         skill_id: str,
         owner_id: str,
         bot_id: str,
-        quarantine_locator: str,
-        cleanup_work_id: int,
-    ) -> int | None:
-        """Atomically delete one inactive Local Skill and commit its purge."""
+    ) -> bool | None:
+        """Atomically delete one inactive Local Skill and its scoped state."""
         from agentclaw.community.core.models import SkillSetSkill
         from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
-        from agentclaw.community.core.skill_center.local_skill_cleanup import (
-            LocalSkillCleanupWorkModel,
-        )
 
         with self._db.transactional_orm_session() as db:
-            locator_hash = sha256(quarantine_locator.encode("utf-8")).hexdigest()
-            cleanup = db.query(LocalSkillCleanupWorkModel).filter(
-                LocalSkillCleanupWorkModel.id == cleanup_work_id,
-                LocalSkillCleanupWorkModel.env == get_current_env(),
-                LocalSkillCleanupWorkModel.owner_id == owner_id,
-                LocalSkillCleanupWorkModel.bot_id == bot_id,
-                LocalSkillCleanupWorkModel.package_locator == quarantine_locator,
-                LocalSkillCleanupWorkModel.package_locator_hash == locator_hash,
-                LocalSkillCleanupWorkModel.status.in_(("preparing", "repair_required")),
-            ).with_for_update().one_or_none()
-            if cleanup is None:
-                raise RuntimeError("Local Skill quarantine preparation is missing")
             skill = db.query(self.Skill).filter(
                 self.Skill.id == int(skill_id),
                 self.Skill.env == get_current_env(),
@@ -913,10 +869,8 @@ class SkillRepository(
             ).delete(synchronize_session=False)
             self._delete_skill_set_associations(db, int(skill_id))
             db.delete(skill)
-            cleanup.status = "pending"
-            cleanup.last_error = None
             db.flush()
-            return int(cleanup.id)
+            return True
 
     def check_skill_blocked_by_bot(
         self, name: str, env: Optional[str] = None
@@ -1287,8 +1241,27 @@ class SkillSetRepository(
             ss = query.limit(1).first()
             return _skill_set_to_dict(ss) if ss else None
 
+    def _default_skill_set_filter(
+        self,
+        engine_type: Optional[str],
+        default_skill_set_bolt_id: Optional[str],
+    ):
+        conditions = [
+            self.SkillSet.is_default == True,  # noqa: E712
+            self.SkillSet.engine_type == engine_type,
+        ]
+        if default_skill_set_bolt_id is not None:
+            conditions.append(self.SkillSet.bolt_id == default_skill_set_bolt_id)
+        return and_(*conditions)
+
     def _list_all_query(
-        self, db, user_id, bolt_id, engine_type
+        self,
+        db,
+        user_id,
+        bolt_id,
+        engine_type,
+        default_skill_set_bolt_id=None,
+        default_skill_set_engine_type=None,
     ):
         query = db.query(self.SkillSet).filter(
             or_(
@@ -1297,6 +1270,11 @@ class SkillSetRepository(
             )
         )
         effective_bolt_id = bolt_id if bolt_id else "default"
+        effective_default_engine = (
+            engine_type
+            if default_skill_set_engine_type is None
+            else default_skill_set_engine_type
+        )
         if engine_type is not None:
             query = query.filter(
                 or_(
@@ -1304,9 +1282,9 @@ class SkillSetRepository(
                         self.SkillSet.is_default == False,  # noqa: E712
                         self.SkillSet.bolt_id == effective_bolt_id,
                     ),
-                    and_(
-                        self.SkillSet.is_default == True,  # noqa: E712
-                        self.SkillSet.engine_type == engine_type,
+                    self._default_skill_set_filter(
+                        effective_default_engine,
+                        default_skill_set_bolt_id,
                     ),
                 )
             )
@@ -1333,10 +1311,17 @@ class SkillSetRepository(
         user_id: Optional[str] = None,
         bolt_id: Optional[str] = None,
         engine_type: Optional[str] = None,
+        default_skill_set_bolt_id: Optional[str] = None,
+        default_skill_set_engine_type: Optional[str] = None,
     ) -> List[dict]:
         with self._db.orm_session() as db:
             rows = self._list_all_query(
-                db, user_id, bolt_id, engine_type
+                db,
+                user_id,
+                bolt_id,
+                engine_type,
+                default_skill_set_bolt_id,
+                default_skill_set_engine_type,
             ).all()
             return [_skill_set_to_dict(s) for s in rows]
 
@@ -1345,6 +1330,8 @@ class SkillSetRepository(
         user_id: Optional[str] = None,
         bolt_id: Optional[str] = None,
         engine_type: Optional[str] = None,
+        default_skill_set_bolt_id: Optional[str] = None,
+        default_skill_set_engine_type: Optional[str] = None,
     ) -> List[dict]:
         from agentclaw.community.plugin_api.models import BotModel
 
@@ -1371,6 +1358,11 @@ class SkillSetRepository(
                 )
             )
             effective_bolt_id = bolt_id if bolt_id else "default"
+            effective_default_engine = (
+                engine_type
+                if default_skill_set_engine_type is None
+                else default_skill_set_engine_type
+            )
             if engine_type is not None:
                 query = query.filter(
                     or_(
@@ -1378,9 +1370,9 @@ class SkillSetRepository(
                             self.SkillSet.is_default == False,  # noqa: E712
                             self.SkillSet.bolt_id == effective_bolt_id,
                         ),
-                        and_(
-                            self.SkillSet.is_default == True,  # noqa: E712
-                            self.SkillSet.engine_type == engine_type,
+                        self._default_skill_set_filter(
+                            effective_default_engine,
+                            default_skill_set_bolt_id,
                         ),
                     )
                 )
@@ -1395,15 +1387,12 @@ class SkillSetRepository(
             if user_id:
                 query = query.filter(
                     or_(
-                        self.SkillSet.user_id
-                        == _normalize_user_id(user_id),
+                        self.SkillSet.user_id == _normalize_user_id(user_id),
                         self.SkillSet.is_default == True,  # noqa: E712
                         self.SkillSet.is_builtin == True,  # noqa: E712
                     )
                 )
-            rows = query.order_by(
-                self.SkillSet.gmt_created.desc()
-            ).all()
+            rows = query.order_by(self.SkillSet.gmt_created.desc()).all()
             return [_skill_set_to_dict(s) for s in rows]
 
     def get_skill_set_by_name_include_deleted(
@@ -2208,6 +2197,8 @@ class SkillSetRepository(
         user_id: Optional[str] = None,
         bolt_id: Optional[str] = None,
         engine_type: Optional[str] = None,
+        default_skill_set_bolt_id: Optional[str] = None,
+        default_skill_set_engine_type: Optional[str] = None,
     ) -> List[dict]:
         effective_bolt_id = bolt_id if bolt_id else "default"
         parsed = _normalize_user_id(user_id)
@@ -2220,23 +2211,29 @@ class SkillSetRepository(
                 self.SkillSet.bolt_id == effective_bolt_id,
             )
             if engine_type is not None:
-                query = query.filter(
-                    self.SkillSet.engine_type == engine_type
-                )
+                query = query.filter(self.SkillSet.engine_type == engine_type)
             if user_id:
-                query = query.filter(
-                    self.SkillSet.user_id == parsed
-                )
+                query = query.filter(self.SkillSet.user_id == parsed)
             else:
                 query = query.filter(self.SkillSet.user_id.is_(None))
             for ss in query.all():
                 active_sets.append(_skill_set_to_dict(ss))
 
-        default_set = self.get_default(
-            user_id=parsed if user_id is not None and bolt_id is not None else None,
-            bolt_id=effective_bolt_id if user_id is not None and bolt_id is not None else None,
-            engine_type=engine_type,
+        effective_default_engine = (
+            engine_type
+            if default_skill_set_engine_type is None
+            else default_skill_set_engine_type
         )
+        default_set = None
+        if (
+            default_skill_set_bolt_id is None
+            or effective_bolt_id == default_skill_set_bolt_id
+        ):
+            default_set = self.get_default(
+                user_id=parsed if user_id is not None and bolt_id is not None else None,
+                bolt_id=effective_bolt_id if user_id is not None and bolt_id is not None else None,
+                engine_type=effective_default_engine,
+            )
         if default_set:
             enabled = self._get_user_default_enabled(
                 user_id, effective_bolt_id, engine_type=engine_type
@@ -2245,12 +2242,11 @@ class SkillSetRepository(
                 active_sets.append(default_set)
         global_default = self.get_default(
             user_id=None,
-            bolt_id=None,
-            engine_type=engine_type,
+            bolt_id=default_skill_set_bolt_id,
+            engine_type=effective_default_engine,
         )
         if global_default and all(
-            skill_set["id"] != global_default["id"]
-            for skill_set in active_sets
+            skill_set["id"] != global_default["id"] for skill_set in active_sets
         ):
             active_sets.append(global_default)
         return active_sets
@@ -2262,6 +2258,8 @@ class SkillSetRepository(
         bolt_id: Optional[str] = None,
         engine_type: Optional[str] = None,
         env: str,
+        default_skill_set_bolt_id: Optional[str] = None,
+        default_skill_set_engine_type: Optional[str] = None,
     ) -> List[dict]:
         effective_bolt_id = bolt_id if bolt_id else "default"
         parsed = _normalize_user_id(user_id)
@@ -2281,23 +2279,32 @@ class SkillSetRepository(
                 query = query.filter(self.SkillSet.user_id.is_(None))
             active_sets.extend(_skill_set_to_dict(ss) for ss in query.all())
 
-        bot_default = self.get_default(
-            user_id=parsed if user_id is not None and bolt_id is not None else None,
-            bolt_id=effective_bolt_id if user_id is not None and bolt_id is not None else None,
-            engine_type=engine_type,
-            env=env,
+        effective_default_engine = (
+            engine_type
+            if default_skill_set_engine_type is None
+            else default_skill_set_engine_type
         )
+        bot_default = None
+        if (
+            default_skill_set_bolt_id is None
+            or effective_bolt_id == default_skill_set_bolt_id
+        ):
+            bot_default = self.get_default(
+                user_id=parsed if user_id is not None and bolt_id is not None else None,
+                bolt_id=effective_bolt_id if user_id is not None and bolt_id is not None else None,
+                engine_type=effective_default_engine,
+                env=env,
+            )
         if bot_default:
             active_sets.append(bot_default)
         global_default = self.get_default(
             user_id=None,
-            bolt_id=None,
-            engine_type=engine_type,
+            bolt_id=default_skill_set_bolt_id,
+            engine_type=effective_default_engine,
             env=env,
         )
         if global_default and all(
-            skill_set["id"] != global_default["id"]
-            for skill_set in active_sets
+            skill_set["id"] != global_default["id"] for skill_set in active_sets
         ):
             active_sets.append(global_default)
         return active_sets

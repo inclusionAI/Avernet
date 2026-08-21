@@ -1,16 +1,17 @@
 //! Application service contract harnesses.
 
+use bcs_service_api::application::v1::{
+    AuthenticatedBotIdentity, AuthenticatedCaller, BotService, CreateEventSubscription,
+    EventSubscriptionDesiredStatus, EventSubscriptionService, EventSubscriptionStatus,
+    GetEventSubscription, PatchEventSubscription, PatchEventSubscriptionRequest, QueryBots,
+};
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, ActorDirectoryService, BotDiscoveryService,
     BotManagementService, BotOnboardingService, BotQueryService, BotRuntimeConnectionService,
-    FriendService, GroupFusionService, GroupManagementService, GroupMessageHistoryService,
-    GroupProposalService, GroupQueryService, HumanActorService, MessageFlowService,
-    CreateOrganizationCommand, OrganizationAuth, OrganizationManagementService,
-    InteractionService, OrganizationMemberAuth, ServiceError, SystemMessageService,
-    WorkbenchSessionService,
-};
-use bcs_service_api::application::v1::{
-    AuthenticatedBotIdentity, AuthenticatedCaller, BotService, QueryBots,
+    CreateOrganizationCommand, FriendService, GroupFusionService, GroupManagementService,
+    GroupMessageHistoryService, GroupProposalService, GroupQueryService, HumanActorService,
+    InteractionService, MessageFlowService, OrganizationAuth, OrganizationManagementService,
+    OrganizationMemberAuth, ServiceError, SystemMessageService, WorkbenchSessionService,
 };
 
 pub async fn bot_service_contract_tests<T: BotService + ?Sized>(svc: &T) {
@@ -33,6 +34,57 @@ pub async fn bot_service_contract_tests<T: BotService + ?Sized>(svc: &T) {
         .await
         .expect_err("Bot control-plane service rejects callers without User");
     assert_eq!(error.code(), "forbidden");
+}
+
+pub async fn event_subscription_service_contract_tests<T: EventSubscriptionService + ?Sized>(
+    svc: &T,
+    command: CreateEventSubscription,
+) {
+    let caller = command.caller.clone();
+    let expected_scope = command.request.scope.clone();
+    let created = svc
+        .create(command)
+        .await
+        .expect("create Event Subscription through application contract");
+    assert_eq!(created.scope, expected_scope);
+    assert_eq!(created.status, EventSubscriptionStatus::Active);
+    assert_eq!(created.revision, 1);
+
+    let fetched = svc
+        .get(GetEventSubscription {
+            caller: caller.clone(),
+            subscription_id: created.subscription_id.clone(),
+        })
+        .await
+        .expect("get created Event Subscription");
+    assert_eq!(fetched, created);
+
+    let patched = svc
+        .patch(PatchEventSubscription {
+            caller: caller.clone(),
+            subscription_id: created.subscription_id.clone(),
+            expected_revision: created.revision,
+            patch: PatchEventSubscriptionRequest {
+                name: Some("contract-renamed".to_string()),
+                status: Some(EventSubscriptionDesiredStatus::Disabled),
+                ..PatchEventSubscriptionRequest::default()
+            },
+        })
+        .await
+        .expect("patch Event Subscription with optimistic revision");
+    assert_eq!(patched.name, "contract-renamed");
+    assert_eq!(patched.status, EventSubscriptionStatus::Disabled);
+    assert!(patched.revision >= created.revision);
+
+    let deleted = svc
+        .delete(bcs_service_api::application::v1::DeleteEventSubscription {
+            caller,
+            subscription_id: created.subscription_id,
+            expected_revision: patched.revision,
+        })
+        .await
+        .expect("soft-delete Event Subscription");
+    assert_eq!(deleted.status, EventSubscriptionStatus::Deleted);
 }
 
 pub async fn a2a_chat_service_contract_tests<T: A2aChatService + ?Sized>(_svc: &T) {}

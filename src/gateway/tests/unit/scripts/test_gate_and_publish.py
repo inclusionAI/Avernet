@@ -87,9 +87,9 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
 
     assert public_document["openapi"] == "3.1.0"
     assert internal_document["openapi"] == "3.1.0"
-    assert public_operations == 34
+    assert public_operations == 39
     assert internal_operations == 10
-    assert public_operations + internal_operations == 44
+    assert public_operations + internal_operations == 49
     assert all(
         path.startswith("/openapi/v1/collaboration/")
         for path in public_document["paths"]
@@ -127,12 +127,14 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
         not in public_document["paths"]
     )
 
-    assert (
-        "get"
-        in internal_document["paths"][
-            "/api/v1/collaboration/bots/{bot_id}/candidates/search"
-        ]
-    )
+    candidate_search = internal_document["paths"][
+        "/api/v1/collaboration/bots/{bot_id}/candidates/search"
+    ]["get"]
+    assert candidate_search["x-avernet-security"] == {
+        "user": "optional",
+        "app": "optional",
+        "bot": "optional",
+    }
     assert (
         "put"
         in internal_document["paths"][
