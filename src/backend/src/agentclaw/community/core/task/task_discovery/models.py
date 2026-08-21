@@ -96,7 +96,7 @@ class DiscoveredTask:
         bot 收到后主动呈现发现任务并询问用户确认。
         """
         return (
-            f"我为您发现了以下可能有意义的事情：\n\n"
+            f"/task 我为您发现了以下可能有意义的事情：\n\n"
             f"【{self.project_name}】\n"
             f"简介：{self.description}\n"
             f"业务场景：{self.business_scenario}\n"
