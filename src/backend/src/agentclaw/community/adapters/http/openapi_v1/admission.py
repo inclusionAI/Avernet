@@ -785,7 +785,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # The caller's own identity. An app-only caller names no end user, so there
     # is nothing to return — its scope question is answered by
     # ``GET /openapi/v1/bots/authorized`` instead.
-    ("GET", "/openapi/v1/caller"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/org/user"): AdmissionMode.REFUSED,
     # Local creation has no existing bot for a grant to cover and may initiate
     # Passport consent. Polling completes that same creation transaction, so
     # both require a human on the wire.
