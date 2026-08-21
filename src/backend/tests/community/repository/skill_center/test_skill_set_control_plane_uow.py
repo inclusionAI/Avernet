@@ -176,6 +176,28 @@ def test_ensure_active_skillset_installations_only_materializes_active_ordinary_
                 ),
                 SkillSetSkill(
                     skill_set_id=default.id, skill_id=default_skill.id, env="dev"
+                ),
+            ]
+        )
+
+    repository = SkillSetControlPlaneRepository(db)
+
+    assert (
+        repository.ensure_active_skillset_installations(
+            bot_id="bot", owner_id="owner", engine_type="openclaw"
+        )
+        == 1
+    )
+    assert (
+        repository.ensure_active_skillset_installations(
+            bot_id="bot", owner_id="owner", engine_type="openclaw"
+        )
+        == 0
+    )
+    with db.orm_session() as session:
+        assert {row.skill_id for row in session.query(BotSkillInstallation).all()} == {1}
+
+
 def test_global_default_reads_apply_owner_bot_exclusions_without_hiding_membership():
     """Global Default is visible to every Bot, but its content is per Bot."""
     db = _Database()
@@ -229,26 +251,19 @@ def test_global_default_reads_apply_owner_bot_exclusions_without_hiding_membersh
 
     repository = SkillSetControlPlaneRepository(db)
 
-    assert (
-        repository.ensure_active_skillset_installations(
-            bot_id="bot", owner_id="owner", engine_type="openclaw"
-        )
-        == 1
-    )
-    # A repeat does not resurrect or modify an already materialized relation.
-    assert (
-        repository.ensure_active_skillset_installations(
-            bot_id="bot", owner_id="owner", engine_type="openclaw"
-        )
-        == 0
-    )
-
-    with db.orm_session() as session:
-        installed = {
-            row.skill_id for row in session.query(BotSkillInstallation).all()
-        }
-        assert installed == {1}
-
+    assert repository.get_set(
+        bot_id="default", owner_id="owner-a", set_id=str(default.id), engine_type="openclaw"
+    )["is_default"] is True
+    assert [item["name"] for item in repository.list_skills(
+        bot_id="default", owner_id="owner-a", set_id=str(default.id), engine_type="openclaw"
+    )] == ["included"]
+    assert [item["server_code"] for item in repository.list_mcps(
+        bot_id="default", owner_id="owner-a", set_id=str(default.id), engine_type="openclaw"
+    )] == ["mcp.included"]
+    # The same system membership remains intact for another owner's Bot.
+    assert [item["name"] for item in repository.list_skills(
+        bot_id="default", owner_id="owner-b", set_id=str(default.id), engine_type="openclaw"
+    )] == ["included", "excluded"]
 
 def test_ensure_active_skillset_installations_uses_install_repository_upsert_seam():
     db = _Database()
@@ -309,19 +324,6 @@ def test_ensure_active_skillset_installations_does_not_resurrect_deactivated_set
     )
     with db.orm_session() as session:
         assert session.query(BotSkillInstallation).count() == 0
-    assert repository.get_set(
-        bot_id="default", owner_id="owner-a", set_id=str(default.id), engine_type="openclaw"
-    )["is_default"] is True
-    assert [item["name"] for item in repository.list_skills(
-        bot_id="default", owner_id="owner-a", set_id=str(default.id), engine_type="openclaw"
-    )] == ["included"]
-    assert [item["server_code"] for item in repository.list_mcps(
-        bot_id="default", owner_id="owner-a", set_id=str(default.id), engine_type="openclaw"
-    )] == ["mcp.included"]
-    # The same system membership remains intact for another owner's Bot.
-    assert [item["name"] for item in repository.list_skills(
-        bot_id="default", owner_id="owner-b", set_id=str(default.id), engine_type="openclaw"
-    )] == ["included", "excluded"]
 
 
 def test_cross_owner_set_id_is_not_readable_or_mutable_for_shared_default_bot_id():
