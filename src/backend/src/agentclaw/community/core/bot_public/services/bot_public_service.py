@@ -995,9 +995,8 @@ class BotPublicService:
             # Skip device sync in local mode: the engine's /api/bot/config endpoint writes
             # ROLE/VISIBILITY to a flat file that nothing on the engine side actually reads.
             # Locally it fails because /home/admin/.credentials doesn't exist on macOS.
-            # Task 2.1: 走 resolver + dispatcher,binding/conn_info 由 resolver
-            # 内部查 — caller 不再透传 binding_id / nick_name。
-            # Mode never reaches this service — Rule 14.
+            # Binding and connection details are resolved inside the device
+            # context resolver; callers only provide the bot and owner identity.
             self.sync_bot_config_to_device(
                 bot_id=bot_id,
                 user_id=owner_id,
@@ -1017,15 +1016,10 @@ class BotPublicService:
     ) -> Dict[str, Any]:
         """通过 BaaS/Arca/Teclaw 链路把 bot config 同步到容器。
 
-        Task 2.1: 走 resolver + DeviceSyncDispatcher 收口,入参精简为
-        ``(bot_id, user_id, public, permission_owner)`` — binding 由
-        resolver 内部查,nick_name 死参兜底成 user_id(plugin 内不读)。
-
-        Rule 14: this service is mode-blind. Resolver/dispatcher 替代
-        旧 ``DeviceSyncPluginSupplier.for_binding``。无 binding /
-        无可用 provider 时 resolver 抛 ``DeviceNotBoundError`` /
-        ``UnknownProviderError``,我们捕获并转 ``{"success": False, ...}``
-        — 与旧 ``DeviceSyncUnavailableError`` 的 wire shape 对齐。
+        The resolver owns binding and connection lookup; the dispatcher selects
+        the provider-specific Core ``DeviceSync`` service. Missing bindings or
+        unsupported providers are converted to the established failure-result
+        shape instead of escaping to the caller.
         """
         from agentclaw.community.core.devices.services.device_context import (
             DeviceNotBoundError,

@@ -1,7 +1,6 @@
 """CommunityDeviceSyncDispatcher — Rule 20 community dispatcher Plugin.
 
-Moved out of ``plugins/community/device_sync.py`` (CHG-5). A selection-only
-dispatcher that nominally inherits :class:`DeviceSyncDispatcher` and is
+A selection-only dispatcher that inherits :class:`DeviceSyncDispatcher` and is
 decorated ``@plugin_impl``. It holds a DI-injected
 ``Callable[[], DeviceSync]`` factory and returns its Core service for any
 ``ctx``, preserving the no-op log line. Concrete service construction stays in

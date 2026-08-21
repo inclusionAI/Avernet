@@ -1,7 +1,7 @@
 """LocalDeviceSyncDispatcher — Rule 20 LOCAL dispatcher Plugin (selection only).
 
-New Rule 20 entry (CHG-6). A selection-only dispatcher that nominally inherits
-:class:`DeviceSyncDispatcher` and is decorated ``@plugin_impl(mode=LOCAL)``.
+A selection-only dispatcher that inherits :class:`DeviceSyncDispatcher` and
+is decorated ``@plugin_impl(mode=LOCAL)``.
 It selects a DI-injected ``Callable[[], DeviceSync]`` factory. It contains
 selection only — no HTTP, filesystem, or provider workflow — and is NOT bound
 as the general singlebox/test/community dispatcher (``CommunityDeviceSyncModule``

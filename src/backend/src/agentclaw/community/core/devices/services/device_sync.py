@@ -8,8 +8,8 @@ returned by the Plugin Protocol :class:`DeviceSyncDispatcher` (see
 services (Community/Local under the community tree, Arca/BaaS/Teclaw under the
 corp tree) and is selected by the dispatcher implementations.
 
-``DeviceSyncUnavailableError`` is relocated here from the former
-``plugin_api.device_sync`` module; it is part of the Core contract surface.
+``DeviceSyncUnavailableError`` is part of the Core contract surface so
+callers do not depend on a concrete dispatcher implementation.
 """
 from __future__ import annotations
 

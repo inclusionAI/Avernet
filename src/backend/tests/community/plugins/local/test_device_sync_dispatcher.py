@@ -3,8 +3,8 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from agentclaw.community.core.devices.services.community_device_sync import (
-    CommunityDeviceSyncService,
+from agentclaw.community.core.devices.services.local_device_sync import (
+    LocalDeviceSyncService,
 )
 from agentclaw.community.plugins.local.device_sync_dispatcher import (
     LocalDeviceSyncDispatcher,
@@ -12,7 +12,7 @@ from agentclaw.community.plugins.local.device_sync_dispatcher import (
 
 
 def test_dispatch_returns_service_created_by_injected_factory():
-    service = CommunityDeviceSyncService()
+    service = LocalDeviceSyncService(skills_dir=None)
     factory = Mock(return_value=service)
     dispatcher = LocalDeviceSyncDispatcher(device_sync_factory=factory)
 

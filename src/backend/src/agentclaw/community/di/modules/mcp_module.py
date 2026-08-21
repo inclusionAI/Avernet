@@ -69,9 +69,8 @@ class McpModule(Module):
         binder.bind(MCPMarketService, to=MCPMarketService, scope=singleton)
         binder.bind(MCPAuthService, to=MCPAuthService, scope=singleton)
         binder.bind(MCPConfigService, to=MCPConfigService, scope=singleton)
-        # MCP delivery now rides the ``DeviceSyncPlugin`` boundary (folded in
-        # from the former ``DeviceMCPSyncPlugin``); ``MCPSyncService`` resolves a
-        # per-bot plugin via ``DeviceContextResolver`` + ``DeviceSyncDispatcher``.
+        # MCP delivery uses the per-bot Core ``DeviceSync`` selected through
+        # ``DeviceContextResolver`` + ``DeviceSyncDispatcher``.
         # No separate device-MCP-sync binding.
         # Single unified ORM repository for both runtimes — differs only
         # by the injected ``DatabasePlugin`` (``orm_session()``). No

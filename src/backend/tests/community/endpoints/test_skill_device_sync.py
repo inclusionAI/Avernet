@@ -1,15 +1,8 @@
-"""Golden-master device-push tests for the skill-center entrypoints (Task 14a).
+"""Golden-master tests for skill-center DeviceSync calls.
 
-Pins the **device sync_symlinks calls** the skill entrypoints make. Task
-14a relocates the push from the adapter layer into the service layer; the
-contract is ARCA byte-equivalence, so these record the calls against
-current code and must pass **unchanged** after the refactor.
-
-The device boundary is the **real** local plugin (``LocalDeviceSyncPlugin``
-carrying the ``MockSeam``). Phase 2 Task 6 收口后 ``DeviceSyncPluginSupplier``
-已删,改注入 ``DeviceSyncDispatcher``。本测试通过 monkey-patch dispatcher.dispatch
-让其返回一个 recording ``LocalDeviceSyncPlugin``(skills_dir=None → noop),
-再读其 ``calls``。The core symlink orchestration runs for real.
+The tests record ``sync_symlinks`` calls selected through
+``DeviceContextResolver`` and ``DeviceSyncDispatcher`` while running the Core
+symlink orchestration against a real local filesystem.
 
 ``activate``/``deactivate`` first run a real symlink op on the *local*
 filesystem (genuinely reachable in local mode), so the seed prepares the
@@ -69,7 +62,7 @@ def _expected_symlink(engine: str) -> dict:
 def _record_for_bot(world) -> RecordingLocalDeviceSync:
     """Patch ``DeviceSyncDispatcher.dispatch``, ``DeviceFilesystemDispatcher.
     dispatch``/``for_bot``, and ``DeviceContextResolver.resolve_for_bot`` so
-    the activate/deactivate paths can drive a stable, recording local plugin
+    the activate/deactivate paths can drive a stable recording DeviceSync service
     without a real device binding.
 
     The test bots are inserted via the repo without a real binding, so the

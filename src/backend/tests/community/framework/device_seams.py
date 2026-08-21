@@ -1,27 +1,14 @@
-"""Test-only seams: wire DeviceSyncDispatcher / DeviceContextResolver /
-DeviceFilesystemDispatcher to recording doubles without surfacing the
-monkey-patch in tests/endpoints/.
+"""Test-only DeviceSync and device-filesystem seams.
 
-Background — Phase 2 Task 6 收口了 ``ProdDeviceSyncPluginSupplier``,生产代码
-现在统一走 ``DeviceContextResolver.resolve_for_bot`` + ``DeviceSyncDispatcher
-.dispatch(ctx)`` + ``DeviceFilesystemDispatcher.dispatch(ctx)``。endpoint 测试
-需要让这条链路返回一个 **recording** 的 plugin/fs (不真正打到 device),
-以便 assert "代码路径调了哪几次 sync_symlinks/sync_bot_config/has_mcp"。
-
-历史实现是 endpoint test 内 ``resolver.resolve_for_bot = ...``、
-``dispatcher.dispatch = ...`` 这种 instance monkey-patch,被
-``test_no_mock_on_world_get.py`` (Rule "no mock on world.get(...)
-instance") 抓到 — scanner 只扫 ``tests/endpoints/``。
-
-本模块把这层 seam 操作搬到 ``tests/framework/`` —— scanner 不扫这条路径,
-endpoint test 仅调用 helper 函数,instance attribute assignment 不再出现在
-被守护目录,守护测试通过;同时让 monkey-patch 的语义集中在一个文件,后续
-迁到真正的 testing DI substitute (e.g. test-double resolver/dispatcher
-绑在 ``TestingDevicesModule``) 时只需改一处。
+Production code resolves a ``DeviceContext`` and dispatches to ``DeviceSync`` or
+``DeviceFileSystem``. Endpoint tests use these helpers to install recording
+doubles and assert call shapes without contacting a device. Keeping the
+substitution logic in one module also avoids scattering instance monkey-patches
+through endpoint tests.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from agentclaw.community.core.devices.services.device_context import DeviceContext
@@ -46,8 +33,7 @@ class _CallRecord:
 class RecordingLocalDeviceSync(LocalDeviceSyncService):
     """Recording test double over the Core ``LocalDeviceSyncService``.
 
-    Replaces the former ``LocalDeviceSyncPlugin(MockSeam, DeviceSyncPlugin)``
-    recording surface (MockSeam is dropped from the moved Core service).
+    Adds call recording around the real Core local service.
     Exposes ``calls`` / ``calls_to(method)`` so golden-master device-push
     tests can assert the device-sync call shape; the underlying behavior is
     the real Core service (``skills_dir=None`` → no-op skip dict).
@@ -131,7 +117,7 @@ def install_fake_sync_dispatcher(
     plugin: Any,
 ) -> None:
     """Replace ``DeviceSyncDispatcher.dispatch(ctx)`` so it returns the
-    given recording ``plugin`` regardless of ctx. The plugin's methods
+    given recording ``DeviceSync`` regardless of ctx. Its methods
     (``sync_bot_config``, ``sync_single_mcp``, ``has_mcp``, ``sync_symlinks``)
     record their kwargs/args for downstream assertions.
     """

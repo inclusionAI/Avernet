@@ -15,10 +15,8 @@ seam IS this ``Plugin`` Protocol and consumers inject it directly. Each profile
 binds its impl to this key; callers reach it via
 ``resolver.resolve_for_bot(...) -> ctx`` then ``dispatcher.dispatch(ctx)``.
 
-``DeviceContext`` (core) and ``DeviceSync`` (core) are referenced by string
-forward annotations only — ``plugin_api/`` must not import ``core/`` (layer
-rule). The old Core-located ``core/devices/services/device_sync_dispatcher.py``
-module is deleted by CHG-17 (Task 14) after all production callers migrate.
+``DeviceContext`` and ``DeviceSync`` are referenced by string forward
+annotations so the Plugin API does not import concrete Core modules.
 """
 from __future__ import annotations
 
@@ -41,7 +39,7 @@ class DeviceSyncDispatcher(Plugin, Protocol):
     deliberately does NOT inherit ``Plugin``.
     """
 
-    def dispatch(self, ctx: "DeviceContext") -> "DeviceSync":
+    def dispatch(self, ctx: "DeviceContext") -> "DeviceSync":  # noqa: F821
         """Return the Core :class:`DeviceSync` service for ``ctx``
         (selected by ``ctx.provider`` / ``ctx.bot_type``)."""
         ...

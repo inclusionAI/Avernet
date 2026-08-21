@@ -181,7 +181,7 @@ class ChannelService:
                 channel.bind_bot_id, e,
             )
             return
-        # sync_symlinks([]) → TeclawDeviceSyncPlugin recomposes + POSTs the
+        # sync_symlinks([]) → the Teclaw DeviceSync service recomposes and posts the
         # artifact; the list arg is ignored (whole-artifact delivery). Run off the
         # event loop — the plugin's transport is synchronous httpx. The teclaw
         # plugin already catches transport/compose errors and returns a result

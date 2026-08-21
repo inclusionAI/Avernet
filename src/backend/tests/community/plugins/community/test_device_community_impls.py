@@ -4,7 +4,7 @@ Covers:
 - ``CommunityHealthProbe`` — direct-HTTP /readiness probe (all branches: no
   bindings, no-url binding, healthy/unhealthy/exception probes, payload parsing,
   list_bindings failure, sandbox unsupported).
-- ``CommunityDeviceSyncDispatcher`` / ``CommunityDeviceSyncPlugin`` — no-op sync.
+- ``CommunityDeviceSyncDispatcher`` / ``CommunityDeviceSyncService`` — no-op sync.
 - ``CommunityDeviceAdapterTransport`` — no-op relay transport.
 
 These ship in the community distribution, so they must be exercised directly
@@ -177,18 +177,18 @@ def test_sandbox_health_unsupported():
     assert "no sandbox runtime" in out["message"]
 
 
-# ── CommunityDeviceSyncDispatcher / CommunityDeviceSyncPlugin ─────────────────
+# ── CommunityDeviceSyncDispatcher / CommunityDeviceSyncService ────────────────
 
-def test_device_sync_dispatcher_returns_noop_plugin():
+def test_device_sync_dispatcher_returns_noop_service():
     ctx = SimpleNamespace(bot_id="bot-1", provider="baas")
     dispatcher = CommunityDeviceSyncDispatcher(
         device_sync_factory=lambda: CommunityDeviceSyncService()
     )
-    plugin = dispatcher.dispatch(ctx)
-    assert isinstance(plugin, CommunityDeviceSyncService)
+    service = dispatcher.dispatch(ctx)
+    assert isinstance(service, CommunityDeviceSyncService)
 
 
-def test_device_sync_plugin_noop_results():
+def test_device_sync_service_noop_results():
     p = CommunityDeviceSyncService()
     assert p.sync_symlinks([{"source": "a", "target": "b"}])["success"] is False
     assert p.sync_bot_config("bot", 1, "1", "OWNER", "u", "nick")["success"] is False

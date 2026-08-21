@@ -1,4 +1,4 @@
-"""Unit tests for LocalDeviceLifecycle (B9 — split out of LocalDeviceAccessor).
+"""Unit tests for LocalDeviceLifecycle.
 
 The singlebox device boot/shutdown participant: startup releases stale bindings,
 reallocates orphaned bots, and rebuilds the skills symlink tree; shutdown stops

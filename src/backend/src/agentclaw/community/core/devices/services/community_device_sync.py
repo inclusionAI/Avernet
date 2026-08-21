@@ -1,14 +1,14 @@
 """CommunityDeviceSyncService — Core no-op DeviceSync for the community profile.
 
-Moved out of ``plugins/community/device_sync.py`` (CHG-3). The community
-distribution ships no container runtime, so community device sync is an honest
+The community distribution ships no container runtime, so community device
+sync is an honest
 no-op: every symlink/bot-config call returns a uniform ``{"success": False}``
 result so callers degrade gracefully, and the MCP bool methods return ``True``
 so the multi-bot batch push counts the bot (Option B parity with the local/
 teclaw whole-artifact impls) without making any network call.
 
-This is a real Core service — not a ``Plugin``/``MockSeam``/``@plugin_impl``
-registry entry — so it does not inherit ``Plugin``. It is constructed by the
+This is a Core service rather than a Plugin implementation. It is constructed
+by the
 ``CommunityDeviceSyncModule`` DI root and returned by
 ``CommunityDeviceSyncDispatcher.dispatch(ctx)`` for any ``ctx``.
 """

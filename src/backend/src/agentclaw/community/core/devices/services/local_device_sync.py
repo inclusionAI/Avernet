@@ -1,6 +1,6 @@
 """LocalDeviceSyncService — Core local-mode DeviceSync service.
 
-Moved out of ``plugins/local/device_sync.py`` (CHG-4). Twomodes:
+It supports two modes:
 
 - **Pathlib fallback** (contract tests / standalone host / lifecycle-injected
   instance): ``skills_dir`` set, no ``baas_service``/``binding_ctx`` —
@@ -15,9 +15,8 @@ Moved out of ``plugins/local/device_sync.py`` (CHG-4). Twomodes:
   general full-absolute-URL ``HttpClient`` and sends the ``openclawToken``
   header per call.
 
-This is a real Core service — not a ``Plugin``/``MockSeam``/``@plugin_impl``
-registry entry — so it does not inherit ``Plugin``. ``sync_symlinks`` is a
-regular ``def`` (callers wrap it in ``asyncio.to_thread``).
+This is a Core service rather than a Plugin implementation. ``sync_symlinks``
+is synchronous; asynchronous callers run it in a worker thread.
 """
 from __future__ import annotations
 
@@ -99,7 +98,7 @@ class LocalDeviceSyncService(DeviceSync):
         self,
         symlinks: list[dict[str, str]],
     ) -> dict[str, Any]:
-        """BaaS 模式：调 adapter bindpath 接口对齐线上 ArcaDeviceSyncPlugin。
+        """BaaS 模式：调用 adapter bindpath 接口同步软链接。
 
         Reuses the injected ``Annotated[HttpClient, QUALIFIER_GENERAL]``
         full-absolute-URL client (NOT the Corp ``x-proxypass-token``
@@ -208,7 +207,6 @@ class LocalDeviceSyncService(DeviceSync):
         # sync_symlinks 是 sync 签名 (Protocol)；新线程跑独立 loop 避免死锁
         # (调用方在 anyio.to_thread 持当前 loop)。保留原 60s 外层超时。
         try:
-            import asyncio
             from concurrent.futures import ThreadPoolExecutor
 
             def _run() -> dict[str, Any]:
@@ -327,7 +325,7 @@ class LocalDeviceSyncService(DeviceSync):
     ) -> dict[str, Any]:
         """Noop in local mode — the target ``/api/bot/config`` endpoint
         runs inside the device sandbox, which isn't reachable on a dev
-        laptop. Returns a sentinel matching today's pre-Rule-14 behavior.
+        laptop. Returns the established local-mode skip result.
         """
         logger.info(
             "[LocalDeviceSyncService.sync_bot_config] bot=%s binding_id=%s — "

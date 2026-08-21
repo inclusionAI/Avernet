@@ -1,4 +1,4 @@
-"""Unit tests for LocalDeviceSyncService BaaS mode (plan-03).
+"""Unit tests for LocalDeviceSyncService BaaS mode.
 
 Migrated to the Core ``LocalDeviceSyncService``: the BaaS branch now uses an
 injected ``Annotated[HttpClient, QUALIFIER_GENERAL]`` instance instead of a
@@ -55,12 +55,9 @@ def _mock_response(status_code: int = 200, json_body: dict | None = None):
     return resp
 
 
-def _http_client(response=None, responses=None):
+def _http_client(response=None):
     client = MagicMock()
-    if responses is not None:
-        client.post.side_effect = responses
-    else:
-        client.post.return_value = response
+    client.post.return_value = response
     return client
 
 
@@ -201,10 +198,7 @@ def test_baas_sync_symlinks_empty_list_short_circuits(fs_baas, mock_baas):
     mock_baas.get_http_info.assert_not_called()
 
 
-# ────────────────────────────────────────────────────────────────────
-# Task 1: bindpath/clean 接口对齐 (R2 修复)
-# 参考线上 ArcaDeviceSyncService.sync_symlinks 的请求形态
-# ────────────────────────────────────────────────────────────────────
+# Bindpath/clean request-shape compatibility.
 
 
 def test_sync_symlinks_non_empty_calls_bindpath(mock_baas, binding_ctx):
