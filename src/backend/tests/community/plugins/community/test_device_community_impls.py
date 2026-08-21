@@ -185,7 +185,9 @@ def test_device_sync_dispatcher_returns_noop_plugin():
 
 def test_device_sync_plugin_noop_results():
     p = CommunityDeviceSyncPlugin()
-    assert p.sync_symlinks([{"source": "a", "target": "b"}])["success"] is False
+    symlink_result = p.sync_symlinks([{"source": "a", "target": "b"}])
+    assert symlink_result["success"] is True
+    assert symlink_result["skipped"] is True
     assert p.sync_bot_config("bot", 1, "1", "OWNER", "u", "nick")["success"] is False
     # MCP bool methods return True (Option B: counted, no network call)
     assert p.sync_all_mcp_servers([{"server_code": "x"}]) is True
