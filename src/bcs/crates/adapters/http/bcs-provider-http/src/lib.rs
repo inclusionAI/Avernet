@@ -1205,9 +1205,6 @@ fn provider_body_log(body: &ProviderWebhookRequest) -> String {
         Ok(value) => value,
         Err(error) => return format!("{{\"serialize_error\":\"{}\"}}", error),
     };
-    if body.method == "interaction.resolve" {
-        redact_interaction_resolution_params(&mut redacted);
-    }
     if let Some(attachments) = redacted
         .get_mut("attachments")
         .and_then(Value::as_array_mut)
@@ -1221,24 +1218,6 @@ fn provider_body_log(body: &ProviderWebhookRequest) -> String {
     serde_json::to_string(&redacted).unwrap_or_else(|error| {
         format!("{{\"serialize_error\":\"{}\"}}", error)
     })
-}
-
-fn redact_interaction_resolution_params(body: &mut Value) {
-    const SAFE_KEYS: &[&str] = &[
-        "bcsRunId",
-        "runId",
-        "interactionId",
-        "kind",
-        "idempotencyKey",
-    ];
-    let Some(params) = body.get_mut("params").and_then(Value::as_object_mut) else {
-        return;
-    };
-    for (key, value) in params {
-        if !SAFE_KEYS.contains(&key.as_str()) {
-            *value = Value::String("<redacted>".to_string());
-        }
-    }
 }
 
 fn sse_data_log(event: &str, data: &str) -> String {
@@ -2243,7 +2222,7 @@ Connection: keep-alive\r\n\
     }
 
     #[test]
-    fn provider_body_log_redacts_interaction_answers_and_extensions() {
+    fn provider_body_log_preserves_interaction_business_payload() {
         let body = ProviderWebhookRequest {
             frame_type: "req".to_string(),
             id: "resolve-frame-1".to_string(),
@@ -2277,11 +2256,10 @@ Connection: keep-alive\r\n\
 
         let logged = provider_body_log(&body);
 
-        assert!(logged.contains("\"action\":\"<redacted>\""));
-        assert!(logged.contains("\"answers\":\"<redacted>\""));
-        assert!(logged.contains("\"providerExtension\":\"<redacted>\""));
-        assert!(!logged.contains("sensitive answer"));
-        assert!(!logged.contains("sensitive extension"));
+        assert!(logged.contains("\"action\":\"submit\""));
+        assert!(logged.contains("sensitive answer"));
+        assert!(logged.contains("sensitive extension"));
+        assert!(!logged.contains("<redacted>"));
     }
 
     #[test]
