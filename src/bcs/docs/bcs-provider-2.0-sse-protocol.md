@@ -370,7 +370,10 @@ Resolve 数据：
 
 约束：
 
-- `command`、非空 `options` 必填；`cwd/toolCallId` 可选。
+- 非空 `options` 必填；`command/cwd/toolCallId` 可选。
+- Provider 提供 `command` 时必须是非空字符串；部分 runtime 只能提供
+  `interactionId/toolCallId` 等审批关联信息，此时可以省略 `command`，消费者也必须
+  支持无 command 的展示。
 - 每项 `decision/label` 必填，`description` 可选；decision 在本 interaction 内唯一。
 - decision 是 Provider 定义的可扩展字符串，BCS 不维护封闭枚举，但 resolve 必须
   选择原 requested options 中的值。
@@ -864,7 +867,7 @@ request/interaction ID、运行上下文以及 engine-native response。统一�
 
 | kind | Provider requested 必须能提供 | resolve 转回引擎所需信息 |
 | --- | --- | --- |
-| `exec` | interactionId、command、动态 decisions | interactionId + decision；toolCallId 可选关联 |
+| `exec` | interactionId、动态 decisions；command/toolCallId 可选 | interactionId + decision；toolCallId 可选关联 |
 | `ask_user` | 稳定 questionId、question、可选 options | action + questionId 到 values[]；Provider 可按原顺序或问题文本转回 |
 | `mode_switch` | 当前可用 decisions；fromMode/targetMode 可选 | interactionId + decision；Provider 查回目标模式/原生 reply |
 
