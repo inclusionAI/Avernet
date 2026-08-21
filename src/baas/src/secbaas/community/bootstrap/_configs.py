@@ -227,6 +227,7 @@ class PluginConfig(ConfigSchema):
 
     engine_adapter: str = Field(default="stub", pattern=r"^(real|stub)$")
     file_transfer: str = Field(default="stub", pattern=r"^(real|stub)$")
+    eval_env: str = Field(default="stub", pattern=r"^(real|stub)$")
     database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
     sandbox: SandboxPluginConfig = Field(default_factory=SandboxPluginConfig)
 
