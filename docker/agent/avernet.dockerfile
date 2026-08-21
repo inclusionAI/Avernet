@@ -145,7 +145,7 @@ RUN groupadd --gid 10001 admin 2>/dev/null || true \
                /home/admin/logs \
                /var/log/supervisor \
                /var/run/agentclaw \
-    && chown -R admin:admin /home/admin
+    && chown -R admin:admin /home/admin /var/run/agentclaw
 
 # Supervisor configuration: engine(autostart=false) + openclaw(autostart=false).
 COPY docker/agent/avernet-supervisord.conf /etc/supervisor/supervisord.conf
