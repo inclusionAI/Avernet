@@ -57,15 +57,17 @@ URL = f"/openapi/v1/bots/{BOT}/probe"
 class _Bots:
     """A bot repository that answers only for the one bot under test."""
 
-    def __init__(self, *, exists: bool = True, raises: bool = False) -> None:
-        self.exists, self.raises = exists, raises
+    def __init__(
+        self, *, exists: bool = True, raises: bool = False, owner: str = OWNER
+    ) -> None:
+        self.exists, self.raises, self.owner = exists, raises, owner
 
     def get_by_id_and_owner(self, bot_id, owner_id, **_):
         if self.raises:
             raise RuntimeError("database is unavailable")
-        if not self.exists or (bot_id, owner_id) != (BOT, OWNER):
+        if not self.exists or (bot_id, owner_id) != (BOT, self.owner):
             return None
-        return {"id": 7, "bot_id": BOT, "owner_id": OWNER, "env": "test"}
+        return {"id": 7, "bot_id": BOT, "owner_id": self.owner, "env": "test"}
 
 
 class _Collaborators:
@@ -354,6 +356,83 @@ def test_audit_failure_does_not_fail_the_request():
 
     assert response.status_code == 200
     assert response.json() == {"ok": "write"}
+
+
+def test_audit_failure_log_bounds_caller_supplied_ids(caplog):
+    """The record of a *dropped* record must not itself be forgeable.
+
+    This branch is reached only after the check passed, so ``owner_id`` had to
+    match the addressed bot's stored owner — better bounded than the refusal
+    branch, where any value at all reaches the log. It goes through the same
+    helper anyway: this line is the only evidence that an audit row was lost,
+    so it is the last line that should be paddable or splittable by the party
+    whose action went unrecorded.
+    """
+    poisoned = "u-owner\nFAKE AUDIT LINE"
+    client, _ = _surface(
+        level=PermissionLevel.ADMIN,
+        bar=PermissionLevel.MEMBER,
+        bots=_Bots(owner=poisoned),
+        audit=_Audit(raises=True),
+    )
+
+    with caplog.at_level("ERROR"):
+        assert _post(client, owner=poisoned).status_code == 200
+
+    dropped = [r for r in caplog.records if "audit write failed" in r.getMessage()]
+
+    assert dropped, "the dropped audit row was not logged at all"
+    line = dropped[0].getMessage()
+    assert "\n" not in line, "a caller-supplied newline reached the log verbatim"
+    assert "FAKE AUDIT LINE" in line, "the value should be escaped, not dropped"
+
+
+def test_the_refusal_message_cannot_forge_the_app_level_404_line(caplog):
+    """The refusal reaches a second log line by a route the seam does not own.
+
+    ``app.py``'s 404 handler renders ``str(exc)`` through ``%s``, so the
+    exception message is a caller-supplied value on a log line written outside
+    this module. Bounding it where the exception is raised is what keeps that
+    handler identical to its three siblings instead of a special case.
+    """
+    client, _ = _surface(level=PermissionLevel.NONE, bar=PermissionLevel.ADMIN)
+
+    with caplog.at_level("WARNING"):
+        response = client.get(
+            "/openapi/v1/bots/b-1%0AFAKE 404 LINE/probe",
+            params={"user_id": CALLER, "owner_id": OWNER},
+        )
+
+    assert response.status_code == 404
+    handled = [r for r in caplog.records if r.getMessage().startswith("[Public 404]")]
+
+    assert handled, "the refusal never reached the app-level handler"
+    assert "\n" not in handled[0].getMessage(), (
+        "the exception message carried a caller-supplied newline into app.py's log"
+    )
+
+
+def test_unadjudicable_log_bounds_the_addressed_bot(caplog):
+    """The least bounded of the lot: no lookup has succeeded yet.
+
+    When the injector is unwired, ``_level`` refuses before the bot is
+    resolved, so ``bot_id`` here is whatever the caller put in the path and is
+    constrained by nothing at all.
+    """
+    client, _ = _surface(level=PermissionLevel.OWNER)
+    client.app.state.injector = None
+
+    with caplog.at_level("ERROR"):
+        assert client.get(
+            "/openapi/v1/bots/b-1%0AFAKE UNWIRED LINE/probe",
+            params={"user_id": CALLER, "owner_id": OWNER},
+        ).status_code in (404, 500)
+
+    unwired = [r for r in caplog.records if "cannot adjudicate" in r.getMessage()]
+
+    assert unwired, "the unadjudicable request was not logged at all"
+    line = unwired[0].getMessage()
+    assert "\n" not in line, "a caller-supplied newline reached the log verbatim"
 
 
 # ── what the seam is not ─────────────────────────────────────────────────────

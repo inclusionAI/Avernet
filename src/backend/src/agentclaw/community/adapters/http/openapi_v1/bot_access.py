@@ -95,13 +95,11 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
     ) -> AsyncIterator[None]:
         level = _level(request, bot_id=bot_id, caller_id=caller_id, owner_id=owner_id)
         if level < rule.level:
-            # Both ids go to the log because the response cannot carry them: it
-            # is a fixed "Not found", so this line is the only record of who was
-            # refused what. ``%r`` on the caller id deliberately — this branch
-            # runs only for a value the server refused, so quoting keeps a
-            # forged multi-line id from poisoning the refusal audit trail.
-            # Both ids go through ``for_log``. This branch runs only for values
-            # the server refused, so by construction they are caller-chosen:
+            # The ids go to the log because the response cannot carry them: it
+            # is a fixed "Not found", so this line is the only record of who
+            # was refused what. All of them go through ``for_log``. This branch
+            # runs only for values the server refused, so by construction they
+            # are caller-chosen:
             # ``owner_id`` is a query parameter declared ``min_length=1`` with
             # no upper bound, and ``bot_id`` is a path segment that arrives
             # percent-decoded — so either can carry newlines or arbitrary bulk
@@ -115,7 +113,13 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
                 for_log(bot_id),
                 for_log(owner_id),
             )
-            raise BotAccessRefusedError(f"bot {bot_id} not found")
+            # ``for_log`` in the exception message too. It never reaches a
+            # caller — ``ENVELOPE_ERRORS`` maps this to a fixed "Not found" —
+            # but ``app.py``'s 404 handler renders ``str(exc)`` through ``%s``,
+            # so an unescaped id here would leak into that line by the back
+            # door. Bounding it at the source keeps that handler identical to
+            # its three siblings rather than making this one a special case.
+            raise BotAccessRefusedError(f"bot {for_log(bot_id)} not found")
 
         yield
 
@@ -147,13 +151,15 @@ def _level(
         logger.error(
             "[bot_access] cannot adjudicate bot=%s: the repository or the "
             "collaborator service is not wired; refusing",
-            bot_id,
+            for_log(bot_id),
         )
         return PermissionLevel.NONE
     try:
         bot = bots.get_by_id_and_owner(bot_id, owner_id)
     except Exception:
-        logger.exception("[bot_access] bot lookup failed for bot=%s; refusing", bot_id)
+        logger.exception(
+            "[bot_access] bot lookup failed for bot=%s; refusing", for_log(bot_id)
+        )
         return PermissionLevel.NONE
     if not bot:
         return PermissionLevel.NONE
@@ -166,7 +172,8 @@ def _level(
         )
     except Exception:
         logger.exception(
-            "[bot_access] collaborator lookup failed for bot=%s; refusing", bot_id
+            "[bot_access] collaborator lookup failed for bot=%s; refusing",
+            for_log(bot_id),
         )
         return PermissionLevel.NONE
 
@@ -234,12 +241,18 @@ def _audit(
             }
         )
     except Exception:
+        # ``for_log`` here too, so the module has one rule for rendering a
+        # caller-supplied id rather than one per branch. These three reached a
+        # bot that resolved, so they are better bounded than the refusal
+        # branch's — but this line is the *only* evidence that an audit row was
+        # dropped, which is precisely the line worth keeping unforgeable.
+        # ``route`` is the matched route template, which the server owns.
         logger.exception(
             "[bot_access] audit write failed and was dropped: bot=%s owner=%s "
-            "actor=%r route=%s — the request succeeded and is not affected",
-            bot_id,
-            owner_id,
-            actor_id,
+            "actor=%s route=%s — the request succeeded and is not affected",
+            for_log(bot_id),
+            for_log(owner_id),
+            for_log(actor_id),
             route,
         )
 
