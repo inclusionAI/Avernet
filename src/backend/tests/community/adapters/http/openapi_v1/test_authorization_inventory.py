@@ -16,6 +16,8 @@ surface silently serving unchecked operations.
 
 from __future__ import annotations
 
+import importlib
+import inspect
 from typing import Annotated
 
 import pytest
@@ -23,10 +25,27 @@ from fastapi import APIRouter, Depends, FastAPI, Query
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from agentclaw.community.adapters.http.openapi_v1.admission import ADMISSION
+from agentclaw.community.adapters.http.openapi_v1.authorization import (
+    AUTHORIZATION,
+    OWNER_SCOPED,
+    SCAFFOLDING_MODES,
+    Check,
+    NoCheck,
+    PublicAPIRoute,
+    PublicRouteNotAuthorized,
+    ServiceChecked,
+    assert_every_route_authorized,
+    scaffolding_row_count,
+)
 from tests.community.adapters.http.openapi_v1._route_walk import (
+    dependant_of,
     depends_on,
     effective_routes,
+    operations,
     original_route_of,
+    path_of,
 )
 
 
@@ -113,3 +132,202 @@ def test_attached_dependency_publishes_its_parameters(probe_surface):
     published = {(p["name"], p["in"]) for p in operation.get("parameters", [])}
 
     assert ("owner_id", "query") in published
+
+
+# ── the inventory ────────────────────────────────────────────────────────────
+
+
+def _live_operations():
+    return {key for key, _ in operations(build_public_router())}
+
+
+def test_the_surface_and_the_table_agree_exactly():
+    """No operation without a decision, and no decision without an operation.
+
+    The first half is also enforced structurally — an operation with no row
+    cannot be constructed — so this failing means something got past that,
+    which is worth knowing loudly.
+    """
+    live, table = _live_operations(), set(AUTHORIZATION)
+
+    assert live - table == set(), "operations with no AUTHORIZATION row"
+    assert table - live == set(), "AUTHORIZATION rows matching no operation"
+
+
+def test_authorization_and_admission_cover_the_same_operations():
+    """Two tables, two questions, one surface.
+
+    ``ADMISSION`` decides whether a *machine* caller is admitted;
+    ``AUTHORIZATION`` decides what a *person* must be to the bot. They are
+    deliberately separate, but they describe the same set of operations, and a
+    row added to one and forgotten in the other is the drift this catches.
+    """
+    assert set(AUTHORIZATION) == set(ADMISSION)
+
+
+def test_every_route_is_a_public_api_route():
+    """Every operation was built through the class that reads the table.
+
+    A router constructed without ``route_class=PublicAPIRoute`` would serve
+    operations whose row was never read — the one way to be absent from the
+    fail-closed default while still appearing in the table.
+    """
+    offenders = [
+        f"{sorted(getattr(ctx, 'methods', None) or {'WEBSOCKET'})} {path_of(ctx)}"
+        for ctx in effective_routes(build_public_router())
+        if not isinstance(original_route_of(ctx), PublicAPIRoute)
+        and hasattr(original_route_of(ctx), "methods")
+    ]
+
+    assert offenders == []
+
+
+def test_an_unlisted_operation_cannot_be_constructed():
+    """The fail-closed default, exercised rather than described.
+
+    This is the property the whole design rests on: a new operation is refused
+    until someone decides what governs it. It fails at *decoration*, so the
+    module never finishes importing and the application never starts.
+    """
+    router = APIRouter(route_class=PublicAPIRoute)
+
+    with pytest.raises(PublicRouteNotAuthorized) as refusal:
+
+        @router.get("/openapi/v1/bots/{bot_id}/an-operation-nobody-decided-about")
+        async def unlisted(bot_id: str) -> dict:  # pragma: no cover - never built
+            return {}
+
+    assert "an-operation-nobody-decided-about" in str(refusal.value)
+    assert "AUTHORIZATION" in str(refusal.value)
+
+
+def test_assembly_refuses_a_row_that_matches_no_operation():
+    """A decision left behind by a rename stops the application too.
+
+    Not pedantry: a stale row is how the table stops describing the surface,
+    and a table that no longer describes the surface cannot be trusted to say
+    an operation is covered.
+    """
+    router = build_public_router()
+    AUTHORIZATION[("GET", "/openapi/v1/bots/{bot_id}/renamed-away")] = OWNER_SCOPED
+    try:
+        with pytest.raises(PublicRouteNotAuthorized) as refusal:
+            assert_every_route_authorized(router)
+        assert "renamed-away" in str(refusal.value)
+    finally:
+        AUTHORIZATION.pop(("GET", "/openapi/v1/bots/{bot_id}/renamed-away"), None)
+
+
+def test_every_nocheck_row_carries_a_reason():
+    """An empty reason turns a decision into an oversight that reads like one."""
+    missing = [
+        key for key, rule in AUTHORIZATION.items()
+        if isinstance(rule, NoCheck) and not rule.reason.strip()
+    ]
+
+    assert missing == []
+
+
+def test_every_service_checked_row_cites_a_real_enforcer():
+    """The citation must resolve, and that module must really check something.
+
+    This is the *most* this file can prove about a ``ServiceChecked`` row. It
+    cannot prove the level is right — that is read by hand at migration, and
+    the table's own docstring says so. Proving the module exists and performs a
+    permission check at least stops a row citing something that was deleted or
+    renamed out from under it.
+    """
+    unverifiable = []
+    for key, rule in AUTHORIZATION.items():
+        if not isinstance(rule, ServiceChecked):
+            continue
+        module_path = rule.where.replace(
+            "…openapi_v1", "agentclaw.community.adapters.http.openapi_v1"
+        ).replace("…core", "agentclaw.community.core")
+        try:
+            module = importlib.import_module(module_path)
+        except ImportError:
+            unverifiable.append(f"{key}: cannot import {module_path}")
+            continue
+        source = inspect.getsource(module)
+        if not any(
+            marker in source
+            for marker in (
+                "permission",
+                "PermissionLevel",
+                "has_bot_access",
+                "resolve_operable_bot",
+                "can_manage_bot",
+                "CollaboratorService",
+            )
+        ):
+            unverifiable.append(f"{key}: {module_path} performs no visible check")
+
+    assert unverifiable == []
+
+
+def test_no_row_is_check_yet():
+    """This change builds the seam; adopting it is per-group follow-up work.
+
+    When the first group migrates this test is what says so, and it should be
+    deleted then rather than weakened.
+    """
+    adopted = [key for key, rule in AUTHORIZATION.items() if isinstance(rule, Check)]
+
+    assert adopted == [], "a group adopted the seam — see spec.md Decisions 4"
+
+
+def test_scaffolding_burn_down_is_reported():
+    """The migration's remaining distance is a number, and it only goes down.
+
+    It also fails if a *new* row is added in a scaffolding mode, which is the
+    quiet way the final shape becomes unreachable.
+    """
+    counted = sum(
+        1 for rule in AUTHORIZATION.values() if isinstance(rule, SCAFFOLDING_MODES)
+    )
+
+    assert scaffolding_row_count() == counted
+    assert counted == len(AUTHORIZATION) - sum(
+        1 for rule in AUTHORIZATION.values() if isinstance(rule, NoCheck)
+    )
+
+
+# ── inertness ────────────────────────────────────────────────────────────────
+
+
+def test_no_live_operation_carries_the_gate():
+    """Why this change cannot have altered any answer, proved structurally.
+
+    A status-for-status sweep would only sample the behaviour; this shows the
+    seam is attached to nothing at all, so there is no request it could be
+    reached on. When the first group migrates, this test changes to name the
+    operations that legitimately carry it.
+    """
+    from agentclaw.community.adapters.http.openapi_v1.bot_access import require_check
+
+    gated = [
+        path_of(ctx)
+        for ctx in effective_routes(build_public_router())
+        if depends_on(dependant_of(ctx), require_check)
+    ]
+
+    assert gated == []
+
+
+def test_service_level_edit_locks_are_untouched():
+    """The seam carries no lock; that must not read as "the surface lost locks".
+
+    Channels and service publications enforce one today and keep doing so
+    (``spec.md`` *Decisions* 1). If these helpers are ever removed, the seam's
+    "no lock" decision silently becomes "no lock anywhere".
+    """
+    channels = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.channels.router"
+    )
+    publications = importlib.import_module(
+        "agentclaw.community.core.service_bot.services.service_publication_facade"
+    )
+
+    assert hasattr(channels, "_require_edit_lock")
+    assert hasattr(publications.ServicePublicationFacade, "_require_draft_lock")

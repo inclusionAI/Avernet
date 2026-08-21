@@ -116,7 +116,7 @@
   committing. Task 5 keeps the inventory and inertness sweeps.
 - **Depends on:** Task 2
 
-## Task 5: Pin the contract  `[ ]`
+## Task 5: Pin the contract  `[x]`
 
 - **Goal:** Make each property fail for a different, named mistake.
 - **Files:**
@@ -124,25 +124,25 @@
   `…/test_bot_access.py` (new),
   `…/test_authorization_is_inert.py` (new)
 - **Done when:**
-  - [ ] Inventory: every route has a row, no row lacks a route, every route is a
+  - [x] Inventory: every route has a row, no row lacks a route, every route is a
         `PublicAPIRoute`, an unlisted route fails assembly, every
         `ServiceChecked` row cites a real enforcer, every `NoCheck` row carries
         a non-empty reason, and `AUTHORIZATION` and `ADMISSION` cover the same
         operations.
-  - [ ] `test_scaffolding_burn_down_is_reported` asserts the scaffolding count
+  - [x] `test_scaffolding_burn_down_is_reported` asserts the scaffolding count
         is published and matches the table — the test that goes to zero when the
         final shape is reached, and that will fail loudly if a *new* row is ever
         added in a scaffolding mode.
-  - [ ] Gate, over a fixture router declaring `Check` rows so the path is
+  - [x] Gate, over a fixture router declaring `Check` rows so the path is
         exercised despite having no shipped caller: owner passes every level;
         below-level is 404 not 403; an unresolvable bot refuses; a
         collaborator-lookup failure refuses; a non-owner write audits once; a
         read audits none; an owner's write audits none; an audit failure logs
         and does not fail the request; the lock service is never touched.
-  - [ ] Inertness: a sweep asserts every operation answers status-for-status as
+  - [x] Inertness: a sweep asserts every operation answers status-for-status as
         it did before, and that the service-level edit locks in channels and
         service publications still fire.
-  - [ ] `test_admission_inventory.py`, `test_principal_seam.py` and
+  - [x] `test_admission_inventory.py`, `test_principal_seam.py` and
         `engine_runtime/test_operator_access.py` pass unmodified.
 - **Depends on:** Tasks 3, 4
 
