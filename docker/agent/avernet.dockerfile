@@ -103,7 +103,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/usr/local/bin:/home/admin/.local/bin:$PATH \
     TZ=Asia/Shanghai
 
-# Runtime deps only (no build tools).
+# Runtime deps (python3 needed by supervisor venv symlink).
 RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -113,6 +113,7 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
         jq \
         lsof \
         procps \
+        python3 \
         sudo \
     && rm -rf /var/lib/apt/lists/*
 

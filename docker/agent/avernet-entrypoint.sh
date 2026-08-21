@@ -5,14 +5,16 @@
 #
 # Runtime model (mirrors ocb/dockers/arca-openclaw/entrypoint.sh):
 #   - supervisord runs as PID 1 (started via exec)
-#   - [program:engine]   autostart=false — started by start_service.sh
+#   - [program:engine]   autostart=false — started by start_service.sh (external)
 #   - [program:openclaw]  autostart=false — started by engine on demand
 #
 # Flow:
 #   1. Create runtime directories
 #   2. Generate ~/.openclaw/openclaw.json from env vars (if not mounted)
-#   3. Schedule start_service.sh as a background subshell
-#   4. exec supervisord (becomes PID 1)
+#   3. exec supervisord (becomes PID 1)
+#
+# The platform invokes start_service.sh externally (docker exec) with
+# --token/--client_id to save credentials and start the engine.
 
 set -euo pipefail
 
@@ -179,42 +181,10 @@ else
     echo "===> using existing ${CONFIG_FILE} (mounted or pre-built)"
 fi
 
-# --- 4. Schedule start_service.sh as a background subshell.
-# It waits for the supervisord socket, then starts the engine program
-# and polls its /health endpoint.  Running it in the background lets
-# supervisord become PID 1 and receive SIGTERM directly for graceful
-# shutdown.
+# --- 4. exec supervisord — becomes PID 1
+# Engine and openclaw are both autostart=false.
+# The platform invokes start_service.sh externally (e.g. docker exec)
+# with --token/--client_id to orchestrate pod startup.
 
-ENGINE="${ENGINE:-openclaw}"
-TOKEN="${TOKEN:-}"
-CLIENT_ID="${CLIENT_ID:-}"
-BOT_ID="${BOT_ID:-}"
-STAGE="${STAGE:-}"
-OWNER_ID="${OWNER_ID:-}"
-
-START_ARGS=()
-[ -n "$TOKEN" ]      && START_ARGS+=(--token "$TOKEN")
-[ -n "$CLIENT_ID" ]  && START_ARGS+=(--client_id "$CLIENT_ID")
-[ -n "$BOT_ID" ]     && START_ARGS+=(--bot_id "$BOT_ID")
-[ -n "$STAGE" ]      && START_ARGS+=(--stage "$STAGE")
-[ -n "$OWNER_ID" ]   && START_ARGS+=(--owner_id "$OWNER_ID")
-START_ARGS+=(--engine "$ENGINE")
-
-echo "===> scheduling start_service.sh in background"
-(
-    # Wait for supervisord socket to appear
-    for _ in $(seq 1 30); do
-        [ -S /var/run/supervisor.sock ] && break
-        sleep 1
-    done
-    if [ -S /var/run/supervisor.sock ]; then
-        bash "${SCRIPT_DIR}/start_service.sh" "${START_ARGS[@]}" \
-            2>&1 | tee -a "${LOG_DIR}/start_service.log"
-    else
-        echo "[entrypoint] ERROR: supervisord socket never appeared, skipping start_service.sh" >&2
-    fi
-) &
-
-# --- 5. exec supervisord — becomes PID 1
-echo "===> starting supervisord (engine + openclaw on demand)"
+echo "===> starting supervisord (engine + openclaw on demand via start_service.sh)"
 exec /usr/local/bin/supervisord -n -c /etc/supervisor/supervisord.conf
