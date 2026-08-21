@@ -170,6 +170,7 @@ class MariaDbOrmPlugin(DataSourcePlugin):
             "secbaas.community.core.repository.ac_bot._orm_model",
             "secbaas.community.core.repository.ac_bot_publish._orm_model",
             "secbaas.community.core.repository.api_gateway._orm_model",
+            "secbaas.community.core.repository.arca_ttl._orm_model",
             "secbaas.community.core.repository.bot._orm_model",
             "secbaas.community.core.repository.bot_device_rel._orm_model",
             "secbaas.community.core.repository.bot_run._orm_model",
