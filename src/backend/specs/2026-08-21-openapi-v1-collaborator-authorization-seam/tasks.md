@@ -32,31 +32,31 @@
         `build_public_router()`.
 - **Depends on:** —
 
-## Task 2: The mode vocabulary and the table  `[ ]`
+## Task 2: The mode vocabulary and the table  `[x]`
 
 - **Goal:** One row per public operation, saying what that operation requires —
   including the rows that say "adjudicated elsewhere, here is where".
 - **Files:**
   `src/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization.py` (new)
 - **Done when:**
-  - [ ] `Check(level)`, `ServiceChecked(level, where)` and the `NoCheck(reason)`, and the
+  - [x] `Check(level)`, `ServiceChecked(level, where)` and the `NoCheck(reason)`, and the
         `OWNER_SCOPED` / `SELF_CHECKED` scaffolding sentinels exist, each with a docstring
         saying what it means and what it costs to be wrong. No `mutates` field.
-  - [ ] `AUTHORIZATION` covers **every** operation on the surface, exactly once,
+  - [x] `AUTHORIZATION` covers **every** operation on the surface, exactly once,
         keyed `(method, path)` like `ADMISSION`.
-  - [ ] Every row reflects **today's** behaviour, verified against the code it
+  - [x] Every row reflects **today's** behaviour, verified against the code it
         names — harness included, defect and all. No row is `Check` in this
         change.
-  - [ ] Each `ServiceChecked.where` is an importable module path that really
+  - [x] Each `ServiceChecked.where` is an importable module path that really
         contains a permission call.
-  - [ ] The module docstring names `Check` / `NoCheck` as the permanent
+  - [x] The module docstring names `Check` / `NoCheck` as the permanent
         vocabulary and `ServiceChecked` / `OWNER_SCOPED` / `SELF_CHECKED` as
         scaffolding, each with the row change that retires it (`spec.md` *The
         Final Shape*).
-  - [ ] A `scaffolding_row_count()` helper reports how many rows still sit in
+  - [x] A `scaffolding_row_count()` helper reports how many rows still sit in
         the scaffolding modes, so the migration's remaining distance is a
         number a follow-up session can watch go to zero.
-  - [ ] The module docstring states the reversal explicitly — this table, not
+  - [x] The module docstring states the reversal explicitly — this table, not
         the route, is now where an operation's authorization is declared — and
         why (`plan.md` *Alternatives Considered*).
 - **Depends on:** —
