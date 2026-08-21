@@ -23,7 +23,7 @@ from secbaas.community.plugins.sandbox.arca.aliyun_ack._client_manager import (
 
 # Seeded by _seed.py (it-sqlite overlay) under tenant "team_claw"
 TEMPLATE_ARCA = "TEMPLATE-4d0e2849d7004111836333de782b95d8"
-TEMPLATE_ID = "ALIYUN_ACK_OPENCLAW"
+TEMPLATE_ID = "ALIYUN_ACK_DEFAULT"
 TEST_TENANT = "team_claw"
 
 _SANDBOX = "secbaas.community.plugins.sandbox.arca.aliyun_ack._sandbox"
