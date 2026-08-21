@@ -1490,3 +1490,82 @@ class TestSyncSkillSetToActiveOwnerIdResolution:
         skill_service.activate_skill.assert_called_once_with(
             "git://biz/skill-a", user_id="user1", bolt_id="bot-1"
         )
+
+
+class TestSyncMcpDesiredState:
+    @staticmethod
+    def _service():
+        from agentclaw.community.core.skill_center.services.skill_set_service import (
+            SkillSetService,
+        )
+
+        service = SkillSetService.__new__(SkillSetService)
+        service.user_id = "owner-1"
+        service.entity_id = "owner-1"
+        service.bot_id = "bot-1"
+        service.engine_type = "openclaw"
+        service.mcp_center = MagicMock()
+        service._mcp_sync_service = MagicMock()
+        service._mcp_sync_service.sync_mcp_detail = AsyncMock(
+            return_value={"success": True}
+        )
+        service._resolver = MagicMock()
+        service._resolver.resolve_for_bot.return_value = object()
+        plugin = MagicMock()
+        plugin.sync_all_mcp_servers.return_value = True
+        service._device_sync_dispatcher = MagicMock()
+        service._device_sync_dispatcher.dispatch.return_value = plugin
+        return service, plugin
+
+    @pytest.mark.asyncio
+    async def test_missing_default_detail_still_declares_complete_allow_list(self):
+        service, plugin = self._service()
+        installed_detail = {
+            "serverCode": "mcp.user-installed",
+            "name": "Installed",
+        }
+        service.mcp_center.get_mcp_detail.side_effect = lambda code: (
+            installed_detail if code == "mcp.user-installed" else None
+        )
+
+        with patch(
+            "agentclaw.community.core.skill_center.services.skill_set_service."
+            "get_default_mcp_server_codes",
+            return_value=["mcp.default"],
+        ):
+            result = await service.sync_mcp_desired_state(
+                server_codes={"mcp.default", "mcp.user-installed"}
+            )
+
+        assert result is True
+        service._mcp_sync_service.sync_mcp_detail.assert_awaited_once_with(
+            user_id="owner-1",
+            mcp_data=installed_detail,
+            bot_id="bot-1",
+            entity_id="owner-1",
+            engine_type="openclaw",
+        )
+        plugin.sync_all_mcp_servers.assert_called_once_with(
+            [
+                {"server_code": "mcp.default"},
+                installed_detail,
+            ]
+        )
+
+    @pytest.mark.asyncio
+    async def test_missing_non_default_detail_remains_fail_closed(self):
+        service, plugin = self._service()
+        service.mcp_center.get_mcp_detail.return_value = None
+
+        with patch(
+            "agentclaw.community.core.skill_center.services.skill_set_service."
+            "get_default_mcp_server_codes",
+            return_value=["mcp.default"],
+        ):
+            result = await service.sync_mcp_desired_state(
+                server_codes={"mcp.user-installed"}
+            )
+
+        assert result is False
+        service._mcp_sync_service.sync_mcp_detail.assert_not_awaited()
+        plugin.sync_all_mcp_servers.assert_not_called()
