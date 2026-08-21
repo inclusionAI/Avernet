@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from secbaas.community.api.eval_env._protocols import EvalSessionLogProtocol
+from secbaas.community.api.eval_env import EvalSessionLogProtocol
 
 
 class NoopEvalSessionLog(EvalSessionLogProtocol):

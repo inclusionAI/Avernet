@@ -6,8 +6,8 @@
 
 from ._eval_binding_query import (
     DYNAMIC_ENV_TAG_KEY,
-    resolve_eval_binding_id,
     is_eval_env_enabled,
+    resolve_eval_binding_id,
 )
 
 __all__ = [

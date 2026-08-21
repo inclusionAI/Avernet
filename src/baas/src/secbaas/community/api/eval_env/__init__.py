@@ -7,7 +7,11 @@ from ._protocols import (
     EvalSessionLogProtocol,
 )
 
+# default_tag 键名（与 OCB 侧 device_props 中的键一致）
+DYNAMIC_ENV_TAG_KEY = "AGENTCLAW_DEFAULT_TAG"
+
 __all__ = [
+    "DYNAMIC_ENV_TAG_KEY",
     "EvalBindingInfo",
     "EvalBindingResolverProtocol",
     "EvalConsistencyCheckProtocol",

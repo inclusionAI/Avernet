@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from secbaas.community.api.eval_env._protocols import EvalBindingResolverProtocol
@@ -16,7 +16,7 @@ DYNAMIC_ENV_TAG_KEY = "AGENTCLAW_DEFAULT_TAG"
 
 
 def resolve_eval_binding_id(
-    eval_binding_resolver: "EvalBindingResolverProtocol",
+    eval_binding_resolver: EvalBindingResolverProtocol,
     *,
     bot_id: str,
     entity_id: str,
@@ -51,7 +51,7 @@ def resolve_eval_binding_id(
 
 
 def is_eval_env_enabled(
-    eval_binding_resolver: "EvalBindingResolverProtocol",
+    eval_binding_resolver: EvalBindingResolverProtocol,
 ) -> bool:
     """检查评测环境功能是否启用。
 

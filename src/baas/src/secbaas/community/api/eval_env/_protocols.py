@@ -6,11 +6,10 @@ BaaS 不管理 EvalEnvLifecycle/EvalVersionSync/EvalTagPropagation
 2. EvalConsistencyCheckProtocol — 评测一致性检查
 3. EvalSessionLogProtocol — 评测会话日志
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
-
-from ._models import EvalBindingInfo
 
 
 @runtime_checkable

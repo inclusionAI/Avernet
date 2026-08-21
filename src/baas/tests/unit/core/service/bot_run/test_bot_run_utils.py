@@ -624,16 +624,30 @@ class TestBuildChatMetadataEval:
         assert result["biz_task_id"] == "task-1"
 
     def test_default_tag_injects_default_tag_field(self):
-        """default_tag 非空时注入 default_tag 观测字段。"""
+        """default_tag 非空时注入 default_tag 观测字段（通过 eval_session_log Plugin）。"""
         metadata = {"default_tag": "staging"}
-        result = build_chat_metadata(metadata, run_id="run-1")
+        mock_log = MagicMock()
+        mock_log.enrich_chat_metadata.return_value = {
+            "biz_task_id": "run-1",
+            "biz_scene": "eval:staging",
+            "default_tag": "staging",
+        }
+        result = build_chat_metadata(metadata, run_id="run-1", eval_session_log=mock_log)
         assert result["default_tag"] == "staging"
+        mock_log.enrich_chat_metadata.assert_called_once()
 
     def test_eval_id_injected_when_present(self):
-        """metadata 含 eval_id 时注入到 chat_metadata。"""
+        """metadata 含 eval_id 时注入到 chat_metadata（通过 eval_session_log Plugin）。"""
         metadata = {"eval_id": "eval:eval:bot-1", "default_tag": "eval"}
-        result = build_chat_metadata(metadata, run_id="run-1")
+        mock_log = MagicMock()
+        mock_log.enrich_chat_metadata.return_value = {
+            "biz_task_id": "run-1",
+            "biz_scene": "eval:eval",
+            "eval_id": "eval:eval:bot-1",
+        }
+        result = build_chat_metadata(metadata, run_id="run-1", eval_session_log=mock_log)
         assert result["eval_id"] == "eval:eval:bot-1"
+        mock_log.enrich_chat_metadata.assert_called_once()
 
     def test_no_default_tag_uses_default_biz_scene(self):
         """default_tag 为空时 biz_scene 保持默认逻辑。"""

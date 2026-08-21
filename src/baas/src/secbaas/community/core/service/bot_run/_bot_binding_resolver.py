@@ -11,7 +11,7 @@ from secbaas.community.api.bot_runtime import BotBindingInfo
 from secbaas.community.logger import get_logger
 
 if TYPE_CHECKING:
-    from secbaas.community.api.eval_env._protocols import (
+    from secbaas.community.api.eval_env import (
         EvalBindingResolverProtocol,
     )
     from secbaas.community.core.repository.ac_bot import AcBotRepository
@@ -137,10 +137,12 @@ class BotBindingResolver:
 
                 if plugin_enabled:
                     # Plugin 启用：走 eval binding 解析
-                    resolved_binding_id = self._eval_binding_resolver.resolve_eval_binding(
-                        bot_id=bot_id,
-                        entity_id=entity_id,
-                        env=env,
+                    resolved_binding_id = (
+                        self._eval_binding_resolver.resolve_eval_binding(
+                            bot_id=bot_id,
+                            entity_id=entity_id,
+                            env=env,
+                        )
                     )
                     if resolved_binding_id is None:
                         logger.warning(
@@ -330,5 +332,3 @@ class BotBindingResolver:
                 f"lifecycle_stage={lifecycle_stage}"
             )
             return None
-
-    

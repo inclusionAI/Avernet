@@ -115,7 +115,7 @@ async def deliver_message(
 
     # 注入 eval 路由 Header 到 metadata — 委托 EvalSessionLogProtocol Plugin
     if x_eval_id or x_default_tag:
-        from secbaas.community.api.eval_env._protocols import EvalSessionLogProtocol
+
         # 从容器获取 eval_session_log Plugin（懒加载避免循环依赖）
         try:
             eval_session_log = Provide[ApplicationContainer.services.eval_session_log]
@@ -261,7 +261,7 @@ async def deliver_message_stream(
 
     # 注入 eval 路由 Header 到 metadata — 委托 EvalSessionLogProtocol Plugin
     if x_eval_id or x_default_tag:
-        from secbaas.community.api.eval_env._protocols import EvalSessionLogProtocol
+
         # 从容器获取 eval_session_log Plugin（懒加载避免循环依赖）
         try:
             eval_session_log = Provide[ApplicationContainer.services.eval_session_log]
