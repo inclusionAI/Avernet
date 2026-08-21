@@ -62,7 +62,7 @@ authorization one. And whether a *machine* caller is admitted at all is
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Annotated, Any, Callable, get_args, get_origin, get_type_hints
 
 from fastapi import APIRouter, Depends
 from fastapi.routing import APIRoute
@@ -80,6 +80,24 @@ class Check:
     """
 
     level: PermissionLevel
+
+    def __post_init__(self) -> None:
+        """Refuse ``NONE``, which would be a gate that never refuses.
+
+        ``_level`` returns ``NONE`` for every unresolvable case — absent bot,
+        unreadable collaborator table, unwired injector — and the gate compares
+        ``level < rule.level``. With ``NONE`` as the bar that comparison is
+        false for exactly those cases, so a one-word typo in the table would
+        turn the fail-closed gate into one that admits precisely the callers it
+        exists to stop. Rejected at construction rather than left to a test,
+        because the table is a literal: this raises while the module imports.
+        """
+        if self.level is PermissionLevel.NONE:
+            raise ValueError(
+                "Check(PermissionLevel.NONE) is not a bar — it admits every "
+                "caller the gate would otherwise refuse. Name the level the "
+                "operation actually requires."
+            )
 
 
 @dataclass(frozen=True)
@@ -662,24 +680,38 @@ def _rule_for(path: str, methods: Any) -> Authorization:
 
 
 def assert_every_route_authorized(router: APIRouter) -> None:
-    """Fail assembly on the two mistakes :class:`PublicAPIRoute` cannot see.
+    """Fail assembly on the mistakes :class:`PublicAPIRoute` cannot see itself.
 
-    It catches a *missing row* at construction. It cannot catch a router built
-    without ``route_class=PublicAPIRoute`` — those routes never run its
-    ``__init__`` — nor a row that matches no operation, which is a decision
-    left behind after a rename. Both are checked here, at the end of assembly,
-    so the application still refuses to start rather than serving an operation
-    nothing governs.
+    It catches a *missing row* at construction. Four things it cannot catch are
+    checked here, at the end of assembly, so the application refuses to start
+    rather than serving an operation nothing governs:
+
+    1. a router built without ``route_class=PublicAPIRoute`` — its routes never
+       ran that ``__init__``;
+    2. a row matching no operation, left behind by a rename;
+    3. a WebSocket operation with no row — it never runs the route class
+       either, so nothing else would notice;
+    4. a WebSocket operation *with* a ``Check`` row, and a ``Check`` route
+       whose handler does not consume the owner the gate adjudicates. Both are
+       declarations the seam cannot honour, and admitting them would leave the
+       table promising enforcement that never happens.
     """
     seen: set[tuple[str, str]] = set()
+    sockets: set[tuple[str, str]] = set()
+    checked_handlers: list[tuple[tuple[str, str], object]] = []
     unguarded: list[str] = []
     for route in _walk(router):
         original = getattr(route, "original_route", None) or route
         path = getattr(route, "path", "") or getattr(original, "path", "")
         methods = set(getattr(route, "methods", None) or {"WEBSOCKET"})
+        is_socket = _is_websocket(original)
         for method in sorted(methods - {"HEAD", "OPTIONS"}):
             seen.add((method, path))
-        if not isinstance(original, PublicAPIRoute) and not _is_websocket(original):
+            if is_socket:
+                sockets.add((method, path))
+            elif isinstance(AUTHORIZATION.get((method, path)), Check):
+                checked_handlers.append(((method, path), original.endpoint))
+        if not isinstance(original, PublicAPIRoute) and not is_socket:
             unguarded.append(f"{sorted(methods)} {path}")
     if unguarded:
         raise PublicRouteNotAuthorized(
@@ -704,6 +736,76 @@ def assert_every_route_authorized(router: APIRouter) -> None:
             "these AUTHORIZATION rows match no live operation (renamed or "
             f"removed?): {sorted(orphans)}"
         )
+    _assert_check_rows_are_enforceable(sockets, checked_handlers)
+
+
+def _assert_check_rows_are_enforceable(
+    sockets: set[tuple[str, str]], checked_handlers: list[tuple[tuple[str, str], object]]
+) -> None:
+    """Refuse a ``Check`` row the seam could not actually enforce.
+
+    A row that declares enforcement the mechanism cannot deliver is worse than
+    no row: the table reads as covered, and the inventory agrees, while the
+    operation is served unguarded. Two shapes of that, both currently
+    unreachable — no row is ``Check`` — and both waiting for the first
+    migration to become reachable.
+    """
+    socket_checks = sorted(
+        f"{method} {path}"
+        for (method, path) in sockets
+        if isinstance(AUTHORIZATION.get((method, path)), Check)
+    )
+    if socket_checks:
+        raise PublicRouteNotAuthorized(
+            "these WebSocket operations declare Check, but FastAPI builds them "
+            "as APIWebSocketRoute so the route class never attaches the gate — "
+            "the declaration would be unenforced: " + ", ".join(socket_checks)
+        )
+
+    from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+        resolve_owner_id,
+    )
+
+    divergent = sorted(
+        f"{method} {path}"
+        for (method, path), endpoint in checked_handlers
+        if not _consumes(endpoint, resolve_owner_id)
+    )
+    if divergent:
+        raise PublicRouteNotAuthorized(
+            "these operations declare Check but their handler does not take "
+            "OwnerIdDep, so the gate would adjudicate the addressed owner while "
+            "the handler acted on a different one (see bot_access's contract): "
+            + ", ".join(divergent)
+        )
+
+
+def _consumes(endpoint: object, dependency: object) -> bool:
+    """Whether ``endpoint``'s own signature declares ``Depends(dependency)``.
+
+    Its *own* signature, deliberately: the gate itself takes ``OwnerIdDep``, so
+    walking the route's whole dependency tree would find it every time and the
+    check would pass vacuously. ``get_type_hints`` follows ``__wrapped__``, so a
+    handler behind ``@envelope_errors`` reports its real parameters.
+    """
+    # ``get_type_hints`` rather than ``signature().parameters[...].annotation``:
+    # every router in this package declares ``from __future__ import
+    # annotations``, so the raw annotations are *strings* and no amount of
+    # ``get_origin`` on them finds anything. Reading them unresolved would make
+    # this check answer "no" for every real handler — a false refusal on the
+    # first migration, which is exactly when it must be trustworthy.
+    # ``include_extras`` keeps the ``Annotated`` metadata the dependency lives in.
+    try:
+        hints = get_type_hints(endpoint, include_extras=True)
+    except Exception:  # pragma: no cover - unresolvable forward reference
+        return False
+    for annotation in hints.values():
+        if get_origin(annotation) is not Annotated:
+            continue
+        for meta in get_args(annotation)[1:]:
+            if getattr(meta, "dependency", None) is dependency:
+                return True
+    return False
 
 
 def _walk(router: APIRouter):

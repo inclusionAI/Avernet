@@ -27,6 +27,11 @@ from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.admission import ADMISSION
+from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import OwnerIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.responses import envelope_errors
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     AUTHORIZATION,
     OWNER_SCOPED,
@@ -404,3 +409,102 @@ def test_a_websocket_route_without_a_row_fails_assembly():
 
     assert "no row in AUTHORIZATION" in str(refusal.value)
     assert "/openapi/v1/bots/undeclared/ws" in str(refusal.value)
+
+
+def test_none_is_not_a_declarable_bar():
+    """``Check(NONE)`` would be a gate that never refuses.
+
+    ``bot_access._level`` returns ``NONE`` for every unresolvable case, and the
+    gate compares ``level < rule.level`` — so with ``NONE`` as the bar that
+    comparison is false for exactly those cases, and a one-word table typo
+    would admit precisely the callers the gate exists to stop. Rejected at
+    construction, so it raises while the table's module imports rather than
+    waiting for a test to notice.
+    """
+    with pytest.raises(ValueError, match="not a bar"):
+        Check(PermissionLevel.NONE)
+
+
+def test_a_websocket_check_row_fails_assembly():
+    """A declaration the seam cannot honour is worse than no declaration.
+
+    FastAPI builds sockets as ``APIWebSocketRoute``, which never runs the route
+    class, so ``require_check`` is never attached. The row would read as
+    covered — and the inventory would agree — while the socket was served
+    unguarded.
+    """
+    public = build_public_router()
+    sockets = APIRouter()
+
+    @sockets.websocket("/openapi/v1/bots/declared/ws")
+    async def declared(websocket) -> None:  # pragma: no cover - never served
+        ...
+
+    public.include_router(sockets)
+    AUTHORIZATION[("WEBSOCKET", "/openapi/v1/bots/declared/ws")] = Check(
+        PermissionLevel.MEMBER
+    )
+    try:
+        with pytest.raises(PublicRouteNotAuthorized) as refusal:
+            assert_every_route_authorized(public)
+        assert "unenforced" in str(refusal.value)
+    finally:
+        AUTHORIZATION.pop(("WEBSOCKET", "/openapi/v1/bots/declared/ws"), None)
+
+
+def test_a_check_handler_must_consume_the_owner_the_gate_checks():
+    """The seam's guarantee stops at the seam unless the handler joins it.
+
+    ``bot_access`` reads ``OwnerIdDep``; a handler that takes ``UserIdDep`` as
+    its owner — as all 34 of today's ``OWNER_SCOPED`` handlers do — reads a
+    *different* dependency, and FastAPI's per-request cache does not unify two
+    distinct callables. Flipping such a row to ``Check`` without also changing
+    the handler would adjudicate one bot and act on another, which for a
+    duplicated legacy id like ``default`` is two genuinely different bots.
+
+    So the migration cannot be half-done: the row and the handler move
+    together, or assembly refuses.
+    """
+    public = build_public_router()
+    diverging = APIRouter(route_class=PublicAPIRoute)
+    key = ("GET", "/openapi/v1/bots/{bot_id}/diverging")
+    AUTHORIZATION[key] = Check(PermissionLevel.MEMBER)
+    try:
+
+        @diverging.get(key[1])
+        async def handler(bot_id: BotIdPath, owner_id: UserIdDep) -> dict:
+            return {}  # pragma: no cover - never served
+
+        public.include_router(diverging)
+
+        with pytest.raises(PublicRouteNotAuthorized) as refusal:
+            assert_every_route_authorized(public)
+        assert "does not take" in str(refusal.value)
+    finally:
+        AUTHORIZATION.pop(key, None)
+
+
+def test_a_check_handler_taking_owner_id_dep_is_accepted():
+    """The counterpart: the correct shape must not be rejected.
+
+    Also exercises ``@envelope_errors``, since every real handler wears it and
+    the check has to see through ``__wrapped__`` to the true signature.
+    """
+    public = build_public_router()
+    correct = APIRouter(route_class=PublicAPIRoute)
+    key = ("GET", "/openapi/v1/bots/{bot_id}/correct")
+    AUTHORIZATION[key] = Check(PermissionLevel.MEMBER)
+    try:
+
+        @correct.get(key[1])
+        @envelope_errors
+        async def handler(
+            bot_id: BotIdPath, caller: UserIdDep, owner_id: OwnerIdDep
+        ) -> dict:
+            return {}  # pragma: no cover - never served
+
+        public.include_router(correct)
+
+        assert_every_route_authorized(public)
+    finally:
+        AUTHORIZATION.pop(key, None)
