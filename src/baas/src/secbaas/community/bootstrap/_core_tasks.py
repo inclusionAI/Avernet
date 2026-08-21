@@ -9,11 +9,14 @@ from dependency_injector import containers, providers
 from secbaas.community.core.service.scheduler import (
     BotRunRecoveryTask,
     BotRunRecoveryTaskConfig,
+    DeadlineRenewalScheduler,
+    DeadlineRenewalSchedulerConfig,
     DeviceTtlTimerTask,
     DeviceTtlTimerTaskConfig,
     FileTransferPoller,
     FileTransferPollerConfig,
 )
+from secbaas.community.core.utils.env_utils import get_current_env
 
 
 class CoreTaskContainer(containers.DeclarativeContainer):
@@ -27,6 +30,7 @@ class CoreTaskContainer(containers.DeclarativeContainer):
     ticket_repository = providers.Dependency()
     paas_service_facade = providers.Dependency()
     file_transfer_backend = providers.Dependency()
+    arca_ttl_schedule_repository = providers.Dependency()
 
     # ── DeviceTtlTimer task ──────────────────────────────────────────────────
 
@@ -85,5 +89,35 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         lock_service=distributed_lock_service,
         ticket_repo=ticket_repository,
         file_backend=file_transfer_backend,
+        paas_facade=paas_service_facade,
+    )
+
+    # ── DeadlineRenewal scheduler ──────────────────────────────────────────
+
+    deadline_renewal_config = providers.Singleton(
+        DeadlineRenewalSchedulerConfig,
+        enabled=providers.Callable(
+            lambda e: e == "deadline",
+            config.renewal_scheduler.engine,
+        ),
+        lock_name=config.renewal_scheduler.lock_name,
+        lock_expire_seconds=config.renewal_scheduler.lock_expire_seconds,
+        cron_interval_seconds=config.renewal_scheduler.cron_interval_seconds,
+        batch_size=config.renewal_scheduler.batch_size,
+        max_concurrency=config.renewal_scheduler.max_concurrency,
+        renew_threshold_hours=config.renewal_scheduler.renew_threshold_hours,
+        retry_delay_minutes=config.renewal_scheduler.retry_delay_minutes,
+        max_fail_count=config.renewal_scheduler.max_fail_count,
+        ttl_safety_margin_minutes=config.renewal_scheduler.ttl_safety_margin_minutes,
+        anti_join_verify_interval_cycles=config.renewal_scheduler.anti_join_verify_interval_cycles,
+        engine=config.renewal_scheduler.engine,
+        env=providers.Callable(get_current_env),
+    )
+
+    deadline_renewal_task = providers.Singleton(
+        DeadlineRenewalScheduler,
+        config=deadline_renewal_config,
+        lock_service=distributed_lock_service,
+        schedule_repo=arca_ttl_schedule_repository,
         paas_facade=paas_service_facade,
     )
