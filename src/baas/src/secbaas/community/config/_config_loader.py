@@ -83,13 +83,11 @@ class ConfigLoader:
             default = match.group("default")
             if default is not None:
                 return default
-            if strict:
-                msg = (
-                    f"Environment variable '{name}' referenced by "
-                    f"${{{name}}} in config is not set and has no default"
-                )
-                raise KeyError(msg)
-            return match.group(0)
+            msg = (
+                f"Environment variable '{name}' referenced by "
+                f"${{{name}}} in config is not set and has no default"
+            )
+            raise KeyError(msg)
 
         if isinstance(data, dict):
             return {
