@@ -90,6 +90,16 @@ export type FlowRunCompletion = {
   completedAt: number;
 };
 
+/** Structured fields written to result_json when a flow is reaped as failed by the timeout watchdog. */
+export type FlowRunReapFields = {
+  /** Structured JSON written to result_json. */
+  reason: string;
+  currentPhase: string;
+  totalDurationMs?: number | null;
+  /** Epoch seconds. */
+  completedAt: number;
+};
+
 export type FindFlowRunsOptions = {
   workflowId?: string;
   status?: string;
@@ -103,9 +113,20 @@ export interface IFlowRunRepository {
   insert(run: FlowRunInsert): Promise<boolean>;
   incrementNodeCount(flowId: string, field: "succeeded_count" | "failed_count"): Promise<boolean>;
   updateCompletion(flowId: string, completion: FlowRunCompletion): Promise<boolean>;
+  /** Atomically mark a flow failed ONLY when it is not already in a terminal
+   *  status (`UPDATE ... WHERE flow_id = ? AND status NOT IN (terminal)`).
+   *  Used by the flow-timeout watchdog: multiple engine processes share one
+   *  DB, and exactly one of them wins this CAS (affectedRows > 0) — only the
+   *  winner logs the reap, sends notifications, and enriches the row.
+   *  Returns true when this caller claimed the transition. */
+  markFailedIfRunning(flowId: string, fields: FlowRunReapFields): Promise<boolean>;
   updateStatus(flowId: string, status: string): Promise<boolean>;
   updateCurrentPhase(flowId: string, currentPhase: string): Promise<boolean>;
   updateNodeCount(flowId: string, nodeCount: number): Promise<boolean>;
+  /** Reset started_at when a flow is resumed/retried from a non-running state,
+   *  so the timeout watchdog computes ranFrom from the retry time rather than
+   *  the original start. */
+  resetStartedAt(flowId: string, startedAt: number): Promise<boolean>;
   /** Overwrite result_json with the last successful node's output. Best-effort. */
   updateResultJson(flowId: string, nodeId: string, result: Record<string, unknown>): Promise<boolean>;
   findByFlowId(flowId: string): Promise<FlowRunRow | null>;

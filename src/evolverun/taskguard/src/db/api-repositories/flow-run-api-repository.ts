@@ -6,7 +6,8 @@
  */
 import type { ApiClient } from "../api-client.js";
 import { FlowRunRepository, type FlowRunRow, type FlowRunInsert, type FlowRunCompletion, type FindFlowRunsOptions } from "../repositories/flow-run-repository.js";
-import type { IFlowRunRepository } from "../repositories/types.js";
+import type { IFlowRunRepository, FlowRunReapFields } from "../repositories/types.js";
+import { safeJsonStringify } from "../safe-json.js";
 
 // ── API Request/Response types ──
 
@@ -129,10 +130,60 @@ export class FlowRunApiRepository implements IFlowRunRepository {
         `/api/internal/runs/${encodeURIComponent(flowId)}/completion`,
         body,
       );
-      return resp.ok;
+      if (!resp.ok) {
+        // The terminal write must be loud: throwing lets the caller's
+        // withRetry kick in and surfaces the failure in run logs. Returning
+        // false here previously made completion failures silent — the flow
+        // then stayed "running" until the timeout watchdog reaped it.
+        throw new Error(`updateCompletion rejected by server: HTTP ${resp.status} ${resp.error ?? ""}`.trim());
+      }
+      return true;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[FlowRunApi] updateCompletion failed: ${msg}`);
+      throw error;
+    }
+  }
+
+  /**
+   * CAS-claim a timeout reap: the server transitions the row to failed only
+   * when it is not already terminal. Exactly one engine process sharing the
+   * DB wins — losers get claimed=false and skip logging/notifications.
+   * Throws on transport/5xx errors (callers treat those differently from
+   * simply losing the race).
+   */
+  async markFailedIfRunning(flowId: string, fields: FlowRunReapFields): Promise<boolean> {
+    try {
+      const resp = await this.api.put<{ claimed?: boolean }>(
+        `/api/internal/runs/${encodeURIComponent(flowId)}/fail-if-running`,
+        {
+          reason: fields.reason,
+          current_phase: fields.currentPhase,
+          total_duration_ms: fields.totalDurationMs ?? null,
+          completed_at: fields.completedAt,
+        },
+      );
+      if (!resp.ok) {
+        throw new Error(`markFailedIfRunning rejected by server: HTTP ${resp.status} ${resp.error ?? ""}`.trim());
+      }
+      return resp.data?.claimed === true;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(`[FlowRunApi] markFailedIfRunning failed: ${msg}`);
+      throw error;
+    }
+  }
+
+  async resetStartedAt(flowId: string, startedAt: number): Promise<boolean> {
+    try {
+      const resp = await this.api.put<{ success: boolean; data: any }>(
+        `/api/internal/runs/${encodeURIComponent(flowId)}/started-at`,
+        { started_at: startedAt },
+      );
+      return resp.ok;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(`[FlowRunApi] resetStartedAt failed: ${msg}`);
       return false;
     }
   }
@@ -181,7 +232,7 @@ export class FlowRunApiRepository implements IFlowRunRepository {
 
   async updateResultJson(flowId: string, nodeId: string, result: Record<string, unknown>): Promise<boolean> {
     try {
-      const resultJson = JSON.stringify({ nodeId, ...result });
+      const resultJson = safeJsonStringify({ nodeId, ...result });
       const resp = await this.api.put<{ success: boolean; data: any }>(
         `/api/internal/runs/${encodeURIComponent(flowId)}/result-json`,
         { result_json: resultJson },

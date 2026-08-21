@@ -219,9 +219,9 @@ export class ApiClient implements IApiClient {
   constructor(config: ApiClientConfig | unknown) {
     const c = config as ApiClientConfig;
     this.baseUrl = c.baseUrl ?? "";
-    this.privateKeyB64 = c.privateKeyB64 || undefined;
-    this.iamtoken = c.iamtoken || undefined;
-    this.iamtokenProvider = c.iamtokenProvider || undefined;
+    this.privateKeyB64 = c.privateKeyB64 ?? undefined;
+    this.iamtoken = c.iamtoken ?? undefined;
+    this.iamtokenProvider = c.iamtokenProvider ?? undefined;
     this.timeout = c.timeout ?? 5000;
     this.maxRetries = c.maxRetries ?? 3;
   }

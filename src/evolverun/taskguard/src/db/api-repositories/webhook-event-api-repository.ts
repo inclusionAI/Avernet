@@ -4,6 +4,7 @@
  * Best-effort no-op: the evolvetrace server has no HTTP endpoints for webhook events.
  * All methods log a warning and return safe defaults.
  */
+import crypto from "node:crypto";
 import type { ApiClient } from "../api-client.js";
 import type { WebhookEvent } from "../../webhook/types.js";
 import type { IWebhookEventRepository } from "../repositories/types.js";
@@ -63,7 +64,6 @@ export class WebhookEventApiRepository implements IWebhookEventRepository {
   }
 
   static hashBody(body: string): string {
-    const crypto = require("node:crypto");
     return crypto.createHash("sha256").update(body).digest("hex");
   }
 }
