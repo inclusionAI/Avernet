@@ -19,7 +19,7 @@ this change; adoption is #906/#907, and each is then a row edit.
 - `src/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization.py`
   — **new.** The mode vocabulary, the per-operation table, the route class that
   applies it.
-- `…/openapi_v1/editors_gate.py` — **new.** The seam: resolve, adjudicate,
+- `…/openapi_v1/bot_access.py` — **new.** The seam: resolve, adjudicate,
   audit.
 - `…/openapi_v1/errors.py` — one new dependency-raised error type.
 - `…/openapi_v1/__init__.py:387` `build_public_router` — the totality check and
@@ -52,43 +52,64 @@ seam reads and writes.
 ### The mode vocabulary
 
 Every row answers one question — **who enforces this operation's
-authorization, and at what level?** There are four possible answers, and the
-mode *is* the answer:
+authorization, and at what level?** Two modes are the permanent answer
+(`spec.md` *The Final Shape*); three more are scaffolding that exists only
+while operations are still on their way to one of the two.
 
 ```python
-# openapi_v1/authorization.py (new)
+# openapi_v1/authorization.py (new) — PERMANENT
 @dataclass(frozen=True)
-class Editors:
+class Check:
     """**The seam enforces this.** Its dependency is attached to the route.
 
-    No row is `Editors` when this lands. It is what a follow-on session
-    switches a row *to* when it moves that group's enforcement here.
+    The level is a parameter and not a further mode: the surface's bars really
+    do differ per operation — MEMBER to drive a bot's sessions, ADMIN to write
+    a channel, OWNER to restart a container.
+
+    No row is `Check` when this lands. It is what a follow-on session switches
+    a row *to* when it moves that group's enforcement here.
     """
     level: PermissionLevel          # the minimum; OWNER always passes
 
 @dataclass(frozen=True)
-class ServiceChecked:
-    """**A service enforces this, elsewhere.** The seam attaches nothing.
+class NoCheck:
+    """**Nothing to verify.** The seam attaches nothing, deliberately.
 
-    The row exists because every operation must have one (see the totality
-    rule below) — this is how an operation says "I am covered, just not
-    here". It also records the bar to preserve, so the follow-on migration is
-    a comparison rather than a guess.
+    Covers two situations, which is why the reason is required and not a
+    comment: the operation has no bot dimension at all (`"tenant-identical
+    catalogue"`), or it is bot-scoped and intentionally unguarded
+    (`"share viewers render panels without an editor relation"` —
+    `render_screens/gating.py:31`). A reviewer must be able to tell a decision
+    from an oversight.
+    """
+    reason: str
+```
+
+```python
+# openapi_v1/authorization.py (new) — SCAFFOLDING, deleted when its last row leaves
+@dataclass(frozen=True)
+class ServiceChecked:
+    """A service enforces this, elsewhere. → becomes `Check(level)`.
+
+    The row exists because every operation must have one (the totality rule
+    below) — this is how an operation says "I am covered, just not here" — and
+    it records the bar to preserve, so the migration is a comparison rather
+    than a guess.
     """
     level: PermissionLevel          # what that module actually enforces
     where: str                      # importable path — asserted to resolve
 
-#: **Nobody enforces a collaborator dimension.** The operation resolves the bot
-#: as ``(bot_id, caller)``, so only the owner reaches it at all. These are the
-#: #906 / #907 rows.
+#: No collaborator dimension decided yet: the operation resolves the bot as
+#: ``(bot_id, caller)``, so only the owner reaches it. → becomes `Check(...)`,
+#: at a level #906 / #907 decide. `Check(OWNER)` would be today's behaviour
+#: exactly — with the owner defaulting to the caller, requiring OWNER means the
+#: caller must be the owner, so the seam and the handler resolve the same bot.
 OWNER_SCOPED = _Sentinel("owner-scoped")
 
-#: No bot on the wire to adjudicate — the owner arrives on a record. The
-#: retiring addresses in ``deprecated/`` check themselves, first, before acting.
+#: No bot on the wire to adjudicate — the owner arrives on a record. Only the
+#: retiring addresses in ``deprecated/``, whose own comment says the set "is
+#: empty the day this package is deleted". → disappears with that package.
 SELF_CHECKED = _Sentinel("self-checked")
-
-#: The operation has no bot dimension at all (catalogue reads, name checks).
-NO_BOT       = _Sentinel("no-bot")
 ```
 
 Worked example, `POST /openapi/v1/bots/{bot_id}/channels`:
@@ -98,12 +119,12 @@ Worked example, `POST /openapi/v1/bots/{bot_id}/channels`:
 ("POST", "/openapi/v1/bots/{bot_id}/channels"): ServiceChecked(ADMIN, "…openapi_v1.channels.router")
 
 # after the channels follow-on: `_require_admin` is deleted, the row flips
-("POST", "/openapi/v1/bots/{bot_id}/channels"): Editors(ADMIN)
+("POST", "/openapi/v1/bots/{bot_id}/channels"): Check(ADMIN)
 ```
 
 Same answer to the caller, from one place instead of two. Contrast
 `GET /openapi/v1/bots/{bot_id}`, which is `OWNER_SCOPED` today: #906 flipping it
-to `Editors(MEMBER)` **does** change behaviour — collaborators start getting
+to `Check(MEMBER)` **does** change behaviour — collaborators start getting
 through — which is why that is a policy decision and not a mechanical
 migration.
 
@@ -111,11 +132,14 @@ migration.
 about code that lives somewhere else, and the `level` in particular can drift
 from what that code really does. The citation test proves the module exists and
 contains a permission call; it cannot prove the number is right. That is checked
-by hand when the row migrates.
+by hand when the row migrates — which is also why it is scaffolding rather than
+a mode anyone should be comfortable leaving in place.
 
 There is no `mutates` flag: with no lock, the only thing it distinguished was
 whether to audit, and the table key already carries the method (`spec.md`
-*Decisions* 3).
+*Decisions* 3). Nor is there a mode for bot-*type* gating — `SUPPORTED_BOT_TYPES`
+answers a capability question (501), not an authorization one, and stays in the
+handlers.
 
 ### The table
 
@@ -126,13 +150,13 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/channels"):  ServiceChecked(ADMIN,  "…openapi_v1.channels.router"),
     ("GET",  "/openapi/v1/bots/{bot_id}"):           OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"): ServiceChecked(ADMIN, "…openapi_v1.harness.router"),
-    ("GET",  "/openapi/v1/bots/check-name"):         NO_BOT,
+    ("GET",  "/openapi/v1/bots/check-name"):         NoCheck("tenant-identical name availability"),
     # … every operation on the surface, exactly once
 }
 ```
 
 Every row in this change is `ServiceChecked` / `OWNER_SCOPED` / `SELF_CHECKED` /
-`NO_BOT`. `Editors` is the mode #906/#907 switch rows to.
+`NoCheck`. `Check` is the mode a migration session switches a row to.
 
 The harness rows record today's behaviour like any other group's — its defect
 (`spec.md` *Motivation*) is that group owner's change, not this one's.
@@ -140,8 +164,8 @@ The harness rows record today's behaviour like any other group's — its defect
 ### The seam
 
 ```python
-# openapi_v1/editors_gate.py (new)
-def require_editors(rule: Editors) -> Callable:
+# openapi_v1/bot_access.py (new)
+def require_check(rule: Check) -> Callable:
     """Build the dependency for one operation's rule.
 
     Enforcement only — the return value is not reachable from a handler, which
@@ -157,7 +181,7 @@ def require_editors(rule: Editors) -> Callable:
         bot = _resolve(request, bot_id, owner_id)          # get_by_id_and_owner; None → refuse
         level = _level(request, bot, caller, owner_id)     # any failure → NONE
         if level < rule.level:
-            raise EditorPermissionError(...)               # → 404, masked
+            raise BotAccessRefusedError(...)               # → 404, masked
         yield
         if _audited(request) and level < PermissionLevel.OWNER:
             _audit(request, bot_id, owner_id, caller, request.scope["route"].path)
@@ -182,8 +206,8 @@ class PublicAPIRoute(APIRoute):
         rule = AUTHORIZATION.get((_method(kw), path))
         if rule is None:
             raise PublicRouteNotAuthorized(f"{_method(kw)} {path} is absent from AUTHORIZATION")
-        if isinstance(rule, Editors):
-            kw["dependencies"] = [*(kw.get("dependencies") or []), Depends(require_editors(rule))]
+        if isinstance(rule, Check):
+            kw["dependencies"] = [*(kw.get("dependencies") or []), Depends(require_check(rule))]
         super().__init__(path, endpoint, **kw)
 ```
 
@@ -219,13 +243,13 @@ assertion (`spec.md` acceptance criteria).
 
 ```python
 # openapi_v1/errors.py
-class EditorPermissionError(Exception):
+class BotAccessRefusedError(Exception):
     """Caller below the operation's level (→ 404, byte-identical to absent bot)."""
 ```
 
 ```diff
 # adapters/http/app.py:659 — beside _grant_not_resolvable_handler
-+ @app.exception_handler(EditorPermissionError)   # → 404 via _public_mapped_error
++ @app.exception_handler(BotAccessRefusedError)   # → 404 via _public_mapped_error
 ```
 
 Registered as a concrete type for the reason `errors.py:36` gives: a
@@ -235,7 +259,7 @@ added — the seam raises none.
 ## Key Files & Functions
 
 ```python
-# openapi_v1/editors_gate.py (new) — the three helpers the gate composes
+# openapi_v1/bot_access.py (new) — the three helpers the gate composes
 def _resolve(request, bot_id: str, owner_id: str) -> Mapping[str, Any]: ...
 def _level(request, bot, caller: str, owner_id: str) -> PermissionLevel: ...   # failure → NONE
 def _audit(request, bot_id: str, owner_id: str, actor: str, route: str) -> None: ...  # never raises
@@ -274,10 +298,10 @@ None. No new packages; `fastapi>=0.115` (`pyproject.toml:34`) already exposes
   If it does not hold, fall back to a post-build pass over `public.routes` using
   `fastapi.dependencies.utils.get_parameterless_sub_dependant` — same table,
   same seam, one file instead of 36.
-- **Risk:** The `Editors` code path has no production caller until #906/#907,
+- **Risk:** The `Check` code path has no production caller until #906/#907,
   so it is an unused branch that can rot.
   **Mitigation:** its behaviour is pinned by direct tests over a fixture router
-  that declares `Editors` rows, so the path is exercised on every run even
+  that declares `Check` rows, so the path is exercised on every run even
   though no shipped operation takes it. Flagged as `spec.md` Open Question 1.
 - **Risk:** A router module is added later without `route_class=`, so its routes
   silently skip the table.
@@ -334,7 +358,7 @@ def test_authorization_and_admission_cover_the_same_operations(): ...
 ```
 
 ```python
-# tests/…/openapi_v1/test_editors_gate.py (new) — over a fixture router
+# tests/…/openapi_v1/test_bot_access.py (new) — over a fixture router
 def test_owner_passes_every_level(): ...
 def test_below_level_is_404_not_403(): ...
 def test_unresolvable_bot_refuses(): ...                   # fail-closed, vs the interceptor's skip

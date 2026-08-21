@@ -36,16 +36,23 @@
 - **Files:**
   `src/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization.py` (new)
 - **Done when:**
-  - [ ] `Editors(level)`, `ServiceChecked(level, where)` and the `OWNER_SCOPED`
-        / `SELF_CHECKED` / `NO_BOT` sentinels exist, each with a docstring
+  - [ ] `Check(level)`, `ServiceChecked(level, where)` and the `NoCheck(reason)`, and the
+        `OWNER_SCOPED` / `SELF_CHECKED` scaffolding sentinels exist, each with a docstring
         saying what it means and what it costs to be wrong. No `mutates` field.
   - [ ] `AUTHORIZATION` covers **every** operation on the surface, exactly once,
         keyed `(method, path)` like `ADMISSION`.
   - [ ] Every row reflects **today's** behaviour, verified against the code it
-        names — harness included, defect and all. No row is `Editors` in this
+        names — harness included, defect and all. No row is `Check` in this
         change.
   - [ ] Each `ServiceChecked.where` is an importable module path that really
         contains a permission call.
+  - [ ] The module docstring names `Check` / `NoCheck` as the permanent
+        vocabulary and `ServiceChecked` / `OWNER_SCOPED` / `SELF_CHECKED` as
+        scaffolding, each with the row change that retires it (`spec.md` *The
+        Final Shape*).
+  - [ ] A `scaffolding_row_count()` helper reports how many rows still sit in
+        the scaffolding modes, so the migration's remaining distance is a
+        number a follow-up session can watch go to zero.
   - [ ] The module docstring states the reversal explicitly — this table, not
         the route, is now where an operation's authorization is declared — and
         why (`plan.md` *Alternatives Considered*).
@@ -62,7 +69,7 @@
 - **Done when:**
   - [ ] `PublicAPIRoute.__init__` looks the operation up and raises
         `PublicRouteNotAuthorized` — naming method and path — when it is absent.
-  - [ ] An `Editors` row appends its dependency; every other row appends
+  - [ ] A `Check` row appends its dependency; every other row appends
         nothing.
   - [ ] All 36 `APIRouter(...)` constructions under `openapi_v1/` pass
         `route_class=PublicAPIRoute`.
@@ -79,18 +86,18 @@
 - **Goal:** One place that resolves the bot, adjudicates the level and writes
   the audit record — fail-closed on every check.
 - **Files:**
-  `…/openapi_v1/editors_gate.py` (new),
+  `…/openapi_v1/bot_access.py` (new),
   `…/openapi_v1/errors.py`,
   `src/backend/src/agentclaw/community/adapters/http/app.py:659`
 - **Done when:**
-  - [ ] `require_editors(rule)` returns a `yield` dependency reading `bot_id`
+  - [ ] `require_check(rule)` returns a `yield` dependency reading `bot_id`
         from the path and `owner_id` from `OwnerIdDep`, and **nothing else** —
         check and action read the same values by construction.
   - [ ] Level comes from `resolve_operable_permission_level`; an unresolvable
         bot, owner or level yields `NONE` and refuses. The interceptor's
         `permission_skipped` fail-open (`interceptor/collaborator.py:186`) is
         not ported, and a comment says so.
-  - [ ] Below-level raises `EditorPermissionError` → 404, byte-identical to an
+  - [ ] Below-level raises `BotAccessRefusedError` → 404, byte-identical to an
         absent bot.
   - [ ] A successful non-owner action on a non-read method writes one
         `ac_bot_collab_log` row; a read writes none; an owner's writes none.
@@ -98,7 +105,7 @@
         route, and does not fail the request (`spec.md` *Decisions* 2).
   - [ ] The module imports no lock service and calls none — asserted by
         `test_gate_never_touches_the_lock_service`.
-  - [ ] `EditorPermissionError` has an `app.py` handler, because a
+  - [ ] `BotAccessRefusedError` has an `app.py` handler, because a
         dependency-raised error never reaches `@envelope_errors`
         (`errors.py:36`). No lock error type is added.
 - **Depends on:** Task 2
@@ -108,14 +115,19 @@
 - **Goal:** Make each property fail for a different, named mistake.
 - **Files:**
   `…/tests/community/adapters/http/openapi_v1/test_authorization_inventory.py`,
-  `…/test_editors_gate.py` (new),
+  `…/test_bot_access.py` (new),
   `…/test_authorization_is_inert.py` (new)
 - **Done when:**
   - [ ] Inventory: every route has a row, no row lacks a route, every route is a
         `PublicAPIRoute`, an unlisted route fails assembly, every
-        `ServiceChecked` row cites a real enforcer, and `AUTHORIZATION` and
-        `ADMISSION` cover the same operations.
-  - [ ] Gate, over a fixture router declaring `Editors` rows so the path is
+        `ServiceChecked` row cites a real enforcer, every `NoCheck` row carries
+        a non-empty reason, and `AUTHORIZATION` and `ADMISSION` cover the same
+        operations.
+  - [ ] `test_scaffolding_burn_down_is_reported` asserts the scaffolding count
+        is published and matches the table — the test that goes to zero when the
+        final shape is reached, and that will fail loudly if a *new* row is ever
+        added in a scaffolding mode.
+  - [ ] Gate, over a fixture router declaring `Check` rows so the path is
         exercised despite having no shipped caller: owner passes every level;
         below-level is 404 not 403; an unresolvable bot refuses; a
         collaborator-lookup failure refuses; a non-owner write audits once; a
@@ -142,7 +154,7 @@
   - [ ] The dated changelog gains an entry for the seam, in the style of the
         2026-08-09 entry, saying plainly that it is inert on arrival.
   - [ ] #906 and #907 are annotated as now being table edits, with the row
-        change spelled out (`OWNER_SCOPED` → `Editors(...)`).
+        change spelled out (`OWNER_SCOPED` → `Check(...)`).
   - [ ] The two deferrals are recorded where they will be found: no edit lock in
         the seam, and the harness defect as that group's own change.
   - [ ] The trade-off against "the decision is visible on the route that carries

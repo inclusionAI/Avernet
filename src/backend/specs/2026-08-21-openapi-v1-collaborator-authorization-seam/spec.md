@@ -82,6 +82,12 @@ contract. What is missing is only the shared enforcement that reads them.
       level, or an explicit named reason it is not adjudicated at this seam.
 - [ ] An entry that names another module as the enforcer cites a module path
       that really exists and really performs a permission check.
+- [ ] The vocabulary marks which modes are permanent (`Check`, `NoCheck`) and
+      which are scaffolding (`ServiceChecked`, `OwnerScoped`, `SelfChecked`),
+      and a test reports how many rows still sit in the scaffolding modes, so
+      the migration's remaining distance is a number rather than an impression.
+- [ ] A `NoCheck` row carries a reason, so "no bot to check" and "bot-scoped
+      but deliberately unguarded" are distinguishable in review.
 - [ ] An operation absent from the table makes the public router **fail to
       assemble** — `build_public_router()` raises, naming the method and path,
       so the application does not start. This is stronger than a test
@@ -135,6 +141,38 @@ contract. What is missing is only the shared enforcement that reads them.
       carrying a lock does not remove the locks that already exist.
 - [ ] The app-caller grant rules are untouched.
 
+## The Final Shape
+
+Stated first, because it is what every decision below serves and what the
+follow-ups converge on. When the last group has migrated and the retiring
+addresses are gone, the table has **two** kinds of row:
+
+- **`Check(level)`** — verify the caller's level on the bot this operation
+  addresses. The level is a parameter, not a further mode: the surface's bars
+  genuinely differ per operation (MEMBER to drive a bot's sessions, ADMIN to
+  write a channel, OWNER to restart a container or delete the bot), so a
+  bare check/no-check would either lock members out or let one delete a bot.
+- **`NoCheck(reason)`** — nothing to verify. The reason distinguishes the two
+  situations this covers, both legitimate: the operation has no bot dimension
+  at all (a name check, the MCP catalogue, the caller's own identity), or it is
+  bot-scoped and deliberately unguarded (render-screen reads, so that share
+  viewers can render panels without an editor relation). One mode, because the
+  seam does the same thing — nothing — but a reviewer must be able to tell a
+  decision from an oversight.
+
+Every other mode in this change is **scaffolding, and is deleted when its last
+row leaves it**: `ServiceChecked` while a group's enforcement still lives in a
+service, `OwnerScoped` while a group has no collaborator dimension decided,
+`SelfChecked` while the retiring addresses in `deprecated/` still exist. None
+survives the migration, and a test counts the remaining scaffolding rows so the
+burn-down is visible rather than assumed.
+
+Two things stay **outside** the seam permanently, named so they are not folded
+in later: bot-*type* gating (`SUPPORTED_BOT_TYPES`, answered 501) is a
+capability question, not an authorization one; and the app-caller grant table
+answers a different question — whether a *machine* caller is admitted — and
+keeps its own seam.
+
 ## Decisions
 
 Settled here rather than left open:
@@ -171,12 +209,12 @@ Settled here rather than left open:
    override is introduced until one exists.
 
 4. **The seam ships with no adopter, deliberately.** Every row in this change
-   is `ServiceChecked` / `OWNER_SCOPED` / `SELF_CHECKED` / `NO_BOT`; no row is
-   `Editors`. This change builds the framework, and moving each group onto it
+   is `ServiceChecked` / `OWNER_SCOPED` / `SELF_CHECKED` / `NoCheck`; no row is
+   `Check`. This change builds the framework, and moving each group onto it
    is its own session — per group, because each move is either a behaviour
    comparison (a service's bar versus the seam's) or a policy decision (#906,
    #907), and neither belongs in the change that introduces the mechanism.
-   The consequence is that the `Editors` path has no production caller until
+   The consequence is that the `Check` path has no production caller until
    the first of those sessions. The alternative — having one already-checked
    group declare the seam redundantly, purely to give the path a live caller —
    was rejected: it buys a warm code path at the cost of a permanent
@@ -219,7 +257,7 @@ Settled here rather than left open:
 
 ## Open Questions
 
-None outstanding. Both are settled above — the unused `Editors` path is
+None outstanding. Both are settled above — the unused `Check` path is
 accepted rather than given an artificial caller (*Decisions* 4), and reads are
 not audited, matching the internal surface as measured (*Decisions* 3).
 
@@ -228,14 +266,14 @@ not audited, matching the internal surface as measured (*Decisions* 3).
 Named here so the sequence after this change is not rediscovered:
 
 - **One session per group** to move a `ServiceChecked` group's enforcement onto
-  the seam: delete the service-local check, flip the row to `Editors` at the
+  the seam: delete the service-local check, flip the row to `Check` at the
   same level, prove the answers are unchanged. Groups, in rough order of how
   unambiguous their current bar is: channels, editors, skill sets, skills, MCP,
   render screens, diagnostics, containers, service publications, chats, the
   engine-runtime groups.
 - **#906 / #907** to give the `OWNER_SCOPED` groups a collaborator dimension.
   These are policy decisions per operation — the level bar is the work, not the
-  wiring — and each flips its rows to `Editors` once decided.
+  wiring — and each flips its rows to `Check` once decided.
 - **The harness defect**, described in *Motivation*, as that group's own change.
 - **The edit lock**, if the public surface should ever have one uniformly
   (*Decisions* 1).
