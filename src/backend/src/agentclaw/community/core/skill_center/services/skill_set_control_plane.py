@@ -274,6 +274,7 @@ class SkillSetControlPlaneService:
                 name=name,
                 description=description,
                 engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
             )
             self._ensure_mutation_lease(mutation_lease)
             self._audit(

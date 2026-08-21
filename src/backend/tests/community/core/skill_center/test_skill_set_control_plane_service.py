@@ -73,6 +73,11 @@ class _Repository:
     def __init__(self) -> None:
         self.restore_calls = []
         self.set_active_calls = []
+        self.update_calls = []
+
+    def update_set(self, **kwargs):
+        self.update_calls.append(kwargs)
+        return {"id": kwargs["set_id"], "is_default": False}
 
     def set_active(self, **kwargs) -> SkillSetMutation:
         self.set_active_calls.append(kwargs)
@@ -851,6 +856,42 @@ def test_list_sets_uses_aicoding_default_then_claude_code_fallback_for_coding_im
     assert repository.list_set_calls == [{
         "bot_id": "bot-1",
         "owner_id": "true-owner",
+        "engine_type": "claude_code",
+        "default_engine_types": ("aicoding", "claude_code"),
+    }]
+
+
+def test_update_set_uses_runtime_default_candidates_for_coding_image():
+    repository = _Repository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_AicodingImageBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    service.update_set(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="default-id",
+        name=None,
+        description="ignored by the repository fake",
+    )
+
+    assert repository.update_calls == [{
+        "bot_id": "bot-1",
+        "owner_id": "true-owner",
+        "set_id": "default-id",
+        "name": None,
+        "description": "ignored by the repository fake",
         "engine_type": "claude_code",
         "default_engine_types": ("aicoding", "claude_code"),
     }]
