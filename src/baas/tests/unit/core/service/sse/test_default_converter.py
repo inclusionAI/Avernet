@@ -642,7 +642,7 @@ class TestInteractionBranch:
         assert "field_path=payload.options[4].decision" in caplog.text
         assert "error_type=duplicate_option_decision" in caplog.text
 
-    def test_invalid_exec_command_drops_interaction_without_consuming_seq(
+    def test_missing_or_invalid_exec_command_is_omitted(
         self,
         monkeypatch,
         caplog,
@@ -666,12 +666,21 @@ class TestInteractionBranch:
                 run_id="run-log",
             )
 
-            assert interaction is None
+            assert interaction is not None
+            assert interaction.event == "interaction"
+            interaction_data = _data(interaction)
+            assert interaction_data["seq"] == 1
+            assert "command" not in interaction_data
+            assert interaction_data["options"] == [
+                {"label": "Allow once", "decision": "allow-once"},
+                {"label": "Allow always", "decision": "allow-always"},
+                {"label": "Deny", "decision": "deny"},
+            ]
             assert chat is not None
-            assert chat.id == "1"
-            assert _data(chat)["seq"] == 1
+            assert chat.id == "2"
+            assert _data(chat)["seq"] == 2
 
-        assert caplog.text.count("field_path=payload.command") == 4
+        assert "field_path=payload.command" not in caplog.text
         assert "Sensitive title" not in caplog.text
 
     def test_invalid_explicit_exec_options_drop_interaction_without_seq(
