@@ -54,6 +54,9 @@ class WorkOrderEventType(StrEnum):
     BOT_COLLABORATOR_APPLIED = "BOT_COLLABORATOR_APPLIED"
     BOT_COLLABORATOR_REVIEWED = "BOT_COLLABORATOR_REVIEWED"
     BOT_MEMBER_ADDED = "BOT_MEMBER_ADDED"
+    SKILL_COLLABORATOR_APPLIED = "SKILL_COLLABORATOR_APPLIED"
+    SKILL_COLLABORATOR_REVIEWED = "SKILL_COLLABORATOR_REVIEWED"
+    SKILL_MEMBER_ADDED = "SKILL_MEMBER_ADDED"
     HUMAN2BOT_FRIEND_APPLIED = "HUMAN2BOT_FRIEND_APPLIED"
     HUMAN2BOT_FRIEND_REVIEWED = "HUMAN2BOT_FRIEND_REVIEWED"
     BOT2BOT_FRIEND_APPLIED = "BOT2BOT_FRIEND_APPLIED"
@@ -71,6 +74,9 @@ EVENT_CATEGORIES: dict[WorkOrderEventType, NotificationCategory] = {
     WorkOrderEventType.BOT_COLLABORATOR_APPLIED: NotificationCategory.APPROVAL,
     WorkOrderEventType.BOT_COLLABORATOR_REVIEWED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT_MEMBER_ADDED: NotificationCategory.NOTICE,
+    WorkOrderEventType.SKILL_COLLABORATOR_APPLIED: NotificationCategory.APPROVAL,
+    WorkOrderEventType.SKILL_COLLABORATOR_REVIEWED: NotificationCategory.NOTICE,
+    WorkOrderEventType.SKILL_MEMBER_ADDED: NotificationCategory.NOTICE,
     WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED: NotificationCategory.APPROVAL,
     WorkOrderEventType.HUMAN2BOT_FRIEND_REVIEWED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT2BOT_FRIEND_APPLIED: NotificationCategory.APPROVAL,
@@ -80,6 +86,19 @@ EVENT_CATEGORIES: dict[WorkOrderEventType, NotificationCategory] = {
     WorkOrderEventType.BOT2BOT_PUBLIC_ORDER_CREATED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT2BOT_PUBLIC_ORDER_COMPLETED: NotificationCategory.NOTICE,
 }
+
+# Approval events are extracted from the single classification table so new
+# event values only need one category entry above.
+APPROVAL_EVENT_TYPES: frozenset[WorkOrderEventType] = frozenset(
+    event_type
+    for event_type, category in EVENT_CATEGORIES.items()
+    if category is NotificationCategory.APPROVAL
+)
+NOTICE_EVENT_TYPES: frozenset[WorkOrderEventType] = frozenset(
+    event_type
+    for event_type, category in EVENT_CATEGORIES.items()
+    if category is NotificationCategory.NOTICE
+)
 
 
 class WorkOrderMessageTitle(StrEnum):

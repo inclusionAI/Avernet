@@ -92,6 +92,9 @@ class WorkOrderEventType(_DocumentedEnum):
     BOT_COLLABORATOR_APPLIED = "BOT_COLLABORATOR_APPLIED"
     BOT_COLLABORATOR_REVIEWED = "BOT_COLLABORATOR_REVIEWED"
     BOT_MEMBER_ADDED = "BOT_MEMBER_ADDED"
+    SKILL_COLLABORATOR_APPLIED = "SKILL_COLLABORATOR_APPLIED"
+    SKILL_COLLABORATOR_REVIEWED = "SKILL_COLLABORATOR_REVIEWED"
+    SKILL_MEMBER_ADDED = "SKILL_MEMBER_ADDED"
     HUMAN2BOT_FRIEND_APPLIED = "HUMAN2BOT_FRIEND_APPLIED"
     HUMAN2BOT_FRIEND_REVIEWED = "HUMAN2BOT_FRIEND_REVIEWED"
     BOT2BOT_FRIEND_APPLIED = "BOT2BOT_FRIEND_APPLIED"
@@ -108,6 +111,9 @@ class WorkOrderEventType(_DocumentedEnum):
         "BOT_COLLABORATOR_APPLIED": "A bot collaborator request was submitted.",
         "BOT_COLLABORATOR_REVIEWED": "A bot collaborator request was reviewed.",
         "BOT_MEMBER_ADDED": "A member was directly added to a bot.",
+        "SKILL_COLLABORATOR_APPLIED": "A skill collaborator request was submitted.",
+        "SKILL_COLLABORATOR_REVIEWED": "A skill collaborator request was reviewed.",
+        "SKILL_MEMBER_ADDED": "A member was directly added to a skill.",
         "HUMAN2BOT_FRIEND_APPLIED": "A user-to-bot friend request was submitted.",
         "HUMAN2BOT_FRIEND_REVIEWED": "A user-to-bot friend request was reviewed.",
         "BOT2BOT_FRIEND_APPLIED": "A bot-to-bot friend request was submitted.",
