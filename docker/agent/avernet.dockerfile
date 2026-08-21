@@ -2,25 +2,28 @@
 # Two-stage build producing an image that runs both the Python engine adapter
 # and the OpenClaw gateway under supervisord.
 #
-# Reference: ocb/dockers/desktop-openclaw/Dockerfile
+# Reference: ocb/dockers/arca-openclaw/Dockerfile
 #
-# Runtime model (mirrors OCB desktop-openclaw):
+# Runtime model (mirrors OCB arca-openclaw):
 #   - supervisord is PID 1
-#   - [program:engine]    autostart=true  — starts on container boot
+#   - [program:engine]    autostart=false — started by start_service.sh
 #   - [program:openclaw]  autostart=false — started on demand by engine
 #                        via `sudo supervisorctl start openclaw`
+#
+# Pod startup flow:
+#   1. entrypoint.sh: pre-init (directories, config), then exec supervisord
+#   2. start_service.sh (background): save credentials → start engine
+#      via supervisorctl → poll /health → write ready marker
 #
 # Build args:
 #   OPENCLAW_VERSION   npm version of openclaw (default 2026.6.1)
 #   UV_VERSION         uv version for pin (default: latest)
-#   USE_CN_MIRROR      set to "1" for China-friendly apt/npm/pip mirrors
 #   NPM_STRICT_SSL     npm strict-ssl toggle (default true)
 
 # ==================== Stage 1: Builder ====================
 FROM node:22-bookworm-slim AS builder
 
 ARG OPENCLAW_VERSION=2026.6.1
-ARG USE_CN_MIRROR=
 ARG NPM_STRICT_SSL=true
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -30,9 +33,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 WORKDIR /opt
 
 # Install build + system dependencies in one layer.
-RUN if [ "${USE_CN_MIRROR}" = "1" ]; then \
-        sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources; \
-    fi \
+RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
@@ -50,9 +51,7 @@ RUN if [ "${USE_CN_MIRROR}" = "1" ]; then \
     && rm -rf /var/lib/apt/lists/*
 
 # Install OpenClaw via npm (global).
-RUN if [ "${USE_CN_MIRROR}" = "1" ]; then \
-        npm config set registry "https://registry.npmmirror.com"; \
-    fi \
+RUN npm config set registry "https://registry.npmmirror.com" \
     && npm config set strict-ssl "${NPM_STRICT_SSL}" \
     && npm install -g "openclaw@${OPENCLAW_VERSION}"
 
@@ -63,18 +62,10 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 # Build engine virtualenv from pyproject.toml.
 COPY src/engine/ /opt/engine/
 RUN uv venv --python 3 /opt/.venv \
-    && if [ "${USE_CN_MIRROR}" = "1" ]; then \
-           UV_INDEX_URL="https://mirrors.aliyun.com/pypi/simple" \
-           uv pip install --python /opt/.venv/bin/python -r /opt/engine/pyproject.toml; \
-       else \
-           uv pip install --python /opt/.venv/bin/python -r /opt/engine/pyproject.toml; \
-       fi \
-    && if [ "${USE_CN_MIRROR}" = "1" ]; then \
-           UV_INDEX_URL="https://mirrors.aliyun.com/pypi/simple" \
-           uv pip install --python /opt/.venv/bin/python -e /opt/engine; \
-       else \
-           uv pip install --python /opt/.venv/bin/python -e /opt/engine; \
-       fi \
+    && UV_INDEX_URL="https://mirrors.aliyun.com/pypi/simple" \
+       uv pip install --python /opt/.venv/bin/python -r /opt/engine/pyproject.toml \
+    && UV_INDEX_URL="https://mirrors.aliyun.com/pypi/simple" \
+       uv pip install --python /opt/.venv/bin/python -e /opt/engine \
     && find /opt/.venv -name "*.pyc" -delete \
     && find /opt/.venv -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true \
     && rm -rf /root/.cache/uv /root/.local/share/uv
@@ -101,8 +92,6 @@ RUN ln -sf /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt
 # ==================== Stage 2: Runtime ====================
 FROM node:22-bookworm-slim AS runtime
 
-ARG USE_CN_MIRROR=
-
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/admin \
     OPENCLAW_PORT=18789 \
@@ -111,9 +100,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Shanghai
 
 # Runtime deps only (no build tools).
-RUN if [ "${USE_CN_MIRROR}" = "1" ]; then \
-        sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources; \
-    fi \
+RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
@@ -152,19 +139,27 @@ RUN groupadd --gid 10001 admin 2>/dev/null || true \
     && mkdir -p /home/admin/.openclaw/workspace \
                /home/admin/logs \
                /var/log/supervisor \
-               /var/run \
+               /var/run/agentclaw \
     && chown -R admin:admin /home/admin
 
-# Supervisor configuration: engine(autostart=true) + openclaw(autostart=false).
-COPY docker/openclaw-supervisord.conf /etc/supervisor/supervisord.conf
+# Supervisor configuration: engine(autostart=false) + openclaw(autostart=false).
+COPY docker/agent/avernet-supervisord.conf /etc/supervisor/supervisord.conf
 
-# Entrypoint: generates ~/.openclaw/openclaw.json from env vars, then starts supervisord.
-COPY docker/openclaw-entrypoint.sh /usr/local/bin/openclaw-entrypoint
-RUN chmod +x /usr/local/bin/openclaw-entrypoint
+# Shared utility functions (logging, helpers).
+COPY docker/agent/util.sh /usr/local/bin/util.sh
+
+# Simplified pod startup script (starts engine, waits for health).
+COPY docker/agent/start_service.sh /usr/local/bin/start_service.sh
+
+# Entrypoint: pre-init, schedules start_service.sh, then execs supervisord.
+COPY docker/agent/avernet-entrypoint.sh /usr/local/bin/avernet-entrypoint
+RUN chmod +x /usr/local/bin/avernet-entrypoint \
+             /usr/local/bin/start_service.sh \
+             /usr/local/bin/util.sh
 
 EXPOSE 20003 18789
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=120s --retries=6 \
     CMD curl -fsS "http://127.0.0.1:20003/health" >/dev/null || exit 1
 
-ENTRYPOINT ["/usr/local/bin/openclaw-entrypoint"]
+ENTRYPOINT ["/usr/local/bin/avernet-entrypoint"]

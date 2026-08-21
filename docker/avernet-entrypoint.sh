@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
-# docker/openclaw-entrypoint.sh
+# docker/avernet-entrypoint.sh
 #
 # Container entrypoint for Avernet Engine + OpenClaw image.
 #
-# Runtime model (mirrors ocb/dockers/desktop-openclaw/entrypoint.sh):
-#   - supervisord is started as PID 1
-#   - [program:engine]   autostart=true  — starts on container boot
+# Runtime model (mirrors ocb/dockers/arca-openclaw/entrypoint.sh):
+#   - supervisord runs as PID 1 (started via exec)
+#   - [program:engine]   autostart=false — started by start_service.sh
 #   - [program:openclaw]  autostart=false — started by engine on demand
-#     via `sudo supervisorctl start openclaw`
 #
-# This script:
-#   1. Creates runtime directories for openclaw and logs
-#   2. Generates ~/.openclaw/openclaw.json from environment variables
-#      (unless a config was already mounted)
-#   3. Launches supervisord
+# Flow:
+#   1. Create runtime directories
+#   2. Generate ~/.openclaw/openclaw.json from env vars (if not mounted)
+#   3. Schedule start_service.sh as a background subshell
+#   4. exec supervisord (becomes PID 1)
 
 set -euo pipefail
 
@@ -23,11 +22,15 @@ CONFIG_FILE="${CONFIG_DIR}/openclaw.json"
 WORKSPACE_DIR="${CONFIG_DIR}/workspace"
 LOG_DIR="${HOME}/logs"
 
-# --- 1. Create runtime directories —-
+SCRIPT_DIR="/usr/local/bin"
+
+# --- 1. Create runtime directories ——
 
 mkdir -p "${CONFIG_DIR}/extensions" "${WORKSPACE_DIR}" "${LOG_DIR}"
+mkdir -p /var/run/agentclaw /var/log/supervisor /var/run
 
-# --- 2. Check that the engine venv + supervisor exist
+# --- 2. Verify build artifacts
+
 if [ ! -f "/opt/.venv/bin/activate" ]; then
     echo "ERROR: engine venv not found at /opt/.venv" >&2
     echo "Please rebuild the Docker image" >&2
@@ -39,7 +42,6 @@ if [ ! -x "/usr/local/bin/supervisord" ]; then
     exit 1
 fi
 
-# --- Check openclaw is installed
 if command -v openclaw &>/dev/null; then
     echo "===> OpenClaw: $(openclaw --version 2>&1 | head -1 || echo 'unknown')"
 else
@@ -52,6 +54,7 @@ echo "     OpenClaw: ${CONFIG_DIR} (port ${OPENCLAW_PORT:-18789})"
 echo "     Logs:     ${LOG_DIR}"
 
 # --- 3. Generate default openclaw.json if none exists (user may mount their own).
+
 if [ ! -f "${CONFIG_FILE}" ]; then
     echo "===> generating default ${CONFIG_FILE}"
     node -e '
@@ -68,7 +71,6 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     const bcsUrl     = process.env.BCS_URL || "";
     const workspace  = process.env.HOME + "/.openclaw/workspace";
 
-    // --- Build model providers (only when baseUrl or apiKey or modelId is set)
     const providers = {};
     if (baseUrl || apiKey || modelId) {
       providers[providerId] = {
@@ -87,7 +89,6 @@ if [ ! -f "${CONFIG_FILE}" ]; then
       };
     }
 
-    // --- Build agent defaults
     const agentDefaults = {
       workspace,
       compaction: { mode: "safeguard" },
@@ -100,7 +101,6 @@ if [ ! -f "${CONFIG_FILE}" ]; then
       agentDefaults.models[providerId + "/" + modelId] = { alias: modelName };
     }
 
-    // --- Build channels (bcs only when BCS_URL is set)
     const channels = {};
     if (bcsUrl) {
       const csv = (s) => s ? s.split(",").map(x => x.trim()).filter(Boolean) : [];
@@ -121,7 +121,6 @@ if [ ! -f "${CONFIG_FILE}" ]; then
       };
     }
 
-    // --- Build gateway auth
     const auth = gwToken
       ? { mode: "token", token: gwToken }
       : {};
@@ -167,7 +166,6 @@ if [ ! -f "${CONFIG_FILE}" ]; then
       }
     };
 
-    // Add channels if non-empty
     if (Object.keys(channels).length > 0) {
       config.channels = channels;
     }
@@ -181,5 +179,42 @@ else
     echo "===> using existing ${CONFIG_FILE} (mounted or pre-built)"
 fi
 
-echo "===> starting supervisord (engine=autostart, openclaw=on-demand)"
+# --- 4. Schedule start_service.sh as a background subshell.
+# It waits for the supervisord socket, then starts the engine program
+# and polls its /health endpoint.  Running it in the background lets
+# supervisord become PID 1 and receive SIGTERM directly for graceful
+# shutdown.
+
+ENGINE="${ENGINE:-openclaw}"
+TOKEN="${TOKEN:-}"
+CLIENT_ID="${CLIENT_ID:-}"
+BOT_ID="${BOT_ID:-}"
+STAGE="${STAGE:-}"
+OWNER_ID="${OWNER_ID:-}"
+
+START_ARGS=()
+[ -n "$TOKEN" ]      && START_ARGS+=(--token "$TOKEN")
+[ -n "$CLIENT_ID" ]  && START_ARGS+=(--client_id "$CLIENT_ID")
+[ -n "$BOT_ID" ]     && START_ARGS+=(--bot_id "$BOT_ID")
+[ -n "$STAGE" ]      && START_ARGS+=(--stage "$STAGE")
+[ -n "$OWNER_ID" ]   && START_ARGS+=(--owner_id "$OWNER_ID")
+START_ARGS+=(--engine "$ENGINE")
+
+echo "===> scheduling start_service.sh in background"
+(
+    # Wait for supervisord socket to appear
+    for _ in $(seq 1 30); do
+        [ -S /var/run/supervisor.sock ] && break
+        sleep 1
+    done
+    if [ -S /var/run/supervisor.sock ]; then
+        bash "${SCRIPT_DIR}/start_service.sh" "${START_ARGS[@]}" \
+            2>&1 | tee -a "${LOG_DIR}/start_service.log"
+    else
+        echo "[entrypoint] ERROR: supervisord socket never appeared, skipping start_service.sh" >&2
+    fi
+) &
+
+# --- 5. exec supervisord — becomes PID 1
+echo "===> starting supervisord (engine + openclaw on demand)"
 exec /usr/local/bin/supervisord -n -c /etc/supervisor/supervisord.conf

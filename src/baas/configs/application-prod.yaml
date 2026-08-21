@@ -50,7 +50,7 @@ user_config:
     token: "${ACK_TOKEN}"
     namespace: "default"
     default_images:
-      ALIYUN_ACK_OPENCLAW: "${OPENCLAW_IMAGE}"
+      ALIYUN_ACK_DEFAULT: "${DEFAULT_IMAGE}"
 
   bot_service:
     proxy_base_url: "https://bot_service.example.com"
