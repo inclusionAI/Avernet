@@ -303,9 +303,9 @@ class TestPublicBcsBot:
             bot_uid="b1:entity1", owner_id="u1", public_scope="user",
             operator=_make_operator(), view_depts=depts,
         )
-        bcn.get_attributes.assert_called_once_with(bot_uid="b1:entity1")
+        bcn.get_attributes.assert_called_once_with(bot_uuid="b1:entity1")
         ckw = bcn.patch_attributes.call_args.kwargs
-        assert ckw["bot_uid"] == "b1:entity1"
+        assert ckw["bot_uuid"] == "b1:entity1"
         body = ckw["body"]
         # merge preserves existing friend_ext keys + sets the PROCESSING block
         assert body["friend_ext"]["old"] == "x"
@@ -345,7 +345,7 @@ class TestPublicBcsBot:
         process.start_approval.assert_not_called()
         bcn.get_attributes.assert_not_called()
         bcn.patch_attributes.assert_called_once_with(
-            bot_uid="b1", body={"user_visibility": "private"}
+            bot_uuid="b1", body={"user_visibility": "private"}
         )
         assert result["success"] is True
         assert result["visibility"] == "private"
@@ -360,7 +360,7 @@ class TestPublicBcsBot:
         )
         # agent 联动 → PATCH BCS visibility 字段 (非 user_visibility)
         bcn.patch_attributes.assert_called_once_with(
-            bot_uid="b1", body={"visibility": "private"}
+            bot_uuid="b1", body={"visibility": "private"}
         )
 
     def test_visibility_public_stored_in_friend_ext_block(self):
@@ -426,7 +426,7 @@ class TestPublicBcsBot:
             last_operate="DISAGREE", public_scope="user",
         )
         # public_scope 非空 → bot_id 即 bot_uid
-        bcn.get_attributes.assert_called_once_with(bot_uid="bot-uuid-x")
+        bcn.get_attributes.assert_called_once_with(bot_uuid="bot-uuid-x")
         block = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["public_user_approval"]
         assert block["status"] == "DISAGREE"
         # 其他子字段保留 (只翻 status)
