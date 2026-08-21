@@ -54,6 +54,27 @@ def test_interaction_resolution_round_trips_ask_user_payload() -> None:
     assert InteractionResolution.from_dict(payload) == resolution
 
 
+def test_interaction_resolution_round_trips_skipped_ask_user_values() -> None:
+    resolution = InteractionResolution(
+        kind="ask_user",
+        decision="submit",
+        answer="Array: ；Empty: ；Blank:    ",
+        message="Array: ；Empty: ；Blank:    ",
+        values={"Array": "", "Empty": "", "Blank": "   "},
+        answers={
+            "Skip with an empty array?": "",
+            "Skip with an empty string?": "",
+            "Skip with whitespace?": "   ",
+        },
+        selected_options=((), ("",), ("   ",)),
+    )
+
+    payload = resolution.to_dict()
+
+    assert payload["selectedOptions"] == [[], [""], ["   "]]
+    assert InteractionResolution.from_dict(payload) == resolution
+
+
 def test_interaction_resolution_omits_absent_optional_fields() -> None:
     resolution = InteractionResolution(kind="exec", decision="deny")
 

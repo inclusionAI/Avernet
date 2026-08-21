@@ -94,10 +94,6 @@ def _normalize_interaction_resolution(
             or not source_answer.question.strip()
         ):
             raise ValueError("ask_user answer identity must be non-empty")
-        if not source_answer.values or any(
-            not value.strip() for value in source_answer.values
-        ):
-            raise ValueError("ask_user answer values must be non-empty")
         joined_values = "，".join(source_answer.values)
         summaries.append(f"{source_answer.header}: {joined_values}")
         if source_answer.header in values:
