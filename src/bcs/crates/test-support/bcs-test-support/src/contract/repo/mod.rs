@@ -3,14 +3,6 @@
 //! Concrete repository implementations call these functions from
 //! `tests/conformance_*.rs`.
 
-pub mod edge_grant;
-pub mod permission_profile;
-pub mod permission_request;
-
-pub use edge_grant::run_edge_grant_repo_contract;
-pub use permission_profile::run_permission_profile_repo_contract;
-pub use permission_request::run_permission_request_repo_contract;
-
 use bcs_domain::{MessageOwnerFilter, MessageQuery, NewMessage, SenderType};
 use bcs_service_api::ServiceError;
 use bcs_service_api::port::repo::{
@@ -1383,60 +1375,6 @@ pub async fn bot_repo_contract_tests<T: BotRepoPort + ?Sized>(repo: &T) {
     repo.save_token(bot_id, token).await.expect("save token");
     assert_eq!(repo.load_token(bot_id).await.as_deref(), Some(token));
     assert_eq!(repo.find_bot_by_token(token).await.as_deref(), Some(bot_id));
-
-    // update_capabilities replaces capabilities wholesale, including cleared
-    // (empty) domains/skills/scopes — unlike register, which skips empty
-    // arrays on the existing-bot merge path. Seed non-empty arrays, then
-    // clear them and assert the live registry reflects the clear.
-    repo.update_capabilities(
-        bot_id,
-        BotCapabilities {
-            name: Some("Repo Contract Bot".to_string()),
-            domains: vec!["contracts".to_string()],
-            skills: vec![Skill::new("repo_contract")],
-            scopes: vec!["production".to_string()],
-            visibility: "public".to_string(),
-            ..Default::default()
-        },
-    )
-    .await
-    .expect("update capabilities with seeded arrays");
-    let seeded = repo.get(bot_id).await.expect("bot after seeding");
-    assert_eq!(seeded.capabilities.domains, vec!["contracts"]);
-    assert_eq!(seeded.capabilities.scopes, vec!["production"]);
-    assert!(!seeded.capabilities.skills.is_empty());
-
-    // Owner/token (immutable identity) must survive the wholesale replace.
-    assert_eq!(repo.load_token(bot_id).await.as_deref(), Some(token));
-    assert!(
-        repo.list_bots_by_creator(owner)
-            .await
-            .iter()
-            .any(|bot| bot.bot_uuid == bot_id)
-    );
-
-    repo.update_capabilities(
-        bot_id,
-        BotCapabilities {
-            name: Some("Repo Contract Bot".to_string()),
-            domains: vec![],
-            skills: vec![],
-            scopes: vec![],
-            visibility: "public".to_string(),
-            ..Default::default()
-        },
-    )
-    .await
-    .expect("update capabilities clearing arrays");
-    let cleared = repo.get(bot_id).await.expect("bot after clear");
-    assert!(
-        cleared.capabilities.domains.is_empty(),
-        "update_capabilities must clear domains (register's empty-skip does not apply)"
-    );
-    assert!(cleared.capabilities.skills.is_empty());
-    assert!(cleared.capabilities.scopes.is_empty());
-    // Unmodified visibility preserved through the replace.
-    assert_eq!(cleared.capabilities.visibility, "public");
 }
 
 pub async fn bot_repo_port_contract_tests<T: BotRepoPort + ?Sized>(repo: &T) {

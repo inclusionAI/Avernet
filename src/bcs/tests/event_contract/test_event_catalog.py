@@ -232,41 +232,6 @@ def test_representative_fixtures_validate_against_envelope_and_data_schemas(
     }
 
 
-def test_node_started_predecessors_are_additive_and_unique(
-    schema_registry: tuple[dict[str, Any], Registry],
-) -> None:
-    envelope_schema, registry = schema_registry
-    validator = Draft202012Validator(
-        {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "$ref": envelope_schema["$id"] + "#/$defs/StateMachineNodeStartedData",
-        },
-        registry=registry,
-    )
-    legacy_data = {
-        "run_id": "run-1",
-        "node_id": "join",
-        "attempt": 0,
-        "started_at": "2026-08-21T00:00:00.000Z",
-    }
-
-    validator.validate(legacy_data)
-    validator.validate(
-        {
-            **legacy_data,
-            "predecessor_node_ids": ["branch-b", "branch-c"],
-        }
-    )
-    assert list(
-        validator.iter_errors(
-            {
-                **legacy_data,
-                "predecessor_node_ids": ["branch-b", "branch-b"],
-            }
-        )
-    )
-
-
 def test_metadata_only_fixtures_never_expose_content_or_derived_identifiers() -> None:
     fixture_paths = sorted(FIXTURE_ROOT.glob("*.metadata_only.json"))
     assert fixture_paths

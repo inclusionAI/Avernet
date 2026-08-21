@@ -2,8 +2,8 @@
 
 The public contract must expose exactly the approved operations across Bot,
 Group, GroupParticipant, Session, SessionParticipant, Invitation, and
-Friendship / FriendRequest, Channel Binding, and must not expose session-file,
-bot candidate search, message-send, Internal API, or routing-only path aliases.
+Friendship / FriendRequest, and must not expose session-file, bot candidate search,
+message-send, Internal API, or routing-only path aliases.
 """
 
 import sys
@@ -52,18 +52,6 @@ EXPECTED_OPERATIONS = {
     ("get", "/openapi/v1/collaboration/bots/{bot_uuid}/friend-requests"),
     ("post", "/openapi/v1/collaboration/friend-requests/{request_id}/accept"),
     ("post", "/openapi/v1/collaboration/friend-requests/{request_id}/reject"),
-    ("post", "/openapi/v1/collaboration/friend-connections/requests"),
-    ("get", "/openapi/v1/collaboration/friend-connections/requests"),
-    ("post", "/openapi/v1/collaboration/friend-connections/requests/{request_id}/accept"),
-    ("post", "/openapi/v1/collaboration/friend-connections/requests/{request_id}/reject"),
-    ("post", "/openapi/v1/collaboration/friend-connections/requests/{request_id}/cancel"),
-    ("get", "/openapi/v1/collaboration/friend-connections"),
-    ("delete", "/openapi/v1/collaboration/friend-connections"),
-    ("post", "/openapi/v1/collaboration/channels/bindings"),
-    ("get", "/openapi/v1/collaboration/channels/bindings"),
-    ("get", "/openapi/v1/collaboration/channels/bindings/by-target"),
-    ("patch", "/openapi/v1/collaboration/channels/bindings/{id}"),
-    ("delete", "/openapi/v1/collaboration/channels/bindings/{id}"),
     ("post", "/openapi/v1/collaboration/event-subscriptions"),
     ("get", "/openapi/v1/collaboration/event-subscriptions"),
     ("get", "/openapi/v1/collaboration/event-subscriptions/{subscription_id}"),
@@ -87,7 +75,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_56_approved_operations() -> None:
+def test_contract_contains_exactly_the_44_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 
@@ -107,11 +95,6 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
                 continue
             if path == "/openapi/v1/collaboration/messages/ws":
                 expected = {}
-            elif (method, path) == (
-                "post",
-                "/openapi/v1/collaboration/groups/{group_id}/sessions",
-            ):
-                expected = {"user": "optional", "app": "optional", "bot": "optional"}
             else:
                 expected = {"user": "required", "app": "required"}
             assert operation["x-avernet-security"] == expected, (

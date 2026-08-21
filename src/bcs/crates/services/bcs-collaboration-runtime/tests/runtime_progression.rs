@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     future::Future,
     io::{self, Write},
-    sync::{Arc, Mutex as StdMutex, OnceLock},
+    sync::{Arc, OnceLock},
     time::Duration,
 };
 
@@ -20,8 +20,7 @@ use bcs_group::{GroupManagement, GroupManagementWithRuntimeCleanup, GroupStore};
 use bcs_group_store::MemoryGroupRepo;
 use bcs_message_store::MemoryMessageRepo;
 use bcs_protocol::{BcsFrame, ChatSendParams};
-use bcs_service_api::port::repo::{AppendEventRecord, MessageRepoError, MessageRepoPort};
-use bcs_service_api::port::{EventRecordError, EventRecordFactoryPort, NewEvent};
+use bcs_service_api::port::repo::{MessageRepoError, MessageRepoPort};
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult,
     BotDeliveryTarget, BotRunContext, BotRunContextPort, CallbackChannelConfig, CallbackConfig,
@@ -157,21 +156,6 @@ struct RecordingSessionChannelOutbound {
     events: Mutex<Vec<HumanInputReadyEvent>>,
     validation_calls: Mutex<Vec<(String, String)>>,
     validation_error: Mutex<Option<String>>,
-}
-
-#[derive(Default)]
-struct RecordingEventFactory {
-    events: StdMutex<Vec<NewEvent>>,
-}
-
-impl EventRecordFactoryPort for RecordingEventFactory {
-    fn prepare(&self, event: NewEvent) -> Result<Option<AppendEventRecord>, EventRecordError> {
-        self.events
-            .lock()
-            .expect("event recording lock")
-            .push(event);
-        Ok(None)
-    }
 }
 
 #[async_trait]
@@ -356,7 +340,6 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
         role: ParticipantRole::Consultant,
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::Auto),
-        tags: Vec::new(),
     });
     let sessions = test_sessions();
     let session = sessions
@@ -557,7 +540,6 @@ async fn one_shot_result_publication_failure_marks_run_failed_instead_of_complet
         role: ParticipantRole::Consultant,
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::Auto),
-        tags: Vec::new(),
     });
     let sessions = test_sessions();
     let session = sessions
@@ -3604,7 +3586,6 @@ async fn start_run_rejects_multi_bot_slot_with_current_single_assignee_runtime()
         role: ParticipantRole::Consultant,
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::Auto),
-        tags: Vec::new(),
     });
     group.upsert(seeded_group).await.expect("seed group");
     let sessions = test_sessions();
@@ -3737,7 +3718,6 @@ async fn complete_transitions_support_fan_out_and_implicit_all_join() {
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let event_factory = Arc::new(RecordingEventFactory::default());
     let runtime = test_runtime!(
         store.clone(),
         store.clone(),
@@ -3747,8 +3727,7 @@ async fn complete_transitions_support_fan_out_and_implicit_all_join() {
         sessions,
         delivery.clone(),
         noop_judge(),
-    )
-    .with_event_record_factory(event_factory.clone());
+    );
 
     let started = runtime
         .start_state_machine_run(StartStateMachineRunCommand {
@@ -3804,30 +3783,6 @@ async fn complete_transitions_support_fan_out_and_implicit_all_join() {
     .await;
     let view = handled.view.expect("completed run");
     assert_eq!(view.run.output.as_deref(), Some("joined"));
-
-    let predecessors_by_node = event_factory
-        .events
-        .lock()
-        .expect("event recording lock")
-        .iter()
-        .filter(|event| event.event_type == "state_machine.node.started")
-        .map(|event| {
-            (
-                event.data["node_id"]
-                    .as_str()
-                    .expect("node_id")
-                    .to_string(),
-                serde_json::from_value::<Vec<String>>(
-                    event.data["predecessor_node_ids"].clone(),
-                )
-                .expect("predecessor_node_ids"),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    assert_eq!(predecessors_by_node["start"], Vec::<String>::new());
-    assert_eq!(predecessors_by_node["branch_b"], ["start"]);
-    assert_eq!(predecessors_by_node["branch_c"], ["start"]);
-    assert_eq!(predecessors_by_node["join"], ["branch_b", "branch_c"]);
 }
 
 #[tokio::test]
@@ -4558,7 +4513,6 @@ fn test_group() -> Group {
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
-            tags: Vec::new(),
         }],
     )
 }
@@ -4578,7 +4532,6 @@ fn session_collaboration_group(strategy: GroupStrategy) -> Group {
                 },
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
-                tags: Vec::new(),
             },
             Participant {
                 bot_uuid: "worker-bot".to_string(),
@@ -4592,7 +4545,6 @@ fn session_collaboration_group(strategy: GroupStrategy) -> Group {
                 },
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
-                tags: Vec::new(),
             },
         ],
     );

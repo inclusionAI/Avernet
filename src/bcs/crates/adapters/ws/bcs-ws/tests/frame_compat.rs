@@ -9,16 +9,15 @@ use bcs_protocol::{
     ResponseFrame,
 };
 use bcs_service_api::{
-    BotDeliveryTarget, BotDynamicStatus, BotEventCommand, BotEventOutcome, BotRunContext,
-    BotRunContextPort, BotRuntimeConnectCommand, BotRuntimeConnectOutcome,
-    BotRuntimeConnectionService, BotRuntimeDisconnectCommand, BotRuntimeStatusCommand,
-    BotRuntimeStatusOutcome, BotUseCaseError, ChatAbortCommand,
+    BotDeliveryTarget, BotDynamicStatus, BotEventCommand, BotEventOutcome, BotRuntimeConnectCommand,
+    BotRuntimeConnectOutcome, BotRuntimeConnectionService, BotRuntimeDisconnectCommand,
+    BotRuntimeStatusCommand, BotRuntimeStatusOutcome, BotUseCaseError, ChatAbortCommand,
     ChatAbortOutcome, ChatEventState, GroupCallbackCommand, GroupCallbackOutcome,
     CancelStateMachineRunCommand, CollaborationDefinition, CollaborationRuntimeError,
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
     DmActorSpec, Group, GroupCoreService, GroupMessage, GroupStatus, HandleBotTerminalEventCommand,
     HandleBotTerminalEventOutcome, MessageFlowService, Participant, ParticipantMode,
-    ParticipantRole, ProviderRunTransport, RedactedToken, ServiceError, ServiceResult, ServiceSpec,
+    ParticipantRole, RedactedToken, ServiceError, ServiceResult, ServiceSpec,
     SessionHistoryResult, StartStateMachineRunCommand, StartStateMachineRunOutcome,
     StateMachineDeliveryCorrelation, StateMachineRunView, Workspace,
     SystemMessageEvent, SystemMessageService, TaskCompleteCommand, TaskCompleteOutcome,
@@ -26,6 +25,7 @@ use bcs_service_api::{
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
 };
 use bcs_session::NoopSessionManagementService;
+use bcs_test_support::NoopBotRunContextPort;
 use bcs_ws::bot::{
     BotConnectionRegistry, BotDispatchOutcome, BotDispatchState, BotWsDispatchError, dispatch_frame,
 };
@@ -56,55 +56,6 @@ struct RecordingBotRuntime {
 struct RecordingCollaborationRuntime {
     correlation: Mutex<Option<StateMachineDeliveryCorrelation>>,
     aliases: Mutex<Vec<(String, String)>>,
-}
-
-#[derive(Default)]
-struct RecordingBotRunContext {
-    contexts: Mutex<HashMap<String, BotRunContext>>,
-}
-
-#[async_trait]
-impl BotRunContextPort for RecordingBotRunContext {
-    async fn put_context(&self, context: BotRunContext) {
-        self.contexts
-            .lock()
-            .await
-            .insert(context.run_id.clone(), context);
-    }
-
-    async fn get_context(&self, run_id: &str) -> Option<BotRunContext> {
-        self.contexts.lock().await.get(run_id).cloned()
-    }
-
-    async fn try_begin_terminal(&self, _run_id: &str) -> bool {
-        false
-    }
-
-    async fn mark_terminal(&self, _run_id: &str) -> bool {
-        false
-    }
-
-    async fn release_terminal(&self, _run_id: &str) {}
-
-    async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
-        false
-    }
-
-    async fn bind_provider_transport(
-        &self,
-        _run_id: &str,
-        _transport: ProviderRunTransport,
-    ) -> bool {
-        false
-    }
-
-    async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
-        None
-    }
-
-    async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
-
-    async fn clear_provider_transport(&self, _run_id: &str) {}
 }
 
 #[derive(Default)]
@@ -605,7 +556,6 @@ struct TestState {
     collaboration_runtime: Arc<RecordingCollaborationRuntime>,
     group: Arc<RecordingGroupCoreService>,
     system_message: Arc<RecordingSystemMessageService>,
-    bot_run_context: Arc<RecordingBotRunContext>,
     dispatch_state: Arc<BotDispatchState>,
 }
 
@@ -615,12 +565,11 @@ fn new_state() -> TestState {
     let collaboration_runtime = Arc::new(RecordingCollaborationRuntime::default());
     let group = Arc::new(RecordingGroupCoreService::default());
     let system_message = Arc::new(RecordingSystemMessageService::default());
-    let bot_run_context = Arc::new(RecordingBotRunContext::default());
     let dispatch_state = Arc::new(BotDispatchState {
         bot_runtime: bot_runtime.clone(),
         message_flow: message_flow.clone(),
         collaboration_runtime: collaboration_runtime.clone(),
-        bot_run_context: bot_run_context.clone(),
+        bot_run_context: Arc::new(NoopBotRunContextPort),
         bot_connections: Arc::new(BotConnectionRegistry::new()),
         run_channels: Arc::new(RunChannelManager::new()),
         task_callback: None,
@@ -640,7 +589,6 @@ fn new_state() -> TestState {
         collaboration_runtime,
         group,
         system_message,
-        bot_run_context,
         dispatch_state,
     }
 }
@@ -1454,64 +1402,6 @@ async fn bot_chat_event_frame_is_forwarded_to_message_flow() {
 }
 
 #[tokio::test]
-async fn direct_chat_event_scope_comes_from_run_context_for_all_session_key_shapes() {
-    let state = new_state();
-    let (tx, _rx) = mpsc::channel(8);
-    let mut registered_bot_id = Some("bot-compat:staff".to_string());
-
-    for (index, session_id) in [
-        "bcs-cli:caller-bot:abcdef12",
-        "chat:abcdef12",
-        "caller-supplied-session",
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let run_id = format!("direct-run-{index}");
-        state
-            .bot_run_context
-            .put_context(BotRunContext {
-                run_id: run_id.clone(),
-                bot_id: "bot-compat:staff".to_string(),
-                group_id: String::new(),
-                bcs_session_id: Some(session_id.to_string()),
-                deadline_ms: u64::MAX,
-                terminal: false,
-            })
-            .await;
-        let event = BcsFrame::Event(EventFrame::new(
-            "chat.event",
-            Some(serde_json::json!({
-                "run_id": run_id,
-                "bcs_group_id": session_id,
-                "state": WireChatEventState::Final
-            })),
-            Some(1),
-        ));
-
-        dispatch_frame(
-            &state.dispatch_state,
-            &serde_json::to_string(&event).unwrap(),
-            &tx,
-            &mut registered_bot_id,
-        )
-        .await
-        .unwrap();
-    }
-
-    let events = state.message_flow.bot_events.lock().await;
-    assert_eq!(events.len(), 3);
-    for (event, expected_session_id) in events.iter().zip([
-        "bcs-cli:caller-bot:abcdef12",
-        "chat:abcdef12",
-        "caller-supplied-session",
-    ]) {
-        assert!(event.group_id.is_empty());
-        assert_eq!(event.bcs_session_id.as_deref(), Some(expected_session_id));
-    }
-}
-
-#[tokio::test]
 async fn traced_chat_event_creates_bot_response_child_span_after_message_flow_accepts() {
     let state = new_state();
     let (tx, _rx) = mpsc::channel(8);
@@ -1829,82 +1719,6 @@ async fn task_response_ack_from_target_worker_registers_sub_run_alias() {
             .as_deref(),
         Some("group-1:abcdef12")
     );
-}
-
-#[tokio::test]
-async fn direct_chat_response_alias_carries_run_context_to_streaming_events() {
-    let state = new_state();
-    let (tx, _rx) = mpsc::channel(8);
-    let (client_tx, _client_rx) = mpsc::channel(8);
-    let mut registered_bot_id = Some("bot-compat:staff".to_string());
-    let session_id = "bcs-cli:caller-bot:abcdef12";
-
-    state
-        .dispatch_state
-        .run_channels
-        .register(
-            "direct-outer-run".to_string(),
-            session_id.to_string(),
-            client_tx,
-            Some("http-chat-async".to_string()),
-            None,
-        )
-        .await;
-    state
-        .bot_run_context
-        .put_context(BotRunContext {
-            run_id: "direct-outer-run".to_string(),
-            bot_id: "bot-compat:staff".to_string(),
-            group_id: String::new(),
-            bcs_session_id: Some(session_id.to_string()),
-            deadline_ms: u64::MAX,
-            terminal: false,
-        })
-        .await;
-
-    let response = BcsFrame::Response(ResponseFrame::ok(
-        "direct-outer-run",
-        serde_json::json!({"run_id": "direct-inner-run"}),
-    ));
-    dispatch_frame(
-        &state.dispatch_state,
-        &serde_json::to_string(&response).unwrap(),
-        &tx,
-        &mut registered_bot_id,
-    )
-    .await
-    .unwrap();
-
-    let alias_context = state
-        .bot_run_context
-        .get_context("direct-inner-run")
-        .await
-        .expect("accepted direct run id should inherit its context");
-    assert!(alias_context.group_id.is_empty());
-    assert_eq!(alias_context.bcs_session_id.as_deref(), Some(session_id));
-
-    let event = BcsFrame::Event(EventFrame::new(
-        "chat.event",
-        Some(serde_json::json!({
-            "run_id": "direct-inner-run",
-            "bcs_group_id": session_id,
-            "state": WireChatEventState::Final
-        })),
-        Some(1),
-    ));
-    dispatch_frame(
-        &state.dispatch_state,
-        &serde_json::to_string(&event).unwrap(),
-        &tx,
-        &mut registered_bot_id,
-    )
-    .await
-    .unwrap();
-
-    let events = state.message_flow.bot_events.lock().await;
-    assert_eq!(events.len(), 1);
-    assert!(events[0].group_id.is_empty());
-    assert_eq!(events[0].bcs_session_id.as_deref(), Some(session_id));
 }
 
 #[tokio::test]

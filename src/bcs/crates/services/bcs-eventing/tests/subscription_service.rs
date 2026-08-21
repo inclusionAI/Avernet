@@ -430,7 +430,7 @@ async fn private_endpoint_allowlist_permits_only_matching_host_and_port() {
         PrivateEndpointAllowlistEntryConfig {
             host: "*.hooks.example.internal".to_string(),
             cidrs: vec!["10.20.0.0/16".to_string()],
-            ports: vec![80, 8443],
+            ports: vec![8443],
         },
     ];
     let harness = harness_with_eventing_config(true, eventing_config);
@@ -445,21 +445,10 @@ async fn private_endpoint_allowlist_permits_only_matching_host_and_port() {
         .await
         .expect("matching wildcard host and port should pass static validation");
 
-    let mut allowed_http =
-        create_command(vec!["group.*".to_string()], EventPayloadMode::MetadataOnly);
-    let EventSinkInput::Webhook { url, .. } = &mut allowed_http.request.sink;
-    *url = "http://worker.hooks.example.internal/events".to_string();
-    harness
-        .service
-        .create(allowed_http)
-        .await
-        .expect("matching private endpoint should permit HTTP on an allowlisted port");
-
     for rejected_url in [
         "https://hooks.example.internal:8443/events",
         "https://worker.hooks.example.internal:9443/events",
         "https://worker.evilhooks.example.internal:8443/events",
-        "http://worker.hooks.example.internal:8080/events",
     ] {
         let mut rejected =
             create_command(vec!["group.*".to_string()], EventPayloadMode::MetadataOnly);

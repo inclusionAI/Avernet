@@ -931,27 +931,23 @@ impl GroupManagementService for GroupManagement {
             .unwrap_or_else(|| generated_group_id(GroupKind::Normal));
         let mut requested = Vec::new();
         for participant in cmd.participants {
-            requested.push((participant.bot_id, participant.role, participant.tags));
+            requested.push((participant.bot_id, participant.role));
         }
         for bot_id in cmd.member_bot_ids {
-            requested.push((bot_id, None, Vec::new()));
+            requested.push((bot_id, None));
         }
         if !requested
             .iter()
-            .any(|(bot_id, _, _)| bot_id == &cmd.driver_bot_id)
+            .any(|(bot_id, _)| bot_id == &cmd.driver_bot_id)
         {
-            requested.push((
-                cmd.driver_bot_id.clone(),
-                Some("driver".to_string()),
-                Vec::new(),
-            ));
+            requested.push((cmd.driver_bot_id.clone(), Some("driver".to_string())));
         }
 
         let mut seen = HashSet::new();
         let mut participants = Vec::with_capacity(requested.len());
         let mut participant_ids = Vec::with_capacity(requested.len());
         let mut subscription_targets = Vec::new();
-        for (bot_id, role, tags) in requested {
+        for (bot_id, role) in requested {
             if !seen.insert(bot_id.clone()) {
                 continue;
             }
@@ -1000,7 +996,6 @@ impl GroupManagementService for GroupManagement {
                 role,
                 actor_kind: bot.actor_kind,
                 mode: Some(mode),
-                tags,
             });
             participant_ids.push(bot_id);
         }
@@ -1397,7 +1392,6 @@ impl GroupManagementService for GroupManagement {
             role,
             actor_kind: bot.actor_kind,
             mode,
-            tags: Vec::new(),
         };
 
         self.group
@@ -1426,7 +1420,6 @@ impl GroupManagementService for GroupManagement {
                 role: participant_role_to_wire(participant.role).to_string(),
                 actor_kind: participant.actor_kind,
                 mode: participant.mode,
-                tags: participant.tags,
             },
         })
     }
@@ -1782,7 +1775,6 @@ impl GroupManagementService for GroupManagement {
                     role: ParticipantRole::Observer,
                     actor_kind: ActorKind::Human,
                     mode: Some(cmd.mode),
-                    tags: Vec::new(),
                 },
                 actor_is_public: true,
             }
@@ -2265,7 +2257,6 @@ fn group_to_detail_with_context(group: DomainGroup, context_injected: u64) -> Gr
                 role: participant_role_to_wire(participant.role).to_string(),
                 actor_kind: participant.actor_kind,
                 mode: participant.mode,
-                tags: participant.tags,
             })
             .collect(),
         message_count,
@@ -2305,7 +2296,6 @@ fn group_to_list_entry(group: DomainGroup) -> GroupListEntry {
                 role: participant_role_to_wire(participant.role).to_string(),
                 actor_kind: participant.actor_kind,
                 mode: participant.mode,
-                tags: participant.tags,
             })
             .collect(),
         participant_count,

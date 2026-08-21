@@ -7,7 +7,6 @@ pub mod delivery;
 pub mod event_delivery;
 pub mod event_metrics;
 pub mod event_recording;
-pub mod friend_connect_notification;
 pub mod group_context;
 pub mod group_session_token;
 pub mod interaction;
@@ -38,10 +37,6 @@ pub use delivery::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult,
     FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryResult,
     FrontendDeliveryTarget, ProviderTransportPreference, RunFallbackDelivery,
-};
-pub use friend_connect_notification::{
-    FriendConnectNotificationCommand, FriendConnectNotificationKind,
-    FriendConnectNotificationPort, NoopFriendConnectNotificationPort,
 };
 pub use event_delivery::*;
 pub use event_metrics::*;

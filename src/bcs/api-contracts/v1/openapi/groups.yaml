@@ -391,11 +391,6 @@ CreateParticipant:
         - manager
         - worker
         - observer
-    tags:
-      type: array
-      items:
-        type: string
-      description: Provider routing tags scoped to this Group membership.
 
 AddGroupParticipantRequest:
   type: object
@@ -575,8 +570,6 @@ UpdateGroup:
   minProperties: 1
   properties:
     name:
-      type: string
-    context:
       type: string
     opening_message:
       oneOf:

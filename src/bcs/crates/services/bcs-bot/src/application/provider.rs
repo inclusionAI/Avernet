@@ -1,16 +1,13 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::{
-    BotControlPlaneCoreService, BotRegistryCoreService, BotTaskModesQuery,
-    ChannelBindingCleanupPort, DeleteProviderBotCommand, DeleteProviderBotOutcome,
-    NoopChannelBindingCleanupPort, ProviderBotBinding, ProviderBotCoreService,
-    ProviderBotRosterItem, ProviderBotTaskModesFilter, ProviderCoreService,
-    ProviderManagementService, ProviderRecord, RegisterProviderBotCommand,
-    RegisterProviderBotOutcome, RegisterProviderBotParams, RegisterProviderCommand,
-    RegisterProviderOutcome, RelationCoreService, ServiceError, ServiceResult,
-    UpdateProviderBotCommand, UpdateProviderBotOutcome, UpdateProviderCommand,
+    BotRegistryCoreService, ChannelBindingCleanupPort, DeleteProviderBotCommand,
+    DeleteProviderBotOutcome, NoopChannelBindingCleanupPort, ProviderBotBinding,
+    ProviderBotCoreService, ProviderCoreService, ProviderManagementService, ProviderRecord,
+    RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderBotParams,
+    RegisterProviderCommand, RegisterProviderOutcome, RelationCoreService, ServiceError,
+    ServiceResult, UpdateProviderCommand,
 };
 use bcs_user_directory_api::UserDirectoryPlugin;
 
@@ -22,7 +19,6 @@ pub struct ProviderManagement {
     relation: Arc<dyn RelationCoreService>,
     channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
-    control_plane: Option<Arc<dyn BotControlPlaneCoreService>>,
 }
 
 impl ProviderManagement {
@@ -39,7 +35,6 @@ impl ProviderManagement {
             relation,
             channel_binding_cleanup: Arc::new(NoopChannelBindingCleanupPort),
             user_directory: None,
-            control_plane: None,
         }
     }
 
@@ -53,17 +48,6 @@ impl ProviderManagement {
 
     pub fn with_user_directory(mut self, user_directory: Arc<dyn UserDirectoryPlugin>) -> Self {
         self.user_directory = Some(user_directory);
-        self
-    }
-
-    /// Inject the bot control-plane core required by the task-mode roster
-    /// (`list_provider_bots_by_task_modes`). The composition root wires this for
-    /// the production/memory server paths; without it the roster method errors.
-    pub fn with_control_plane(
-        mut self,
-        control_plane: Arc<dyn BotControlPlaneCoreService>,
-    ) -> Self {
-        self.control_plane = Some(control_plane);
         self
     }
 
@@ -277,7 +261,6 @@ impl ProviderManagementService for ProviderManagement {
                     skills: command.skills,
                     scopes: command.scopes,
                     bot_uuid: command.bot_uuid,
-                    connection_mode: command.connection_mode,
                 },
             )
             .await?;
@@ -302,48 +285,6 @@ impl ProviderManagementService for ProviderManagement {
         self.provider_bot_core
             .list_provider_bots(provider_id, provider_admin_token)
             .await
-    }
-
-    async fn list_provider_bots_by_task_modes(
-        &self,
-        provider_id: &str,
-        provider_admin_token: &str,
-        filter: ProviderBotTaskModesFilter,
-    ) -> ServiceResult<Vec<ProviderBotRosterItem>> {
-        let control_plane = self.control_plane.clone().ok_or_else(|| {
-            ServiceError::InternalError("control-plane core not configured".to_string())
-        })?;
-        // Reuse the same admin-token validation path as `list_provider_bots`.
-        // A bad/missing token surfaces as Unauthorized from the provider bot core.
-        let bindings = self
-            .provider_bot_core
-            .list_provider_bots(provider_id, provider_admin_token)
-            .await?;
-        let allowed_uuids: HashSet<String> = bindings
-            .into_iter()
-            .map(|binding| binding.bot_uuid)
-            .collect();
-        let env = bcs_config::resolve_env_str();
-        let views = control_plane
-            .list_by_task_modes(BotTaskModesQuery {
-                env,
-                task_claim_mode: filter.task_claim_mode,
-                task_dream_mode: filter.task_dream_mode,
-                match_mode: filter.match_mode,
-            })
-            .await?;
-        let items = views
-            .into_iter()
-            .filter(|view| allowed_uuids.contains(&view.record.bot_id))
-            .map(|view| ProviderBotRosterItem {
-                bot_id: view.record.bot_id,
-                name: view.record.name,
-                env: view.record.env,
-                task_claim_mode: view.record.task_claim_mode,
-                task_dream_mode: view.record.task_dream_mode,
-            })
-            .collect();
-        Ok(items)
     }
 
     async fn delete_provider_bot(
@@ -419,38 +360,6 @@ impl ProviderManagementService for ProviderManagement {
                 disabled,
             )
             .await
-    }
-
-    async fn update_provider_bot(
-        &self,
-        command: UpdateProviderBotCommand,
-    ) -> ServiceResult<UpdateProviderBotOutcome> {
-        let result = self
-            .provider_bot_core
-            .update_provider_bot(
-                &command.provider_id,
-                &command.provider_admin_token,
-                &command.provider_bot_ref,
-                command.name,
-                command.summary,
-                command.domains,
-                command.skills,
-                command.scopes,
-                command.visibility,
-            )
-            .await?;
-        let capabilities = result.capabilities;
-        Ok(UpdateProviderBotOutcome {
-            bot_uuid: result.binding.bot_uuid,
-            provider_id: result.binding.provider_id,
-            provider_bot_ref: result.binding.provider_bot_ref,
-            name: capabilities.name,
-            summary: capabilities.summary,
-            domains: capabilities.domains,
-            skills: capabilities.skills,
-            scopes: capabilities.scopes,
-            visibility: capabilities.visibility,
-        })
     }
 }
 

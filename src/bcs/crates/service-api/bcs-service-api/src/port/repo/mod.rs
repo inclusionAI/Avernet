@@ -1,17 +1,13 @@
 pub mod bot;
-pub mod bot_actor_config;
 pub mod bot_control_plane;
 pub mod channel;
 pub mod collaboration;
 pub mod collaboration_template;
-pub mod edge_grant;
 pub mod event;
 pub mod friend;
 pub mod group;
 pub mod message;
 pub mod organization;
-pub mod permission_profile;
-pub mod permission_request;
 pub mod provider;
 pub mod relation;
 pub mod session;
@@ -19,7 +15,6 @@ pub mod session_file;
 pub mod user_identity;
 
 pub use bot::BotRepoPort;
-pub use bot_actor_config::BotActorConfigRepoPort;
 pub use bot_control_plane::*;
 pub use channel::{
     ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,
@@ -31,7 +26,6 @@ pub use collaboration::{
     StateMachineEventfulTransition, StateMachineRunRepoPort,
 };
 pub use collaboration_template::{CollaborationTemplateEntry, CollaborationTemplateRepoPort};
-pub use edge_grant::EdgeGrantRepoPort;
 pub use event::*;
 pub use friend::{FriendRepoPort, FriendRequestRepoPort};
 pub use group::{
@@ -50,8 +44,6 @@ pub use provider::{
     ProviderCredentialRepoPort, ProviderRepoPort,
 };
 pub use relation::RelationRepoPort;
-pub use permission_profile::PermissionProfileRepoPort;
-pub use permission_request::PermissionRequestRepoPort;
 pub use session::{
     AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent,
     NewSessionParams, RemoveSessionParticipantWithEvent, SessionRepoPort,

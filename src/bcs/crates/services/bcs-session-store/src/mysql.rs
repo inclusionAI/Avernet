@@ -16,9 +16,7 @@ use bcs_db_api::{
 use bcs_event_store::EventAppendTransactionPlan;
 use tracing::info;
 
-use bcs_service_api::core::session::{
-    can_reactivate, new_channel_session_id, new_session_id, validate_session_id,
-};
+use bcs_service_api::core::session::{can_reactivate, new_session_id, validate_session_id};
 use bcs_service_api::port::repo::{
     AddSessionParticipantWithEvent, AppendEventRecord, CompleteSessionWithEvent,
     CreateSessionWithEvent, NewSessionParams, RemoveSessionParticipantWithEvent, SessionRepoPort,
@@ -560,41 +558,6 @@ impl SessionRepoPort for MySqlSessionStore {
             Some(&command.event),
         )
         .await
-    }
-
-    async fn create_channel(
-        &self,
-        group_id: &str,
-        channel_type: &str,
-        params: NewSessionParams,
-    ) -> ServiceResult<Session> {
-        for _ in 0..3 {
-            let id = new_channel_session_id(group_id, channel_type)
-                .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
-            match self
-                .insert_session(
-                    id,
-                    group_id.to_string(),
-                    params.clone(),
-                    current_millis(),
-                    None,
-                )
-                .await
-            {
-                Ok(session) => return Ok(session),
-                Err(ServiceError::InternalError(ref message))
-                    if message.to_ascii_lowercase().contains("duplicate")
-                        || message.contains("1062")
-                        || message.contains("UNIQUE constraint failed") =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        Err(ServiceError::SessionInvalidParams(
-            "session_id collision retry exhausted (3 attempts)".to_string(),
-        ))
     }
 
     async fn get(&self, session_id: &str) -> Option<Session> {
