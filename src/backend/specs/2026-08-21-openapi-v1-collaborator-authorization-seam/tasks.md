@@ -146,7 +146,7 @@
         `engine_runtime/test_operator_access.py` pass unmodified.
 - **Depends on:** Tasks 3, 4
 
-## Task 6: Write the rule where the next author looks  `[ ]`
+## Task 6: Write the rule where the next author looks  `[x]`
 
 - **Goal:** Leave the convention findable, and the reversal recorded rather than
   discovered.
@@ -154,16 +154,16 @@
   `src/backend/docs/openapi-v1/README.md`,
   `src/backend/specs/2026-08-21-openapi-v1-collaborator-authorization-seam/plan.md`
 - **Done when:**
-  - [ ] A section states the convention — `bot_id` on the path, `user_id` and
+  - [x] A section states the convention — `bot_id` on the path, `user_id` and
         `owner_id` on the query, authorization declared in `AUTHORIZATION` and
         never on a handler — and that omission stops the app from starting.
-  - [ ] The dated changelog gains an entry for the seam, in the style of the
+  - [x] The dated changelog gains an entry for the seam, in the style of the
         2026-08-09 entry, saying plainly that it is inert on arrival.
-  - [ ] #906 and #907 are annotated as now being table edits, with the row
+  - [x] #906 and #907 are annotated as now being table edits, with the row
         change spelled out (`OWNER_SCOPED` → `Check(...)`).
-  - [ ] The two deferrals are recorded where they will be found: no edit lock in
+  - [x] The two deferrals are recorded where they will be found: no edit lock in
         the seam, and the harness defect as that group's own change.
-  - [ ] The trade-off against "the decision is visible on the route that carries
+  - [x] The trade-off against "the decision is visible on the route that carries
         it" (`principal.py`, `admission.py`) is written down as a deliberate
         reversal.
 - **Depends on:** Task 5
