@@ -60,7 +60,7 @@ class TaskModule(Module):
         - discover(``BotDiscoverServiceProtocol``,来自 BotPublicModule)始终传入:
           singlebox profile 换 ``SingleboxKeywordBotDiscover``(本地关键字搜索),其余用注入的 BCSFuse。
         """
-        bot, bcs = self._resolve_ports()
+        bot, bcs, task_provider_id = self._resolve_ports()
         discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
         bcs_identity = None
         if bcs is not None:
@@ -76,7 +76,7 @@ class TaskModule(Module):
         harness = TaskHarness(graph)
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
-            bcs_identity=bcs_identity,
+            bcs_identity=bcs_identity, task_provider_id=task_provider_id,
         )
 
     @singleton
@@ -121,7 +121,7 @@ class TaskModule(Module):
           覆写本 provider。
         """
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
-            return None, None
+            return None, None, ""
         from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
             LocalBcsTokenProvider,
         )
@@ -149,9 +149,12 @@ class TaskModule(Module):
                 sm_status="completed", sm_output=_coop_pass_output,
                 poll_once_then_terminal=True, terminal_after=1,
             )
+            task_provider_id = ""  # double 不走真实 BCS roster,圈定关闭
         else:
-            bcs = SingleboxBcsAdapter(LocalBcsTokenProvider.from_env())
-        return bot, bcs
+            token = LocalBcsTokenProvider.from_env()
+            bcs = SingleboxBcsAdapter(token)
+            task_provider_id = token.provider_id  # SINGLEBOX_BCS_PROVIDER_ID;空→roster 圈定关闭(旧行为)
+        return bot, bcs, task_provider_id
 
     @staticmethod
     def _resolve_discover(

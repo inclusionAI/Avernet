@@ -33,12 +33,14 @@ class TaskService:
     """
 
     def __init__(self, graph, harness=None, *, bot=None, bcs=None, discover=None,
-                 bcs_identity=None) -> None:
+                 bcs_identity=None, task_provider_id: str = "") -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
-        bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。"""
+        bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
+        task_provider_id:任务模式 roster 圈定的 provider(空=圈定关闭,旧行为);透传给引擎派发策略。"""
         self._graph = graph
         self._harness = harness
         self._bcs_identity = bcs_identity
+        self._task_provider_id = task_provider_id
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
         self._bg_tasks: set[asyncio.Task] = set()
@@ -56,7 +58,7 @@ class TaskService:
         接线 TaskExecutor。测试可经 facade/engine 子类覆写本方法注入 stub 策略/投递的引擎(测试 seam)。"""
         return ExecutionEngine(
             self._graph, bot=bot, bcs=bcs, discover=discover,
-            bcs_identity=self._bcs_identity,
+            bcs_identity=self._bcs_identity, task_provider_id=self._task_provider_id,
         )
 
     @property

@@ -5,7 +5,7 @@ import uuid
 from typing import Any
 
 from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
-    BcsCreateGroupRequest, BcsCreateGroupResult,
+    BcsCreateGroupRequest, BcsCreateGroupResult, BotTaskModeRoster,
 )
 
 
@@ -18,7 +18,8 @@ class _DoubleBcsClient:
 
     def __init__(self, *, session_status: str = "completed", session_output: Any = None,
                  sm_status: str = "completed", sm_output: Any = None,
-                 poll_once_then_terminal: bool = False, terminal_after: int = 1) -> None:
+                 poll_once_then_terminal: bool = False, terminal_after: int = 1,
+                 task_mode_roster: list[BotTaskModeRoster] | None = None) -> None:
         self._session_status = session_status
         self._session_output = session_output
         self._sm_status = sm_status
@@ -27,6 +28,7 @@ class _DoubleBcsClient:
         self._terminal_after = terminal_after
         self._grp_poll: dict[str, int] = {}
         self._sm_poll: dict[str, int] = {}
+        self._task_mode_roster: list[BotTaskModeRoster] = list(task_mode_roster or [])
 
     async def create_group(self, req: BcsCreateGroupRequest) -> BcsCreateGroupResult:
         gid = f"grp_{uuid.uuid4().hex[:8]}"
@@ -55,6 +57,11 @@ class _DoubleBcsClient:
 
     async def validate_definition(self, definition_yaml: str) -> None:
         return None
+
+    async def list_bots_by_task_modes(self, *, provider_id: str, claim: bool | None = None,
+                                      dream: bool | None = None, match: str = "any") -> list[BotTaskModeRoster]:
+        # canned:直接回放注入的 roster(忽略过滤参数),供 singlebox/test 复用。
+        return list(self._task_mode_roster)
 
     def _resolve(self, final_status: str, final_output: Any, counts: dict[str, int], key: str) -> tuple[str, Any]:
         if not self._poll_mode:

@@ -56,7 +56,7 @@ def test_resolve_ports_singlebox_uses_singlebox_bcs_adapter(monkeypatch):
     monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
     monkeypatch.setenv("SINGLEBOX_BCS_URL", "http://localhost:21000")
     monkeypatch.setenv("SINGLEBOX_USER_ID", "35983")
-    bot, bcs = TaskModule._resolve_ports()
+    bot, bcs, task_provider_id = TaskModule._resolve_ports()
     try:
         assert isinstance(bot, SingleboxEngineAdapter)
         assert isinstance(bcs, SingleboxBcsAdapter), "singlebox bcs 端口应为 SingleboxBcsAdapter"

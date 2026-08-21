@@ -17,7 +17,12 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
 
     @abstractmethod
     def list_sets(
-        self, *, bot_id: str, owner_id: str, engine_type: str | None = None
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> list[dict]: ...
     @abstractmethod
     def ensure_active_skillset_installations(
@@ -41,29 +46,35 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
     ) -> dict: ...
     @abstractmethod
     def get_set(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> dict: ...
     @abstractmethod
     def update_set(
         self,
         *,
         bot_id: str,
+        owner_id: str,
         set_id: str,
         name: str | None,
         description: str | None,
         engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> dict: ...
     @abstractmethod
     def delete_set(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> None: ...
     @abstractmethod
     def list_skills(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> list[dict]: ...
     @abstractmethod
     def list_mcps(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> list[dict]: ...
     @abstractmethod
     def resolve_legacy_skill_id(self, *, bot_id: str, identifier: str) -> str: ...
@@ -76,6 +87,7 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
         set_id: str,
         skill_id: str,
         engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation: ...
     @abstractmethod
     def remove_skill(
@@ -86,6 +98,7 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
         set_id: str,
         skill_id: str,
         engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation: ...
     @abstractmethod
     def add_mcp(
@@ -96,6 +109,7 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
         set_id: str,
         server_code: str,
         engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation: ...
     @abstractmethod
     def remove_mcp(
@@ -106,6 +120,7 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
         set_id: str,
         server_code: str,
         engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation: ...
     @abstractmethod
     def activate_mcp_direct(
@@ -128,10 +143,12 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
         set_id: str,
         active: bool,
         engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation: ...
     @abstractmethod
     def replace_active_set(
-        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation: ...
     @abstractmethod
     def snapshot_desired_state(

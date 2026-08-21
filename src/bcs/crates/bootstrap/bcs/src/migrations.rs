@@ -41,7 +41,9 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         actor_kind TEXT NOT NULL DEFAULT 'bot',
         status TEXT NOT NULL DEFAULT 'online',
         is_deleted INTEGER NOT NULL DEFAULT 0,
-        agent_code TEXT DEFAULT NULL
+        agent_code TEXT DEFAULT NULL,
+        task_claim_mode INTEGER NOT NULL DEFAULT 0,
+        task_dream_mode INTEGER NOT NULL DEFAULT 0
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_session_token ON bcs_bots(session_token)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_bot_env ON bcs_bots(bot_uuid, env)",
@@ -924,6 +926,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 11,
         name: "group_opening_message",
     },
+    SqliteMigration {
+        version: 12,
+        name: "add_bot_task_modes",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1025,6 +1031,7 @@ pub async fn run_sqlite_bootstrap_tables(db: &dyn DbPlugin) -> DbResult<()> {
     ensure_sqlite_message_owner_bot_id(db).await?;
     ensure_sqlite_session_collected_column(db).await?;
     ensure_bcs_session_files(db).await?;
+    ensure_sqlite_bot_task_modes(db).await?;
     Ok(())
 }
 
@@ -1067,6 +1074,37 @@ async fn ensure_sqlite_message_owner_bot_id(db: &dyn DbPlugin) -> DbResult<()> {
          ON bcs_messages(session_id, owner_bot_id, created_at, session_seq)",
     ))
     .await?;
+    Ok(())
+}
+
+async fn ensure_sqlite_bot_task_modes(db: &dyn DbPlugin) -> DbResult<()> {
+    let columns = db
+        .query(DbStatement::new("PRAGMA table_info(bcs_bots)"))
+        .await?;
+    let mut has_claim = false;
+    let mut has_dream = false;
+    for row in &columns {
+        match row.get_string("name")?.as_deref() {
+            Some("task_claim_mode") => has_claim = true,
+            Some("task_dream_mode") => has_dream = true,
+            _ => {}
+        }
+        if has_claim && has_dream {
+            break;
+        }
+    }
+    if !has_claim {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN task_claim_mode INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await?;
+    }
+    if !has_dream {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN task_dream_mode INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await?;
+    }
     Ok(())
 }
 
@@ -1219,6 +1257,10 @@ async fn apply_sqlite_migration_body(
         // without discarding any persisted Subscription configuration.
         10 => migrate_sqlite_eventing_plaintext_endpoint(db).await,
         11 => ensure_sqlite_group_opening_message_column(db).await,
+        // task_claim_mode / task_dream_mode columns are added by
+        // ensure_sqlite_bot_task_modes in run_sqlite_bootstrap_tables;
+        // version 12 only records progress.
+        12 => Ok(()),
         _ => Ok(()),
     }
 }
@@ -1497,6 +1539,8 @@ mod tests {
 
         let columns = column_names(&db, "bcs_bots").await?;
         assert!(columns.iter().any(|column| column == "agent_code"));
+        assert!(columns.iter().any(|column| column == "task_claim_mode"));
+        assert!(columns.iter().any(|column| column == "task_dream_mode"));
         let node_columns = column_names(&db, "bcs_state_machine_node_runs").await?;
         assert!(node_columns.iter().any(|column| column == "outcome"));
         assert!(node_columns.iter().any(|column| column == "responded_by"));
@@ -1553,6 +1597,11 @@ mod tests {
                     11,
                     "group_opening_message".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    12,
+                    "add_bot_task_modes".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1565,7 +1614,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 11);
+        assert_eq!(report.pending_versions.len(), 12);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1602,6 +1651,8 @@ mod tests {
         );
         assert_eq!(report.pending_versions[10].version, 11);
         assert_eq!(report.pending_versions[10].name, "group_opening_message");
+        assert_eq!(report.pending_versions[11].version, 12);
+        assert_eq!(report.pending_versions[11].name, "add_bot_task_modes");
         Ok(())
     }
 
@@ -1653,6 +1704,11 @@ mod tests {
                     11,
                     "group_opening_message".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    12,
+                    "add_bot_task_modes".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1673,7 +1729,12 @@ mod tests {
         .await?;
 
         let before = check_sqlite_migrations(&db).await?;
-        assert_eq!(before.current_version, Some(10));
+        // v12 (add_bot_task_modes) stays applied after we delete only v11
+        // (group_opening_message), so max applied is now 12 even though v11 is
+        // the sole pending migration. origin's version had group_opening_message
+        // as the tail; the merge appends task_modes at v12, so current_version
+        // drops to 12 (not 10) and v11 remains the only pending re-apply.
+        assert_eq!(before.current_version, Some(12));
         assert_eq!(
             before
                 .pending_versions
@@ -1691,14 +1752,14 @@ mod tests {
                 .iter()
                 .any(|column| column == "opening_message_json")
         );
-        assert_eq!(
-            migration_rows(&db).await?.last(),
-            Some(&(
-                11,
-                "group_opening_message".to_string(),
-                "sqlite".to_string()
-            ))
-        );
+        // group_opening_message is no longer the tail migration (task_modes at v12
+        // follows it), so assert it was re-applied as the version-11 row rather than
+        // as the last row. The column check above already proves the migration
+        // re-added opening_message_json; this row check pins it to the right version.
+        assert!(migration_rows(&db)
+            .await?
+            .iter()
+            .any(|(version, name, _)| *version == 11 && name == "group_opening_message"));
         Ok(())
     }
 

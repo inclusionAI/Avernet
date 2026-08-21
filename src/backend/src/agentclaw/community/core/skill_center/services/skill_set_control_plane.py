@@ -55,6 +55,7 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from agentclaw.community.core.workspace.skill_layout import runtime_layout_engine_for_bot
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -123,6 +124,7 @@ class SkillSetControlPlaneService:
             bot_id=bot_id,
             owner_id=str(bot["owner_id"]),
             engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
         )
 
     def create_set(
@@ -219,7 +221,9 @@ class SkillSetControlPlaneService:
     def get_set(self, *, bot_id: str, owner_id: str, user_id: str, set_id: str) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.get_set(
-            bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
         )
 
     def get_legacy_set(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
@@ -235,11 +239,11 @@ class SkillSetControlPlaneService:
         if bot_id != "default":
             raise LocalSkillNotFoundError()
         item = self._repository.get_set(
-            bot_id=bot_id, set_id=set_id, engine_type="openclaw"
+            bot_id=bot_id, owner_id=actor_id, set_id=set_id, engine_type="openclaw"
         )
         # The released no-Bot compatibility wire is owner-scoped.  ``default``
         # is a shared sentinel rather than a globally readable Bot identity.
-        if str(item.get("user_id") or "") != actor_id:
+        if not item.get("is_default") and str(item.get("user_id") or "") != actor_id:
             raise SkillSetAccessDeniedError()
         return item
 
@@ -265,10 +269,12 @@ class SkillSetControlPlaneService:
         try:
             item = self._repository.update_set(
                 bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 name=name,
                 description=description,
                 engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
             )
             self._ensure_mutation_lease(mutation_lease)
             self._audit(
@@ -286,7 +292,9 @@ class SkillSetControlPlaneService:
     ) -> None:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         item = self._repository.get_set(
-            bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
         )
         command = (
             BotSkillRuntimeCommand.CLEANUP
@@ -303,7 +311,9 @@ class SkillSetControlPlaneService:
             raise SkillSetControlPlaneLockUnavailableError() from exc
         try:
             self._repository.delete_set(
-                bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+                bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+                engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
             )
             self._ensure_mutation_lease(mutation_lease)
             self._audit(
@@ -320,7 +330,9 @@ class SkillSetControlPlaneService:
     ) -> list[dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.list_skills(
-            bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
         )
 
     def resolve_legacy_skill_id(
@@ -379,6 +391,7 @@ class SkillSetControlPlaneService:
                 set_id=set_id,
                 skill_id=skill_id,
                 engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
             ),
         )
 
@@ -404,6 +417,7 @@ class SkillSetControlPlaneService:
                 set_id=set_id,
                 skill_id=skill_id,
                 engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
             ),
         )
 
@@ -412,7 +426,9 @@ class SkillSetControlPlaneService:
     ) -> list[dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.list_mcps(
-            bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
         )
 
     def mcp_permissions(
@@ -485,6 +501,7 @@ class SkillSetControlPlaneService:
                 set_id=set_id,
                 server_code=server_code,
                 engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
             ),
         )
 
@@ -510,6 +527,7 @@ class SkillSetControlPlaneService:
                 set_id=set_id,
                 server_code=server_code,
                 engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
             ),
         )
 
@@ -564,7 +582,9 @@ class SkillSetControlPlaneService:
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         target = self._repository.get_set(
-            bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
         )
         if not target["is_default"]:
             self._require_set_mcp_permissions(
@@ -581,6 +601,7 @@ class SkillSetControlPlaneService:
                 set_id=set_id,
                 active=True,
                 engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
             ),
         )
 
@@ -600,6 +621,7 @@ class SkillSetControlPlaneService:
                 set_id=set_id,
                 active=False,
                 engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
             ),
         )
 
@@ -616,6 +638,7 @@ class SkillSetControlPlaneService:
                 owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
             ),
         )
 
@@ -633,19 +656,13 @@ class SkillSetControlPlaneService:
                 set_id=set_id,
                 active=True,
                 engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
             ),
         )
 
     def resources(self, *, bot_id: str, owner_id: str, user_id: str) -> list[dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         owner_id = str(bot["owner_id"])
-        legacy = self._legacy_factory.create(
-            user_id=owner_id,
-            entity_id=str(bot.get("entity_id") or owner_id),
-            bot_id=bot_id,
-            engine_type=bot.get("active_engine"),
-            entity_type=bot.get("entity_type") or "staff",
-        )
         # Resource reads preserve the legacy graceful degradation: a passport-provider
         # outage hides Default CLI entries but must not hide SkillSet/MCP data.
         try:
@@ -658,6 +675,7 @@ class SkillSetControlPlaneService:
             bot_id=bot_id,
             owner_id=owner_id,
             engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
         )
         return [
             {
@@ -666,12 +684,12 @@ class SkillSetControlPlaneService:
                 # MCP membership is canonical desired state, not a legacy BFF
                 # association, so BFF reads observe the same rows as OpenAPI.
                 "mcps": (
-                    legacy.get_set_mcp_servers(
-                        item["id"], user_id=owner_id, bot_id=bot_id
-                    )
-                    if item["is_default"]
-                    else self._repository.list_mcps(
-                        bot_id=bot_id, set_id=item["id"], engine_type=self._engine(bot)
+                    self._repository.list_mcps(
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        set_id=item["id"],
+                        engine_type=self._engine(bot),
+                        default_engine_types=self._default_engine_types(bot),
                     )
                 ),
                 "clis": default_clis if item["is_default"] else [],
@@ -826,7 +844,9 @@ class SkillSetControlPlaneService:
         self, *, bot_id: str, actor_id: str, set_id: str, bot: dict
     ) -> None:
         for mcp in self._repository.list_mcps(
-            bot_id=bot_id, set_id=set_id, engine_type=self._engine(bot)
+            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
         ):
             self._require_mcp_permission(
                 actor_id=actor_id, server_code=str(mcp["server_code"])
@@ -835,6 +855,13 @@ class SkillSetControlPlaneService:
     @staticmethod
     def _engine(bot: dict) -> str:
         return str(bot["active_engine"])
+
+    @classmethod
+    def _default_engine_types(cls, bot: dict) -> tuple[str, ...]:
+        """Select Default rows using runtime layout before persisted fallback."""
+        return tuple(
+            dict.fromkeys((runtime_layout_engine_for_bot(bot), cls._engine(bot)))
+        )
 
     @staticmethod
     def _require_mutable_bot(
