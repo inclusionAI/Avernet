@@ -187,6 +187,14 @@ class TaskCallbackRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def upsert(self, rec: "TaskCallbackRecord") -> "TaskCallbackRecord":
+        """Insert-or-refresh the callback row keyed by ``(run_id, node_id)``:
+        an existing row's mutable columns are overwritten; absent → insert.
+        Used by the callback receive path so replayable callbacks (start then
+        result) refresh one row instead of raising on the unique key."""
+        ...
+
+    @abstractmethod
     def get(self, run_id: str, node_id: str) -> Optional["TaskCallbackRecord"]:
         """Return the callback, or ``None``."""
         ...

@@ -27,8 +27,9 @@ class _Bot:
             raise OpenApiAuthError("403")
 
     async def send_message(self, *, bot_id, message, metadata):
+        from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
         self.sent.append((bot_id, message, metadata))
-        return self._rid
+        return BotSendResult(run_id=self._rid, session_id=None)
 
 
 class _Poller:

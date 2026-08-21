@@ -18,6 +18,7 @@ from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.core.repository.protocols.task import TaskInfoRepositoryProtocol
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
 from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.core.task.domain.models import (
@@ -48,6 +49,11 @@ class _StubDiscoverModule(Module):
                 return {"total": 0, "items": []}
         return _B()  # type: ignore[return-value]
 
+    @provider
+    def task_info_repo(self) -> TaskInfoRepositoryProtocol:
+        # HTTP 契约测聚焦边界协议,不验持久化;facade 构造需 protocol 绑定 → None 跳过 persist。
+        return None  # type: ignore[return-value]
+
 
 @pytest.fixture
 def client():
@@ -61,18 +67,27 @@ def client():
     return TestClient(app), injector
 
 
-def _task_info_dict(task_id="t_http") -> dict:
+def _task_info_dict() -> dict:
+    """新扁平契约(TaskInfoRequestDTO):task_id 服务端生成,不在请求体。"""
     return {
         "task_spec": {
-            "metadata": {"task_id": task_id, "title": "存储尽调", "instruction": "produce DD"},
+            "metadata": {"title": "存储尽调", "instruction": "produce DD"},
             "context": {"background": "存储行业", "extend_props": {}},
             "goal": {"objective": "产出尽调报告",
-                     "acceptances": [{"id": "ac1", "description": "d1"}]},
+                     "acceptances": [{"id": "ac1", "acceptance": "d1"}]},
         },
-        "source_channel_type": "bot",
-        "source_channel_id": "owner_bot",
-        "execution_config": {"MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3},
+        "source_type": "bot",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {"task_type": "dynamic", "MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3},
     }
+
+
+def _execute_and_get_id(c) -> str:
+    """POST execute → 返回服务端生成的 task_id(契约:task_id 不在请求体,服务端 uuid4)。"""
+    r = c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
+    assert r.status_code == 200, r.text
+    return r.json()["data"]["task_id"]
 
 
 class TestTaskExecute:
@@ -82,7 +97,7 @@ class TestTaskExecute:
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["code"] == 200000
-        assert body["data"]["task_id"] == "t_http"
+        assert isinstance(body["data"]["task_id"], str) and body["data"]["task_id"]
         assert body["data"]["success"] is True
         assert body["data"]["run_id"] > 0
 
@@ -90,28 +105,28 @@ class TestTaskExecute:
 class TestTaskDashboard:
     def test_dashboard_returns_graph_structure(self, client):
         c, _ = client
-        c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
-        r = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": "t_http"})
+        task_id = _execute_and_get_id(c)
+        r = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": task_id})
         assert r.status_code == 200, r.text
         body = r.json()["data"]
         # stub 路径无 owner bot → 无法规划 → 根 gap 拆不出 → 图 HUNG(语义正确:无规划端口不假 done)
         assert body["status"] == Status.HUNG.value
-        assert any(n["node_id"] == "t_http" for n in body["tasks"])
-        # 根节点 task_spec 字段透传
-        root = next(n for n in body["tasks"] if n["node_id"] == "t_http")
-        assert root["task_spec"]["metadata"]["task_id"] == "t_http"
+        assert any(n["node_id"] == task_id for n in body["tasks"])
+        # 根节点 task_spec 字段透传(task_id 服务端回填进 metadata)
+        root = next(n for n in body["tasks"] if n["node_id"] == task_id)
+        assert root["task_spec"]["metadata"]["task_id"] == task_id
         assert root["task_spec"]["goal"]["objective"] == "产出尽调报告"
         # include_action_log 默认关:action_log 不返回(空),避免常规查询 payload 膨胀
         assert root["run_info"]["action_log"] == []
 
     def test_dashboard_include_action_log_populates(self, client):
         c, _ = client
-        c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
+        task_id = _execute_and_get_id(c)
         r = c.get("/openapi/v1/collaboration/tasks/dashboard",
-                  params={"task_id": "t_http", "include_action_log": "true"})
+                  params={"task_id": task_id, "include_action_log": "true"})
         assert r.status_code == 200, r.text
         body = r.json()["data"]
-        root = next(n for n in body["tasks"] if n["node_id"] == "t_http")
+        root = next(n for n in body["tasks"] if n["node_id"] == task_id)
         # 根经历 plan(无规划端口 has_gap=T,children=[])→ HUNG:至少 1 条 plan + 1 条 transition
         actions = [e["action"] for e in root["run_info"]["action_log"]]
         assert "plan" in actions

@@ -20,13 +20,13 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
 from agentclaw.community.adapters.http.task.schemas import (
     TaskExecutionGraphDTO,
-    TaskInfoDTO,
+    TaskInfoRequestDTO,
     TaskOpResultDTO,
     TaskSummaryDTO,
     graph_to_dto,
     op_result_to_dto,
     summary_to_dto,
-    task_info_from_dto,
+    task_info_request_from_dto,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.models import Status
@@ -38,15 +38,15 @@ router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"])
 @router.post("/execute", response_model=Envelope[TaskOpResultDTO])
 @envelope_errors
 async def execute_task(
-    body: TaskInfoDTO,
+    body: TaskInfoRequestDTO,
     request: Request,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskOpResultDTO]:
-    """提交执行任务。initialize_graph(根 PENDING) → 编排核 on_execute 首帧推进。
+    """提交执行任务。task_id 服务端生成;持久化 task_info(PENDING)→ initialize_graph → on_execute 首帧。
 
     幂等:同 task_id 已建图(GraphAlreadyInitializedError)→ ``@envelope_errors`` 映射 409。"""
-    task_info = task_info_from_dto(body)
-    result = await service.execute(task_info)
+    task_request = task_info_request_from_dto(body)
+    result = await service.execute(task_request)
     return envelope(op_result_to_dto(result), request)
 
 

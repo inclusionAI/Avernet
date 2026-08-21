@@ -1,6 +1,7 @@
 """integration Port 契约(对齐 spec §7.4)。transport-agnostic Protocol;组合根选实现。"""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
@@ -11,10 +12,20 @@ if TYPE_CHECKING:
     )
 
 
+@dataclass(frozen=True)
+class BotSendResult:
+    """Result of sending a message to a bot: the run id (message handle the
+    poller correlates on) and the conversation session_id (used by the workflow
+    task_type path)."""
+    run_id: str
+    session_id: str | None = None
+
+
 @runtime_checkable
 class OpenApiBotPort(Protocol):
     async def ensure_grant(self, bot_id: str) -> None: ...
-    async def send_message(self, *, bot_id: str, message: str, metadata: dict[str, Any]) -> str: ...
+    async def send_message(self, *, bot_id: str, message: str,
+                           metadata: dict[str, Any]) -> BotSendResult: ...
     async def get_run(self, run_id: str) -> dict[str, Any]: ...
     async def cancel_run(self, run_id: str) -> None: ...
     async def send_and_wait_async(self, *, bot_id: str, message: str,

@@ -53,6 +53,29 @@ def _task_info(task_id: str = "t_case", *, max_depth: int = 3) -> TaskInfo:
     )
 
 
+def _task_info_request(task_id: str = "t_case", *, max_depth: int = 3):
+    """TaskInfoRequest for execute (task_id is supplied by the provider, not the request)."""
+    from agentclaw.community.core.task.domain.models import TaskSourceType
+    from agentclaw.community.core.task.domain.requests import (
+        RequestAcceptance, RequestContext, RequestGoal, RequestMetadata,
+        RequestTaskSpec, TaskInfoRequest,
+    )
+    return TaskInfoRequest(
+        task_spec=RequestTaskSpec(
+            metadata=RequestMetadata(title="存储行业尽调", instruction="produce a DD report"),
+            context=RequestContext(background="存储行业"),
+            goal=RequestGoal(
+                objective="产出一份尽调报告",
+                acceptances=[RequestAcceptance(id=f"ac{i}", acceptance=f"d{i}") for i in range(1, 6)],
+            ),
+        ),
+        source_type=TaskSourceType.BOT,
+        owner_user_id="owner_user",
+        owner_bot_id="owner_bot",
+        execution_config={"MAX_DEPTH": max_depth},
+    )
+
+
 def _node(node_id: str, task_id: str, *, run_mode: str | None = None, assignee: str | None = None) -> TaskNode:
     return TaskNode(
         node_id=node_id, task_id=task_id, status=Status.PENDING,
@@ -68,13 +91,13 @@ def _cb(success: bool, loop_task_id: str, *, data="done", fail_detail=None) -> T
         result["data"] = data
     if fail_detail is not None:
         result["fail_detail"] = fail_detail
-    return TaskCallbackData(
-        loop_task_id=loop_task_id,
-        workflow_type="single_bot",
-        workflow_id=1,
-        instance_id=1,
-        result=result,
-    )
+    return TaskCallbackData(data={
+        "loop_task_id": loop_task_id,
+        "workflow_type": "single_bot",
+        "workflow_id": 1,
+        "instance_id": 1,
+        "result": result,
+    })
 
 
 def _run(coro):
@@ -272,11 +295,11 @@ class _CaseEngine(ExecutionEngine):
 
 
 class _CaseTaskService(TaskService):
-    def __init__(self, graph, decomposer, discover, runner=None, harness=None):
+    def __init__(self, graph, decomposer, discover, runner=None, harness=None, task_id_provider=None):
         self._cd = decomposer
         self._cbd = discover
         self._cr = runner
-        super().__init__(graph, harness=harness)
+        super().__init__(graph, harness=harness, task_id_provider=task_id_provider)
 
     def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
         # case 测试覆写:注入 stub 策略/投递的 _CaseEngine(忽略传入端口)
@@ -296,7 +319,8 @@ def _wire_facade(*, task_id="t_case", max_depth=3, miss_nodes=None) -> tuple:
     runner = _TestRunner(svc)
     decomposer = CaseDecomposer(task_id=task_id)
     discover = CaseBotDiscover(miss_nodes=miss_nodes, task_id=task_id)
-    facade = _CaseTaskService(svc, decomposer, discover, runner=runner)
+    facade = _CaseTaskService(svc, decomposer, discover, runner=runner,
+                          task_id_provider=lambda: "t_case")
     return facade, svc, runner
 
 
@@ -305,7 +329,7 @@ class TestThreeModesHappyToDone:
     def test_full_flow(self):
         facade, svc, runner = _wire_facade()
         root_id = "t_case"
-        _exec(facade, _task_info(root_id))
+        _exec(facade, _task_info_request(root_id))
         g = svc.query_task_dashboard(root_id)
         ov = svc._get_node(g, "N_overview")
         assert ov.run_info.run_mode == "single_bot"
@@ -355,7 +379,7 @@ class TestThreeModesHappyToDone:
 
     def test_relations_decomposition_tree_single_in(self):
         facade, svc, *_ = _wire_facade()
-        _exec(facade, _task_info("t_case"))
+        _exec(facade, _task_info_request("t_case"))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="x")))
         g = svc.query_task_dashboard("t_case")
         non_root = [n for n in g.tasks if n.node_id != "t_case"]
@@ -369,7 +393,7 @@ class TestThreeModesHappyToDone:
 class TestFailRemedyCure:
     def test_fail_then_remedy_pass_cures_and_propagates(self):
         facade, svc, runner = _wire_facade(max_depth=3)
-        _exec(facade, _task_info("t_case", max_depth=3))
+        _exec(facade, _task_info_request("t_case", max_depth=3))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         _run(facade.callback.report_result(_cb(True, "t_case::N_compete", data="compete")))
         # 验收不过 → FAILED(v4:不立即补救拆子,交 harness 重新派发执行重试)
@@ -399,7 +423,7 @@ class TestFailRemedyCure:
 class TestMissEscalateBbs:
     def test_miss_at_max_escalates_bbs(self):
         facade, svc, runner = _wire_facade(max_depth=1, miss_nodes={"N_practice_bbs"})
-        _exec(facade, _task_info("t_case", max_depth=1))
+        _exec(facade, _task_info_request("t_case", max_depth=1))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
             _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
@@ -418,7 +442,7 @@ class TestMissEscalateBbs:
         (已 RUNNING)→ facade.report_bbs_result(PASS)→ scoped DONE + claim 释放;框架 _on_pass_collect 复核
         根 gap(case planner 返 has_gap=False)→ 根 DONE + 图 DONE。"""
         facade, svc, runner = _wire_facade(max_depth=1, miss_nodes={"N_practice_bbs"})
-        _exec(facade, _task_info("t_case", max_depth=1))
+        _exec(facade, _task_info_request("t_case", max_depth=1))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
             _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
@@ -457,7 +481,7 @@ class TestMissEscalateBbs:
 class TestDashboardTerminal:
     def test_query_result_and_detail(self):
         facade, svc, *_ = _wire_facade()
-        _exec(facade, _task_info("t_case"))
+        _exec(facade, _task_info_request("t_case"))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="行业全貌")))
         from agentclaw.community.core.task.task_runner.runner import TaskRunner
         r = TaskRunner(svc)

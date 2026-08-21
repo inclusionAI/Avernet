@@ -20,6 +20,12 @@ from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.repository.protocols.task import (
+    TaskCallbackRepositoryProtocol,
+    TaskInfoRepositoryProtocol,
+    TaskNodeRepositoryProtocol,
+    TaskNodeRunInfoRepositoryProtocol,
+)
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
@@ -50,6 +56,7 @@ class TaskModule(Module):
         discover: BotDiscoverServiceProtocol,
         bot_public: BotPublicServiceProtocol,
         injector: Injector,
+        task_info_repo: TaskInfoRepositoryProtocol,
     ) -> TaskService:
         """构造 TaskService facade(引擎自当 ResultSink/TaskContextBuilder;构造期收端口)。
 
@@ -74,9 +81,29 @@ class TaskModule(Module):
         # harness 旁路常驻巡检(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推);
         # facade 内部 set_on_harness 回填编排核入口并启动 daemon 巡检线程。
         harness = TaskHarness(graph)
+        # 回投落库:TaskPersistenceModule 装了即取到(与 task_info_repo 同模块绑定);测试/纯内核
+        # fixture 若未装则取不到 → 跳过回投落库(与 task_info_repo 缺省同语义,不阻断编排核推进)。
+        try:
+            callback_repo = injector.get(TaskCallbackRepositoryProtocol)
+        except Exception:  # noqa: BLE101 未绑定 → 跳过回投落库
+            callback_repo = None
+        # task_node / task_node_run_info 落库(workflow/yaml 分支):TaskPersistenceModule 装了即取到
+        # (与 task_info_repo/callback_repo 同模块绑定);测试/纯内核 fixture 未装则取不到 → 跳过节点落库
+        # (与 task_info_repo 缺省同语义,不阻断编排核推进;dynamic 分支本就不落这两个表)。
+        try:
+            task_node_repo = injector.get(TaskNodeRepositoryProtocol)
+        except Exception:  # noqa: BLE101 未绑定 → 跳过 task_node 落库
+            task_node_repo = None
+        try:
+            task_node_run_info_repo = injector.get(TaskNodeRunInfoRepositoryProtocol)
+        except Exception:  # noqa: BLE101 未绑定 → 跳过 task_node_run_info 落库
+            task_node_run_info_repo = None
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
             bcs_identity=bcs_identity, task_provider_id=task_provider_id,
+            task_info_repo=task_info_repo, callback_repo=callback_repo,
+            task_node_repo=task_node_repo,
+            task_node_run_info_repo=task_node_run_info_repo,
         )
 
     @singleton

@@ -28,6 +28,7 @@ task_loop inbound PUSH callback(前缀 ``/api/v1/collaboration/tasks/callback``)
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -44,7 +45,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackDataDTO,
     TaskCallbackRequest,
     TaskExecutionGraphDTO,
-    TaskInfoDTO,
+    TaskInfoRequestDTO,
     TaskNodeCallbackRequest,
     TaskOpResultDTO,
     TaskSummaryDTO,
@@ -53,10 +54,12 @@ from agentclaw.community.adapters.http.task.schemas import (
     graph_to_dto,
     op_result_to_dto,
     summary_to_dto,
-    task_info_from_dto,
+    task_info_request_from_dto,
     task_spec_from_dto,
 )
-from agentclaw.community.adapters.http.task.translator import translate
+from agentclaw.community.adapters.http.task.translator import (
+    is_bcn_event_payload, is_claw_mind_payload, translate, translate_bcn, translate_claw_mind,
+)
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.errors import InternalError
@@ -90,15 +93,15 @@ router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
 @router.post("/execute", response_model=Envelope[TaskOpResultDTO])
 @envelope_errors
 async def execute_task_internal(
-    body: TaskInfoDTO,
+    body: TaskInfoRequestDTO,
     request: Request,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskOpResultDTO]:
-    """提交执行任务(内部副本)。initialize_graph(根 PENDING)→ 编排核 on_execute 首帧推进。
+    """提交执行任务(内部副本)。task_id 服务端生成;持久化 task_info(PENDING)→ initialize_graph → on_execute。
 
     幂等:同 task_id 已建图(GraphAlreadyInitializedError)→ ``@envelope_errors`` 映射 409。"""
-    task_info = task_info_from_dto(body)
-    result = await service.execute(task_info)
+    task_request = task_info_request_from_dto(body)
+    result = await service.execute(task_request)
     return envelope(op_result_to_dto(result), request)
 
 
@@ -415,6 +418,27 @@ async def _dispatch(
     svc: TaskServiceProtocol, auth: CallbackAuthenticator, registry: CallbackCorrelationRegistry,
 ) -> Envelope[dict[str, Any]]:
     raw = await request.body()
+    # 回调 body 按调用者分流:ClawMind(HttpCallbackPayload 四字段)/ BCN(CloudEvent 信封)/ 羽雀(默认 schema)。
+    try:
+        _raw_obj = json.loads(raw)
+    except Exception:
+        _raw_obj = None
+    # ClawMind / BCN 是事件/工作流级回投(run_id/workflow_id 不对应框架节点):只落 task_callback 审计,
+    # 不推进编排核(start_run/report_result 会 NodeNotFoundError),直接 ack。
+    if is_claw_mind_payload(_raw_obj):
+        auth.verify(source="claw_mind", headers=request.headers, raw_body=raw,
+                    method=request.method, path=request.url.path)
+        await svc.callback.ingest(translate_claw_mind(_raw_obj, disposition).data)
+        return envelope({"ok": True}, request)
+    if is_bcn_event_payload(_raw_obj):
+        auth.verify(source="bcn", headers=request.headers, raw_body=raw,
+                    method=request.method, path=request.url.path)
+        _tc = translate_bcn(_raw_obj)
+        if _tc is None:
+            return envelope({"ok": True}, request, message="bcn event not handled")
+        await svc.callback.ingest(_tc.data)
+        return envelope({"ok": True}, request)
+    # 羽雀(框架节点级回投):落库 + 推进编排核。
     try:
         req = schema_cls.model_validate_json(raw)
     except Exception:
@@ -424,14 +448,16 @@ async def _dispatch(
                 method=request.method, path=request.url.path)
     tc = translate(req, disposition, registry)
     try:
-        if disposition == "start":
+        if tc.disposition == "start":
             await svc.callback.start_run(tc.data)
         else:
             await svc.callback.report_result(tc.data)
     except TaskStateError:
         # 幂等:result 重投到已终态节点 → 200 ack;否则 TaskStateError 上抛 → @envelope_errors 409
-        if disposition == "result":
-            cur = _find_node_status(svc, tc.data.loop_task_id)
+        if tc.disposition == "result":
+            _payload = tc.data.data
+            _loop_task_id = _payload.get("loop_task_id") if isinstance(_payload, dict) else ""
+            cur = _find_node_status(svc, _loop_task_id)
             if cur in _TERMINAL:
                 return envelope({"ok": True}, request, message="idempotent")
         raise

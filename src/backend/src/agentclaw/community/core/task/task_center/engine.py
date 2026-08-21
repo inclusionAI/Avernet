@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import dataclass
 
 from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
 from agentclaw.community.core.task.domain.models import (
@@ -38,11 +39,20 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskNodeQueryCriteria,
 )
+from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
 
 
 logger = logging.getLogger("task.engine")
 
 _DEFAULT_MAX_HARNESS = 3  # 执行报错 harness 重投上限(达上限→HUNG)
+
+
+@dataclass(frozen=True)
+class CoopGroupStart:
+    """Result of starting a BCN coop group: the group id + its initial session_id."""
+    group_id: str
+    session_id: str | None
 
 
 class ExecutionEngine:
@@ -77,6 +87,19 @@ class ExecutionEngine:
         self._planner = self._build_planner()
         self._dispatcher = self._build_dispatcher()
         self._runner = self._build_runner()
+
+    # ===== 任务类型分流 seams(委托 self._runner;TaskService.execute 调用)=====
+    async def trigger_single_bot_workflow(self, *, task_id: str, bot_id: str,
+                                          message: str) -> BotSendResult:
+        """Single-bot workflow trigger; returns the conversation session_id."""
+        return await self._runner.trigger_workflow(
+            bot_id=bot_id, message=message, metadata={"biz_task_id": task_id})
+
+    async def start_coop_group(self, gf: GroupFormation) -> CoopGroupStart:
+        """Create the BCN coop group and fetch its initial session_id by default."""
+        group_id = await self._runner.form_coop_group(gf)
+        session_id = await self._runner.get_group_session(group_id)
+        return CoopGroupStart(group_id=group_id, session_id=session_id)
 
     # ===== protected 工厂方法(测试子类可覆写注入 stub 策略/投递;引擎自带默认接真实端口)=====
     def _build_executor(self):

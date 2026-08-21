@@ -31,7 +31,7 @@ from typing import Any
 import httpx
 import websockets
 
-from agentclaw.community.core.task.task_runner.integration.ports import OpenApiBotPort
+from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult, OpenApiBotPort
 from agentclaw.community.core.task.task_runner.integration.protocols import BotPublicServiceProtocol
 
 _WS_PATH = "/api/openclaw/ws"
@@ -92,17 +92,18 @@ class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singl
         """singlebox 无 api-key grant:仅预解析并缓存 bot → 引擎 target(等同"确保可达")。"""
         await self._resolve_target(bot_id)
 
-    async def send_message(self, *, bot_id: str, message: str, metadata: dict[str, Any]) -> str:
-        """fire ``chat.send``:解析 target+建 session → 后台 WS 收帧存 ``_runs`` → 立即返 run_id。
+    async def send_message(self, *, bot_id: str, message: str, metadata: dict[str, Any]) -> BotSendResult:
+        """fire ``chat.send``:解析 target+建 session → 后台 WS 收帧存 ``_runs`` → 立即返 BotSendResult。
 
         解析/建会话失败不抛(避免打断 executor gather):落 FAILED 进 ``_runs``,poller 收口。
+        run_id 为 poller 关联句柄,session_id 透传 WS session_key(workflow task_type 路径用)。
         """
         run_id = f"ws_{uuid.uuid4().hex[:8]}"
         resolved = await self._resolve_roundtrip_inputs(bot_id)
         if isinstance(resolved, str):  # 错误信息
             with self._lock:
                 self._runs[run_id] = {"status": "FAILED", "error": resolved}
-            return run_id
+            return BotSendResult(run_id=run_id, session_id=None)
         target, session_key = resolved
         with self._lock:
             self._runs[run_id] = {"status": "RUNNING"}
@@ -112,7 +113,7 @@ class SingleboxEngineAdapter(OpenApiBotPort):  # pragma: no cover — live singl
         with self._lock:
             self._collectors[run_id] = future
         future.add_done_callback(lambda done: self._collector_done(run_id, done))
-        return run_id
+        return BotSendResult(run_id=run_id, session_id=session_key)
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         """轮询 run 状态:未终态返 RUNNING;终态返 {status, result{content}, error}(对齐 BaaS)。"""
