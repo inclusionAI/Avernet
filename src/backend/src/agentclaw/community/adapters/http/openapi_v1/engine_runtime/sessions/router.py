@@ -53,10 +53,11 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/sessions", tags=["sessions"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/sessions", tags=["sessions"], route_class=PublicAPIRoute)
 
 #: The path parameter naming the session an operation addresses.
 SessionIdPath = Annotated[

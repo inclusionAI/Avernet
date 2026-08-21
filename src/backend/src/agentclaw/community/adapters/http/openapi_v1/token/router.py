@@ -36,11 +36,13 @@ from agentclaw.community.api.caller_credential import (
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.auth import AuthRequestContext
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 
-token_router = APIRouter(prefix="/openapi/v1/org/user", tags=["org-user"])
+token_router = APIRouter(prefix="/openapi/v1/org/user", tags=["org-user"], route_class=PublicAPIRoute)
 caller_identity_router = APIRouter(
-    prefix="/openapi/v1/bots/{bot_id}", tags=["Caller identity"]
+    prefix="/openapi/v1/bots/{bot_id}", tags=["Caller identity"],
+    route_class=PublicAPIRoute,
 )
 
 

@@ -61,7 +61,7 @@
         why (`plan.md` *Alternatives Considered*).
 - **Depends on:** —
 
-## Task 3: The route class and the assembly-time refusal  `[ ]`
+## Task 3: The route class and the assembly-time refusal  `[x]`
 
 - **Goal:** Make the table apply itself, and make an operation missing from it
   impossible to serve.
@@ -70,17 +70,17 @@
   `…/openapi_v1/__init__.py:387`,
   36 router modules under `…/openapi_v1/` (one-line `route_class=` each)
 - **Done when:**
-  - [ ] `PublicAPIRoute.__init__` looks the operation up and raises
+  - [x] `PublicAPIRoute.__init__` looks the operation up and raises
         `PublicRouteNotAuthorized` — naming method and path — when it is absent.
-  - [ ] A `Check` row appends its dependency; every other row appends
+  - [x] A `Check` row appends its dependency; every other row appends
         nothing.
-  - [ ] All 36 `APIRouter(...)` constructions under `openapi_v1/` pass
+  - [x] All 36 `APIRouter(...)` constructions under `openapi_v1/` pass
         `route_class=PublicAPIRoute`.
-  - [ ] `_assert_every_route_authorized(public)` runs at the end of
+  - [x] `_assert_every_route_authorized(public)` runs at the end of
         `build_public_router` and raises on a route not built through the class,
         and on a table row matching no route — so the **app does not start**,
         rather than a test merely failing.
-  - [ ] The app still starts and every existing openapi_v1 test passes
+  - [x] The app still starts and every existing openapi_v1 test passes
         unchanged.
 - **Depends on:** Tasks 1, 2
 

@@ -31,8 +31,9 @@ from .schemas import (
     SkillMarketItem,
     SkillMarketSearchRequest,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/market", tags=["market"])
+router = APIRouter(prefix="/openapi/v1/bots/market", tags=["market"], route_class=PublicAPIRoute)
 _AUTH = [Depends(require_principal)]
 
 

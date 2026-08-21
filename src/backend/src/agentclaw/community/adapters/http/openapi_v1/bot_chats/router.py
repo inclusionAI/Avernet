@@ -29,10 +29,12 @@ from agentclaw.community.core.bot_chat.schemas import (
     SessionListResponse,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/chats",
     tags=["bot-chats"],
+    route_class=PublicAPIRoute,
 )
 
 _GRANT_CHECKED_ADDRESSED_BOT = [Depends(require_granted_addressed_bot)]

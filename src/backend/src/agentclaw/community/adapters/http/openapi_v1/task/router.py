@@ -31,8 +31,9 @@ from agentclaw.community.adapters.http.task.schemas import (
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"])
+router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"], route_class=PublicAPIRoute)
 
 
 @router.post("/execute", response_model=Envelope[TaskOpResultDTO])

@@ -54,8 +54,9 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.di import Injected
 
 from .schemas import Skill, SkillContent, SkillParameters, SkillState, SkillUpload
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/skills", tags=["skills"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/skills", tags=["skills"], route_class=PublicAPIRoute)
 
 #: The bot authorization for an application caller, on the two operations the
 #: shared dependency can decide — the **addressed-bot** dependency, because the

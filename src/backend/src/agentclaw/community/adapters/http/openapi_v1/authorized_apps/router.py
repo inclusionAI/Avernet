@@ -97,6 +97,7 @@ from agentclaw.community.api.collaborator_service import CollaboratorServiceProt
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
 from agentclaw.community.core.gateway_principal import PrincipalType
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 #: The bot-scoped group — the owner's three operations. All three are
 #: ``REFUSED`` to a machine caller: delegation is a human act, so an
@@ -108,6 +109,7 @@ router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/authorized-apps",
     tags=["authorized-apps"],
     dependencies=[Depends(refuse_app_only_caller)],
+    route_class=PublicAPIRoute,
 )
 
 #: The app-scoped read, as its own literal component under the base. A second
@@ -121,7 +123,8 @@ router = APIRouter(
 #: ``/openapi/v1/bots`` reaches no upstream at all — it would be refused at the
 #: edge rather than served. ``test_path_convention.py`` holds the rule.
 app_view_router = APIRouter(
-    prefix="/openapi/v1/bots/authorized", tags=["authorized-apps"]
+    prefix="/openapi/v1/bots/authorized", tags=["authorized-apps"],
+    route_class=PublicAPIRoute,
 )
 
 #: Both parties. The APP half is checked here; the USER half comes from

@@ -140,6 +140,7 @@ from .schemas import (
     StartupScript,
     StartupScriptWrite,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
 
@@ -162,7 +163,7 @@ _GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
 #: entry were ever mislabelled. See ``refuse_app_only_caller``.
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
-router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
+router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"], route_class=PublicAPIRoute)
 
 
 def _require_service_capable_engine(bot_type: str, engine: str) -> None:

@@ -42,8 +42,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/caller", tags=["caller"])
+router = APIRouter(prefix="/openapi/v1/caller", tags=["caller"], route_class=PublicAPIRoute)
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 

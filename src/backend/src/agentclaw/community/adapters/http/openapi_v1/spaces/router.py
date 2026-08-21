@@ -71,9 +71,10 @@ from agentclaw.community.core.repository.protocols.skill_center_types import (
     SpaceSkillSummaryRecord,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 
-router = APIRouter(prefix="/openapi/v1/bots/spaces", tags=["spaces"])
+router = APIRouter(prefix="/openapi/v1/bots/spaces", tags=["spaces"], route_class=PublicAPIRoute)
 SpaceIdPath = Annotated[int, Path(ge=1, description="Space primary identifier.")]
 PageNoQuery = Annotated[int, Query(ge=1, description="One-based page number.")]
 PageSizeQuery = Annotated[

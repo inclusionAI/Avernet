@@ -27,8 +27,9 @@ from agentclaw.community.core.skill_center.errors import (
     RepositoryCatalogSyncInProgressError,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["repository-skills"])
+router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["repository-skills"], route_class=PublicAPIRoute)
 
 
 @router.get("/repository", response_model=Envelope[Page[dict[str, Any]]])

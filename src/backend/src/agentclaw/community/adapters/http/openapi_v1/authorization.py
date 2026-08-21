@@ -62,6 +62,10 @@ authorization one. And whether a *machine* caller is admitted at all is
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Callable
+
+from fastapi import APIRouter, Depends
+from fastapi.routing import APIRoute
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
@@ -536,3 +540,127 @@ __all__ = [
     "ServiceChecked",
     "scaffolding_row_count",
 ]
+
+
+class PublicRouteNotAuthorized(RuntimeError):
+    """A public operation was constructed without a row in :data:`AUTHORIZATION`.
+
+    Raised while the route's own module is importing, so the application never
+    starts. That is the whole fail-closed property: a new operation is refused
+    until someone decides what governs it, rather than served because nobody
+    noticed. Nothing catches it — there is no "continue without a decision".
+    """
+
+
+class PublicAPIRoute(APIRoute):
+    """The route type every ``/openapi/v1`` router is built with.
+
+    Reads the operation's row and attaches what it calls for, so a handler
+    never declares its own authorization and cannot opt out of it. A row that
+    is absent raises rather than defaulting to anything.
+
+    This runs at *decoration* time — when ``@router.get(...)`` constructs the
+    route — which is earlier than assembly and earlier than the first request.
+    """
+
+    def __init__(self, path: str, endpoint: Callable[..., Any], **kwargs: Any) -> None:
+        rule = _rule_for(path, kwargs.get("methods"))
+        if isinstance(rule, Check):
+            # Imported here, not at module scope: ``bot_access`` reads ``Check``
+            # off this module, so a top-level import would be a cycle. The cost
+            # is one lookup per adjudicated route at import time, the cheapest
+            # place to pay it.
+            from agentclaw.community.adapters.http.openapi_v1.bot_access import (
+                require_check,
+            )
+
+            kwargs["dependencies"] = [
+                *(kwargs.get("dependencies") or []),
+                Depends(require_check(rule)),
+            ]
+        super().__init__(path, endpoint, **kwargs)
+
+
+def _rule_for(path: str, methods: Any) -> Authorization:
+    """The row for this operation, or raise naming what is missing.
+
+    Every method a route declares must resolve to the same rule; a route
+    serving two methods with different bars would have to pick one, and
+    silently picking is how a surface acquires a hole. ``HEAD`` and ``OPTIONS``
+    are excluded for the reason the inventory excludes them: FastAPI adds them
+    alongside ``GET`` and they are not separate decisions.
+    """
+    wanted = sorted(set(methods or ["GET"]) - {"HEAD", "OPTIONS"})
+    rules = []
+    for method in wanted:
+        rule = AUTHORIZATION.get((method, path))
+        if rule is None:
+            raise PublicRouteNotAuthorized(
+                f"{method} {path} has no row in AUTHORIZATION. Every public "
+                f"operation must declare what governs it; add a row in "
+                f"openapi_v1/authorization.py."
+            )
+        rules.append(rule)
+    if len({repr(rule) for rule in rules}) > 1:
+        raise PublicRouteNotAuthorized(
+            f"{path} declares methods {wanted} with differing authorization "
+            f"rules {rules}; split the route or give them the same rule."
+        )
+    return rules[0]
+
+
+def assert_every_route_authorized(router: APIRouter) -> None:
+    """Fail assembly on the two mistakes :class:`PublicAPIRoute` cannot see.
+
+    It catches a *missing row* at construction. It cannot catch a router built
+    without ``route_class=PublicAPIRoute`` — those routes never run its
+    ``__init__`` — nor a row that matches no operation, which is a decision
+    left behind after a rename. Both are checked here, at the end of assembly,
+    so the application still refuses to start rather than serving an operation
+    nothing governs.
+    """
+    seen: set[tuple[str, str]] = set()
+    unguarded: list[str] = []
+    for route in _walk(router):
+        original = getattr(route, "original_route", None) or route
+        path = getattr(route, "path", "") or getattr(original, "path", "")
+        methods = set(getattr(route, "methods", None) or {"WEBSOCKET"})
+        for method in sorted(methods - {"HEAD", "OPTIONS"}):
+            seen.add((method, path))
+        if not isinstance(original, PublicAPIRoute) and not _is_websocket(original):
+            unguarded.append(f"{sorted(methods)} {path}")
+    if unguarded:
+        raise PublicRouteNotAuthorized(
+            "these routes were not built with route_class=PublicAPIRoute, so "
+            "their AUTHORIZATION row was never read: " + ", ".join(sorted(unguarded))
+        )
+    orphans = set(AUTHORIZATION) - seen
+    if orphans:
+        raise PublicRouteNotAuthorized(
+            "these AUTHORIZATION rows match no live operation (renamed or "
+            f"removed?): {sorted(orphans)}"
+        )
+
+
+def _walk(router: APIRouter):
+    """Every operation as the application will really serve it.
+
+    ``include_router`` stores a lazy wrapper rather than copying routes, so the
+    effective contexts — not ``router.routes`` — are what the surface serves.
+    """
+    for route in getattr(router, "routes", []):
+        if hasattr(route, "effective_route_contexts"):
+            yield from route.effective_route_contexts()
+        elif hasattr(route, "dependant"):
+            yield route
+
+
+def _is_websocket(route: Any) -> bool:
+    """WebSocket routes are ``APIWebSocketRoute``, which takes no route class.
+
+    FastAPI offers no per-router class for the socket plane, so a socket route
+    cannot carry :class:`PublicAPIRoute`. It is still covered: its row is
+    required by the orphan check above and by the inventory test, and the
+    socket operations on this surface are refused to app callers anyway.
+    """
+    return not hasattr(route, "methods")
