@@ -173,14 +173,14 @@ jobs:
         #   SIGTERM bcs                 -> flush profraw
         #   singlebox stop bcs_bots     -> tear down
         #   cargo llvm-cov report + endpoint coverage report
-        #     -> aggregate + enforce line >=39.8%, method >=36%, HTTP endpoints=100%,
+        #     -> aggregate + enforce line >=40%, method >=36%, HTTP endpoints=100%,
         #        and bcs-cli leaf commands=100%
         # --force-rebuild (mirroring pre_push): always rebuild the instrumented
         # binary from the pushed source instead of reusing a cached one, so the
         # measured coverage is correct. Exits non-zero on ANY e2e failure OR
-        # e2e line-coverage <39.8%, method coverage <36%, HTTP endpoint coverage
+        # e2e line-coverage <40%, method coverage <36%, HTTP endpoint coverage
         # below 100%, or CLI command coverage below 100%.
-        run: bash src/bcs/scripts/e2e_coverage.sh --bcs-line-min 39.8 --bcs-method-min 36 --force-rebuild
+        run: bash src/bcs/scripts/e2e_coverage.sh --bcs-line-min 40 --bcs-method-min 36 --force-rebuild
 
       - name: Stop stack (best-effort cleanup)
         if: always() && steps.changes.outputs.skip-bcs != 'true'

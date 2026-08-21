@@ -37,7 +37,7 @@ jobs:
       OCB_SKIP_GIT_HOOKS: "1"
       SINGLEBOX_MODEL_CONFIG_MODE: mock
       SINGLEBOX_COVERAGE_MODE: real
-      SINGLEBOX_COVERAGE_BCS_LINE_MIN: "39.8"
+      SINGLEBOX_COVERAGE_BCS_LINE_MIN: "40"
       SINGLEBOX_COVERAGE_BCS_METHOD_MIN: "36"
       USE_CN_MIRROR: ${{ inputs.use_cn_mirror && '1' || '' }}
       BCN_PLUGIN_SOURCE: source
@@ -165,7 +165,7 @@ jobs:
         run: |
           python3 scripts/ci/verify_singlebox_coverage_artifacts.py \
             --reports-dir scripts/.dependencies/coverage/singlebox/reports \
-            --bcs-line-min 39.8 \
+            --bcs-line-min 40 \
             --bcs-method-min 36 \
             --bcs-router-min 100 \
             --bcs-cli-min 100
