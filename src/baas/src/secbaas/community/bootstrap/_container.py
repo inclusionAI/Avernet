@@ -129,12 +129,13 @@ def _select_renewal_task(engine, legacy_task, deadline_task):
 
     Per D-04: if/else branch (not Plugin Selector).  When engine="legacy"
     (the default), DeviceTtlTimerTask is registered as before.  When
-    engine="deadline", the registered deadline task (resolved through the
-    generic task registry) replaces it in the cron list.
+    engine="deadline", the deadline task provider (default: the
+    ``deadline_renewal_task`` provider; registry resolution was removed
+    with the task_registry in 05.2-07) replaces it in the cron list.
 
-    None defense: a community-only build has no registered deadline task;
-    engine="deadline" then falls back to legacy with a warning instead of
-    mounting None into the AppScheduler.
+    None defense: an engine="deadline" configuration whose deadline task
+    provider resolves to None falls back to legacy with a warning instead
+    of mounting None into the AppScheduler.
 
     Phase 7 cleanup will delete this function and the legacy branch.
     """
