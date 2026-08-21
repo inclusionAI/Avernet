@@ -74,6 +74,19 @@ class HttpxClient(HttpClient):
             "PUT", path, params=params, json=json, headers=headers, timeout=timeout
         )
 
+    def patch(
+        self,
+        path: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        json: Any | None = None,
+        headers: Mapping[str, str] | None = None,
+        timeout: float = 30.0,
+    ) -> httpx.Response:
+        return self._request(
+            "PATCH", path, params=params, json=json, headers=headers, timeout=timeout
+        )
+
     def delete(
         self,
         path: str,

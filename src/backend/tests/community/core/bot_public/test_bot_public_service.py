@@ -31,6 +31,7 @@ def _make_service(
     bot_repository=None,
     process_service=None,
     bot_service=None,
+    bcn_service=None,
     passport_plugin=None,
     auth_relationship_plugin=None,
     publish_approval_plugin=None,
@@ -44,6 +45,7 @@ def _make_service(
         bot_repository=bot_repository or MagicMock(),
         process_service=process_service or MagicMock(),
         bot_service=bot_service or MagicMock(),
+        bcn_service=bcn_service or MagicMock(),
         passport_plugin=passport_plugin or MagicMock(),
         auth_relationship_plugin=auth_relationship_plugin or MagicMock(),
         publish_approval_plugin=publish_approval_plugin or MagicMock(),
@@ -80,6 +82,499 @@ def _make_catalog_bot(bot_id: str, entity_id: str):
         **_make_bot(bot_id=bot_id, owner_id=entity_id),
         "entity_id": entity_id,
     }
+
+
+# ---------------------------------------------------------------------------
+# public_bcs_bot – new-version BCS-delegated publish
+# ---------------------------------------------------------------------------
+
+class TestPublicBcsBot:
+    def test_context_mirrors_normal_bot_plus_public_scope_and_view_friend_deps(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True,
+            "puid": "p1",
+            "state": "PROCESSING",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        svc = _make_service(process_service=process, bot_repository=bot_repo)
+
+        result = svc.public_bcs_bot(
+            bot_uid="b1",
+            owner_id="u1",
+            public_scope="user",
+            operator=_make_operator(staff_id="op_user"),
+        )
+
+        assert result["puid"] == "p1"
+        process.start_approval.assert_called_once()
+        # bot record is fetched now — consistent with the normal-bot publish so
+        # _build_public_approval_context can fill publishHint/botSkills/botMcps.
+        bot_repo.get_by_id_and_owner.assert_called_once_with("b1", "u1")
+        kw = process.start_approval.call_args.kwargs
+        assert kw["applicant"] == "op_user"            # operator.staff_id
+        assert kw["biz_type"] == "botpublic"           # reused from the legacy flow
+        assert "process_code" not in kw                # reuses the default
+        ctx = kw["context"]
+        # normal-bot fields + the two new-version fields; no raw view_depts.
+        assert {"publishHint", "botSkills", "botMcps"}.issubset(ctx)
+        assert ctx["public_scope"] == "user"
+        assert ctx["viewFriendDeps"] == ""
+        assert "view_depts" not in ctx
+        # BCS publish overrides publishHint: 开放 + scene from public_scope.
+        assert "同学正在开放" in ctx["publishHint"]
+        assert "bot到加好友场景，" in ctx["publishHint"]
+
+    def test_completed_runs_callback_inline_with_public_scope(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True,
+            "puid": "p1",
+            "state": "COMPLETED",
+            "lastOperate": "AGREE",
+        }
+        svc = _make_service(process_service=process)
+        with patch.object(svc, "handle_public_approval_callback") as cb:
+            svc.public_bcs_bot(
+                bot_uid="b1",
+                owner_id="u1",
+                public_scope="user",
+                operator=_make_operator(),
+            )
+        cb.assert_called_once()
+        ckw = cb.call_args.kwargs
+        assert ckw["bot_id"] == "b1"
+        assert ckw["owner_id"] == "u1"
+        assert ckw["puid"] == "p1"
+        assert ckw["last_operate"] == "agree"
+        assert ckw["public_scope"] == "user"
+
+    def test_not_completed_does_not_invoke_callback(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True,
+            "puid": "p1",
+            "state": "PROCESSING",
+        }
+        svc = _make_service(process_service=process)
+        with patch.object(svc, "handle_public_approval_callback") as cb:
+            svc.public_bcs_bot(
+                bot_uid="b1", owner_id="u1", public_scope="user",
+                operator=_make_operator(),
+            )
+        cb.assert_not_called()
+
+    def test_failed_start_raises_service_error(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": False,
+            "error_msg": "workflow unavailable",
+        }
+        svc = _make_service(process_service=process)
+        with pytest.raises(BotPublicServiceError, match="workflow unavailable"):
+            svc.public_bcs_bot(
+                bot_uid="b1", owner_id="u1", public_scope="user",
+                operator=_make_operator(),
+            )
+
+    def test_rejects_empty_owner_id(self):
+        svc = _make_service()
+        with pytest.raises(BotPublicServiceError, match="Owner ID"):
+            svc.public_bcs_bot("b1", "", "user", _make_operator())
+
+    def test_rejects_empty_public_scope(self):
+        svc = _make_service()
+        with pytest.raises(BotPublicServiceError, match="public_scope"):
+            svc.public_bcs_bot("b1", "u1", "", _make_operator())
+
+    def test_rejects_invalid_public_scope(self):
+        svc = _make_service()
+        with pytest.raises(BotPublicServiceError, match="must be 'user' or 'agent'"):
+            svc.public_bcs_bot("b1", "u1", "team", _make_operator())
+
+    def test_view_depts_derives_view_friend_deps_in_context(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True, "puid": "p1", "state": "PROCESSING",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        svc = _make_service(process_service=process, bot_repository=bot_repo)
+        depts = [{"deptNo": "D1", "deptName": "Tech"},
+                 {"deptNo": "D2", "deptName": "Sales"}]
+        svc.public_bcs_bot(
+            bot_uid="b1", owner_id="u1", public_scope="user",
+            operator=_make_operator(), view_depts=depts,
+        )
+        ctx = process.start_approval.call_args.kwargs["context"]
+        # viewFriendDeps = deptName values joined; no raw view_depts in context.
+        assert ctx["viewFriendDeps"] == "Tech,Sales"
+        assert "view_depts" not in ctx
+        assert {"publishHint", "botSkills", "botMcps", "public_scope"}.issubset(ctx)
+
+    def test_view_friend_deps_empty_when_no_view_depts(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True, "puid": "p1", "state": "PROCESSING",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        svc = _make_service(process_service=process, bot_repository=bot_repo)
+        svc.public_bcs_bot(
+            bot_uid="b1", owner_id="u1", public_scope="user",
+            operator=_make_operator(),
+        )
+        ctx = process.start_approval.call_args.kwargs["context"]
+        assert ctx["viewFriendDeps"] == ""
+        assert "view_depts" not in ctx
+
+    def test_completed_inline_callback_omits_view_friend_deps(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True, "puid": "p1", "state": "COMPLETED",
+            "lastOperate": "AGREE",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        svc = _make_service(process_service=process, bot_repository=bot_repo)
+        depts = [{"deptNo": "D1", "deptName": "Tech"}]
+        with patch.object(svc, "handle_public_approval_callback") as cb:
+            svc.public_bcs_bot(
+                bot_uid="b1", owner_id="u1", public_scope="user",
+                operator=_make_operator(), view_depts=depts,
+            )
+        ckw = cb.call_args.kwargs
+        assert ckw["public_scope"] == "user"
+        # viewFriendDeps rides the ticket context only — NOT forwarded to callback.
+        assert "view_friend_deps" not in ckw
+
+    def test_bcs_publish_hint_scene_by_public_scope(self):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True, "puid": "p1", "state": "PROCESSING",
+        }
+        svc = _make_service(process_service=process, bot_repository=bot_repo)
+        for scope, scene in [("user", "加好友场景"), ("agent", "群聊场景")]:
+            process.start_approval.reset_mock()
+            svc.public_bcs_bot(
+                bot_uid="b1", owner_id="u1", public_scope=scope,
+                operator=_make_operator(),
+            )
+            hint = process.start_approval.call_args.kwargs["context"]["publishHint"]
+            assert f"bot到{scene}，" in hint, scope
+            assert "同学正在开放" in hint, scope
+            assert "正在发布" not in hint, scope  # normal-bot verb
+            assert '"' not in hint, scope        # no quote-wrapping around names
+            assert hint.endswith("发布。"), scope  # trailing full-stop
+
+    def test_bcs_bot_id_split_for_backend_lookup(self):
+        # BCS bot_id is shaped "{backend_bot_id}:{entity_id}"; the bot / skills
+        # lookup must use the backend bot_id (split on ':', first element).
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True, "puid": "p1", "state": "PROCESSING",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        svc = _make_service(process_service=process, bot_repository=bot_repo)
+        svc.public_bcs_bot(
+            bot_uid="b1:entity1", owner_id="u1", public_scope="user",
+            operator=_make_operator(),
+        )
+        bot_repo.get_by_id_and_owner.assert_called_once_with("b1", "u1")
+
+    def test_publish_persists_public_user_approval_to_bcs(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True, "puid": "p1",
+            "approval_url": "https://antprocess-pre/t/d/p1",
+            "state": "PROCESSING",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {"friend_ext": {"old": "x"}}
+        svc = _make_service(process_service=process, bot_repository=bot_repo, bcn_service=bcn)
+        depts = [{"deptNo": "D1", "deptName": "Tech"}]
+        svc.public_bcs_bot(
+            bot_uid="b1:entity1", owner_id="u1", public_scope="user",
+            operator=_make_operator(), view_depts=depts,
+        )
+        bcn.get_attributes.assert_called_once_with(bot_uuid="b1:entity1")
+        ckw = bcn.patch_attributes.call_args.kwargs
+        assert ckw["bot_uuid"] == "b1:entity1"
+        body = ckw["body"]
+        # merge preserves existing friend_ext keys + sets the PROCESSING block
+        assert body["friend_ext"]["old"] == "x"
+        assert body["friend_ext"]["public_user_approval"] == {
+            "puid": "p1",
+            "approval_url": "https://antprocess-pre/t/d/p1",
+            "view_friend_deps": [{"deptNo": "D1", "deptName": "Tech"}],
+            "status": "PROCESSING",
+        }
+
+    def test_publish_skips_bcs_when_credentials_skipped(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True, "puid": "p1", "state": "PROCESSING",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {"skipped": True}
+        svc = _make_service(process_service=process, bot_repository=bot_repo, bcn_service=bcn)
+        svc.public_bcs_bot(
+            bot_uid="b1", owner_id="u1", public_scope="agent",
+            operator=_make_operator(),
+        )
+        bcn.patch_attributes.assert_not_called()
+
+    def test_visibility_private_user_direct_patch_no_approval(self):
+        process = MagicMock()
+        bot_repo = MagicMock()
+        bcn = MagicMock()
+        svc = _make_service(process_service=process, bot_repository=bot_repo, bcn_service=bcn)
+        result = svc.public_bcs_bot(
+            bot_uid="b1", owner_id="u1", public_scope="user",
+            operator=_make_operator(), visibility="private",
+        )
+        # private 直连: 不走审批, 不查工单信息, 直接 PATCH BCS user_visibility
+        process.start_approval.assert_not_called()
+        bcn.get_attributes.assert_not_called()
+        bcn.patch_attributes.assert_called_once_with(
+            bot_uuid="b1", body={"user_visibility": "private"}
+        )
+        assert result["success"] is True
+        assert result["visibility"] == "private"
+        assert result["visibility_field"] == "user_visibility"
+
+    def test_visibility_private_agent_direct_patch_uses_visibility_field(self):
+        bcn = MagicMock()
+        svc = _make_service(bcn_service=bcn)
+        svc.public_bcs_bot(
+            bot_uid="b1", owner_id="u1", public_scope="agent",
+            operator=_make_operator(), visibility="private",
+        )
+        # agent 联动 → PATCH BCS visibility 字段 (非 user_visibility)
+        bcn.patch_attributes.assert_called_once_with(
+            bot_uuid="b1", body={"visibility": "private"}
+        )
+
+    def test_visibility_public_stored_in_friend_ext_block(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True, "puid": "p1", "approval_url": "u1", "state": "PROCESSING",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {"friend_ext": {"old": "x"}}
+        svc = _make_service(process_service=process, bot_repository=bot_repo, bcn_service=bcn)
+        svc.public_bcs_bot(
+            bot_uid="b1", owner_id="u1", public_scope="user",
+            operator=_make_operator(), visibility="public",
+        )
+        block = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["public_user_approval"]
+        assert block["visibility"] == "public"
+        # merge 仍保留已有 friend_ext 子键
+        assert bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["old"] == "x"
+
+    def test_agent_publish_stores_public_public_approval_block(self):
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True, "puid": "p1", "approval_url": "u1", "state": "PROCESSING",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {"friend_ext": {"old": "x"}}
+        svc = _make_service(process_service=process, bot_repository=bot_repo, bcn_service=bcn)
+        svc.public_bcs_bot(
+            bot_uid="b1", owner_id="u1", public_scope="agent",
+            operator=_make_operator(),
+            view_depts=[{"deptNo": "D1", "deptName": "Tech"}],
+            visibility="public",
+        )
+        friend_ext = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]
+        # agent → public_public_approval subkey (NOT public_user_approval); same block shape
+        assert "public_user_approval" not in friend_ext
+        block = friend_ext["public_public_approval"]
+        assert block["puid"] == "p1"
+        assert block["approval_url"] == "u1"
+        assert block["view_friend_deps"] == [{"deptNo": "D1", "deptName": "Tech"}]
+        assert block["status"] == "PROCESSING"
+        assert block["visibility"] == "public"
+        # merge preserves existing friend_ext subkeys
+        assert friend_ext["old"] == "x"
+
+    def test_callback_disagree_updates_public_user_approval_status(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {
+            "friend_ext": {
+                "public_user_approval": {
+                    "puid": "p1", "status": "PROCESSING", "visibility": "public",
+                    "approval_url": "u",
+                }
+            }
+        }
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="bot-uuid-x", owner_id="u1", puid="p1",
+            last_operate="DISAGREE", public_scope="user",
+        )
+        # public_scope 非空 → bot_id 即 bot_uid
+        bcn.get_attributes.assert_called_once_with(bot_uuid="bot-uuid-x")
+        block = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["public_user_approval"]
+        assert block["status"] == "DISAGREE"
+        # 其他子字段保留 (只翻 status)
+        assert block["puid"] == "p1"
+        assert block["visibility"] == "public"
+
+    def test_callback_cancel_updates_public_public_approval_for_agent(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {
+            "friend_ext": {
+                "public_public_approval": {"puid": "p1", "status": "PROCESSING"}
+            }
+        }
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="b", owner_id="u", puid="p1",
+            last_operate="CANCEL", public_scope="agent",
+        )
+        block = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]["public_public_approval"]
+        assert block["status"] == "CANCEL"
+
+    def test_callback_agree_user_writes_block_visibility_to_user_visibility(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {
+            "friend_ext": {
+                "public_user_approval": {"puid": "p1", "status": "PROCESSING", "visibility": "public"}
+            }
+        }
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="b", owner_id="u", puid="p1",
+            last_operate="AGREE", public_scope="user",
+        )
+        body = bcn.patch_attributes.call_args.kwargs["body"]
+        assert body["friend_ext"]["public_user_approval"]["status"] == "AGREE"
+        # user: user_visibility 直接取 block.visibility
+        assert body["user_visibility"] == "public"
+
+    def test_callback_agree_user_uses_protected_from_block(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {
+            "friend_ext": {
+                "public_user_approval": {"puid": "p1", "status": "PROCESSING", "visibility": "protected"}
+            }
+        }
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="b", owner_id="u", puid="p1",
+            last_operate="AGREE", public_scope="user",
+        )
+        assert bcn.patch_attributes.call_args.kwargs["body"]["user_visibility"] == "protected"
+
+    def test_callback_agree_agent_public_when_friend_check_open(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {
+            "friend_ext": {"public_public_approval": {"puid": "p1", "status": "PROCESSING"}},
+            "friend_check_in_strategy": "OPEN",
+        }
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="b", owner_id="u", puid="p1",
+            last_operate="AGREE", public_scope="agent",
+        )
+        body = bcn.patch_attributes.call_args.kwargs["body"]
+        assert body["friend_ext"]["public_public_approval"]["status"] == "AGREE"
+        # agent: visibility 由 friend_check_in_strategy=OPEN → public
+        assert body["visibility"] == "public"
+
+    def test_callback_agree_agent_protected_when_friend_check_not_open(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {
+            "friend_ext": {"public_public_approval": {"puid": "p1", "status": "PROCESSING"}},
+            "friend_check_in_strategy": "APPROVAL",
+        }
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="b", owner_id="u", puid="p1",
+            last_operate="AGREE", public_scope="agent",
+        )
+        assert bcn.patch_attributes.call_args.kwargs["body"]["visibility"] == "protected"
+
+    def test_callback_agree_lifts_view_friend_deps_for_user(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {
+            "friend_ext": {
+                "public_user_approval": {
+                    "puid": "p1", "status": "PROCESSING", "visibility": "public",
+                    "view_friend_deps": [{"deptNo": "D1", "deptName": "Tech"}],
+                }
+            }
+        }
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="b", owner_id="u", puid="p1",
+            last_operate="AGREE", public_scope="user",
+        )
+        friend_ext = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]
+        # AGREE lifts block.view_friend_deps to top-level friend_ext key
+        assert friend_ext["view_scope_user_friend_deps"] == [{"deptNo": "D1", "deptName": "Tech"}]
+        # block's own view_friend_deps preserved (block merged back into friend_ext)
+        assert friend_ext["public_user_approval"]["view_friend_deps"] == [
+            {"deptNo": "D1", "deptName": "Tech"}
+        ]
+
+    def test_callback_agree_lifts_view_friend_deps_for_agent(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {
+            "friend_ext": {
+                "public_public_approval": {
+                    "puid": "p1", "status": "PROCESSING",
+                    "view_friend_deps": [{"deptNo": "D2", "deptName": "Sales"}],
+                }
+            }
+        }
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="b", owner_id="u", puid="p1",
+            last_operate="AGREE", public_scope="agent",
+        )
+        friend_ext = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]
+        assert friend_ext["view_scope_agent_friend_deps"] == [{"deptNo": "D2", "deptName": "Sales"}]
+
+    def test_callback_skips_when_bcs_creds_missing(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {"skipped": True}
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="b", owner_id="u", puid="p1",
+            last_operate="DISAGREE", public_scope="user",
+        )
+        bcn.patch_attributes.assert_not_called()
+
+    def test_rejects_invalid_visibility(self):
+        svc = _make_service()
+        with pytest.raises(BotPublicServiceError, match="visibility must be"):
+            svc.public_bcs_bot("b1", "u1", "user", _make_operator(), visibility="bogus")
+
+    def test_rejects_view_depts_not_a_list(self):
+        svc = _make_service()
+        with pytest.raises(BotPublicServiceError, match="view_depts must be a list"):
+            svc.public_bcs_bot("b1", "u1", "user", _make_operator(),
+                               view_depts="not-a-list")
+
+    def test_rejects_view_depts_item_without_deptNo(self):
+        svc = _make_service()
+        with pytest.raises(BotPublicServiceError, match="deptNo"):
+            svc.public_bcs_bot("b1", "u1", "user", _make_operator(),
+                               view_depts=[{"deptName": "no no here"}])
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +865,51 @@ class TestHandlePublicApprovalCallback:
         svc = _make_service(bot_repository=bot_repo)
         result = svc.handle_public_approval_callback("bot1", "owner1", "puid1", "agree")
         assert result["success"] is False
+
+    # -- public_scope: new-version publish short-circuits the legacy ac_bots path --
+
+    def test_public_scope_user_skips_ac_bots_and_logs(self):
+        svc, _, bot_repo = self._make_svc_with_bot({
+            "public_approval": {"puid": "puid1", "status": "PROCESSING",
+                                "permission_owner": "owner", "public": "1",
+                                "applicant": "op_user"}
+        })
+        result = svc.handle_public_approval_callback(
+            "bot1", "owner1", "puid1", "agree", public_scope="user",
+        )
+        assert result["success"] is True
+        assert result["public"] is None
+        assert "public_scope=user" in result["message"]
+        # New-version path must NOT touch ac_bots at all.
+        bot_repo.get_by_id_and_owner.assert_not_called()
+        bot_repo.update_by_owner.assert_not_called()
+
+    def test_public_scope_agent_also_new_version(self):
+        svc = _make_service()
+        result = svc.handle_public_approval_callback(
+            "bot1", "owner1", "puid1", "disagree", public_scope="agent",
+        )
+        assert result["success"] is True
+        assert result["public"] is None
+        assert "public_scope=agent" in result["message"]
+
+    def test_public_scope_empty_string_runs_legacy(self):
+        # public_scope="" must fall through to the legacy path (here: bot lookup).
+        svc, _, bot_repo = self._make_svc_with_bot({
+            "public_approval": {"puid": "puid1", "status": "PROCESSING",
+                                "permission_owner": "owner", "public": "1",
+                                "applicant": "op_user", "friend_approval": "0"}
+        })
+        with patch.object(svc, "_sync_access_mode_and_relations_or_raise"):
+            svc.handle_public_approval_callback(
+                "bot1", "owner1", "puid1", "agree", public_scope="",
+            )
+        bot_repo.get_by_id_and_owner.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# _build_public_approval_context
+# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

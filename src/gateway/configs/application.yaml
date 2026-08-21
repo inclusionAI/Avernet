@@ -339,6 +339,15 @@ user_config:
       user: required
       app: required
 
+    # New-version publish-to-users: served by the backend (the antprocess
+    # approval + bcs_pub callback live there), pulled out of the
+    # collaboration→bcs domain by the `collaboration-publish` match upstream. A
+    # logged-in end user via cookie SSO — no app credential — mirroring the legacy
+    # POST /api/bots/{bot_id}/public this replaces. The method-qualified exact
+    # path outranks the broad collaboration/** (app: required) rule above.
+    "POST /openapi/v1/collaboration/bots/{bot_uuid}/public":
+      user: required
+
     "/api/v1/collaboration/**":
       user: optional
       app: optional
@@ -559,6 +568,17 @@ user_config:
       collaboration-internal:
         match: /api/v1/collaboration/**
         server: bcs
+        protocols: [http]
+      # New-version publish-to-users is served by the backend (it owns the
+      # antprocess approval flow + the bcs_pub callback), even though the rest of
+      # the collaboration namespace goes to BCS. The `public` leaf keeps this
+      # subtree disjoint from BCS's bots/{bot_uuid}/friendships,
+      # friend-requests, mine, query, and the match outranks the broad
+      # collaboration→bcs rule behind it; the rewrite onto the backend route
+      # /openapi/v1/bots/{bot_id}/public-bcs is gateway-side.
+      collaboration-publish:
+        match: /openapi/v1/collaboration/bots/{bot_uuid}/public/**
+        server: backend
         protocols: [http]
       # bcsfuse public surface: fusion + fusable worker-config queries, served
       # under clean, version-free sub-prefixes. bcsfuse still serves its own /api/v1

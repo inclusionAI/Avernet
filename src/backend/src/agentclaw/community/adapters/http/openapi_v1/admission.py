@@ -137,10 +137,7 @@ class AdmissionMode(StrEnum):
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # Sensitive first-party identity operations always require a human user.
     ("GET", "/openapi/v1/org/user/iam-token"): AdmissionMode.REFUSED,
-    (
-        "POST",
-        "/openapi/v1/bots/{bot_id}/caller-identity",
-    ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/{bot_id}/caller-identity"): AdmissionMode.REFUSED,
     # The item routes resolve the addressed owner from the asset and perform
     # the grant check against that exact Bot/owner pair in their handler.
     (
@@ -636,6 +633,8 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/mcp/servers"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/servers/{server_code}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/tenants"): AdmissionMode.OPEN,
+    # New-version bcs publish-to-users: auth baseline only, no grant check; authz deferred.
+    ("POST", "/openapi/v1/bots/{bot_id}/public-bcs"): AdmissionMode.OPEN,
     # Department directory search — a tenant-wide catalogue read, not a user's.
     ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,

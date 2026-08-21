@@ -358,7 +358,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: ``none`` then moved 53 → 54 with the department directory search
 #: (``/openapi/v1/org/dept``), an account-level catalogue read that addresses no bot.
-_BOT_ID_PLACEMENT = {"path": 138, "query": 1, "none": 54}
+#:
+#: ``path`` then moved 132 → 133 with the BCS publish-to-users operation
+#: (``POST /openapi/v1/bots/{bot_id}/public-bcs``): it addresses a bot and acts
+#: for the operator, so it is bot-path-addressed like the rest of the surface.
+_BOT_ID_PLACEMENT = {"path": 139, "query": 1, "none": 54}
 
 
 def _schema() -> dict:
@@ -454,7 +458,7 @@ def test_the_pinned_number_of_operations_take_it():
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
     # MCP adds eight operations, the Harness surface adds six Bot-addressed
     # operations, and Session File adds six more.
-    assert len(taking) == 176
+    assert len(taking) == 177
 
 
 def test_the_exempt_operations_take_none():
