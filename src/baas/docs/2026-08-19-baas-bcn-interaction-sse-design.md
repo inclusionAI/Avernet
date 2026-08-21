@@ -160,7 +160,7 @@ data: {
 | Engine 来源 | BCN `data` 字段 | 规则 |
 | --- | --- | --- |
 | `payload.cwd` | `cwd` | 可选 |
-| `payload.command` | `command` | 必需，必须为非空字符串 |
+| `payload.command` | `command` | 可选；仅非空字符串会被复制 |
 | `payload.options[].label` | `options[].label` | 必需 |
 | `payload.options[].decision`，fallback `.value` | `options[].decision` | 两者都缺失时跳过该选项并 warning |
 
@@ -168,6 +168,8 @@ data: {
 BCN 可执行的 `allow-once`、`allow-always`、`deny` 三个标准选项。显式提供
 `options` 时必须是非空数组；非法子项被过滤，重复 decision 由后一项覆盖前一项，
 过滤后没有有效选项则跳过当前 interaction。显式 `null` 不触发默认选项合成。
+`command` 缺失、为 `null`、非字符串、空字符串或仅含空白时不阻断 interaction，
+BaaS 省略该可选字段且不记录 warning；非空字符串保持原值透传。
 
 ```text
 event: interaction
@@ -291,8 +293,8 @@ warning 使用结构化上下文，仅记录 BCN runId、interactionId、kind、
   1..4/唯一性限制、bool-only `multiSelect`/`allowOther`、自由文本约束，以及 option
   decision/value/legacy-label fallback；用真实 Engine label+description-only shape
   验证输出仍满足 BCN 合约且 warning 不泄露业务文本。
-- exec 的必需 command、无 options 默认选项、显式非法 options 拒绝、option
-  fallback 与重复 decision 后写覆盖。
+- exec 的可选 command 省略规则、有效 command 透传、无 options 默认选项、显式
+  非法 options 拒绝、option fallback 与重复 decision 后写覆盖。
 - 使用实际抓包形状作为 mode_switch fixture，验证顶层 toMode 到 targetMode、
   subject fallback、decision/value fallback、recommended 和 option targetMode。
 - 验证 Engine 私有字段不会进入 BCN 数据。
