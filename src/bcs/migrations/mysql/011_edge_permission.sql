@@ -22,10 +22,10 @@ CREATE TABLE IF NOT EXISTS `edge_grants` (
   `status`                 VARCHAR(16)  NOT NULL DEFAULT 'approved' COMMENT 'approved（生效）| revoked（撤回，不再授权）',
   `originator_policy_type` VARCHAR(16)  NOT NULL DEFAULT 'any' COMMENT 'any | same_as_from | specific | owner（friend 边恒为 any，D7）',
   `originator_policy_data` TEXT         DEFAULT NULL COMMENT 'policy_type=specific 时的发起方集合（JSON 字符串）',
-  `gmt_create`             timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `gmt_modified`           timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `gmt_create`             timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `gmt_modified`           timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`edge_id`),
-  UNIQUE KEY `ux_edge_from_to_env_ref` (`from_id`, `to_id`, `env`, `grant_ref_id`) COMMENT '每个 (A,B,env,ref) 至多一行',
+  UNIQUE KEY `uk_edge_from_to_env_ref` (`from_id`, `to_id`, `env`, `grant_ref_id`) COMMENT '每个 (A,B,env,ref) 至多一行',
   KEY `idx_edge_from_env_status` (`from_id`, `env`, `status`) COMMENT 'list_friends / 出边扫描',
   KEY `idx_edge_to_env_status` (`to_id`, `env`, `status`) COMMENT 'admission / 入边扫描'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -47,10 +47,10 @@ CREATE TABLE IF NOT EXISTS `permission_profiles` (
   `status`                VARCHAR(16)  NOT NULL DEFAULT 'active' COMMENT 'active | deleted',
   `created_by`            VARCHAR(64)  NOT NULL COMMENT '创建者（默认 profile 为 system）',
   `updated_by`            VARCHAR(64)  DEFAULT NULL COMMENT '最近修订者（NULL 表示无人改过）',
-  `gmt_create`            timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `gmt_modified`          timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `gmt_create`            timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `gmt_modified`          timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`permission_profile_id`),
-  UNIQUE KEY `ux_profile_bot_env_default` (`bot_id`, `env`, `is_default`, `status`) COMMENT '每 (bot,env) 至多一条 active default',
+  UNIQUE KEY `uk_profile_bot_env_default` (`bot_id`, `env`, `is_default`, `status`) COMMENT '每 (bot,env) 至多一条 active default',
   KEY `idx_profile_bot_env` (`bot_id`, `env`, `status`) COMMENT '默认 profile 查找'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -72,8 +72,8 @@ CREATE TABLE IF NOT EXISTS `permission_requests` (
   `created_by`        VARCHAR(64)  NOT NULL COMMENT '发起者标识',
   `decided_by`        VARCHAR(64)  DEFAULT NULL COMMENT '决定者；未决定时 NULL',
   `decided_at`        timestamp    NULL DEFAULT NULL COMMENT '决定时刻（DB 托管，CURRENT_TIMESTAMP 写入）；未决定时 NULL',
-  `gmt_create`        timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `gmt_modified`      timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `gmt_create`        timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `gmt_modified`      timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`request_id`),
   KEY `idx_req_to_env_status` (`to_id`, `env`, `status`) COMMENT '收件箱（received）扫描',
   KEY `idx_req_from_env_status` (`from_id`, `env`, `status`) COMMENT '发件箱（sent）扫描',
@@ -94,8 +94,8 @@ CREATE TABLE IF NOT EXISTS `capabilities` (
   `source`            VARCHAR(16)  NOT NULL COMMENT 'system | agent_card | manual',
   `status`            VARCHAR(16)  NOT NULL DEFAULT 'active' COMMENT 'active | inactive',
   `raw_metadata`      TEXT         DEFAULT NULL COMMENT '原始元数据（JSON 字符串，透传）',
-  `gmt_create`        timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `gmt_modified`      timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `gmt_create`        timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `gmt_modified`      timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`capability_id`),
   KEY `idx_cap_bot_env` (`bot_id`, `env`, `status`) COMMENT '按 bot/env 列能力'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -116,8 +116,8 @@ CREATE TABLE IF NOT EXISTS `authz_decision_logs` (
   `reason_code`   VARCHAR(64)  NOT NULL COMMENT '机器原因码（ok | public_default | no_edge | bot_hidden | bot_not_found…）',
   `grant_refs`    TEXT         NOT NULL COMMENT '命中的授权边引用（JSON 数组字符串，NOT NULL）',
   `context_json`  TEXT         DEFAULT NULL COMMENT '决策上下文快照（JSON 字符串）',
-  `gmt_create`    timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `gmt_modified`  timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `gmt_create`    timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `gmt_modified`  timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`decision_id`),
   KEY `idx_adl_env_from_to` (`env`, `from_id`, `to_id`) COMMENT '按对查决策历史'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

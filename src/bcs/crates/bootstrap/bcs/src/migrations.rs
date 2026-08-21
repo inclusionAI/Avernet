@@ -1350,11 +1350,11 @@ async fn add_sqlite_edge_permission_schema(db: &dyn DbPlugin) -> DbResult<()> {
     // Five edge-permission tables (idempotent; spec §3.1).
     for stmt in [
         "CREATE TABLE IF NOT EXISTS edge_grants (edge_id TEXT PRIMARY KEY, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, grant_kind TEXT NOT NULL, grant_ref_id TEXT NOT NULL, rules TEXT, status TEXT NOT NULL DEFAULT 'approved', originator_policy_type TEXT NOT NULL DEFAULT 'any', originator_policy_data TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_edge_from_to_env_ref ON edge_grants(from_id, to_id, env, grant_ref_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_edge_from_to_env_ref ON edge_grants(from_id, to_id, env, grant_ref_id)",
         "CREATE INDEX IF NOT EXISTS idx_edge_from_env_status ON edge_grants(from_id, env, status)",
         "CREATE INDEX IF NOT EXISTS idx_edge_to_env_status ON edge_grants(to_id, env, status)",
         "CREATE TABLE IF NOT EXISTS permission_profiles (permission_profile_id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, env TEXT NOT NULL, name TEXT NOT NULL DEFAULT 'default', description TEXT, rules_template TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, digest TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', created_by TEXT NOT NULL, updated_by TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_profile_bot_env_default ON permission_profiles(bot_id, env, is_default) WHERE status = 'active'",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_profile_bot_env_default ON permission_profiles(bot_id, env, is_default) WHERE status = 'active'",
         "CREATE INDEX IF NOT EXISTS idx_profile_bot_env ON permission_profiles(bot_id, env, status)",
         "CREATE TABLE IF NOT EXISTS permission_requests (request_id TEXT PRIMARY KEY, edge_id TEXT, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, request_kind TEXT NOT NULL, requested_ref_id TEXT, requested_rules TEXT, message TEXT, status TEXT NOT NULL DEFAULT 'pending', decision_reason TEXT, created_by TEXT NOT NULL, decided_by TEXT, decided_at TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
         "CREATE INDEX IF NOT EXISTS idx_req_to_env_status ON permission_requests(to_id, env, status)",
