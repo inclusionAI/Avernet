@@ -74,6 +74,19 @@ RUN uv venv --python 3 /opt/.venv \
     && find /opt/.venv -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true \
     && rm -rf /root/.cache/uv /root/.local/share/uv
 
+# Build the openclaw-channel-bcn plugin (BCS WebSocket channel).
+# Mirrors Dockerfile.ocb: npm install → build → prune devDeps.
+RUN mkdir -p /tmp/openclaw-channel-bcn \
+    && cp -R src/bcs/crates/plugins/openclaw-channel-bcn/. /tmp/openclaw-channel-bcn/ \
+    && cd /tmp/openclaw-channel-bcn \
+    && npm install \
+    && npm run build \
+    && npm prune --omit=dev \
+    && mkdir -p /opt/openclawExt/openclaw-channel-bcn \
+    && cp -R dist node_modules package.json openclaw.plugin.json \
+           /opt/openclawExt/openclaw-channel-bcn/ \
+    && rm -rf /tmp/openclaw-channel-bcn
+
 # Install supervisor in an isolated venv (avoids conflicts with engine site-packages).
 RUN python3 -m venv /opt/supervisor-venv \
     && /opt/supervisor-venv/bin/pip install --no-cache-dir supervisor \
@@ -143,6 +156,9 @@ COPY --from=builder /usr/local/bin/supervisorctl /usr/local/bin/supervisorctl
 # Bring over uv for developer convenience.
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 
+# Bring over the openclaw-channel-bcn plugin and link it into openclaw extensions.
+COPY --from=builder /opt/openclawExt/openclaw-channel-bcn /opt/openclawExt/openclaw-channel-bcn
+
 # CA bundle symlink for run.sh's hardcoded NODE_EXTRA_CA_CERTS path.
 RUN ln -sf /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt
 
@@ -152,9 +168,12 @@ RUN groupadd --gid 10001 admin 2>/dev/null || true \
     && echo 'admin ALL=(ALL) NOPASSWD: /usr/local/bin/supervisorctl *' > /etc/sudoers.d/admin-supervisorctl \
     && chmod 440 /etc/sudoers.d/admin-supervisorctl \
     && mkdir -p /home/admin/.openclaw/workspace \
+               /home/admin/.openclaw/extensions \
                /home/admin/logs \
                /var/log/supervisor \
                /var/run/agentclaw \
+    && ln -sfn /opt/openclawExt/openclaw-channel-bcn \
+               /home/admin/.openclaw/extensions/openclaw-channel-bcn \
     && chown -R admin:admin /home/admin /var/run/agentclaw
 
 # Supervisor configuration: engine(autostart=false) + openclaw(autostart=false).

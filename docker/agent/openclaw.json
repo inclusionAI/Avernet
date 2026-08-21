@@ -117,5 +117,17 @@
         "calendar.add", "contacts.add", "reminders.add"
       ]
     }
+  },
+  "plugins": {
+    "load": {
+      "paths": [
+        "/opt/openclawExt/openclaw-channel-bcn"
+      ]
+    },
+    "entries": {
+      "openclaw-channel-bcn": {
+        "enabled": true
+      }
+    }
   }
 }
