@@ -226,7 +226,7 @@ class BcnService:
     def register_provider_bot(
         self,
         *,
-        teamclaw_bot_uid: str,
+        teamclaw_bot_uuid: str,
         owner_workno: str,
         name: str,
         summary: str,
@@ -236,7 +236,7 @@ class BcnService:
         语雀: doc 548864073, POST /providers/{provider_id}/bots
 
         Args:
-            teamclaw_bot_uid: TC 的 bot uuid (例如 "20260502_1cjjh1ik")
+            teamclaw_bot_uuid: TC 的 bot uuid (例如 "20260502_1cjjh1ik")
             owner_workno: bot 所有者工号 (例如 "100000")
             name: bot 显示名
             summary: bot 简介 (空字符串也可)
@@ -245,7 +245,7 @@ class BcnService:
             BCN 返回的 dict, 关键字段:
               - bot_uid
               - provider_id
-              - provider_bot_ref (= "{teamclaw_bot_uid}:{owner_workno}")
+              - provider_bot_ref (= "{teamclaw_bot_uuid}:{owner_workno}")
               - bot_runtime_token (后续下行调用凭据)
             额外字段 (本方法附加):
               - skipped: dev 环境跳过时为 True
@@ -254,7 +254,7 @@ class BcnService:
         Raises:
             BcnServiceError: 4xx/5xx (除 409) / 超时 / 其他网络异常
         """
-        provider_bot_ref = f"{teamclaw_bot_uid}:{owner_workno}"
+        provider_bot_ref = f"{teamclaw_bot_uuid}:{owner_workno}"
         env = get_current_env()
 
         # dev / local 环境无 provider 凭据, 跳过实际调用 (排查日志关键字: [register_provider_bot])
@@ -350,7 +350,7 @@ class BcnService:
     def switch_bot(
         self,
         *,
-        teamclaw_bot_uid: str,
+        teamclaw_bot_uuid: str,
         owner_workno: str,
         name: str,
         summary: str,
@@ -361,7 +361,7 @@ class BcnService:
         用于切换 bot 的绑定关系，返回新的 token。
 
         Args:
-            teamclaw_bot_uid: TC 的 bot uuid (例如 "20260502_1cjjh1ik")
+            teamclaw_bot_uuid: TC 的 bot uuid (例如 "20260502_1cjjh1ik")
             owner_workno: bot 所有者工号 (例如 "100000")
             name: bot 显示名
             summary: bot 简介
@@ -381,7 +381,7 @@ class BcnService:
         Raises:
             BcnServiceError: 4xx/5xx / 超时 / 其他网络异常
         """
-        provider_bot_ref = f"{teamclaw_bot_uid}:{owner_workno}"
+        provider_bot_ref = f"{teamclaw_bot_uuid}:{owner_workno}"
         env = get_current_env()
 
         # dev / local 环境无 provider 凭据, 跳过实际调用
@@ -470,7 +470,7 @@ class BcnService:
     def delete_provider_bot(
         self,
         *,
-        teamclaw_bot_uid: str,
+        teamclaw_bot_uuid: str,
         owner_workno: str,
     ) -> Dict[str, Any]:
         """逻辑删除 Provider Bot 绑定。
@@ -478,7 +478,7 @@ class BcnService:
         调用 BCN 的 DELETE /providers/{provider_id}/bots/{provider_bot_ref} 接口。
 
         Args:
-            teamclaw_bot_uid: TC 的 bot uuid (例如 "20260611_d5v7rui3")
+            teamclaw_bot_uuid: TC 的 bot uuid (例如 "20260611_d5v7rui3")
             owner_workno: bot 所有者工号 (例如 "100000")
 
         Returns:
@@ -487,7 +487,7 @@ class BcnService:
         Raises:
             BcnServiceError: 4xx/5xx / 超时 / 其他网络异常
         """
-        provider_bot_ref = f"{teamclaw_bot_uid}:{owner_workno}"
+        provider_bot_ref = f"{teamclaw_bot_uuid}:{owner_workno}"
         env = get_current_env()
 
         provider_cfg = _get_provider_config(env, self._config)
