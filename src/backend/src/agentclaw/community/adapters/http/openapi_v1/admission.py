@@ -135,8 +135,7 @@ class AdmissionMode(StrEnum):
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # Sensitive first-party identity operations always require a human user.
-    ("GET", "/openapi/v1/org/user/iam-token"): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/bots/{bot_id}/caller-identity"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): AdmissionMode.REFUSED,
     # The item routes resolve the addressed owner from the asset and perform
     # the grant check against that exact Bot/owner pair in their handler.
     (

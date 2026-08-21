@@ -179,7 +179,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.authorized_apps.router"),
     ("DELETE", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"):
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.authorized_apps.router"),
-    ("POST", "/openapi/v1/bots/{bot_id}/caller-identity"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/channels"):
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.channels.router"),
     ("POST", "/openapi/v1/bots/{bot_id}/channels"):
@@ -510,8 +510,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the named user's own work orders and notifications"),
     ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/reject"):
         NoCheck("the named user's own work orders and notifications"),
-    ("GET", "/openapi/v1/org/user/iam-token"): NoCheck("the caller's own credential"),
-
     # ── Declared but not mounted (see UNMOUNTED_OPERATIONS) ───────────────
     ("POST", "/openapi/v1/collaboration/tasks/execute"):
         NoCheck("a task, not a bot; the surface is not mounted"),

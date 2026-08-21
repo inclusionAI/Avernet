@@ -1817,14 +1817,14 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   existed to retire. Regenerated Gateway `bots.openapi.json` is the release
   artifact for this surface and must be copied unchanged to the OCB Gateway.
 
-- **2026-08-18** — Split and migrated both legacy `/api/v1/token/iam`
-  capabilities: `GET /openapi/v1/org/user/iam-token` returns the first-party chat IAM
-  token, while `POST /openapi/v1/bots/{bot_id}/caller-identity` prepares Caller
-  identity for a Bot. Both require a Gateway user principal, re-check
-  `user_id` in Backend, refuse app-only callers, use the standard Envelope, and
-  disable response caching through shared middleware. Avernet Gateway now has the org forwarding domain
-  and exact user-only security rules; the OCB Gateway SOFA config still needs
-  the corresponding deployment-side update.
+- **2026-08-18** — Migrated the legacy `/api/v1/token/iam` IAM-token return and
+  optional Caller preparation as one Bot-scoped operation:
+  `POST /openapi/v1/bots/{bot_id}/iam-token`. The client supplies only Bot and
+  runtime context; Backend decides whether Caller exchange is required. The
+  operation requires a Gateway user principal, re-checks `user_id`, refuses
+  app-only callers, uses the standard Envelope, and disables response caching
+  through shared middleware. The OCB Gateway SOFA config still needs the
+  corresponding deployment-side update.
 
 - **2026-08-15** — **Bot-first addressing.** Every bot-scoped operation moved
   to `/openapi/v1/bots/{bot_id}/<component>/…`, reversing the component-first
