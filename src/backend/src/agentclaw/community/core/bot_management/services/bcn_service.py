@@ -155,7 +155,7 @@ class BcnService:
 
         Returns:
             BCN 返回的结果，包含：
-            - bot_uuid: Bot UUID
+            - bot_uid: Bot UUID
             - onboarded: 是否已入网
             - name: Bot 名称
 
@@ -189,19 +189,19 @@ class BcnService:
 
             response_data = response.json()
 
-            # BCN 接口返回格式：{"bot_uuid": "xxx", "onboarded": true, "name": "xxx"}
+            # BCN 接口返回格式：{"bot_uid": "xxx", "onboarded": true, "name": "xxx"}
             # 或者错误格式：{"error": "xxx"} 或 {"message": "xxx"}
             if "error" in response_data:
                 raise BcnServiceError(
                     f"BCN API error: {response_data.get('error')}"
                 )
 
-            bot_uuid = response_data.get("bot_uuid")
+            bot_uid = response_data.get("bot_uid")
             onboarded = response_data.get("onboarded", False)
 
             logger.info(
                 f"[BcnService.onboard_bot] BCN onboard succeeded: "
-                f"bot_id={bot_id}, bot_uuid={bot_uuid}, onboarded={onboarded}"
+                f"bot_id={bot_id}, bot_uid={bot_uid}, onboarded={onboarded}"
             )
 
             return response_data
@@ -226,7 +226,7 @@ class BcnService:
     def register_provider_bot(
         self,
         *,
-        teamclaw_bot_uuid: str,
+        teamclaw_bot_uid: str,
         owner_workno: str,
         name: str,
         summary: str,
@@ -236,16 +236,16 @@ class BcnService:
         语雀: doc 548864073, POST /providers/{provider_id}/bots
 
         Args:
-            teamclaw_bot_uuid: TC 的 bot uuid (例如 "20260502_1cjjh1ik")
+            teamclaw_bot_uid: TC 的 bot uuid (例如 "20260502_1cjjh1ik")
             owner_workno: bot 所有者工号 (例如 "100000")
             name: bot 显示名
             summary: bot 简介 (空字符串也可)
 
         Returns:
             BCN 返回的 dict, 关键字段:
-              - bot_uuid
+              - bot_uid
               - provider_id
-              - provider_bot_ref (= "{teamclaw_bot_uuid}:{owner_workno}")
+              - provider_bot_ref (= "{teamclaw_bot_uid}:{owner_workno}")
               - bot_runtime_token (后续下行调用凭据)
             额外字段 (本方法附加):
               - skipped: dev 环境跳过时为 True
@@ -254,7 +254,7 @@ class BcnService:
         Raises:
             BcnServiceError: 4xx/5xx (除 409) / 超时 / 其他网络异常
         """
-        provider_bot_ref = f"{teamclaw_bot_uuid}:{owner_workno}"
+        provider_bot_ref = f"{teamclaw_bot_uid}:{owner_workno}"
         env = get_current_env()
 
         # dev / local 环境无 provider 凭据, 跳过实际调用 (排查日志关键字: [register_provider_bot])
@@ -265,7 +265,7 @@ class BcnService:
                 f"(no provider credentials), provider_bot_ref={provider_bot_ref}"
             )
             return {
-                "bot_uuid": "",
+                "bot_uid": "",
                 "provider_id": "",
                 "provider_bot_ref": provider_bot_ref,
                 "bot_runtime_token": "",
@@ -318,7 +318,7 @@ class BcnService:
             response_data = response.json()
             logger.info(
                 f"[BcnService.register_provider_bot] OK "
-                f"bot_uuid={response_data.get('bot_uuid')} "
+                f"bot_uid={response_data.get('bot_uid')} "
                 f"provider_bot_ref={provider_bot_ref}"
             )
             return response_data
@@ -350,7 +350,7 @@ class BcnService:
     def switch_bot(
         self,
         *,
-        teamclaw_bot_uuid: str,
+        teamclaw_bot_uid: str,
         owner_workno: str,
         name: str,
         summary: str,
@@ -361,7 +361,7 @@ class BcnService:
         用于切换 bot 的绑定关系，返回新的 token。
 
         Args:
-            teamclaw_bot_uuid: TC 的 bot uuid (例如 "20260502_1cjjh1ik")
+            teamclaw_bot_uid: TC 的 bot uuid (例如 "20260502_1cjjh1ik")
             owner_workno: bot 所有者工号 (例如 "100000")
             name: bot 显示名
             summary: bot 简介
@@ -381,7 +381,7 @@ class BcnService:
         Raises:
             BcnServiceError: 4xx/5xx / 超时 / 其他网络异常
         """
-        provider_bot_ref = f"{teamclaw_bot_uuid}:{owner_workno}"
+        provider_bot_ref = f"{teamclaw_bot_uid}:{owner_workno}"
         env = get_current_env()
 
         # dev / local 环境无 provider 凭据, 跳过实际调用
@@ -470,7 +470,7 @@ class BcnService:
     def delete_provider_bot(
         self,
         *,
-        teamclaw_bot_uuid: str,
+        teamclaw_bot_uid: str,
         owner_workno: str,
     ) -> Dict[str, Any]:
         """逻辑删除 Provider Bot 绑定。
@@ -478,7 +478,7 @@ class BcnService:
         调用 BCN 的 DELETE /providers/{provider_id}/bots/{provider_bot_ref} 接口。
 
         Args:
-            teamclaw_bot_uuid: TC 的 bot uuid (例如 "20260611_d5v7rui3")
+            teamclaw_bot_uid: TC 的 bot uuid (例如 "20260611_d5v7rui3")
             owner_workno: bot 所有者工号 (例如 "100000")
 
         Returns:
@@ -487,7 +487,7 @@ class BcnService:
         Raises:
             BcnServiceError: 4xx/5xx / 超时 / 其他网络异常
         """
-        provider_bot_ref = f"{teamclaw_bot_uuid}:{owner_workno}"
+        provider_bot_ref = f"{teamclaw_bot_uid}:{owner_workno}"
         env = get_current_env()
 
         provider_cfg = _get_provider_config(env, self._config)
@@ -552,6 +552,80 @@ class BcnService:
                 f"provider_bot_ref={provider_bot_ref}"
             )
             raise BcnServiceError(f"BCN delete_provider_bot error: {e}")
+
+    def get_attributes(self, *, bot_uid: str) -> Dict[str, Any]:
+        """读取已注册 Bot 的协作属性 (Provider 管理 API GET)。
+
+        GET /providers/{provider_id}/bots/{bot_uid}/attributes — 与
+        register/switch/delete provider-bot 同套鉴权:仅 ``Authorization:
+        Bearer {provider_admin_token}``，``provider_id`` 在 path，不传
+        ``X-BCN-Provider-Id``。响应直接是属性对象 (``user_visibility`` /
+        ``friend_ext`` / ``friend_check_in_strategy``)。非 prod/pre 或凭据
+        空时跳过 (返 ``{"skipped": True}``)。
+        """
+        env = get_current_env()
+        provider_cfg = _get_provider_config(env, self._config)
+        if not provider_cfg:
+            return {"skipped": True}
+        provider_id = provider_cfg["provider_id"]
+        token = provider_cfg["provider_admin_token"]
+        path = f"/providers/{provider_id}/bots/{bot_uid}/attributes"
+        try:
+            response = self._http.get(
+                path, headers={"Authorization": f"Bearer {token}"}, timeout=self._timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, dict) else {}
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else "No response"
+            status = e.response.status_code if e.response else "N/A"
+            raise BcnServiceError(
+                f"BCS attributes get HTTP error: {status} - {error_body}"
+            )
+        except httpx.TimeoutException as e:
+            raise BcnServiceError(f"BCS attributes get timeout: {e}")
+        except Exception as e:
+            raise BcnServiceError(f"BCS attributes get error: {e}")
+
+    def patch_attributes(
+        self, *, bot_uid: str, body: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """局部更新 Bot 协作属性 (Provider 管理 API PATCH)。
+
+        PATCH /providers/{provider_id}/bots/{bot_uid}/attributes，同套鉴权。
+        body 至少含一个可更新字段 (``user_visibility`` / ``friend_ext`` /
+        ``friend_check_in_strategy``)；``friend_ext`` 顶层对象整体替换、传
+        ``{}`` 清空。非 prod/pre 或凭据空时跳过。
+        """
+        env = get_current_env()
+        provider_cfg = _get_provider_config(env, self._config)
+        if not provider_cfg:
+            return {"skipped": True}
+        provider_id = provider_cfg["provider_id"]
+        token = provider_cfg["provider_admin_token"]
+        path = f"/providers/{provider_id}/bots/{bot_uid}/attributes"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = self._http.patch(
+                path, json=body, headers=headers, timeout=self._timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, dict) else {}
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else "No response"
+            status = e.response.status_code if e.response else "N/A"
+            raise BcnServiceError(
+                f"BCS attributes patch HTTP error: {status} - {error_body}"
+            )
+        except httpx.TimeoutException as e:
+            raise BcnServiceError(f"BCS attributes patch timeout: {e}")
+        except Exception as e:
+            raise BcnServiceError(f"BCS attributes patch error: {e}")
 
 
 # ``BcnService`` is wired as a @singleton via the injector

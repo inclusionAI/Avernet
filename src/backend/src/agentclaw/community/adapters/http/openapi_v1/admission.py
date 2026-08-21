@@ -636,6 +636,8 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/mcp/servers"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/servers/{server_code}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/tenants"): AdmissionMode.OPEN,
+    # New-version bcs publish-to-users: auth baseline only, no grant check; authz deferred.
+    ("POST", "/openapi/v1/bots/{bot_id}/public-bcs"): AdmissionMode.OPEN,
     # Department directory search — a tenant-wide catalogue read, not a user's.
     ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
@@ -783,7 +785,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # The caller's own identity. An app-only caller names no end user, so there
     # is nothing to return — its scope question is answered by
     # ``GET /openapi/v1/bots/authorized`` instead.
-    ("GET", "/openapi/v1/org/user"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/caller"): AdmissionMode.REFUSED,
     # Local creation has no existing bot for a grant to cover and may initiate
     # Passport consent. Polling completes that same creation transaction, so
     # both require a human on the wire.
