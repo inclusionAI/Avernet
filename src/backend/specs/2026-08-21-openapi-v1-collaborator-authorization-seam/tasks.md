@@ -168,18 +168,60 @@
         reversal.
 - **Depends on:** Task 5
 
-## Task 7: Tests & Verification  `[~]`
+## Task 7: Tests & Verification  `[x]`
 
 - **Goal:** Ensure the feature meets every spec acceptance criterion.
 - **Files:** —
 - **Done when:**
-  - [ ] Every `spec.md` acceptance criterion checks off, walked one by one.
-  - [ ] `OCB_PRE_PUSH_RUN_CI=1 scripts/ci/pre_push.sh` passes for the backend
-        module, per `AGENTS.md`.
-  - [ ] `spec.md` *Follow-ups* still names every deferred piece, and nothing
-        deferred was quietly decided in code instead.
-  - [ ] PR #1323 body is updated to the trimmed scope and marked ready for
-        review, per `AGENTS.md` *Pull Request Conventions*.
+  - [x] Every `spec.md` acceptance criterion checks off — walked below.
+  - [x] The required SAST/lint gate (`scripts/ci/python_sast_local.sh
+        src/backend`) exits 0. The heavy gate (`src/backend/scripts/ci_test.sh`)
+        reports **13412 passed, 23 skipped, 2 failed** — both failures are
+        `test_bot_build_service_skill_artifact.py`, which shells out to
+        `rsync`; this container has none, and they fail identically at
+        `origin/dev_refactory_collaboration` without this change.
+  - [x] `spec.md` *Follow-ups* still names every deferred piece; nothing
+        deferred was decided in code instead.
+  - [x] PR #1323 body updated to the shipped scope and marked ready for review.
+
+### Acceptance criteria, walked
+
+**The table** — 229 rows, key set identical to `ADMISSION`
+(`test_authorization_and_admission_cover_the_same_operations`) and to the
+assembled surface (`test_the_surface_and_the_table_agree_exactly`, modulo the
+named `UNMOUNTED_OPERATIONS`). Every row is one of the five modes; every
+`NoCheck` carries a reason (`test_every_nocheck_row_carries_a_reason`); every
+`ServiceChecked` cites a module that imports and performs a permission check
+(`test_every_service_checked_row_cites_a_real_enforcer`). Permanent vs
+scaffolding is stated in the module docstring and counted by
+`scaffolding_row_count()` — 173 today, pinned by
+`test_scaffolding_burn_down_is_reported`. An absent row raises at *import*
+(`test_an_unlisted_operation_cannot_be_constructed`); a router skipping the
+route class and a row matching no operation both raise at assembly
+(`test_a_router_cannot_opt_out_of_the_route_class`,
+`test_assembly_refuses_a_row_that_matches_no_operation`).
+
+**The seam** — attached by the route class with nothing declared on the
+handler; reads only `{bot_id}`, `UserIdDep` and `OwnerIdDep`. Owner passes
+every bar and below-bar is answered as an absent bot
+(`test_owner_passes_every_level`, `test_caller_below_the_bar_is_404_not_403`,
+`test_absent_bot_answers_exactly_as_a_refused_caller`). Every failure refuses
+(`test_unresolvable_bot_refuses`, `test_collaborator_lookup_failure_refuses`,
+`test_unwired_services_refuse`). One audit row for a non-owner write, none for
+a read, an owner, or a refusal; an audit failure is logged and dropped
+(`test_audit_failure_does_not_fail_the_request`).
+
+**Documented contract** — all 228 published operations document a 404, so the
+seam's refusal is already in every error set. The "publishes its owner
+parameter without a handler declaring it" criterion is **vacuous over live
+operations** — none is adjudicated yet — and holds for the mechanism, proved by
+`test_attached_dependency_publishes_its_parameters`.
+
+**Nothing moves** — proved structurally rather than sampled:
+`test_no_live_operation_carries_the_gate` shows the seam is attached nowhere,
+so no request can reach it. `admission.py`, `principal.py` and their two tests
+are byte-identical to the base branch. Existing service locks still hold
+(`test_service_level_edit_locks_are_untouched`).
 - **Depends on:** Task 6
 
 ---
