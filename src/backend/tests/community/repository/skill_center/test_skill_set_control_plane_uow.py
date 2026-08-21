@@ -344,6 +344,98 @@ def test_cross_owner_set_id_is_not_readable_or_mutable_for_shared_default_bot_id
         )
 
 
+def test_global_default_is_immutable_even_for_description_only_update():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        session.add(
+            SkillSet(
+                name="system-default",
+                user_id="",
+                bolt_id="",
+                engine_type="openclaw",
+                is_default=True,
+                description="original",
+                env="dev",
+            )
+        )
+
+    repository = SkillSetControlPlaneRepository(db)
+    with pytest.raises(
+        SkillSetControlPlaneConflictError, match="SYSTEM_DEFAULT_IMMUTABLE"
+    ):
+        repository.update_set(
+            bot_id="default",
+            owner_id="owner-a",
+            set_id="1",
+            name=None,
+            description="must-not-write",
+            engine_type="openclaw",
+        )
+    with db.orm_session() as session:
+        assert session.query(SkillSet).one().description == "original"
+
+
+def test_routed_claude_code_prefers_aicoding_global_default_before_fallback():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        session.add_all(
+            [
+                SkillSet(
+                    name="aicoding-default",
+                    user_id="",
+                    bolt_id="",
+                    engine_type="aicoding",
+                    is_default=True,
+                    env="dev",
+                ),
+                SkillSet(
+                    name="claude-fallback",
+                    user_id="",
+                    bolt_id="",
+                    engine_type="claude_code",
+                    is_default=True,
+                    env="dev",
+                ),
+            ]
+        )
+
+    items = SkillSetControlPlaneRepository(db).list_sets(
+        bot_id="bot",
+        owner_id="owner",
+        engine_type="claude_code",
+        default_engine_types=("aicoding", "claude_code"),
+    )
+
+    assert [item["name"] for item in items] == ["aicoding-default"]
+
+
+def test_mcp_membership_is_independent_for_two_owners_sharing_default_bot_id():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        owner_a = SkillSet(name="a", user_id="owner-a", bolt_id="default", env="dev")
+        owner_b = SkillSet(name="b", user_id="owner-b", bolt_id="default", env="dev")
+        session.add_all([owner_a, owner_b])
+        session.flush()
+        session.add(
+            SkillSetMCPServer(
+                skill_set_id=owner_b.id,
+                server_code="mcp.weather",
+                name="weather",
+                user_id="owner-b",
+                env="dev",
+            )
+        )
+
+    result = SkillSetControlPlaneRepository(db).add_mcp(
+        bot_id="default",
+        owner_id="owner-a",
+        set_id=str(owner_a.id),
+        server_code="mcp.weather",
+    )
+
+    assert result.changed is True
+
+
 def test_activation_rolls_back_all_membership_installations_when_nth_insert_fails():
     """No half-selected set can survive a storage failure at member N."""
     db = _Database()
@@ -472,18 +564,26 @@ def test_default_projection_is_always_active_even_for_historical_false_row():
         session.add(
             SkillSet(
                 name="default",
-                user_id="owner",
-                bolt_id="bot",
+                user_id="",
+                bolt_id="",
                 is_default=True,
                 is_active=False,
+                engine_type="openclaw",
                 env="dev",
             )
         )
 
     repository = SkillSetControlPlaneRepository(db)
-    assert repository.list_sets(bot_id="bot", owner_id="owner")[0]["is_active"] is True
+    assert repository.list_sets(
+        bot_id="bot", owner_id="owner", engine_type="openclaw"
+    )[0]["is_active"] is True
     result = repository.set_active(
-        bot_id="bot", owner_id="owner", set_id="1", active=True
+        bot_id="bot",
+        owner_id="owner",
+        set_id="1",
+        active=True,
+        engine_type="openclaw",
+        default_engine_types=("openclaw",),
     )
     assert result.item["is_active"] is True
 

@@ -170,6 +170,15 @@ class _UnsupportedBots(_Bots):
         return {**bot, "bot_type": "desktop", "active_engine": "claude_code"}
 
 
+class _AicodingImageBots(_Bots):
+    def get_unique_by_id(self, bot_id: str) -> dict:
+        return {
+            **super().get_unique_by_id(bot_id),
+            "active_engine": "claude_code",
+            "template_type": "personalCoding",
+        }
+
+
 class _Runtime:
     def __init__(self, guard: _Guard) -> None:
         self._guard = guard
@@ -760,9 +769,10 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
         {
             "bot_id": "bot-1",
             "owner_id": "true-owner",
-            "set_id": "set-1",
-            "active": True,
-            "engine_type": "openclaw",
+                "set_id": "set-1",
+                "active": True,
+                "engine_type": "openclaw",
+                "default_engine_types": ("openclaw",),
         }
     ]
 
@@ -811,11 +821,39 @@ def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
     ) == []
     assert repository.list_set_calls == [
         {
-            "bot_id": "bot-1",
-            "owner_id": "true-owner",
-            "engine_type": "openclaw",
+                "bot_id": "bot-1",
+                "owner_id": "true-owner",
+                "engine_type": "openclaw",
+                "default_engine_types": ("openclaw",),
         }
     ]
+
+
+def test_list_sets_uses_aicoding_default_then_claude_code_fallback_for_coding_image():
+    repository = _ResourceRepository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_AicodingImageBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=_ResourceLegacyFactory(),
+        passport=object(),
+        authorization=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    assert service.list_sets(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner"
+    ) == []
+    assert repository.list_set_calls == [{
+        "bot_id": "bot-1",
+        "owner_id": "true-owner",
+        "engine_type": "claude_code",
+        "default_engine_types": ("aicoding", "claude_code"),
+    }]
 
 
 def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_scope():
@@ -846,8 +884,9 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
     assert repository.list_mcp_calls == [{
         "bot_id": "bot-1",
         "owner_id": "true-owner",
-        "set_id": "global-default",
-        "engine_type": "openclaw",
+            "set_id": "global-default",
+            "engine_type": "openclaw",
+            "default_engine_types": ("openclaw",),
     }]
 
 
@@ -908,9 +947,10 @@ async def test_historical_bot_skill_set_deactivate_uses_cleanup_projection():
         {
             "bot_id": "bot-1",
             "owner_id": "true-owner",
-            "set_id": "set-1",
-            "active": False,
-            "engine_type": "claude_code",
+                "set_id": "set-1",
+                "active": False,
+                "engine_type": "claude_code",
+                "default_engine_types": ("claude_code",),
         }
     ]
     assert runtime.cleanup_calls == [{"bot_id": "bot-1", "owner_id": "true-owner"}]
