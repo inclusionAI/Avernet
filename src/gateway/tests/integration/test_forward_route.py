@@ -437,7 +437,6 @@ def test_real_authenticator_admits_google_token_then_forwards() -> None:
     """End-to-end sanity: Authenticator + GoogleUserStrategy (MockTransport) → forward 200."""
     from gateway.community.bootstrap import initialize_database
     from gateway.community.bootstrap._authn import build_authenticator
-    from gateway.community.bootstrap._configs import DatabaseConfig
     from gateway.community.core.authn import IdentityChain
     from gateway.community.plugins.authn.google_token import GoogleUserStrategy
     from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
@@ -446,9 +445,7 @@ def test_real_authenticator_admits_google_token_then_forwards() -> None:
     def _userinfo_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"sub": "g-1", "email": "a@example.com"})
 
-    db = initialize_database(
-        SqliteDatabasePlugin(), DatabaseConfig(plugin_type="SQLITE_ORM", db_url="")
-    )
+    db = initialize_database(SqliteDatabasePlugin())
     authenticator = _test_authenticator(db)
     # Swap the USER chain to a MockTransport google so no real network call.
     authenticator.strategies[PrincipalType.USER] = IdentityChain(
@@ -492,12 +489,9 @@ def test_real_authenticator_rejects_missing_required_identity() -> None:
     """No google token + required user → 401 before forwarding."""
     from gateway.community.bootstrap import initialize_database
     from gateway.community.bootstrap._authn import build_authenticator
-    from gateway.community.bootstrap._configs import DatabaseConfig
     from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 
-    db = initialize_database(
-        SqliteDatabasePlugin(), DatabaseConfig(plugin_type="SQLITE_ORM", db_url="")
-    )
+    db = initialize_database(SqliteDatabasePlugin())
     authenticator = _test_authenticator(db)
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=_stub_upstream))  # type: ignore[arg-type]
 
