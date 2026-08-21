@@ -99,6 +99,7 @@ FROM node:22-bookworm-slim AS runtime
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/admin \
     OPENCLAW_PORT=18789 \
+    OPENCLAW_GATEWAY_TOKEN=ack-openclaw \
     OPENCLAW_STATE_DIR=/home/admin/.openclaw \
     PATH=/usr/local/bin:/home/admin/.local/bin:$PATH \
     TZ=Asia/Shanghai

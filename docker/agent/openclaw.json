@@ -109,7 +109,7 @@
     "mode": "local",
     "auth": {
       "mode": "token",
-      "token": "OPENCLAW_GATEWAY_TOKEN"
+      "token": "ack-openclaw"
     },
     "nodes": {
       "denyCommands": [
