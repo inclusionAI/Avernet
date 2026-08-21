@@ -1,0 +1,12 @@
+# SQLite E2E overlay — use the in-memory SQLite backend with schema creation.
+# Select via: SOFAPY_CONFIG_OVERLAY=e2e-sqlite
+# Enables schema creation so the E2E/integration suites that drive the real app
+# (create_app → bootstrap_app) can run DB-backed writes against a freshly
+# provisioned in-memory schema. Production configs keep these flags false.
+user_config:
+  plugins:
+    database:
+      plugin_database: "sqlite"
+      database_url: ""
+      create_schema: true
+      seed_data: true

@@ -29,7 +29,7 @@ class TestPluginConfig:
         assert cfg.cache == "stub"
         assert cfg.authn.app_token == "stub"
         assert cfg.authn.tenant == "stub"
-        assert cfg.database.plugin_database == "SQLITE_ORM"
+        assert cfg.database.plugin_database == "sqlite"
         assert cfg.database.database_url == ""
 
     def test_arbitrary_forwarder_accepted(self) -> None:
@@ -59,7 +59,7 @@ class TestPluginConfig:
 
     def test_database_defaults(self) -> None:
         cfg = DatabasePluginConfig()
-        assert cfg.plugin_database == "SQLITE_ORM"
+        assert cfg.plugin_database == "sqlite"
         assert cfg.database_url == ""
 
 
@@ -87,7 +87,7 @@ class TestPluginContainerSelectors:
         container = ApplicationContainer()
         init_container_config(container)
         container.config.from_dict(
-            {"plugins": {"database": {"plugin_database": "MARIADB_ORM"}}}
+            {"plugins": {"database": {"plugin_database": "mariadb"}}}
         )
 
         db = container.plugins().database()
@@ -97,7 +97,7 @@ class TestPluginContainerSelectors:
         container = ApplicationContainer()
         init_container_config(container)
         container.config.from_dict(
-            {"plugins": {"database": {"plugin_database": "SQLITE_ORM"}}}
+            {"plugins": {"database": {"plugin_database": "sqlite"}}}
         )
 
         db = container.plugins().database()
@@ -165,7 +165,7 @@ class TestApplicationContainer:
 
         assert container.config.plugins.forwarder() == "httpx"
         assert container.config.plugins.cache() == "stub"
-        assert container.config.plugins.database.plugin_database() == "SQLITE_ORM"
+        assert container.config.plugins.database.plugin_database() == "sqlite"
 
     def test_config_overridable(self) -> None:
         """Container config can be overridden from YAML-like dict."""
