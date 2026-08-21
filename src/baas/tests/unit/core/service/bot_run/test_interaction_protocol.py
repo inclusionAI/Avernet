@@ -348,6 +348,38 @@ def test_build_ask_user_submit_request_preserves_complete_answer() -> None:
     }
 
 
+def test_build_ask_user_submit_request_preserves_skipped_values() -> None:
+    request = build_interaction_resolve_request(
+        request_id="engine-ask-skip",
+        interaction_id="int-ask-skip",
+        resolution=InteractionResolution(
+            kind="ask_user",
+            decision="submit",
+            answer="Array: ；Empty: ；Blank:    ",
+            message="Array: ；Empty: ；Blank:    ",
+            values={"Array": "", "Empty": "", "Blank": "   "},
+            answers={
+                "Skip with an empty array?": "",
+                "Skip with an empty string?": "",
+                "Skip with whitespace?": "   ",
+            },
+            selected_options=((), ("",), ("   ",)),
+        ),
+    )
+
+    assert request["params"]["values"] == {
+        "Array": "",
+        "Empty": "",
+        "Blank": "   ",
+    }
+    assert request["params"]["answers"] == {
+        "Skip with an empty array?": "",
+        "Skip with an empty string?": "",
+        "Skip with whitespace?": "   ",
+    }
+    assert request["params"]["selectedOptions"] == [[], [""], ["   "]]
+
+
 def test_build_ask_user_cancel_request_omits_answer_fields() -> None:
     request = build_interaction_resolve_request(
         request_id="engine-ask-cancel",
