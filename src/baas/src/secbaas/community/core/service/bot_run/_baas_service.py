@@ -43,7 +43,6 @@ from secbaas.community.core.service.bot_runtime.dispatcher import (
     DefaultBotWssDispatcher,
 )
 from secbaas.community.core.service.bot_session import DefaultSessionService
-from secbaas.community.core.service.eval_binding import DYNAMIC_ENV_TAG_KEY
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
 
@@ -419,19 +418,11 @@ consistency_key = (
                     chat_metadata=chat_metadata,
                 )
             else:
-                # 降级：内联一致性检查（兼容旧路径）
-                binding_default_tag = (binding_info.device_props or {}).get(
-                    DYNAMIC_ENV_TAG_KEY, ""
+                logger.warning(
+                    "[BaasBotService.send_message] eval_consistency_check not injected, "
+                    "skipping consistency check for session_id=%s",
+                    session_id,
                 )
-                request_default_tag = chat_metadata.get("default_tag", "")
-                if binding_default_tag and request_default_tag and binding_default_tag != request_default_tag:
-                    logger.warning(
-                        "[BaasBotService.send_message] default_tag mismatch: "
-                        "binding=%s, request=%s, session_id=%s",
-                        binding_default_tag,
-                        request_default_tag,
-                        session_id,
-                    )
 
         try:
             conn_info = await self._resolve_ws_connection_for_binding(
@@ -487,6 +478,7 @@ consistency_key = (
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         timeout: float,
+        chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
@@ -513,19 +505,11 @@ consistency_key = (
                     chat_metadata=chat_metadata,
                 )
             else:
-                # 降级：内联一致性检查（兼容旧路径）
-                binding_default_tag = (binding_info.device_props or {}).get(
-                    DYNAMIC_ENV_TAG_KEY, ""
+                logger.warning(
+                    "[BaasBotService.send_message_stream] eval_consistency_check not injected, "
+                    "skipping consistency check for session_id=%s",
+                    session_id,
                 )
-                request_default_tag = chat_metadata.get("default_tag", "")
-                if binding_default_tag and request_default_tag and binding_default_tag != request_default_tag:
-                    logger.warning(
-                        "[BaasBotService.send_message_stream] default_tag mismatch: "
-                        "binding=%s, request=%s, session_id=%s",
-                        binding_default_tag,
-                        request_default_tag,
-                        session_id,
-                    )
 
         try:
             conn_info = await self._resolve_ws_connection_for_binding(

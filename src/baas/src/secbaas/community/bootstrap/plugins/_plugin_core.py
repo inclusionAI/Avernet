@@ -58,6 +58,15 @@ from secbaas.community.plugins.sandbox.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.plugins.secret import AliyunKmsSecretStorePlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
+from secbaas.community.plugins.eval_env.stub._noop_binding_resolver import (
+    NoopEvalBindingResolver,
+)
+from secbaas.community.plugins.eval_env.stub._noop_consistency_check import (
+    NoopEvalConsistencyCheck,
+)
+from secbaas.community.plugins.eval_env.stub._noop_session_log import (
+    NoopEvalSessionLog,
+)
 
 
 def _build_aliyun_ack_templates(
@@ -171,6 +180,20 @@ class PluginContainer(containers.DeclarativeContainer):
     file_transfer_backend = providers.Selector(
         config.plugins.file_transfer,
         stub=providers.Singleton(NoopFileTransferBackend),
+    )
+
+    # 评测环境 Plugin（stub=空操作, real=由 OCB 企业层通过 register_plugin_option 注入）
+    eval_binding_resolver = providers.Selector(
+        config.plugins.eval_env,
+        stub=providers.Singleton(NoopEvalBindingResolver),
+    )
+    eval_consistency_check = providers.Selector(
+        config.plugins.eval_env,
+        stub=providers.Singleton(NoopEvalConsistencyCheck),
+    )
+    eval_session_log = providers.Selector(
+        config.plugins.eval_env,
+        stub=providers.Singleton(NoopEvalSessionLog),
     )
 
 

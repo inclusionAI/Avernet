@@ -125,13 +125,11 @@ async def deliver_message(
                 x_default_tag=x_default_tag,
             )
         except Exception:
-            # 降级：直接注入（兼容旧路径）
-            if x_eval_id:
-                metadata["eval_id"] = x_eval_id
-                metadata.setdefault("session_id", x_eval_id)
-            if x_default_tag:
-                metadata["default_tag"] = x_default_tag
-                metadata.setdefault("bot_options", {})["lifecycle_stage"] = x_default_tag
+            logger.warning(
+                "deliver_message: eval_session_log Plugin unavailable, "
+                "eval headers not injected for bot_id=%s",
+                request.bot_id,
+            )
     if request.callback_url is not None:
         metadata["callback_url"] = request.callback_url
         callback = "http_callback"
@@ -273,13 +271,11 @@ async def deliver_message_stream(
                 x_default_tag=x_default_tag,
             )
         except Exception:
-            # 降级：直接注入（兼容旧路径）
-            if x_eval_id:
-                metadata["eval_id"] = x_eval_id
-                metadata.setdefault("session_id", x_eval_id)
-            if x_default_tag:
-                metadata["default_tag"] = x_default_tag
-                metadata.setdefault("bot_options", {})["lifecycle_stage"] = x_default_tag
+            logger.warning(
+                "deliver_message_stream: eval_session_log Plugin unavailable, "
+                "eval headers not injected for bot_id=%s",
+                request.bot_id,
+            )
 
     logger.info(
         f"deliver_message_stream: bot_id={bot_id}, app_id={api_key_record.app_id}, "

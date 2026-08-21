@@ -198,10 +198,11 @@ def build_chat_metadata(
             run_id=run_id,
         )
         return enriched
-    # 降级路径：Plugin 未注入时直接注入
-    eval_id = metadata.get("eval_id")
-    if eval_id:
-        chat_metadata["eval_id"] = str(eval_id)
-    if default_tag:
-        chat_metadata["default_tag"] = str(default_tag)
+    # Plugin 未注入：记录告警，eval 观测字段不注入（生产环境应注入 Real Plugin）
+    if metadata.get("eval_id") or default_tag:
+        logger.warning(
+            "build_chat_metadata: eval_session_log not injected, "
+            "skipping eval metadata enrichment for run_id=%s",
+            run_id,
+        )
     return chat_metadata

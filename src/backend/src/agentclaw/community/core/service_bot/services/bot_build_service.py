@@ -485,6 +485,7 @@ class BotBuildService:
         docker_image: str | None = None,
         runtime_kind: str | None = None,
         template_config: Optional[Dict[str, Any]] = None,
+        template_uuid: str | None = None,
     ) -> Dict[str, Any]:
         """发布 Bot 到 BaaS 层。
 
@@ -502,6 +503,9 @@ class BotBuildService:
                 PublishExtState 的 compose seam 产生，流程层无法直接传原始
                 config_artifact；ARCA 挂载路径为 config_artifact=None。
             ext_info: Dict[str, Any] = None,
+            template_uuid: 可选的显式模板 UUID。非空时跳过
+                _resolve_baas_template_uuid() 路由，直接使用传入值。
+                评测沙箱场景用于强制注入评测模板，与生产模板隔离。
 
         Returns:
             dict: BaaS 层返回的 Bot 信息（包含 bot_uuid）
@@ -576,12 +580,16 @@ class BotBuildService:
                     "ext_info": ext_info,
                     "extra_envs": extra_envs,
                 }
-                template_uuid = self._resolve_baas_template_uuid(
-                    bot=bot,
-                    user_id=user_id,
-                )
                 if template_uuid is not None:
+                    # 显式传入模板 UUID（评测沙箱场景），跳过路由选择
                     create_kwargs["template_uuid"] = template_uuid
+                else:
+                    resolved_uuid = self._resolve_baas_template_uuid(
+                        bot=bot,
+                        user_id=user_id,
+                    )
+                    if resolved_uuid is not None:
+                        create_kwargs["template_uuid"] = resolved_uuid
                 if template_config:
                     create_kwargs["template_config"] = dict(template_config)
                 if docker_image:
@@ -621,6 +629,7 @@ class BotBuildService:
         docker_image: str | None = None,
         runtime_kind: str | None = None,
         template_config: Optional[Dict[str, Any]] = None,
+        template_uuid: str | None = None,
     ) -> Dict[str, Any]:
         """异步发布 Bot 到 BaaS 层。
 
@@ -662,6 +671,7 @@ class BotBuildService:
             docker_image=docker_image,
             runtime_kind=runtime_kind,
             template_config=template_config,
+            template_uuid=template_uuid,
         )
 
     def _run_local_command(
