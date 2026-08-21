@@ -10,6 +10,7 @@ import 'justfiles/test-common.just'
 import 'justfiles/test-self.just'
 import 'justfiles/tests.just'
 import 'justfiles/test-mariadb.just'
+import 'justfiles/test-docker.just'
 
 _default:
     @just --list --list-prefix '==> '
