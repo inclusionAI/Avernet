@@ -190,6 +190,18 @@ class TaskExecutor:
                     for binding, spec in raw_bindings.items()
                 }
             req_kwargs["start_initial_run"] = False
+            # state_machine 群需 opening_message(task-loop panel),taskId = 任务ID
+            _task_id = gf.extend_props.get("task_id")
+            if _task_id:
+                import json as _json
+                req_kwargs["opening_message"] = {
+                    "type": "panel",
+                    "component": "task-loop",
+                    "params": _json.dumps({
+                        "taskId": _task_id,
+                        "apiBaseUrl": gf.extend_props.get("api_base_url") or "",
+                    }),
+                }
         if originator_bot_id:
             req_kwargs["originator"] = bcs_uuid(str(originator_bot_id))
         service_spec = gf.extend_props.get("service_spec")

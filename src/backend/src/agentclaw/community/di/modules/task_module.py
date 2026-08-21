@@ -67,7 +67,7 @@ class TaskModule(Module):
         - discover(``BotDiscoverServiceProtocol``,来自 BotPublicModule)始终传入:
           singlebox profile 换 ``SingleboxKeywordBotDiscover``(本地关键字搜索),其余用注入的 BCSFuse。
         """
-        bot, bcs, task_provider_id = self._resolve_ports()
+        bot, bcs = self._resolve_ports()
         discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
         bcs_identity = None
         if bcs is not None:
@@ -103,7 +103,7 @@ class TaskModule(Module):
             bcs_identity=bcs_identity, task_info_repo=task_info_repo,
             callback_repo=callback_repo, task_node_repo=task_node_repo,
             task_node_run_info_repo=task_node_run_info_repo,
-            task_provider_id=task_provider_id,
+            api_base_url=self._resolve_api_base_url(),
         )
 
     @singleton
@@ -138,6 +138,21 @@ class TaskModule(Module):
         return auth
 
     @staticmethod
+    def _resolve_api_base_url() -> str:
+        """按环境解析后端 API base URL(singlebox→环境变量;prod/pre→线上地址;dev→localhost)。"""
+        import os
+        from agentclaw.community.di.profile import DeployProfile
+        from agentclaw.community.utils.env_utils import get_current_env
+        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
+            return os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
+        env = get_current_env()
+        if env == "prod":
+            return "https://secbaas-prod.alipay.com/"
+        if env == "pre":
+            return "https://secbaas-pre.alipay.com/"
+        return "http://localhost:8888"
+
+    @staticmethod
     def _resolve_ports():
         """构造传输端口(组合根按 ``DEPLOY_PROFILE`` 选实现,不在 adapter 内 if)。
 
@@ -148,7 +163,7 @@ class TaskModule(Module):
           覆写本 provider。
         """
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
-            return None, None, ""
+            return None, None
         from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
             LocalBcsTokenProvider,
         )
@@ -176,12 +191,9 @@ class TaskModule(Module):
                 sm_status="completed", sm_output=_coop_pass_output,
                 poll_once_then_terminal=True, terminal_after=1,
             )
-            task_provider_id = ""  # double 不走真实 BCS roster,圈定关闭
         else:
-            token = LocalBcsTokenProvider.from_env()
-            bcs = SingleboxBcsAdapter(token)
-            task_provider_id = token.provider_id  # SINGLEBOX_BCS_PROVIDER_ID;空→roster 圈定关闭(旧行为)
-        return bot, bcs, task_provider_id
+            bcs = SingleboxBcsAdapter(LocalBcsTokenProvider.from_env())
+        return bot, bcs
 
     @staticmethod
     def _resolve_discover(

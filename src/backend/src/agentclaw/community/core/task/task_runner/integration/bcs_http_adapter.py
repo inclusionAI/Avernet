@@ -50,6 +50,7 @@ class BcsCreateGroupRequest:
     start_initial_run: bool | None = None
     originator: str | None = None
     visibility: str | None = None
+    opening_message: dict[str, Any] | None = None
 
 
 @dataclass
@@ -114,6 +115,8 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
                 body["collaboration_definition_yaml"] = req.collaboration_definition_yaml
             if req.participant_bindings:
                 body["participant_bindings"] = req.participant_bindings
+            if req.opening_message:
+                body["opening_message"] = req.opening_message
         elif req.group_strategy:
             body["group_strategy"] = req.group_strategy
         for opt in ("context", "topic", "service_spec", "originator", "visibility"):
