@@ -27,7 +27,6 @@ from secbaas.community.core.service.scheduler import (
 )
 from secbaas.community.core.utils.env_utils import get_current_env
 
-
 # ── Tests 1-5 (Plan 05-01, existing) ───────────────────────────────────
 
 
@@ -145,9 +144,7 @@ class TestSchedulerSkeleton:
         lock_ctx = MagicMock()
         lock_ctx.acquired = True
         lock_service = MagicMock()
-        lock_service.try_lock.return_value.__enter__ = MagicMock(
-            return_value=lock_ctx
-        )
+        lock_service.try_lock.return_value.__enter__ = MagicMock(return_value=lock_ctx)
         lock_service.try_lock.return_value.__exit__ = MagicMock(return_value=None)
 
         # Mock repo to return empty -- _run_once will early-return

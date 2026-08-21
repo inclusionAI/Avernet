@@ -63,8 +63,13 @@ def _make_scheduler(
 
     Returns (scheduler, mock_repo, mock_lock_service, mock_paas_facade).
     """
-    cfg_kwargs = {"enabled": enabled, "batch_size": 500, "max_concurrency": 20,
-                  "anti_join_verify_interval_cycles": 48, "env": "test"}
+    cfg_kwargs = {
+        "enabled": enabled,
+        "batch_size": 500,
+        "max_concurrency": 20,
+        "anti_join_verify_interval_cycles": 48,
+        "env": "test",
+    }
     if config_overrides:
         cfg_kwargs.update(config_overrides)
     config = DeadlineRenewalSchedulerConfig(**cfg_kwargs)
@@ -102,7 +107,8 @@ class TestRunGuards:
     async def test_lock_not_acquired_returns_none(self):
         """Test 2: lock.acquired=False → return None, repo methods NOT called."""
         scheduler, mock_repo, _, _ = _make_scheduler(
-            enabled=True, lock_acquired=False,
+            enabled=True,
+            lock_acquired=False,
         )
         result = await scheduler.run()
         assert result is None
@@ -146,7 +152,9 @@ class TestRunGuards:
 
         kwargs = mock_lock.try_lock.call_args.kwargs
         assert kwargs["lock_name"] == scheduler._config.resolved_lock_name()
-        assert kwargs["lock_name"] == f"{scheduler._config.lock_name}_{get_current_env()}"
+        assert (
+            kwargs["lock_name"] == f"{scheduler._config.lock_name}_{get_current_env()}"
+        )
         # The bare config lock name must never be used directly.
         assert kwargs["lock_name"] != scheduler._config.lock_name
         assert kwargs["expire_seconds"] == scheduler._config.lock_expire_seconds
@@ -206,7 +214,14 @@ class TestStep0GapDetection:
         def _find_unregistered_side_effect(env, side, limit=500):
             call_counts[side] = call_counts.get(side, 0) + 1
             if side == "baas_device" and call_counts[side] == 1:
-                return [{"id": 1, "sandbox_id": "sb-1", "source_table": "baas_device", "ttl": "1760000000000"}]
+                return [
+                    {
+                        "id": 1,
+                        "sandbox_id": "sb-1",
+                        "source_table": "baas_device",
+                        "ttl": "1760000000000",
+                    }
+                ]
             return []
 
         mock_repo.find_unregistered.side_effect = _find_unregistered_side_effect
@@ -243,7 +258,9 @@ class TestStep0GapDetection:
         # Round 49: mod 48 = 1, no periodic verify (and cold == hot)
         call_count_before = mock_repo.find_unregistered.call_count
         report_49 = await scheduler._run_once()
-        assert mock_repo.find_unregistered.call_count == call_count_before  # no new calls
+        assert (
+            mock_repo.find_unregistered.call_count == call_count_before
+        )  # no new calls
 
     @pytest.mark.asyncio
     async def test_hot_count_query_failure_does_not_crash(self):
@@ -265,8 +282,9 @@ class TestStep0GapDetection:
 class TestStep1ColdTableQuery:
     """Tests for Step 1 — cold table query + LEFT JOIN orphan detection."""
 
-    def _due_row(self, source_table="baas_device", source_id=1,
-                 sandbox_id="sb-1", hot_id=1):
+    def _due_row(
+        self, source_table="baas_device", source_id=1, sandbox_id="sb-1", hot_id=1
+    ):
         return {
             "id": source_id,
             "sandbox_id": sandbox_id,
@@ -288,7 +306,10 @@ class TestStep1ColdTableQuery:
 
         mock_repo.list_due_for_renewal.side_effect = [
             [self._due_row("baas_device", 1, "sb-1", hot_id=1) for _ in range(100)],
-            [self._due_row("ac_entity_device_binding", 101, "sb-101", hot_id=101) for _ in range(100)],
+            [
+                self._due_row("ac_entity_device_binding", 101, "sb-101", hot_id=101)
+                for _ in range(100)
+            ],
         ]
         mock_repo.find_unregistered.return_value = []
 
@@ -337,7 +358,9 @@ class TestStep1ColdTableQuery:
         report = await scheduler._run_once()
 
         # set_status called for orphan
-        mock_repo.set_status.assert_called_once_with("test", "baas_device", 2, "STOPPED")
+        mock_repo.set_status.assert_called_once_with(
+            "test", "baas_device", 2, "STOPPED"
+        )
         # du_count = 2 rows total
         assert report.due_count == 2
 
@@ -370,8 +393,9 @@ class TestStep1ColdTableQuery:
 class TestStep2ConcurrentRenewalScaffolding:
     """Tests for Step 2 — asyncio.Semaphore + _renew_one placeholder."""
 
-    def _due_row(self, source_table="baas_device", source_id=1,
-                 sandbox_id="sb-1", hot_id=1):
+    def _due_row(
+        self, source_table="baas_device", source_id=1, sandbox_id="sb-1", hot_id=1
+    ):
         return {
             "id": source_id,
             "sandbox_id": sandbox_id,
@@ -392,7 +416,9 @@ class TestStep2ConcurrentRenewalScaffolding:
         mock_repo.count_hot_arca_bindings.return_value = 0
         mock_repo.find_unregistered.return_value = []
 
-        rows = [self._due_row("baas_device", i, f"sb-{i}", hot_id=i) for i in range(1, 4)]
+        rows = [
+            self._due_row("baas_device", i, f"sb-{i}", hot_id=i) for i in range(1, 4)
+        ]
         mock_repo.list_due_for_renewal.side_effect = [rows, []]
 
         # Track _renew_one calls
@@ -457,6 +483,7 @@ def _renewal_record(
 def _ttl_ms(remaining_hours: float) -> int:
     """Compute ttl_timestamp in milliseconds for given remaining hours."""
     import time
+
     return int((time.time() + remaining_hours * 3600) * 1000)
 
 
@@ -599,9 +626,7 @@ class TestStep3RenewalDecision:
         """Test 21b: ttl_timestamp is 0 → failure handling."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
 
-        mock_facade.get_device_info = AsyncMock(
-            return_value=MagicMock(ttl_timestamp=0)
-        )
+        mock_facade.get_device_info = AsyncMock(return_value=MagicMock(ttl_timestamp=0))
         mock_facade.extend_ttl = AsyncMock()
         mock_repo.update_after_failure = MagicMock()
 
@@ -818,6 +843,7 @@ class TestStep5ReportAndMetrics:
         assert next_renew is not None
 
         from datetime import datetime, timedelta
+
         expected_min = datetime.now() + timedelta(hours=12) - timedelta(seconds=5)
         expected_max = datetime.now() + timedelta(hours=12) + timedelta(seconds=5)
         assert expected_min <= next_renew <= expected_max
@@ -911,12 +937,14 @@ class TestDiscoveryScanIsolation:
         def _find_unregistered(env, side, limit=500):
             call_counts[side] = call_counts.get(side, 0) + 1
             if side == "baas_device" and call_counts[side] == 1:
-                return [{
-                    "id": 7,
-                    "sandbox_id": "sb-poison",
-                    "source_table": "baas_device",
-                    "ttl": "1760000000000",
-                }]
+                return [
+                    {
+                        "id": 7,
+                        "sandbox_id": "sb-poison",
+                        "source_table": "baas_device",
+                        "ttl": "1760000000000",
+                    }
+                ]
             return []
 
         mock_repo.find_unregistered.side_effect = _find_unregistered
@@ -947,12 +975,14 @@ class TestDiscoveryScanIsolation:
 
         def _find_unregistered(env, side, limit=500):
             call_counts[side] = call_counts.get(side, 0) + 1
-            return [{
-                "id": 1,
-                "sandbox_id": "sb-poison",
-                "source_table": side,
-                "ttl": "1760000000000",
-            }]
+            return [
+                {
+                    "id": 1,
+                    "sandbox_id": "sb-poison",
+                    "source_table": side,
+                    "ttl": "1760000000000",
+                }
+            ]
 
         mock_repo.find_unregistered.side_effect = _find_unregistered
         mock_repo.register_if_missing = MagicMock(side_effect=Exception("DataError"))
@@ -983,12 +1013,14 @@ class TestDiscoveryScanIsolation:
         def _find_unregistered(env, side, limit=500):
             calls[side] = calls.get(side, 0) + 1
             if side == "baas_device" and calls[side] == 1:
-                return [{
-                    "id": 8,
-                    "sandbox_id": "sb-huge",
-                    "source_table": "baas_device",
-                    "ttl": "9" * 40,  # int() fine, fromtimestamp overflows time_t
-                }]
+                return [
+                    {
+                        "id": 8,
+                        "sandbox_id": "sb-huge",
+                        "source_table": "baas_device",
+                        "ttl": "9" * 40,  # int() fine, fromtimestamp overflows time_t
+                    }
+                ]
             return []
 
         mock_repo.find_unregistered.side_effect = _find_unregistered
@@ -1130,9 +1162,7 @@ class TestStoppedTransitionMetric:
         assert result == "stopped"
 
         transition_lines = [
-            r.message
-            for r in caplog.records
-            if "stopped_transition" in r.message
+            r.message for r in caplog.records if "stopped_transition" in r.message
         ]
         assert len(transition_lines) == 1
         msg = transition_lines[0]

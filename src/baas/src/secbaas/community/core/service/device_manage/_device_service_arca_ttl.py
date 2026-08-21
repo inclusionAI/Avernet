@@ -27,11 +27,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from secbaas.community.core.repository.arca_ttl import TtlRenewalScheduleRepository
-from secbaas.community.core.service.device_manage._device_service import (
-    DefaultDeviceService,
-)
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
+
+from ._device_service import (
+    DefaultDeviceService,
+)
 
 log = get_logger("core-scheduler")
 

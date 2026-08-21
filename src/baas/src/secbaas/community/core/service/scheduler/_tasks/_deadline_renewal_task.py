@@ -128,8 +128,12 @@ class DeadlineRenewalScheduler:
         hot_count_device = 0
         hot_count_binding = 0
         try:
-            hot_count_device = self._schedule_repo.count_hot_arca_devices(self._config.env)
-            hot_count_binding = self._schedule_repo.count_hot_arca_bindings(self._config.env)
+            hot_count_device = self._schedule_repo.count_hot_arca_devices(
+                self._config.env
+            )
+            hot_count_binding = self._schedule_repo.count_hot_arca_bindings(
+                self._config.env
+            )
         except Exception:
             log.exception(
                 "[DeadlineRenewalScheduler] Hot count query failed — discovery scan skipped"
@@ -461,7 +465,10 @@ class DeadlineRenewalScheduler:
             expiration_dt = datetime.fromtimestamp(ttl_ms / 1000.0)
             next_renew = expiration_dt - timedelta(hours=12)
             self._schedule_repo.postpone_renewal(
-                self._config.env, record["source_table"], record["source_id"], next_renew
+                self._config.env,
+                record["source_table"],
+                record["source_id"],
+                next_renew,
             )
             log.info(
                 "[DeadlineRenewalScheduler] sandbox_id=%s remaining=%.1fh > 24h, "
@@ -477,7 +484,10 @@ class DeadlineRenewalScheduler:
             expiration_dt = datetime.fromtimestamp(ttl_ms / 1000.0)
             next_renew = expiration_dt - timedelta(hours=12)
             self._schedule_repo.postpone_renewal(
-                self._config.env, record["source_table"], record["source_id"], next_renew
+                self._config.env,
+                record["source_table"],
+                record["source_id"],
+                next_renew,
             )
             log.info(
                 "[DeadlineRenewalScheduler] sandbox_id=%s remaining=%.1fh "

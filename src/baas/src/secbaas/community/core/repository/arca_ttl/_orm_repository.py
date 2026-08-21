@@ -21,10 +21,8 @@ from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from secbaas.community.core.repository import OrmConnectionMixin, with_orm_session
-from secbaas.community.core.repository.device._orm_model import DeviceModel
-from secbaas.community.core.repository.device_binding._orm_model import (
-    DeviceBindingModel,
-)
+from secbaas.community.core.repository.device import DeviceModel
+from secbaas.community.core.repository.device_binding import DeviceBindingModel
 from secbaas.community.logger import get_logger
 
 from ._orm_model import TtlRenewalScheduleModel
