@@ -23,6 +23,15 @@ from agentclaw.community.api.engine_connection_service import (
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
+from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.chat import (
+    ExpertChatInstanceRepository,
+)
 
 
 class EngineRuntimeModule(Module):
@@ -32,6 +41,23 @@ class EngineRuntimeModule(Module):
         binder.bind(EngineRuntimeRelay, to=EngineRuntimeRelay, scope=singleton)
         binder.bind(
             EngineConnectionService, to=EngineConnectionService, scope=singleton
+        )
+
+    @singleton
+    @provider
+    @inject
+    def runtime_binding_resolution_service(
+        self,
+        bot_repository: BotRepository,
+        publish_repository: BotPublishRepositoryProtocol,
+        binding_repository: DeviceBindingRepository,
+        caller_instance_repository: ExpertChatInstanceRepository,
+    ) -> RuntimeBindingResolutionService:
+        return RuntimeBindingResolutionService(
+            bot_repository=bot_repository,
+            publish_repository=publish_repository,
+            binding_repository=binding_repository,
+            caller_instance_repository=caller_instance_repository,
         )
 
     @singleton

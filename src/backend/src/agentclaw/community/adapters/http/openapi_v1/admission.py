@@ -430,6 +430,30 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-intents",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-complete",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/materialize-status",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
         "GET",
         "/openapi/v1/bots/{bot_id}/engine/available",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
