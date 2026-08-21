@@ -1,6 +1,6 @@
 # Bot Search 接口设计
 
-> 状态：待确认
+> 状态：已实现（`GET /v2/bots/search`，commit `feat(bots): implement GET /v2/bots/search with filtering + tc_bot`）
 > 日期：2026-08-20
 > 范围：为好友申请页面提供 bot 列表查询接口，支持名称模糊搜索 + 其他关键字过滤 + 分页 + friend 状态。
 
@@ -36,11 +36,12 @@ GET /v2/bots/search
 | 参数 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `q` | string | — | 名称/简介模糊搜索（contains，大小写不敏感） |
-| `visibility` | string | — | 可见性过滤：`public` / `protected` / `private` |
-| `status` | string | — | 状态过滤：`online` / `hidden` |
+| `visibility` | string | — | 可见性过滤：`public` / `protected` / `private`；非法值 → 400 |
+| `status` | string | — | 状态过滤：`online` / `hidden`；非法值 → 400 |
 | `is_friend` | bool | — | friend 状态过滤：`true` / `false`（需 Bearer 认证） |
+| `tc_bot` | bool | — | TC（TeamClaw backend）bot 过滤：`true` 仅返回 backend 过来的 bot，`false` 仅返回 native bot，缺省不过滤（见 §3.6.6） |
 | `offset` | int | 0 | 分页起始 |
-| `limit` | int | 20 | 每页数（最大 100） |
+| `limit` | int | 20 | 每页数，取值范围 `1..=100`，越界 → 400 |
 
 ### 3.3 认证
 
@@ -70,31 +71,42 @@ GET /v2/bots/search
 }
 ```
 
+> `is_friend` 字段仅在有 Bearer 时返回；匿名调用该字段缺省（`skip_serializing_if`）。
+> `status` 来自 `ActorStatus`（`online`/`hidden`），`is_online` 来自 `effective_dynamic_status`（`active`/`offline`）。
+
 ### 3.5 错误码
 
 | HTTP | code | 说明 |
 |---|---|---|
-| 400 | BadRequest | 参数非法（如 limit > 100） |
+| 400 | BadRequest | 参数非法：`limit` 越界、`visibility`/`status` 取值非法 |
 | 401 | Unauthorized | Bearer 提供但解析失败 |
 | 500 | Internal | 服务内部错误 |
 
 ### 3.6 行为规则
 
-1. **名称搜索**：`q` 匹配 `name` 或 `summary`（contains，大小写不敏感）。
+1. **名称搜索**：`q` 匹配 `capabilities.name` 或 `capabilities.summary`（contains，大小写不敏感，trim 后空串视为不过滤）。
 2. **可见性过滤**：
    - 无 Bearer → 强制 `visibility=public`（忽略用户传入的 visibility 参数）。
-   - 有 Bearer → 默认返回 `public` + `protected`（可见的）；若传 `visibility` 参数则按参数过滤。
+   - 有 Bearer → 默认返回 `public` + `protected`（服务侧 `visibility=None`）；若传 `visibility` 参数则按参数过滤（含 `private`）。
 3. **friend 过滤**：`is_friend=true` → 仅返回已是好友的 bot；`is_friend=false` → 仅返回非好友的 bot。无此参数 → 不过滤。
-4. **排序**：按 `name` 升序（可扩展为多字段排序参数）。
-5. **is_friend** 判定：`EdgeGrantRepo::has_friend_edge(caller, bot_uuid, env)`。
+4. **排序**：按 `name` 升序（无 name 的排最后；可扩展为多字段排序参数）。
+5. **is_friend** 判定：handler 调 `ConnectService::list_friends(caller)` 取好友 actor_id 集合，按 `bot_uuid` 是否在集合内判定。
+6. **匿名 is_friend 过滤**：无 Bearer 时好友集合为空，`is_friend=true` → 返回空，`is_friend=false` → 返回全部 public bot（逻辑自洽：匿名者与任何 bot 都不是好友）。
+
+### 3.6.6 TC bot 过滤（`tc_bot`）
+
+- **判据**：`tc_bot` 过滤依据是持久化的 **owner-suffixed `bot_uuid`**——`bot_uuid` 形如 `<prefix>:<staff_no>` 且后缀 == `created_by` 所有者。这是 backend 经 `POST /admin/bots/{bot_uuid}/ensure`（服务凭证，非用户 JWT）onboard 的 bot 的持久化标记，与删除流程 `is_owner_suffixed_bot_id_for_staff`（"TC bot must be deleted from TC"）同源。
+- **不依赖** `ProviderBotBinding`（那只是下行模式 bot 的绑定，backend 过来的 bot 不在该记录里）。
+- `tc_bot=true` → 仅留 owner-suffixed bot；`false` → 仅留 native（WebSocket 自注册）bot；缺省 → 不过滤。纯内存判定，无需额外 repo 查询。
 
 ### 3.7 复用性
 
 | 复用 | 来源 |
 |---|---|
-| bot 列表查询 | `BotQueryService::list_bots_paged`（现有）或 `BotRegistryCoreService::list_active` |
-| friend 状态 | `ConnectService::list_friends(caller)` 或直接 `EdgeGrantRepo::has_friend_edge` |
-| caller 解析 | `caller_actor_id_from_headers`（现有） |
+| bot 列表查询 | 新增 `BotQueryService::search_bots`（基于 `BotRegistryCoreService::list_active`，携带 `status` + `effective_dynamic_status`） |
+| friend 状态 | `ConnectService::list_friends(caller)` |
+| caller 解析 | `caller_actor_id_from_headers`（现有，可选） |
+| TC bot 判据 | `is_tc_bot(&RegisteredBot)`（后缀 == `created_by`，见 `bcs-bot/src/application/bot.rs`） |
 
 ## 4. 兼容性 & 可扩展性
 
@@ -119,12 +131,15 @@ GET /v2/bots/search
 
 | 层 | 改动 | 文件 |
 |---|---|---|
-| **wire** | `BotSearchQuery` struct + `BotSearchEntry` response struct | `bcs-protocol/src/http/bots.rs` |
-| **handler** | `search_bots` handler | `bcs-http/src/routes/bots.rs`（同文件追加） |
+| **wire** | `BotSearchQuery`（含 `tc_bot`）+ `BotSearchEntry` response struct；crate root re-export | `bcs-protocol/src/http/bots.rs`、`http/mod.rs`、`lib.rs` |
+| **handler** | `search_bots` handler：参数校验（limit/visibility/status → 400）、caller 解析、可见性规则、is_friend 后过滤 + 分页、`BotSearchEntry` 组装 | `bcs-http/src/routes/bots.rs` |
 | **router** | 注册 `.route("/v2/bots/search", get(routes::bots::search_bots))` | `bcs-http/src/router.rs` |
-| **service** | 复用 `BotQueryService::list_bots_paged`（现有）；`is_friend` 通过 `ConnectService::list_friends` 批量判断 | 无新增 trait |
+| **service** | 新增 `BotQueryService::search_bots(SearchBotsCommand) -> BotSearchResult`（默认 impl 兜底），基于 `list_active()` 过滤 `q`/`visibility`/`status`/`tc_bot` + name 排序，经 `bot_to_query_entry` 带 status/online；`is_tc_bot` helper | `bcs-service-api/.../bot_query.rs`（trait）、`bcs-bot/src/application/bot.rs`（impl） |
+| **friend** | `is_friend` 在 handler 调 `ConnectService::list_friends` 取集合判定 | 复用现有，无新增 |
 | **store** | 无改动（复用 `bcs-bot-store` 现有 query 能力） | — |
-| **测试** | handler 单测 + E2E | `bcs-http` tests + `edge_permission.sh` |
+| **测试** | handler 契约测试 + `search_bots` 服务级测试 | `bcs-http/tests/bots_contract.rs`、`bcs-bot/tests/bot_search_contract.rs` |
+
+> 注：早期 WIP 复用了 `BotDiscoveryService::discover_bots`，但其 `BotDiscoveryEntry` 丢弃 `status`/`is_online`，无法满足 §3.4 响应与 `status` 过滤，故改为新增 `search_bots` 直接查询 `list_active()`。另顺手修复了 WIP 误从 `/bots/{id}`、`/bots/query`、`/bots/status` 响应移除 `status` 字段的回归。
 
 ## 6. 不做的事
 
@@ -145,6 +160,9 @@ GET /v2/bots/search?visibility=public&offset=20&limit=20
 # 搜索非好友的 protected bot
 GET /v2/bots/search?visibility=protected&is_friend=false
   Authorization: Bearer <bot_token>
+
+# 仅返回 TeamClaw backend 过来的 bot
+GET /v2/bots/search?tc_bot=true
 
 # 无认证 → 仅返回 public bot
 GET /v2/bots/search?q=助手
