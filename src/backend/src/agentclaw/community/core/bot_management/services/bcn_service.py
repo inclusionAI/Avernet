@@ -553,10 +553,10 @@ class BcnService:
             )
             raise BcnServiceError(f"BCN delete_provider_bot error: {e}")
 
-    def get_attributes(self, *, bot_uid: str) -> Dict[str, Any]:
+    def get_attributes(self, *, bot_uuid: str) -> Dict[str, Any]:
         """读取已注册 Bot 的协作属性 (Provider 管理 API GET)。
 
-        GET /providers/{provider_id}/bots/{bot_uid}/attributes — 与
+        GET /providers/{provider_id}/bots/{bot_uuid}/attributes — 与
         register/switch/delete provider-bot 同套鉴权:仅 ``Authorization:
         Bearer {provider_admin_token}``，``provider_id`` 在 path，不传
         ``X-BCN-Provider-Id``。响应直接是属性对象 (``user_visibility`` /
@@ -569,7 +569,7 @@ class BcnService:
             return {"skipped": True}
         provider_id = provider_cfg["provider_id"]
         token = provider_cfg["provider_admin_token"]
-        path = f"/providers/{provider_id}/bots/{bot_uid}/attributes"
+        path = f"/providers/{provider_id}/bots/{bot_uuid}/attributes"
         try:
             response = self._http.get(
                 path, headers={"Authorization": f"Bearer {token}"}, timeout=self._timeout
@@ -589,11 +589,11 @@ class BcnService:
             raise BcnServiceError(f"BCS attributes get error: {e}")
 
     def patch_attributes(
-        self, *, bot_uid: str, body: Dict[str, Any]
+        self, *, bot_uuid: str, body: Dict[str, Any]
     ) -> Dict[str, Any]:
         """局部更新 Bot 协作属性 (Provider 管理 API PATCH)。
 
-        PATCH /providers/{provider_id}/bots/{bot_uid}/attributes，同套鉴权。
+        PATCH /providers/{provider_id}/bots/{bot_uuid}/attributes，同套鉴权。
         body 至少含一个可更新字段 (``user_visibility`` / ``friend_ext`` /
         ``friend_check_in_strategy``)；``friend_ext`` 顶层对象整体替换、传
         ``{}`` 清空。非 prod/pre 或凭据空时跳过。
@@ -604,7 +604,7 @@ class BcnService:
             return {"skipped": True}
         provider_id = provider_cfg["provider_id"]
         token = provider_cfg["provider_admin_token"]
-        path = f"/providers/{provider_id}/bots/{bot_uid}/attributes"
+        path = f"/providers/{provider_id}/bots/{bot_uuid}/attributes"
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",

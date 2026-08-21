@@ -744,7 +744,7 @@ class BotPublicService:
         整体替换)。view_friend_deps 用入参 view_depts 原样(空/None → [])。BCS 调用
         跳过(非 prod/pre 或凭据空)时静默返回。
         """
-        attrs = self._bcn_service.get_attributes(bot_uid=bot_uid)
+        attrs = self._bcn_service.get_attributes(bot_uuid=bot_uid)
         if attrs.get("skipped"):
             return
         friend_ext = dict(attrs.get("friend_ext") or {})
@@ -758,7 +758,7 @@ class BotPublicService:
             block["visibility"] = visibility
         friend_ext[_BCS_APPROVAL_KEY_BY_SCOPE[public_scope]] = block
         self._bcn_service.patch_attributes(
-            bot_uid=bot_uid, body={"friend_ext": friend_ext}
+            bot_uuid=bot_uid, body={"friend_ext": friend_ext}
         )
 
     def _apply_visibility_direct(
@@ -775,7 +775,7 @@ class BotPublicService:
         public/protected 仍走工单, 见 public_bcs_bot 主流程。
         """
         field = _BCS_VISIBILITY_FIELD_BY_SCOPE[public_scope]
-        self._bcn_service.patch_attributes(bot_uid=bot_uid, body={field: "private"})
+        self._bcn_service.patch_attributes(bot_uuid=bot_uid, body={field: "private"})
         return {
             "success": True,
             "state": "COMPLETED",
@@ -803,7 +803,7 @@ class BotPublicService:
         所有变更合一 PATCH (friend_ext + 可见性字段) 回。BCS 跳过 (非 prod/pre 或
         凭据空) 时静默返回。
         """
-        attrs = self._bcn_service.get_attributes(bot_uid=bot_uid)
+        attrs = self._bcn_service.get_attributes(bot_uuid=bot_uid)
         if attrs.get("skipped"):
             return {
                 "success": True, "public": None,
@@ -835,7 +835,7 @@ class BotPublicService:
             friend_ext[_BCS_VIEW_SCOPE_DEPS_KEY_BY_SCOPE[public_scope]] = (
                 block.get("view_friend_deps") or []
             )
-        self._bcn_service.patch_attributes(bot_uid=bot_uid, body=body)
+        self._bcn_service.patch_attributes(bot_uuid=bot_uid, body=body)
         return {
             "success": True, "public": None,
             "message": f"public_scope={public_scope} callback status={block['status']}",
