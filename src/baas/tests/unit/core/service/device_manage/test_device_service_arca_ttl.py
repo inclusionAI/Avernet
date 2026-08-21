@@ -349,6 +349,44 @@ class TestStopDeviceHook:
         assert len(critical) == 1
         assert len(metrics) == 1
 
+    @pytest.mark.asyncio
+    async def test_stop_failed_result_skips_set_status(self):
+        """WR-03: when the underlying stop FAILED (success=False) the row
+        must stay ACTIVE — a still-live container keeps renewing."""
+        svc, mock_schedule_repo, mock_device_repo = _make_service()
+        mock_device_repo.get_active_or_updating_by_device_uuid.return_value = _record()
+        destroy_response = DestroyDeviceResponse(success=False)
+
+        with patch.object(
+            DefaultDeviceService,
+            "stop_device_by_uuid",
+            new=AsyncMock(return_value=destroy_response),
+        ):
+            result = await svc.stop_device_by_uuid(
+                tenant="test-tenant", device_uuid="DEVICE-test-001", modifier="test"
+            )
+
+        assert result is destroy_response
+        mock_schedule_repo.set_status.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stop_none_result_skips_set_status(self):
+        """WR-03: a None result (no success signal) must not mark STOPPED."""
+        svc, mock_schedule_repo, mock_device_repo = _make_service()
+        mock_device_repo.get_active_or_updating_by_device_uuid.return_value = _record()
+
+        with patch.object(
+            DefaultDeviceService,
+            "stop_device_by_uuid",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await svc.stop_device_by_uuid(
+                tenant="test-tenant", device_uuid="DEVICE-test-001", modifier="test"
+            )
+
+        assert result is None
+        mock_schedule_repo.set_status.assert_not_called()
+
 
 # ── destroy_device_by_uuid (INTG-02 set_status, for_restart guard) ─────
 
@@ -397,6 +435,29 @@ class TestDestroyDeviceHook:
         mock_schedule_repo.set_status.assert_called_once_with(
             "test", source_table="baas_device", source_id=7, status="STOPPED"
         )
+
+    @pytest.mark.asyncio
+    async def test_destroy_failed_result_skips_set_status(self):
+        """WR-03: a failed (success=False) destroy leaves the row ACTIVE —
+        do not kill renewal for a container the destroy did not remove."""
+        svc, mock_schedule_repo, mock_device_repo = _make_service()
+        mock_device_repo.get_active_or_updating_by_device_uuid.return_value = _record()
+        destroy_response = DestroyDeviceResponse(success=False)
+
+        with patch.object(
+            DefaultDeviceService,
+            "destroy_device_by_uuid",
+            new=AsyncMock(return_value=destroy_response),
+        ):
+            result = await svc.destroy_device_by_uuid(
+                tenant="test-tenant",
+                device_uuid="DEVICE-test-001",
+                modifier="test",
+                for_restart=False,
+            )
+
+        assert result is destroy_response
+        mock_schedule_repo.set_status.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_destroy_set_status_failure_is_defensive(self, caplog):

@@ -8,8 +8,10 @@ _device_service.py core path (D-08'/D-09'):
   in the baas_arca_ttl_renewal_schedule cold table (defensive posture:
   never blocks device creation).
 - stop_device_by_uuid() / destroy_device_by_uuid() — after a successful
-  stop/destroy, mark the schedule row STOPPED (defensive posture, same as
-  start: a cold-table failure never fails the already-completed device
+  stop/destroy (DestroyDeviceResponse.success is True), mark the schedule
+  row STOPPED. A failed destroy leaves the row ACTIVE so renewal is never
+  killed for a container that may still be live (defensive posture, same
+  as start: a cold-table failure never fails the already-completed device
   operation; it only emits CRITICAL + set_status_error=1 metrics).
 
 The wrapper is injected by the community bootstrap as a Singleton override
@@ -44,7 +46,8 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
     community _device_service.py before the enterprise namespace was
     withdrawn from the community tree (Route A). Guard replication:
     ARCA type guard, provider_device_id truthiness, for_restart skip on
-    destroy, and no schedule action for non-ARCA devices.
+    destroy, success guard on stop/destroy results, and no schedule
+    action for non-ARCA devices.
     """
 
     def __init__(
@@ -144,7 +147,13 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
         if not record:
             record = self._repository.get_by_device_uuid_only(device_uuid=device_uuid)
         result = await super().stop_device_by_uuid(tenant, device_uuid, modifier)
-        if record and record.provider_type == "ARCA" and record.provider_device_id:
+        if (
+            result
+            and getattr(result, "success", True)
+            and record
+            and record.provider_type == "ARCA"
+            and record.provider_device_id
+        ):
             try:
                 self._schedule_repo.set_status(
                     get_current_env(),
@@ -177,6 +186,8 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
         )
         if (
             not for_restart
+            and result
+            and getattr(result, "success", True)
             and record
             and record.provider_type == "ARCA"
             and record.provider_device_id
