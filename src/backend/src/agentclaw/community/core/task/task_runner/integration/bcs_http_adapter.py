@@ -60,6 +60,20 @@ class BcsCreateGroupResult:
     definition_ref: dict[str, Any] | None = None
 
 
+@dataclass
+class BotTaskModeRoster:
+    """任务模式 roster 本地 DTO(不复用 backend 已有领域对象)。
+
+    来自 BCS 内部 provider 路由 ``GET /providers/{provider_id}/bots/by-task-modes``。
+    """
+
+    bot_id: str
+    name: str
+    env: str
+    task_claim_mode: bool
+    task_dream_mode: bool
+
+
 def _map_status(resp: httpx.Response) -> None:
     if resp.status_code == 429:
         raise BcsRateLimitError(f"429 {resp.text}")
@@ -159,3 +173,31 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
 
     async def validate_definition(self, definition_yaml: str) -> None:
         await self._req("POST", "/collaboration/definitions/validate", json={"yaml": definition_yaml})
+
+    async def list_bots_by_task_modes(self, *, provider_id: str, claim: bool | None = None,
+                                      dream: bool | None = None, match: str = "any") -> list[BotTaskModeRoster]:
+        """查询满足任务模式开关的 provider bot roster(BCS 内部 provider 路由,Bearer provider_admin_token)。
+
+        ``claim``/``dream`` 为 ``None`` 表示该开关不过滤(有意哨兵);``match`` 为 any|all。路径照搬
+        ``get_session_messages``:HMAC 签 path 不含 query,query 走 httpx ``params``(provider 路由只读
+        Bearer,忽略 X-ECB,故 HMAC 签串约定无关)。
+        """
+        path = f"/providers/{provider_id}/bots/by-task-modes"
+        ts = str(int(time.time()))
+        headers = self._sign("GET", path, ts)
+        headers["Authorization"] = f"Bearer {self._t.provider_admin_token}"
+        params: dict[str, str] = {"match": match}
+        if claim is not None:
+            params["task_claim_mode"] = "true" if claim else "false"
+        if dream is not None:
+            params["task_dream_mode"] = "true" if dream else "false"
+        r = await self._client.request("GET", path, params=params, headers=headers)
+        _map_status(r)
+        items = r.json().get("items", [])
+        return [BotTaskModeRoster(
+            bot_id=str(it.get("bot_id", "")),
+            name=str(it.get("name", "")),
+            env=str(it.get("env", "")),
+            task_claim_mode=bool(it.get("task_claim_mode", False)),
+            task_dream_mode=bool(it.get("task_dream_mode", False)),
+        ) for it in items]

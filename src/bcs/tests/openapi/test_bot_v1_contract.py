@@ -95,14 +95,26 @@ def test_bot_domain_model_is_a_strict_bot_human_union() -> None:
 
     assert physical["additionalProperties"] is False
     assert human["additionalProperties"] is False
-    assert set(physical["required"]) == common_required | {"descriptor", "reachability"}
+    assert set(physical["required"]) == common_required | {
+        "descriptor",
+        "reachability",
+        "task_claim_mode",
+        "task_dream_mode",
+    }
     assert set(human["required"]) == common_required
     assert "created_by" in physical["properties"]
     assert "created_by" in human["properties"]
     assert "created_by" not in physical["required"]
     assert "created_by" not in human["required"]
 
-    physical_only = {"descriptor", "reachability", "provider", "agent_code"}
+    physical_only = {
+        "descriptor",
+        "reachability",
+        "provider",
+        "agent_code",
+        "task_claim_mode",
+        "task_dream_mode",
+    }
     assert physical_only.issubset(physical["properties"])
     assert physical_only.isdisjoint(human["properties"])
     assert set(physical["properties"]["provider"]["required"]) == {
@@ -311,7 +323,14 @@ def test_bot_patch_exposes_only_the_approved_mutable_fields() -> None:
     assert set(_parameters(operation)) == {"bot_id"}
     assert request["minProperties"] == 1
     assert request["additionalProperties"] is False
-    assert set(request["properties"]) == {"name", "visibility", "status", "descriptor"}
+    assert set(request["properties"]) == {
+        "name",
+        "visibility",
+        "status",
+        "descriptor",
+        "task_claim_mode",
+        "task_dream_mode",
+    }
     descriptor = request["properties"]["descriptor"]
     assert descriptor["minProperties"] == 1
     assert descriptor["additionalProperties"] is False

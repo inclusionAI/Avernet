@@ -261,6 +261,8 @@ impl BotServiceImpl {
                     reachability,
                     provider,
                     agent_code: record.agent_code,
+                    task_claim_mode: record.task_claim_mode,
+                    task_dream_mode: record.task_dream_mode,
                     created_at: record.created_at,
                     updated_at: record.updated_at,
                 }))
@@ -484,10 +486,14 @@ impl BotService for BotServiceImpl {
                 command.bot_id
             )));
         }
-        if record.kind == ActorKind::Human && command.patch.descriptor.is_some() {
+        if record.kind == ActorKind::Human
+            && (command.patch.descriptor.is_some()
+                || command.patch.task_claim_mode.is_some()
+                || command.patch.task_dream_mode.is_some())
+        {
             return Err(ApplicationError::invalid(
                 "invalid_bot_kind",
-                "Human rows do not have a descriptor",
+                "Human rows do not support descriptor or task-mode patches",
             ));
         }
 
@@ -543,6 +549,8 @@ impl BotService for BotServiceImpl {
                     visibility: command.patch.visibility.map(visibility_value),
                     status: command.patch.status.map(domain_status),
                     descriptor,
+                    task_claim_mode: command.patch.task_claim_mode,
+                    task_dream_mode: command.patch.task_dream_mode,
                     ..Default::default()
                 },
             )
