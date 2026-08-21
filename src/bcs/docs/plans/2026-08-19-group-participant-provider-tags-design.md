@@ -133,8 +133,10 @@ Another risk is cross-target leakage. Delivery tests use two participants with
 different tags and verify that each Provider request contains only the target
 participant's list.
 
-No frontend configuration UI or new CLI flag is included. Frontend transport
-types may accept and display the field without adding a user-facing editor.
+No frontend configuration UI, transport type, or other `src/frontend/**`
+change is included. The BCS OpenAPI and protocol definitions remain the
+authoritative backend contract; frontend consumers can adopt the field in a
+separate change when needed.
 
 ## Validation
 
@@ -149,8 +151,8 @@ types may accept and display the field without adding a user-facing editor.
 - Protocol coverage verifies the shared `chat.send` builder preserves non-empty
   tags; the existing Provider transport contract covers projection from
   `params.tags` to `to_bot.tags`.
-- SQLite migration tests cover migration 009 planning, application, and
-  idempotency. The MySQL migration is additive and uses `IF NOT EXISTS` so it
+- SQLite migration tests cover version 12 planning, application, and
+  idempotency. MySQL migration 011 is additive and uses `IF NOT EXISTS` so it
   is safe with the updated baseline schema.
 - The complete Rust workspace compiles with all test targets, and the bundled
   OpenAPI contract validates successfully. Global `cargo fmt` is intentionally
