@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_app_session::GroupSessionConnectionServiceImpl;
+use bcs_service_api::SessionKind;
 use bcs_service_api::application::v1::{
     ActorKind, AddSessionParticipant, ApplicationError, AuthenticatedAccessKeyIdentity,
     AuthenticatedAppIdentity, AuthenticatedBotIdentity, AuthenticatedCaller,
@@ -255,8 +256,10 @@ fn session_detail(session_id: &str, group_id: &str) -> SessionDetail {
         version: 1,
         group_id: group_id.into(),
         status: SessionStatus::Running,
+        kind: SessionKind::Chat,
         title: None,
         input: None,
+        meta: None,
         participants: vec![SessionParticipant {
             actor_id: "human_user-a".into(),
             actor_kind: ActorKind::Human,
@@ -267,6 +270,8 @@ fn session_detail(session_id: &str, group_id: &str) -> SessionDetail {
         }],
         created_at: 1,
         updated_at: 1,
+        state_machine_run_id: None,
+        state_machine_run: None,
     }
 }
 

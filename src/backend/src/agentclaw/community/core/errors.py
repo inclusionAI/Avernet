@@ -63,3 +63,11 @@ class Conflict(DomainError):
 
 class InternalError(DomainError):
     """Unexpected failure inside a core service."""
+
+
+class CallbackAuthError(DomainError):
+    """任务回调鉴权失败(签名校验不通过/时间戳超窗)。HTTP 层映射 401。"""
+
+
+class CallbackCorrelationError(DomainError):
+    """task 级回调无法寻址节点(无回声 loop_task_id 且 registry 未登记派发)。HTTP 层映射 400。"""

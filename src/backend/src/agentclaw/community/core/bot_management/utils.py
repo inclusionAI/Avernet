@@ -395,6 +395,12 @@ def _extract_code_repo_urls(template_config: Dict[str, Any]) -> List[str]:
     return urls
 
 
+# Public name for the canonical repo-URL extraction so other domains (e.g. the
+# aicoding workspace-exclude derivation) can reuse this single source instead
+# of re-encoding the template_config repo-declaration vocabulary.
+extract_code_repo_urls = _extract_code_repo_urls
+
+
 def memory_sources_changed(
     old_template_config: Dict[str, Any],
     new_template_config: Dict[str, Any],

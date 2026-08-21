@@ -6,8 +6,7 @@ use serde_json::json;
 
 mod helpers;
 
-const TEST_GATEWAY_PRINCIPAL_SIGNING_KEY: &[u8] =
-    b"test-only-gateway-principal-signing-key";
+const TEST_GATEWAY_PRINCIPAL_SIGNING_KEY: &[u8] = b"test-only-gateway-principal-signing-key";
 
 fn user_principal_token(signing_key: &[u8]) -> String {
     let now = SystemTime::now()
@@ -49,12 +48,19 @@ async fn mounted_openapi_v1_routes_require_and_verify_gateway_principal() {
     let client = reqwest::Client::new();
     let url = format!("http://{addr}/openapi/v1/collaboration/bots/mine");
 
-    let missing = client.get(&url).send().await.expect("missing-principal request");
+    let missing = client
+        .get(&url)
+        .send()
+        .await
+        .expect("missing-principal request");
     assert_eq!(missing.status(), reqwest::StatusCode::UNAUTHORIZED);
 
     let invalid = client
         .get(&url)
-        .header("x-avernet-principal", user_principal_token(b"wrong-test-key"))
+        .header(
+            "x-avernet-principal",
+            user_principal_token(b"wrong-test-key"),
+        )
         .send()
         .await
         .expect("invalid-principal request");
@@ -92,9 +98,8 @@ async fn mounted_session_file_routes_use_the_real_facade_and_public_token_bounda
     let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
     let client = reqwest::Client::new();
-    let protected_url = format!(
-        "http://{addr}/api/v1/collaboration/sessions/missing-session/files"
-    );
+    let protected_url =
+        format!("http://{addr}/api/v1/collaboration/sessions/missing-session/files");
 
     let missing = client
         .get(&protected_url)
@@ -138,9 +143,7 @@ async fn mounted_session_token_route_authenticates_before_reaching_the_applicati
     let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
     let client = reqwest::Client::new();
-    let url = format!(
-        "http://{addr}/openapi/v1/collaboration/sessions/missing-session/token"
-    );
+    let url = format!("http://{addr}/openapi/v1/collaboration/sessions/missing-session/token");
 
     let missing = client
         .post(&url)
@@ -151,7 +154,10 @@ async fn mounted_session_token_route_authenticates_before_reaching_the_applicati
 
     let invalid = client
         .post(&url)
-        .header("x-avernet-principal", user_principal_token(b"wrong-test-key"))
+        .header(
+            "x-avernet-principal",
+            user_principal_token(b"wrong-test-key"),
+        )
         .send()
         .await
         .expect("invalid-principal request");
@@ -181,9 +187,7 @@ async fn mounted_session_collection_routes_require_a_gateway_principal() {
     let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
     let client = reqwest::Client::new();
-    let url = format!(
-        "http://{addr}/openapi/v1/collaboration/sessions/missing-session/collect"
-    );
+    let url = format!("http://{addr}/openapi/v1/collaboration/sessions/missing-session/collect");
 
     let collect = client
         .post(&url)
@@ -234,9 +238,84 @@ async fn mounted_message_websocket_route_verifies_token_and_preserves_legacy_web
     let (_legacy, response) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
         .await
         .expect("legacy Workbench WebSocket remains mounted");
+    assert_eq!(response.status(), reqwest::StatusCode::SWITCHING_PROTOCOLS);
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn mounted_event_subscription_routes_return_explicitly_disabled_capability() {
+    let bots_dir = helpers::create_temp_bots_dir();
+    let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
+    config.metrics.enabled = false;
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
+    let (addr, handle) = server.run_on_random_port().await.expect("start server");
+    let response = reqwest::Client::new()
+        .get(format!(
+            "http://{addr}/openapi/v1/collaboration/event-subscriptions"
+        ))
+        .header(
+            "x-avernet-principal",
+            user_principal_token(TEST_GATEWAY_PRINCIPAL_SIGNING_KEY),
+        )
+        .send()
+        .await
+        .expect("list subscriptions");
+
+    assert_eq!(response.status(), reqwest::StatusCode::CONFLICT);
+    let envelope: serde_json::Value = response.json().await.expect("JSON envelope");
+    assert_eq!(envelope["data"]["error_code"], "eventing_disabled");
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn mounted_eventing_record_only_profile_uses_the_real_application_service() {
+    let bots_dir = helpers::create_temp_bots_dir();
+    let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
+    config.metrics.enabled = false;
+    config.eventing.enabled = true;
+    config.eventing.dispatcher_enabled = false;
+    config.eventing.webhook.allow_http_loopback = true;
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
+    let (addr, handle) = server.run_on_random_port().await.expect("start server");
+    let client = reqwest::Client::new();
+    let principal = user_principal_token(TEST_GATEWAY_PRINCIPAL_SIGNING_KEY);
+
+    let list = client
+        .get(format!(
+            "http://{addr}/openapi/v1/collaboration/event-subscriptions"
+        ))
+        .header("x-avernet-principal", &principal)
+        .send()
+        .await
+        .expect("list subscriptions");
+    assert_eq!(list.status(), reqwest::StatusCode::OK);
+    let envelope: serde_json::Value = list.json().await.expect("JSON envelope");
+    assert_eq!(envelope["data"]["items"], json!([]));
+
+    let create = client
+        .post(format!(
+            "http://{addr}/openapi/v1/collaboration/event-subscriptions"
+        ))
+        .header("x-avernet-principal", principal)
+        .json(&json!({
+            "name": "missing-group-test",
+            "scope": {"type": "group", "id": "missing-group"},
+            "event_filters": ["group.created"],
+            "sink": {
+                "type": "webhook",
+                "url": "http://127.0.0.1:9/events"
+            }
+        }))
+        .send()
+        .await
+        .expect("create subscription for missing scope");
+    assert_eq!(create.status(), reqwest::StatusCode::NOT_FOUND);
+    let envelope: serde_json::Value = create.json().await.expect("JSON envelope");
     assert_eq!(
-        response.status(),
-        reqwest::StatusCode::SWITCHING_PROTOCOLS
+        envelope["data"]["error_code"],
+        "event_subscription_not_found"
     );
 
     handle.abort();

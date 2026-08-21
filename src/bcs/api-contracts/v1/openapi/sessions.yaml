@@ -2,16 +2,42 @@ CreateSessionRequest:
   type: object
   description: >-
     Creates a new Session using the parent Group as the source of truth for
-    driver and participants. The request body does not accept driver_bot_uuid or
-    participants; the Session roster inherits all parent Group participants,
-    including both Bot and Human actors, and the parent driver Bot is ensured as
-    the Session driver.
+    participants. The request body does not accept driver_bot_uuid or
+    participants; the Session roster inherits the complete parent Group roster
+    and its existing roles, including both Bot and Human actors.
   additionalProperties: false
   properties:
     title:
       type: string
+    kind:
+      $ref: ../domain-models.yaml#/SessionKind
+    acting_bot_id:
+      type: string
+      minLength: 1
+      description: >-
+        Optional explicit creator Actor identity. A Human caller may specify
+        its authenticated Human Actor ID (`human_{user.id}`) or a Bot ID it
+        owns. A Bot caller may specify only its own Bot ID. When omitted, the
+        authenticated caller is selected implicitly.
+    creator_role:
+      type: string
+      description: >-
+        Optional role assigned only when the resolved creator is not already a
+        participant and is added to a public Group Session. If omitted in that
+        case, it defaults to consultant. For private Groups or creators already
+        present in the inherited Group participant list, this field is ignored
+        and does not override the existing role. Driver is not allowed.
+      enum:
+        - consultant
+        - manager
+        - worker
+        - observer
     input:
       $ref: ../domain-models.yaml#/SessionInput
+    meta:
+      $ref: ../domain-models.yaml#/SessionMetadata
+    context_delivery:
+      $ref: ../domain-models.yaml#/ContextDelivery
 
 SessionParticipantInput:
   type: object
@@ -98,8 +124,10 @@ GroupSessionsPath:
     tags: ["Collaboration / Sessions"]
     summary: Create a Session under a Group.
     x-avernet-security:
-      user: required
-      app: required
+      user: optional
+      app: optional
+      bot: optional
+    x-bcn-identity-policy: human_or_owned_bot
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
     requestBody:
@@ -112,8 +140,7 @@ GroupSessionsPath:
       "201":
         description: >-
           Created session detail. Participants are inherited from the parent
-          Group roster, including Human participants, with the parent driver Bot
-          ensured as driver.
+          Group roster with their existing roles, including Human participants.
         content:
           application/json:
             schema:
@@ -144,10 +171,9 @@ GroupSessionsPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "404":
-        description: Group or referenced Bot is missing or hidden.
+        description: Group is missing or hidden.
         x-error-codes:
           - group_not_found
-          - bot_not_found
         content:
           application/json:
             schema:
@@ -156,7 +182,6 @@ GroupSessionsPath:
         description: Session conflicts with current group state.
         x-error-codes:
           - conflict
-          - non_public_participant
         content:
           application/json:
             schema:
@@ -647,14 +672,21 @@ AddSessionParticipantPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          Principal cannot manage the session. A Human Principal may manage
-          when it can act as the Session creator or at least one parent Group
-          management actor: the driver, originator, or ManagerWorker manager participant.
+          The Principal may not manage the Session, or the added Bot is not
+          collaboration-eligible. A Human Principal may manage when it can act
+          as the Session creator or at least one parent Group management actor:
+          the driver, originator, or ManagerWorker manager participant.
           Human-to-actor authority is checked only against these target actors:
           direct human_{user.id}, a Bot whose created_by equals the Human user
           id, or a creator relation edge from human_{user.id} to that Bot. The
           server does not enumerate every Bot created by the Human for this
-          authorization decision.
+          authorization decision. Separately, the added Bot must be
+          collaboration-eligible from at least one of the following anchor
+          actors: the calling Principal, the parent Group driver, or the parent
+          Group originator. A Bot is eligible when it is public, equals an
+          anchor, or (for a Human anchor) is owned by that Human via created_by
+          or a creator relation edge, or is a friend of an anchor. A Hidden Bot
+          is rejected outright regardless of any anchor.
         x-error-codes:
           - forbidden
         content:
@@ -662,7 +694,7 @@ AddSessionParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "404":
-        description: Session or referenced Bot is missing or hidden.
+        description: Session or referenced Bot is missing.
         x-error-codes:
           - session_not_found
           - bot_not_found

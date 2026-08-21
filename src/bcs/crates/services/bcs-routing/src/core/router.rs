@@ -1041,6 +1041,7 @@ mod tests {
             originator: None, // Defaults to driver_bot
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants: vec![
                 Participant {
                     bot_uuid: "driver".to_string(),
@@ -1422,6 +1423,7 @@ mod tests {
             originator: None,
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants: vec![
                 Participant {
                     bot_uuid: "pmo".to_string(),
@@ -1650,6 +1652,7 @@ mod tests {
             originator: Some("alice".to_string()),
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants: vec![
                 Participant {
                     bot_uuid: "alice".to_string(),
@@ -1944,6 +1947,7 @@ mod tests {
             originator: None,
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants: vec![
                 Participant {
                     bot_uuid: "a".to_string(),
@@ -2208,6 +2212,7 @@ mod tests {
             originator: None,
             routing_policy: None,
             context: None,
+            opening_message: None,
             service_group_uuid: None,
             service_mode: None,
             participants: vec![

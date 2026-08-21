@@ -6,11 +6,16 @@
   Group Service API.
 - Principal-aware authorization, V1 projections, and orchestration over the
   existing Group, Session, Friendship, Relation, and Collaboration contracts.
+- Optional inline Group Event Subscription provisioning, including hidden
+  provisional resources, atomic finalization, compensation, and crash
+  reconciliation through injected service contracts.
 
 ## Consumes
 
 - `bcs-service-api` application, core, and outbound-port contracts.
 - Pure utility crates for asynchronous traits and JSON values.
+- Injected Event Subscription provisioning and lifecycle contracts; this
+  crate does not depend on Eventing persistence or delivery implementations.
 
 ## Allowed dependencies
 
@@ -26,18 +31,18 @@
 
 ## Configuration
 
-- A future production composition root must inject all contract
-  implementations and a signed Gateway Principal verifier before mounting the
-  V1 delivery adapter.
+- The production composition root injects all contract implementations,
+  including the optional Group Event Subscription provisioner and state-machine
+  runtime.
 - This crate must not select implementations or inspect environment variables.
 
 ## Runtime ownership
 
-This crate owns the V1 Group use-case facade. It is deliberately not linked
-into the production `bcs` binary until the signed Principal verifier and V1
-router are wired together.
+This crate owns the V1 Group use-case facade and Group provisioning recovery
+policy. It does not own Group/Event persistence, Webhook delivery, secret
+protection, or transport contracts.
 
 ## Tests
 
-- `cargo test --package bcs-group-v1 --manifest-path src/bcs/Cargo.toml`
-- `cargo check --package bcs-group-v1 --all-targets --manifest-path src/bcs/Cargo.toml`
+- `cargo test --package bcs-app-group --manifest-path src/bcs/Cargo.toml`
+- `cargo check --package bcs-app-group --all-targets --manifest-path src/bcs/Cargo.toml`

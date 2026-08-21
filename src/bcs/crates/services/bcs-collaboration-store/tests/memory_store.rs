@@ -1,8 +1,14 @@
 use bcs_collaboration_store::MemoryCollaborationStore;
 use bcs_domain::{
-    CollaborationDefinition, StateMachineDeliveryCorrelation, StateMachineRun,
-    StateMachineRunStatus,
+    CollaborationDefinition, StateMachineDeliveryCorrelation, StateMachineNodeRun,
+    StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
+use bcs_event_store::MemoryEventStore;
+use bcs_service_api::port::NewEvent;
+use bcs_service_api::port::repo::{
+    AppendEventRecord, EventRepoPort, StateMachineEventfulTransition,
+};
+use bcs_service_api::types::{EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject};
 use bcs_service_api::{StateMachineDefinitionRepoPort, StateMachineRunRepoPort};
 use serde_json::json;
 
@@ -152,6 +158,200 @@ async fn session_idle_create_atomically_allows_only_one_active_run() {
             .await
             .expect("create run after completion")
     );
+}
+
+#[tokio::test]
+async fn identical_human_response_is_idempotent_while_completion_is_retried() {
+    let store = MemoryCollaborationStore::new();
+    let run = test_run("sm-run-human", "group-1:abcdef12", 1);
+    let node = StateMachineNodeRun {
+        run_id: run.run_id.clone(),
+        node_id: "review".to_string(),
+        status: StateMachineNodeStatus::Running,
+        attempt: 1,
+        node_timeout_ms: Some(60_000),
+        timeout_deadline_ms: Some(60_001),
+        max_attempts: 1,
+        assignee_bot_id: None,
+        outcome: None,
+        responded_by: None,
+        delivery_request_id: None,
+        bot_delivery_run_id: None,
+        artifact_text: None,
+        error: None,
+        started_at: Some(1),
+        completed_at: None,
+    };
+    store
+        .create_run(run, vec![node])
+        .await
+        .expect("create human run");
+
+    assert!(
+        store
+            .record_human_response_if_running(
+                "sm-run-human",
+                "review",
+                1,
+                "approve".to_string(),
+                "human-1".to_string(),
+            )
+            .await
+            .expect("record first response")
+    );
+    assert!(
+        store
+            .record_human_response_if_running(
+                "sm-run-human",
+                "review",
+                1,
+                "approve".to_string(),
+                "human-1".to_string(),
+            )
+            .await
+            .expect("retry identical response")
+    );
+    assert!(
+        !store
+            .record_human_response_if_running(
+                "sm-run-human",
+                "review",
+                1,
+                "reject".to_string(),
+                "human-1".to_string(),
+            )
+            .await
+            .expect("reject conflicting response")
+    );
+}
+
+#[tokio::test]
+async fn run_start_and_ordered_public_events_commit_atomically() {
+    let events = std::sync::Arc::new(MemoryEventStore::new());
+    let store = MemoryCollaborationStore::new().with_event_store(events.clone());
+    let mut run = test_run("sm-run-eventful", "group-1:abcdef12", 1);
+    run.status = StateMachineRunStatus::Pending;
+    store
+        .create_run(run, Vec::new())
+        .await
+        .expect("create pending run");
+
+    assert!(
+        store
+            .commit_eventful_transition(StateMachineEventfulTransition::StartRun {
+                run_id: "sm-run-eventful".to_string(),
+                started_at_ms: 2,
+                events: vec![
+                    public_event("evt-run-created", "state_machine.run.created", None),
+                    public_event(
+                        "evt-run-started",
+                        "state_machine.run.started",
+                        Some("evt-run-created"),
+                    ),
+                ],
+            })
+            .await
+            .expect("commit eventful start")
+    );
+
+    let stored = store
+        .get_run("sm-run-eventful")
+        .await
+        .expect("load run")
+        .expect("run");
+    assert_eq!(stored.status, StateMachineRunStatus::Running);
+    assert_eq!(stored.updated_at, 2);
+    let created = events
+        .get_event("evt-run-created", "test")
+        .await
+        .expect("load created Event")
+        .expect("created Event");
+    let started = events
+        .get_event("evt-run-started", "test")
+        .await
+        .expect("load started Event")
+        .expect("started Event");
+    assert_eq!(created.envelope.stream.sequence, 1);
+    assert_eq!(started.envelope.stream.sequence, 2);
+}
+
+#[tokio::test]
+async fn event_append_failure_rolls_back_run_start_and_prior_event() {
+    let events = std::sync::Arc::new(MemoryEventStore::new());
+    let store = MemoryCollaborationStore::new().with_event_store(events.clone());
+    let mut run = test_run("sm-run-rollback", "group-1:abcdef12", 1);
+    run.status = StateMachineRunStatus::Pending;
+    store
+        .create_run(run, Vec::new())
+        .await
+        .expect("create pending run");
+
+    let error = store
+        .commit_eventful_transition(StateMachineEventfulTransition::StartRun {
+            run_id: "sm-run-rollback".to_string(),
+            started_at_ms: 2,
+            events: vec![
+                public_event("evt-rollback-created", "state_machine.run.created", None),
+                public_event(
+                    "evt-rollback-started",
+                    "state_machine.run.started",
+                    Some("missing-cause"),
+                ),
+            ],
+        })
+        .await
+        .expect_err("invalid Event batch must fail");
+    assert!(error.to_string().contains("causation"));
+
+    let stored = store
+        .get_run("sm-run-rollback")
+        .await
+        .expect("load run")
+        .expect("run");
+    assert_eq!(stored.status, StateMachineRunStatus::Pending);
+    assert!(
+        events
+            .get_event("evt-rollback-created", "test")
+            .await
+            .expect("load rolled-back Event")
+            .is_none()
+    );
+}
+
+fn public_event(
+    event_id: &str,
+    event_type: &str,
+    causation_event_id: Option<&str>,
+) -> AppendEventRecord {
+    AppendEventRecord {
+        event: NewEvent {
+            event_id: event_id.to_string(),
+            event_type: event_type.to_string(),
+            schema_version: EVENT_SCHEMA_VERSION_V1.to_string(),
+            producer: "bcs-collaboration-runtime".to_string(),
+            producer_key: event_id.to_string(),
+            occurred_at: "2026-08-19T00:00:00.000Z".to_string(),
+            subject: EventSubject {
+                subject_type: "state_machine.run".to_string(),
+                id: "sm-run-eventful".to_string(),
+            },
+            scope: EventScope {
+                group_id: Some("group-1".to_string()),
+                session_id: Some("group-1:abcdef12".to_string()),
+                run_id: Some("sm-run-eventful".to_string()),
+                ..EventScope::default()
+            },
+            stream_key: "state-machine-run:sm-run-eventful".to_string(),
+            actor: None,
+            correlation_id: None,
+            causation_event_id: causation_event_id.map(str::to_string),
+            trace_id: None,
+            data: Default::default(),
+        },
+        recorded_at: "2026-08-19T00:00:00.001Z".to_string(),
+        retention_until_ms: 2_000_000_000_000,
+        env: "test".to_string(),
+    }
 }
 
 fn test_run(run_id: &str, session_id: &str, created_at: u64) -> StateMachineRun {

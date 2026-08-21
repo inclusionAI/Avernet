@@ -307,7 +307,9 @@ async def create_bot_dima_workspace(
     ctx: RequestContext = Depends(get_request_context),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> DimaWorkspaceResponse:
-    """为 applicationCoding bot 创建 DIMA 工作空间（幂等）。
+    """为 Coding bot 创建 DIMA 工作空间（幂等）。
+
+    支持 legacy applicationCoding，或 active_engine 为 claude_code/aicoding 的 Bot。
 
     使用场景：bot 创建时 DIMA 调用失败，前端检测到 template_config 中
     缺少 ``dima_space_id``，可调用本接口手动触发创建。

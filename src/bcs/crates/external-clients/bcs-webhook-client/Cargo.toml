@@ -1,0 +1,25 @@
+[package]
+name = "bcs-webhook-client"
+description = "Secure single-attempt Webhook delivery adapter for BCS Events"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-route-security = { workspace = true }
+bcs-service-api = { workspace = true }
+futures = { workspace = true }
+httpdate = { workspace = true }
+reqwest = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+bcs-config-api = { workspace = true }
+bcs-test-support = { workspace = true }
+tokio = { workspace = true }

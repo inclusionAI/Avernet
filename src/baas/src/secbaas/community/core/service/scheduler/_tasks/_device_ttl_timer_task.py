@@ -27,6 +27,7 @@ from secbaas.community.core.service.health_check.sandbox import (
     SandboxDeviceRouter,
     TableType,
 )
+from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
 
 log = get_logger("core-scheduler")
@@ -38,11 +39,9 @@ class DeviceTtlTimerTaskConfig:
 
     enabled: bool = True
     lock_name: str = "device_ttl_timer_lock"
-    # 锁过期时间须 >= cron 间隔：full-drain 一轮可能超过5分钟，锁在持有期间
-    # 会被 DistributedLockService 自动续期，为避免进程卡住时锁永远不释放，
-    # 这里给一个宽松的租约（默认30分钟）。cron 间隔与 lock 到期解耦，避免
-    # “下一轮在上一轮还没跑完时就再次触发、锁又正好过期”导致并发重复扫描。
-    lock_expire_seconds: int = 1800
+    # 锁过期时间须 < cron 间隔：租约在下一轮触发前到期释放，允许其它机器
+    # 在轮次间抢到锁，避免同一实例每轮都重复占锁。
+    lock_expire_seconds: int = 1750
     cron_interval_seconds: int = 1800
     batch_size: int = 100
     dry_run: bool = False
@@ -51,6 +50,15 @@ class DeviceTtlTimerTaskConfig:
     max_page_concurrency: int = 10
     # 单页查询 DB 失败时的重试次数（指数退避），吸收瞬时 DB 抖动。
     query_retries: int = 3
+
+    def resolved_lock_name(self) -> str:
+        """返回按环境作用域的分布式锁名。
+
+        在配置的 ``lock_name`` 基准上追加环境后缀（如 ``_pre``/``_prod``），
+        使 pre 与 prod 使用不同的锁名，避免共享同一把分布式锁。
+        """
+        env = get_current_env()
+        return f"{self.lock_name}_{env}"
 
 
 @dataclass
@@ -181,19 +189,20 @@ class DeviceTtlTimerTask:
             log.info("[DeviceTtlTimer] Another run in progress, skipping cron trigger")
             return None
 
+        lock_name = self._config.resolved_lock_name()
         with self._lock_service.try_lock(
-            lock_name=self._config.lock_name,
+            lock_name=lock_name,
             expire_seconds=self._config.lock_expire_seconds,
             block=False,
         ) as lock:
             if not lock.acquired:
                 log.info(
                     "[DeviceTtlTimer] Lock %s not acquired, skipping",
-                    self._config.lock_name,
+                    lock_name,
                 )
                 return None
 
-            log.info("[DeviceTtlTimer] Lock %s acquired", self._config.lock_name)
+            log.info("[DeviceTtlTimer] Lock %s acquired", lock_name)
             self._running = True
             try:
                 return await self._run_once(run_uuid=run_uuid)

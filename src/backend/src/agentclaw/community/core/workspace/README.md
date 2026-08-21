@@ -16,6 +16,7 @@ consumes:
   - "AppConfig through the central ConfigProvider registry"
   - "WorkspaceConfig (typed dataclass from agentclaw.community.di.config)"
 internal_dependencies:
+  - agentclaw.community.core.bot_management.utils  # canonical code-repo URL extractor reused by the aicoding workspace-exclude derivation
   - agentclaw.community.core.config.provider
   - agentclaw.community.di
   - agentclaw.community.log

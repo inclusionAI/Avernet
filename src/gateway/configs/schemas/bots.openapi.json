@@ -23,6 +23,31 @@
         "title": "AddSpaceMemberRequest",
         "type": "object"
       },
+      "ApplyResponse": {
+        "description": "Result of an apply or rollback request.",
+        "properties": {
+          "err_msg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error message when success=false",
+            "title": "Err Msg"
+          },
+          "success": {
+            "default": true,
+            "description": "Whether the operation succeeded",
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "title": "ApplyResponse",
+        "type": "object"
+      },
       "ApprovalMode": {
         "description": "How much the bot may do without asking first.",
         "enum": [
@@ -379,7 +404,7 @@
                 "type": "null"
               }
             ],
-            "description": "Reserved for a human-readable note from the authorization service; currently always null.",
+            "description": "Human-readable note accompanying the status — for example, that the Passport is not ready yet while status is 'PENDING'. Null when there is nothing to add.",
             "title": "Message"
           },
           "status": {
@@ -392,6 +417,101 @@
           "status"
         ],
         "title": "BotAuthStatus",
+        "type": "object"
+      },
+      "BotAuthStatusPoll": {
+        "additionalProperties": false,
+        "description": "Poll-authorization request body: the attributes the bot was requested with.\n\nOn the 202 create flow the bot is only actually created by this poll, so\nre-supply the attributes the create request carried. An omitted field falls\nback to the same default create would have applied, so omitting one the\ncreate named can produce a bot that contradicts the original request —\nalways echo back what was sent. Every restriction create enforces is\nre-applied to the echoed values.",
+        "example": {
+          "bot_desc": "Summarizes weekly industry news.",
+          "bot_name": "research-assistant",
+          "bot_type": "personal",
+          "cluster_name": "ACRA",
+          "engine": "openclaw"
+        },
+        "properties": {
+          "bot_desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the description the bot was requested with.",
+            "title": "Bot Desc"
+          },
+          "bot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the name the bot was requested with.",
+            "title": "Bot Name"
+          },
+          "bot_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "personal",
+                  "service"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the bot type the bot was requested with; defaults to 'personal' when omitted.",
+            "title": "Bot Type"
+          },
+          "cluster_name": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ACRA",
+                  "ANDC"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the cluster the bot was requested with; validated against the engine exactly as on create.",
+            "title": "Cluster Name"
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the engine the bot was requested with. Required in practice: an omitted value falls back to the deployment default.",
+            "title": "Engine"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the business space the bot was requested with; omitted resolves the caller's current space, exactly as on create.",
+            "title": "Space Id"
+          }
+        },
+        "title": "BotAuthStatusPoll",
         "type": "object"
       },
       "BotCreate": {
@@ -2200,6 +2320,585 @@
         "title": "Deleted",
         "type": "object"
       },
+      "DiagnoseStartResponse": {
+        "description": "Acknowledgement that a diagnose scan has started.",
+        "properties": {
+          "bot_id": {
+            "description": "Bot ID",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "entity_id": {
+            "description": "Entity ID (owner/workNo)",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "message": {
+            "default": "Scan started",
+            "description": "Human-readable status message",
+            "title": "Message",
+            "type": "string"
+          },
+          "scan_id": {
+            "description": "Scan record ID, used to poll progress",
+            "title": "Scan Id",
+            "type": "integer"
+          },
+          "status": {
+            "default": "scanning",
+            "description": "Initial scan status",
+            "title": "Status",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "description": "Whether the scan was accepted",
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "scan_id",
+          "bot_id",
+          "entity_id"
+        ],
+        "title": "DiagnoseStartResponse",
+        "type": "object"
+      },
+      "DimHistoryRecordItem": {
+        "description": "Single scan record in dimension history list.",
+        "properties": {
+          "bot_id": {
+            "description": "Bot ID",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "bot_publish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bot publish ID",
+            "title": "Bot Publish Id"
+          },
+          "check_items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "检查项 JSON",
+            "title": "Check Items"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "诊断耗时（ms）",
+            "title": "Duration Ms"
+          },
+          "entity_id": {
+            "description": "Entity ID",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "环境标识",
+            "title": "Env"
+          },
+          "failed_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "失败原因",
+            "title": "Failed Reason"
+          },
+          "findings": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "漏洞明细 JSON",
+            "title": "Findings"
+          },
+          "findings_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "漏洞摘要 JSON",
+            "title": "Findings Summary"
+          },
+          "gmt_create": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "创建时间",
+            "title": "Gmt Create"
+          },
+          "gmt_modified": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最后修改时间",
+            "title": "Gmt Modified"
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "评分等级：excellent / good / warning / critical",
+            "title": "Grade"
+          },
+          "health_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "健康分（0-100）",
+            "title": "Health Score"
+          },
+          "id": {
+            "description": "记录 ID",
+            "title": "Id",
+            "type": "integer"
+          },
+          "patch_ids": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "补丁 ID 列表 JSON",
+            "title": "Patch Ids"
+          },
+          "patches": {
+            "description": "补丁详细信息列表",
+            "items": {
+              "$ref": "#/components/schemas/PatchItem"
+            },
+            "title": "Patches",
+            "type": "array"
+          },
+          "scan_dim": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "体检维度",
+            "title": "Scan Dim"
+          },
+          "scan_report_type": {
+            "default": "normal",
+            "description": "报告类型：normal 普通扫描报告 / daily 日报 / weekly 周报",
+            "title": "Scan Report Type",
+            "type": "string"
+          },
+          "scan_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "扫描类型",
+            "title": "Scan Type"
+          },
+          "status": {
+            "default": "completed",
+            "description": "状态",
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "触发来源",
+            "title": "Trigger Source"
+          }
+        },
+        "required": [
+          "id",
+          "bot_id",
+          "entity_id"
+        ],
+        "title": "DimHistoryRecordItem",
+        "type": "object"
+      },
+      "DimHistoryResponse": {
+        "description": "Response for dimension history list endpoint.",
+        "properties": {
+          "bot_id": {
+            "description": "Bot ID",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "bot_publish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bot publish ID filter",
+            "title": "Bot Publish Id"
+          },
+          "entity_id": {
+            "description": "Entity ID",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "items": {
+            "description": "历史记录列表",
+            "items": {
+              "$ref": "#/components/schemas/DimHistoryRecordItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "default": 1,
+            "description": "当前页码",
+            "title": "Page",
+            "type": "integer"
+          },
+          "scan_dim": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "体检维度筛选条件",
+            "title": "Scan Dim"
+          },
+          "size": {
+            "default": 20,
+            "description": "每页大小",
+            "title": "Size",
+            "type": "integer"
+          },
+          "success": {
+            "default": true,
+            "description": "Whether the query succeeded",
+            "title": "Success",
+            "type": "boolean"
+          },
+          "total": {
+            "default": 0,
+            "description": "总记录数",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bot_id",
+          "entity_id"
+        ],
+        "title": "DimHistoryResponse",
+        "type": "object"
+      },
+      "DimReportItem": {
+        "description": "Latest scan result for one dimension in the dim-report.",
+        "properties": {
+          "check_items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "检查项 JSON",
+            "title": "Check Items"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "诊断耗时（ms）",
+            "title": "Duration Ms"
+          },
+          "env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "环境标识",
+            "title": "Env"
+          },
+          "failed_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "失败原因",
+            "title": "Failed Reason"
+          },
+          "findings": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "漏洞明细 JSON",
+            "title": "Findings"
+          },
+          "findings_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "漏洞摘要 JSON",
+            "title": "Findings Summary"
+          },
+          "gmt_create": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "创建时间",
+            "title": "Gmt Create"
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "评分等级：excellent / good / warning / critical",
+            "title": "Grade"
+          },
+          "health_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "健康分（0-100）",
+            "title": "Health Score"
+          },
+          "patch_ids": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "补丁 ID 列表 JSON",
+            "title": "Patch Ids"
+          },
+          "patches": {
+            "description": "补丁详细信息列表",
+            "items": {
+              "$ref": "#/components/schemas/PatchItem"
+            },
+            "title": "Patches",
+            "type": "array"
+          },
+          "scan_dim": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "体检维度",
+            "title": "Scan Dim"
+          },
+          "scan_report_type": {
+            "default": "normal",
+            "description": "报告类型：normal 普通扫描报告 / daily 日报 / weekly 周报",
+            "title": "Scan Report Type",
+            "type": "string"
+          },
+          "scan_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "扫描类型",
+            "title": "Scan Type"
+          },
+          "status": {
+            "default": "completed",
+            "description": "状态",
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "触发来源",
+            "title": "Trigger Source"
+          }
+        },
+        "title": "DimReportItem",
+        "type": "object"
+      },
+      "DimReportResponse": {
+        "description": "Latest per-dimension scan report for a bot.",
+        "properties": {
+          "bot_id": {
+            "description": "Bot ID",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "bot_publish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bot publish ID filter",
+            "title": "Bot Publish Id"
+          },
+          "entity_id": {
+            "description": "Entity ID",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "items": {
+            "description": "Per-dimension report items",
+            "items": {
+              "$ref": "#/components/schemas/DimReportItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "description": "Whether the query succeeded",
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bot_id",
+          "entity_id"
+        ],
+        "title": "DimReportResponse",
+        "type": "object"
+      },
       "DingTalkChannelConfig": {
         "description": "Safe DingTalk config projection; never contains the client secret.",
         "properties": {
@@ -2978,6 +3677,48 @@
           "running"
         ],
         "title": "EngineStatus",
+        "type": "object"
+      },
+      "Envelope_ApplyResponse_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApplyResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[ApplyResponse]",
         "type": "object"
       },
       "Envelope_ApprovalState_": {
@@ -3818,6 +4559,132 @@
           "request_id"
         ],
         "title": "Envelope[Deleted]",
+        "type": "object"
+      },
+      "Envelope_DiagnoseStartResponse_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiagnoseStartResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[DiagnoseStartResponse]",
+        "type": "object"
+      },
+      "Envelope_DimHistoryResponse_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DimHistoryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[DimHistoryResponse]",
+        "type": "object"
+      },
+      "Envelope_DimReportResponse_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DimReportResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[DimReportResponse]",
         "type": "object"
       },
       "Envelope_EditLockRelease_": {
@@ -6172,6 +7039,48 @@
         "title": "Envelope[PersonalSpaceInitialized]",
         "type": "object"
       },
+      "Envelope_PreviewResponse_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/agentclaw__community__adapters__http__harness__schemas__PreviewResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[PreviewResponse]",
+        "type": "object"
+      },
       "Envelope_Preview_": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -8254,6 +9163,209 @@
           "type"
         ],
         "title": "FileEntry",
+        "type": "object"
+      },
+      "HarnessApplyRequest": {
+        "description": "Apply patches (or a patch record) to a bot.",
+        "properties": {
+          "bot_publish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bot publish ID",
+            "title": "Bot Publish Id"
+          },
+          "entity_id": {
+            "description": "Entity ID",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_type": {
+            "description": "Entity type",
+            "title": "Entity Type",
+            "type": "string"
+          },
+          "patch_id_list": {
+            "description": "ac_harness_patch IDs to apply",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Patch Id List",
+            "type": "array"
+          },
+          "record_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ac_harness_patch_record ID",
+            "title": "Record Id"
+          }
+        },
+        "required": [
+          "entity_type",
+          "entity_id"
+        ],
+        "title": "HarnessApplyRequest",
+        "type": "object"
+      },
+      "HarnessDiagnoseRequest": {
+        "description": "Start a diagnose scan for a bot.",
+        "properties": {
+          "bot_publish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bot publish ID",
+            "title": "Bot Publish Id"
+          },
+          "entity_id": {
+            "description": "Entity ID (owner/workNo)",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_type": {
+            "description": "Entity type, e.g. staff",
+            "title": "Entity Type",
+            "type": "string"
+          },
+          "layer": {
+            "default": "L1",
+            "description": "L1 / L2 / L3",
+            "title": "Layer",
+            "type": "string"
+          },
+          "scan_type": {
+            "default": "full",
+            "description": "full / verify",
+            "title": "Scan Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_type",
+          "entity_id"
+        ],
+        "title": "HarnessDiagnoseRequest",
+        "type": "object"
+      },
+      "HarnessPreviewRequest": {
+        "description": "Render a preview of applying patches, without persisting.",
+        "properties": {
+          "entity_id": {
+            "description": "Entity ID",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_type": {
+            "description": "Entity type",
+            "title": "Entity Type",
+            "type": "string"
+          },
+          "file_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target file type",
+            "title": "File Type"
+          },
+          "patch_id_list": {
+            "description": "Patch template IDs to preview",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Patch Id List",
+            "type": "array"
+          },
+          "scan_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Associated scan record ID",
+            "title": "Scan Id"
+          }
+        },
+        "required": [
+          "entity_type",
+          "entity_id",
+          "patch_id_list"
+        ],
+        "title": "HarnessPreviewRequest",
+        "type": "object"
+      },
+      "HarnessRollbackRequest": {
+        "description": "Roll back a previously applied patch.",
+        "properties": {
+          "bot_publish_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bot publish ID",
+            "title": "Bot Publish Id"
+          },
+          "entity_id": {
+            "description": "Entity ID",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_type": {
+            "description": "Entity type",
+            "title": "Entity Type",
+            "type": "string"
+          },
+          "file_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target file type",
+            "title": "File Type"
+          },
+          "patch_id": {
+            "description": "Patch ID from ac_harness_patch",
+            "title": "Patch Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entity_type",
+          "entity_id",
+          "patch_id"
+        ],
+        "title": "HarnessRollbackRequest",
         "type": "object"
       },
       "HealthCheckAccepted": {
@@ -10649,6 +11761,141 @@
         "title": "Passport",
         "type": "object"
       },
+      "PatchItem": {
+        "description": "Patch information for dim-report response.",
+        "properties": {
+          "advise": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "修复建议 JSON",
+            "title": "Advise"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "补丁描述",
+            "title": "Description"
+          },
+          "gmt_create": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "创建时间",
+            "title": "Gmt Create"
+          },
+          "is_advise": {
+            "default": false,
+            "description": "是否存在可展示修复建议",
+            "title": "Is Advise",
+            "type": "boolean"
+          },
+          "is_applied": {
+            "default": false,
+            "description": "是否已应用",
+            "title": "Is Applied",
+            "type": "boolean"
+          },
+          "is_patch": {
+            "default": false,
+            "description": "是否存在可执行修复 patch",
+            "title": "Is Patch",
+            "type": "boolean"
+          },
+          "layer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "层级 L1/L2/L3",
+            "title": "Layer"
+          },
+          "name": {
+            "description": "补丁名称",
+            "title": "Name",
+            "type": "string"
+          },
+          "operations": {
+            "description": "操作列表",
+            "items": {
+              "$ref": "#/components/schemas/PatchOperationItem"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "patch_id": {
+            "description": "补丁 ID",
+            "title": "Patch Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "patch_id",
+          "name"
+        ],
+        "title": "PatchItem",
+        "type": "object"
+      },
+      "PatchOperationItem": {
+        "description": "Operation definition within a patch template.\n\nFixed fields: op, target, template.\nCustom fields (e.g. src_md_content, dst_md_content) go into 'detail'.",
+        "properties": {
+          "detail": {
+            "additionalProperties": true,
+            "description": "Custom fields (e.g. src_md_content, dst_md_content)",
+            "title": "Detail",
+            "type": "object"
+          },
+          "op": {
+            "description": "Operation type: update_md / rewrite_section / ...",
+            "title": "Op",
+            "type": "string"
+          },
+          "target": {
+            "description": "Target file name",
+            "title": "Target",
+            "type": "string"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Instruction / template for this operation",
+            "title": "Template"
+          }
+        },
+        "required": [
+          "op",
+          "target"
+        ],
+        "title": "PatchOperationItem",
+        "type": "object"
+      },
       "PersonalSpaceInitialized": {
         "description": "Result of ensuring that the current user's personal Space exists.",
         "properties": {
@@ -10760,6 +12007,63 @@
           "content_type"
         ],
         "title": "Preview",
+        "type": "object"
+      },
+      "PreviewOperationItem": {
+        "description": "One operation in a preview result, with its rendered diff.",
+        "properties": {
+          "content": {
+            "description": "Full content text produced/replaced by this operation",
+            "title": "Content",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "description": "Custom fields (e.g. src_md_content, dst_md_content)",
+            "title": "Detail",
+            "type": "object"
+          },
+          "diff": {
+            "description": "Unified diff text for this operation",
+            "title": "Diff",
+            "type": "string"
+          },
+          "op": {
+            "description": "Operation type: update_md / rewrite_section / ...",
+            "title": "Op",
+            "type": "string"
+          },
+          "op_summary": {
+            "description": "One-line summary of this operation",
+            "title": "Op Summary",
+            "type": "string"
+          },
+          "target": {
+            "description": "Target file name",
+            "title": "Target",
+            "type": "string"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Instruction / template for this operation",
+            "title": "Template"
+          }
+        },
+        "required": [
+          "op",
+          "target",
+          "diff",
+          "op_summary",
+          "content"
+        ],
+        "title": "PreviewOperationItem",
         "type": "object"
       },
       "PublicBot": {
@@ -14130,6 +15434,59 @@
           "APPROVED",
           "REJECTED"
         ]
+      },
+      "agentclaw__community__adapters__http__harness__schemas__PreviewResponse": {
+        "description": "Rendered preview of applying a set of patches, without persisting.",
+        "properties": {
+          "bot_id": {
+            "description": "Bot ID",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "final_content": {
+            "description": "Full document content after all patches are applied",
+            "title": "Final Content",
+            "type": "string"
+          },
+          "operations": {
+            "description": "Per-operation diffs",
+            "items": {
+              "$ref": "#/components/schemas/PreviewOperationItem"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "risk_level": {
+            "description": "Overall risk level: low / medium / high",
+            "title": "Risk Level",
+            "type": "string"
+          },
+          "scan_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Associated scan ID",
+            "title": "Scan Id"
+          },
+          "success": {
+            "default": true,
+            "description": "Whether the preview rendered",
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bot_id",
+          "risk_level",
+          "final_content"
+        ],
+        "title": "PreviewResponse",
+        "type": "object"
       },
       "agentclaw__community__adapters__http__openapi_v1__bots__schemas__DataInitRequest": {
         "additionalProperties": false,
@@ -32992,7 +34349,8 @@
     },
     "/openapi/v1/bots/{bot_id}/auth-status": {
       "get": {
-        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nOn the 202 create flow the bot is only actually created here, so the\ncaller must re-supply the attributes it created with — the optional query\nparameters mirror the create body and are forwarded to completion. Omit\nthem and the bot is created with defaults that contradict what was\nrequested, so always echo back engine, cluster_name, bot_name, bot_desc\nand bot_type when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, and the\nsame personal/service restriction on bot_type.",
+        "deprecated": true,
+        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nOn the 202 create flow the bot is only actually created here, so the\ncaller must re-supply the attributes it created with — the optional query\nparameters mirror the create body and are forwarded to completion. Omit\nthem and the bot is created with defaults that contradict what was\nrequested, so always echo back engine, cluster_name, bot_name, bot_desc\nand bot_type when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, and the\nsame personal/service restriction on bot_type.\n\nWhile the authorization service has no status for the bot yet — the\nPassport is not ready — the poll answers PENDING with a message saying\nso, rather than an error: keep polling.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/auth-status instead.",
         "operationId": "get_bot_auth_status_openapi_v1_bots__bot_id__auth_status_get",
         "parameters": [
           {
@@ -33271,6 +34629,184 @@
           }
         },
         "summary": "Get Bot Auth Status",
+        "tags": [
+          "bots (deprecated)"
+        ]
+      },
+      "post": {
+        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nA POST because this operation is not a read: on the 202 create flow the\nbot is only actually created here, once authorization is granted. The\ncaller must re-supply the attributes it created with — the body fields\nmirror the create body and are forwarded to completion. Omit them and the\nbot is created with defaults that contradict what was requested, so\nalways echo back engine, cluster_name, bot_name, bot_desc, bot_type and\nspace_id when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, the same\npersonal/service restriction on bot_type, and the same business-space\nresolution.\n\nWhile the authorization service has no status for the bot yet — the\nPassport is not ready — the poll answers PENDING with a message saying\nso, rather than an error: keep polling.",
+        "operationId": "poll_bot_auth_status_openapi_v1_bots__bot_id__auth_status_post",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotAuthStatusPoll"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotAuthStatus_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "data": {
+                    "status": "REJECTED"
+                  },
+                  "message": "Authorization did not complete",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotAuthStatus_"
+                }
+              }
+            },
+            "description": "Authorization did not complete; `data.status` carries the terminal state (e.g. REJECTED, EXPIRED)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Poll Bot Auth Status",
         "tags": [
           "bots"
         ]
@@ -40623,6 +42159,1145 @@
         "summary": "Get Engine Status",
         "tags": [
           "engine"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/harness/apply": {
+      "post": {
+        "operationId": "harness_apply_openapi_v1_bots__bot_id__harness_apply_post",
+        "parameters": [
+          {
+            "description": "Bot ID",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HarnessApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ApplyResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Harness Apply",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/harness/diagnose": {
+      "post": {
+        "operationId": "harness_diagnose_openapi_v1_bots__bot_id__harness_diagnose_post",
+        "parameters": [
+          {
+            "description": "Bot ID",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HarnessDiagnoseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_DiagnoseStartResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Harness Diagnose",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/harness/dim-history": {
+      "get": {
+        "operationId": "harness_dim_history_openapi_v1_bots__bot_id__harness_dim_history_get",
+        "parameters": [
+          {
+            "description": "Bot ID",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Entity ID",
+            "in": "query",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "description": "Entity ID",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by scan dimension",
+            "in": "query",
+            "name": "scan_dim",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by scan dimension",
+              "title": "Scan Dim"
+            }
+          },
+          {
+            "description": "Bot publish ID, to read a specific publish version",
+            "in": "query",
+            "name": "bot_publish_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bot publish ID, to read a specific publish version",
+              "title": "Bot Publish Id"
+            }
+          },
+          {
+            "description": "Page number, 1-based",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Page number, 1-based",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Page size",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_DimHistoryResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Harness Dim History",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/harness/dim-report": {
+      "get": {
+        "operationId": "harness_dim_report_openapi_v1_bots__bot_id__harness_dim_report_get",
+        "parameters": [
+          {
+            "description": "Bot ID",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Entity ID",
+            "in": "query",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "description": "Entity ID",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bot publish ID, to read a specific publish version",
+            "in": "query",
+            "name": "bot_publish_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bot publish ID, to read a specific publish version",
+              "title": "Bot Publish Id"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_DimReportResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Harness Dim Report",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/harness/preview": {
+      "post": {
+        "operationId": "harness_preview_openapi_v1_bots__bot_id__harness_preview_post",
+        "parameters": [
+          {
+            "description": "Bot ID",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HarnessPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_PreviewResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Harness Preview",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/harness/rollback": {
+      "post": {
+        "operationId": "harness_rollback_openapi_v1_bots__bot_id__harness_rollback_post",
+        "parameters": [
+          {
+            "description": "Bot ID",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HarnessRollbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ApplyResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Harness Rollback",
+        "tags": [
+          "harness"
         ]
       }
     },

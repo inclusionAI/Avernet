@@ -8,6 +8,15 @@ use bcs_domain::{MessageOwnerFilter, MessagePage, MessageQuery, NewMessage, Pers
 
 use crate::types::ServiceResult;
 
+use super::AppendEventRecord;
+
+#[derive(Debug, Clone)]
+pub struct AppendMessageWithEvent {
+    pub message_id: String,
+    pub message: NewMessage,
+    pub event: AppendEventRecord,
+}
+
 /// Errors specific to message repository operations.
 #[derive(Debug, thiserror::Error)]
 pub enum MessageRepoError {
@@ -31,16 +40,20 @@ pub enum MessageRepoError {
 #[async_trait]
 pub trait MessageRepoPort: Send + Sync + 'static {
     /// Append a message to a session. Allocates `session_seq` atomically.
-    async fn append_message(
+    async fn append_message(&self, msg: NewMessage) -> Result<PersistedMessage, MessageRepoError>;
+
+    async fn append_message_with_event(
         &self,
-        msg: NewMessage,
-    ) -> Result<PersistedMessage, MessageRepoError>;
+        command: AppendMessageWithEvent,
+    ) -> Result<PersistedMessage, MessageRepoError> {
+        let _ = command;
+        Err(MessageRepoError::StorageError(
+            "Eventful message persistence is not configured".to_string(),
+        ))
+    }
 
     /// Query messages with cursor-based pagination and optional filters.
-    async fn query_messages(
-        &self,
-        query: MessageQuery,
-    ) -> Result<MessagePage, MessageRepoError>;
+    async fn query_messages(&self, query: MessageQuery) -> Result<MessagePage, MessageRepoError>;
 
     /// Get a single message by its global unique id.
     async fn get_message_by_id(

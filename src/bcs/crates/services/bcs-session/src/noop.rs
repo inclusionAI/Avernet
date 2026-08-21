@@ -6,12 +6,40 @@ use bcs_service_api::application::session::{
     CreateOrReactivateCommand, CreateOrReactivateOutcome, SessionManagementService,
     SessionUseCaseError,
 };
+use bcs_service_api::{
+    CreateSessionLaunch, ReactivateSessionLaunch, SessionLaunchError, SessionLaunchOutcome,
+    SessionLaunchService,
+};
 use bcs_service_api::{Participant, ParticipantMode, Session, SessionStatus};
 
 #[derive(Default)]
 pub struct NoopSessionManagementService;
 
+#[derive(Default)]
+pub struct NoopSessionLaunchService;
+
 const NOT_SUPPORTED: &str = "NoopSessionManagementService";
+
+#[async_trait]
+impl SessionLaunchService for NoopSessionLaunchService {
+    async fn create(
+        &self,
+        _command: CreateSessionLaunch,
+    ) -> Result<SessionLaunchOutcome, SessionLaunchError> {
+        Err(SessionLaunchError::InvalidRequest(
+            "NoopSessionLaunchService".into(),
+        ))
+    }
+
+    async fn reactivate(
+        &self,
+        _command: ReactivateSessionLaunch,
+    ) -> Result<SessionLaunchOutcome, SessionLaunchError> {
+        Err(SessionLaunchError::InvalidRequest(
+            "NoopSessionLaunchService".into(),
+        ))
+    }
+}
 
 #[async_trait]
 impl SessionManagementService for NoopSessionManagementService {

@@ -3,13 +3,19 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbTransactionStep, DbValue, db_get_column};
+use bcs_db_api::{
+    DbPlugin, DbSqlFlavor, DbStatement, DbTransactionParam, DbTransactionStep, DbValue,
+    db_get_column,
+};
+use bcs_event_store::EventAppendTransactionPlan;
 use tracing::{debug, info};
 
 use bcs_domain::{
     MessageOwnerFilter, MessagePage, MessageQuery, NewMessage, PersistedMessage, PersistedMessageStatus, SenderType,
 };
-use bcs_service_api::port::repo::{MessageRepoError, MessageRepoPort};
+use bcs_service_api::port::repo::{
+    AppendMessageWithEvent, MessageRepoError, MessageRepoPort,
+};
 use bcs_service_api::{ServiceError, ServiceResult};
 
 // ---------------------------------------------------------------------------
@@ -179,19 +185,52 @@ impl MessageRepoPort for MySqlMessageStore {
             }
         }
 
-        // Step 2: Atomic seq allocation via transaction
+        let sender_type_str = match msg.sender_type {
+            SenderType::Bot => "bot",
+            SenderType::Human => "human",
+            SenderType::System => "system",
+        };
+        let content_str = msg.content.to_string();
+
+        // Allocate the sequence and insert the logical message in one transaction.
         let seq_update = DbStatement::with_params(
-            "UPDATE bcs_group_sessions SET current_msg_seq = current_msg_seq + 1 WHERE session_id = ?",
-            vec![DbValue::from(msg.session_id.clone())],
+            "UPDATE bcs_group_sessions SET current_msg_seq = current_msg_seq + 1 \
+             WHERE env = ? AND session_id = ?",
+            vec![
+                DbValue::from(self.env.as_str()),
+                DbValue::from(msg.session_id.as_str()),
+            ],
         );
         let seq_select = DbStatement::with_params(
-            "SELECT current_msg_seq FROM bcs_group_sessions WHERE session_id = ?",
-            vec![DbValue::from(msg.session_id.clone())],
+            "SELECT current_msg_seq FROM bcs_group_sessions WHERE env = ? AND session_id = ?",
+            vec![
+                DbValue::from(self.env.as_str()),
+                DbValue::from(msg.session_id.as_str()),
+            ],
+        );
+        let insert_stmt = DbStatement::with_transaction_params(
+            INSERT_SQL,
+            vec![
+                DbTransactionParam::value(message_id.clone()),
+                DbTransactionParam::value(msg.group_id.as_str()),
+                DbTransactionParam::value(msg.session_id.as_str()),
+                DbTransactionParam::query_result(1, 0, "current_msg_seq"),
+                DbTransactionParam::value(self.env.as_str()),
+                DbTransactionParam::value(msg.sender_id.as_str()),
+                DbTransactionParam::value(sender_type_str),
+                DbTransactionParam::value(msg.message_type.as_str()),
+                DbTransactionParam::value(content_str),
+                DbTransactionParam::value(DbValue::from(msg.client_msg_id.as_deref())),
+                DbTransactionParam::value(DbValue::from(msg.owner_bot_id.as_deref())),
+                DbTransactionParam::value(msg.created_at),
+                DbTransactionParam::value(msg.run_id.as_str()),
+            ],
         );
 
         let steps: Vec<DbTransactionStep> = vec![
             DbTransactionStep::Execute(seq_update),
             DbTransactionStep::Query(seq_select),
+            DbTransactionStep::Execute(insert_stmt),
         ];
 
         let tx_results = self
@@ -214,38 +253,6 @@ impl MessageRepoPort for MySqlMessageStore {
             }
         };
 
-        // Step 3: INSERT the message
-        let sender_type_str = match msg.sender_type {
-            SenderType::Bot => "bot",
-            SenderType::Human => "human",
-            SenderType::System => "system",
-        };
-        let content_str = msg.content.to_string();
-
-        let insert_stmt = DbStatement::with_params(
-            INSERT_SQL,
-            vec![
-                DbValue::from(message_id.clone()),
-                DbValue::from(msg.group_id.clone()),
-                DbValue::from(msg.session_id.clone()),
-                DbValue::from(session_seq),
-                DbValue::from(self.env.clone()),
-                DbValue::from(msg.sender_id.clone()),
-                DbValue::from(sender_type_str),
-                DbValue::from(msg.message_type.clone()),
-                DbValue::from(content_str),
-                DbValue::from(msg.client_msg_id.clone()),
-                DbValue::from(msg.owner_bot_id.clone()),
-                DbValue::from(msg.created_at),
-                DbValue::from(msg.run_id.clone()),
-            ],
-        );
-
-        self.db
-            .execute(insert_stmt)
-            .await
-            .map_err(|e| MessageRepoError::StorageError(format!("insert: {}", e)))?;
-
         info!(
             session_id = %msg.session_id,
             message_id = %message_id,
@@ -256,6 +263,126 @@ impl MessageRepoPort for MySqlMessageStore {
 
         Ok(PersistedMessage {
             message_id,
+            group_id: msg.group_id,
+            session_id: msg.session_id,
+            session_seq,
+            sender_id: msg.sender_id,
+            sender_type: msg.sender_type,
+            message_type: msg.message_type,
+            content: msg.content,
+            client_msg_id: msg.client_msg_id,
+            owner_bot_id: msg.owner_bot_id,
+            status: PersistedMessageStatus::Normal,
+            created_at: msg.created_at,
+            run_id: msg.run_id,
+        })
+    }
+
+    async fn append_message_with_event(
+        &self,
+        command: AppendMessageWithEvent,
+    ) -> Result<PersistedMessage, MessageRepoError> {
+        let msg = command.message;
+        if command.event.event.subject.id != command.message_id
+            || command.event.event.scope.group_id.as_deref() != Some(msg.group_id.as_str())
+            || command.event.event.scope.session_id.as_deref() != Some(msg.session_id.as_str())
+        {
+            return Err(MessageRepoError::StorageError(
+                "message Event does not match the persisted logical message".to_string(),
+            ));
+        }
+        if let Some(client_msg_id) = msg.client_msg_id.as_deref() {
+            let sql = format!(
+                "SELECT {SELECT_COLS} FROM bcs_messages \
+                 WHERE env = ? AND group_id = ? AND session_id = ? \
+                   AND sender_id = ? AND client_msg_id = ? LIMIT 1"
+            );
+            let rows = self
+                .db
+                .query(DbStatement::with_params(
+                    sql,
+                    vec![
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(msg.group_id.as_str()),
+                        DbValue::from(msg.session_id.as_str()),
+                        DbValue::from(msg.sender_id.as_str()),
+                        DbValue::from(client_msg_id),
+                    ],
+                ))
+                .await
+                .map_err(|error| MessageRepoError::StorageError(error.to_string()))?;
+            if let Some(row) = rows.first() {
+                return row_to_message(row);
+            }
+        }
+
+        let sender_type = match msg.sender_type {
+            SenderType::Bot => "bot",
+            SenderType::Human => "human",
+            SenderType::System => "system",
+        };
+        let mut steps = vec![
+            DbTransactionStep::Execute(DbStatement::with_params(
+                "UPDATE bcs_group_sessions SET current_msg_seq = current_msg_seq + 1 \
+                 WHERE env = ? AND session_id = ?",
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(msg.session_id.as_str()),
+                ],
+            )),
+            DbTransactionStep::Query(DbStatement::with_params(
+                "SELECT current_msg_seq FROM bcs_group_sessions \
+                 WHERE env = ? AND session_id = ?",
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(msg.session_id.as_str()),
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+                INSERT_SQL,
+                vec![
+                    DbTransactionParam::value(command.message_id.as_str()),
+                    DbTransactionParam::value(msg.group_id.as_str()),
+                    DbTransactionParam::value(msg.session_id.as_str()),
+                    DbTransactionParam::query_result(1, 0, "current_msg_seq"),
+                    DbTransactionParam::value(self.env.as_str()),
+                    DbTransactionParam::value(msg.sender_id.as_str()),
+                    DbTransactionParam::value(sender_type),
+                    DbTransactionParam::value(msg.message_type.as_str()),
+                    DbTransactionParam::value(msg.content.to_string()),
+                    DbTransactionParam::value(DbValue::from(msg.client_msg_id.as_deref())),
+                    DbTransactionParam::value(DbValue::from(msg.owner_bot_id.as_deref())),
+                    DbTransactionParam::value(msg.created_at),
+                    DbTransactionParam::value(msg.run_id.as_str()),
+                ],
+            )),
+        ];
+        let event_plan = EventAppendTransactionPlan::build(
+            &command.event,
+            self.flavor,
+            steps.len(),
+        )
+        .map_err(|error| {
+            MessageRepoError::StorageError(format!("prepare message Event append: {error}"))
+        })?;
+        steps.extend(event_plan.steps);
+        let results = self
+            .db
+            .transaction(steps)
+            .await
+            .map_err(|error| MessageRepoError::StorageError(format!("transaction: {error}")))?;
+        let session_seq = match results.get(1) {
+            Some(bcs_db_api::DbTransactionStepResult::Rows(rows)) => {
+                let row = rows
+                    .first()
+                    .ok_or_else(|| MessageRepoError::SessionNotFound(msg.session_id.clone()))?;
+                db_get_column(row, "current_msg_seq")
+                    .map_err(|error| MessageRepoError::StorageError(error.to_string()))?
+            }
+            _ => return Err(MessageRepoError::SessionNotFound(msg.session_id.clone())),
+        };
+        Ok(PersistedMessage {
+            message_id: command.message_id,
             group_id: msg.group_id,
             session_id: msg.session_id,
             session_seq,
@@ -560,11 +687,17 @@ mod tests {
             &self,
             steps: Vec<DbTransactionStep>,
         ) -> DbResult<Vec<DbTransactionStepResult>> {
-            if steps.len() != 2 {
+            if steps.len() != 3 {
                 return Err(DbError::InvalidInput(format!(
                     "unexpected transaction steps: {}",
                     steps.len()
                 )));
+            }
+            let mut executed = self.executed.lock().await;
+            for step in &steps {
+                if let DbTransactionStep::Execute(statement) = step {
+                    executed.push(statement.clone());
+                }
             }
             let mut row = BTreeMap::new();
             row.insert("current_msg_seq".to_string(), DbValue::from(1_i64));
@@ -574,6 +707,10 @@ mod tests {
                     last_insert_id: None,
                 }),
                 DbTransactionStepResult::Rows(vec![DbRow::new(row)]),
+                DbTransactionStepResult::Executed(DbExecuteResult {
+                    affected_rows: 1,
+                    last_insert_id: None,
+                }),
             ])
         }
 
@@ -604,7 +741,10 @@ mod tests {
             .expect("append should succeed");
 
         let executed = db.executed.lock().await;
-        let insert = executed.first().expect("expected insert statement");
+        let insert = executed
+            .iter()
+            .find(|statement| statement.sql().contains("INSERT INTO bcs_messages"))
+            .expect("expected insert statement");
         assert_eq!(insert.params().get(9), Some(&DbValue::Null));
         assert_eq!(
             insert.params().get(10),

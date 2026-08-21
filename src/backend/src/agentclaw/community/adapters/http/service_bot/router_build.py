@@ -28,7 +28,7 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.bot_build_service import BotBuildServiceProtocol
 from agentclaw.community.core.bot_collaborator.interceptor import CollaboratorPermissionInterceptor, with_interceptors
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
+from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
 from agentclaw.community.core.service_bot.services.bot_build_service import (
     BotBuildServiceError,
     BotBuildMigrationError,
@@ -218,7 +218,7 @@ async def get_read_only_tree(
         ]
 
         # 3. 解析引擎 provider 与默认只读规则
-        engine_type = resolve_engine_for_bot(bot_id, owner_id, bot_repo=bot_repo)
+        engine_type = resolve_runtime_engine_for_bot(bot_id, owner_id, bot_repo=bot_repo)
         provider = registry.resolve(engine_type)
 
         base_path = provider.get_base_path()
@@ -344,7 +344,7 @@ async def get_bot_rsync_excludes(
     try:
 
         # 2. 解析引擎类型
-        engine_type = resolve_engine_for_bot(bot_id, owner_id, bot_repo=bot_repo)
+        engine_type = resolve_runtime_engine_for_bot(bot_id, owner_id, bot_repo=bot_repo)
 
         # 3. 通过引擎 provider 获取默认配置，避免在路由层硬编码具体引擎。
         provider = registry.resolve(engine_type)

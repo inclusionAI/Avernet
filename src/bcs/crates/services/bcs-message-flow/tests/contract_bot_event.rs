@@ -4654,6 +4654,8 @@ fn manager_worker_flow_with_provider_stream(
     ])))
 }
 
+const CONFIGURED_TASK_RUN_TIMEOUT_MS: u64 = 7_200_000;
+
 async fn manager_worker_flow_with_blocking_repo() -> (
     support::FlowTestSupport,
     Arc<BlockingMessageRepo>,
@@ -4680,6 +4682,7 @@ async fn manager_worker_flow_with_blocking_repo() -> (
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
     )
+    .with_provider_chat_run_timeout_ms(CONFIGURED_TASK_RUN_TIMEOUT_MS)
     .with_message_repo(repo.clone())
     .with_bot_run_context(run_context.clone());
     (support, repo, run_context, flow)
@@ -4829,6 +4832,7 @@ async fn manager_worker_task_dispatch_persists_dispatch_to_worker_history_after_
 async fn manager_worker_task_dispatch_records_context_before_history_persistence() {
     let (support, repo, run_context, flow) = manager_worker_flow_with_blocking_repo().await;
 
+    let before_dispatch_ms = bcs_protocol::now_ms();
     let handle = tokio::spawn(async move {
         flow.handle_task_dispatch(TaskDispatchCommand {
             driver_bot_id: "bot-manager".to_string(),
@@ -4847,6 +4851,7 @@ async fn manager_worker_task_dispatch_records_context_before_history_persistence
     let frames = support.bot_delivery.frames().await;
     let run_id = request_id(frames.first().expect("expected task.dispatch frame"));
     let context_before_append_finished = run_context.get_context(&run_id).await;
+    let after_context_ms = bcs_protocol::now_ms();
     repo.release_append();
     let outcome = handle
         .await
@@ -4859,6 +4864,14 @@ async fn manager_worker_task_dispatch_records_context_before_history_persistence
     assert_eq!(context.bot_id, "bot-worker");
     assert_eq!(context.group_id, "group-1");
     assert_eq!(context.bcs_session_id.as_deref(), Some("group-1:abcdef12"));
+    assert!(
+        context.deadline_ms
+            >= before_dispatch_ms.saturating_add(CONFIGURED_TASK_RUN_TIMEOUT_MS)
+    );
+    assert!(
+        context.deadline_ms
+            <= after_context_ms.saturating_add(CONFIGURED_TASK_RUN_TIMEOUT_MS)
+    );
     assert_eq!(repo.appended().await.len(), 1);
 }
 

@@ -3,6 +3,7 @@ pub mod bot_control_plane;
 pub mod channel;
 pub mod collaboration;
 pub mod collaboration_template;
+pub mod event;
 pub mod friend;
 pub mod group;
 pub mod message;
@@ -22,12 +23,15 @@ pub use channel::{
 pub use collaboration::{
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
     GroupRuntimeBindingRepoPort, MarkHumanNodeRunningCommand, StateMachineDefinitionRepoPort,
-    StateMachineRunRepoPort,
+    StateMachineEventfulTransition, StateMachineRunRepoPort,
 };
 pub use collaboration_template::{CollaborationTemplateEntry, CollaborationTemplateRepoPort};
+pub use event::*;
 pub use friend::{FriendRepoPort, FriendRequestRepoPort};
-pub use group::GroupRepoPort;
-pub use message::{MessageRepoError, MessageRepoPort};
+pub use group::{
+    CommitGroupEventfulMutation, FinalizeGroupProvisioning, GroupEventfulMutation, GroupRepoPort,
+};
+pub use message::{AppendMessageWithEvent, MessageRepoError, MessageRepoPort};
 pub use organization::{
     CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
     ListOrganizationsQuery, OrganizationCandidateReadPage, OrganizationCandidateReadPort,
@@ -40,6 +44,11 @@ pub use provider::{
     ProviderCredentialRepoPort, ProviderRepoPort,
 };
 pub use relation::RelationRepoPort;
-pub use session::{NewSessionParams, SessionRepoPort};
-pub use session_file::{NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort};
+pub use session::{
+    AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent,
+    NewSessionParams, RemoveSessionParticipantWithEvent, SessionRepoPort,
+};
+pub use session_file::{
+    NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort,
+};
 pub use user_identity::{UserIdentity, UserIdentityRepoPort};

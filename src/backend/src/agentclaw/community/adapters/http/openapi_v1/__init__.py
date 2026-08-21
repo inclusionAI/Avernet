@@ -201,6 +201,7 @@ from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
 from .engine_runtime.nodes import router as engine_nodes_router
 from .engine_runtime.sessions import router as engine_sessions_router
+from .harness import harness_router
 from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
@@ -285,6 +286,11 @@ _SUBGROUPS = [
     # creation/authorization pair remains human-only. Dependencies are declared
     # per route in the local router.
     local_router,
+    # Harness public surface: every route is `{bot_id}`-first under
+    # `/bots/{bot_id}/harness/...` and performs its own owner/collaborator
+    # check via `HarnessBotAccessDep`, so it joins the plain subgroups with
+    # only `_PUBLIC_AUTH` + the user-scoped error table.
+    harness_router,
 ]
 
 # These groups may address a shared Bot. ``OwnerIdDep`` performs the same grant

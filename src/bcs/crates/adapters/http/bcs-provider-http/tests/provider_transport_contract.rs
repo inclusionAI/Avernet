@@ -24,7 +24,6 @@ use bcs_service_api::{
     GroupCallbackOutcome, GroupHistoryBotRequestPort, MessageFlowService,
     ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
     ProviderRunTransport, ProviderTransportPreference, ServiceResult,
-    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
 };
@@ -38,7 +37,8 @@ async fn interaction_resolve_reuses_provider_route_and_expects_json_ack() {
         .with_state(captured.clone());
     let (webhook_url, server) = spawn_server(app).await;
     let target = provider_target_v2(webhook_url);
-    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests()
+        .with_chat_run_timeout_ms(42_000);
 
     let ack = transport
         .resolve_interaction(InteractionProviderCommand {
@@ -80,6 +80,57 @@ async fn interaction_resolve_reuses_provider_route_and_expects_json_ack() {
     assert_eq!(request.body["params"]["kind"], "exec");
     assert_eq!(request.body["params"]["idempotencyKey"], "idem-1");
     assert_eq!(request.body["params"]["decision"], "allow_once");
+    assert_eq!(request.body["timeout_ms"], 3_600_000);
+    server.abort();
+}
+
+#[tokio::test]
+async fn interaction_resolve_forwards_ask_user_header() {
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new()
+        .route("/webhook", post(capture_ack))
+        .with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+    let target = provider_target_v2(webhook_url);
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+
+    let ack = transport
+        .resolve_interaction(InteractionProviderCommand {
+            target,
+            provider_bypass_headers: Vec::new(),
+            bcs_run_id: "bcs-run-1".to_string(),
+            provider_run_id: "provider-run-1".to_string(),
+            bcs_session_id: "session-1".to_string(),
+            group_id: "group-1".to_string(),
+            bot_id: "bot-1".to_string(),
+            interaction_id: "interaction-ask-1".to_string(),
+            kind: InteractionKind::AskUser,
+            idempotency_key: "idem-ask-1".to_string(),
+            resolution: json!({
+                "action": "submit",
+                "answers": {
+                    "deploy_target": {
+                        "header": "Deployment environment",
+                        "question": "Where should this be deployed?",
+                        "values": ["staging"]
+                    }
+                }
+            }),
+        })
+        .await
+        .unwrap();
+
+    assert!(ack.ok);
+    let request = captured.lock().await.clone().unwrap();
+    assert_eq!(request.body["params"]["kind"], "ask_user");
+    assert_eq!(
+        request.body["params"]["answers"]["deploy_target"],
+        json!({
+            "header": "Deployment environment",
+            "question": "Where should this be deployed?",
+            "values": ["staging"]
+        })
+    );
     server.abort();
 }
 use serde_json::{Value, json};
@@ -342,7 +393,8 @@ async fn provider_delivery_posts_bearer_token_and_chat_send_body() {
         .with_state(captured.clone());
     let (webhook_url, server) = spawn_server(app).await;
 
-    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests()
+        .with_chat_run_timeout_ms(42_000);
     let result = transport
         .deliver(BotDeliveryCommand {
             target: provider_target(webhook_url),
@@ -701,7 +753,8 @@ async fn provider_delivery_falls_back_to_actor_id_for_sender_name() {
         .with_state(captured.clone());
     let (webhook_url, server) = spawn_server(app).await;
 
-    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests()
+        .with_chat_run_timeout_ms(7_200_000);
     let result = transport
         .deliver(BotDeliveryCommand {
             target: provider_target(webhook_url),
@@ -740,10 +793,7 @@ async fn provider_delivery_falls_back_to_actor_id_for_sender_name() {
     assert_eq!(request.body["from"]["kind"], "bot");
     assert_eq!(request.body["from"]["name"], "sender-bot-id");
     assert_eq!(request.body["from"]["actor_id"], "sender-bot-id");
-    assert_eq!(
-        request.body["timeout_ms"],
-        DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS
-    );
+    assert_eq!(request.body["timeout_ms"], 7_200_000);
 
     server.abort();
 }
@@ -903,7 +953,8 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
         .with_state(captured.clone());
     let (webhook_url, server) = spawn_server(app).await;
 
-    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests()
+        .with_chat_run_timeout_ms(42_000);
     let result = transport
         .deliver(BotDeliveryCommand {
             target: provider_target(webhook_url),
@@ -954,6 +1005,7 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
     assert_eq!(request.body["from"]["name"], "Sender Bot");
     assert_eq!(request.body["message"]["text"], "observe");
     assert_eq!(request.body["attachments"][0]["attachment_id"], "att-1");
+    assert_eq!(request.body["timeout_ms"], 3_600_000);
 
     server.abort();
 }
