@@ -296,7 +296,8 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         role TEXT NOT NULL,
         env TEXT NOT NULL,
         actor_kind TEXT NOT NULL DEFAULT 'bot',
-        mode TEXT NOT NULL DEFAULT 'auto'
+        mode TEXT NOT NULL DEFAULT 'auto',
+        tags_json TEXT DEFAULT NULL
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_participants_env_group_bot ON bcs_group_participants(env, group_id, bot_uuid)",
     "CREATE INDEX IF NOT EXISTS idx_participants_bot ON bcs_group_participants(bot_uuid)",
@@ -924,6 +925,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 11,
         name: "group_opening_message",
     },
+    SqliteMigration {
+        version: 12,
+        name: "group_participant_tags",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1219,6 +1224,7 @@ async fn apply_sqlite_migration_body(
         // without discarding any persisted Subscription configuration.
         10 => migrate_sqlite_eventing_plaintext_endpoint(db).await,
         11 => ensure_sqlite_group_opening_message_column(db).await,
+        12 => add_sqlite_group_participant_tags_schema(db).await,
         _ => Ok(()),
     }
 }
@@ -1276,6 +1282,19 @@ async fn migrate_sqlite_eventing_plaintext_endpoint(db: &dyn DbPlugin) -> DbResu
         )),
     ])
     .await?;
+    Ok(())
+}
+
+async fn add_sqlite_group_participant_tags_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    if table_exists(db, "bcs_group_participants").await? {
+        let columns = sqlite_table_columns(db, "bcs_group_participants").await?;
+        if !columns.iter().any(|column| column == "tags_json") {
+            db.execute(DbStatement::new(
+                "ALTER TABLE bcs_group_participants ADD COLUMN tags_json TEXT DEFAULT NULL",
+            ))
+            .await?;
+        }
+    }
     Ok(())
 }
 
@@ -1553,6 +1572,11 @@ mod tests {
                     11,
                     "group_opening_message".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    12,
+                    "group_participant_tags".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1565,7 +1589,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 11);
+        assert_eq!(report.pending_versions.len(), 12);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1602,6 +1626,8 @@ mod tests {
         );
         assert_eq!(report.pending_versions[10].version, 11);
         assert_eq!(report.pending_versions[10].name, "group_opening_message");
+        assert_eq!(report.pending_versions[11].version, 12);
+        assert_eq!(report.pending_versions[11].name, "group_participant_tags");
         Ok(())
     }
 
@@ -1653,6 +1679,11 @@ mod tests {
                     11,
                     "group_opening_message".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    12,
+                    "group_participant_tags".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1664,7 +1695,7 @@ mod tests {
         let db = LocalSqliteDbPlugin::new()?;
         run_sqlite_migrations(&db).await?;
         db.execute(DbStatement::new(
-            "DELETE FROM bcs_schema_migrations WHERE version = 11",
+            "DELETE FROM bcs_schema_migrations WHERE version >= 11",
         ))
         .await?;
         db.execute(DbStatement::new(
@@ -1680,7 +1711,7 @@ mod tests {
                 .iter()
                 .map(|migration| (migration.version, migration.name.as_str()))
                 .collect::<Vec<_>>(),
-            vec![(11, "group_opening_message")]
+            vec![(11, "group_opening_message"), (12, "group_participant_tags")]
         );
 
         run_sqlite_migrations(&db).await?;
@@ -1694,8 +1725,8 @@ mod tests {
         assert_eq!(
             migration_rows(&db).await?.last(),
             Some(&(
-                11,
-                "group_opening_message".to_string(),
+                12,
+                "group_participant_tags".to_string(),
                 "sqlite".to_string()
             ))
         );

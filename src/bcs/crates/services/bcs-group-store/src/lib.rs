@@ -564,6 +564,19 @@ impl MySqlGroupStore {
         })
     }
 
+    fn deserialize_participant_tags(json_str: Option<String>) -> Vec<String> {
+        let Some(json_str) = json_str.filter(|value| !value.is_empty()) else {
+            return Vec::new();
+        };
+        match serde_json::from_str::<Vec<String>>(&json_str) {
+            Ok(tags) => tags,
+            Err(error) => {
+                warn!(%error, "failed to deserialize participant tags; using empty list");
+                Vec::new()
+            }
+        }
+    }
+
     /// Load session from MySQL.
     async fn load_group_from_mysql(&self, group_id: &str) -> ServiceResult<Option<Group>> {
         // Task G.2 / migration 005: read group_kind + dm_pair_key from DB so
@@ -672,7 +685,7 @@ impl MySqlGroupStore {
         &self,
         group_id: &str,
     ) -> ServiceResult<Vec<Participant>> {
-        let sql = "SELECT bot_uuid, role, actor_kind, mode FROM bcs_group_participants \
+        let sql = "SELECT bot_uuid, role, actor_kind, mode, tags_json FROM bcs_group_participants \
              WHERE group_id = ? AND env = ?";
 
         let rows = self
@@ -704,6 +717,8 @@ impl MySqlGroupStore {
                     .map_err(|error| decode("actor_kind", error))?;
                 let mode_str: Option<String> =
                     db_get_column_opt(row, "mode").map_err(|error| decode("mode", error))?;
+                let tags_json: Option<String> = db_get_column_opt(row, "tags_json")
+                    .map_err(|error| decode("tags_json", error))?;
 
                 let (actor_kind, mode) = Self::normalize_kind_mode(
                     group_id,
@@ -720,6 +735,7 @@ impl MySqlGroupStore {
                     role: Self::str_to_role(&role_str),
                     actor_kind,
                     mode: Some(mode),
+                    tags: Self::deserialize_participant_tags(tags_json),
                 })
             })
             .collect()
@@ -737,7 +753,7 @@ impl MySqlGroupStore {
                     gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     {} AS created_ts, {} AS updated_ts, \
-                    gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
+                    gp.actor_kind, gp.mode, gp.tags_json, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
              FROM bcs_groups gs \
              LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ? \
              WHERE gs.env = ?",
@@ -873,6 +889,9 @@ impl MySqlGroupStore {
                         role: Self::str_to_role(&role_str),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Self::deserialize_participant_tags(
+                            db_get_column_opt(row, "tags_json").ok().flatten(),
+                        ),
                     });
                 }
             }
@@ -1053,19 +1072,22 @@ impl GroupRepoPort for MySqlGroupStore {
         };
         let g_version: i64 = group.version as i64;
         let g_record_status = group.record_status.clone();
-        // Build participant tuples: (bot_uuid, role_str, actor_kind_str, mode_str)
-        let g_participants: Vec<(String, &'static str, &'static str, &'static str)> = group
+        // Build participant tuples: (bot_uuid, role_str, actor_kind_str, mode_str, tags_json)
+        let g_participants: Vec<(String, &'static str, &'static str, &'static str, String)> = group
             .participants
             .iter()
             .map(|p| {
-                (
+                Ok((
                     p.bot_uuid.clone(),
                     Self::role_to_str(&p.role),
                     Self::actor_kind_to_str(p.actor_kind),
                     Self::mode_to_str(p.effective_mode()),
-                )
+                    serde_json::to_string(&p.tags).map_err(|error| {
+                        ServiceError::InternalError(format!("participant tags: {error}"))
+                    })?,
+                ))
             })
-            .collect();
+            .collect::<ServiceResult<Vec<_>>>()?;
 
         let g_visibility = group.visibility.clone();
 
@@ -1128,10 +1150,10 @@ impl GroupRepoPort for MySqlGroupStore {
 
         // 3. Insert new participants.
         // Always populate actor_kind + mode explicitly per Requirement 3.10#2 / 3.18#6.
-        for (bot_uuid, role_str, actor_kind_str, mode_str) in &g_participants {
+        for (bot_uuid, role_str, actor_kind_str, mode_str, tags_json) in &g_participants {
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-                    "INSERT INTO bcs_group_participants (group_id, bot_uuid, role, env, actor_kind, mode) \
-                     VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO bcs_group_participants (group_id, bot_uuid, role, env, actor_kind, mode, tags_json) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?)",
                     vec![
                         Value::from(g_id.as_str()),
                         Value::from(bot_uuid.as_str()),
@@ -1139,6 +1161,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         Value::from(env.as_str()),
                         Value::from(*actor_kind_str),
                         Value::from(*mode_str),
+                        Value::from(tags_json.as_str()),
                     ],
             )));
         }
@@ -1687,10 +1710,13 @@ impl GroupRepoPort for MySqlGroupStore {
         let role_str = Self::role_to_str(&participant.role);
         let actor_kind_str = Self::actor_kind_to_str(participant.actor_kind);
         let mode_str = Self::mode_to_str(participant.effective_mode());
+        let tags_json = serde_json::to_string(&participant.tags).map_err(|error| {
+            ServiceError::InternalError(format!("participant tags: {error}"))
+        })?;
         self.db.execute_with(
             &self.logical_db,
-            "INSERT INTO bcs_group_participants (group_id, bot_uuid, role, env, actor_kind, mode) \
-             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO bcs_group_participants (group_id, bot_uuid, role, env, actor_kind, mode, tags_json) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
             vec![
                 Value::from(id),
                 Value::from(participant.bot_uuid.as_str()),
@@ -1698,6 +1724,7 @@ impl GroupRepoPort for MySqlGroupStore {
                 Value::from(self.env.as_str()),
                 Value::from(actor_kind_str),
                 Value::from(mode_str),
+                Value::from(tags_json.as_str()),
             ],
         ).await
             .map_err(|e| {
@@ -2056,7 +2083,7 @@ impl GroupRepoPort for MySqlGroupStore {
                     gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     gs.created_ts, gs.updated_ts, \
-                    gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
+                    gp.actor_kind, gp.mode, gp.tags_json, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
              FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                           service_group_uuid, service_mode, service_spec, version, record_status, \
                           {} AS created_ts, {} AS updated_ts, \
@@ -2197,6 +2224,9 @@ impl GroupRepoPort for MySqlGroupStore {
                         role: Self::str_to_role(&role_str),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Self::deserialize_participant_tags(
+                            db_get_column_opt(row, "tags_json").ok().flatten(),
+                        ),
                     });
                 }
             }
@@ -2224,7 +2254,7 @@ impl GroupRepoPort for MySqlGroupStore {
                 gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                 gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                 {} AS created_ts, {} AS updated_ts, \
-                gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, \
+                gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, gp2.tags_json AS p_tags_json, \
                 gs.group_kind AS g_group_kind, gs.dm_pair_key AS g_dm_pair_key, gs.group_strategy, gs.visibility \
              FROM bcs_group_participants gp \
              JOIN bcs_groups gs ON gp.group_id = gs.group_id AND gs.env = ? \
@@ -2374,6 +2404,9 @@ impl GroupRepoPort for MySqlGroupStore {
                         role: Self::str_to_role(&p_role),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Self::deserialize_participant_tags(
+                            db_get_column_opt(row, "p_tags_json").ok().flatten(),
+                        ),
                     });
                 }
             }
@@ -2441,7 +2474,7 @@ impl GroupRepoPort for MySqlGroupStore {
                 gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                 gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                 {} AS created_ts, {} AS updated_ts, \
-                gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, \
+                gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, gp2.tags_json AS p_tags_json, \
                 gs.group_kind AS g_group_kind, gs.dm_pair_key AS g_dm_pair_key, gs.group_strategy, gs.visibility \
              FROM bcs_group_participants gp \
              JOIN bcs_groups gs ON gp.group_id = gs.group_id AND gs.env = ? \
@@ -2586,6 +2619,9 @@ impl GroupRepoPort for MySqlGroupStore {
                         role: Self::str_to_role(&p_role),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Self::deserialize_participant_tags(
+                            db_get_column_opt(row, "p_tags_json").ok().flatten(),
+                        ),
                     });
                 }
             }
@@ -2678,7 +2714,7 @@ impl GroupRepoPort for MySqlGroupStore {
                             gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                             gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                             gs.created_ts, gs.updated_ts, \
-                            gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
+                            gp.actor_kind, gp.mode, gp.tags_json, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
                      FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                                   service_group_uuid, service_mode, service_spec, version, record_status, \
                                   {} AS created_ts, {} AS updated_ts, \
@@ -2707,7 +2743,7 @@ impl GroupRepoPort for MySqlGroupStore {
                             gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                             gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                             gs.created_ts, gs.updated_ts, \
-                            gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
+                            gp.actor_kind, gp.mode, gp.tags_json, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
                      FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                                   service_group_uuid, service_mode, service_spec, version, record_status, \
                                   {} AS created_ts, {} AS updated_ts, \
@@ -2843,6 +2879,9 @@ impl GroupRepoPort for MySqlGroupStore {
                         role: Self::str_to_role(&role_str),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Self::deserialize_participant_tags(
+                            db_get_column_opt(row, "tags_json").ok().flatten(),
+                        ),
                     });
                 }
             }
@@ -2896,7 +2935,7 @@ impl GroupRepoPort for MySqlGroupStore {
                     gp2.bot_uuid, gp2.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     gs.created_ts, gs.updated_ts, \
-                    gp2.actor_kind, gp2.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
+                    gp2.actor_kind, gp2.mode, gp2.tags_json, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
              FROM (SELECT DISTINCT g.group_id, g.label, g.status, g.driver_bot, g.originator, g.routing_policy_json, g.context, \
                           g.service_group_uuid, g.service_mode, g.service_spec, g.version, g.record_status, \
                           {} AS created_ts, {} AS updated_ts, \
@@ -3038,6 +3077,9 @@ impl GroupRepoPort for MySqlGroupStore {
                         role: Self::str_to_role(&p_role),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Self::deserialize_participant_tags(
+                            db_get_column_opt(row, "tags_json").ok().flatten(),
+                        ),
                     });
                 }
             }
@@ -3447,7 +3489,7 @@ impl GroupRepoPort for MySqlGroupStore {
                     gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     gs.created_ts, gs.updated_ts, \
-                    gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
+                    gp.actor_kind, gp.mode, gp.tags_json, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
              FROM ({}) gs \
              LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
             inner_sql
@@ -3564,6 +3606,9 @@ impl GroupRepoPort for MySqlGroupStore {
                         role: Self::str_to_role(&role_str),
                         actor_kind,
                         mode: Some(mode),
+                        tags: Self::deserialize_participant_tags(
+                            db_get_column_opt(row, "tags_json").ok().flatten(),
+                        ),
                     });
                 }
             }
@@ -3820,6 +3865,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
                 mode: None,
+                tags: Vec::new(),
             },
             Participant {
                 bot_uuid: "bob".to_string(),
@@ -3828,6 +3874,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: ActorKind::Bot,
                 mode: None,
+                tags: Vec::new(),
             },
         ];
         let mut group = Group::new("loser-group", "alice", participants);

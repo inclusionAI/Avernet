@@ -391,6 +391,11 @@ CreateParticipant:
         - manager
         - worker
         - observer
+    tags:
+      type: array
+      items:
+        type: string
+      description: Provider routing tags scoped to this Group membership.
 
 AddGroupParticipantRequest:
   type: object

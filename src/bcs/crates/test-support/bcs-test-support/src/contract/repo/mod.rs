@@ -1420,12 +1420,14 @@ pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {
     assert!(repo.get("repo-contract-missing-group").await.is_none());
     assert_eq!(repo.count().await, 0);
 
+    let mut helper = Participant::bot("repo-helper", ParticipantRole::Consultant);
+    helper.tags = vec!["tenant-a".to_string(), "scene-review".to_string()];
     let mut group = Group::new(
         "repo-contract-group",
         "repo-driver",
         vec![
             Participant::bot("repo-driver", ParticipantRole::Driver),
-            Participant::bot("repo-helper", ParticipantRole::Consultant),
+            helper,
         ],
     );
     group.label = Some("initial label".to_string());
@@ -1445,12 +1447,20 @@ pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {
         .expect("group exists after upsert");
     assert_eq!(stored.label.as_deref(), Some("initial label"));
     assert_eq!(stored.participants.len(), 2);
+    assert_eq!(
+        stored
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == "repo-helper")
+            .expect("helper participant")
+            .tags,
+        vec!["tenant-a".to_string(), "scene-review".to_string()]
+    );
     assert_eq!(repo.count().await, 1);
 
-    repo.add_participant(
-        &group.id,
-        Participant::bot("repo-observer", ParticipantRole::Observer),
-    )
+    let mut observer = Participant::bot("repo-observer", ParticipantRole::Observer);
+    observer.tags = vec!["observer-tag".to_string()];
+    repo.add_participant(&group.id, observer)
     .await
     .expect("add participant");
     let stored = repo.get(&group.id).await.expect("group after add");
@@ -1459,6 +1469,15 @@ pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {
             .participants
             .iter()
             .any(|p| p.bot_uuid == "repo-observer")
+    );
+    assert_eq!(
+        stored
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == "repo-observer")
+            .expect("observer participant")
+            .tags,
+        vec!["observer-tag".to_string()]
     );
 
     repo.update_participant_mode(&group.id, "repo-helper", ParticipantMode::Muted)

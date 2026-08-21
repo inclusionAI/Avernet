@@ -507,6 +507,7 @@ fn participant_view(bot_uuid: &str) -> GroupParticipantView {
         role: "driver".to_string(),
         actor_kind: ActorKind::Bot,
         mode: None,
+        tags: Vec::new(),
     }
 }
 

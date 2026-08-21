@@ -105,6 +105,7 @@ fn group_detail() -> GroupDetail {
             name: None,
             role: ParticipantRole::Driver,
             mode: ParticipantMode::Auto,
+            tags: Vec::new(),
         }],
         driver_bot_uuid: "driver-bot".into(),
         collaboration: CollaborationConfiguration::Chat(ChatConfiguration {

@@ -340,6 +340,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
         role: ParticipantRole::Consultant,
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::Auto),
+        tags: Vec::new(),
     });
     let sessions = test_sessions();
     let session = sessions
@@ -540,6 +541,7 @@ async fn one_shot_result_publication_failure_marks_run_failed_instead_of_complet
         role: ParticipantRole::Consultant,
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::Auto),
+        tags: Vec::new(),
     });
     let sessions = test_sessions();
     let session = sessions
@@ -3586,6 +3588,7 @@ async fn start_run_rejects_multi_bot_slot_with_current_single_assignee_runtime()
         role: ParticipantRole::Consultant,
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::Auto),
+        tags: Vec::new(),
     });
     group.upsert(seeded_group).await.expect("seed group");
     let sessions = test_sessions();
@@ -4513,6 +4516,7 @@ fn test_group() -> Group {
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
+            tags: Vec::new(),
         }],
     )
 }
@@ -4532,6 +4536,7 @@ fn session_collaboration_group(strategy: GroupStrategy) -> Group {
                 },
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
+                tags: Vec::new(),
             },
             Participant {
                 bot_uuid: "worker-bot".to_string(),
@@ -4545,6 +4550,7 @@ fn session_collaboration_group(strategy: GroupStrategy) -> Group {
                 },
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
+                tags: Vec::new(),
             },
         ],
     );

@@ -2406,6 +2406,16 @@ async fn frame_for_target(
             .collect::<Vec<_>>();
         (!attachments.is_empty()).then_some(attachments)
     });
+    let provider_tags = if delivery_target.is_http_provider() {
+        group
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == target.bot_uuid)
+            .map(|participant| participant.tags.as_slice())
+            .unwrap_or(&[])
+    } else {
+        &[]
+    };
     match target.delivery_type {
         DeliveryType::Send => {
             if context_projection == ContextProjection::DirectBot {
@@ -2432,6 +2442,7 @@ async fn frame_for_target(
                 sender_display_name,
                 &decision.mentions,
                 &target.bot_uuid,
+                provider_tags,
                 &wire_attachments,
                 &cmd.thinking,
                 is_self,
