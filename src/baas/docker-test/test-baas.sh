@@ -37,7 +37,7 @@ export BAAS_PORT="${BAAS_PORT:-8888}"
 export ACK_SERVER="${ACK_SERVER:-https://ack-test.example.com}"
 export ACK_TOKEN="${ACK_TOKEN:-ack-test-token}"
 export DEFAULT_IMAGE="${DEFAULT_IMAGE:-openclaw:latest}"
-export DEPLOY_ENV="${DEPLOY_ENV:-ALI_YUN_ACK}"
+export DEPLOY_ENV="${DEPLOY_ENV:-prod}"
 
 # Host port mapped to baas (for the /health probe).
 HOST_PORT="${HOST_PORT:-18889}"

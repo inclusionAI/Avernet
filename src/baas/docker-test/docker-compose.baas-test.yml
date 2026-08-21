@@ -37,7 +37,7 @@ services:
       ACK_SERVER: "${ACK_SERVER:-https://ack-test.example.com}"
       ACK_TOKEN: "${ACK_TOKEN:-ack-test-token}"
       DEFAULT_IMAGE: "${DEFAULT_IMAGE:-openclaw:latest}"
-      DEPLOY_ENV: "${DEPLOY_ENV:-ALI_YUN_ACK}"
+      DEPLOY_ENV: "${DEPLOY_ENV:-prod}"
     ports:
       - "${HOST_PORT:-18889}:8888"
     depends_on:
