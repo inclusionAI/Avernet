@@ -73,6 +73,11 @@ class _Repository:
     def __init__(self) -> None:
         self.restore_calls = []
         self.set_active_calls = []
+        self.update_calls = []
+
+    def update_set(self, **kwargs):
+        self.update_calls.append(kwargs)
+        return {"id": kwargs["set_id"], "is_default": False}
 
     def set_active(self, **kwargs) -> SkillSetMutation:
         self.set_active_calls.append(kwargs)
@@ -168,6 +173,15 @@ class _UnsupportedBots(_Bots):
     def get_unique_by_id(self, bot_id: str) -> dict:
         bot = super().get_unique_by_id(bot_id)
         return {**bot, "bot_type": "desktop", "active_engine": "claude_code"}
+
+
+class _AicodingImageBots(_Bots):
+    def get_unique_by_id(self, bot_id: str) -> dict:
+        return {
+            **super().get_unique_by_id(bot_id),
+            "active_engine": "claude_code",
+            "template_type": "personalCoding",
+        }
 
 
 class _Runtime:
@@ -301,6 +315,20 @@ class _ResourceRepository(_Repository):
         return []
 
 
+class _DefaultResourceRepository(_ResourceRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.list_mcp_calls: list[dict] = []
+
+    def list_sets(self, **kwargs) -> list[dict]:
+        self.list_set_calls.append(kwargs)
+        return [{"id": "global-default", "is_default": True}]
+
+    def list_mcps(self, **kwargs):
+        self.list_mcp_calls.append(kwargs)
+        return [{"server_code": "visible-default-mcp"}]
+
+
 class _ResourceLegacyFactory:
     def create(self, **_kwargs):
         return _LegacySkillSetService()
@@ -420,10 +448,22 @@ class _TeclawRuntimeBots(_RuntimeBots):
 
 
 class _McpInstallations:
+    def __init__(self) -> None:
+        self.materialize_calls: list[dict] = []
+
+    def ensure_active_skillset_installations(self, **kwargs) -> int:
+        self.materialize_calls.append(kwargs)
+        return 0
+
     def list_installed_mcps(self, *, bot_id: str, owner_id: str) -> set[str]:
         assert bot_id == "bot-1"
         assert owner_id == "true-owner"
         return {"mcp.weather"}
+
+
+class _FailingMaterializationRepository(_McpInstallations):
+    def ensure_active_skillset_installations(self, **_kwargs) -> int:
+        raise RuntimeError("installation persistence unavailable")
 
 
 class _RuntimeSkills:
@@ -734,9 +774,10 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
         {
             "bot_id": "bot-1",
             "owner_id": "true-owner",
-            "set_id": "set-1",
-            "active": True,
-            "engine_type": "openclaw",
+                "set_id": "set-1",
+                "active": True,
+                "engine_type": "openclaw",
+                "default_engine_types": ("openclaw",),
         }
     ]
 
@@ -785,11 +826,109 @@ def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
     ) == []
     assert repository.list_set_calls == [
         {
-            "bot_id": "bot-1",
-            "owner_id": "true-owner",
-            "engine_type": "openclaw",
+                "bot_id": "bot-1",
+                "owner_id": "true-owner",
+                "engine_type": "openclaw",
+                "default_engine_types": ("openclaw",),
         }
     ]
+
+
+def test_list_sets_uses_aicoding_default_then_claude_code_fallback_for_coding_image():
+    repository = _ResourceRepository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_AicodingImageBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=_ResourceLegacyFactory(),
+        passport=object(),
+        authorization=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    assert service.list_sets(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner"
+    ) == []
+    assert repository.list_set_calls == [{
+        "bot_id": "bot-1",
+        "owner_id": "true-owner",
+        "engine_type": "claude_code",
+        "default_engine_types": ("aicoding", "claude_code"),
+    }]
+
+
+def test_update_set_uses_runtime_default_candidates_for_coding_image():
+    repository = _Repository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_AicodingImageBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    service.update_set(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="default-id",
+        name=None,
+        description="ignored by the repository fake",
+    )
+
+    assert repository.update_calls == [{
+        "bot_id": "bot-1",
+        "owner_id": "true-owner",
+        "set_id": "default-id",
+        "name": None,
+        "description": "ignored by the repository fake",
+        "engine_type": "claude_code",
+        "default_engine_types": ("aicoding", "claude_code"),
+    }]
+
+
+def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_scope():
+    repository = _DefaultResourceRepository()
+    authorization = _Collaborators()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=_ResourceLegacyFactory(),
+        passport=object(),
+        authorization=authorization,
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    result = service.resources(
+        bot_id="bot-1", owner_id="true-owner", user_id="collaborator"
+    )
+
+    assert result[0]["mcps"] == [{"server_code": "visible-default-mcp"}]
+    assert authorization.calls == [{
+        "bot_id": "bot-1", "owner_id": "true-owner", "actor_id": "collaborator"
+    }]
+    assert repository.list_mcp_calls == [{
+        "bot_id": "bot-1",
+        "owner_id": "true-owner",
+            "set_id": "global-default",
+            "engine_type": "openclaw",
+            "default_engine_types": ("openclaw",),
+    }]
 
 
 @pytest.mark.asyncio
@@ -849,9 +988,10 @@ async def test_historical_bot_skill_set_deactivate_uses_cleanup_projection():
         {
             "bot_id": "bot-1",
             "owner_id": "true-owner",
-            "set_id": "set-1",
-            "active": False,
-            "engine_type": "claude_code",
+                "set_id": "set-1",
+                "active": False,
+                "engine_type": "claude_code",
+                "default_engine_types": ("claude_code",),
         }
     ]
     assert runtime.cleanup_calls == [{"bot_id": "bot-1", "owner_id": "true-owner"}]
@@ -1062,6 +1202,46 @@ async def test_mcp_direct_activation_denies_before_writing_desired_state():
             server_code="mcp.weather",
         )
     assert repository.direct_calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_reconcile_materializes_active_ordinary_skillset_members_first():
+    repository = _McpInstallations()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=repository,
+        pool_skills=_RuntimeSkills(),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+    assert repository.materialize_calls == [
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "engine_type": "openclaw",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_reconcile_fails_before_runtime_projection_when_materialization_fails():
+    runtime = BotRuntimeProjectionReconciler(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=_FailingMaterializationRepository(),
+        pool_skills=_RuntimeSkills(),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    with pytest.raises(RuntimeError, match="installation persistence unavailable"):
+        await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
 
 
 @pytest.mark.asyncio

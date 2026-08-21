@@ -128,6 +128,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
     BotCapabilityMutationGuard,
 )
+from agentclaw.community.core.skill_center.services.active_skillset_installation_materializer import (
+    ActiveSkillSetInstallationMaterializer,
+)
 from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
     BotRuntimeProjectionReconciler,
 )
@@ -318,6 +321,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         binder.bind(
             SkillSetControlPlaneRepositoryProtocol,
             to=SkillSetControlPlaneRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            ActiveSkillSetInstallationMaterializer,
+            to=ActiveSkillSetInstallationMaterializer,
             scope=singleton,
         )
         binder.bind(

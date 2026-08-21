@@ -20,6 +20,8 @@ from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderBizType,
     WorkOrderDetail,
+    APPROVAL_EVENT_TYPES,
+    EVENT_CATEGORIES,
     WorkOrderEventType,
     WorkOrderItemType,
     WorkOrderNotificationDetail,
@@ -417,4 +419,20 @@ def test_notification_service_delegates_and_maps_missing_records() -> None:
     )
     repository.mark_all_notifications_read.assert_called_once_with(
         recipient_user_id="owner-1", env="dev"
+    )
+
+
+def test_event_categories_include_all_application_events():
+    assert APPROVAL_EVENT_TYPES == frozenset(
+        {
+            WorkOrderEventType.SPACE_JOIN_APPLIED,
+            WorkOrderEventType.BOT_COLLABORATOR_APPLIED,
+            WorkOrderEventType.SKILL_COLLABORATOR_APPLIED,
+            WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED,
+            WorkOrderEventType.BOT2BOT_FRIEND_APPLIED,
+        }
+    )
+    assert all(
+        EVENT_CATEGORIES[event_type] is NotificationCategory.APPROVAL
+        for event_type in APPROVAL_EVENT_TYPES
     )

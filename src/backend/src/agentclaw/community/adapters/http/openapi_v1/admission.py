@@ -51,7 +51,6 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-
 class AdmissionMode(StrEnum):
     """How an operation treats a caller that names no end user.
 
@@ -685,8 +684,11 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/spaces/{space_id}/join-requests",
     ): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/market/skill-center/tags"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/work-orders"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/work-orders/{work_order_id}"): AdmissionMode.USER_GATED,
+    ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/approval"): AdmissionMode.USER_GATED,
     (
         "POST",
         "/openapi/v1/bots/work-orders/{work_order_id}/approve",

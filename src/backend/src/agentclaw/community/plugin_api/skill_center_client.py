@@ -2,7 +2,7 @@
 
 对接 SkillCenter 的核心接口：
 - POST /api/v1/skills/upload/publish   （上传发布）
-- GET  /api/v1/skills/upload/status/{skillCode} （查询状态）
+- GET  /skillcenter/api/v1/skills/upload/status/{skillCode} （查询状态）
 - GET  /api/v1/skills/{skillCode}/versions      （版本列表）
 - GET  /api/v1/skills/market/search             （市场搜索）
 - GET  /api/v1/skills/market/tags               （市场标签）
@@ -59,6 +59,10 @@ class SkillCenterTeamQueryResult:
 
 class SkillCenterMarketSearchError(RuntimeError):
     """Raised when Skill Center market search fails or returns invalid data."""
+
+
+class SkillCenterPublishStatusError(RuntimeError):
+    """Raised when Skill Center publish-status lookup fails or is malformed."""
 
 
 @dataclass(frozen=True)
@@ -133,8 +137,13 @@ class SkillCenterClient(Plugin, Protocol):
 
         Args:
             skill_code: 技能编码（userProvidedSkillId）。
+        The implementation calls ``GET /skillcenter/api/v1/skills/upload/status/{skillCode}``
+        and injects ``code``/``source`` from deployment configuration.
+
         Returns:
-            SkillCenter 响应 dict，含 data.status / isCompleted / isSuccess 等。
+            SkillCenter response envelope containing ``data`` with the publish
+            status fields. Upstream failures or malformed responses raise
+            :class:`SkillCenterPublishStatusError`.
         """
         ...
 

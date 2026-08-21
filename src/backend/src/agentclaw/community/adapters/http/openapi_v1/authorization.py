@@ -441,6 +441,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("tenant-identical marketplace"),
     ("POST", "/openapi/v1/bots/market/skill-center/skills"):
         NoCheck("tenant-identical marketplace"),
+    ("GET", "/openapi/v1/bots/market/skill-center/tags"):
+        NoCheck("tenant-identical marketplace"),
     ("POST", "/openapi/v1/bots/market/skills"): NoCheck("tenant-identical marketplace"),
     ("GET", "/openapi/v1/bots/mcp/servers"):
         NoCheck("tenant-identical MCP catalogue and per-caller config"),
@@ -462,6 +464,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the shared skill repository, owned by no bot"),
     ("GET", "/openapi/v1/bots/skills/repository/{skill_id}"):
         NoCheck("the shared skill repository, owned by no bot"),
+    ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"):
+        NoCheck("Skill Center publish status, keyed by skill code not by bot"),
     ("GET", "/openapi/v1/bots/spaces"):
         NoCheck("Space membership, adjudicated by the Space service"),
     ("POST", "/openapi/v1/bots/spaces/create"):
@@ -499,6 +503,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/work-orders"):
         NoCheck("the named user's own work orders and notifications"),
     ("GET", "/openapi/v1/bots/work-orders/{work_order_id}"):
+        NoCheck("the named user's own work orders and notifications"),
+    ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/approval"):
         NoCheck("the named user's own work orders and notifications"),
     ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/approve"):
         NoCheck("the named user's own work orders and notifications"),

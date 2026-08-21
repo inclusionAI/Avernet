@@ -144,6 +144,10 @@ fn build_api_routes() -> Router<HttpAppState> {
                 .post(routes::providers::register_provider_bot),
         )
         .route(
+            "/providers/{provider_id}/bots/by-task-modes",
+            get(routes::providers::list_provider_bots_by_task_modes),
+        )
+        .route(
             "/providers/{provider_id}/bots/{bot_uuid}",
             delete(routes::providers::delete_provider_bot),
         )

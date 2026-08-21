@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
@@ -33,7 +34,10 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     WorkOrderListItem,
     WorkOrderQueryType,
     WorkOrderReviewRequest,
+    WorkOrderApprovalRequest,
+    WorkOrderDecision,
     WorkOrderReviewResponse,
+    WorkOrderLegacyReviewResponse,
 )
 from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
@@ -66,6 +70,45 @@ def _require_user_delegation(caller: ActingCaller) -> str:
     return caller.user_id
 
 
+def _approval_display(work_order) -> tuple[str, str | None]:
+    """Return display copy for an approval item without a recipient notice.
+
+    A work order initiated by the current user has no notification row for
+    that user: approval notifications belong to the approvers.  Keep the
+    notification identifier/category nullable, but still provide the same
+    display copy that the frontend receives for notification items.
+
+    Business modules provide display copy in ``biz_data``.  The shared
+    adapter does not maintain a business-type-to-copy enum, so new business
+    types can define their own wording without changing this endpoint.
+    """
+    data: dict[str, object] = {}
+    if work_order.biz_data:
+        try:
+            parsed = json.loads(work_order.biz_data)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            data = parsed
+
+    status = work_order.status.value
+    display_title = data.get("display_title")
+    display_content = data.get("display_content")
+    if isinstance(display_title, dict):
+        display_title = display_title.get(status)
+    if isinstance(display_content, dict):
+        display_content = display_content.get(status)
+    if isinstance(display_title, str) and display_title:
+        return display_title, display_content if isinstance(
+            display_content, str
+        ) else None
+
+    # Compatibility fallback for work orders created before display copy was
+    # included in biz_data.  New business types must provide their own copy
+    # through biz_data rather than being added to this shared adapter.
+    return work_order.biz_type, work_order.apply_reason
+
+
 def _list_item(item: DomainListItem) -> WorkOrderListItem:
     work_order = item.work_order
     notification = item.notification
@@ -80,6 +123,10 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         if category is not None
         else WorkOrderItemType.APPROVAL
     )
+    title = notification.title if notification is not None else None
+    content = notification.content if notification is not None else None
+    if notification is None:
+        title, content = _approval_display(work_order)
     return WorkOrderListItem(
         item_id=(
             f"NOTIFICATION_{notification.id}"
@@ -102,8 +149,8 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
             notification.recipient_user_id if notification is not None else None
         ),
         event_type=notification.event_type if notification is not None else None,
-        title=notification.title if notification is not None else None,
-        content=notification.content if notification is not None else None,
+        title=title,
+        content=content,
         status=work_order.status,
         is_read=notification.is_read if notification is not None else None,
         read_at=notification.read_at if notification is not None else None,
@@ -192,7 +239,9 @@ async def get_work_order(
             work_order_id=work_order.id,
             work_order_no=work_order.work_order_no,
             biz_type=work_order.biz_type,
-            biz_id=detail.space_id,
+            biz_id=detail.space_id
+            if work_order.biz_type == "SPACE_JOIN"
+            else work_order.biz_id,
             event_type=detail.event_type,
             title=detail.title,
             content=WorkOrderDetailContent(
@@ -206,6 +255,7 @@ async def get_work_order(
             reviewer_user_id=work_order.reviewer_user_id,
             review_remark=work_order.review_remark,
             reviewed_at=work_order.reviewed_at,
+            biz_data=work_order.biz_data,
             can_approve=detail.can_approve,
         ),
         request,
@@ -216,6 +266,17 @@ def _review_response(result) -> WorkOrderReviewResponse:
     return WorkOrderReviewResponse(
         work_order_id=result.work_order_id,
         status=result.status,
+        decision=result.decision,
+        reviewer_user_id=result.reviewer_user_id,
+        review_remark=result.review_remark,
+        reviewed_at=result.reviewed_at,
+    )
+
+
+def _legacy_review_response(result) -> WorkOrderLegacyReviewResponse:
+    return WorkOrderLegacyReviewResponse(
+        work_order_id=result.work_order_id,
+        status=result.status,
         reviewer_user_id=result.reviewer_user_id,
         review_remark=result.review_remark,
         reviewed_at=result.reviewed_at,
@@ -223,8 +284,30 @@ def _review_response(result) -> WorkOrderReviewResponse:
 
 
 @router.post(
-    "/openapi/v1/bots/work-orders/{work_order_id}/approve",
+    "/openapi/v1/bots/work-orders/{work_order_id}/approval",
     response_model=Envelope[WorkOrderReviewResponse],
+)
+@envelope_errors
+async def process_work_order_approval(
+    work_order_id: PositiveIdPath,
+    body: WorkOrderApprovalRequest,
+    request: Request,
+    caller: ActingCallerDep,
+    service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
+) -> Envelope[WorkOrderReviewResponse]:
+    actor_id = _require_user_delegation(caller)
+    result = service.process_approval(
+        work_order_id=work_order_id,
+        actor_id=actor_id,
+        decision=WorkOrderDecision(body.decision),
+        review_remark=body.review_remark,
+    )
+    return envelope(_review_response(result), request)
+
+
+@router.post(
+    "/openapi/v1/bots/work-orders/{work_order_id}/approve",
+    response_model=Envelope[WorkOrderLegacyReviewResponse],
     dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
@@ -236,16 +319,14 @@ async def approve_work_order(
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderReviewResponse]:
     result = service.approve(
-        work_order_id=work_order_id,
-        actor_id=user_id,
-        review_remark=body.review_remark,
+        work_order_id=work_order_id, actor_id=user_id, review_remark=body.review_remark
     )
-    return envelope(_review_response(result), request)
+    return envelope(_legacy_review_response(result), request)
 
 
 @router.post(
     "/openapi/v1/bots/work-orders/{work_order_id}/reject",
-    response_model=Envelope[WorkOrderReviewResponse],
+    response_model=Envelope[WorkOrderLegacyReviewResponse],
     dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
@@ -257,11 +338,9 @@ async def reject_work_order(
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderReviewResponse]:
     result = service.reject(
-        work_order_id=work_order_id,
-        actor_id=user_id,
-        review_remark=body.review_remark,
+        work_order_id=work_order_id, actor_id=user_id, review_remark=body.review_remark
     )
-    return envelope(_review_response(result), request)
+    return envelope(_legacy_review_response(result), request)
 
 
 @router.get(

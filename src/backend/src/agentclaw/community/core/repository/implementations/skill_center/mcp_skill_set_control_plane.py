@@ -7,6 +7,9 @@ from agentclaw.community.core.models.mcp import (
     SkillSetMCPServer,
 )
 from agentclaw.community.core.models.skill import SkillSet
+from agentclaw.community.core.repository.implementations.skill_center.default_skillset_projection import (
+    excluded_mcp_codes,
+)
 from agentclaw.community.core.repository.skill_set_control_plane_types import (
     SkillSetMutation,
 )
@@ -25,24 +28,45 @@ class McpSkillSetControlPlaneCommands:
     prevents the SkillSet repository from growing into a mixed resource store.
     """
 
-    def list_mcps(self, *, bot_id: str, set_id: str, engine_type: str | None = None) -> list[dict]:
+    def list_mcps(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        set_id: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> list[dict]:
         with self._db.orm_session() as session:
-            row = self._set(session, bot_id=bot_id, set_id=set_id, engine_type=engine_type)
+            row = self._set(
+                session, bot_id=bot_id, owner_id=owner_id, set_id=set_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
             rows = (
                 self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer)
                 .filter(SkillSetMCPServer.skill_set_id == row.id)
                 .order_by(SkillSetMCPServer.server_code)
                 .all()
             )
+            if row.is_default:
+                excluded = excluded_mcp_codes(
+                    session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+                )
+                rows = [item for item in rows if item.server_code not in excluded]
             return [
                 {"id": str(item.id), "server_code": item.server_code, "name": item.name,
                  "description": item.description, "icon": item.icon}
                 for item in rows
             ]
 
-    def add_mcp(self, *, bot_id: str, owner_id: str, set_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
+    def add_mcp(
+        self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
-            row = self._set(session, bot_id=bot_id, set_id=set_id, engine_type=engine_type, locked=True)
+            row = self._set(session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type, default_engine_types=default_engine_types, locked=True)
             self._ordinary(row)
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             current = (
@@ -59,6 +83,7 @@ class McpSkillSetControlPlaneCommands:
                 .join(SkillSetMCPServer, SkillSetMCPServer.skill_set_id == SkillSet.id)
                 .filter(
                     SkillSet.bolt_id == bot_id,
+                    SkillSet.user_id == owner_id,
                     SkillSet.is_default.is_(False),
                     SkillSetMCPServer.server_code == server_code,
                 )
@@ -79,9 +104,13 @@ class McpSkillSetControlPlaneCommands:
             session.flush()
             return SkillSetMutation(self._as_item(row), True, old)
 
-    def remove_mcp(self, *, bot_id: str, owner_id: str, set_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
+    def remove_mcp(
+        self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
-            row = self._set(session, bot_id=bot_id, set_id=set_id, engine_type=engine_type, locked=True)
+            row = self._set(session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type, default_engine_types=default_engine_types, locked=True)
             self._ordinary(row)
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             membership = (
