@@ -247,12 +247,13 @@ async def process_work_order_approval(
     work_order_id: PositiveIdPath,
     body: WorkOrderApprovalRequest,
     request: Request,
-    user_id: UserIdDep,
+    caller: ActingCallerDep,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderReviewResponse]:
+    actor_id = _require_user_delegation(caller)
     result = service.process_approval(
         work_order_id=work_order_id,
-        actor_id=user_id,
+        actor_id=actor_id,
         decision=WorkOrderDecision(body.decision),
         review_remark=body.review_remark,
     )

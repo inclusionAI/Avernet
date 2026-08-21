@@ -135,14 +135,11 @@ class AdmissionMode(StrEnum):
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
-    # Sensitive first-party identity operations always require a human user.
     ("GET", "/openapi/v1/org/user/iam-token"): AdmissionMode.REFUSED,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/caller-identity",
     ): AdmissionMode.REFUSED,
-    # The item routes resolve the addressed owner from the asset and perform
-    # the grant check against that exact Bot/owner pair in their handler.
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content",
@@ -654,10 +651,6 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/spaces/personal/initialize"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/create"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.USER_GATED,
-    # The caller must arrive on behalf of a real user.  The handler then
-    # resolves that user as the actor and SpaceAccessService enforces the
-    # concrete space membership; this is deliberately not OPEN or
-    # GRANT_FILTERED because the result is scoped by the path's space_id.
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): AdmissionMode.USER_GATED,
     ("POST", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.REFUSED,
     (
@@ -785,7 +778,6 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "DELETE",
         "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    # ── REFUSED — each for its own reason ────────────────────────────────────
     # The caller's own identity. An app-only caller names no end user, so there
     # is nothing to return — its scope question is answered by
     # ``GET /openapi/v1/bots/authorized`` instead.
