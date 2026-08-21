@@ -500,7 +500,8 @@ class LocalSkillUploadService:
             if (
                 runtime_sync_attempted
                 and not await self._sync_runtime(owner_id, bot_id)
-            ):                raise LocalSkillRuntimeSyncError()
+            ):
+                raise LocalSkillRuntimeSyncError()
         if backup is not None:
             await self._discard(backup)
         await self._discard(staged)

@@ -9,6 +9,8 @@ from typing import Protocol, runtime_checkable
 from secbaas.community.api.sse import StreamChunk
 
 from ._models import (
+    BcnInteractionResolveInput,
+    BcnInteractionResolveResult,
     ChatHistoryInput,
     ChatHistoryResult,
     ChatInjectInput,
@@ -113,4 +115,10 @@ class BcnDownlinkService(Protocol):
             BcnSessionNotFoundError: 会话不存在
             BcnInvalidRequestError: 请求参数错误
         """
+        ...
+
+    async def handle_interaction_resolve(
+        self, resolve_input: BcnInteractionResolveInput
+    ) -> BcnInteractionResolveResult:
+        """Persist a BCN interaction answer for the Engine websocket owner."""
         ...

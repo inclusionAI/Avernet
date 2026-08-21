@@ -210,6 +210,50 @@ class TestAICodingProvider:
         ):
             assert path in rule_paths
 
+    def test_build_plan_excludes_repo_workspace_dirs_from_template_config(self):
+        """aicoding 注入 template_config 声明仓库的 workspace/<repo> 排除。"""
+        provider = AICodingSandboxProvider(workspace=_workspace())
+        bot = {
+            "template_config": {
+                "backend_repo": [
+                    {"repo_url": "https://code.alipay.com/ASF-Service-Platform/aixcore"}
+                ],
+                "frontend_repo": [
+                    {"repo_url": "https://code.alipay.com/ASF/web-frontend.git"}
+                ],
+            }
+        }
+        plan = provider.get_build_plan(bot=bot)
+        assert "workspace/aixcore" in plan.rsync_excludes
+        assert "workspace/web-frontend" in plan.rsync_excludes
+
+    def test_build_plan_without_bot_keeps_default_excludes(self):
+        """无 bot 时 aicoding 不追加额外仓库排除。"""
+        provider = AICodingSandboxProvider(workspace=_workspace())
+        plan = provider.get_build_plan()
+        assert "workspace/aixcore" not in plan.rsync_excludes
+
+    def test_build_plan_dedupes_repeated_repo(self):
+        """同一仓库在多个 key 声明时只追加一次。"""
+        provider = AICodingSandboxProvider(workspace=_workspace())
+        bot = {
+            "template_config": {
+                "backend_repo": [{"repo_url": "https://code.alipay.com/ASF/repo.git"}],
+                "lib_repo": [{"repo_url": "https://code.alipay.com/ASF/repo"}],
+            }
+        }
+        plan = provider.get_build_plan(bot=bot)
+        assert plan.rsync_excludes.count("workspace/repo") == 1
+
+    def test_build_plan_ignores_ac_bots_ext_template_config(self):
+        """bot.ext (ac_bots.ext) 不作为仓库来源，即便里面有 template_config 也不读取。"""
+        provider = AICodingSandboxProvider(workspace=_workspace())
+        bot = {"ext": {"template_config": {"lib_repo": [
+            {"repo_url": "https://code.alipay.com/ASF/lib.git"}
+        ]}}}
+        plan = provider.get_build_plan(bot=bot)
+        assert "workspace/lib" not in plan.rsync_excludes
+
 _OPENCLAW_ROOT = cfg.WorkspaceConfig().openclaw_root
 _CLAUDE_CODE_ROOT = cfg.WorkspaceConfig().claude_code_root
 
@@ -637,3 +681,33 @@ class TestAICodingProviderChangedLineCoverage:
         )
 
         assert await provider.list_directory() == []
+
+
+@pytest.mark.unit
+class TestGetBuildPlanBotParamCrossEngine:
+    """get_build_plan(bot=...) 在所有 provider 上都可用；只有 aicoding 消费它。"""
+
+    def test_openclaw_ignores_bot_repo(self):
+        provider = OpenClawSandboxProvider(workspace=_workspace())
+        bot = {"template_config": {"backend_repo": [
+            {"repo_url": "https://code.alipay.com/ASF/repo.git"}
+        ]}}
+        plan = provider.get_build_plan(bot=bot)
+        assert "workspace/repo" not in plan.rsync_excludes
+
+    def test_claude_code_ignores_bot_repo(self):
+        provider = ClaudeCodeSandboxProvider(workspace=_workspace())
+        bot = {"template_config": {"backend_repo": [
+            {"repo_url": "https://code.alipay.com/ASF/repo.git"}
+        ]}}
+        plan = provider.get_build_plan(bot=bot)
+        assert "workspace/repo" not in plan.rsync_excludes
+
+    def test_calling_without_bot_still_works(self):
+        for provider in (
+            OpenClawSandboxProvider(workspace=_workspace()),
+            ClaudeCodeSandboxProvider(workspace=_workspace()),
+            AICodingSandboxProvider(workspace=_workspace()),
+        ):
+            plan = provider.get_build_plan()
+            assert plan.rsync_excludes  # non-empty defaults preserved

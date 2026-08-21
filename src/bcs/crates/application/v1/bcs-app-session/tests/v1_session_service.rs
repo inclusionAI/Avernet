@@ -1275,6 +1275,134 @@ async fn human_collects_and_uncollects_for_owned_participant_bot_idempotently() 
 }
 
 #[tokio::test]
+async fn human_collects_as_own_human_actor_idempotently() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    // Register the human's own actor entry (`human_owner-1`) the way
+    // `ensure_human_actor` does: actor_kind = Human, created_by = the staff_no.
+    fixture
+        .bots
+        .ensure_human_actor("owner-1", "Owner")
+        .await
+        .expect("provision human actor");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_owner-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    // Collect as the human's own actor id (participant = "human_owner-1").
+    for _ in 0..2 {
+        let result = fixture
+            .service
+            .collect(CollectSession {
+                caller: human_principal("owner-1"),
+                session_id: session.id.clone(),
+                participant: "human_owner-1".into(),
+            })
+            .await
+            .expect("human can collect as its own actor");
+        assert_eq!(result.session_id, session.id);
+        assert_eq!(result.participant, "human_owner-1");
+        assert!(result.collected);
+    }
+    let collected = fixture
+        .session_repo
+        .collected_at_map(&[session.id.as_str()], "human_owner-1")
+        .await;
+    assert_eq!(collected.len(), 1);
+    assert_eq!(collected[0].0, session.id);
+
+    // Uncollecting as the human actor is idempotent.
+    for _ in 0..2 {
+        let result = fixture
+            .service
+            .uncollect(UncollectSession {
+                caller: human_principal("owner-1"),
+                session_id: session.id.clone(),
+                participant: "human_owner-1".into(),
+            })
+            .await
+            .expect("human can uncollect as its own actor");
+        assert_eq!(result.participant, "human_owner-1");
+        assert!(!result.collected);
+    }
+    assert!(
+        fixture
+            .session_repo
+            .collected_at_map(&[session.id.as_str()], "human_owner-1")
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn collect_rejects_participant_not_owned_by_authenticated_human() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .bots
+        .ensure_human_actor("owner-1", "Owner")
+        .await
+        .expect("provision authenticated human actor");
+    fixture
+        .bots
+        .ensure_human_actor("other", "Other")
+        .await
+        .expect("provision a different human actor");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_owner-1", ParticipantRole::Observer),
+                    Participant::human("human_other", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let error = fixture
+        .service
+        .collect(CollectSession {
+            caller: human_principal("owner-1"),
+            session_id: session.id.clone(),
+            // `human_other` is registered, but not owned by the authenticated
+            // human (`owner-1`); collecting on its behalf must be forbidden.
+            participant: "human_other".into(),
+        })
+        .await
+        .expect_err("must not collect as an actor the human does not own");
+    assert!(
+        matches!(error, bcs_service_api::application::v1::ApplicationError::Forbidden(_)),
+        "expected forbidden, got {error:?}"
+    );
+}
+
+#[tokio::test]
 async fn list_surfaces_per_session_collected_for_explicit_view_actor() {
     let fixture = Fixture::new().await;
     fixture.add_bot("bot-1").await;
@@ -1973,6 +2101,206 @@ async fn update_participant_emits_mode_changed_system_message_only_on_change() {
     );
 }
 
+#[tokio::test]
+async fn add_participant_emits_bot_joined_system_message() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    // Adding a participant must emit a BotJoined notification (parity with the
+    // legacy `add_session_participant` route).
+    fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect("add expert");
+
+    let joined = recorded_bot_joined(&fixture, &session_id);
+    assert_eq!(joined.len(), 1, "exactly one BotJoined event");
+    assert_eq!(joined[0], "expert");
+
+    // A duplicate add is a conflict and must NOT emit another event.
+    let error = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect_err("duplicate add should conflict");
+    assert_eq!(error.code(), "participant_already_exists");
+    assert_eq!(
+        recorded_bot_joined(&fixture, &session_id).len(),
+        1,
+        "no new event on duplicate add"
+    );
+}
+
+#[tokio::test]
+async fn delete_participant_emits_bot_left_system_message() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+    fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect("add expert");
+
+    // Removing a participant must emit a BotLeft notification (parity with the
+    // legacy `remove_session_participant` route).
+    let removed = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect("delete expert");
+    assert!(removed.deleted);
+
+    let left = recorded_bot_left(&fixture, &session_id);
+    assert_eq!(left.len(), 1, "exactly one BotLeft event");
+    assert_eq!(left[0], "expert");
+
+    // Removing an already-absent participant is idempotent and must NOT emit
+    // another event.
+    let again = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect("idempotent delete");
+    assert!(!again.deleted);
+    assert_eq!(
+        recorded_bot_left(&fixture, &session_id).len(),
+        1,
+        "no new event on idempotent delete"
+    );
+}
+
+#[tokio::test]
+async fn delete_participant_allows_removing_group_originator() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    // Group whose originator is the human `human_owner-1` (distinct from the
+    // driver bot). The originator is a session participant and must be allowed
+    // to leave the session — only the driver/manager are structurally pinned.
+    fixture
+        .store_group_with_originator("g1", "driver", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_owner-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let removed = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: human_principal("owner-1"),
+            session_id: session.id.clone(),
+            bot_uuid: "human_owner-1".into(),
+        })
+        .await
+        .expect("originator can leave the session");
+    assert!(removed.deleted);
+    let left = recorded_bot_left(&fixture, &session.id);
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0], "human_owner-1");
+}
+
+#[tokio::test]
+async fn delete_participant_still_rejects_group_driver() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .store_group_with_originator("g1", "driver", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_owner-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let error = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: human_principal("owner-1"),
+            session_id: session.id.clone(),
+            bot_uuid: "driver".into(),
+        })
+        .await
+        .expect_err("driver remains pinned");
+    assert!(
+        matches!(error, bcs_service_api::application::v1::ApplicationError::InvalidInput { .. }),
+        "expected invalid_request, got {error:?}"
+    );
+    // No leave event when removal is rejected.
+    assert!(recorded_bot_left(&fixture, &session.id).is_empty());
+}
+
 /// Collect `ParticipantModeChanged` events recorded for `session_id`.
 fn recorded_mode_changes(
     fixture: &Fixture,
@@ -1997,6 +2325,38 @@ fn recorded_mode_changes(
             } else {
                 None
             }
+        })
+        .collect()
+}
+
+/// Collect `BotJoined` actor ids recorded for `session_id`.
+fn recorded_bot_joined(fixture: &Fixture, session_id: &str) -> Vec<String> {
+    fixture
+        .system_messages
+        .events
+        .lock()
+        .expect("sysmsg lock")
+        .iter()
+        .filter(|recorded| recorded.session_id == session_id)
+        .filter_map(|recorded| match &recorded.event {
+            SystemMessageEvent::BotJoined { actor, .. } => Some(actor.bot_uuid.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Collect `BotLeft` actor ids recorded for `session_id`.
+fn recorded_bot_left(fixture: &Fixture, session_id: &str) -> Vec<String> {
+    fixture
+        .system_messages
+        .events
+        .lock()
+        .expect("sysmsg lock")
+        .iter()
+        .filter(|recorded| recorded.session_id == session_id)
+        .filter_map(|recorded| match &recorded.event {
+            SystemMessageEvent::BotLeft { actor, .. } => Some(actor.bot_uuid.clone()),
+            _ => None,
         })
         .collect()
 }

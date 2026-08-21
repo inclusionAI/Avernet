@@ -292,6 +292,7 @@ _BCSFUSE_VARS = {
     "bcs_server_url": "http://bcs:8081",
     "engine_proxy_server_url": "https://engineproxy:20003",
     "bcsfuse_server_url": "http://bcsfuse:8765",
+    "clawweb_server_url": "http://clawweb:8082",
 }
 
 

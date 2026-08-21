@@ -5,7 +5,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from secbaas.community.api.bcn import (
     Attachment as DomainAttachment,
@@ -221,6 +221,80 @@ class ChatHistoryRequest(BaseModel):
         if self.before is not None and self.after is not None:
             raise ValueError("before 和 after 互斥，不能同时传入")
         return self
+
+
+class InteractionResolveAnswer(BaseModel):
+    """One ask-user answer forwarded by BCS."""
+
+    values: list[str] = Field(..., min_length=1)
+    question: str
+    header: str
+
+    @field_validator("question", "header")
+    @classmethod
+    def _text_fields_must_be_non_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("interaction answer text fields must be non-empty")
+        return value
+
+    @field_validator("values")
+    @classmethod
+    def _values_must_be_non_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("interaction answer values must be non-empty strings")
+        return values
+
+
+class InteractionResolveParams(BaseModel):
+    """BCS Provider 2.0 kind-specific interaction resolution."""
+
+    bcs_run_id: str = Field(..., alias="bcsRunId")
+    run_id: str = Field(..., alias="runId")
+    interaction_id: str = Field(..., alias="interactionId")
+    kind: Literal["ask_user", "exec", "mode_switch"]
+    idempotency_key: str = Field(..., alias="idempotencyKey")
+    action: Literal["submit", "cancel"] | None = None
+    decision: str | None = None
+    answers: dict[str, InteractionResolveAnswer] | None = None
+
+    model_config = {"populate_by_name": True}
+
+    @model_validator(mode="after")
+    def _validate_kind_specific_fields(self) -> "InteractionResolveParams":
+        if self.kind == "ask_user":
+            if self.action is None:
+                raise ValueError("ask_user interaction resolve requires action")
+            if self.action == "submit" and not self.answers:
+                raise ValueError("ask_user submit requires answers")
+            if self.answers is not None and any(
+                not question_id.strip() for question_id in self.answers
+            ):
+                raise ValueError("ask_user answer questionId must be non-empty")
+            return self
+        if self.decision is None or not self.decision.strip():
+            raise ValueError(f"{self.kind} interaction resolve requires decision")
+        return self
+
+
+class InteractionResolveRequest(BaseModel):
+    """Full BCS Provider webhook for `interaction.resolve`."""
+
+    type: Literal["req"] = "req"
+    id: str
+    method: Literal["interaction.resolve"] = "interaction.resolve"
+    session_id: str
+    bcn_group_id: str
+    to_bot: BotRef
+    params: InteractionResolveParams
+    timeout_ms: int = 3_600_000
+
+
+class InteractionResolveAckResponse(BaseModel):
+    """Finite acknowledgement decoded by BCS `ProviderAckResponse`."""
+
+    ok: bool
+    retryable: bool | None = None
+    error: str | None = None
 
 
 # ─────────────────────────── Response ───────────────────────────

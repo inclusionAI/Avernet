@@ -1,0 +1,29 @@
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint"],
+  "rules": {
+    "no-restricted-imports": ["error", {
+      "paths": [
+        {
+          "name": "mysql2",
+          "message": "mysql2 is internal-only. Use extensions.createDatabase for database access."
+        },
+        {
+          "name": "mysql2/promise",
+          "message": "mysql2 is internal-only. Use extensions.createDatabase for database access."
+        }
+      ],
+      "patterns": [
+        {
+          "group": ["@ocb/*", "@alipay/*", "@clawmind/*"],
+          "message": "Community code cannot import internal packages. Use community/ abstraction interfaces."
+        },
+        {
+          "group": ["*/dingtalk-enterprise*", "*/api-client*", "*/zdas-database*", "*/yuque-adapter*", "*/agentmind-adapter*", "*/approval-card-web-poller*", "*/dev-workflow-callback*"],
+          "message": "Internal modules are not available in community. Use extensions parameter to inject."
+        }
+      ]
+    }]
+  }
+}

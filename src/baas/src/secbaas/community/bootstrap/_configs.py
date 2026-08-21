@@ -243,6 +243,20 @@ class FileTransferPollerConfigSchema(ConfigSchema):
     dry_run: bool = Field(default=False)
 
 
+class RenewalSchedulerConfigSchema(ConfigSchema):
+    """Deadline renewal scheduler engine selection.
+
+    Controls whether the legacy DeviceTtlTimerTask or the new
+    DeadlineRenewalScheduler handles ARCA TTL renewal.
+
+    - "legacy": DeviceTtlTimerTask runs, DeadlineRenewalScheduler cron is off.
+    - "deadline": DeadlineRenewalScheduler runs, DeviceTtlTimerTask cron is off.
+    """
+
+    config_section = "renewal_scheduler"
+    engine: str = Field(default="legacy", pattern=r"^(legacy|deadline)$")
+
+
 class FileTransferOssConfigSchema(ConfigSchema):
     """OSS storage backend configuration for file transfer."""
 

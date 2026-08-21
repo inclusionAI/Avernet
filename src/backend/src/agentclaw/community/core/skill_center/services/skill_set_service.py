@@ -1607,11 +1607,12 @@ class SkillSetService:
             "aicoding": "/home/admin/.aicoding/skills-repo",
             "hermes": "/home/admin/.hermes/skills-repo",
         }
-        if self.runtime_engine_type not in ENGINE_SKILLS_DIR_MAP:
-            raise ValueError(
-                f"engine Skill layout not implemented: {self.runtime_engine_type}"
+        base_skills_dir = Path(
+            ENGINE_SKILLS_DIR_MAP.get(
+                self.runtime_engine_type,
+                "/home/admin/.openclaw/workspace/skills",
             )
-        base_skills_dir = Path(ENGINE_SKILLS_DIR_MAP[self.runtime_engine_type])
+        )
         # aicoding 引擎使用独立的 skills-repo 目录
         skills_repo_dir = Path(
             ENGINE_SKILLS_REPO_DIR_MAP.get(

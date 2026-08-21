@@ -116,7 +116,9 @@ class RollbackOpsMixin:
         version = f"{target_record.version}"
         delivery = self._ext_state.compose_stored(target_ext, PublishStage.ONLINE)
         skills_env = service_publish_extra_envs(target_ext, bot)
-        image_pin = self.resolve_publish_image_pin(target_record)
+        image_pin = self.resolve_publish_image_pin(
+            target_record, device_provider=self.device_provider(bot)
+        )
 
         # (#197) Crash-safe issuance via the operation runner (existing bot →
         # adopt-by-query on resume, never a second rollback deploy).
@@ -140,7 +142,6 @@ class RollbackOpsMixin:
                 delivery=delivery,
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
-                runtime_kind=self.resolve_publish_runtime_kind(target_record),
                 template_config=service_publish_template_config(bot),
             )
 

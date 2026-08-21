@@ -978,6 +978,7 @@ mod tests {
             originator: Some("bot-a".into()),
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants: vec![group_participant("bot-a"), group_participant("bot-b")],
             messages: Vec::new(),
             workspace: Workspace::default(),

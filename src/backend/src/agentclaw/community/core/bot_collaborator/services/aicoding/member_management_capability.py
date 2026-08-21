@@ -72,12 +72,18 @@ class AICodingMemberManagementCapability:
         bot: Mapping[str, Any],
         bot_id: str | None = None,
     ) -> bool:
-        """AICoding app bots or opted-in AICoding templates use member management."""
+        """AICoding coding bots or opted-in templates use member management.
+
+        应用 Coding Bot（``applicationCoding``）与个人 Coding Bot
+        （``personalCoding``）都运行在 ``claude_code`` 引擎上，并复用协作者表
+        做应用成员管理。其它 Bot 必须通过模板 ``advanced_config.member_management
+        == true`` 显式开启才会放行。
+        """
         if self._has_template_switch_enabled(bot, bot_id):
             return True
         return (
             bot.get("active_engine") == "claude_code"
-            and bot.get("template_type") == "applicationCoding"
+            and bot.get("template_type") in ("applicationCoding", "personalCoding")
         )
 
     def _has_template_switch_enabled(

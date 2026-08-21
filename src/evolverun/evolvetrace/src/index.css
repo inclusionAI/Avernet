@@ -1,0 +1,22 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-status-succeeded: #22c55e;
+  --color-status-failed: #ef4444;
+  --color-status-running: #3b82f6;
+  --color-status-waiting: #eab308;
+  --color-status-pending: #9ca3af;
+  --color-status-skipped: #9ca3af;
+  --color-status-blocked: #f97316;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}

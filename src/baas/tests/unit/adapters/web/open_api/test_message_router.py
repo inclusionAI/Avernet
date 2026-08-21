@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from secbaas.community.adapters.web.routers.open_api.message_router import (
     deliver_message,
@@ -979,3 +980,193 @@ class TestGetMessageResult:
                 bot_runner=self._make_runner(record),
             )
             mock_policy.assert_called_once_with(api_key, "bot-42:entity-7")
+
+
+class TestResolveMessageInteraction:
+    @pytest.mark.asyncio
+    async def test_returns_rpc_res_envelope(self):
+        from secbaas.community.adapters.web.routers.open_api.message_router import (
+            resolve_message_interaction,
+        )
+        from secbaas.community.adapters.web.routers.open_api.model import (
+            InteractionResolveEnvelope,
+        )
+        from secbaas.community.api.bot_interaction import InteractionResolution
+        from secbaas.community.core.service.bot_interaction import (
+            InteractionResolveResult,
+        )
+
+        service = MagicMock()
+        service.resolve.return_value = InteractionResolveResult(interaction_id="int-1")
+
+        response = await resolve_message_interaction(
+            request=InteractionResolveEnvelope(
+                type="req",
+                id="req-1",
+                method="interaction.resolve",
+                params={
+                    "sessionKey": "s-1",
+                    "interactionId": "int-1",
+                    "decision": "allow-once",
+                },
+            ),
+            api_key_record=_make_api_key_record(),
+            interaction_service=service,
+        )
+
+        body = response.model_dump(by_alias=True)
+        assert body["type"] == "res"
+        assert body["id"] == "req-1"
+        assert body["ok"] is True
+        service.resolve.assert_called_once_with(
+            session_key="s-1",
+            interaction_id="int-1",
+            resolution=InteractionResolution(decision="allow-once"),
+            request_envelope={
+                "type": "req",
+                "id": "req-1",
+                "method": "interaction.resolve",
+                "params": {
+                    "sessionKey": "s-1",
+                    "interactionId": "int-1",
+                    "decision": "allow-once",
+                },
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_forbidden_app_type_raises_403(self):
+        from secbaas.community.adapters.web.routers.open_api.message_router import (
+            resolve_message_interaction,
+        )
+        from secbaas.community.adapters.web.routers.open_api.model import (
+            InteractionResolveEnvelope,
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            await resolve_message_interaction(
+                request=InteractionResolveEnvelope(
+                    type="req",
+                    id="req-1",
+                    method="interaction.resolve",
+                    params={
+                        "sessionKey": "s-1",
+                        "interactionId": "int-1",
+                        "decision": "allow-once",
+                    },
+                ),
+                api_key_record=_make_api_key_record(app_type="user"),
+                interaction_service=MagicMock(),
+            )
+        assert exc.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_domain_conflict_returns_typed_rpc_error(self):
+        from secbaas.community.adapters.web.routers.open_api.message_router import (
+            resolve_message_interaction,
+        )
+        from secbaas.community.adapters.web.routers.open_api.model import (
+            InteractionResolveEnvelope,
+        )
+        from secbaas.community.core.service.bot_interaction import (
+            InteractionConflictError,
+        )
+
+        service = MagicMock()
+        service.resolve.side_effect = InteractionConflictError(
+            "interaction state is queued"
+        )
+        response = await resolve_message_interaction(
+            request=InteractionResolveEnvelope(
+                type="req",
+                id="req-1",
+                method="interaction.resolve",
+                params={
+                    "sessionKey": "s-1",
+                    "interactionId": "int-1",
+                    "decision": "allow-once",
+                },
+            ),
+            api_key_record=_make_api_key_record(),
+            interaction_service=service,
+        )
+
+        assert response.model_dump(by_alias=True) == {
+            "type": "res",
+            "id": "req-1",
+            "ok": False,
+            "error": {
+                "code": "CONFLICT",
+                "message": "interaction state is queued",
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_repository_failure_propagates(self):
+        from secbaas.community.adapters.web.routers.open_api.message_router import (
+            resolve_message_interaction,
+        )
+        from secbaas.community.adapters.web.routers.open_api.model import (
+            InteractionResolveEnvelope,
+        )
+
+        service = MagicMock()
+        service.resolve.side_effect = RuntimeError("db down")
+        with pytest.raises(RuntimeError, match="db down"):
+            await resolve_message_interaction(
+                request=InteractionResolveEnvelope(
+                    type="req",
+                    id="req-1",
+                    method="interaction.resolve",
+                    params={
+                        "sessionKey": "s-1",
+                        "interactionId": "int-1",
+                        "decision": "allow-once",
+                    },
+                ),
+                api_key_record=_make_api_key_record(),
+                interaction_service=service,
+            )
+
+    @pytest.mark.parametrize(
+        "request_body",
+        [
+            {
+                "type": "event",
+                "id": "req-1",
+                "method": "interaction.resolve",
+                "params": {
+                    "sessionKey": "s-1",
+                    "interactionId": "int-1",
+                    "decision": "allow-once",
+                },
+            },
+            {
+                "type": "req",
+                "id": "req-1",
+                "method": "interaction.answer",
+                "params": {
+                    "sessionKey": "s-1",
+                    "interactionId": "int-1",
+                    "decision": "allow-once",
+                },
+            },
+            {
+                "type": "req",
+                "id": "req-1",
+                "method": "interaction.resolve",
+                "params": {
+                    "sessionKey": "",
+                    "interactionId": "int-1",
+                    "decision": "allow-once",
+                },
+            },
+        ],
+    )
+    def test_request_contract_rejects_invalid_envelopes(self, request_body):
+        from secbaas.community.adapters.web.routers.open_api.model import (
+            InteractionResolveEnvelope,
+        )
+
+        with pytest.raises(ValidationError):
+            InteractionResolveEnvelope.model_validate(request_body)

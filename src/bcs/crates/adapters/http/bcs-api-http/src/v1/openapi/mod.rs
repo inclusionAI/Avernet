@@ -16,6 +16,7 @@ pub fn protected_router() -> Router<ApiState> {
     Router::new().nest(
         "/openapi/v1/collaboration",
         routes::bot::router()
+            .merge(routes::event_subscription::router())
             .merge(routes::group::router())
             .merge(routes::session::router())
             .merge(routes::invitation::router())

@@ -1,15 +1,37 @@
 # BCN API Contracts
 
+## Public Event Contract
+
+`events/v1/catalog.yaml` is the authoritative inventory for public BCS Event
+types and registered family wildcards. `events/v1/event-envelope.schema.json`
+defines the versioned envelope plus the discriminated data schema for every
+catalog Event. `events/v1/content-projection.schema.json` is the single shared
+shape for metadata-only and full projections of externally visible content.
+
+The Rust runtime registry in `bcs-eventing` loads the checked-in Catalog at
+compile time; it must not copy the Event list into Rust constants. Internal
+Judge/runtime events are intentionally outside this public Contract.
+
+Validate the Catalog, schemas, representative payload modes, and fixtures:
+
+```bash
+uv run --with pytest --with pyyaml --with jsonschema \
+  pytest src/bcs/tests/event_contract -q
+```
+
+## Collaboration HTTP APIs
+
 `v1/openapi.yaml` is the source of truth for the versioned public BCN OpenAPI.
 `v1/internal.yaml` is the source of truth for the versioned internal BCN
 collaboration API. Domain models and resource path items live in separate YAML
 fragments so a domain can evolve without creating one monolithic file.
 
-The current public OpenAPI contract contains 34 approved operations across Bot,
+The current public OpenAPI contract contains 44 approved operations across Bot,
 Group, GroupParticipant, Session, SessionParticipant, Invitation, Friendship,
-FriendRequest, and session-bound WebSocket resources. Every public operation is
-published below the single BCN ownership prefix `/openapi/v1/collaboration/**`.
-These are the exact endpoints served externally by BCN.
+FriendRequest, Event Subscription, Event Delivery, and session-bound WebSocket
+resources. Every public operation is published below the single BCN ownership
+prefix `/openapi/v1/collaboration/**`. These are the exact endpoints served
+externally by BCN.
 
 The Human control-plane Bot batch contains exactly five public operations:
 

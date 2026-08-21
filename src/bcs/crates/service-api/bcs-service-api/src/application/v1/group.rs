@@ -1,9 +1,15 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use super::{ApplicationError, AuthenticatedCaller};
+use super::{
+    ApplicationError, AuthenticatedCaller, CreateEventSubscriptionRequest, EventSinkInput,
+    EventSubscription,
+};
+use crate::types::{
+    EventActor, EventPayload, EventSubscriptionScope, EventSubscriptionScopeType, Group, Session,
+};
 
-pub use bcs_domain::{ActorKind, ParticipantMode, ParticipantRole};
+pub use bcs_domain::{ActorKind, OpeningMessage, ParticipantMode, ParticipantRole};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -200,6 +206,8 @@ pub struct CollaborationGroupDetail {
     pub visibility: GroupVisibility,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening_message: Option<OpeningMessage>,
     pub originator_actor_id: String,
     pub participants: Vec<Participant>,
     pub driver_bot_uuid: String,
@@ -266,6 +274,7 @@ pub struct CreateParticipant {
 pub struct CreateCollaborationGroup {
     pub name: Option<String>,
     pub context: Option<String>,
+    pub opening_message: Option<OpeningMessage>,
     pub visibility: GroupVisibility,
     pub driver_bot_uuid: String,
     pub participants: Vec<CreateParticipant>,
@@ -298,6 +307,102 @@ pub struct CreateGroup {
 pub struct CreateGroupOutcome {
     pub group: GroupDetail,
     pub created: bool,
+    /// Subscriptions provisioned as part of this create operation. Empty for
+    /// legacy requests and for a reused DM that did not request subscriptions.
+    pub event_subscriptions: Vec<EventSubscription>,
+}
+
+/// Event Subscription input nested inside a Group create request.
+///
+/// Scope is deliberately absent: the application service fixes it to the
+/// server-generated Group id, so callers cannot subscribe an arbitrary
+/// resource through the Group creation endpoint.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InlineGroupEventSubscriptionRequest {
+    pub name: String,
+    pub event_filters: Vec<String>,
+    #[serde(default)]
+    pub payload: EventPayload,
+    pub sink: EventSinkInput,
+}
+
+impl InlineGroupEventSubscriptionRequest {
+    pub fn into_scoped(self, group_id: String) -> CreateEventSubscriptionRequest {
+        CreateEventSubscriptionRequest {
+            name: self.name,
+            scope: EventSubscriptionScope {
+                scope_type: EventSubscriptionScopeType::Group,
+                id: group_id,
+            },
+            event_filters: self.event_filters,
+            payload: self.payload,
+            sink: self.sink,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedGroupEventSubscriptions {
+    pub group_id: String,
+    pub subscription_ids: Vec<String>,
+    pub actor: EventActor,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingGroupEventSubscriptions {
+    pub prepared: PreparedGroupEventSubscriptions,
+    pub created_at_ms: u64,
+}
+
+#[async_trait]
+pub trait GroupEventSubscriptionProvisioner: Send + Sync {
+    /// Validate, protect, and persist pending subscriptions for a server-fixed
+    /// Group scope. This happens before any Group or Session row is created.
+    async fn prepare(
+        &self,
+        caller: &AuthenticatedCaller,
+        group_id: &str,
+        requests: Vec<InlineGroupEventSubscriptionRequest>,
+    ) -> Result<PreparedGroupEventSubscriptions, ApplicationError>;
+
+    /// Best-effort compensation used when Group provisioning fails. The
+    /// implementation may only cancel subscriptions that are still pending.
+    async fn cancel(
+        &self,
+        prepared: &PreparedGroupEventSubscriptions,
+        reason: &str,
+    ) -> Result<(), ApplicationError>;
+
+    /// Atomically make the Group available, activate all prepared
+    /// subscriptions, and persist the ordered creation Events. The optional
+    /// Session is the initial Session created by Group management.
+    async fn finalize(
+        &self,
+        prepared: &PreparedGroupEventSubscriptions,
+        group: &Group,
+        initial_session: Option<&Session>,
+    ) -> Result<(), ApplicationError>;
+
+    /// Rebuild the pending set after a process restart. The returned actor is
+    /// System because recovery, rather than the original HTTP request, owns
+    /// the finalization decision.
+    async fn recover_pending(
+        &self,
+        group_id: &str,
+    ) -> Result<PreparedGroupEventSubscriptions, ApplicationError>;
+
+    /// List pending Group-scoped sets so recovery can cancel subscriptions
+    /// whose process crashed after prepare but before the Group row existed.
+    async fn list_pending_groups(
+        &self,
+    ) -> Result<Vec<PendingGroupEventSubscriptions>, ApplicationError>;
+
+    /// Load redacted summaries after atomic finalization activated them.
+    async fn load_activated(
+        &self,
+        prepared: &PreparedGroupEventSubscriptions,
+    ) -> Result<Vec<EventSubscription>, ApplicationError>;
 }
 
 #[derive(Debug, Clone)]
@@ -310,6 +415,8 @@ pub struct GetGroup {
 pub struct GroupPatch {
     pub name: Option<String>,
     pub context: Option<String>,
+    /// Outer `None` leaves the field unchanged; `Some(None)` restores the default.
+    pub opening_message: Option<Option<OpeningMessage>>,
     pub visibility: Option<GroupVisibility>,
     pub delivery_policy: Option<GroupDeliveryPolicy>,
 }
@@ -318,6 +425,7 @@ impl GroupPatch {
     pub fn is_empty(&self) -> bool {
         self.name.is_none()
             && self.context.is_none()
+            && self.opening_message.is_none()
             && self.visibility.is_none()
             && self.delivery_policy.is_none()
     }
@@ -380,7 +488,21 @@ pub trait GroupService: Send + Sync {
         Ok(CreateGroupOutcome {
             group: self.create(command).await?,
             created: true,
+            event_subscriptions: Vec::new(),
         })
+    }
+
+    async fn create_with_event_subscriptions(
+        &self,
+        command: CreateGroup,
+        event_subscriptions: Vec<InlineGroupEventSubscriptionRequest>,
+    ) -> Result<CreateGroupOutcome, ApplicationError> {
+        if !event_subscriptions.is_empty() {
+            return Err(ApplicationError::internal(
+                "Group Event Subscription provisioning is not configured",
+            ));
+        }
+        self.create_with_outcome(command).await
     }
 
     async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError>;

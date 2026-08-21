@@ -16,7 +16,8 @@ from agentclaw.community.core.service_bot.services.bot_build_service import BotB
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     ImagePolicyState,
     ServiceBotImagePin,
-    resolve_publish_image_pin as resolve_publish_image_pin_policy,
+    has_explicit_image_policy,
+    image_policy_from_ext,
 )
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
@@ -124,49 +125,18 @@ def _pf(*args, **kw):
         baas.list_bot_publishes.return_value = []
     publish_service = args[0] if args else kw.get("bot_publish_service")
     if isinstance(publish_service, Mock):
-        def _resolve_image_policy(record):
-            artifact = (record.ext or {}).get("config_artifact")
-            if isinstance(artifact, dict) and artifact.get("engine_type") == "teclaw":
+        def _resolve_image_policy(record, *, device_provider):
+            # Stands in for PublishImagePolicyResolver.resolve: teclaw carries no
+            # ARCA policy, an explicit snapshot decodes as-is, and a record with no
+            # policy stays legacy. These flow tests predate runtime-pin
+            # configuration and focus on orchestration, so the resolver's lazy
+            # common-config snapshot is deliberately not modelled here — dedicated
+            # image-policy tests cover it.
+            if device_provider == "teclaw" or not has_explicit_image_policy(record.ext):
                 return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
-            if not any(
-                key in (record.ext or {})
-                for key in (
-                    "sbot_pin_image",
-                    "sbot_docker_image",
-                    "sbot_use_default_image",
-                )
-            ):
-                # These flow tests predate runtime-pin configuration and focus
-                # on orchestration. Dedicated image-policy tests cover the
-                # production resolver's fail-closed behavior.
-                return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
-            return resolve_publish_image_pin_policy(
-                record,
-                common_config_service=kw["common_config_service"],
-                env=record.env,
-            )
+            return image_policy_from_ext(record)
 
         publish_service.resolve_publish_image_pin.side_effect = _resolve_image_policy
-        def _resolve_runtime_kind(record):
-            ext = record.ext or {}
-            explicit = ext.get("sbot_runtime_kind")
-            if explicit == "arka":
-                return "arca"
-            if explicit in {"arca", "teclaw"}:
-                return explicit
-            artifact = ext.get("config_artifact")
-            if isinstance(artifact, dict) and artifact.get("engine_type") == "teclaw":
-                return "teclaw"
-            # Old flow fixtures express their historical binding through the
-            # BaaS provider mock. Production uses Publish ext/bindings only.
-            provider = (
-                baas.resolve_container_provider.return_value
-                if isinstance(baas, Mock)
-                else None
-            )
-            return "teclaw" if provider == "teclaw" else "arca"
-
-        publish_service.resolve_publish_runtime_kind.side_effect = _resolve_runtime_kind
     if "channel_overrides_reader" not in kw:
         # Default to "no channels for this stage" ({}), so promotion delivers the
         # base artifact with channels cleared — tests that care about channels pass
@@ -1828,6 +1798,56 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
 
 
 @pytest.mark.asyncio
+async def test_release_provider_follows_the_bot_not_a_stale_publish_ext():
+    """A stale provider hint on ``ext`` must not decide the container.
+
+    The build stage picks its producer from ``resolve_container_provider(bot)``.
+    The release stage must reach the same answer, or a teclaw build is shipped to
+    an ARCA create (and vice versa). Here the record still carries the ARCA mount
+    chain plus an ARCA image pin from an earlier life, while the bot now runs in a
+    teclaw container: the bot wins, and the ARCA image pin is not consumed.
+    """
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.release_async = AsyncMock(
+        return_value={"bot_uuid": "BOT-1", "publish_id": 9}
+    )
+    build_service.generate_request_id = Mock(return_value="rid")
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
+    svc = _pf(
+        publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
+    )
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("draft"))
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock()
+
+    record = _make_publish_record(
+        status=PublishStatus.BUILT.value,
+        ext={
+            **_artifact_ext("draft"),
+            "migration_path": "/build/v1",
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arca:v2",
+        },
+    )
+    await svc._execute_verify_first_release(
+        publish_record=record,
+        operator="op",
+        migration_path="/build/v1",
+        bot={"bot_id": "b2", "owner_id": "u1"},
+    )
+
+    baas_service.resolve_container_provider.assert_called_with(
+        {"bot_id": "b2", "owner_id": "u1"}
+    )
+    # The ARCA image policy is skipped for a teclaw container even though the
+    # record still carries a pin.
+    assert build_service.release_async.await_args.kwargs["docker_image"] is None
+
+
+@pytest.mark.asyncio
 async def test_verify_upgrade_stamps_canary_delivered_and_persisted():
     publish_service = Mock()
     build_service = Mock()
@@ -2833,14 +2853,15 @@ async def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
         return_value=_make_publish_record(
             id=15,
             status=PublishStatus.SUCCESS.value,
-            ext={"sbot_runtime_kind": "teclaw"},
+            ext={"migration_path": "/build/v1"},
         )
     )
     bot_service.get_bot = Mock(
-        return_value={"bot_id": "bot-source", "active_engine": "openclaw", "ext": {}}
+        return_value={"bot_id": "bot-source", "active_engine": "teclaw", "ext": {}}
     )
-    # The current Draft is ARCA, but the immutable Publish is TeClaw-owned.
-    baas_service.resolve_container_provider.return_value = "baas"
+    # Scale support follows the bot's container, not anything cached on the
+    # publish record's ext.
+    baas_service.resolve_container_provider.return_value = "teclaw"
 
     result = await svc.scale_bot(publish_id=15, operator="u1")
 

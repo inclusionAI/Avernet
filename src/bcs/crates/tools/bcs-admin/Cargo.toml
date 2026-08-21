@@ -23,6 +23,8 @@ sha2 = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+bcs-config-api = { workspace = true }
+mysql_async = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]
