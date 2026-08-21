@@ -8,8 +8,9 @@ use axum::{
 };
 use bcs_auth_api::{AuthError, AuthPluginChain, AuthPrincipal, UserIdentityInfo};
 use bcs_auth_local::StaticAuthPlugin;
-use bcs_bot::{BotCore, ProviderCore, ProviderManagement};
+use bcs_bot::{BotControlPlaneCore, BotCore, ProviderCore, ProviderManagement};
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
+use bcs_config::resolve_env_str;
 use bcs_http::{
     router::build_router,
     service_key::{ApiKeyEntry, ApiKeyRegistry, sha256_hex},
@@ -18,9 +19,9 @@ use bcs_http::{
 use bcs_service_api::application::v1::ApplicationError;
 use bcs_user_directory_api::{UserDirectoryPlugin, UserDirectoryProfile};
 use bcs_service_api::{
-    ActorKind, BotInternalAttributes, BotRegistryCoreService, EnsureOwnerEdgesResult,
-    FriendCheckInStrategy, InternalBotAttributesService, PatchBotInternalAttributes,
-    ProviderBotBindingRepoPort,
+    ActorKind, BotControlPlaneCoreService, BotControlPlanePatch, BotInternalAttributes,
+    BotRegistryCoreService, EnsureOwnerEdgesResult, FriendCheckInStrategy,
+    InternalBotAttributesService, PatchBotInternalAttributes, ProviderBotBindingRepoPort,
     ProviderBotCoreService, ProviderCoreService, ProviderCredential, ProviderCredentialRepoPort,
     ProviderRecord, ProviderRepoPort, ProviderStreamGrayList, RelationCoreService, RelationEdge,
     ServiceResult, UserVisibility,
@@ -37,6 +38,7 @@ struct TestApp {
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     registry: Arc<BotCore>,
     relation: Arc<RecordingRelationCoreService>,
+    control_plane: Arc<BotControlPlaneCore>,
     internal_bot_attributes: Arc<RecordingInternalBotAttributesService>,
     _temp_dir: TempDir,
 }
@@ -122,6 +124,11 @@ fn test_app_with_options(
     let provider_stream_gray_list = Arc::new(ProviderStreamGrayList::default());
     let internal_bot_attributes = Arc::new(RecordingInternalBotAttributesService::default());
     let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    let control_plane = Arc::new(BotControlPlaneCore::new(
+        bot_repo.clone(),
+        provider_repo.clone(),
+        provider_bindings.clone(),
+    ));
     let registry = Arc::new(BotCore::with_provider_repos(
         bot_repo,
         provider_repo.clone(),
@@ -147,6 +154,7 @@ fn test_app_with_options(
     if let Some(user_directory) = user_directory {
         provider_management = provider_management.with_user_directory(user_directory);
     }
+    provider_management = provider_management.with_control_plane(control_plane.clone());
     let provider_management = Arc::new(provider_management);
 
     let services = Services::builder()
@@ -170,6 +178,7 @@ fn test_app_with_options(
         provider_stream_gray_list,
         registry,
         relation,
+        control_plane,
         internal_bot_attributes,
         _temp_dir: temp_dir,
     }
@@ -2270,6 +2279,180 @@ async fn provider_admin_token_cannot_manage_another_provider() {
     assert_eq!(body["error"], "provider_id_mismatch");
 }
 
+async fn set_task_modes(
+    control_plane: &Arc<BotControlPlaneCore>,
+    bot_uuid: &str,
+    env: &str,
+    task_claim_mode: Option<bool>,
+    task_dream_mode: Option<bool>,
+) {
+    control_plane
+        .patch(
+            bot_uuid,
+            env,
+            BotControlPlanePatch {
+                name: None,
+                visibility: None,
+                status: None,
+                descriptor: None,
+                task_claim_mode,
+                task_dream_mode,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("patch control-plane toggles")
+        .expect("bot control-plane record should exist after onboarding");
+}
+
+async fn task_mode_roster(
+    app: &Router,
+    provider_id: &str,
+    token: Option<&str>,
+    query: &str,
+) -> (StatusCode, Value) {
+    let mut builder = Request::builder()
+        .method("GET")
+        .uri(format!("/providers/{provider_id}/bots/by-task-modes{query}"));
+    if let Some(token) = token {
+        builder = builder.header("authorization", format!("Bearer {token}"));
+    }
+    let response = app
+        .clone()
+        .oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    (status, response_json(response).await)
+}
+
+fn roster_bot_ids(body: &Value) -> Vec<String> {
+    body["items"]
+        .as_array()
+        .expect("roster response has items array")
+        .iter()
+        .map(|item| item["bot_id"].as_str().expect("item has bot_id").to_string())
+        .collect()
+}
+
+fn sorted_ids(mut ids: Vec<String>) -> Vec<String> {
+    ids.sort();
+    ids
+}
+
+#[tokio::test]
+async fn list_provider_bots_by_task_modes_filters_and_scopes_to_provider() {
+    let TestApp {
+        app, control_plane, ..
+    } = test_app();
+
+    let provider = register_provider(&app, json!({ "mode": "static_bearer" })).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+
+    // A second provider whose bots must NOT appear in provider_id's roster
+    // (provider-scoped intersect).
+    let other = register_provider(&app, json!({ "mode": "static_bearer" })).await;
+    let other_provider_id = other["provider_id"].as_str().unwrap();
+    let other_token = other["provider_admin_token"].as_str().unwrap();
+
+    let bot_a = register_provider_bot(&app, provider_id, admin_token, "bot-a").await;
+    let bot_b = register_provider_bot(&app, provider_id, admin_token, "bot-b").await;
+    let bot_c = register_provider_bot(&app, provider_id, admin_token, "bot-c").await;
+    let bot_d = register_provider_bot(&app, other_provider_id, other_token, "bot-d").await;
+    let uuid_a = bot_a["bot_uuid"].as_str().unwrap().to_string();
+    let uuid_b = bot_b["bot_uuid"].as_str().unwrap().to_string();
+    let uuid_c = bot_c["bot_uuid"].as_str().unwrap().to_string();
+    let uuid_d = bot_d["bot_uuid"].as_str().unwrap().to_string();
+
+    let env = resolve_env_str();
+    // a = claim, b = dream, c = claim+dream, d = claim+dream (other provider).
+    set_task_modes(&control_plane, &uuid_a, &env, Some(true), Some(false)).await;
+    set_task_modes(&control_plane, &uuid_b, &env, Some(false), Some(true)).await;
+    set_task_modes(&control_plane, &uuid_c, &env, Some(true), Some(true)).await;
+    set_task_modes(&control_plane, &uuid_d, &env, Some(true), Some(true)).await;
+
+    // No toggles => all bots bound to provider_id (d excluded by provider scoping).
+    let (status, body) =
+        task_mode_roster(&app, provider_id, Some(admin_token), "").await;
+    assert_eq!(status, StatusCode::OK, "no-filter roster failed: {body}");
+    assert_eq!(
+        sorted_ids(roster_bot_ids(&body)),
+        sorted_ids(vec![uuid_a.clone(), uuid_b.clone(), uuid_c.clone()])
+    );
+    assert!(!body.to_string().contains(&uuid_d));
+
+    // claim_mode=true, match=any => a, c.
+    let (status, body) = task_mode_roster(
+        &app,
+        provider_id,
+        Some(admin_token),
+        "?task_claim_mode=true&match=any",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        sorted_ids(roster_bot_ids(&body)),
+        sorted_ids(vec![uuid_a.clone(), uuid_c.clone()])
+    );
+
+    // claim=true AND dream=true, match=all => c only.
+    let (status, body) = task_mode_roster(
+        &app,
+        provider_id,
+        Some(admin_token),
+        "?task_claim_mode=true&task_dream_mode=true&match=all",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(roster_bot_ids(&body), vec![uuid_c.clone()]);
+
+    // claim=true OR dream=true, match=any => a, b, c.
+    let (status, body) = task_mode_roster(
+        &app,
+        provider_id,
+        Some(admin_token),
+        "?task_claim_mode=true&task_dream_mode=true&match=any",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        sorted_ids(roster_bot_ids(&body)),
+        sorted_ids(vec![uuid_a.clone(), uuid_b.clone(), uuid_c.clone()])
+    );
+
+    // dream=true, match=any => b, c.
+    let (status, body) = task_mode_roster(
+        &app,
+        provider_id,
+        Some(admin_token),
+        "?task_dream_mode=true&match=any",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        sorted_ids(roster_bot_ids(&body)),
+        sorted_ids(vec![uuid_b.clone(), uuid_c.clone()])
+    );
+
+    // Missing token => 401.
+    let (status, body) =
+        task_mode_roster(&app, provider_id, None, "?task_claim_mode=true").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["status"], 401);
+
+    // Wrong token => 401.
+    let (status, body) = task_mode_roster(
+        &app,
+        provider_id,
+        Some("not-the-admin-token"),
+        "?task_claim_mode=true",
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["status"], 401);
+}
+
 async fn register_provider(app: &Router, auth: Value) -> Value {
     let response = app
         .clone()
@@ -2355,4 +2538,31 @@ async fn register_provider_bot(
 async fn response_json(response: axum::response::Response) -> Value {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&body).unwrap()
+}
+
+#[tokio::test]
+async fn list_provider_bots_by_task_modes_rejects_invalid_toggle_and_accepts_false() {
+    let TestApp { app, .. } = test_app();
+    let provider = register_provider(&app, json!({ "mode": "static_bearer" })).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+
+    // `false` parses to Some(false) — exercises the false/0 arm of
+    // parse_task_mode_toggle. With no bots bound the roster is empty but 200.
+    let (status, body) =
+        task_mode_roster(&app, provider_id, Some(admin_token), "?task_claim_mode=false").await;
+    assert_eq!(status, StatusCode::OK, "false toggle failed: {body}");
+    assert!(body["items"].is_array(), "false toggle response missing items: {body}");
+
+    // `0` is the other accepted false spelling (same parse arm).
+    let (status, _body) =
+        task_mode_roster(&app, provider_id, Some(admin_token), "?task_dream_mode=0").await;
+    assert_eq!(status, StatusCode::OK, "0 toggle failed");
+
+    // An unrecognized toggle value surfaces as 400 bad_request from the handler
+    // (parse_task_mode_toggle error arm), before the service is consulted.
+    let (status, body) =
+        task_mode_roster(&app, provider_id, Some(admin_token), "?task_claim_mode=maybe").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "invalid toggle not rejected: {body}");
+    assert_eq!(body["status"], 400);
 }

@@ -12,6 +12,10 @@
 - ``get_state_machine_run``/``start_state_machine_run``/``get_session_messages``/``get_group``:
   先继承 ``BcsHttpAdapter``;真跑 singlebox coop_group e2e 时若 translator 拿不到 ``status``/``output``/
   ``session.*``,据真实响应再覆写归一。
+
+已继承(不覆写,本地与生产响应形状一致):
+- ``list_bots_by_task_modes``:provider 任务模式 roster 路由,返 ``{"items":[...]}``,Bearer provider_admin_token
+  来自 ``BcsTokenProvider``;本地 BCS 同 bcs-http 代码,响应形状与生产一致。
 """
 from __future__ import annotations
 

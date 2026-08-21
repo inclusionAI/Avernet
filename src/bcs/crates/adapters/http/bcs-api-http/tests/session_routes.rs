@@ -19,7 +19,7 @@ use bcs_service_api::application::v1::{
     DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, GetGroup,
     GetSession, GroupDetail, GroupService, GroupSummary, ListGroups, ListSessionMessages,
     ListSessions, Page, SessionCollectionResult, SessionCompletionResult, SessionDetail,
-    SessionInput, SessionMessageService, SessionParticipant, SessionService, SessionStatus,
+    SessionMessageService, SessionParticipant, SessionService, SessionStatus,
     SessionSummary, UncollectSession, UpdateGroup, UpdateGroupParticipant, UpdateSession,
     UpdateSessionParticipant,
 };

@@ -635,6 +635,8 @@ fn physical_bot() -> PhysicalBot {
         reachability: BotReachability::Reachable,
         provider: None,
         agent_code: Some("agent-code".to_string()),
+        task_claim_mode: false,
+        task_dream_mode: false,
         created_at: 1,
         updated_at: 2,
     }

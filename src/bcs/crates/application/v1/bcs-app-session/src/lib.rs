@@ -28,7 +28,7 @@ use bcs_service_api::application::v1::{
     session::{
         AddSessionParticipant, CollectSession, CompleteSession, CreateSession, CreateSessionOutcome,
         DeleteSession, DeleteSessionParticipant, GetSession, ListSessions, SessionCollectionResult,
-        SessionCompletionResult, SessionDetail, SessionInput, SessionParticipant, SessionService,
+        SessionCompletionResult, SessionDetail, SessionParticipant, SessionService,
         SessionStatus as V1SessionStatus, SessionSummary, UncollectSession, UpdateSession,
         UpdateSessionParticipant,
     },
