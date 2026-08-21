@@ -367,10 +367,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: ``path`` then moved 132 → 133 with the BCS publish-to-users operation
 #: (``POST /openapi/v1/bots/{bot_id}/public-bcs``): it addresses a bot and acts
 #: for the operator, so it is bot-path-addressed like the rest of the surface.
-#: The two IAM operations then merged into one Bot-addressed operation: the
-#: existing Caller path was renamed while the account-level IAM read went away,
-#: so ``path`` stays unchanged and ``none`` decreases by one.
-_BOT_ID_PLACEMENT = {"path": 139, "query": 1, "none": 57}
+_BOT_ID_PLACEMENT = {"path": 140, "query": 1, "none": 57}
 
 
 def _schema() -> dict:
@@ -466,7 +463,7 @@ def test_the_pinned_number_of_operations_take_it():
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
     # MCP adds eight operations, the Harness surface adds six Bot-addressed
     # operations, and Session File adds six more.
-    assert len(taking) == 177
+    assert len(taking) == 178
 
 
 def test_the_exempt_operations_take_none():

@@ -10,7 +10,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import UploadFile
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 
 class Skill(BaseModel):
@@ -167,6 +168,30 @@ class SkillUpload(BaseModel):
         "keeping its id and active state; answers 200."
     )
     skill: Skill = Field(description="The skill as stored after the upload.")
+
+
+# Keep this pre-existing generated component name stable for clients that have
+# already generated multipart request types from the Gateway OpenAPI document.
+SkillFolderUpload = create_model(
+    "Body_upload_skill_folder_openapi_v1_bots__bot_id__skills_upload_folder_post",
+    __base__=BaseModel,
+    __config__=ConfigDict(
+        json_schema_extra={
+            "description": "Files and optional relative paths for one local Skill directory."
+        }
+    ),
+    files=(
+        list[UploadFile],
+        Field(description="All files from the selected local Skill directory."),
+    ),
+    file_paths=(
+        str | None,
+        Field(
+            default=None,
+            description="Optional JSON array of relative paths aligned one-to-one with files.",
+        ),
+    ),
+)
 
 
 class SkillState(BaseModel):

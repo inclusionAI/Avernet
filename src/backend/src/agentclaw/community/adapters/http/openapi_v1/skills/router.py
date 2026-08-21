@@ -62,6 +62,7 @@ from agentclaw.community.plugin_api.skill_center_client import (
 from .schemas import (
     Skill,
     SkillContent,
+    SkillFolderUpload,
     SkillParameters,
     SkillPublishStatus,
     SkillState,
@@ -71,7 +72,6 @@ from fastapi import (
     APIRouter,
     Body,
     Depends,
-    File,
     Form,
     Path,
     Query,
@@ -500,29 +500,21 @@ async def upload_skill_folder(
     request: Request,
     response: Response,
     owner_id: OwnerIdDep,
-    files: list[UploadFile] = File(
-        ..., description="Files selected from exactly one local Skill directory."
-    ),
-    file_paths: str | None = Form(
-        default=None,
-        description=(
-            "JSON array of relative paths aligned one-to-one with files. "
-            "When omitted, each uploaded filename is used as its relative path."
-        ),
-    ),
+    payload: Annotated[SkillFolderUpload, Form(media_type="multipart/form-data")],
     upload_service: LocalSkillUploadServiceProtocol = Injected(
         LocalSkillUploadServiceProtocol
     ),
 ) -> Envelope[SkillUpload]:
     """Upload a browser-selected local Skill directory.
 
-    This preserves the legacy multipart ``files`` + ``file_paths`` contract.
+    This preserves the legacy multipart files and file_paths contract.
     The Service API converts the directory into the exact same validated
     package authority as the existing raw-ZIP endpoint.
     """
-    paths = _directory_relative_paths(file_paths, files)
+    paths = _directory_relative_paths(payload.file_paths, payload.files)
     uploaded = [
-        (path, await file.read()) for path, file in zip(paths, files, strict=True)
+        (path, await file.read())
+        for path, file in zip(paths, payload.files, strict=True)
     ]
     result = await upload_service.upload_local_skill_files(
         bot_id=bot_id,

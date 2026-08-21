@@ -94,6 +94,7 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     # bot-first change, which is why it was not in this set before.
     ("get", "/openapi/v1/bots/{bot_id}/skills"),
     ("post", "/openapi/v1/bots/{bot_id}/skills"),
+    ("post", "/openapi/v1/bots/{bot_id}/skills/upload-folder"),
     # The product chat reads address a bot that may be shared with the acting
     # user, so they take the owner half of ``(owner, bot_id)`` for the same
     # reason and with the same default — the caller's own bot.
