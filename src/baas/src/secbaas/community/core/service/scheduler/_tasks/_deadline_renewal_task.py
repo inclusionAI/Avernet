@@ -209,6 +209,8 @@ class DeadlineRenewalScheduler:
 
         if not all_rows:
             report.duration_seconds = time.time() - t_start
+            self._log_metrics(report)
+            log.info("[DeadlineRenewalScheduler] %s", report.to_log())
             return report
 
         # ---- Orphan Detection within Step 1 ----
@@ -238,6 +240,8 @@ class DeadlineRenewalScheduler:
 
         if not processing_list:
             report.duration_seconds = time.time() - t_start
+            self._log_metrics(report)
+            log.info("[DeadlineRenewalScheduler] %s", report.to_log())
             return report
 
         sem = asyncio.Semaphore(self._config.max_concurrency)

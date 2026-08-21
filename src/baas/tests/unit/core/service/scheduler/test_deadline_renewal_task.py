@@ -436,6 +436,82 @@ class TestStep1ColdTableQuery:
         assert isinstance(report, RenewalRunReport)
 
 
+class TestEarlyReturnMetrics:
+    """WR-02: metrics + summary must be emitted on EVERY round, including
+    the early-return paths (empty due list / all-orphan list) — monitoring
+    must not go dark exactly when the scheduler is idle."""
+
+    def _due_row(
+        self, source_table="baas_device", source_id=1, sandbox_id="sb-1", hot_id=1
+    ):
+        return {
+            "id": source_id,
+            "sandbox_id": sandbox_id,
+            "source_table": source_table,
+            "source_id": source_id,
+            "next_renew_at": "2026-08-18 12:00:00",
+            "renew_fail_count": 0,
+            "device_props": "{}",
+            "hot_id": hot_id,
+        }
+
+    @pytest.mark.asyncio
+    async def test_empty_due_list_early_return_emits_metrics_and_summary(self, caplog):
+        """WR-02: zero due rows → the round still emits [arca_ttl_metrics]
+        and the [DeadlineRenewalScheduler] summary line."""
+        import logging
+
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 200
+        mock_repo.count_hot_arca_devices.return_value = 200
+        mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.list_due_for_renewal.return_value = []
+        mock_repo.find_unregistered.return_value = []
+
+        scheduler._round_count = 0
+        with caplog.at_level(logging.INFO, logger="core-scheduler"):
+            report = await scheduler._run_once()
+
+        assert report.due_count == 0
+        assert report.duration_seconds > 0
+        messages = [r.message for r in caplog.records]
+        assert any("[arca_ttl_metrics]" in m and "due_count=0" in m for m in messages)
+        assert any("[DeadlineRenewalScheduler]" in m for m in messages)
+
+    @pytest.mark.asyncio
+    async def test_all_orphan_round_early_return_emits_metrics_and_summary(
+        self, caplog
+    ):
+        """WR-02: every due row is an orphan (empty processing list) →
+        metrics + summary still emitted, orphan count reported."""
+        import logging
+
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 2
+        mock_repo.count_hot_arca_devices.return_value = 1
+        mock_repo.count_hot_arca_bindings.return_value = 1
+        mock_repo.find_unregistered.return_value = []
+        mock_repo.list_due_for_renewal.side_effect = [
+            [
+                self._due_row("baas_device", 1, "sb-1", hot_id=None),
+                self._due_row("baas_device", 2, "sb-2", hot_id=None),
+            ],
+            [],
+        ]
+
+        scheduler._round_count = 0
+        with caplog.at_level(logging.INFO, logger="core-scheduler"):
+            report = await scheduler._run_once()
+
+        assert report.due_count == 2
+        assert report.orphan_count == 2
+        assert report.success == 0
+        messages = [r.message for r in caplog.records]
+        assert any("[arca_ttl_metrics]" in m and "due_count=2" in m for m in messages)
+        assert any("[DeadlineRenewalScheduler]" in m for m in messages)
+        mock_repo.set_status.assert_called()
+
+
 class TestStep2ConcurrentRenewalScaffolding:
     """Tests for Step 2 — asyncio.Semaphore + _renew_one placeholder."""
 
