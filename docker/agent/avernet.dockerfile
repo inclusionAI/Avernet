@@ -76,9 +76,8 @@ RUN uv venv --python 3 /opt/.venv \
 
 # Build the openclaw-channel-bcn plugin (BCS WebSocket channel).
 # Mirrors Dockerfile.ocb: npm install → build → prune devDeps.
-RUN mkdir -p /tmp/openclaw-channel-bcn \
-    && cp -R src/bcs/crates/plugins/openclaw-channel-bcn/. /tmp/openclaw-channel-bcn/ \
-    && cd /tmp/openclaw-channel-bcn \
+COPY src/bcs/crates/plugins/openclaw-channel-bcn/ /tmp/openclaw-channel-bcn/
+RUN cd /tmp/openclaw-channel-bcn \
     && npm install \
     && npm run build \
     && npm prune --omit=dev \
