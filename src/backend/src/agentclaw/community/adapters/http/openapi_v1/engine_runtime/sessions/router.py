@@ -36,7 +36,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     SessionPage,
     SessionUpdate,
 )
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.session_file_adapter import (
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import (
     OpenApiSessionFileAdapter,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
@@ -877,7 +877,6 @@ async def stream_session_file_content(
         )
     except ValueError as exc:
         _session_file_not_found(exc)
-
     async def body() -> AsyncIterator[bytes]:
         try:
             async for chunk in upstream.body:
@@ -885,7 +884,6 @@ async def stream_session_file_content(
                     yield chunk
         finally:
             await upstream.close()
-
     headers = _session_file_headers(upstream.headers)
     headers.setdefault(
         "Content-Disposition", f'{disposition}; filename="{record.filename}"'

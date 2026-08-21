@@ -1,4 +1,4 @@
-"""OpenAPI-only adapter onto the existing Session Resource state machine."""
+"""Router-local dependency onto the existing Session Resource state machine."""
 
 from __future__ import annotations
 
