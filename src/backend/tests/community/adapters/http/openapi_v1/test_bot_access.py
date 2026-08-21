@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi_injector import attach_injector
 from injector import Injector, InstanceProvider, Module
 
@@ -104,8 +104,12 @@ class _Audit:
         return data
 
 
-def _surface(*, level, bots=None, collaborators=None, audit=None, bar=None):
-    """A one-operation app whose route really carries the seam."""
+def _surface(*, level, bots=None, collaborators=None, audit=None, bar=None, write_raises=None):
+    """A one-operation app whose route really carries the seam.
+
+    ``write_raises`` makes the mutation fail *before* a response exists, which
+    is a different question from a mutation that fails with one.
+    """
     bots = bots or _Bots()
     collaborators = collaborators or _Collaborators(level)
     audit = audit or _Audit()
@@ -122,6 +126,8 @@ def _surface(*, level, bots=None, collaborators=None, audit=None, bar=None):
 
         @router.post(PATH)
         async def write(bot_id: str) -> dict:
+            if write_raises is not None:
+                raise write_raises
             return {"ok": "write"}
 
         class _M(Module):
@@ -338,6 +344,42 @@ def test_refused_request_writes_none():
     client, audit = _surface(level=PermissionLevel.MEMBER, bar=PermissionLevel.ADMIN)
 
     assert _post(client).status_code == 404
+
+    assert audit.rows == []
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        pytest.param(RuntimeError("the handler blew up"), id="unhandled"),
+        pytest.param(HTTPException(status_code=409, detail="conflict"), id="http"),
+    ],
+)
+def test_a_mutation_that_never_produced_a_response_writes_no_audit_row(failure):
+    """The two shapes of failure *before* a response, not after one.
+
+    ``_succeeded`` reads a status the middleware published, so it is fair to
+    ask what happens when the request dies before there is one. Two different
+    mechanisms answer, and neither is the status check:
+
+    - An exception that escapes the handler is thrown back into the gate at
+      its ``yield``. The ``yield`` is bare, so it propagates straight out and
+      the audit code below it never runs at all.
+    - An exception a handler *converts* into a response — this is what an
+      ``HTTPException`` does — is a response, so the middleware publishes its
+      status and the ordinary ``>= 400`` check suppresses the row.
+
+    Pinned because both are load-bearing and neither is visible in the code
+    that appears to make the decision.
+    """
+    client, audit = _surface(
+        level=PermissionLevel.ADMIN, bar=PermissionLevel.MEMBER, write_raises=failure
+    )
+
+    try:
+        _post(client)
+    except RuntimeError:
+        pass  # escaped every handler, which is the case under test
 
     assert audit.rows == []
 

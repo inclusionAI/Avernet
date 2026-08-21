@@ -121,6 +121,15 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
             # its three siblings rather than making this one a special case.
             raise BotAccessRefusedError(f"bot {for_log(bot_id)} not found")
 
+        # The ``yield`` is bare, and that is load-bearing rather than terse. An
+        # exception escaping the handler is thrown back in here, and a bare
+        # ``yield`` propagates it immediately, so everything below is skipped —
+        # which is the only thing stopping an audit row from being written for
+        # a mutation that never produced a response and therefore never
+        # published a status for ``_succeeded`` to read. Wrapping this in
+        # ``try``/``finally`` to "make sure the audit always runs" reintroduces
+        # exactly that bug; ``test_a_mutation_that_never_produced_a_response_
+        # writes_no_audit_row`` fails if anyone does.
         yield
 
         if _succeeded(request) and _is_audited(request) and level < PermissionLevel.OWNER:
