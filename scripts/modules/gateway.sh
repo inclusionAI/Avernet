@@ -8,6 +8,7 @@ GATEWAY_LOG="${LOG_DIR}/gateway.log"
 GATEWAY_PID_FILE="${DEP_DIR}/gateway.pid"
 GATEWAY_APP_SCRIPT="${GATEWAY_DIR}/scripts/app.sh"
 GATEWAY_PORT="${GATEWAY_PORT:-8889}"
+GATEWAY_SERVER_ENV="${GATEWAY_SERVER_ENV:-local}"
 
 
 gateway_setup() {
@@ -62,7 +63,7 @@ gateway_start() {
 
     (
         cd "${GATEWAY_DIR}"
-        SERVER_ENV="${SERVER_ENV:-local}" GATEWAY_PORT="${GATEWAY_PORT}" APP_PORT="${GATEWAY_PORT}" "${GATEWAY_APP_SCRIPT}" start --mode bare
+        SERVER_ENV="${GATEWAY_SERVER_ENV}" GATEWAY_PORT="${GATEWAY_PORT}" APP_PORT="${GATEWAY_PORT}" "${GATEWAY_APP_SCRIPT}" start --mode bare
     ) >> "${GATEWAY_LOG}" 2>&1
 
     local gateway_pid=""
@@ -88,7 +89,7 @@ gateway_stop() {
     log_info "Stopping Gateway..."
 
     if [ -x "${GATEWAY_APP_SCRIPT}" ]; then
-        (cd "${GATEWAY_DIR}" && SERVER_ENV="${SERVER_ENV:-local}" GATEWAY_PORT="${GATEWAY_PORT}" APP_PORT="${GATEWAY_PORT}" "${GATEWAY_APP_SCRIPT}" stop) >> "${GATEWAY_LOG}" 2>&1 || true
+        (cd "${GATEWAY_DIR}" && SERVER_ENV="${GATEWAY_SERVER_ENV}" GATEWAY_PORT="${GATEWAY_PORT}" APP_PORT="${GATEWAY_PORT}" "${GATEWAY_APP_SCRIPT}" stop) >> "${GATEWAY_LOG}" 2>&1 || true
     fi
 
     if [ -f "${GATEWAY_PID_FILE}" ]; then
