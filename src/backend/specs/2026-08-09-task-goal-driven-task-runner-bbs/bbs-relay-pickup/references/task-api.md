@@ -9,7 +9,7 @@
 
 ## 发现(读面,无需 claim)
 
-### GET /openapi/v1/collaboration/tasks/list — 列任务轻量投影
+### GET /api/v1/collaboration/tasks/list — 列任务轻量投影
 
 响应 `data: TaskSummaryDTO[]`(每项含 `bbs_mode`):
 ```json
@@ -20,10 +20,10 @@
 ```
 **客户端筛 `bbs_mode==true`**;再跳过 `status` 为 `DONE` / `HUNG` 者。
 ```bash
-curl -s "$BASE/openapi/v1/collaboration/tasks/list" | jq '.data[] | select(.bbs_mode==true) | .task_id'
+curl -s "$BASE/api/v1/collaboration/tasks/list" | jq '.data[] | select(.bbs_mode==true) | .task_id'
 ```
 
-### GET /openapi/v1/collaboration/tasks/dashboard?task_id=<id> — 取整图
+### GET /api/v1/collaboration/tasks/dashboard?task_id=<id> — 取整图
 
 响应 `data: TaskExecutionGraphDTO`:
 ```json
@@ -52,7 +52,7 @@ curl -s "$BASE/openapi/v1/collaboration/tasks/list" | jq '.data[] | select(.bbs_
 - `run_info.run_mode=="bbs"` 的节点是接力 scoped 节点;`status` 为 `DONE`/`FAILED` 的 `run_info.output` 是 checkpoint;`run_info.acceptance_result.gaps` 是该段自报剩余差距。
 - 图 `extend_props.bbs_relay_count` = 已用接力深度(每次 attach +1);`BBS_MAX_DEPTH` 默认 3。
 ```bash
-curl -s "$BASE/openapi/v1/collaboration/tasks/dashboard?task_id=t1" | jq '.data'
+curl -s "$BASE/api/v1/collaboration/tasks/dashboard?task_id=t1" | jq '.data'
 ```
 
 ## BBS 接力写口(仅三条)
@@ -145,8 +145,8 @@ curl -s --json @result.json "$BASE/api/v1/collaboration/tasks/bbs/result" | jq '
 ```bash
 ME=botA; BASE=http://127.0.0.1:8000
 # 步①
-curl -s "$BASE/openapi/v1/collaboration/tasks/list" | jq '.data[] | select(.bbs_mode==true) | .task_id'      # → "t1"
-curl -s "$BASE/openapi/v1/collaboration/tasks/dashboard?task_id=t1" | jq '.data'                              # 自判
+curl -s "$BASE/api/v1/collaboration/tasks/list" | jq '.data[] | select(.bbs_mode==true) | .task_id'      # → "t1"
+curl -s "$BASE/api/v1/collaboration/tasks/dashboard?task_id=t1" | jq '.data'                              # 自判
 # 步②
 curl -s --json "{\"task_id\":\"t1\",\"bot_id\":\"$ME\"}" "$BASE/api/v1/collaboration/tasks/bbs/claim" | jq '.data.root_node_id'
 # 步④
