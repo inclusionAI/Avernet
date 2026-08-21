@@ -69,6 +69,19 @@ class DeadlineRenewalScheduler:
     def interval_seconds(self) -> int:
         return self._config.cron_interval_seconds
 
+    @property
+    def _renewal_window(self) -> timedelta:
+        """Lead window before TTL expiry — half the configured TTL period.
+
+        Derived from ``config.default_ttl_minutes`` (DI-injected from
+        ``arca.default_ttl_minutes`` in _core_tasks.py), so the schedule
+        targets written by the discovery scan, the postpone branches, and
+        the success path all stay coherent with the configured TTL.
+        Defaults: 1440 minutes -> 12h, i.e. byte-identical behavior to
+        the former hardcoded ``hours=12``.
+        """
+        return timedelta(minutes=self._config.default_ttl_minutes // 2)
+
     async def run(self) -> RenewalRunReport | None:
         """Execute one scheduler run (lock acquisition + _run_once dispatch).
 
@@ -353,9 +366,9 @@ class DeadlineRenewalScheduler:
                             try:
                                 ttl_ms = int(ttl_ms_str)
                                 ttl_dt = naive_utc_fromtimestamp(ttl_ms / 1000)
-                                next_renew_at = ttl_dt - timedelta(hours=12)
+                                next_renew_at = ttl_dt - self._renewal_window
                             except (ValueError, OSError, OverflowError):
-                                # Unparseable ttl — fall back to now + 12h
+                                # Unparseable ttl — fall back to now + window
                                 log.warning(
                                     "[DeadlineRenewalScheduler] discovery scan: "
                                     "unparseable ttl=%s for sandbox_id=%s "
@@ -366,7 +379,7 @@ class DeadlineRenewalScheduler:
                                     row["source_table"],
                                     row["id"],
                                 )
-                                next_renew_at = naive_utc_now() + timedelta(hours=12)
+                                next_renew_at = naive_utc_now() + self._renewal_window
                         else:
                             log.info(
                                 "[DeadlineRenewalScheduler] discovery scan: "
@@ -377,7 +390,7 @@ class DeadlineRenewalScheduler:
                                 row["source_table"],
                                 row["id"],
                             )
-                            next_renew_at = naive_utc_now() + timedelta(hours=12)
+                            next_renew_at = naive_utc_now() + self._renewal_window
 
                         self._schedule_repo.register_if_missing(
                             self._config.env,
@@ -492,7 +505,7 @@ class DeadlineRenewalScheduler:
         # ---- Step 3(f): remaining > 24h — cannot renew (API constraint) ----
         if remaining_hours > 24:
             expiration_dt = naive_utc_fromtimestamp(ttl_ms / 1000.0)
-            next_renew = expiration_dt - timedelta(hours=12)
+            next_renew = expiration_dt - self._renewal_window
             self._schedule_repo.postpone_renewal(
                 self._config.env,
                 record["source_table"],
@@ -511,7 +524,7 @@ class DeadlineRenewalScheduler:
         # ---- Step 3(g): 12h < remaining <= 24h — not yet due ----
         if remaining_hours > self._config.renew_threshold_hours:
             expiration_dt = naive_utc_fromtimestamp(ttl_ms / 1000.0)
-            next_renew = expiration_dt - timedelta(hours=12)
+            next_renew = expiration_dt - self._renewal_window
             self._schedule_repo.postpone_renewal(
                 self._config.env,
                 record["source_table"],
@@ -529,8 +542,11 @@ class DeadlineRenewalScheduler:
             return "skipped"
 
         # ---- Step 3(h): 0 <= remaining <= 12h — renewal window ----
+        # TTL period comes from the configured default_ttl_minutes (1440:
+        # identical to the former 86400-second constant); the safety margin
+        # is subtracted so an extension never lands exactly on the expiry.
         ttl_minutes = (
-            int((86400 - remaining_hours * 3600) / 60)
+            int((self._config.default_ttl_minutes * 60 - remaining_hours * 3600) / 60)
             - self._config.ttl_safety_margin_minutes
         )
 
@@ -558,7 +574,7 @@ class DeadlineRenewalScheduler:
             return await self._handle_failure(record)
 
         # Renewal success
-        next_renew = naive_utc_now() + timedelta(hours=12)
+        next_renew = naive_utc_now() + self._renewal_window
         self._schedule_repo.update_after_success(
             self._config.env, record["source_table"], record["source_id"], next_renew
         )

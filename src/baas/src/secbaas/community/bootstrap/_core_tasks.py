@@ -106,6 +106,14 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         batch_size=config.renewal_scheduler.batch_size,
         max_concurrency=config.renewal_scheduler.max_concurrency,
         renew_threshold_hours=config.renewal_scheduler.renew_threshold_hours,
+        # Rule 14 (configuration-driven wiring): the TTL period comes from
+        # the arca config section, not hardcoded task constants. The
+        # fallback keeps overlays without an arca section (minimal test
+        # containers) on the 1440 default.
+        default_ttl_minutes=providers.Callable(
+            lambda v: v if v else 1440,
+            config.arca.default_ttl_minutes,
+        ),
         retry_delay_minutes=config.renewal_scheduler.retry_delay_minutes,
         max_fail_count=config.renewal_scheduler.max_fail_count,
         ttl_safety_margin_minutes=config.renewal_scheduler.ttl_safety_margin_minutes,

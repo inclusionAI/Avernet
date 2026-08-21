@@ -68,6 +68,7 @@ class TestSchedulerConfig:
         assert config.batch_size == 500
         assert config.max_concurrency == 20
         assert config.renew_threshold_hours == 12
+        assert config.default_ttl_minutes == 1440
         assert config.retry_delay_minutes == 2
         assert config.max_fail_count == 10
         assert config.ttl_safety_margin_minutes == 1

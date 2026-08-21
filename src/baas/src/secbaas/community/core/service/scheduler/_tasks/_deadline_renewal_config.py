@@ -23,6 +23,9 @@ class DeadlineRenewalSchedulerConfig:
         batch_size: Maximum due records to process per run.
         max_concurrency: Semaphore limit for concurrent renewal calls.
         renew_threshold_hours: Only renew when remaining TTL ≤ this threshold.
+        default_ttl_minutes: Configured ARCA TTL period (from arca.default_ttl_minutes,
+            injected by DI). The renewal lead window is derived as half of it;
+            the ttl_minutes formula in Step 3(h) is normalized to this period.
         retry_delay_minutes: Delay between renewal retry attempts.
         max_fail_count: Consecutive failure count before marking STOPPED.
         ttl_safety_margin_minutes: Safety buffer subtracted from ttl_minutes.
@@ -40,6 +43,7 @@ class DeadlineRenewalSchedulerConfig:
     batch_size: int = 500
     max_concurrency: int = 20
     renew_threshold_hours: int = 12
+    default_ttl_minutes: int = 1440
     retry_delay_minutes: int = 2
     max_fail_count: int = 10
     ttl_safety_margin_minutes: int = 1

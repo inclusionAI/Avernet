@@ -797,6 +797,128 @@ class TestStep3RenewalDecision:
         assert result == "failed"
 
 
+class TestTtlWindowDerivation:
+    """WR-02 (user-adjudicated scheme): the lead window and the ttl_minutes
+    period are derived from config.default_ttl_minutes (DI-injected from
+    arca.default_ttl_minutes), not hardcoded — with the 1440 default the
+    behavior is byte-identical to the former hardcoded 12h/86400 values."""
+
+    @pytest.mark.asyncio
+    async def test_success_window_derives_from_default_ttl_minutes(self):
+        """default_ttl_minutes=2880 -> success target = now + 24h (not 12h)."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True,
+            config_overrides={"default_ttl_minutes": 2880},
+        )
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(6))
+        )
+        mock_facade.extend_ttl = AsyncMock(return_value=True)
+        mock_repo.update_after_success = MagicMock()
+
+        result = await scheduler._renew_one(_renewal_record())
+
+        assert result == "success"
+        next_renew = mock_repo.update_after_success.call_args[0][3]
+        from datetime import UTC, datetime, timedelta
+
+        now_utc = datetime.now(UTC).replace(tzinfo=None)
+        expected_min = now_utc + timedelta(hours=24) - timedelta(seconds=5)
+        expected_max = now_utc + timedelta(hours=24) + timedelta(seconds=5)
+        assert expected_min <= next_renew <= expected_max
+
+    @pytest.mark.asyncio
+    async def test_postpone_target_derives_from_default_ttl_minutes(self):
+        """default_ttl_minutes=2880, remaining=18h -> postpone to expiry-24h
+        instead of the hardcoded expiry-12h."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True,
+            config_overrides={"default_ttl_minutes": 2880},
+        )
+
+        ttl_ms = _ttl_ms(18)
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=ttl_ms)
+        )
+        mock_facade.extend_ttl = AsyncMock()
+
+        result = await scheduler._renew_one(_renewal_record())
+
+        assert result == "skipped"
+        next_renew = mock_repo.postpone_renewal.call_args[0][3]
+        from datetime import UTC, datetime, timedelta
+
+        expiration_utc = datetime.fromtimestamp(ttl_ms / 1000.0, tz=UTC).replace(
+            tzinfo=None
+        )
+        expected_min = expiration_utc - timedelta(hours=24) - timedelta(seconds=5)
+        expected_max = expiration_utc - timedelta(hours=24) + timedelta(seconds=5)
+        assert expected_min <= next_renew <= expected_max
+
+    @pytest.mark.asyncio
+    async def test_ttl_minutes_formula_uses_configured_period(self):
+        """default_ttl_minutes=2880, remaining=12h -> extend_ttl(2159):
+        the 86400 constant is replaced by default_ttl_minutes*60."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True,
+            config_overrides={"default_ttl_minutes": 2880},
+        )
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(12))
+        )
+        mock_facade.extend_ttl = AsyncMock(return_value=True)
+        mock_repo.update_after_success = MagicMock()
+
+        await scheduler._renew_one(_renewal_record())
+
+        # int((2880*60 - 12*3600)/60) - 1 = int(2160) - 1 = 2159
+        mock_facade.extend_ttl.assert_awaited_once_with("sb-1", 2159)
+
+    @pytest.mark.asyncio
+    async def test_discovery_register_target_derives_from_default_ttl_minutes(self):
+        """default_ttl_minutes=2880 -> discovery register = ttl_utc - 24h."""
+        scheduler, mock_repo, _, _ = _make_scheduler(
+            enabled=True,
+            config_overrides={"default_ttl_minutes": 2880},
+        )
+        mock_repo.count_active.return_value = 0
+        mock_repo.count_hot_arca_devices.return_value = 1
+        mock_repo.count_hot_arca_bindings.return_value = 0  # gap=1 -> scan
+        mock_repo.list_due_for_renewal.return_value = []
+        ttl_epoch_sec = 1760000000
+
+        calls: dict[str, int] = {}
+
+        def _find_unregistered(env, side, limit=500):
+            calls[side] = calls.get(side, 0) + 1
+            if side == "baas_device" and calls[side] == 1:
+                return [
+                    {
+                        "id": 1,
+                        "sandbox_id": "sb-1",
+                        "source_table": "baas_device",
+                        "ttl": str(ttl_epoch_sec * 1000),
+                    }
+                ]
+            return []
+
+        mock_repo.find_unregistered.side_effect = _find_unregistered
+
+        scheduler._round_count = 0
+        await scheduler._run_once()
+
+        mock_repo.register_if_missing.assert_called_once()
+        next_renew_at = mock_repo.register_if_missing.call_args.kwargs["next_renew_at"]
+        from datetime import UTC, datetime, timedelta
+
+        ttl_utc = datetime.fromtimestamp(ttl_epoch_sec, tz=UTC).replace(tzinfo=None)
+        expected_min = ttl_utc - timedelta(hours=24) - timedelta(seconds=5)
+        expected_max = ttl_utc - timedelta(hours=24) + timedelta(seconds=5)
+        assert expected_min <= next_renew_at <= expected_max
+
+
 class TestStep4FailureHandling:
     """Tests for Step 4 — failure handling (retry + STOPPED threshold)."""
 
