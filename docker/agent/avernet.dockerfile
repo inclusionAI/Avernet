@@ -55,9 +55,11 @@ RUN npm config set registry "https://registry.npmmirror.com" \
     && npm config set strict-ssl "${NPM_STRICT_SSL}" \
     && npm install -g "openclaw@${OPENCLAW_VERSION}"
 
-# Install uv (Python package manager, standalone binary).
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && cp /root/.local/bin/uv /usr/local/bin/uv
+# Install uv via pip (Aliyun mirror — astral.sh is unreachable in CN build envs).
+ARG UV_VERSION=
+RUN pip3 install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple \
+        "uv${UV_VERSION:+==${UV_VERSION}}" \
+    && which uv && uv --version
 
 # Build engine virtualenv from pyproject.toml.
 COPY src/engine/ /opt/engine/
