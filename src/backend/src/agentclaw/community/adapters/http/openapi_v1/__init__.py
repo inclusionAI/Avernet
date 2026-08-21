@@ -508,7 +508,7 @@ def build_public_router() -> APIRouter:
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
     )
     # New-version bcs publish-to-users (backend route: /openapi/v1/bots/{bot_id}/public-bcs;
-    # the gateway rewrites the external /openapi/v1/collaboration/bots/{bot_id}/public onto
+    # the gateway rewrites the external /openapi/v1/collaboration/bots/{bot_uuid}/public onto
     # it). Declares user-scoped responses for the openapi_v1 admission contract; authz
     # is deferred per design (caller identity via _PUBLIC_AUTH/UserIdDep, no grant check yet).
     public.include_router(

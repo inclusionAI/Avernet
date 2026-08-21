@@ -1,7 +1,7 @@
 """New-version publish-to-users endpoint (BCS-delegated, backend-served).
 
 Internal backend route: POST /openapi/v1/bots/{bot_id}/public-bcs. The public
-openapi path /openapi/v1/collaboration/bots/{bot_id}/public is rewritten onto
+openapi path /openapi/v1/collaboration/bots/{bot_uuid}/public is rewritten onto
 this backend route by the gateway (external path unchanged, gateway-side).
 
 Starts a botpublish approval ticket whose context carries the normal-bot
