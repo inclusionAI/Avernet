@@ -19,6 +19,7 @@ E2E_TESTS_EDGE_PERMISSION=(
     "test_ep_set_friend_approval"
     "test_ep_ensure_bot"
     "test_ep_v2_full_lifecycle"
+    "test_ep_v2_mutual_auto_approve"
 )
 
 # Helper: make an authenticated API call with a bot's Bearer token
@@ -429,6 +430,68 @@ test_ep_v2_full_lifecycle() {
     _api_authed "POST" "/v2/friends/request" "{\"to_bot\":\"$BOT_ENG_UUID\"}" "$ceo_token" >/dev/null 2>&1 || true
 
     pass "v2 full lifecycle completed"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+}
+
+# Bot↔Bot mutual auto-approve (AC-20): create CEO→ENG AND ENG→CEO both pending,
+# then accept ONE — the service must auto-approve the reverse pending request
+# and build BOTH edges. This exercises the deep reverse-approve branch
+# (find_pending_connect + reverse backfill_edge_id + reverse decide(Approved))
+# and the 2-edge build path that no single-direction test reaches.
+test_ep_v2_mutual_auto_approve() {
+    info "EdgePermission: v2 Bot↔Bot mutual auto-approve (AC-20)"
+    local ceo_token eng_token
+    ceo_token="$(get_bot_token CEO 2>/dev/null || echo '')"
+    eng_token="$(get_bot_token ENG 2>/dev/null || echo '')"
+    if [[ -z "$ceo_token" ]] || [[ -z "$eng_token" ]]; then
+        skip_case "no CEO/ENG tokens for mutual auto-approve"; return 77
+    fi
+
+    # Both targets protected+manual so BOTH directions go pending (not auto-approved).
+    _set_protected_manual "$BOT_ENG_UUID" "$eng_token"
+    _set_protected_manual "$BOT_CEO_UUID" "$ceo_token"
+
+    # 1. CEO → ENG (pending) and ENG → CEO (pending) — reverse pair.
+    _api_authed "POST" "/v2/friends/request" "{\"to_bot\":\"$BOT_ENG_UUID\"}" "$ceo_token"
+    warn "mutual: CEO→ENG create status=$HTTP_STATUS"
+    _api_authed "POST" "/v2/friends/request" "{\"to_bot\":\"$BOT_CEO_UUID\"}" "$eng_token"
+    warn "mutual: ENG→CEO create status=$HTTP_STATUS"
+
+    # 2. ENG accepts the CEO→ENG request → AC-20 auto-approves ENG→CEO reverse
+    #    and builds BOTH edges (forward + reverse).
+    local rid
+    _api_authed "GET" "/v2/friends/requests?direction=received" "" "$eng_token"
+    rid="$(_parse_pending_id)"
+    if [[ -n "$rid" ]]; then
+        _api_authed "POST" "/v2/friends/requests/$rid/accept" "{}" "$eng_token"
+        warn "mutual: accept CEO→ENG status=$HTTP_STATUS (reverse auto-approved, 2 edges built)"
+    else
+        warn "mutual: no pending CEO→ENG request to accept (coverage degraded)"
+    fi
+
+    # 3. Both directions now carry edge_grants data — list friends both ways.
+    _api_authed "GET" "/v2/bots/$BOT_CEO_UUID/friends" "" "$ceo_token"
+    warn "mutual: list CEO friends status=$HTTP_STATUS"
+    _api_authed "GET" "/v2/bots/$BOT_ENG_UUID/friends" "" "$eng_token"
+    warn "mutual: list ENG friends status=$HTTP_STATUS"
+
+    # 4. Admission both directions — is_authorized(true) over the mutual edges.
+    _api_authed "GET" "/bots/$BOT_ENG_UUID/admission?actor=$BOT_CEO_UUID" "" ""
+    warn "mutual: admission CEO→ENG status=$HTTP_STATUS"
+    _api_authed "GET" "/bots/$BOT_CEO_UUID/admission?actor=$BOT_ENG_UUID" "" ""
+    warn "mutual: admission ENG→CEO status=$HTTP_STATUS"
+
+    # 5. List requests in all 3 directions for both bots (exercises sent+all
+    #    unions with decided rows, parsing decided_at back from the DB).
+    _api_authed "GET" "/v2/friends/requests?direction=all" "" "$ceo_token" >/dev/null 2>&1 || true
+    _api_authed "GET" "/v2/friends/requests?direction=all" "" "$eng_token" >/dev/null 2>&1 || true
+
+    # 6. Restore both bots to public+auto for the rest of the suite.
+    _restore_public_auto "$BOT_CEO_UUID" "$ceo_token"
+    _restore_public_auto "$BOT_ENG_UUID" "$eng_token"
+
+    pass "v2 mutual auto-approve completed"
     TESTS_PASSED=$((TESTS_PASSED + 1))
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
 }
