@@ -73,6 +73,22 @@ def test_list_sets_is_scoped_to_exact_owner_for_shared_default_bot_id():
                     engine_type="openclaw",
                     env="dev",
                 ),
+                SkillSet(
+                    name="system-default",
+                    user_id="",
+                    bolt_id="",
+                    engine_type="openclaw",
+                    is_default=True,
+                    env="dev",
+                ),
+                SkillSet(
+                    name="other-engine-default",
+                    user_id="",
+                    bolt_id="",
+                    engine_type="hermes",
+                    is_default=True,
+                    env="dev",
+                ),
             ]
         )
 
@@ -80,7 +96,7 @@ def test_list_sets_is_scoped_to_exact_owner_for_shared_default_bot_id():
         bot_id="default", owner_id="owner-a", engine_type="openclaw"
     )
 
-    assert [item["name"] for item in items] == ["mine"]
+    assert [item["name"] for item in items] == ["system-default", "mine"]
 
 
 def test_activation_rolls_back_all_membership_installations_when_nth_insert_fails():
