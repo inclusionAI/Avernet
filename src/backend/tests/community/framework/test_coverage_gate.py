@@ -172,6 +172,17 @@ def test_head_method_is_not_separately_required() -> None:
     assert methods == {"GET"}
 
 
+def test_contract_only_route_is_covered_by_its_501_contract_test() -> None:
+    """A temporary 501 endpoint must not be forced to fake a success case."""
+    app = FastAPI()
+
+    @app.get("/contract", openapi_extra={"x-contract-status": "contract-only"})
+    async def contract_only():
+        return {}
+
+    assert compute_missing_coverage(app, []) == []
+
+
 def test_gap_render_format() -> None:
     """Pin the human-readable rendering — the failure message authors
     will read. Also the wire format of the baseline file.
@@ -261,5 +272,4 @@ def test_diff_partial_progress_surfaces_as_both_new_and_stale() -> None:
     diff = diff_against_baseline(current, baseline)
     assert diff.new == (CoverageGap("GET", "/x", ("error",)),)
     assert diff.stale == (CoverageGap("GET", "/x", ("happy", "error")),)
-
 

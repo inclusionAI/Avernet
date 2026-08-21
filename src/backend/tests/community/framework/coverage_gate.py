@@ -1,4 +1,4 @@
-"""Coverage gate: every live endpoint must have a happy + error case.
+"""Coverage gate: every implemented endpoint must have happy + error cases.
 
 **Always on**, using a frozen baseline:
 
@@ -80,6 +80,8 @@ def _live_routes(app: FastAPI) -> set[tuple[str, str]]:
     """
     routes: set[tuple[str, str]] = set()
     for path, route in _walk_apiroutes(app.routes):
+        if (route.openapi_extra or {}).get("x-contract-status") == "contract-only":
+            continue
         for method in route.methods:
             # FastAPI auto-adds HEAD for GET; that's not a separately
             # authored endpoint, so don't demand a case for it.

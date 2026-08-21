@@ -369,8 +369,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: existing Caller path was renamed while the account-level IAM read went away,
 #: so ``path`` stays unchanged and ``none`` decreases by one. Bot editor
 #: requests then add one path-addressed Bot operation. The metadata query
-#: added alongside it is user-scoped but has no ``bot_id`` parameter.
-_BOT_ID_PLACEMENT = {"path": 141, "query": 1, "none": 58}
+#: added alongside it is user-scoped but has no ``bot_id`` parameter. Phase 2
+#: then adds 30 Space Skill operations, which are Space-addressed rather than
+#: Bot-addressed.
+_BOT_ID_PLACEMENT = {"path": 141, "query": 1, "none": 88}
 
 
 def _schema() -> dict:
@@ -466,8 +468,9 @@ def test_the_pinned_number_of_operations_take_it():
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
     # MCP adds eight operations, the Harness surface adds six Bot-addressed
     # operations, Session File adds six more, Bot metadata queries add one, and
-    # Bot editor requests add one.
-    assert len(taking) == 181
+    # Bot editor requests add one. Phase 2 adds 30 contract-only Space Skill
+    # routes; each still names the acting user explicitly.
+    assert len(taking) == 211
 
 
 def test_the_exempt_operations_take_none():
