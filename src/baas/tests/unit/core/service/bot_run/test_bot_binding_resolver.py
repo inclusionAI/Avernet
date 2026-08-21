@@ -744,13 +744,19 @@ class TestTemplateTypeNormalization:
 # ==================== Tests: eval lifecycle_stage ====================
 
 
-def _make_eval_binding_resolver_plugin(enabled=True, resolved_id=None):
+_MISSING = object()
+
+
+def _make_eval_binding_resolver_plugin(enabled=True, resolved_id=_MISSING):
     """创建 mock EvalBindingResolverProtocol。"""
-    from secbaas.community.api.eval_env._protocols import EvalBindingResolverProtocol
+    from secbaas.community.api.eval_env import EvalBindingResolverProtocol
 
     plugin = MagicMock(spec=EvalBindingResolverProtocol)
     plugin.is_eval_env_enabled.return_value = enabled
-    plugin.resolve_eval_binding.return_value = resolved_id
+    if resolved_id is _MISSING:
+        plugin.resolve_eval_binding.return_value = 100099
+    else:
+        plugin.resolve_eval_binding.return_value = resolved_id
     return plugin
 
 
@@ -770,12 +776,12 @@ class TestServiceBotEvalStage:
         mock_publish_repo,
         mock_binding_repo,
         *,
-        resolved_id=None,
+        resolved_id=_MISSING,
     ):
         """创建带 eval_binding_resolver 的 BotBindingResolver。"""
         eval_plugin = _make_eval_binding_resolver_plugin(
             enabled=True,
-            resolved_id=resolved_id if resolved_id is not None else self.BINDING_ID_EVAL,
+            resolved_id=resolved_id,
         )
         resolver = BotBindingResolver(
             ac_bot_repo=mock_ac_bot_repo,
