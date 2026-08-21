@@ -1,0 +1,121 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.5.12",
+    "lastTouchedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "openai-compatible": {
+        "baseUrl": "OPENCLAW_OPENAI_BASE_URL",
+        "apiKey": "OPENCLAW_OPENAI_API_KEY",
+        "auth": "api-key",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "OPENCLAW_OPENAI_MODEL_ID",
+            "name": "OPENCLAW_OPENAI_MODEL_NAME",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "imageMaxDimensionPx": 4096,
+      "model": {
+        "primary": "openai-compatible/OPENCLAW_OPENAI_MODEL_ID"
+      },
+      "imageModel": {
+        "primary": "openai-compatible/OPENCLAW_OPENAI_MODEL_ID"
+      },
+      "models": {
+        "openai-compatible/OPENCLAW_OPENAI_MODEL_ID": {}
+      },
+      "compaction": { "mode": "safeguard" },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8,
+        "archiveAfterMinutes": 5256000
+      }
+    }
+  },
+  "tools": {
+    "alsoAllow": ["bcs_route"],
+    "media": {
+      "image": { "enabled": true, "maxBytes": 20971520 }
+    }
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "logging": {
+    "file": "/home/admin/logs/openclaw/openclaw.log",
+    "level": "info",
+    "maxFileBytes": 10485760
+  },
+  "skills": {
+    "entries": { "acp-router": { "enabled": false } },
+    "load": {
+      "extraDirs": ["/home/admin/.openclaw/skills"],
+      "watch": true,
+      "watchDebounceMs": 250
+    }
+  },
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "entries": {}
+    }
+  },
+  "session": {
+    "dmScope": "per-channel-peer",
+    "reset": { "mode": "idle", "idleMinutes": 5256000 }
+  },
+  "messages": {
+    "groupChat": { "visibleReplies": "automatic" }
+  },
+  "discovery": {
+    "mdns": { "mode": "off" },
+    "wideArea": { "enabled": false }
+  },
+  "channels": {
+    "bcs": {
+      "enabled": "BCS_ENABLED",
+      "bcsUrl": "BCS_URL",
+      "botId": "BCS_BOT_ID",
+      "botName": "BCS_BOT_NAME",
+      "capabilities": {
+        "summary": "OpenClaw bot",
+        "domains": ["general"],
+        "skills": ["general"],
+        "scopes": ["production"]
+      },
+      "heartbeatIntervalMs": 60000,
+      "reconnectIntervalMs": 5000,
+      "connectionTimeoutMs": 30000
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "auth": {
+      "mode": "token",
+      "token": "OPENCLAW_GATEWAY_TOKEN"
+    },
+    "nodes": {
+      "denyCommands": [
+        "camera.snap", "camera.clip", "screen.record",
+        "calendar.add", "contacts.add", "reminders.add"
+      ]
+    }
+  }
+}
