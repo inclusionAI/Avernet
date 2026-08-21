@@ -23,6 +23,9 @@ from agentclaw.community.core.repository.implementations.skill_center.default_sk
     excluded_skill_ids,
     global_default_scope,
 )
+from agentclaw.community.core.repository.implementations.skill_center.skill_set_projection import (
+    skill_set_item as _item,
+)
 from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
     SkillSetControlPlaneRepositoryProtocol,
 )
@@ -49,27 +52,6 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
-
-
-def _item(row: SkillSet) -> dict:
-    return {
-        "id": str(row.id),
-        "name": row.name,
-        "description": row.description,
-        "is_default": bool(row.is_default),
-        "is_builtin": bool(row.is_builtin),
-        # System Default is a platform projection, not mutable desired state.
-        # Historical rows may contain false from the old storage model, but the
-        # public contract must always expose Default as active.
-        "is_active": True if row.is_default else bool(row.is_active),
-        "user_id": row.user_id,
-        "bolt_id": row.bolt_id,
-        "engine_type": row.engine_type,
-        "gmt_created": row.gmt_created.isoformat() if row.gmt_created else "",
-        "gmt_modified": row.gmt_modified.isoformat() if row.gmt_modified else "",
-        "env": row.env,
-        "type": "default" if row.is_default else "custom",
-    }
 
 
 class SkillSetControlPlaneRepository(
