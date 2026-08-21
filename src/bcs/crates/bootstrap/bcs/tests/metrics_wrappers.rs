@@ -479,6 +479,7 @@ fn group_detail(status: GroupStatus, group_kind: GroupKind) -> GroupDetailResult
         status,
         driver_bot_id: "bot-driver".to_string(),
         context: None,
+        opening_message: None,
         participants: vec![participant_view("bot-driver")],
         message_count: 0,
         workspace: Workspace::default(),
@@ -506,6 +507,7 @@ fn participant_view(bot_uuid: &str) -> GroupParticipantView {
         role: "driver".to_string(),
         actor_kind: ActorKind::Bot,
         mode: None,
+        tags: Vec::new(),
     }
 }
 
@@ -518,6 +520,7 @@ fn group_create_cmd() -> GroupCreateCommand {
         label: None,
         topic: None,
         context: None,
+        opening_message: None,
         routing_policy: None,
         participants: vec![],
         member_bot_ids: vec![],
@@ -525,6 +528,7 @@ fn group_create_cmd() -> GroupCreateCommand {
         service_spec: None,
         group_strategy: None,
         visibility: None,
+        provisioning: false,
     }
 }
 

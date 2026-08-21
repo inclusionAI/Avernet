@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
@@ -9,37 +10,40 @@ use bcs_protocol::{
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
-    BotDeliveryResult, BotDeliveryTarget, BotEventCommand, BotEventOutcome, BotRunContext, BotRunContextPort,
-    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
-    BotTerminalObserverPort, NoopBotTerminalObserver,
-    BotRegistryCoreService, CallerContext, ChatAbortCommand, ChatAbortOutcome,
-    DeliveryBlockContext, DeliveryBlockReason,
-    DeliveryBlockSurface, DeliveryMetricKind, DeliveryMetricTarget, DeliveryType,
-    FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryResult,
-    FrontendDeliveryTarget,
-    Group, GroupCallbackCommand, GroupCallbackOutcome, GroupChatCommand, GroupChatOutcome,
-    GroupKind, GroupMessage, GroupMessageType, GroupCoreService, GroupStatus, GroupStrategy, HiddenMentionInfo, MessageDeliveryResult,
-    MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
-    MessageLogTargetSummary, MESSAGE_LOG_SCHEMA_VERSION, message_log_json,
-    MessageFlowService, MessageRole, Participant, ParticipantMode, ParticipantRole, PersistentGroupSendCommand,
-    PersistentGroupSendOutcome, ProviderStreamGrayList,
-    RouteParticipantOverlay, RoutingDecision, RoutingCoreService, RoutingTarget, ServiceError, ServiceResult,
-    SessionManagementService, ChannelService,
-    SystemMessageEvent, SystemMessageService,
+    BotDeliveryResult, BotDeliveryTarget, BotEventCommand, BotEventOutcome, BotRegistryCoreService,
+    BotRunContext, BotRunContextPort, BotTerminalObserverPort, CallerContext, ChannelService,
+    ChatAbortCommand, ChatAbortOutcome, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS, DeliveryBlockContext,
+    DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind, DeliveryMetricTarget,
+    DeliveryType, FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort,
+    FrontendDeliveryResult, FrontendDeliveryTarget, Group, GroupCallbackCommand,
+    GroupCallbackOutcome, GroupChatCommand, GroupChatOutcome, GroupCoreService, GroupKind,
+    GroupMessage, GroupMessageType, GroupStatus, GroupStrategy, HiddenMentionInfo,
+    MESSAGE_LOG_SCHEMA_VERSION, MessageDeliveryResult, MessageFlowService, MessageLogContent,
+    MessageLogEventType, MessageLogMode, MessageLogStatus, MessageLogTargetSummary, MessageRole,
+    NoopBotTerminalObserver, Participant, ParticipantMode, ParticipantRole,
+    PersistentGroupSendCommand, PersistentGroupSendOutcome, ProviderStreamGrayList,
+    RouteParticipantOverlay, RoutingCoreService, RoutingDecision, RoutingTarget, ServiceError,
+    ServiceResult, SessionManagementService, SessionStatus, SystemMessageEvent,
+    SystemMessageService,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
     TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration, WebSendCommand,
-    WebSendOutcome,
-    backfill_bot_names,
-    interceptor::{BlockReason, InterceptorChain, InterceptorDecision, MessageInterceptor, OutboundMessage},
-    port::repo::MessageRepoPort,
+    WebSendOutcome, backfill_bot_names,
+    interceptor::{
+        BlockReason, InterceptorChain, InterceptorDecision, MessageInterceptor, OutboundMessage,
+    },
+    message_log_json,
+    port::repo::{AppendMessageWithEvent, MessageRepoPort},
+    port::{EventRecordFactoryPort, EventRecorderPort, NewEvent},
+    types::{EVENT_SCHEMA_VERSION_V1, EventActor, EventActorType, EventScope, EventSubject},
 };
+use chrono::{SecondsFormat, TimeZone, Utc};
 use regex::Regex;
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
+use crate::MSG_LOG_TARGET;
 use crate::protocol_context::{group_context_input, group_type_wire};
 use crate::task_store::TaskStore;
-use crate::MSG_LOG_TARGET;
 
 pub struct BcsMessageFlow {
     pub group: Arc<dyn GroupCoreService>,
@@ -55,6 +59,8 @@ pub struct BcsMessageFlow {
     pub provider_chat_run_timeout_ms: u64,
     pub system_message: Option<Arc<dyn SystemMessageService>>,
     pub message_repo: Option<Arc<dyn MessageRepoPort>>,
+    pub event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
+    pub event_recorder: Option<Arc<dyn EventRecorderPort>>,
     pub message_tracker: Arc<crate::message_tracker::MessageTracker>,
     /// Deprecated compatibility setting. Transport selection is owned by the
     /// HTTP Provider adapter and this value is no longer consulted.
@@ -85,6 +91,8 @@ impl BcsMessageFlow {
             provider_chat_run_timeout_ms: DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
             system_message: None,
             message_repo: None,
+            event_record_factory: None,
+            event_recorder: None,
             message_tracker: Arc::new(crate::message_tracker::MessageTracker::new()),
             provider_stream_gray_list: None,
             channel: Arc::new(OnceLock::new()),
@@ -139,6 +147,19 @@ impl BcsMessageFlow {
 
     pub fn with_message_repo(mut self, message_repo: Arc<dyn MessageRepoPort>) -> Self {
         self.message_repo = Some(message_repo);
+        self
+    }
+
+    pub fn with_event_record_factory(
+        mut self,
+        event_record_factory: Arc<dyn EventRecordFactoryPort>,
+    ) -> Self {
+        self.event_record_factory = Some(event_record_factory);
+        self
+    }
+
+    pub fn with_event_recorder(mut self, event_recorder: Arc<dyn EventRecorderPort>) -> Self {
+        self.event_recorder = Some(event_recorder);
         self
     }
 
@@ -285,36 +306,181 @@ pub(crate) async fn try_persist_group_message(
     client_msg_id: Option<&str>,
     owner_bot_id: Option<String>,
     run_id: &str,
-) {
+) -> ServiceResult<Option<bcs_domain::PersistedMessage>> {
     let Some(ref repo) = flow.message_repo else {
-        return;
+        return Ok(None);
+    };
+    let created_at = now_ms();
+    let strategy_supports_message_event = if flow.event_record_factory.is_some()
+        && message_type == "chat"
+    {
+        flow.group.try_get(group_id).await?.is_some_and(|group| {
+            matches!(
+                group.group_strategy,
+                GroupStrategy::Chat | GroupStrategy::ManagerWorker
+            )
+        })
+    } else {
+        false
+    };
+    let effective_session_id = if strategy_supports_message_event {
+        match session_id.filter(|session_id| !session_id.is_empty()) {
+            Some(session_id) => session_id.to_string(),
+            None => {
+                let session_management = flow.session_management.as_ref().ok_or_else(|| {
+                    ServiceError::InternalError(
+                        "Eventing message persistence requires session management".to_string(),
+                    )
+                })?;
+                session_management
+                    .list_by_group(
+                        group_id,
+                        Some(SessionStatus::Running),
+                        0,
+                        1,
+                        None,
+                        None,
+                    )
+                    .await
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?
+                    .into_iter()
+                    .next()
+                    .map(|session| session.id)
+                    .ok_or_else(|| ServiceError::InvalidOperation {
+                        message: format!(
+                            "cannot persist message.created for Group '{group_id}' without a running Session"
+                        ),
+                        request_id: None,
+                    })?
+            }
+        }
+    } else {
+        session_id.unwrap_or_default().to_string()
     };
     let msg = NewMessage {
         group_id: group_id.to_string(),
-        session_id: session_id.unwrap_or("").to_string(),
+        session_id: effective_session_id.clone(),
         sender_id: sender_id.to_string(),
         sender_type,
         message_type: message_type.to_string(),
         content,
         client_msg_id: client_msg_id.map(str::to_string),
         owner_bot_id,
-        created_at: now_ms(),
+        created_at,
         run_id: run_id.to_string(),
     };
-    if let Err(e) = repo.append_message(msg).await {
-        warn!(
-            group_id = %group_id,
-            error = %e,
-            "failed to persist group message to message store"
-        );
+    let persisted = if let Some(factory) = flow.event_record_factory.as_ref() {
+        if strategy_supports_message_event {
+            let session_id = effective_session_id.as_str();
+            let message_id = uuid::Uuid::new_v4().to_string();
+            let content_size = serde_json::to_vec(&msg.content)
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?
+                .len();
+            let sender_type_name = match msg.sender_type {
+                SenderType::Bot => "bot",
+                SenderType::Human => "human",
+                SenderType::System => "system",
+            };
+            let mut data = BTreeMap::from([
+                (
+                    "logical_message_id".to_string(),
+                    serde_json::json!(message_id.clone()),
+                ),
+                ("message_type".to_string(), serde_json::json!(message_type)),
+                (
+                    "sender".to_string(),
+                    serde_json::json!({"id": sender_id, "type": sender_type_name}),
+                ),
+                (
+                    "content".to_string(),
+                    serde_json::json!({
+                        "content_type": "application/json",
+                        "size_bytes": content_size,
+                        "json": msg.content.clone(),
+                        "truncated": false
+                    }),
+                ),
+                ("attachments".to_string(), serde_json::json!([])),
+            ]);
+            if !run_id.is_empty() {
+                data.insert("run_id".to_string(), serde_json::json!(run_id));
+            }
+            let occurred_at = Utc
+                .timestamp_millis_opt(i64::try_from(created_at).map_err(|_| {
+                    ServiceError::InternalError("message timestamp is out of range".to_string())
+                })?)
+                .single()
+                .ok_or_else(|| {
+                    ServiceError::InternalError("message timestamp is invalid".to_string())
+                })?
+                .to_rfc3339_opts(SecondsFormat::Millis, true);
+            let event = factory
+                .prepare(NewEvent {
+                    event_id: format!("evt_{}", uuid::Uuid::new_v4()),
+                    event_type: "message.created".to_string(),
+                    schema_version: EVENT_SCHEMA_VERSION_V1.to_string(),
+                    producer: "bcs-message-flow".to_string(),
+                    producer_key: format!("message.created:{message_id}"),
+                    occurred_at,
+                    subject: EventSubject {
+                        subject_type: "message".to_string(),
+                        id: message_id.clone(),
+                    },
+                    scope: EventScope {
+                        group_id: Some(group_id.to_string()),
+                        session_id: Some(session_id.to_string()),
+                        ..EventScope::default()
+                    },
+                    stream_key: format!("session:{session_id}"),
+                    actor: Some(EventActor {
+                        actor_type: match msg.sender_type {
+                            SenderType::Bot => EventActorType::Bot,
+                            SenderType::Human => EventActorType::Human,
+                            SenderType::System => EventActorType::System,
+                        },
+                        id: sender_id.to_string(),
+                        display_name: None,
+                    }),
+                    correlation_id: if run_id.is_empty() {
+                        None
+                    } else {
+                        Some(run_id.to_string())
+                    },
+                    causation_event_id: None,
+                    trace_id: None,
+                    data,
+                })
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            match event {
+                Some(event) => {
+                    repo.append_message_with_event(AppendMessageWithEvent {
+                        message_id,
+                        message: msg,
+                        event,
+                    })
+                    .await
+                }
+                None => repo.append_message(msg).await,
+            }
+        } else {
+            repo.append_message(msg).await
+        }
     } else {
-        info!(
-            group_id = %group_id,
-            sender_id = %sender_id,
-            message_type,
-            "group message persisted"
-        );
+        repo.append_message(msg).await
     }
+    .map_err(|error| {
+        ServiceError::InternalError(format!(
+            "failed to persist group message for Group '{group_id}': {error}"
+        ))
+    })?;
+    info!(
+        group_id = %group_id,
+        sender_id = %sender_id,
+        message_type,
+        message_id = %persisted.message_id,
+        "group message persisted"
+    );
+    Ok(Some(persisted))
 }
 
 /// Persist the sender's original text verbatim so human-facing history keeps
@@ -476,9 +642,14 @@ pub async fn handle_web_send(
         .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
 
     if group.status == GroupStatus::Inactive {
-        flow.group
-            .update_status(&cmd.group_id, GroupStatus::Active)
-            .await?;
+        crate::update_group_status(
+            flow.group.as_ref(),
+            &cmd.group_id,
+            GroupStatus::Active,
+            "message_activity_resumed",
+            crate::caller_event_actor(&cmd.caller),
+        )
+        .await?;
         group = flow
             .group
             .get(&cmd.group_id)
@@ -531,7 +702,7 @@ pub async fn handle_web_send(
         None,
         "", // run_id: user messages don't associate with bot runs
     )
-    .await;
+    .await?;
     let mut active_run_ids = Vec::new();
     let mut bot_deliveries = Vec::new();
     let mut delivery_results = Vec::new();
@@ -986,10 +1157,14 @@ pub async fn handle_persistent_group_send(
     if cmd.max_group_messages > 0 {
         let count = flow.group.message_count(&cmd.group_id).await?;
         if count >= cmd.max_group_messages as usize {
-            let _ = flow
-                .group
-                .update_status(&cmd.group_id, GroupStatus::Inactive)
-                .await;
+            crate::update_group_status(
+                flow.group.as_ref(),
+                &cmd.group_id,
+                GroupStatus::Inactive,
+                "message_limit_reached",
+                crate::caller_event_actor(&cmd.caller),
+            )
+            .await?;
             return Err(ServiceError::MessageLimitReached(format!(
                 "Group '{}' already has {} messages (max {})",
                 cmd.group_id, count, cmd.max_group_messages
@@ -1030,7 +1205,7 @@ pub async fn handle_persistent_group_send(
         None,
         "", // run_id: persistent send
     )
-    .await;
+    .await?;
 
     let decision = if group.group_kind == GroupKind::Dm {
         let overlay = build_route_overlay(flow, &group).await;
@@ -1405,14 +1580,8 @@ pub async fn handle_group_callback(
             None,
             "", // run_id: group callback
         )
-        .await;
-        if let Err(error) = flow.group.add_message(&cmd.group_id, group_message).await {
-            warn!(
-                group_id = %cmd.group_id,
-                error = %error,
-                "failed to persist group callback message"
-            );
-        }
+        .await?;
+        flow.group.add_message(&cmd.group_id, group_message).await?;
     }
 
     let mut bot_deliveries = Vec::new();
@@ -2237,6 +2406,16 @@ async fn frame_for_target(
             .collect::<Vec<_>>();
         (!attachments.is_empty()).then_some(attachments)
     });
+    let provider_tags = if delivery_target.is_http_provider() {
+        group
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == target.bot_uuid)
+            .map(|participant| participant.tags.as_slice())
+            .unwrap_or(&[])
+    } else {
+        &[]
+    };
     match target.delivery_type {
         DeliveryType::Send => {
             if context_projection == ContextProjection::DirectBot {
@@ -2263,6 +2442,7 @@ async fn frame_for_target(
                 sender_display_name,
                 &decision.mentions,
                 &target.bot_uuid,
+                provider_tags,
                 &wire_attachments,
                 &cmd.thinking,
                 is_self,

@@ -106,17 +106,21 @@ impl DbPlugin for LocalSqliteDbPlugin {
             .map_err(|err| DbError::Backend(format!("begin sqlite transaction: {}", err)))?;
         let mut results = Vec::with_capacity(steps.len());
 
-        for step in steps {
+        for (step_index, step) in steps.into_iter().enumerate() {
             match step {
                 DbTransactionStep::Query(statement) => {
-                    results.push(DbTransactionStepResult::Rows(query_with_connection(
-                        &tx, statement,
+                    let params = statement.resolve_transaction_params(&results, step_index)?;
+                    results.push(DbTransactionStepResult::Rows(query_with_connection_params(
+                        &tx,
+                        statement.sql(),
+                        &params,
                     )?));
                 }
                 DbTransactionStep::Execute(statement) => {
-                    results.push(DbTransactionStepResult::Executed(execute_with_connection(
-                        &tx, statement,
-                    )?));
+                    let params = statement.resolve_transaction_params(&results, step_index)?;
+                    results.push(DbTransactionStepResult::Executed(
+                        execute_with_connection_params(&tx, statement.sql(), &params)?,
+                    ));
                 }
             }
         }
@@ -140,9 +144,18 @@ fn execute_with_connection(
     connection: &Connection,
     statement: DbStatement,
 ) -> DbResult<DbExecuteResult> {
-    let params = sqlite_params(statement.params())?;
+    let params = statement.standalone_params()?;
+    execute_with_connection_params(connection, statement.sql(), params)
+}
+
+fn execute_with_connection_params(
+    connection: &Connection,
+    sql: &str,
+    values: &[DbValue],
+) -> DbResult<DbExecuteResult> {
+    let params = sqlite_params(values)?;
     let affected_rows = connection
-        .execute(statement.sql(), params_from_iter(params))
+        .execute(sql, params_from_iter(params))
         .map_err(|err| DbError::Backend(format!("execute sqlite statement: {}", err)))?;
     Ok(DbExecuteResult {
         affected_rows: affected_rows as u64,
@@ -153,9 +166,18 @@ fn execute_with_connection(
 }
 
 fn query_with_connection(connection: &Connection, statement: DbStatement) -> DbResult<Vec<DbRow>> {
-    let params = sqlite_params(statement.params())?;
+    let params = statement.standalone_params()?;
+    query_with_connection_params(connection, statement.sql(), params)
+}
+
+fn query_with_connection_params(
+    connection: &Connection,
+    sql: &str,
+    values: &[DbValue],
+) -> DbResult<Vec<DbRow>> {
+    let params = sqlite_params(values)?;
     let mut prepared = connection
-        .prepare(statement.sql())
+        .prepare(sql)
         .map_err(|err| DbError::Backend(format!("prepare sqlite query: {}", err)))?;
     let column_names: Vec<String> = prepared
         .column_names()

@@ -4,7 +4,7 @@ Covers:
 - 幂等：template_config 已有 dima_space_id → 直接返回不调 DIMA
 - 创建成功 → 调 DIMA + 持久化 template + 返回 workspace_id
 - bot 不存在 → BotNotFoundError
-- 非 applicationCoding → BotServiceError
+- 非 Coding Bot → BotServiceError
 - DIMA 报错 → 异常透出（不吞）
 - template_service 持久化失败 → workspace_id 仍返回（让前端可重试持久化）
 """
@@ -29,14 +29,23 @@ def _make_service():
     return svc
 
 
-def _make_app_coding_bot(bot_id: str = "bot-001", owner_id: str = "owner-1"):
-    return {
+def _make_app_coding_bot(
+    bot_id: str = "bot-001",
+    owner_id: str = "owner-1",
+    template_type: str = "applicationCoding",
+    active_engine: str | None = None,
+):
+    bot = {
         "id": 1,
         "bot_id": bot_id,
         "bot_name": "TestApp",
         "owner_id": owner_id,
-        "template_type": "applicationCoding",
+        "template_type": template_type,
     }
+    if active_engine is not None:
+        bot["active_engine"] = active_engine
+    return bot
+
 
 
 class TestEnsureDimaWorkspace:
@@ -125,22 +134,62 @@ class TestEnsureDimaWorkspace:
 
         svc._workspace_hosting_service.create_workspace_for_bot.assert_not_called()
 
-    def test_raises_for_non_application_coding_bot(self):
-        """template_type 不是 applicationCoding → BotServiceError。"""
+    def test_allows_non_application_coding_claude_code_bot(self):
+        """template_type 非 applicationCoding 但 active_engine=claude_code → 允许创建。"""
+        from agentclaw.community.core.bot_management.services.bot_service import BotService
+
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.return_value = _make_app_coding_bot(
+            template_type="normalCC",
+            active_engine="claude_code",
+        )
+        svc._template_service.get_template_config.return_value = {"foo": "bar"}
+
+        def fake_create(staff_id, bot_id, bot_name, template_config, raise_on_failure):
+            template_config["dima_space_id"] = "W_CC"
+            return "W_CC"
+
+        svc._workspace_hosting_service.create_workspace_for_bot.side_effect = fake_create
+
+        result = BotService.ensure_hosted_workspace(svc, "bot-001", "owner-1")
+
+        assert result == "W_CC"
+        svc._workspace_hosting_service.create_workspace_for_bot.assert_called_once()
+
+    def test_allows_non_application_coding_aicoding_bot(self):
+        """template_type 非 applicationCoding 但 active_engine=aicoding → 允许创建。"""
+        from agentclaw.community.core.bot_management.services.bot_service import BotService
+
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.return_value = _make_app_coding_bot(
+            template_type="personalCoding",
+            active_engine="aicoding",
+        )
+        svc._template_service.get_template_config.return_value = {}
+        svc._workspace_hosting_service.create_workspace_for_bot.return_value = "W_AI"
+
+        result = BotService.ensure_hosted_workspace(svc, "bot-001", "owner-1")
+
+        assert result == "W_AI"
+        svc._workspace_hosting_service.create_workspace_for_bot.assert_called_once()
+
+    def test_raises_for_non_coding_bot(self):
+        """既不是 legacy applicationCoding，也不是 claude_code/aicoding engine → BotServiceError。"""
         from agentclaw.community.core.bot_management.services.bot_service import (
             BotServiceError,
             BotService,
         )
 
         svc = _make_service()
-        bot = _make_app_coding_bot()
-        bot["template_type"] = "personal"
-        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._repository.get_by_id_and_owner.return_value = _make_app_coding_bot(
+            template_type="personal",
+            active_engine="openclaw",
+        )
 
         with pytest.raises(BotServiceError) as exc_info:
             BotService.ensure_hosted_workspace(svc, "bot-001", "owner-1")
 
-        assert "applicationCoding" in str(exc_info.value)
+        assert "Coding Bot" in str(exc_info.value)
         svc._workspace_hosting_service.create_workspace_for_bot.assert_not_called()
 
     def test_propagates_dima_error(self):

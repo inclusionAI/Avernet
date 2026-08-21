@@ -23,6 +23,7 @@ bcs-protocol = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-callback = { workspace = true }
 bcs-route-security = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
 bcs-collaboration-store = { workspace = true }

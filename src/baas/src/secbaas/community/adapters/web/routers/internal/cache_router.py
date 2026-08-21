@@ -52,10 +52,9 @@ class CacheKeyNotFoundError(DomainError):
 async def set_cache(
     key: str,
     body: CacheSetRequest,
-    op_ctx: OperationContext = Depends(get_op_ctx),
     cache: CachePlugin = Depends(Provide[ApplicationContainer.plugins.cache_plugin]),
 ) -> ApiResponse[CacheSetResponse]:
-    """将 ``value`` 写入缓存，超过 ``ttl_seconds`` 后自动过期。需登录鉴权。"""
+    """将 ``value`` 写入缓存，超过 ``ttl_seconds`` 后自动过期。"""
     cache.set(key, body.value, ttl_seconds=body.ttl_seconds)
     return ApiResponse(data=CacheSetResponse(key=key, ttl_seconds=body.ttl_seconds))
 
@@ -68,9 +67,10 @@ async def set_cache(
 @inject
 async def get_cache(
     key: str,
+    op_ctx: OperationContext = Depends(get_op_ctx),
     cache: CachePlugin = Depends(Provide[ApplicationContainer.plugins.cache_plugin]),
 ) -> ApiResponse[CacheGetResponse]:
-    """读取缓存中 ``key`` 对应的值，未命中返回 404。"""
+    """读取缓存中 ``key`` 对应的值，未命中返回 404。需登录鉴权。"""
     value = cache.get(key)
     if value is None:
         raise CacheKeyNotFoundError(f"cache key not found: {key}")

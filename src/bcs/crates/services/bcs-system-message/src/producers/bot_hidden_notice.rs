@@ -85,6 +85,7 @@ mod tests {
             originator: Some("bot-driver".into()),
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants: vec![
                 Participant {
                     bot_uuid: "bot-driver".into(),
@@ -93,6 +94,7 @@ mod tests {
                     role: ParticipantRole::Driver,
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::Auto),
+                    tags: Vec::new(),
                 },
                 Participant {
                     bot_uuid: "bot-hidden".into(),
@@ -101,6 +103,7 @@ mod tests {
                     role: ParticipantRole::Consultant,
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::Auto),
+                    tags: Vec::new(),
                 },
             ],
             messages: vec![],
@@ -153,6 +156,7 @@ mod tests {
             originator: Some("bot-driver".into()),
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants: vec![Participant {
                 bot_uuid: "bot-driver".into(),
                 bot_name: Some("Driver".into()),
@@ -160,6 +164,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
+                tags: Vec::new(),
             }],
             messages: vec![],
             workspace: Default::default(),

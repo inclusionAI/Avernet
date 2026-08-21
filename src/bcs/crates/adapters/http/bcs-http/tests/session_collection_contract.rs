@@ -1089,6 +1089,7 @@ async fn test_app() -> (
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+                tags: Vec::new(),
             }],
         ))
         .await
@@ -1148,6 +1149,7 @@ async fn human_app(
             },
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+            tags: Vec::new(),
         })
         .collect();
     group_store

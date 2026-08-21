@@ -230,6 +230,7 @@ impl GroupSessionConnectionService for RecordingGroupSessionConnections {
                 actor_kind: ActorKind::Human,
                 name: Some("Test Human".to_string()),
                 role: ParticipantRole::Observer,
+                tags: Vec::new(),
                 mode: ParticipantMode::Present,
                 joined_at: None,
             }],

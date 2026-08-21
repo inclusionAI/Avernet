@@ -1,0 +1,40 @@
+{
+  "spec_version": "1.0",
+  "event_id": "evt-task-completed-1",
+  "event_type": "task.completed",
+  "schema_version": "1.0",
+  "source": "bcs",
+  "occurred_at": "2026-08-18T10:02:00.000Z",
+  "recorded_at": "2026-08-18T10:02:00.006Z",
+  "subject": {
+    "type": "task",
+    "id": "task-1"
+  },
+  "scope": {
+    "group_id": "group-1",
+    "session_id": "session-1",
+    "task_id": "task-1"
+  },
+  "stream": {
+    "key": "task:task-1",
+    "sequence": 3
+  },
+  "actor": {
+    "type": "bot",
+    "id": "bot-worker"
+  },
+  "correlation_id": "collaboration-1",
+  "data": {
+    "task_id": "task-1",
+    "manager_id": "bot-manager",
+    "worker_id": "bot-worker",
+    "session_id": "session-1",
+    "result": {
+      "included": false,
+      "content_type": "text/plain",
+      "size_bytes": 320,
+      "truncated": false
+    },
+    "completed_at": "2026-08-18T10:02:00.000Z"
+  }
+}

@@ -200,6 +200,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         local_user_machine_repo=repository.local_user_machine_repository,
         bot_run_repository=repository.bot_run_repository,
         bot_run_queue_repository=repository.bot_run_queue_repository,
+        bot_run_interaction_repository=repository.bot_run_interaction_repository,
         bot_run_queue_chunk_repository=repository.bot_run_queue_chunk_repository,
         bot_qpm_repository=repository.bot_qpm_repository,
         distributed_lock_repository=repository.distributed_lock_repository,

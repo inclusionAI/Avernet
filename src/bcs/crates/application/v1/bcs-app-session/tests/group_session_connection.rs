@@ -98,6 +98,7 @@ impl SessionService for FakeSessionService {
                     actor_kind: ActorKind::Bot,
                     name: None,
                     role: ParticipantRole::Driver,
+                    tags: Vec::new(),
                     mode: ParticipantMode::Auto,
                     joined_at: None,
                 };
@@ -265,6 +266,7 @@ fn session_detail(session_id: &str, group_id: &str) -> SessionDetail {
             actor_kind: ActorKind::Human,
             name: None,
             role: ParticipantRole::Consultant,
+            tags: Vec::new(),
             mode: ParticipantMode::Present,
             joined_at: None,
         }],
