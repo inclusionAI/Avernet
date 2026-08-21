@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import uuid4
 
 from secbaas.community.core.repository.arca_ttl import TtlRenewalScheduleRepository
 from secbaas.community.core.service.distributed_lock import DistributedLockService
 from secbaas.community.core.service.paas import PaasServiceFacade
+from secbaas.community.core.utils.time_utils import (
+    naive_utc_fromtimestamp,
+    naive_utc_now,
+)
 from secbaas.community.logger import get_logger
 
 from ._deadline_renewal_config import DeadlineRenewalSchedulerConfig
@@ -181,7 +185,10 @@ class DeadlineRenewalScheduler:
                 )
 
         # ---- Step 1: Cold Table Query + LEFT JOIN ----
-
+        # The due gate time is computed ONCE per round as naive UTC and
+        # passed to the repository as a bound parameter — the comparison
+        # is then time-zone independent of the DB server clock (CR-01).
+        due_now = naive_utc_now()
         try:
             device_rows, binding_rows = await asyncio.gather(
                 asyncio.to_thread(
@@ -189,12 +196,14 @@ class DeadlineRenewalScheduler:
                     self._config.env,
                     "baas_device",
                     self._config.batch_size,
+                    now=due_now,
                 ),
                 asyncio.to_thread(
                     self._schedule_repo.list_due_for_renewal,
                     self._config.env,
                     "ac_entity_device_binding",
                     self._config.batch_size,
+                    now=due_now,
                 ),
             )
         except Exception:
@@ -343,7 +352,7 @@ class DeadlineRenewalScheduler:
                         if ttl_ms_str:
                             try:
                                 ttl_ms = int(ttl_ms_str)
-                                ttl_dt = datetime.fromtimestamp(ttl_ms / 1000)
+                                ttl_dt = naive_utc_fromtimestamp(ttl_ms / 1000)
                                 next_renew_at = ttl_dt - timedelta(hours=12)
                             except (ValueError, OSError, OverflowError):
                                 # Unparseable ttl — fall back to now + 12h
@@ -357,7 +366,7 @@ class DeadlineRenewalScheduler:
                                     row["source_table"],
                                     row["id"],
                                 )
-                                next_renew_at = datetime.now() + timedelta(hours=12)
+                                next_renew_at = naive_utc_now() + timedelta(hours=12)
                         else:
                             log.info(
                                 "[DeadlineRenewalScheduler] discovery scan: "
@@ -368,7 +377,7 @@ class DeadlineRenewalScheduler:
                                 row["source_table"],
                                 row["id"],
                             )
-                            next_renew_at = datetime.now() + timedelta(hours=12)
+                            next_renew_at = naive_utc_now() + timedelta(hours=12)
 
                         self._schedule_repo.register_if_missing(
                             self._config.env,
@@ -482,7 +491,7 @@ class DeadlineRenewalScheduler:
 
         # ---- Step 3(f): remaining > 24h — cannot renew (API constraint) ----
         if remaining_hours > 24:
-            expiration_dt = datetime.fromtimestamp(ttl_ms / 1000.0)
+            expiration_dt = naive_utc_fromtimestamp(ttl_ms / 1000.0)
             next_renew = expiration_dt - timedelta(hours=12)
             self._schedule_repo.postpone_renewal(
                 self._config.env,
@@ -501,7 +510,7 @@ class DeadlineRenewalScheduler:
 
         # ---- Step 3(g): 12h < remaining <= 24h — not yet due ----
         if remaining_hours > self._config.renew_threshold_hours:
-            expiration_dt = datetime.fromtimestamp(ttl_ms / 1000.0)
+            expiration_dt = naive_utc_fromtimestamp(ttl_ms / 1000.0)
             next_renew = expiration_dt - timedelta(hours=12)
             self._schedule_repo.postpone_renewal(
                 self._config.env,
@@ -549,7 +558,7 @@ class DeadlineRenewalScheduler:
             return await self._handle_failure(record)
 
         # Renewal success
-        next_renew = datetime.now() + timedelta(hours=12)
+        next_renew = naive_utc_now() + timedelta(hours=12)
         self._schedule_repo.update_after_success(
             self._config.env, record["source_table"], record["source_id"], next_renew
         )
@@ -605,7 +614,7 @@ class DeadlineRenewalScheduler:
             return "stopped"
 
         # Retry: schedule next attempt after retry_delay_minutes
-        next_retry = datetime.now() + timedelta(
+        next_retry = naive_utc_now() + timedelta(
             minutes=self._config.retry_delay_minutes
         )
         self._schedule_repo.update_after_failure(

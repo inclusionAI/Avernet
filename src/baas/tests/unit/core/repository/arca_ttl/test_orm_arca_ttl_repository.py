@@ -47,6 +47,9 @@ def _make_row(mapping: dict):
 
 _SQLITE = "sqlite"
 
+# Fixed naive-UTC gate time passed to list_due_for_renewal (CR-01).
+_NOW = datetime(2026, 8, 21, 0, 0, 0)
+
 
 class TestRegister:
     def test_register_upserts_with_bindparams(self):
@@ -186,7 +189,7 @@ class TestListDueForRenewal:
             )
         ]
 
-        results = repo.list_due_for_renewal("test", "baas_device", 500)
+        results = repo.list_due_for_renewal("test", "baas_device", 500, now=_NOW)
 
         mock_session.execute.assert_called_once()
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
@@ -195,7 +198,10 @@ class TestListDueForRenewal:
         assert "LEFT OUTER JOIN baas_device" in sql_text
         assert "provider_device_props AS device_props" in sql_text
         assert "baas_device.id AS hot_id" in sql_text
-        assert "next_renew_at < now()" in sql_text
+        # CR-01: the gate compares against a caller-supplied bound datetime,
+        # never the DB clock function.
+        assert "next_renew_at < %s" in sql_text
+        assert "now()" not in sql_text
         assert "ORDER BY baas_arca_ttl_renewal_schedule.next_renew_at ASC" in sql_text
         assert "LIMIT %s" in sql_text
         # Rule 1 deviation: cold side restricted to the requested source_table
@@ -204,6 +210,7 @@ class TestListDueForRenewal:
         params = compiled.params
         assert params["env_1"] == "test" or params["env_2"] == "test"
         assert 500 in params.values()
+        assert params["next_renew_at_1"] == _NOW
 
         assert len(results) == 1
         assert results[0]["hot_id"] == 5
@@ -227,7 +234,7 @@ class TestListDueForRenewal:
             )
         ]
 
-        results = repo.list_due_for_renewal("test", "baas_device", 500)
+        results = repo.list_due_for_renewal("test", "baas_device", 500, now=_NOW)
 
         sql_text = str(
             mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
@@ -243,7 +250,7 @@ class TestListDueForRenewal:
         repo, mock_session = _make_repo()
         mock_session.execute.return_value = []
 
-        results = repo.list_due_for_renewal("test", "baas_device", 500)
+        results = repo.list_due_for_renewal("test", "baas_device", 500, now=_NOW)
 
         assert results == []
 
@@ -252,7 +259,7 @@ class TestListDueForRenewal:
         repo, mock_session = _make_repo()
         mock_session.execute.return_value = []
 
-        repo.list_due_for_renewal("test", "baas_device", 500)
+        repo.list_due_for_renewal("test", "baas_device", 500, now=_NOW)
 
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
@@ -265,7 +272,7 @@ class TestListDueForRenewal:
         repo, mock_session = _make_repo()
         mock_session.execute.return_value = []
 
-        repo.list_due_for_renewal("test", "ac_entity_device_binding", 500)
+        repo.list_due_for_renewal("test", "ac_entity_device_binding", 500, now=_NOW)
 
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
@@ -278,7 +285,7 @@ class TestListDueForRenewal:
         repo, mock_session = _make_repo()
 
         with pytest.raises(ValueError, match="Unsupported source_table"):
-            repo.list_due_for_renewal("test", "bogus", 500)
+            repo.list_due_for_renewal("test", "bogus", 500, now=_NOW)
 
 
 class TestUpdateAfterSuccess:

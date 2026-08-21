@@ -40,6 +40,10 @@ SOURCE_TABLE = "baas_device"
 SOURCE_ID = 42
 FIRST_RENEW = datetime(2026, 8, 20, 12, 0, 0)
 NEW_RENEW = datetime(2027, 1, 15, 8, 30, 0)
+# Fixed gate time for list_due_for_renewal: the repository was moved from
+# DB-side `now()` to a caller-supplied naive-UTC bound parameter (CR-01),
+# so every due-contract assertion passes the same explicit naive datetime.
+NOW = datetime(2026, 8, 21, 0, 0, 0)
 
 
 @pytest.fixture
@@ -363,7 +367,7 @@ class TestListDueForRenewal:
     def test_list_due_device_join_order_orphan_env(self, repo):
         self._seed()
 
-        rows = repo.list_due_for_renewal(ENV, "baas_device", 500)
+        rows = repo.list_due_for_renewal(ENV, "baas_device", 500, now=NOW)
 
         # Due device rows only: orphan (oldest), cross-env orphan, hot match.
         assert [r["source_id"] for r in rows] == [999, 3, 1]
@@ -394,7 +398,7 @@ class TestListDueForRenewal:
     def test_list_due_binding_join(self, repo):
         self._seed()
 
-        rows = repo.list_due_for_renewal(ENV, "ac_entity_device_binding", 500)
+        rows = repo.list_due_for_renewal(ENV, "ac_entity_device_binding", 500, now=NOW)
 
         # source_id=7 is an ACTIVE due binding cold row without a hot row
         # (orphan); source_id=20 has its hot binding row. Ordered by
@@ -408,13 +412,13 @@ class TestListDueForRenewal:
     def test_list_due_limit_is_applied(self, repo):
         self._seed()
 
-        rows = repo.list_due_for_renewal(ENV, "baas_device", 2)
+        rows = repo.list_due_for_renewal(ENV, "baas_device", 2, now=NOW)
 
         assert [r["source_id"] for r in rows] == [999, 3]
 
     def test_list_due_unsupported_source_table_raises(self, repo):
         with pytest.raises(ValueError, match="Unsupported source_table"):
-            repo.list_due_for_renewal(ENV, "bogus", 500)
+            repo.list_due_for_renewal(ENV, "bogus", 500, now=NOW)
 
 
 # ==================== Row-level updates ====================

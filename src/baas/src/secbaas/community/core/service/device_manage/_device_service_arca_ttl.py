@@ -26,10 +26,11 @@ discovery scan is the safety net for that window.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from secbaas.community.core.repository.arca_ttl import TtlRenewalScheduleRepository
 from secbaas.community.core.utils.env_utils import get_current_env
+from secbaas.community.core.utils.time_utils import naive_utc_fromtimestamp
 from secbaas.community.logger import get_logger
 
 from ._device_service import (
@@ -77,7 +78,7 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
                     device_uuid,
                 )
                 return
-            expiration_dt = datetime.fromtimestamp(ttl_ms / 1000)
+            expiration_dt = naive_utc_fromtimestamp(ttl_ms / 1000)
             self._schedule_repo.register(
                 get_current_env(),
                 sandbox_id=response.provider_device_id,

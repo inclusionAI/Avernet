@@ -964,10 +964,13 @@ class TestStep5ReportAndMetrics:
         next_renew = call_args[3]  # env, source_table, source_id, next_renew_at
         assert next_renew is not None
 
-        from datetime import datetime, timedelta
+        from datetime import UTC, datetime, timedelta
 
-        expected_min = datetime.now() + timedelta(hours=12) - timedelta(seconds=5)
-        expected_max = datetime.now() + timedelta(hours=12) + timedelta(seconds=5)
+        # CR-01: the scheduler writes naive-UTC pipeline timestamps, so the
+        # expected window is UTC wall clock, never the local wall clock.
+        now_utc = datetime.now(UTC).replace(tzinfo=None)
+        expected_min = now_utc + timedelta(hours=12) - timedelta(seconds=5)
+        expected_max = now_utc + timedelta(hours=12) + timedelta(seconds=5)
         assert expected_min <= next_renew <= expected_max
 
     @pytest.mark.asyncio
@@ -1153,8 +1156,12 @@ class TestDiscoveryScanIsolation:
 
         mock_repo.register_if_missing.assert_called_once()
         next_renew_at = mock_repo.register_if_missing.call_args.kwargs["next_renew_at"]
-        expected_min = datetime.now() + timedelta(hours=12) - timedelta(seconds=5)
-        expected_max = datetime.now() + timedelta(hours=12) + timedelta(seconds=5)
+        # CR-01: discovery-scan fallback writes naive UTC, not local time.
+        from datetime import UTC
+
+        now_utc = datetime.now(UTC).replace(tzinfo=None)
+        expected_min = now_utc + timedelta(hours=12) - timedelta(seconds=5)
+        expected_max = now_utc + timedelta(hours=12) + timedelta(seconds=5)
         assert expected_min <= next_renew_at <= expected_max
         assert report.gap_records_registered == 1
 

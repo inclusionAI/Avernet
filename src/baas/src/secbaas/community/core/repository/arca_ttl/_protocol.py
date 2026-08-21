@@ -47,11 +47,16 @@ class TtlRenewalScheduleRepository(Protocol):
         env: str,
         source_table: str,
         limit: int = 500,
+        *,
+        now: datetime,
     ) -> list[dict]:
-        """Query ACTIVE rows where next_renew_at < NOW().
+        """Query ACTIVE rows where next_renew_at < :now (caller-supplied).
 
-        LEFT JOINs the corresponding hot table to verify the container
-        still exists. Returns dict rows with hot_id for orphan detection.
+        ``now`` is a naive-UTC datetime computed by the caller (CR-01
+        clock domain) so the due gate is time-zone independent of the
+        DB server clock. LEFT JOINs the corresponding hot table to
+        verify the container still exists. Returns dict rows with
+        hot_id for orphan detection.
         """
         ...
 

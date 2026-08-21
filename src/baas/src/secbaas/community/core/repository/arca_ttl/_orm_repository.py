@@ -172,8 +172,16 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         env: str,
         source_table: str,
         limit: int = 500,
+        *,
+        now: datetime,
     ) -> list[dict]:
-        """Query ACTIVE rows where next_renew_at < NOW().
+        """Query ACTIVE rows where next_renew_at < :now (caller-supplied).
+
+        ``now`` must be a naive-UTC datetime computed by the caller
+        (CR-01 clock domain): both sides of the comparison then share
+        the UTC wall clock and the due gate is time-zone independent of
+        the DB server clock (SQLite CURRENT_TIMESTAMP is UTC; MySQL
+        NOW() follows the server time zone).
 
         LEFT JOINs the corresponding hot table to verify the container
         still exists and provide device_props for TTL extraction.
@@ -237,7 +245,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                 TtlRenewalScheduleModel.status == "ACTIVE",
                 TtlRenewalScheduleModel.source_table == source_table,
                 TtlRenewalScheduleModel.env == env,
-                TtlRenewalScheduleModel.next_renew_at < func.now(),
+                TtlRenewalScheduleModel.next_renew_at < now,
             )
             .order_by(TtlRenewalScheduleModel.next_renew_at.asc())
             .limit(limit)

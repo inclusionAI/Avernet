@@ -22,7 +22,7 @@ Pins the exact INTG-01/INTG-02 semantics replicated by the wrapper:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -60,7 +60,9 @@ def _mock_env(monkeypatch):
 
 
 def _expiration_dt() -> datetime:
-    return datetime.fromtimestamp(_TTL_MS / 1000)
+    # CR-01: the wrapper computes the register margin in naive UTC — the
+    # test expectation must share the UTC wall clock, not the local one.
+    return datetime.fromtimestamp(_TTL_MS / 1000, tz=UTC).replace(tzinfo=None)
 
 
 def _make_service() -> tuple[ArcaScheduleAwareDeviceService, MagicMock, MagicMock]:
