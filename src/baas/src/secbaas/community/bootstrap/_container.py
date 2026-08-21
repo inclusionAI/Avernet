@@ -233,6 +233,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ticket_repository=repository.ticket_repository,
         paas_service_facade=services.paas_facade,
         file_transfer_backend=services.file_transfer_backend,
+        arca_ttl_schedule_repository=repository.arca_ttl_schedule_repository,
     )
 
     cron_lifecycle = providers.Singleton(
