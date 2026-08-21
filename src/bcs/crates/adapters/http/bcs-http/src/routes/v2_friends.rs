@@ -29,7 +29,7 @@ use bcs_service_api::application::{ConnectStatus, RequestDirection};
 use crate::error::HttpAdapterError;
 use crate::state::HttpAppState;
 
-use super::caller::caller_actor_id_from_headers;
+use super::{bots::bot_use_case_error_to_http, caller::caller_actor_id_from_headers};
 
 /// `POST /friends/request` — create a friend (connect) request.
 pub async fn create_friend_request(
@@ -92,9 +92,16 @@ pub async fn cancel_friend_request(
     uri: Uri,
     Path(id): Path<String>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    // Caller identity is resolved for auth-area consistency; `cancel` acts on
-    // the request id and the service layer verifies the caller is the sender.
-    let _caller = resolve_caller(&state, &headers, &uri, None, None).await?;
+    // Caller identity is resolved for auth-area consistency; the caller may
+    // only cancel requests they originally created.
+    let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
+    let req = state.connect.get_request(&id).await?;
+    if req.created_by != caller {
+        return Err(HttpAdapterError::Forbidden(format!(
+            "not authorized to cancel request '{}'",
+            id
+        )));
+    }
     state.connect.cancel(&id).await?;
     Ok(Json(envelope(&StatusResponse {
         status: "cancelled".into(),
@@ -183,14 +190,14 @@ pub async fn list_friends_by_actor(
 /// 1. **Bearer** (primary): token resolves to a human (`human_<staff>`) or bot
 ///    identity → authenticated, safe.
 /// 2. **from_actor fallback**: only when Bearer resolves AND the caller wants
-///    to "act as" a different bot they own. If NO Bearer → reject (401).
+///    to "act as" a different actor they are allowed to represent. If NO
+///    Bearer → reject (401).
 ///    This closes the unauthenticated-self-declaration hole that the old
 ///    `/friends/*` Strategy-A fallback allowed.
 ///
-/// TODO(future): when from_actor + actor_kind=bot is provided, verify the
-/// Bearer-authenticated user owns that bot (via BotActorConfigRepoPort
-/// created_by). Requires exposing bot_config on HttpAppState or a new
-/// ConnectService method.
+/// Ownership rule: a human bearer may only act as a bot they own
+/// (`bot_query.list_bots_by_creator(staff_no)`), and a bot bearer may only act
+/// as itself. Any other `from_actor` is rejected with 403.
 async fn resolve_caller(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -200,26 +207,42 @@ async fn resolve_caller(
 ) -> Result<String, HttpAdapterError> {
     let bearer_id = caller_actor_id_from_headers(state, headers, uri).await;
 
-    if let Some(bearer) = bearer_id {
-        // Bearer authenticated. If from_actor provided with actor_kind=bot,
-        // the caller wants to act AS that bot (act-as). For now trust the
-        // Bearer (caller is authenticated); ownership verification is a TODO.
-        // Without from_actor → use Bearer identity directly.
-        if let Some(actor_id) = from_actor.filter(|id| !id.is_empty()) {
-            let canonical = match actor_kind {
-                Some("human") => format!("human_{}", actor_id),
-                _ => actor_id.to_string(),
-            };
-            return Ok(canonical);
-        }
+    let Some(bearer) = bearer_id else {
+        return Err(HttpAdapterError::Unauthorized(
+            "v2 endpoints require Bearer authentication; from_actor fallback without Bearer is not allowed".to_string(),
+        ));
+    };
+
+    let Some(actor_id) = from_actor.filter(|id| !id.is_empty()) else {
         return Ok(bearer);
+    };
+
+    let canonical = match actor_kind {
+        Some("human") => format!("human_{}", actor_id),
+        _ => actor_id.to_string(),
+    };
+
+    if canonical == bearer {
+        return Ok(canonical);
     }
 
-    // No Bearer → v2 rejects unauthenticated self-declaration (unlike old
-    // /friends/* which allows from_bot fallback for bcs-cli).
-    Err(HttpAdapterError::Unauthorized(
-        "v2 endpoints require Bearer authentication; from_actor fallback without Bearer is not allowed".to_string(),
-    ))
+    if matches!(actor_kind, Some("bot")) && bearer.starts_with("human_") {
+        let staff_no = bearer.strip_prefix("human_").unwrap_or(&bearer);
+        let owned_bots = state
+            .services
+            .bot_query
+            .list_bots_by_creator(staff_no)
+            .await
+            .map_err(bot_use_case_error_to_http)?;
+        if owned_bots.iter().any(|bot| bot.bot_uuid == canonical) {
+            return Ok(canonical);
+        }
+    }
+
+    Err(HttpAdapterError::Forbidden(format!(
+        "not authorized to act as actor '{}'",
+        canonical
+    )))
 }
 
 fn parse_status_filter(s: &str) -> Option<bcs_domain::edge_permission::RequestStatus> {

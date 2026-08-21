@@ -123,8 +123,4 @@ CREATE TABLE IF NOT EXISTS `authz_decision_logs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- === bcs_bots（增量列）======================================================
--- 人方向加好友开关 + 加好友是否需审批，**解耦** visibility（visibility 只决定谁能
--- 主动发起，§3.2）。由 ConnectService/AdmissionService 读取决定 add/connect/admit。
-ALTER TABLE `bcs_bots`
-  ADD COLUMN `human_addable`   TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1=允许人发起加该 bot（默认关）',
-  ADD COLUMN `friend_approval` VARCHAR(8) NOT NULL DEFAULT 'auto' COMMENT 'auto（自动批准）| manual（需人工审批）';
+-- 旧版人方向加好友开关 / 审批列已并入 bot_info 内部属性读取，不再在迁移里新增列。

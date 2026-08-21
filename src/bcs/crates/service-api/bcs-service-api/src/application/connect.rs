@@ -68,6 +68,9 @@ pub trait ConnectService: Send + Sync {
     /// Caller withdraws a pending request.
     async fn cancel(&self, request_id: &str) -> ServiceResult<()>;
 
+    /// Fetch a request by id for delivery-layer authorization checks.
+    async fn get_request(&self, request_id: &str) -> ServiceResult<PermissionRequest>;
+
     /// Unfriend: revoke friend edge(s) only (human→bot 1 / bot↔bot 2). Other edges untouched.
     /// Returns the revoked edge_ids.
     async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<String>>;
@@ -85,12 +88,4 @@ pub trait ConnectService: Send + Sync {
         page_size: u32,
     ) -> ServiceResult<RequestsPage>;
 
-    /// Set the bot's `human_addable` flag (spec §3.2). Caller must own the bot
-    /// (ownership is verified by the implementation). Backs
-    /// `PUT /bots/{id}/human-addable`.
-    async fn set_human_addable(&self, bot_id: &str, value: bool, caller: &str) -> ServiceResult<()>;
-
-    /// Set the bot's `friend_approval` policy (spec §3.2). Caller must own the
-    /// bot. Backs `PUT /bots/{id}/friend-approval`.
-    async fn set_friend_approval(&self, bot_id: &str, value: &str, caller: &str) -> ServiceResult<()>;
 }

@@ -93,6 +93,18 @@ fn actor_kind_of(id: &str) -> ActorKind {
     }
 }
 
+fn normalize_policy_value(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn is_open_friend_strategy(strategy: &str) -> bool {
+    matches!(normalize_policy_value(strategy).as_str(), "open")
+}
+
+fn is_private_visibility(value: &str) -> bool {
+    matches!(normalize_policy_value(value).as_str(), "private")
+}
+
 /// Fresh opaque id for a new edge grant. UUID v4 — collision-safe, unlike a
 /// formatted `from_to` id which collides on re-create after revoke.
 fn new_edge_id() -> String {
@@ -143,23 +155,7 @@ impl ConnectService for DbConnectService {
             .await
             .ok_or_else(|| ServiceError::BotNotFound(to_bot.to_string()))?;
 
-        // 4. Visibility / status gates (§4.2).
-        if cfg.status == "hidden" {
-            return Err(ServiceError::BotHidden(to_bot.to_string()));
-        }
-        if cfg.visibility == "private" {
-            // Private bots never initiate collaboration (AC-33).
-            return Err(ServiceError::PrivateBotCannotCollaborate);
-        }
-        // Human-direction add gate: a Human caller may only connect to a bot
-        // whose `human_addable` is true.
-        if caller_kind == ActorKind::Human && !cfg.human_addable {
-            return Err(ServiceError::Forbidden(format!(
-                "bot '{to_bot}' is not human-addable"
-            )));
-        }
-
-        // 5. Idempotency: already friends → Approved (no new ids).
+        // 4. Idempotency: already friends → Approved (no new ids).
         if self.edge_grants.has_friend_edge(caller, to_bot, &self.env).await {
             return Ok(ConnectResult {
                 request_ids: vec![],
@@ -181,54 +177,80 @@ impl ConnectService for DbConnectService {
             });
         }
 
-        // 6. §4.2 decision tree.
-        // Fully-public + auto → no edge (runtime public_default admits at check time).
-        let is_fully_public =
-            cfg.visibility == "public" && cfg.friend_approval == "auto";
-        if is_fully_public {
-            return Ok(ConnectResult {
-                request_ids: vec![],
-                edge_ids: vec![],
-                status: ConnectStatus::PublicNoEdge,
-                auto_accepted: false,
-            });
+        // 5. Existing visibility/status gates.
+        if cfg.status == "hidden" {
+            return Err(ServiceError::BotHidden(to_bot.to_string()));
+        }
+        if is_private_visibility(&cfg.visibility) {
+            return Err(ServiceError::PrivateBotCannotCollaborate);
+        }
+        if caller_kind == ActorKind::Human && is_private_visibility(&cfg.user_visibility) {
+            return Err(ServiceError::Forbidden(format!(
+                "bot '{to_bot}' is not human-addable"
+            )));
         }
 
-        if cfg.friend_approval == "auto" {
-            // Auto-approve: build edges + approved snapshot requests.
-            let (edge_ids, default_refs) = self
-                .build_connect_edges(caller, to_bot, caller_kind, target_kind)
-                .await?;
-            let request_ids = self
-                .insert_approved_connect_requests(
-                    caller,
-                    to_bot,
-                    caller_kind,
-                    target_kind,
-                    "auto",
-                    &edge_ids,
-                    &default_refs,
-                    message.as_deref(),
-                )
-                .await?;
-
-            Ok(ConnectResult {
-                request_ids,
-                edge_ids,
-                status: ConnectStatus::Approved,
-                auto_accepted: true,
-            })
-        } else {
-            // Manual: insert pending request(s), no edges.
-            let request_ids = self
-                .insert_pending_connect(caller, to_bot, caller_kind, target_kind, message)
-                .await?;
-            Ok(ConnectResult {
-                request_ids,
-                edge_ids: vec![],
-                status: ConnectStatus::Pending,
-                auto_accepted: false,
-            })
+        let needs_approval = !is_open_friend_strategy(&cfg.friend_check_in_strategy);
+        match cfg.visibility.as_str() {
+            "public" => {
+                if needs_approval {
+                    let request_ids = self
+                        .insert_pending_connect(caller, to_bot, caller_kind, target_kind, message)
+                        .await?;
+                    Ok(ConnectResult {
+                        request_ids,
+                        edge_ids: vec![],
+                        status: ConnectStatus::Pending,
+                        auto_accepted: false,
+                    })
+                } else {
+                    Ok(ConnectResult {
+                        request_ids: vec![],
+                        edge_ids: vec![],
+                        status: ConnectStatus::PublicNoEdge,
+                        auto_accepted: false,
+                    })
+                }
+            }
+            "protected" => {
+                if needs_approval {
+                    let request_ids = self
+                        .insert_pending_connect(caller, to_bot, caller_kind, target_kind, message)
+                        .await?;
+                    Ok(ConnectResult {
+                        request_ids,
+                        edge_ids: vec![],
+                        status: ConnectStatus::Pending,
+                        auto_accepted: false,
+                    })
+                } else {
+                    let (edge_ids, default_refs) = self
+                        .build_connect_edges(caller, to_bot, caller_kind, target_kind)
+                        .await?;
+                    let request_ids = self
+                        .insert_approved_connect_requests(
+                            caller,
+                            to_bot,
+                            caller_kind,
+                            target_kind,
+                            "auto",
+                            &edge_ids,
+                            &default_refs,
+                            message.as_deref(),
+                        )
+                        .await?;
+                    Ok(ConnectResult {
+                        request_ids,
+                        edge_ids,
+                        status: ConnectStatus::Approved,
+                        auto_accepted: true,
+                    })
+                }
+            }
+            other => Err(ServiceError::InvalidOperation {
+                message: format!("unsupported bot visibility '{other}' for '{to_bot}'"),
+                request_id: None,
+            }),
         }
     }
 
@@ -426,6 +448,13 @@ impl ConnectService for DbConnectService {
         Ok(())
     }
 
+    async fn get_request(&self, request_id: &str) -> ServiceResult<PermissionRequest> {
+        self.requests
+            .get(request_id, &self.env)
+            .await
+            .ok_or_else(|| ServiceError::FriendRequestNotFound(request_id.to_string()))
+    }
+
     async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<String>> {
         // D12 friend edges are `grant_ref_id == target.default` (caller→target)
         // or `grant_ref_id == caller.default` (target→caller, Bot↔Bot). Revoke
@@ -561,31 +590,13 @@ impl ConnectService for DbConnectService {
         })
     }
 
-    async fn set_human_addable(&self, bot_id: &str, value: bool, caller: &str) -> ServiceResult<()> {
-        self.verify_ownership(bot_id, caller).await?;
-        self.bot_config
-            .set_human_addable(bot_id, &self.env, value)
-            .await
-    }
-
-    async fn set_friend_approval(
-        &self,
-        bot_id: &str,
-        value: &str,
-        caller: &str,
-    ) -> ServiceResult<()> {
-        self.verify_ownership(bot_id, caller).await?;
-        self.bot_config
-            .set_friend_approval(bot_id, &self.env, value)
-            .await
-    }
 }
 
 // ---- private helpers ------------------------------------------------------
 
 impl DbConnectService {
     /// Verify `caller` owns `bot_id` (spec §3.2 ownership gate for config
-    /// writes: `set_human_addable` / `set_friend_approval`).
+    /// writes).
     ///
     /// Rules (mirrors `docs/CLAUDE.md` "Bot Ownership Verification"):
     /// - `created_by` present AND matches `caller` → allow.
@@ -1205,8 +1216,7 @@ mod tests {
                 bot_uuid TEXT NOT NULL, \
                 env TEXT NOT NULL, \
                 visibility TEXT NOT NULL DEFAULT 'public', \
-                human_addable INTEGER NOT NULL DEFAULT 0, \
-                friend_approval TEXT NOT NULL DEFAULT 'auto', \
+                bot_info TEXT DEFAULT NULL, \
                 status TEXT NOT NULL DEFAULT 'online', \
                 created_by TEXT, \
                 is_deleted INTEGER NOT NULL DEFAULT 0, \
@@ -1246,20 +1256,23 @@ mod tests {
         db: &Arc<LocalSqliteDbPlugin>,
         bot_uuid: &str,
         visibility: &str,
-        human_addable: bool,
-        friend_approval: &str,
+        user_visibility: &str,
+        friend_check_in_strategy: &str,
         status: &str,
         created_by: Option<&str>,
     ) {
+        let bot_info = serde_json::json!({
+            "user_visibility": user_visibility,
+            "friend_check_in_strategy": friend_check_in_strategy,
+        });
         db.execute(DbStatement::with_params(
             "INSERT INTO bcs_bots \
-             (bot_uuid, env, visibility, human_addable, friend_approval, status, created_by) \
-             VALUES (?, 'dev', ?, ?, ?, ?, ?)",
+             (bot_uuid, env, visibility, bot_info, status, created_by) \
+             VALUES (?, 'dev', ?, ?, ?, ?)",
             vec![
                 DbValue::from(bot_uuid),
                 DbValue::from(visibility),
-                DbValue::from(human_addable),
-                DbValue::from(friend_approval),
+                DbValue::from(serde_json::to_string(&bot_info).expect("bot_info json")),
                 DbValue::from(status),
                 match created_by {
                     Some(v) => DbValue::from(v),
@@ -1337,7 +1350,7 @@ mod tests {
     #[tokio::test]
     async fn hidden_bot_rejected() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:hidden", "public", true, "auto", "hidden", Some("85020")).await;
+        seed_bot(&db, "x:hidden", "public", "protected", "OPEN", "hidden", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
             .create_connect("human_1", "x:hidden", None)
@@ -1349,7 +1362,7 @@ mod tests {
     #[tokio::test]
     async fn private_bot_rejected() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:priv", "private", true, "auto", "online", Some("85020")).await;
+        seed_bot(&db, "x:priv", "private", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
             .create_connect("human_1", "x:priv", None)
@@ -1362,21 +1375,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn human_addable_false_for_human_caller() {
+    async fn user_visibility_private_for_human_caller() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:nha", "protected", false, "auto", "online", Some("85020")).await;
+        seed_bot(&db, "x:nha", "protected", "private", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
             .create_connect("human_1", "x:nha", None)
             .await
-            .expect_err("!human_addable → Forbidden for human caller");
+            .expect_err("user_visibility=private → Forbidden for human caller");
         assert!(matches!(err, ServiceError::Forbidden(_)), "got {err:?}");
     }
 
     #[tokio::test]
     async fn public_auto_bot_returns_public_no_edge() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:pub", "public", true, "auto", "online", Some("85020")).await;
+        seed_bot(&db, "x:pub", "public", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
             .create_connect("human_1", "x:pub", None)
@@ -1400,7 +1413,7 @@ mod tests {
     #[tokio::test]
     async fn human_to_bot_manual_returns_pending_one_request_no_edge() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:man", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:man", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
             .create_connect("human_1", "x:man", Some("hi".into()))
@@ -1422,7 +1435,7 @@ mod tests {
     #[tokio::test]
     async fn human_to_bot_auto_approves_one_edge_one_request() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:auto1", "protected", true, "auto", "online", Some("85020")).await;
+        seed_bot(&db, "x:auto1", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
             .create_connect("human_1", "x:auto1", None)
@@ -1450,8 +1463,8 @@ mod tests {
     #[tokio::test]
     async fn bot_to_bot_auto_approves_two_edges_two_requests() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:botA", "protected", true, "auto", "online", Some("85020")).await;
-        seed_bot(&db, "x:botB", "protected", true, "auto", "online", Some("85020")).await;
+        seed_bot(&db, "x:botA", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        seed_bot(&db, "x:botB", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
             .create_connect("x:botA", "x:botB", None)
@@ -1479,7 +1492,7 @@ mod tests {
     #[tokio::test]
     async fn already_friends_is_idempotent_approved() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:idem", "protected", true, "auto", "online", Some("85020")).await;
+        seed_bot(&db, "x:idem", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let first = svc
             .create_connect("human_1", "x:idem", None)
@@ -1501,7 +1514,7 @@ mod tests {
     #[tokio::test]
     async fn pending_connect_is_idempotent_pending() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:pend", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:pend", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let first = svc
             .create_connect("human_1", "x:pend", None)
@@ -1520,7 +1533,7 @@ mod tests {
     #[tokio::test]
     async fn approve_pending_human_to_bot_builds_edge() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:appr", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:appr", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
             .create_connect("human_1", "x:appr", None)
@@ -1545,7 +1558,7 @@ mod tests {
         // auto path inserts snapshots). Total connect request rows for this
         // Human→Bot connect must remain 1 after approve.
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:nodupe", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:nodupe", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
             .create_connect("human_1", "x:nodupe", None)
@@ -1569,8 +1582,8 @@ mod tests {
     #[tokio::test]
     async fn approve_bot_to_bot_approves_both_and_builds_two_edges() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:bbA", "protected", true, "manual", "online", Some("85020")).await;
-        seed_bot(&db, "x:bbB", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:bbA", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        seed_bot(&db, "x:bbB", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
             .create_connect("x:bbA", "x:bbB", None)
@@ -1596,7 +1609,7 @@ mod tests {
     #[tokio::test]
     async fn reject_does_not_build_edge() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:rej", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:rej", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
             .create_connect("human_1", "x:rej", None)
@@ -1616,8 +1629,8 @@ mod tests {
     #[tokio::test]
     async fn reject_bot_to_bot_rejects_both() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:rbA", "protected", true, "manual", "online", Some("85020")).await;
-        seed_bot(&db, "x:rbB", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:rbA", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        seed_bot(&db, "x:rbB", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
             .create_connect("x:rbA", "x:rbB", None)
@@ -1635,7 +1648,7 @@ mod tests {
     #[tokio::test]
     async fn cancel_only_pending() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:canc", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:canc", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
             .create_connect("human_1", "x:canc", None)
@@ -1655,7 +1668,7 @@ mod tests {
     #[tokio::test]
     async fn revoke_friend_human_to_bot_one_edge() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:unf", "protected", true, "auto", "online", Some("85020")).await;
+        seed_bot(&db, "x:unf", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let created = svc
             .create_connect("human_1", "x:unf", None)
@@ -1672,8 +1685,8 @@ mod tests {
     #[tokio::test]
     async fn revoke_friend_bot_to_bot_two_edges() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:uA", "protected", true, "auto", "online", Some("85020")).await;
-        seed_bot(&db, "x:uB", "protected", true, "auto", "online", Some("85020")).await;
+        seed_bot(&db, "x:uA", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        seed_bot(&db, "x:uB", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         svc.create_connect("x:uA", "x:uB", None).await.expect("connect");
         assert!(eg.has_friend_edge("x:uA", "x:uB", "dev").await);
@@ -1688,7 +1701,7 @@ mod tests {
         // A non-default profile edge (grant_ref_id != default) must survive
         // revoke_friend (it is not a friend edge per D12).
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:keep", "protected", true, "auto", "online", Some("85020")).await;
+        seed_bot(&db, "x:keep", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         svc.create_connect("human_1", "x:keep", None).await.expect("connect");
         // Manually insert a writer-profile edge with a different ref id.
@@ -1717,8 +1730,8 @@ mod tests {
     #[tokio::test]
     async fn list_friends_after_connect() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:lf1", "protected", true, "auto", "online", Some("85020")).await;
-        seed_bot(&db, "x:lf2", "protected", true, "auto", "online", Some("85020")).await;
+        seed_bot(&db, "x:lf1", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        seed_bot(&db, "x:lf2", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         svc.create_connect("human_1", "x:lf1", None).await.expect("c1");
         svc.create_connect("human_1", "x:lf2", None).await.expect("c2");
@@ -1738,7 +1751,7 @@ mod tests {
     #[tokio::test]
     async fn list_requests_received_returns_pending() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:lr", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:lr", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
             .create_connect("human_1", "x:lr", None)
@@ -1779,7 +1792,7 @@ mod tests {
     #[tokio::test]
     async fn list_requests_pagination() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:pg", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:pg", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         // Create 3 separate human callers connecting to the same bot.
         for h in ["human_a", "human_b", "human_c"] {
@@ -1825,8 +1838,8 @@ mod tests {
 
     #[tokio::test]
     async fn admission_bot_hidden() {
-        let (eg, pp, _rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:hid", "public", true, "auto", "hidden", Some("85020")).await;
+        let (eg, pp, _rq, _bc, db) = assemble().await;
+        seed_bot(&db, "x:hid", "public", "protected", "OPEN", "hidden", Some("85020")).await;
         let svc = admission_service(&eg, &bc, &pp);
         let r = svc
             .check_admission("human_1", "x:hid", "originator", "dev")
@@ -1841,7 +1854,7 @@ mod tests {
     #[tokio::test]
     async fn admission_friend_edge_allowed() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:fr", "protected", true, "auto", "online", Some("85020")).await;
+        seed_bot(&db, "x:fr", "protected", "protected", "OPEN", "online", Some("85020")).await;
         // Seed a friend edge by going through ConnectService (auto path),
         // which also ensures the target default profile and builds the edge.
         let conn = service(&eg, &pp, &rq, &bc);
@@ -1871,8 +1884,8 @@ mod tests {
 
     #[tokio::test]
     async fn admission_public_default() {
-        let (eg, pp, _rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:pub", "public", true, "auto", "online", Some("85020")).await;
+        let (eg, pp, _rq, _bc, db) = assemble().await;
+        seed_bot(&db, "x:pub", "public", "protected", "OPEN", "online", Some("85020")).await;
         let svc = admission_service(&eg, &bc, &pp);
         let r = svc
             .check_admission("human_1", "x:pub", "originator", "dev")
@@ -1889,8 +1902,8 @@ mod tests {
 
     #[tokio::test]
     async fn admission_no_edge_protected_bot() {
-        let (eg, pp, _rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:prot", "protected", true, "auto", "online", Some("85020")).await;
+        let (eg, pp, _rq, _bc, db) = assemble().await;
+        seed_bot(&db, "x:prot", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = admission_service(&eg, &bc, &pp);
         let r = svc
             .check_admission("human_1", "x:prot", "originator", "dev")
@@ -1905,7 +1918,7 @@ mod tests {
     #[tokio::test]
     async fn build_authz_context_with_active_edge() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:az", "protected", true, "auto", "online", Some("85020")).await;
+        seed_bot(&db, "x:az", "protected", "protected", "OPEN", "online", Some("85020")).await;
         // Seed an approved friend edge.
         let conn = service(&eg, &pp, &rq, &bc);
         conn.create_connect("human_1", "x:az", None)
@@ -1931,8 +1944,8 @@ mod tests {
 
     #[tokio::test]
     async fn build_authz_context_empty_for_protected_no_edge() {
-        let (eg, pp, _rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:prot2", "protected", true, "auto", "online", Some("85020")).await;
+        let (eg, pp, _rq, _bc, db) = assemble().await;
+        seed_bot(&db, "x:prot2", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = admission_service(&eg, &bc, &pp);
         let ctx = svc
             .build_authz_context("human_1", "x:prot2", "o", "t", "r", "dev")
@@ -1946,8 +1959,8 @@ mod tests {
 
     #[tokio::test]
     async fn build_authz_context_public_default_fallback() {
-        let (eg, pp, _rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:pub2", "public", true, "auto", "online", Some("85020")).await;
+        let (eg, pp, _rq, _bc, db) = assemble().await;
+        seed_bot(&db, "x:pub2", "public", "protected", "OPEN", "online", Some("85020")).await;
         let svc = admission_service(&eg, &bc, &pp);
         let ctx = svc
             .build_authz_context("human_1", "x:pub2", "o", "t", "r", "dev")
@@ -1965,8 +1978,8 @@ mod tests {
         // `is_authorized` but NOT via `has_friend_edge`. This is the B4b
         // conformance check: admission uses is_authorized (edge superset),
         // friendship uses has_friend_edge (default-profile only).
-        let (eg, pp, _rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:rules", "protected", true, "manual", "online", Some("85020")).await;
+        let (eg, pp, _rq, _bc, db) = assemble().await;
+        seed_bot(&db, "x:rules", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         // Ensure the target has a default profile so has_friend_edge can resolve,
         // then insert a Rules edge (grant_kind=Rules, arbitrary ref) from→to.
         pp.ensure_default_profile("x:rules", "dev").await.expect("ensure default");
@@ -2006,8 +2019,8 @@ mod tests {
         // Admission must admit via a Rules edge (is_authorized superset), even
         // when no friend (default-profile) edge exists. This is the behavioral
         // proof that check_admission uses is_authorized, not has_friend_edge.
-        let (eg, pp, _rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:radm", "protected", true, "manual", "online", Some("85020")).await;
+        let (eg, pp, _rq, _bc, db) = assemble().await;
+        seed_bot(&db, "x:radm", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         pp.ensure_default_profile("x:radm", "dev").await.expect("ensure default");
         eg.insert_grant(EdgeGrant {
             edge_id: "eg_radm_1".to_string(),
@@ -2042,7 +2055,7 @@ mod tests {
     #[tokio::test]
     async fn list_requests_sent_and_all_with_status_filter() {
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:sa", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:sa", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
             .create_connect("human_1", "x:sa", Some("hi".into()))
@@ -2098,8 +2111,8 @@ mod tests {
         // each side's All view sees both rows (one from_id, one to_id) — no
         // dedup collapse (distinct request_ids), exercising the union + sort.
         let (eg, pp, rq, bc, db) = assemble().await;
-        seed_bot(&db, "x:btA", "protected", true, "manual", "online", Some("85020")).await;
-        seed_bot(&db, "x:btB", "protected", true, "manual", "online", Some("85020")).await;
+        seed_bot(&db, "x:btA", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        seed_bot(&db, "x:btB", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let pending = svc
             .create_connect("x:btA", "x:btB", None)

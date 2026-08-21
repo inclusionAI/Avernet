@@ -39,7 +39,6 @@ pub use http::{
     DiscoverBotProviderInfo, DiscoverBotsExtendedResponse, DiscoverBotsResponse,
     DynamicStatusResponse, EngineType, EvaluateProposalRequest, FriendApiResponse,
     BotSearchEntry, BotSearchQuery,
-    FriendApprovalBody, HumanAddableBody,
     EnsureBotRequest, EnsureBotResponse,
     FriendEntry, FriendListResponse, FusionRequest, FusionResponse,
     InlineEventPayloadInfo, InlineEventPayloadMode, InlineEventSinkInfo,

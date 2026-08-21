@@ -54,6 +54,9 @@ impl ConnectService for NoopConnectService {
     async fn approve(&self, _: &str, _: &str) -> ServiceResult<Vec<String>> { Ok(vec![]) }
     async fn reject(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<()> { Ok(()) }
     async fn cancel(&self, _: &str) -> ServiceResult<()> { Ok(()) }
+    async fn get_request(&self, _: &str) -> ServiceResult<PermissionRequest> {
+        Err(bcs_service_api::ServiceError::FriendRequestNotFound("noop".to_string()))
+    }
     async fn revoke_friend(&self, _: &str, _: &str) -> ServiceResult<Vec<String>> { Ok(vec![]) }
     async fn list_friends(&self, _: &str) -> ServiceResult<Vec<FriendListEntry>> { Ok(vec![]) }
     async fn list_requests(
@@ -65,17 +68,6 @@ impl ConnectService for NoopConnectService {
         page_size: u32,
     ) -> ServiceResult<RequestsPage> {
         Ok(RequestsPage { items: vec![], total: 0, page, page_size })
-    }
-    async fn set_human_addable(&self, _bot_id: &str, _value: bool, _caller: &str) -> ServiceResult<()> {
-        Ok(())
-    }
-    async fn set_friend_approval(
-        &self,
-        _bot_id: &str,
-        _value: &str,
-        _caller: &str,
-    ) -> ServiceResult<()> {
-        Ok(())
     }
 }
 

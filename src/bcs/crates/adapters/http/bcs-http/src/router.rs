@@ -222,14 +222,6 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/bots/{id}/admission",
             get(routes::admission::get_admission),
         )
-        .route(
-            "/bots/{id}/human-addable",
-            put(routes::bots::set_human_addable),
-        )
-        .route(
-            "/bots/{id}/friend-approval",
-            put(routes::bots::set_friend_approval),
-        )
         .route("/groups", get(routes::groups::list_groups).post(routes::groups::create_group))
         .route("/groups/my", get(routes::groups::list_my_groups))
         .route(

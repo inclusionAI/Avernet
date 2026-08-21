@@ -906,10 +906,10 @@ impl DbBotActorConfigStore {
             })
     }
 
-    /// SELECT the 7 decision columns for `(bot_uuid, env)`. Excludes soft-deleted
+    /// SELECT the decision columns for `(bot_uuid, env)`. Excludes soft-deleted
     /// rows, mirroring the bot store read (`COALESCE(is_deleted, 0) = 0`).
     const SELECT_BOT_CONFIG_SQL: &'static str =
-        "SELECT bot_uuid, env, visibility, human_addable, friend_approval, status, created_by \
+        "SELECT bot_uuid, env, visibility, bot_info, status, created_by \
          FROM bcs_bots \
          WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 LIMIT 1";
 }
@@ -943,31 +943,6 @@ impl BotActorConfigRepoPort for DbBotActorConfigStore {
         }
     }
 
-    async fn set_human_addable(&self, bot_id: &str, env: &str, value: bool) -> ServiceResult<()> {
-        self.execute(
-            "set_human_addable",
-            DbStatement::with_params(
-                "UPDATE bcs_bots SET human_addable = ? WHERE bot_uuid = ? AND env = ?",
-                vec![
-                    DbValue::from(if value { 1_i64 } else { 0_i64 }),
-                    DbValue::from(bot_id),
-                    DbValue::from(env),
-                ],
-            ),
-        )
-        .await
-    }
-
-    async fn set_friend_approval(&self, bot_id: &str, env: &str, value: &str) -> ServiceResult<()> {
-        self.execute(
-            "set_friend_approval",
-            DbStatement::with_params(
-                "UPDATE bcs_bots SET friend_approval = ? WHERE bot_uuid = ? AND env = ?",
-                vec![DbValue::from(value), DbValue::from(bot_id), DbValue::from(env)],
-            ),
-        )
-        .await
-    }
 }
 
 fn row_to_permission_request(row: &DbRow) -> ServiceResult<PermissionRequest> {
@@ -1089,22 +1064,30 @@ fn row_to_edge_grant(row: &DbRow) -> ServiceResult<EdgeGrant> {
 
 /// Map a `bcs_bots` row to a [`BotActorConfig`].
 ///
-/// `human_addable` is stored as MySQL TINYINT(1) / SQLite INTEGER; `get_bool`
-/// coerces integer 0/1 to bool (works across both flavors). `created_by` is
-/// `NULL` for legacy bots.
+/// `created_by` is `NULL` for legacy bots. `bot_info` carries the existing
+/// internal attributes payload and is reused for friend gating defaults.
 fn row_to_bot_actor_config(row: &DbRow) -> ServiceResult<BotActorConfig> {
-    let human_addable = row
-        .get_bool("human_addable")
-        .map_err(|err| service_db_error("human_addable", err))?
-        .unwrap_or(false);
+    let bot_info = optional_string(row, "bot_info")?
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+        .unwrap_or_default();
+    let user_visibility = bot_info
+        .get("user_visibility")
+        .and_then(|value| value.as_str())
+        .unwrap_or("protected")
+        .to_string();
+    let friend_check_in_strategy = bot_info
+        .get("friend_check_in_strategy")
+        .and_then(|value| value.as_str())
+        .unwrap_or("APPROVAL")
+        .to_string();
     Ok(BotActorConfig {
         bot_id: required_string(row, "bot_uuid")?,
         env: required_string(row, "env")?,
         visibility: required_string(row, "visibility")?,
-        human_addable,
-        friend_approval: required_string(row, "friend_approval")?,
         status: required_string(row, "status")?,
         created_by: optional_string(row, "created_by")?,
+        user_visibility,
+        friend_check_in_strategy,
     })
 }
 
@@ -1695,10 +1678,9 @@ mod tests {
     // ---- DbBotActorConfigStore (T12) ----
 
     /// Bot-config store backed by a fresh LocalSqliteDbPlugin with a minimal
-    /// `bcs_bots` schema (the 7 decision cols + the soft-delete flag the read
-    /// filters on). Mirrors the bcs_bot-store DDL (`bot_uuid`, `env`,
-    /// `visibility`, `status`, `created_by`) + the T6 SQLite DDL additions
-    /// (`human_addable` INTEGER, `friend_approval` TEXT).
+    /// `bcs_bots` schema (the decision cols + the soft-delete flag the read
+    /// filters on). Mirrors the bot-store decision fields plus `bot_info`
+    /// for the internal friend-gating attributes.
     async fn bot_config_store() -> DbBotActorConfigStore {
         let db = LocalSqliteDbPlugin::new().expect("local sqlite");
         db.execute(DbStatement::new(
@@ -1706,8 +1688,7 @@ mod tests {
                 bot_uuid TEXT NOT NULL, \
                 env TEXT NOT NULL, \
                 visibility TEXT NOT NULL DEFAULT 'public', \
-                human_addable INTEGER NOT NULL DEFAULT 0, \
-                friend_approval TEXT NOT NULL DEFAULT 'auto', \
+                bot_info TEXT DEFAULT NULL, \
                 status TEXT NOT NULL DEFAULT 'online', \
                 created_by TEXT, \
                 is_deleted INTEGER NOT NULL DEFAULT 0, \
@@ -1724,24 +1705,27 @@ mod tests {
         bot_uuid: &str,
         env: &str,
         visibility: &str,
-        human_addable: bool,
-        friend_approval: &str,
+        user_visibility: &str,
+        friend_check_in_strategy: &str,
         status: &str,
         created_by: Option<&str>,
     ) {
+        let bot_info = serde_json::json!({
+            "user_visibility": user_visibility,
+            "friend_check_in_strategy": friend_check_in_strategy,
+        });
         store
             .execute(
                 "seed_bot",
                 DbStatement::with_params(
                     "INSERT INTO bcs_bots \
-                     (bot_uuid, env, visibility, human_addable, friend_approval, status, created_by) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (bot_uuid, env, visibility, bot_info, status, created_by) \
+                     VALUES (?, ?, ?, ?, ?, ?)",
                     vec![
                         DbValue::from(bot_uuid),
                         DbValue::from(env),
                         DbValue::from(visibility),
-                        DbValue::from(human_addable),
-                        DbValue::from(friend_approval),
+                        DbValue::from(serde_json::to_string(&bot_info).expect("bot_info json")),
                         DbValue::from(status),
                         match created_by {
                             Some(v) => DbValue::from(v),
@@ -1763,8 +1747,8 @@ mod tests {
             "20260421_x:85020",
             "dev",
             "public",
-            true,
-            "auto",
+            "protected",
+            "APPROVAL",
             "online",
             Some("85020"),
         )
@@ -1776,8 +1760,8 @@ mod tests {
         assert_eq!(cfg.bot_id, "20260421_x:85020");
         assert_eq!(cfg.env, "dev");
         assert_eq!(cfg.visibility, "public");
-        assert!(cfg.human_addable, "human_addable true round-trips from INTEGER 1");
-        assert_eq!(cfg.friend_approval, "auto");
+        assert_eq!(cfg.user_visibility, "protected");
+        assert_eq!(cfg.friend_check_in_strategy, "APPROVAL");
         assert_eq!(cfg.status, "online");
         assert_eq!(cfg.created_by.as_deref(), Some("85020"));
     }
@@ -1788,12 +1772,12 @@ mod tests {
         // Missing bot -> None (non-fallible).
         assert!(store.get("nope", "dev").await.is_none());
         // Different env -> None (PK is bot_uuid + env).
-        seed_bot(&store, "bot_b", "prod", "protected", false, "manual", "hidden", None).await;
+        seed_bot(&store, "bot_b", "prod", "protected", "private", "DEPT_FREE", "hidden", None).await;
         assert!(store.get("bot_b", "dev").await.is_none());
-        // Same env row reads back; human_addable=false, created_by=None (legacy).
+        // Same env row reads back; internal attributes come from bot_info.
         let cfg = store.get("bot_b", "prod").await.expect("bot exists in prod");
-        assert!(!cfg.human_addable);
-        assert_eq!(cfg.friend_approval, "manual");
+        assert_eq!(cfg.user_visibility, "private");
+        assert_eq!(cfg.friend_check_in_strategy, "DEPT_FREE");
         assert_eq!(cfg.status, "hidden");
         assert!(cfg.created_by.is_none(), "legacy bot has no created_by");
     }

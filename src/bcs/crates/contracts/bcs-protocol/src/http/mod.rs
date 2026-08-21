@@ -11,7 +11,7 @@ pub mod provider;
 pub use bots::{
     BotCapabilities, BotDynamicStatus, BotInfo, BotSearchEntry, BotSearchQuery, DiscoverBotEntry,
     DiscoverBotProviderInfo, DiscoverBotsExtendedResponse, DiscoverBotsResponse, DynamicStatusResponse,
-    EngineType, FriendApprovalBody, HumanAddableBody, JoinRequest, JoinResponse, LeaveResponse, QueryBotEntry,
+    EngineType, JoinRequest, JoinResponse, LeaveResponse, QueryBotEntry,
     QueryBotsRequest, SetVisibilityRequest, UpdateStatusRequest, UpdateStatusResponse,
 };
 pub use chat_run::{

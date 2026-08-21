@@ -256,31 +256,40 @@ pub struct AuthzContext {
     pub signature: Option<Vec<u8>>,
 }
 
-/// Bot-level config consumed by connect/admission decisions (spec §3.2).
+/// Bot-level config consumed by connect/admission decisions.
 ///
-/// Read from `bcs_bots` (T12): a narrow projection of the columns
-/// ConnectService (T13) and AdmissionService (T14) need to decide an
-/// add/connect/admit. `visibility` decides who can discover/add;
-/// `human_addable` the human-direction gate; `friend_approval` whether an
-/// add needs manual approval (`auto` vs `manual`); `status` the
-/// collaboration on/off switch (`hidden` ⇒ reject). `created_by` is included
-/// so T13's ownership check can read it here without a second query (NULL
-/// for legacy bots — auto-claim per the ownership rules).
+/// Read from `bcs_bots`: a narrow projection of the columns ConnectService
+/// (T13) and AdmissionService (T14) need to decide an add/connect/admit.
+/// `visibility` and `status` are the existing decision fields; `created_by`
+/// is included so T13's ownership check can read it here without a second
+/// query (NULL for legacy bots — auto-claim per the ownership rules).
+/// `user_visibility` and `friend_check_in_strategy` are read from the bot's
+/// internal attributes payload and reused for friend-add gating.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BotActorConfig {
     pub bot_id: String,
     pub env: String,
     /// `public` | `protected` | `private`.
     pub visibility: String,
-    /// Human-direction add gate (mirrors `bcs_bots.human_addable`).
-    pub human_addable: bool,
-    /// `auto` | `manual` — whether an add needs manual approval.
-    pub friend_approval: String,
     /// `online` | `hidden` — `hidden` ⇒ admission rejects (spec §4.3).
     pub status: String,
     /// Owner of the bot; `None` for legacy bots (auto-claim, spec §3.2).
     #[serde(default)]
     pub created_by: Option<String>,
+    /// `public` | `protected` | `private` from bot internal attributes.
+    #[serde(default = "default_user_visibility")]
+    pub user_visibility: String,
+    /// `OPEN` | `APPROVAL` | `DEPT_FREE` from bot internal attributes.
+    #[serde(default = "default_friend_check_in_strategy")]
+    pub friend_check_in_strategy: String,
+}
+
+fn default_user_visibility() -> String {
+    "protected".to_string()
+}
+
+fn default_friend_check_in_strategy() -> String {
+    "APPROVAL".to_string()
 }
 
 /// Reason code for an admission decision.

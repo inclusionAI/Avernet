@@ -1261,7 +1261,7 @@ async fn apply_sqlite_migration_body(
         // without discarding any persisted Subscription configuration.
         10 => migrate_sqlite_eventing_plaintext_endpoint(db).await,
         11 => ensure_sqlite_group_opening_message_column(db).await,
-        // task_claim_mode / task_dream_mode columns are added by
+// task_claim_mode / task_dream_mode columns are added by
         // ensure_sqlite_bot_task_modes in run_sqlite_bootstrap_tables;
         // version 12 only records progress.
         12 => Ok(()),
@@ -1392,19 +1392,6 @@ async fn add_sqlite_edge_permission_schema(db: &dyn DbPlugin) -> DbResult<()> {
                 )))
                 .await?;
             }
-        }
-    }
-    // bcs_bots: ensure human_addable + friend_approval (idempotent; spec §3.2).
-    let bot_cols = sqlite_table_columns(db, "bcs_bots").await?;
-    for (name, definition) in [
-        ("human_addable", "INTEGER NOT NULL DEFAULT 0"),
-        ("friend_approval", "TEXT NOT NULL DEFAULT 'auto'"),
-    ] {
-        if !bot_cols.iter().any(|column| column == name) {
-            db.execute(DbStatement::new(format!(
-                "ALTER TABLE bcs_bots ADD COLUMN {name} {definition}"
-            )))
-            .await?;
         }
     }
     Ok(())
