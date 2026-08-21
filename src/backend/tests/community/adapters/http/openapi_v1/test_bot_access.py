@@ -17,11 +17,14 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from fastapi_injector import attach_injector
 from injector import Injector, InstanceProvider, Module
 
 from agentclaw.community.adapters.http.openapi_v1 import authorization as authz
+from agentclaw.community.adapters.http.openapi_v1.access_log import (
+    PublicApiAccessLogMiddleware,
+)
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     Check,
     PublicAPIRoute,
@@ -31,6 +34,10 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
+from agentclaw.community.core.bot_collaborator.errors import (
+    BotNotFoundError as CollaboratorBotNotFoundError,
+)
+from agentclaw.community.adapters.http.openapi_v1.responses import envelope_errors
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
     BotRepository,
@@ -133,6 +140,10 @@ def _surface(*, level, bots=None, collaborators=None, audit=None, bar=None):
         app.dependency_overrides[require_principal] = lambda: {"user_id": CALLER}
         mount_public_error_handlers(app)
         attach_injector(app, Injector([_M()]))
+        # The real middleware, not a stand-in: it is what publishes the wire
+        # status the audit decision reads, so a test app without it would
+        # exercise a different path from production.
+        app.add_middleware(PublicApiAccessLogMiddleware)
         return user_scoped_client(app, CALLER), audit
     finally:
         authz.AUTHORIZATION.pop(("GET", PATH), None)
@@ -215,8 +226,6 @@ def test_refusal_is_byte_identical_to_the_rest_of_the_surface():
     Compared at the mapping layer rather than through a fixture app, because
     the claim is about the shared table, not about one route's wiring.
     """
-    from fastapi import Request
-
     from agentclaw.community.adapters.http.openapi_v1.errors import (
         BotAccessRefusedError,
         GrantNotResolvableError,
@@ -367,3 +376,72 @@ def test_the_seam_never_touches_the_lock_service():
     )
 
     assert "lock" not in code.lower()
+
+
+def test_failed_mutation_writes_no_audit_row():
+    """A mutation that did not happen must not leave a record saying it did.
+
+    Reaching the teardown does not mean the operation worked:
+    ``@envelope_errors`` catches a mapped domain error and *returns* an error
+    response instead of raising, so the handler completes normally and this
+    dependency resumes exactly as it would after a success. Before the status
+    check, that wrote an audit row for a 404 — an incident review could not
+    then tell a real action from a failed one.
+    """
+    audit = _Audit()
+    row = Check(PermissionLevel.MEMBER)
+    path = "/openapi/v1/bots/{bot_id}/failing"
+    authz.AUTHORIZATION[("POST", path)] = row
+    try:
+        router = APIRouter(route_class=PublicAPIRoute)
+
+        @router.post(path)
+        @envelope_errors
+        async def failing(bot_id: str, request: Request) -> dict:
+            raise CollaboratorBotNotFoundError("the mutation did not happen")
+
+        class _M(Module):
+            def configure(self, binder):
+                binder.bind(BotRepository, to=InstanceProvider(_Bots()))
+                binder.bind(
+                    CollaboratorServiceProtocol,
+                    to=InstanceProvider(_Collaborators(PermissionLevel.ADMIN)),
+                )
+                binder.bind(BotCollabLogRepositoryProtocol, to=InstanceProvider(audit))
+
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[require_principal] = lambda: {"user_id": CALLER}
+        mount_public_error_handlers(app)
+        attach_injector(app, Injector([_M()]))
+        app.add_middleware(PublicApiAccessLogMiddleware)
+        client = user_scoped_client(app, CALLER)
+
+        response = client.post(f"/openapi/v1/bots/{BOT}/failing", params={"owner_id": OWNER})
+
+        assert response.status_code == 404
+        assert audit.rows == [], "audited a mutation that never happened"
+    finally:
+        authz.AUTHORIZATION.pop(("POST", path), None)
+
+
+def test_refusal_log_bounds_caller_supplied_ids(caplog):
+    """A refused caller must not be able to forge lines in the refusal trail.
+
+    ``owner_id`` is a query parameter with no upper bound and ``bot_id`` a
+    percent-decoded path segment, so both can carry newlines. This branch runs
+    only for values the server refused — i.e. values the caller chose — so
+    formatting either raw would let the party being refused append convincing
+    extra entries to the one record of that refusal.
+    """
+    client, _ = _surface(level=PermissionLevel.NONE, bar=PermissionLevel.ADMIN)
+
+    with caplog.at_level("WARNING"):
+        client.get(URL, params={"user_id": CALLER, "owner_id": "u-9\nFAKE LOG LINE"})
+
+    refusals = [r for r in caplog.records if "is below" in r.getMessage()]
+
+    assert refusals, "the refusal was not logged at all"
+    line = refusals[0].getMessage()
+    assert "\n" not in line, "a caller-supplied newline reached the log verbatim"
+    assert "FAKE LOG LINE" in line, "the value should be escaped, not dropped"

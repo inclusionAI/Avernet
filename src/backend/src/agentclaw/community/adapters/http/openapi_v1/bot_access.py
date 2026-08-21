@@ -44,12 +44,16 @@ from typing import Any
 
 from fastapi import Request
 
+from agentclaw.community.adapters.http.openapi_v1.access_log import (
+    RESPONSE_STATUS_KEY,
+)
 from agentclaw.community.adapters.http.openapi_v1.authorization import Check
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import BotAccessRefusedError
+from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
@@ -96,18 +100,26 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
             # refused what. ``%r`` on the caller id deliberately — this branch
             # runs only for a value the server refused, so quoting keeps a
             # forged multi-line id from poisoning the refusal audit trail.
+            # Both ids go through ``for_log``. This branch runs only for values
+            # the server refused, so by construction they are caller-chosen:
+            # ``owner_id`` is a query parameter declared ``min_length=1`` with
+            # no upper bound, and ``bot_id`` is a path segment that arrives
+            # percent-decoded — so either can carry newlines or arbitrary bulk
+            # and forge extra lines in the audit trail of refusals. ``caller_id``
+            # is already bounded by matching the verified principal, but goes
+            # through the same helper so the line has one rule, not two.
             logger.warning(
-                "[bot_access] caller %r is below %s on bot=%s owner=%s",
-                caller_id,
+                "[bot_access] caller %s is below %s on bot=%s owner=%s",
+                for_log(caller_id),
                 rule.level.name,
-                bot_id,
-                owner_id,
+                for_log(bot_id),
+                for_log(owner_id),
             )
             raise BotAccessRefusedError(f"bot {bot_id} not found")
 
         yield
 
-        if _is_audited(request) and level < PermissionLevel.OWNER:
+        if _succeeded(request) and _is_audited(request) and level < PermissionLevel.OWNER:
             _audit(
                 request,
                 bot_id=bot_id,
@@ -162,6 +174,32 @@ def _level(
 def _is_audited(request: Request) -> bool:
     """Whether this operation's success leaves a record. Reads do not."""
     return request.method.upper() not in _READ_METHODS
+
+
+def _succeeded(request: Request) -> bool:
+    """Whether the response actually reported success.
+
+    Necessary because reaching this point does **not** mean the operation
+    worked. ``@envelope_errors`` catches a mapped domain error and *returns* an
+    error response rather than raising, so the handler completes normally and
+    this teardown runs exactly as it would after a success. Auditing on arrival
+    here would record mutations that never happened, which is worse than
+    recording none: an incident review cannot tell a real action from a failed
+    one.
+
+    The status comes from ``access_log``, which publishes the wire status on
+    the scope. A ``yield`` teardown runs *after* the response is sent, so that
+    is the only vantage point where the outcome exists — the dependency itself
+    never sees it, and neither does any middleware that would run earlier.
+
+    **Unknown counts as success**, deliberately. An app without the public
+    access-log middleware — a focused test app, say — records nothing, and the
+    choice there is between dropping real audit rows and keeping a few
+    doubtful ones. Only a *positively observed* failure suppresses the record,
+    so this can never silently empty the trail.
+    """
+    status = getattr(request.state, RESPONSE_STATUS_KEY, None)
+    return not isinstance(status, int) or status < 400
 
 
 def _audit(
