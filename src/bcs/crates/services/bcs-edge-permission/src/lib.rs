@@ -1838,7 +1838,7 @@ mod tests {
 
     #[tokio::test]
     async fn admission_bot_hidden() {
-        let (eg, pp, _rq, _bc, db) = assemble().await;
+        let (eg, pp, _rq, bc, db) = assemble().await;
         seed_bot(&db, "x:hid", "public", "protected", "OPEN", "hidden", Some("85020")).await;
         let svc = admission_service(&eg, &bc, &pp);
         let r = svc
@@ -1884,7 +1884,7 @@ mod tests {
 
     #[tokio::test]
     async fn admission_public_default() {
-        let (eg, pp, _rq, _bc, db) = assemble().await;
+        let (eg, pp, _rq, bc, db) = assemble().await;
         seed_bot(&db, "x:pub", "public", "protected", "OPEN", "online", Some("85020")).await;
         let svc = admission_service(&eg, &bc, &pp);
         let r = svc
@@ -1902,7 +1902,7 @@ mod tests {
 
     #[tokio::test]
     async fn admission_no_edge_protected_bot() {
-        let (eg, pp, _rq, _bc, db) = assemble().await;
+        let (eg, pp, _rq, bc, db) = assemble().await;
         seed_bot(&db, "x:prot", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = admission_service(&eg, &bc, &pp);
         let r = svc
@@ -1944,7 +1944,7 @@ mod tests {
 
     #[tokio::test]
     async fn build_authz_context_empty_for_protected_no_edge() {
-        let (eg, pp, _rq, _bc, db) = assemble().await;
+        let (eg, pp, _rq, bc, db) = assemble().await;
         seed_bot(&db, "x:prot2", "protected", "protected", "OPEN", "online", Some("85020")).await;
         let svc = admission_service(&eg, &bc, &pp);
         let ctx = svc
@@ -1959,7 +1959,7 @@ mod tests {
 
     #[tokio::test]
     async fn build_authz_context_public_default_fallback() {
-        let (eg, pp, _rq, _bc, db) = assemble().await;
+        let (eg, pp, _rq, bc, db) = assemble().await;
         seed_bot(&db, "x:pub2", "public", "protected", "OPEN", "online", Some("85020")).await;
         let svc = admission_service(&eg, &bc, &pp);
         let ctx = svc
@@ -2019,7 +2019,7 @@ mod tests {
         // Admission must admit via a Rules edge (is_authorized superset), even
         // when no friend (default-profile) edge exists. This is the behavioral
         // proof that check_admission uses is_authorized, not has_friend_edge.
-        let (eg, pp, _rq, _bc, db) = assemble().await;
+        let (eg, pp, _rq, bc, db) = assemble().await;
         seed_bot(&db, "x:radm", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         pp.ensure_default_profile("x:radm", "dev").await.expect("ensure default");
         eg.insert_grant(EdgeGrant {
