@@ -24,8 +24,8 @@ set -euo pipefail
 #   bash src/bcs/scripts/e2e_coverage.sh              # full flow
 #   bash src/bcs/scripts/e2e_coverage.sh --skip-start # instrumented bcs already running; run e2e + stop + aggregate only
 #   bash src/bcs/scripts/e2e_coverage.sh --no-stop    # do not stop bcs after running (debug; no aggregation)
-#   bash src/bcs/scripts/e2e_coverage.sh --bcs-line-min 40 --bcs-method-min 36
-#                                                    # gate line >=40%, method >=36%
+#   bash src/bcs/scripts/e2e_coverage.sh --bcs-line-min 39.8 --bcs-method-min 36
+#                                                    # gate line >=39.8%, method >=36%
 #   bash src/bcs/scripts/e2e_coverage.sh --force-rebuild # force-rebuild instrumented bcs (ignore cache)
 #
 # Coverage scope: bcs server (crate bcs) only; excludes the 5 bots / Python.
