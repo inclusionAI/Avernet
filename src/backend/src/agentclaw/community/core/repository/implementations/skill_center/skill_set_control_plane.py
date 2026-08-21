@@ -19,9 +19,9 @@ from agentclaw.community.core.models.mcp import (
     BotMCPInstallation,
     SkillSetMCPServer,
 )
-from agentclaw.community.core.skill_center.orm import (
-    DefaultSkillsetMcpExclusion,
-    DefaultSkillsetSkillExclusion,
+from agentclaw.community.core.repository.implementations.skill_center.default_skillset_projection import (
+    excluded_skill_ids,
+    global_default_scope,
 )
 from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
     SkillSetControlPlaneRepositoryProtocol,
@@ -120,7 +120,7 @@ class SkillSetControlPlaneRepository(
             for candidate in default_engine_types or ((engine_type,) if engine_type else ()):
                 defaults = (
                     self._scope(session.query(SkillSet), SkillSet)
-                    .filter(self._global_default_scope((candidate,)))
+                    .filter(global_default_scope((candidate,)))
                     .order_by(SkillSet.id)
                     .all()
                 )
@@ -310,7 +310,7 @@ class SkillSetControlPlaneRepository(
                 .all()
             )
             if row.is_default:
-                excluded = self._default_excluded_skill_ids(
+                excluded = excluded_skill_ids(
                     session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
                 )
                 rows = [skill for skill in rows if int(skill.id) not in excluded]
@@ -865,7 +865,7 @@ class SkillSetControlPlaneRepository(
         # A fallback id cannot bypass a higher-priority runtime Default.
         for candidate in default_engine_types or ((engine_type,) if engine_type else ()):
             defaults = self._scope(session.query(SkillSet), SkillSet).filter(
-                self._global_default_scope((candidate,))
+                global_default_scope((candidate,))
             )
             if locked:
                 defaults = defaults.with_for_update()
@@ -882,18 +882,6 @@ class SkillSetControlPlaneRepository(
         filters = [SkillSet.bolt_id == bot_id, SkillSet.user_id == owner_id]
         if engine_type is not None:
             filters.append(SkillSet.engine_type == engine_type)
-        return and_(*filters)
-
-    @staticmethod
-    def _global_default_scope(engine_types: tuple[str | None, ...]):
-        filters = [
-            SkillSet.is_default.is_(True),
-            or_(SkillSet.bolt_id == "", SkillSet.bolt_id.is_(None)),
-            or_(SkillSet.user_id == "", SkillSet.user_id.is_(None)),
-        ]
-        normalized = tuple(engine for engine in engine_types if engine is not None)
-        if normalized:
-            filters.append(SkillSet.engine_type.in_(normalized))
         return and_(*filters)
 
     @staticmethod
@@ -923,44 +911,6 @@ class SkillSetControlPlaneRepository(
             .filter(
                 BotMCPInstallation.bot_id == bot_id,
                 BotMCPInstallation.owner_id == owner_id,
-            )
-            .all()
-        }
-
-    def _default_excluded_skill_ids(
-        self, session, *, bot_id: str, owner_id: str, set_id: int
-    ) -> set[int]:
-        """Return this Bot owner's exclusions from the shared Default set.
-
-        Default memberships are platform-wide.  Exclusions are deliberately
-        addressed by the concrete Bot owner, so reading the same Default set
-        for two ``bot_id=default`` Bots must produce different projections.
-        """
-        return {
-            int(value[0])
-            for value in session.query(DefaultSkillsetSkillExclusion.skill_id)
-            .filter(
-                DefaultSkillsetSkillExclusion.avernet_tenant
-                == get_current_avernet_tenant(),
-                DefaultSkillsetSkillExclusion.user_id == owner_id,
-                DefaultSkillsetSkillExclusion.bot_id == bot_id,
-                DefaultSkillsetSkillExclusion.skill_set_id == set_id,
-            )
-            .all()
-        }
-
-    def _default_excluded_mcp_codes(
-        self, session, *, bot_id: str, owner_id: str, set_id: int
-    ) -> set[str]:
-        return {
-            str(value[0])
-            for value in session.query(DefaultSkillsetMcpExclusion.server_code)
-            .filter(
-                DefaultSkillsetMcpExclusion.avernet_tenant
-                == get_current_avernet_tenant(),
-                DefaultSkillsetMcpExclusion.user_id == owner_id,
-                DefaultSkillsetMcpExclusion.bot_id == bot_id,
-                DefaultSkillsetMcpExclusion.skill_set_id == set_id,
             )
             .all()
         }

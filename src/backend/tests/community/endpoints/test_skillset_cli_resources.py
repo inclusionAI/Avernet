@@ -11,6 +11,9 @@ from __future__ import annotations
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.models.mcp import SkillSetMCPServer
+from agentclaw.community.core.models.skill import SkillSet
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.utils.env_utils import get_current_env
 from tests.community.factories.access import make_staff_user
@@ -40,27 +43,46 @@ def _bind_deps(world, *, default_set: bool = True) -> PassportPlugin:
         "creator_id": "u_skillset_cli",
         "active_engine": "openclaw",
     })
-    repo = world.get(SkillSetRepository)
-    skill_set = repo.create({
-        "name": "Default",
-        "description": "Default set",
-        "user_id": "u_skillset_cli",
-        "bolt_id": "bot_skillset_cli",
-        "is_default": default_set,
-        "is_builtin": False,
-        "is_active": 1,
-        "engine_type": "openclaw",
-    })
-    assert skill_set["id"] == _SKILL_SET_ID
-    repo.add_mcp_to_set(
-        skill_set["id"],
-        "web-search",
-        "Web Search",
-        description="",
-        icon="",
-        user_id="u_skillset_cli",
-        env=get_current_env(),
-    )
+    if default_set:
+        # Production Default is platform-owned; user and Bot exclusions are
+        # applied later by the Control Plane, not encoded in this membership.
+        with world.get(DatabasePlugin).orm_session() as session:
+            skill_set = SkillSet(
+                name="Default",
+                description="Default set",
+                user_id="",
+                bolt_id="",
+                is_default=True,
+                is_builtin=False,
+                is_active=True,
+                engine_type="openclaw",
+                env=get_current_env(),
+            )
+            session.add(skill_set)
+            session.flush()
+            session.add(
+                SkillSetMCPServer(
+                    skill_set_id=skill_set.id,
+                    server_code="web-search",
+                    name="Web Search",
+                    user_id="",
+                    env=get_current_env(),
+                )
+            )
+            skill_set_id = str(skill_set.id)
+    else:
+        skill_set = world.get(SkillSetRepository).create({
+            "name": "Custom",
+            "description": "Custom set",
+            "user_id": "u_skillset_cli",
+            "bolt_id": "bot_skillset_cli",
+            "is_default": False,
+            "is_builtin": False,
+            "is_active": 1,
+            "engine_type": "openclaw",
+        })
+        skill_set_id = skill_set["id"]
+    assert skill_set_id == _SKILL_SET_ID
 
     passport = world.get(PassportPlugin)
     passport.set_response("query_passport_clis", [
@@ -80,30 +102,7 @@ def _seed_resources_happy(world) -> None:
 
 
 def _seed_global_default_list(world) -> None:
-    make_staff_user(world, user_id="u_skillset_cli")
-    world.get(BotRepository).insert({
-        "bot_id": "bot_skillset_cli",
-        "bot_name": "SkillSet CLI Bot",
-        "owner_id": "u_skillset_cli",
-        "owner_name": "u_skillset_cli",
-        "bot_type": "service",
-        "status": "ACTIVE",
-        "entity_id": "u_skillset_cli",
-        "entity_type": "staff",
-        "creator_id": "u_skillset_cli",
-        "active_engine": "openclaw",
-    })
-    # This is the production-shaped platform Default: it is not Bot-owned.
-    world.get(SkillSetRepository).create({
-        "name": "Global Default",
-        "description": "platform projection",
-        "user_id": "",
-        "bolt_id": "",
-        "is_default": True,
-        "is_builtin": True,
-        "is_active": True,
-        "engine_type": "openclaw",
-    })
+    _bind_deps(world)
 
 
 def _seed_resources_cli_query_failure(world) -> None:
@@ -178,12 +177,23 @@ def list_skillset_resources_happy():
         status=200,
         json_contains={
             "success": True,
-            "data": [{"name": "Global Default", "is_default": True}],
+            "data": [{"name": "Default", "is_default": True}],
         },
     ),
 )
 def list_skillsets_includes_readable_global_default_without_404():
     """The BFF expands Default members after listing, so this is a full-path regression."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/skillsets",
+    scenario="missing_auth",
+    input=CaseInput(query_params=_QUERY, headers={}),
+    expect=ExpectError(status=401, json_contains={"detail": "Authentication required"}),
+)
+def list_skillsets_requires_authentication():
+    """The new global-Default regression wire retains its published auth gate."""
 
 
 @endpoint_test(
