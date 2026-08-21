@@ -288,6 +288,9 @@ _NO_USER_DIMENSION = {
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/skills"),
+    # Public Skill Center status and tag catalogues are tenant-wide reads.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/skills/{{skill_code}}/publish/status"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/tags"),
     # The load-test endpoint answers a constant. It reads nothing and writes
     # nothing, so there is no scope for a user id to name — and a synthetic
     # endpoint measuring the shared path must not be the one exception that
@@ -362,7 +365,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: ``path`` then moved 132 → 133 with the BCS publish-to-users operation
 #: (``POST /openapi/v1/bots/{bot_id}/public-bcs``): it addresses a bot and acts
 #: for the operator, so it is bot-path-addressed like the rest of the surface.
-_BOT_ID_PLACEMENT = {"path": 139, "query": 1, "none": 54}
+_BOT_ID_PLACEMENT = {"path": 139, "query": 1, "none": 57}
 
 
 def _schema() -> dict:
@@ -458,7 +461,7 @@ def test_the_pinned_number_of_operations_take_it():
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
     # MCP adds eight operations, the Harness surface adds six Bot-addressed
     # operations, and Session File adds six more.
-    assert len(taking) == 177
+    assert len(taking) == 178
 
 
 def test_the_exempt_operations_take_none():
