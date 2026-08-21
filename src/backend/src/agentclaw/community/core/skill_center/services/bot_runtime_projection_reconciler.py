@@ -199,6 +199,13 @@ class BotRuntimeProjectionReconciler:
                 engine_type=str(bot.get("active_engine") or "openclaw"),
             )
 
+        if materialize_active_skillset_installations:
+            self._repository.ensure_active_skillset_installations(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=str(bot.get("active_engine") or "openclaw"),
+            )
+
         return self._build_plan(
             bot=bot,
             bot_id=bot_id,

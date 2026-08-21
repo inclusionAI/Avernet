@@ -135,14 +135,15 @@ Backend 真实提供，同时避免在 Review 阶段暴露返回 `501` 的占位
 `ac_bot_skill_installation` 是 **Bot 当前期望生效 Skill 的物化清单**：
 
 ```text
-UNIQUE(tenant, env, bot_id, skill_id)
+UNIQUE(tenant, env, owner_id, bot_id, skill_id)
 ```
 
 - 行存在即 active，不保存 inactive 行。
 - 不保存 `source_type`、`skill_set_id`、`direct_active` 或 Runtime observed status。
 - `Installation + 普通 SkillSet Membership` 表示由 SkillSet 管理。
 - `Installation + 无普通 Membership` 表示 Direct 管理。
-- Active SkillSet、Direct Activate、System Default 最终物化到同一张表。
+- Active 普通 SkillSet 与 Direct Activate 最终物化到同一张表；System Default 是
+  Resolver 的独立平台输入。
 
 | 场景 | Asset | Membership | Installation |
 | --- | --- | --- | --- |
@@ -150,6 +151,15 @@ UNIQUE(tenant, env, bot_id, skill_id)
 | Repo/Space 在 inactive SkillSet | 有 | 有 | 无 |
 | Direct active | 有 | 无 | 有 |
 | Active SkillSet 成员 | 有 | 有 | 有 |
+
+切流不执行全库 Installation backfill。普通 active SkillSet 的历史成员由按 Bot 懒物化
+补齐：在完整 Runtime reconcile 前、以及 Service Bot 构建新 Artifact 前，查询当前
+`is_default=false AND is_active=true` 的 Membership，对缺失 Installation 执行插入。
+同一串行重试会因已存在关系成为 no-op；本期不额外建设并发竞争协调，竞争失败由下一次
+完整 reconcile 或 Artifact 构建重试收敛。
+该过程不删除行、不读取历史 Default exclusion、也不在 GET/list/detail、Pool 运维循环或
+文件快照中写入。inactive SkillSet、未激活 Local 与 System Default 都不参与物化；极少
+历史 Local Direct 残留通过 DB 订正。
 
 不存在公开的 Installation Resource API：
 
@@ -192,7 +202,7 @@ Phase 1 新增两张 Desired State 表：
 
 | 表 | 唯一键 | 行语义 |
 | --- | --- | --- |
-| `ac_bot_skill_installation` | `tenant + env + bot_id + skill_id` | Skill 当前应在 Bot 生效 |
+| `ac_bot_skill_installation` | `tenant + env + owner_id + bot_id + skill_id` | Skill 当前应在 Bot 生效 |
 | `ac_bot_mcp_installation` | `tenant + env + bot_id + server_code` | MCP 当前应在 Bot 生效 |
 
 两表都不保存 inactive 行、来源类型、SkillSet ID 或 Runtime observed status。
@@ -240,6 +250,9 @@ skills-local / skills-repo / skill-center / MCP projection
 7. 进程崩溃窗口接受暂时不一致；下次 mutation 或 Bot 重启时全量自愈。
 8. Installation 是 Desired State，不是 Runtime observed state。
 9. Bot offline/not-ready 返回 `409 BOT_NOT_READY`，不写新的 Desired State。
+10. Runtime reconcile 前、Service Bot 新 Artifact build 前执行普通 active SkillSet
+    Installation 的按 Bot 懒物化；普通读取、历史 Default exclusion 与已发布 Artifact
+    重启/扩容/回滚都不触发该写入。
 
 ### 5. Phase 1：Bot Skill OpenAPI
 
@@ -587,7 +600,7 @@ Phase 1 是 Phase 2 的控制面基础，但允许 Phase 2 的纯内部模块在
 功能启用必须遵循以下 Gate：
 
 1. **Phase 1 Schema/Consumer first**：部署 Additive DDL、Installation Repository、
-   Runtime Resolver、兼容 Adapter 和 OpenAPI 兼容测试，不改变产品流量。
+   按 Bot 懒物化、Runtime Resolver、兼容 Adapter 和 OpenAPI 兼容测试，不改变产品流量。
 2. **Phase 1 Enable**：切换 Local active 的内部事实源，开放 Repo/SkillSet/MCP
    canonical OpenAPI，产品显式使用统一 Gateway；通过 Phase 1 全量门禁。
 3. **Phase 2 Consumer first**：先部署 Mapping v3、pool_center、Teclaw skill-center
