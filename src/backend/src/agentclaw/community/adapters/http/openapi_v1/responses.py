@@ -329,6 +329,12 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
     ),
     SkillCenterMarketSearchError: (502, "Skill Center marketplace unavailable"),
+    # Staff directory infra failure (master-data service unreachable/errored).
+    # 502, not 200-null: "directory down" must stay distinct from "no dept" so an
+    # operator can tell the two apart; the org/user + org/dept lookups raise this
+    # and ``@envelope_errors`` maps it. Fixed message — the cause is logged, never
+    # returned (mirrors MissingPrincipalError keeping its reason off the wire).
+    DeptLookupError: (502, "Department directory unavailable"),
     WorkOrderAccessDeniedError: (403, WorkOrderPublicErrorMessage.FORBIDDEN),
     WorkOrderNotFoundError: (404, WorkOrderPublicErrorMessage.NOT_FOUND),
     WorkOrderNotificationNotFoundError: (

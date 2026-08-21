@@ -268,12 +268,12 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
-    # The caller-identity read is how a client LEARNS the id it must thread
+    # The user-identity read is how a client LEARNS the id it must thread
     # everywhere else — requiring the parameter here would make the id a
     # precondition of discovering it. The answer is read off the verified
     # principal, so there is no caller-supplied user to compare against and no
     # 403 to answer.
-    ("get", f"{PUBLIC_API_PREFIX}/caller"),
+    ("get", f"{PUBLIC_API_PREFIX}/org/user"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
     # The marketplace catalogue is identical for every caller in the tenant.
@@ -355,7 +355,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: The merged contract contains 132 path-addressed Bots, one legacy
 #: query-addressed operation, and 53 non-Bot operations — the six Harness
 #: operations are Bot-addressed under ``/bots/{bot_id}/harness``.
-_BOT_ID_PLACEMENT = {"path": 132, "query": 1, "none": 53}
+#:
+#: ``none`` then moved 53 → 54 with the department directory search
+#: (``/openapi/v1/org/dept``), an account-level catalogue read that addresses no bot.
+_BOT_ID_PLACEMENT = {"path": 132, "query": 1, "none": 54}
 
 
 def _schema() -> dict:
