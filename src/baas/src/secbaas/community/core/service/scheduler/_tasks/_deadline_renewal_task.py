@@ -123,7 +123,14 @@ class DeadlineRenewalScheduler:
 
         # ---- Step 0: Gap Detection + Discovery Scan ----
 
-        cold_count = self._schedule_repo.count_active(self._config.env)
+        try:
+            cold_count = self._schedule_repo.count_active(self._config.env)
+        except Exception:
+            log.exception(
+                "[DeadlineRenewalScheduler] count_active failed — "
+                "gap detection skipped, renewals proceed"
+            )
+            cold_count = None
 
         hot_count_device = 0
         hot_count_binding = 0
@@ -140,19 +147,28 @@ class DeadlineRenewalScheduler:
             )
 
         hot_count = hot_count_device + hot_count_binding
-        gap = hot_count - cold_count
 
-        gap_result = GapDetectionResult(
-            cold_count=cold_count,
-            hot_count=hot_count,
-            gap=gap,
-        )
-        report.gap_detected = gap > 0
+        should_scan = False
+        gap_result = None
+        if cold_count is None:
+            # Cold-count failure: the gap ground truth is unknown, so gap
+            # detection AND the cold-table-dependent discovery scan are
+            # skipped this round (see exception log above). Steps 1-2
+            # (due query + renewal) run unaffected.
+            report.gap_detected = False
+        else:
+            gap = hot_count - cold_count
+            gap_result = GapDetectionResult(
+                cold_count=cold_count,
+                hot_count=hot_count,
+                gap=gap,
+            )
+            report.gap_detected = gap > 0
+            should_scan = (gap > 0) or (
+                self._round_count % self._config.anti_join_verify_interval_cycles == 0
+            )
 
-        should_scan = (gap > 0) or (
-            self._round_count % self._config.anti_join_verify_interval_cycles == 0
-        )
-        if should_scan:
+        if should_scan and gap_result is not None:
             gap_result = await self._run_discovery_scan(gap_result)
             report.gap_records_registered = gap_result.records_registered
             report.anti_join_triggered = gap_result.anti_join_triggered

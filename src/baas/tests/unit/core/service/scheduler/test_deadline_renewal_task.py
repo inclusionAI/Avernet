@@ -278,6 +278,52 @@ class TestStep0GapDetection:
         # Should not crash; report is returned
         assert isinstance(report, RenewalRunReport)
 
+    @pytest.mark.asyncio
+    async def test_cold_count_failure_skips_gap_detection_but_continues_round(
+        self, caplog
+    ):
+        """WR-01: count_active raising must not abort the round — gap
+        detection + discovery scan skipped, Steps 1-2 renewals proceed."""
+        import logging
+
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.side_effect = Exception("cold table down")
+        mock_repo.count_hot_arca_devices.return_value = 1
+        mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.find_unregistered.return_value = []
+        mock_repo.list_due_for_renewal.side_effect = [
+            [
+                {
+                    "id": 1,
+                    "sandbox_id": "sb-1",
+                    "source_table": "baas_device",
+                    "source_id": 1,
+                    "next_renew_at": "2026-08-18 12:00:00",
+                    "renew_fail_count": 0,
+                    "device_props": "{}",
+                    "hot_id": 1,
+                }
+            ],
+            [],
+        ]
+        scheduler._renew_one = AsyncMock(return_value="success")
+
+        # Round 47 → 48: the periodic anti-join verify would normally fire
+        # here — with an unknown cold count it must be suppressed as well.
+        scheduler._round_count = 47
+        with caplog.at_level(logging.ERROR, logger="core-scheduler"):
+            report = await scheduler._run_once()
+
+        assert isinstance(report, RenewalRunReport)
+        assert report.gap_detected is False
+        mock_repo.find_unregistered.assert_not_called()
+        # Renewals still ran — the round was NOT aborted.
+        assert scheduler._renew_one.call_count == 1
+        assert report.success == 1
+        assert report.due_count == 1
+        messages = [r.message for r in caplog.records]
+        assert any("count_active failed" in m for m in messages)
+
 
 class TestStep1ColdTableQuery:
     """Tests for Step 1 — cold table query + LEFT JOIN orphan detection."""
