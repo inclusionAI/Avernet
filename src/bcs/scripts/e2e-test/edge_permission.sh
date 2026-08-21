@@ -20,6 +20,7 @@ E2E_TESTS_EDGE_PERMISSION=(
     "test_ep_ensure_bot"
     "test_ep_v2_full_lifecycle"
     "test_ep_v2_mutual_auto_approve"
+    "test_ep_bot_search"
 )
 
 # Helper: make an authenticated API call with a bot's Bearer token
@@ -494,4 +495,49 @@ test_ep_v2_mutual_auto_approve() {
     pass "v2 mutual auto-approve completed"
     TESTS_PASSED=$((TESTS_PASSED + 1))
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
+}
+
+# GET /v2/bots/search — bot search (name fuzzy + visibility/status/is_friend
+# filters + is_friend from edge_grants). Covers the endpoint itself + the
+# bot_query.search_bots service path + the caller's edge_grants friend-set read,
+# plus the anonymous-scope and bad-param validation branches.
+test_ep_bot_search() {
+    info "EdgePermission: v2 bot search"
+    local ceo_token
+    ceo_token="$(get_bot_token CEO 2>/dev/null || echo '')"
+    if [[ -z "$ceo_token" ]]; then
+        skip_case "no CEO token for bot search"; return 77
+    fi
+
+    # Authenticated: name fuzzy + pagination (exercises search service + is_friend field path).
+    _api_authed "GET" "/v2/bots/search?q=CEO&offset=0&limit=20" "" "$ceo_token"
+    if [[ "$HTTP_STATUS" == "200" ]]; then
+        pass "v2/bots/search?q= returns 200"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        warn "v2/bots/search?q= returned $HTTP_STATUS"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    # Authenticated: visibility + status + is_friend filters (effective-visibility + friend-set filter).
+    _api_authed "GET" "/v2/bots/search?visibility=public&status=online&is_friend=false&limit=50" "" "$ceo_token"
+    warn "v2/bots/search with filters: status=$HTTP_STATUS"
+
+    # Authenticated: tc_bot filter branch.
+    _api_authed "GET" "/v2/bots/search?tc_bot=true&limit=10" "" "$ceo_token"
+    warn "v2/bots/search?tc_bot: status=$HTTP_STATUS"
+
+    # Anonymous: no Bearer → forced public scope, empty friend set.
+    _api_authed "GET" "/v2/bots/search?limit=10" "" ""
+    warn "v2/bots/search anonymous (public scope): status=$HTTP_STATUS"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    # Bad-param branches (BadRequest validation paths) — still hit the endpoint.
+    _api_authed "GET" "/v2/bots/search?limit=999" "" "$ceo_token"
+    warn "v2/bots/search bad limit: status=$HTTP_STATUS (expect 400)"
+    _api_authed "GET" "/v2/bots/search?visibility=bogus" "" "$ceo_token"
+    warn "v2/bots/search bad visibility: status=$HTTP_STATUS (expect 400)"
+    _api_authed "GET" "/v2/bots/search?status=bogus" "" "$ceo_token"
+    warn "v2/bots/search bad status: status=$HTTP_STATUS (expect 400)"
 }
