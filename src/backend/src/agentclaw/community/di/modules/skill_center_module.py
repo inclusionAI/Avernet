@@ -429,6 +429,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         skill_service_factory: SkillServiceFactory,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
+        cleanup_repo: LocalSkillCleanupRepository,
         injector: Injector,
         runtime_reconciler: CoreBotRuntimeProjectionReconcilerProtocol,
     ) -> LocalSkillUploadServiceProtocol:
@@ -440,6 +441,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             skill_service_factory,
             audit_log_repo,
             edit_guard,
+            cleanup_repo,
             lambda: injector.get(DeviceContextResolver),
             runtime_reconciler,
         )
@@ -492,6 +494,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
         edit_guard: SkillsPoolEditGuard,
+        cleanup_repo: LocalSkillCleanupRepository,
         injector: Injector,
     ) -> LocalSkillDeleteServiceProtocol:
         return LocalSkillDeleteService(
@@ -501,6 +504,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             collaborator_service,
             skill_service_factory,
             edit_guard,
+            cleanup_repo,
             lambda: injector.get(DeviceContextResolver),
         )
 

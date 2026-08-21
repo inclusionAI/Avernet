@@ -210,6 +210,7 @@ def _seed_uploadable_bot(world) -> None:
             storage_factory,
             world.get(BotCollabLogRepositoryProtocol),
             world.get(SkillsPoolEditGuard),
+            _Cleanup(),
             lambda: _DeviceContextResolverStub(),
             _RuntimeFactory(),
         ),

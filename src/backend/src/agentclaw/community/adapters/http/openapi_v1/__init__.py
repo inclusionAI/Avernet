@@ -286,6 +286,11 @@ _SUBGROUPS = [
     # creation/authorization pair remains human-only. Dependencies are declared
     # per route in the local router.
     local_router,
+    # Harness public surface: every route is `{bot_id}`-first under
+    # `/bots/{bot_id}/harness/...` and performs its own owner/collaborator
+    # check via `HarnessBotAccessDep`, so it joins the plain subgroups with
+    # only `_PUBLIC_AUTH` + the user-scoped error table.
+    harness_router,
 ]
 
 # These groups may address a shared Bot. ``OwnerIdDep`` performs the same grant
@@ -306,11 +311,6 @@ _ADDRESSED_BOT_SUBGROUPS = [
     channels_router,
     skill_sets_router,
     bot_mcp_router,
-    # Harness public surface: every route is `{bot_id}`-first under
-    # `/bots/{bot_id}/harness/...` and performs its own owner/collaborator
-    # check via `HarnessBotAccessDep`, so it joins the plain subgroups with
-    # only `_PUBLIC_AUTH` + the user-scoped error table.
-    harness_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it
