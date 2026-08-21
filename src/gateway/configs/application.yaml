@@ -33,18 +33,10 @@ user_config:
     schema_catalog: "file"
     cache: "stub"
     # To use the Redis-backed cache plugin, set ``cache: "redis"`` and provide
-    # a ``cache_redis`` block (see below). Default ``stub`` is the in-memory,
-    # single-process option.
+    # a top-level ``cache_redis`` block (see below). Default ``stub`` is the
+    # in-memory, single-process option.
     #
     # cache: "redis"
-    # cache_redis:
-    #   host: "127.0.0.1"
-    #   port: 6379
-    #   db: 0
-    #   ssl: false
-    #   # Password may be a plain value or a secret reference (``@name``)
-    #   # resolved through the active SecretResolver.
-    #   password: "@redis_password"
     auth: "stub"
     # SecretResolver flavor. Community reads creds from env; enterprise overlays
     # this with a corp/KMS-backed selector registered via the plugin_registry.
@@ -61,14 +53,24 @@ user_config:
     authn:
       app_token: "stub"
       tenant: "stub"
-    database:
-      plugin_database: "sqlite"
-      database_url: ""
-      # create_schema / seed_data default to false (matching BaaS). Set them to
-      # true only in the E2E overlays (e.g. e2e-mariadb.yaml) so a freshly
-      # provisioned test database is created and seeded.
-      create_schema: false
-      seed_data: false
+    database: "sqlite"
+
+  # Database plugin connection params for the plugin selected by
+  # ``plugins.database`` (mirrors BaaS: a sibling top-level section).
+  database:
+    database_url: ""
+    # create_schema / seed_data default to false (matching BaaS). Set them to
+    # true only in the E2E overlays (e.g. e2e-mariadb.yaml) so a freshly
+    # provisioned test database is created and seeded.
+    create_schema: false
+    seed_data: false
+
+  # Redis cache plugin connection params for ``plugins.cache: "redis"``
+  # (mirrors BaaS: a sibling top-level section).
+  cache_redis:
+    url: "redis://localhost:6379/0"
+    socket_timeout: 5.0
+    socket_connect_timeout: 5.0
 
   # SecretResolver configuration. The community (env-backed) resolver reads
   # ``{env_prefix}{NAME}_VALUE`` / ``_USER`` from the process environment.

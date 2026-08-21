@@ -1,27 +1,32 @@
 """Unit tests for RedisCachePlugin — redis-backed cache with server-side TTL.
 
-Uses a fake client injected into the plugin so tests never require a live
-Redis instance. TTL behavior is verified by asserting the ``set`` call passes
-``ex=ttl_seconds`` (server-side expiry) and that a ``get`` returning ``None``
-(the key expired or is absent) surfaces as ``None``.
+The plugin connects eagerly (``Redis.from_url`` + ``ping``) and decodes
+responses to ``str``. ``Redis.from_url`` is patched to return a fake client so
+tests never require a live Redis instance. TTL behavior is verified by asserting
+the ``set`` call passes ``ex=ttl_seconds`` (server-side expiry).
 """
 
 from __future__ import annotations
 
-from typing import Any
+from unittest.mock import patch
 
 import pytest
 
-from gateway.community.plugins.cache.redis import RedisCacheConfig, RedisCachePlugin
+from gateway.community.plugins.cache.redis import RedisCachePlugin
 
 
-class _FakeRedis:
-    """Minimal stand-in for a redis client with dict-backed storage."""
+class _FakeRedisClient:
+    """Stand-in for the ``redis.Redis`` client built by ``Redis.from_url``."""
 
-    def __init__(self, store: dict[str, str] | None = None) -> None:
-        self._store = store if store is not None else {}
+    def __init__(self) -> None:
+        self._store: dict[str, str] = {}
         self._set_calls: list[tuple[str, str, int | None]] = []
         self.closed = False
+        self.ping_called = False
+
+    def ping(self) -> bool:
+        self.ping_called = True
+        return True
 
     def get(self, key: str) -> str | None:
         return self._store.get(key)
@@ -35,13 +40,22 @@ class _FakeRedis:
 
 
 @pytest.fixture
-def fake_client() -> _FakeRedis:
-    return _FakeRedis()
+def client() -> _FakeRedisClient:
+    return _FakeRedisClient()
 
 
 @pytest.fixture
-def plugin(fake_client: _FakeRedis) -> RedisCachePlugin:
-    return RedisCachePlugin(RedisCacheConfig(host="test"), client=fake_client)  # type: ignore[arg-type]
+def from_url(client: _FakeRedisClient):
+    with patch(
+        "gateway.community.plugins.cache.redis._plugin.Redis.from_url",
+        return_value=client,
+    ) as mock:
+        yield mock
+
+
+@pytest.fixture
+def plugin(from_url) -> RedisCachePlugin:
+    return RedisCachePlugin(url="redis://localhost:6379/0")
 
 
 class TestRedisCacheGetSet:
@@ -65,64 +79,72 @@ class TestRedisCacheGetSet:
         plugin.set("k", "", ttl_seconds=60)
         assert plugin.get("k") == ""
 
-    def test_bytes_value_decoded(self, plugin: RedisCachePlugin) -> None:
-        plugin.set("k", "你好", ttl_seconds=60)
-        plugin.get("k")
-
-    def test_redis_bytes_are_decoded(self, fake_client: _FakeRedis) -> None:
-        """A Redis client returns bytes; the plugin decodes them to str."""
-        fake_client._store["k"] = "你好"
-        fake_client.get = lambda key: b"\xe4\xbd\xa0\xe5\xa5\xbd"  # "你好" in utf-8
-        plugin = RedisCachePlugin(RedisCacheConfig(host="test"), client=fake_client)  # type: ignore[arg-type]
-        assert plugin.get("k") == "你好"
-
 
 class TestRedisCacheTTL:
     def test_set_passes_server_side_ttl(
-        self, plugin: RedisCachePlugin, fake_client: _FakeRedis
+        self, plugin: RedisCachePlugin, client: _FakeRedisClient
     ) -> None:
         plugin.set("k", "v", ttl_seconds=30)
-        assert fake_client._set_calls[-1] == ("k", "v", 30)
+        assert client._set_calls[-1] == ("k", "v", 30)
 
-    def test_expired_key_returns_none(
-        self, plugin: RedisCachePlugin, fake_client: _FakeRedis
-    ) -> None:
-        fake_client._store["k"] = "v"  # server considers it present
-        fake_client.get = lambda key: None  # server-side expiry ⇒ None
+    def test_expired_key_returns_none(self, client: _FakeRedisClient) -> None:
+        client.get = lambda key: None  # server-side expiry ⇒ None
+        with patch(
+            "gateway.community.plugins.cache.redis._plugin.Redis.from_url",
+            return_value=client,
+        ):
+            plugin = RedisCachePlugin(url="redis://localhost:6379/0")
         assert plugin.get("k") is None
 
 
 class TestRedisCacheClose:
     def test_close_releases_client(
-        self, plugin: RedisCachePlugin, fake_client: _FakeRedis
+        self, plugin: RedisCachePlugin, client: _FakeRedisClient
     ) -> None:
         plugin.close()
-        assert fake_client.closed
-
-    def test_close_sets_client_none(self, plugin: RedisCachePlugin) -> None:
-        plugin.close()
-        assert plugin._client is None
+        assert client.closed
 
     def test_close_idempotent(self, plugin: RedisCachePlugin) -> None:
         plugin.close()
         plugin.close()
 
 
-class TestRedisCacheConfig:
-    def test_config_from_dict(self) -> None:
-        cfg = RedisCacheConfig(host="h", port=6379)
-        assert cfg.host == "h"
-        assert cfg.port == 6379
-        assert cfg.db == 0
-        assert cfg.ssl is False
+class TestRedisCacheConstruction:
+    def test_connects_eagerly(self, client: _FakeRedisClient) -> None:
+        with patch(
+            "gateway.community.plugins.cache.redis._plugin.Redis.from_url",
+            return_value=client,
+        ):
+            RedisCachePlugin(url="redis://localhost:6379/0")
+        assert client.ping_called
 
-    def test_plugin_accepts_dict_config(self, fake_client: _FakeRedis) -> None:
-        plugin = RedisCachePlugin({"host": "h"}, client=fake_client)  # type: ignore[arg-type]
-        assert plugin._config.host == "h"
+    def test_passes_socket_timeouts(self, from_url) -> None:
+        RedisCachePlugin(
+            url="redis://localhost:6379/0",
+            socket_timeout=3.0,
+            socket_connect_timeout=7.0,
+        )
+        from_url.assert_called_once_with(
+            "redis://localhost:6379/0",
+            socket_timeout=3.0,
+            socket_connect_timeout=7.0,
+            decode_responses=True,
+        )
 
-    def test_lazy_client_build(self) -> None:
-        plugin = RedisCachePlugin(RedisCacheConfig(host="h"), client=None)
-        assert plugin._client is None
-        client = plugin._get_client()
-        assert client is not None
-        assert plugin._client is not None
+    def test_connection_error_raises_at_startup(self) -> None:
+        from types import MethodType
+
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        failing = _FakeRedisClient()
+
+        def _raise_ping(self) -> bool:
+            raise RedisConnectionError("down")
+
+        failing.ping = MethodType(_raise_ping, failing)  # type: ignore[method-assign]
+        with patch(
+            "gateway.community.plugins.cache.redis._plugin.Redis.from_url",
+            return_value=failing,
+        ):
+            with pytest.raises(RuntimeError, match="Cannot connect to Redis"):
+                RedisCachePlugin(url="redis://localhost:6379/0")

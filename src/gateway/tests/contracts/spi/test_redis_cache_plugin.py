@@ -3,15 +3,17 @@
 Matches the ``CachePluginContract`` shape used for the in-memory plugin so every
 ``CachePlugin`` implementation is exercised against the same behavioural
 contract. Redis TTL is enforced server-side (``SET key value EX ttl``), so this
-suite uses a fake in-memory client and verifies both the shared contract and
-the TTL hand-off to the backend.
+suite patches ``Redis.from_url`` with a fake in-memory client and verifies both
+the shared contract and the TTL hand-off to the backend.
 """
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
-from gateway.community.plugins.cache.redis import RedisCacheConfig, RedisCachePlugin
+from gateway.community.plugins.cache.redis import RedisCachePlugin
 
 
 class _FakeRedis:
@@ -21,6 +23,9 @@ class _FakeRedis:
         self._store: dict[str, str] = {}
         self.closed = False
 
+    def ping(self) -> bool:
+        return True
+
     def get(self, key: str) -> str | None:
         return self._store.get(key)
 
@@ -29,6 +34,14 @@ class _FakeRedis:
 
     def close(self) -> None:
         self.closed = True
+
+
+def _plugin(fake: _FakeRedis) -> RedisCachePlugin:
+    with patch(
+        "gateway.community.plugins.cache.redis._plugin.Redis.from_url",
+        return_value=fake,
+    ):
+        return RedisCachePlugin(url="redis://localhost:6379/0")
 
 
 class RedisCachePluginContract:
@@ -54,25 +67,24 @@ class RedisCachePluginContract:
 
     def test_close_releases_client(self) -> None:
         fake = _FakeRedis()
-        plugin = RedisCachePlugin(RedisCacheConfig(host="h"), client=fake)
+        plugin = _plugin(fake)
         plugin.close()
         assert fake.closed
 
     def test_server_side_ttl_passed_to_set(self) -> None:
         fake = _FakeRedis()
-        plugin = RedisCachePlugin(RedisCacheConfig(host="h"), client=fake)
+        plugin = _plugin(fake)
         plugin.set("k", "v", ttl_seconds=45)
         assert fake._store["k"] == "v"
 
 
 class TestRedisCachePluginConformance(RedisCachePluginContract):
     def setup_method(self) -> None:
-        self.plugin = RedisCachePlugin(RedisCacheConfig(host="h"), client=_FakeRedis())
+        self.plugin = _plugin(_FakeRedis())
 
     def test_ttl_expiry_returns_none(self) -> None:
-        # Backend-side expiry ⇒ a client whose key is gone returns None.
         fake = _FakeRedis()
-        plugin = RedisCachePlugin(RedisCacheConfig(host="h"), client=fake)
+        plugin = _plugin(fake)
         plugin.set("k_short", "v", ttl_seconds=1)
         fake._store.pop("k_short", None)  # simulate server-side expiry
         assert plugin.get("k_short") is None
