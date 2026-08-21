@@ -15,6 +15,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import StreamingResponse
 
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
     Deleted,
@@ -36,12 +37,8 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     SessionPage,
     SessionUpdate,
 )
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import (
-    OpenApiSessionFileAdapter,
-)
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
-    RuntimeStage,
-)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import OpenApiSessionFileAdapter
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
     StageQuery,
@@ -55,9 +52,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
-    resolve_operable_bot,
-)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import resolve_operable_bot
 from agentclaw.community.core.engine_runtime.errors import (
     EngineHistoryDepthExceededError,
     EngineResourceNotFoundError,
@@ -65,11 +60,14 @@ from agentclaw.community.core.engine_runtime.errors import (
 from agentclaw.community.core.session_resources.types import SessionResourceRecord
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
-from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/sessions", tags=["sessions"], route_class=PublicAPIRoute)
+router = APIRouter(
+    prefix="/openapi/v1/bots/{bot_id}/sessions",
+    tags=["sessions"],
+    route_class=PublicAPIRoute,
+)
 
 #: The path parameter naming the session an operation addresses.
 SessionIdPath = Annotated[
