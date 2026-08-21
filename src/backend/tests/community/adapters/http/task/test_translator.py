@@ -191,7 +191,8 @@ class TestBCN:
 
     def test_is_bcn_event_payload(self):
         assert is_bcn_event_payload(self._EVT) is True
-        e = dict(self._EVT); del e["scope"]
+        e = dict(self._EVT)
+        del e["scope"]
         assert is_bcn_event_payload(e) is False
         assert is_bcn_event_payload(None) is False
 
