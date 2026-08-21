@@ -400,6 +400,81 @@ class TestInjectEnterprisePluginsImportError:
             _inject_enterprise_plugins(container)
 
 
+@pytest.fixture
+def _fresh_registry():
+    """Reset the task registry module state around each test.
+
+    The registry keeps module-level state; reload clears it before the test
+    and again afterwards so no registration leaks into sibling tests.
+    """
+    import importlib
+
+    import secbaas.community.task_registry as task_registry
+
+    importlib.reload(task_registry)
+    yield task_registry
+    importlib.reload(task_registry)
+
+
+class TestResolveRegisteredTask:
+    """Coverage for _resolve_registered_task — lazy registry lookup."""
+
+    def test_resolve_returns_registered_factory_product(self, _fresh_registry):
+        """A registered factory is resolved to its product."""
+        from secbaas.community.bootstrap._container import _resolve_registered_task
+
+        product = object()
+        _fresh_registry.register_cron_task_factory(
+            "deadline_renewal_scheduler", lambda: product
+        )
+
+        assert _resolve_registered_task("deadline_renewal_scheduler") is product
+
+    def test_resolve_unknown_name_returns_none(self, _fresh_registry):
+        """An unregistered task name resolves to None."""
+        from secbaas.community.bootstrap._container import _resolve_registered_task
+
+        assert _resolve_registered_task("no_such_task") is None
+
+
+class TestInjectEnterprisePluginsDeviceServiceOverlay:
+    """Registered device-service factories apply as provider overrides."""
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self.overrides: list[dict] = []
+
+        def override_providers(self, **overrides) -> None:
+            self.overrides.append(overrides)
+
+    class _FakeContainer:
+        def __init__(self) -> None:
+            self._services = (
+                TestInjectEnterprisePluginsDeviceServiceOverlay._FakeServices()
+            )
+
+        def services(self):
+            return self._services
+
+    def test_registered_factory_applies_device_service_override(self, _fresh_registry):
+        """Each registered device-service factory becomes a Singleton override."""
+        from dependency_injector.providers import Singleton
+
+        from secbaas.community.bootstrap._container import (
+            _inject_enterprise_plugins,
+        )
+
+        container = self._FakeContainer()
+        _fresh_registry.register_device_service_factory(lambda: "wrapped")
+
+        _inject_enterprise_plugins(container)
+
+        overrides = container.services().overrides
+        assert len(overrides) == 1
+        assert set(overrides[0]) == {"device_service"}
+        assert isinstance(overrides[0]["device_service"], Singleton)
+
+
 class TestBuildDbConfig:
     """Unit tests for ``_build_db_config`` in ``bootstrap/_container.py``."""
 
