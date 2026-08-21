@@ -277,13 +277,22 @@ if [[ "$no_stop" -eq 0 ]]; then
   # overall totals, so it does not change pass/fail semantics.
   summary_json="$cov_dir/summary.json"
   echo "--- aggregating coverage ---"
+  # Exclude crates the bcs server e2e structurally never executes from the
+  # line-coverage denominator: the test harness (bcs-test-support), standalone
+  # tool binaries the e2e never runs (bcs-rule-bot, bcs-admin, ding-logger), and
+  # plugins never loaded by the e2e stack (bcs-db-mysql — e2e uses SQLite;
+  # bcs-llm-anthropic — no LLM calls in e2e). They are ~9k lines at 0% coverage
+  # that only bloat the denominator; excluding them reports the real
+  # e2e-reachable coverage (~44%) instead of being dragged to ~40% by dead code.
+  cov_exclude=(--exclude bcs-test-support --exclude bcs-rule-bot --exclude bcs-admin \
+               --exclude bcs-db-mysql --exclude bcs-llm-anthropic --exclude ding-logger)
   set +e
   (
     cd "$bcs_dir"
     export CARGO_TARGET_DIR="$cov_dir"
-    cargo llvm-cov report --cobertura --output-path "$out_xml" > /dev/null 2>&1
-    cargo llvm-cov report > "$report_file" 2>&1
-    cargo llvm-cov report --summary-only --json > "$summary_json" 2>/dev/null
+    cargo llvm-cov report --cobertura --output-path "$out_xml" "${cov_exclude[@]}" > /dev/null 2>&1
+    cargo llvm-cov report "${cov_exclude[@]}" > "$report_file" 2>&1
+    cargo llvm-cov report --summary-only --json "${cov_exclude[@]}" > "$summary_json" 2>/dev/null
   )
   set -e
 
