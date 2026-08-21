@@ -1111,40 +1111,38 @@ class BotPublicService:
         caller: BotCatalogCaller,
         request_id: str,
     ) -> Dict[str, Any]:
-        """Return public Backend Bots admitted by the metadata port."""
-        public_bot_result = self._bot_service.list_bots_by_search(
-            public="1", search=search, page=None, page_size=None
-        )
-        candidates = public_bot_result.get("items", [])
-        addresses = self._catalog_addresses(candidates)
+        """Return the current BCS catalog page joined to public Backend Bots."""
         try:
-            metadata = self._catalog_metadata_service.query_public_bot_metadata(
-                addresses=addresses,
+            metadata = self._catalog_metadata_service.search_public_bot_metadata(
+                search=search,
+                page=page,
+                page_size=page_size,
                 caller=caller,
                 request_id=request_id,
             )
-            admitted = self._validated_catalog_addresses(metadata, addresses)
+            addresses = self._validated_catalog_addresses(metadata)
         except BotCatalogMetadataUnavailableError as exc:
             logger.warning(
-                "[BotPublicService.catalog_search] request_id=%s candidate_count=%s "
+                "[BotPublicService.catalog_search] request_id=%s "
                 "failure=metadata_unavailable",
                 request_id,
-                len(candidates),
             )
             raise BotCatalogSearchUnavailableError() from exc
         except Exception as exc:  # noqa: BLE001 - metadata is fail-closed
             logger.warning(
-                "[BotPublicService.catalog_search] request_id=%s candidate_count=%s "
-                "failure=invalid_metadata",
+                "[BotPublicService.catalog_search] request_id=%s failure=invalid_metadata",
                 request_id,
-                len(candidates),
             )
             raise BotCatalogSearchUnavailableError() from exc
-        items = [
-            bot
-            for bot in candidates
-            if self._catalog_address(bot) in admitted
-        ]
+        backend_bots = self._bot_repository.list_public_bots_by_owner_bot_pairs(
+            [(address.bot_id, address.entity_id) for address in addresses]
+        )
+        bots_by_address = {
+            address: bot
+            for bot in backend_bots
+            if (address := self._catalog_address(bot)) in addresses
+        }
+        items = [bots_by_address[address] for address in addresses if address in bots_by_address]
         # Sanitize sensitive fields before pagination and public projection.
         EXT_SENSITIVE_KEYS = {"iam_token"}
         for bot in items:
@@ -1164,46 +1162,31 @@ class BotPublicService:
                         ext[key] = None
                 bot["ext"] = ext
         total = len(items)
-        page_items = items[(page - 1) * page_size:page * page_size]
         logger.info(
-            "[BotPublicService.catalog_search] request_id=%s candidate_count=%s "
-            "joined_count=%s page_count=%s",
+            "[BotPublicService.catalog_search] request_id=%s bcs_count=%s "
+            "joined_count=%s",
             request_id,
-            len(candidates),
+            len(addresses),
             total,
-            len(page_items),
         )
-        return {"total": total, "items": page_items}
+        return {"total": total, "items": items}
 
     @staticmethod
     def _catalog_address(bot: dict[str, Any]) -> BotCatalogAddress | None:
         bot_id = bot.get("bot_id")
-        entity_id = bot.get("entity_id")
+        entity_id = bot.get("entity_id") or bot.get("owner_id")
         if not isinstance(bot_id, str) or not bot_id.strip():
             return None
         if not isinstance(entity_id, str) or not entity_id.strip():
             return None
         return BotCatalogAddress(bot_id=bot_id, entity_id=entity_id)
 
-    @classmethod
-    def _catalog_addresses(
-        cls, candidates: list[dict[str, Any]]
-    ) -> tuple[BotCatalogAddress, ...]:
-        return tuple(
-            dict.fromkeys(
-                address
-                for candidate in candidates
-                if (address := cls._catalog_address(candidate)) is not None
-            )
-        )
-
     @staticmethod
     def _validated_catalog_addresses(
         metadata: Any,
-        requested: tuple[BotCatalogAddress, ...],
-    ) -> set[BotCatalogAddress]:
-        requested_set = set(requested)
-        admitted: set[BotCatalogAddress] = set()
+    ) -> tuple[BotCatalogAddress, ...]:
+        addresses: list[BotCatalogAddress] = []
+        seen: set[BotCatalogAddress] = set()
         for item in metadata:
             if not isinstance(item, BotCatalogMetadata) or item.kind != "bot":
                 raise BotCatalogMetadataUnavailableError()
@@ -1212,12 +1195,12 @@ class BotPublicService:
                 not isinstance(address, BotCatalogAddress)
                 or not address.bot_id.strip()
                 or not address.entity_id.strip()
-                or address not in requested_set
-                or address in admitted
+                or address in seen
             ):
                 raise BotCatalogMetadataUnavailableError()
-            admitted.add(address)
-        return admitted
+            seen.add(address)
+            addresses.append(address)
+        return tuple(addresses)
 
     def list_my_bot_friends(
         self,
