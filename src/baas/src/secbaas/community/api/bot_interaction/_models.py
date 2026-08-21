@@ -87,10 +87,26 @@ class InteractionDispatch:
 
 
 @dataclass(frozen=True, slots=True)
+class InteractionRequestedResult:
+    """Public identity and persistence outcome for an Engine request event."""
+
+    baas_interaction_id: str
+    created: bool
+
+
+@dataclass(frozen=True, slots=True)
 class InteractionResolveResult:
-    """Successful state transition returned to an uplink adapter."""
+    """Public interaction identity accepted from an uplink adapter."""
 
     interaction_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class InteractionResolvedResult:
+    """Public identity and transition outcome for an Engine terminal event."""
+
+    baas_interaction_id: str
+    applied: bool
 
 
 def _required_string_field(value: dict[str, object], key: str) -> str:

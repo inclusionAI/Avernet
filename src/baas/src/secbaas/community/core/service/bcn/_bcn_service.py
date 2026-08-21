@@ -154,8 +154,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         """Normalize and durably queue one BCS interaction resolution."""
         resolution = _normalize_interaction_resolution(resolve_input)
         self._interaction_service.resolve(
-            session_key=resolve_input.session_id,
-            interaction_id=resolve_input.interaction_id,
+            baas_interaction_id=resolve_input.interaction_id,
             resolution=resolution,
             request_envelope=resolve_input.request_envelope,
             idempotency_key=resolve_input.idempotency_key,

@@ -12,7 +12,9 @@ from typing import Any
 
 from ._models import (
     InteractionDispatch,
+    InteractionRequestedResult,
     InteractionResolution,
+    InteractionResolvedResult,
     InteractionResolveResult,
 )
 
@@ -28,13 +30,12 @@ class BotInteractionService:
         envelope: dict[str, Any],
         allowed_decisions: tuple[str, ...],
         expires_at_ms: int | None,
-    ) -> bool: ...
+    ) -> InteractionRequestedResult: ...
 
     def resolve(
         self,
         *,
-        session_key: str,
-        interaction_id: str,
+        baas_interaction_id: str,
         resolution: InteractionResolution,
         request_envelope: dict[str, Any],
         idempotency_key: str | None = None,
@@ -61,7 +62,7 @@ class BotInteractionService:
         session_key: str,
         interaction_id: str,
         envelope: dict[str, Any],
-    ) -> bool: ...
+    ) -> InteractionResolvedResult | None: ...
 
     def mark_expired(self, *, session_key: str, interaction_id: str) -> bool: ...
 

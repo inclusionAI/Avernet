@@ -10,7 +10,9 @@ from ._exceptions import (
 )
 from ._models import (
     InteractionDispatch,
+    InteractionRequestedResult,
     InteractionResolution,
+    InteractionResolvedResult,
     InteractionResolveResult,
 )
 from ._protocols import BotInteractionService
@@ -21,7 +23,9 @@ __all__ = [
     "InteractionConflictError",
     "InteractionDispatch",
     "InteractionNotFoundError",
+    "InteractionRequestedResult",
     "InteractionResolution",
     "InteractionResolveResult",
+    "InteractionResolvedResult",
     "InteractionServiceError",
 ]

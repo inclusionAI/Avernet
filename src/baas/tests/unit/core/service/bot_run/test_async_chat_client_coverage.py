@@ -14,7 +14,11 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-from secbaas.community.api.bot_interaction import InteractionResolution
+from secbaas.community.api.bot_interaction import (
+    InteractionRequestedResult,
+    InteractionResolution,
+    InteractionResolvedResult,
+)
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.service.bot_interaction import InteractionDispatch
 from secbaas.community.core.service.bot_run._async_chat_client import (
@@ -1380,7 +1384,10 @@ class TestInteractionEvents:
         self, mock_bot_ws
     ):
         service = MagicMock()
-        service.record_requested.return_value = True
+        service.record_requested.return_value = InteractionRequestedResult(
+            baas_interaction_id="BAAS-INTERACTION-public-1",
+            created=True,
+        )
         client = AsyncChatClient(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
@@ -1414,13 +1421,21 @@ class TestInteractionEvents:
         assert chunk.metadata["event"] == "interaction.requested"
         assert chunk.metadata["payload"]["event"] == "interaction.requested"
         assert chunk.metadata["payload"]["seq"] == 42
+        assert (
+            chunk.metadata["payload"]["payload"]["interactionId"]
+            == "BAAS-INTERACTION-public-1"
+        )
+        assert payload["interactionId"] == "int-1"
 
     @pytest.mark.asyncio
     async def test_requested_mixed_options_reach_persistence_chunk_and_converter(
         self, mock_bot_ws
     ):
         service = MagicMock()
-        service.record_requested.return_value = True
+        service.record_requested.return_value = InteractionRequestedResult(
+            baas_interaction_id="BAAS-INTERACTION-public-mixed",
+            created=True,
+        )
         client = AsyncChatClient(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
@@ -1459,7 +1474,16 @@ class TestInteractionEvents:
     @pytest.mark.asyncio
     async def test_duplicate_requested_does_not_emit_duplicate_chunk(self, mock_bot_ws):
         service = MagicMock()
-        service.record_requested.side_effect = [True, False]
+        service.record_requested.side_effect = [
+            InteractionRequestedResult(
+                baas_interaction_id="BAAS-INTERACTION-public-1",
+                created=True,
+            ),
+            InteractionRequestedResult(
+                baas_interaction_id="BAAS-INTERACTION-public-1",
+                created=False,
+            ),
+        ]
         client = AsyncChatClient(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
@@ -1496,7 +1520,10 @@ class TestInteractionEvents:
         self, mock_bot_ws
     ):
         service = MagicMock()
-        service.mark_resolved.return_value = True
+        service.mark_resolved.return_value = InteractionResolvedResult(
+            baas_interaction_id="BAAS-INTERACTION-public-1",
+            applied=True,
+        )
         client = AsyncChatClient(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
@@ -1523,11 +1550,25 @@ class TestInteractionEvents:
         assert chunk.type == "interaction"
         assert chunk.metadata["event"] == "interaction.resolved"
         assert chunk.metadata["payload"]["event"] == "interaction.resolved"
+        assert (
+            chunk.metadata["payload"]["payload"]["interactionId"]
+            == "BAAS-INTERACTION-public-1"
+        )
+        assert payload["interactionId"] == "int-1"
 
     @pytest.mark.asyncio
     async def test_duplicate_resolved_does_not_emit_duplicate_chunk(self, mock_bot_ws):
         service = MagicMock()
-        service.mark_resolved.side_effect = [True, False]
+        service.mark_resolved.side_effect = [
+            InteractionResolvedResult(
+                baas_interaction_id="BAAS-INTERACTION-public-1",
+                applied=True,
+            ),
+            InteractionResolvedResult(
+                baas_interaction_id="BAAS-INTERACTION-public-1",
+                applied=False,
+            ),
+        ]
         client = AsyncChatClient(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
@@ -1545,8 +1586,14 @@ class TestInteractionEvents:
         self, mock_bot_ws
     ):
         service = MagicMock()
-        service.record_requested.return_value = True
-        service.mark_resolved.return_value = False
+        service.record_requested.return_value = InteractionRequestedResult(
+            baas_interaction_id="BAAS-INTERACTION-public-mode",
+            created=True,
+        )
+        service.mark_resolved.return_value = InteractionResolvedResult(
+            baas_interaction_id="BAAS-INTERACTION-public-mode",
+            applied=False,
+        )
         client = AsyncChatClient(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
@@ -1588,9 +1635,15 @@ class TestInteractionEvents:
         assert chunk.metadata["payload"] == {
             "type": "event",
             "event": "mode_transition.resolved",
-            "payload": resolved,
+            "payload": {
+                **resolved,
+                "interactionId": "BAAS-INTERACTION-public-mode",
+                "transitionId": "BAAS-INTERACTION-public-mode",
+            },
             "seq": 131,
         }
+        assert resolved["interactionId"] == "int-mode"
+        assert resolved["transitionId"] == "int-mode"
         event = DefaultStreamConverter().convert(chunk, run_id="bcn-run")
         assert event is not None
         data = json.loads(event.data)
@@ -1598,7 +1651,7 @@ class TestInteractionEvents:
         assert data == {
             "runId": "bcn-run",
             "seq": 1,
-            "interactionId": "int-mode",
+            "interactionId": "BAAS-INTERACTION-public-mode",
             "kind": "mode_switch",
             "phase": "resolved",
             "decision": "proceed",
@@ -1608,7 +1661,10 @@ class TestInteractionEvents:
         self, mock_bot_ws
     ):
         service = MagicMock()
-        service.mark_resolved.return_value = True
+        service.mark_resolved.return_value = InteractionResolvedResult(
+            baas_interaction_id="BAAS-INTERACTION-public-mode",
+            applied=True,
+        )
         client = AsyncChatClient(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
@@ -1630,8 +1686,14 @@ class TestInteractionEvents:
         self, mock_bot_ws
     ):
         service = MagicMock()
-        service.record_requested.return_value = True
-        service.mark_resolved.return_value = False
+        service.record_requested.return_value = InteractionRequestedResult(
+            baas_interaction_id="BAAS-INTERACTION-public-mode",
+            created=True,
+        )
+        service.mark_resolved.return_value = InteractionResolvedResult(
+            baas_interaction_id="BAAS-INTERACTION-public-mode",
+            applied=False,
+        )
         client = AsyncChatClient(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
