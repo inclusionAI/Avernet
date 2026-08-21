@@ -416,6 +416,31 @@ class TestListDueForRenewal:
 
         assert [r["source_id"] for r in rows] == [999, 3]
 
+    def test_list_due_soft_deleted_device_reads_as_orphan(self, repo):
+        """WR-03: is_deleted=1 on the hot device row fails the ON-side
+        JOIN condition, so the due cold row comes back with hot_id IS NULL
+        and flows to orphan handling — never renewed for a soft-deleted
+        device."""
+        self._seed()
+        _seed_hot_device(
+            id_val=8, env=ENV, provider_device_id="sb-softdel", is_deleted=1
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=8,
+            sandbox_id="sb-softdel",
+            next_renew_at=datetime(2020, 1, 10),
+        )
+
+        rows = repo.list_due_for_renewal(ENV, "baas_device", 500, now=NOW)
+
+        by_source = {r["source_id"]: r for r in rows}
+        # The row is present (ON-side semantics, not WHERE-side exclusion)
+        # but reads as an orphan: the scheduler will mark it STOPPED.
+        assert 8 in by_source
+        assert by_source[8]["hot_id"] is None
+
     def test_list_due_unsupported_source_table_raises(self, repo):
         with pytest.raises(ValueError, match="Unsupported source_table"):
             repo.list_due_for_renewal(ENV, "bogus", 500, now=NOW)

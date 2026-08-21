@@ -266,6 +266,10 @@ class TestListDueForRenewal:
         assert "baas_device.env = %s" in sql_text
         assert "baas_arca_ttl_renewal_schedule.env = %s" in sql_text
         assert "test" in compiled.params.values()
+        # WR-03: the device-side JOIN also requires is_deleted = 0 (ON-side,
+        # so a soft-deleted device reads as an orphan instead of renewing).
+        assert "baas_device.is_deleted = %s" in sql_text
+        assert 0 in compiled.params.values()
 
     def test_list_due_binding_join_is_env_guarded(self):
         """CR-01: the binding hot-table JOIN is env-guarded."""
@@ -279,6 +283,9 @@ class TestListDueForRenewal:
         assert "LEFT OUTER JOIN ac_entity_device_binding" in sql_text
         assert "ac_entity_device_binding.env = %s" in sql_text
         assert "test" in compiled.params.values()
+        # D-16': the binding side stays unfiltered — production
+        # ac_entity_device_binding has no is_deleted column.
+        assert "is_deleted" not in sql_text
 
     def test_list_due_unsupported_source_table_raises(self):
         """Whitelist guard: unsupported source_table raises ValueError."""

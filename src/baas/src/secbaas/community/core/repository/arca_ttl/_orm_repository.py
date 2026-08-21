@@ -194,8 +194,10 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         renewed cross-env.
 
         Two hot-table variants based on source_table:
-          - "baas_device" -> LEFT JOIN baas_device
+          - "baas_device" -> LEFT JOIN baas_device (ON additionally requires
+            is_deleted = 0, so a soft-deleted device reads as orphan)
           - "ac_entity_device_binding" -> LEFT JOIN ac_entity_device_binding
+            (no is_deleted filter — production table has no such column, D-16')
 
         The cold side is restricted to the requested source_table
         (design doc §7.4: the scheduler issues two per-source_table
@@ -216,6 +218,12 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                 TtlRenewalScheduleModel.source_id == DeviceModel.id,
                 TtlRenewalScheduleModel.source_table == "baas_device",
                 DeviceModel.env == env,
+                # is_deleted lives in the ON clause (not the WHERE): a
+                # soft-deleted device must NOT satisfy the join, so its
+                # cold row reports hot_id IS NULL and flows to orphan
+                # handling instead of being renewed — same treatment
+                # count_hot_arca_devices / find_unregistered apply.
+                DeviceModel.is_deleted == 0,
             )
         elif source_table == "ac_entity_device_binding":
             hot = DeviceBindingModel
