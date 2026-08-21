@@ -301,6 +301,20 @@ class _ResourceRepository(_Repository):
         return []
 
 
+class _DefaultResourceRepository(_ResourceRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.list_mcp_calls: list[dict] = []
+
+    def list_sets(self, **kwargs) -> list[dict]:
+        self.list_set_calls.append(kwargs)
+        return [{"id": "global-default", "is_default": True}]
+
+    def list_mcps(self, **kwargs):
+        self.list_mcp_calls.append(kwargs)
+        return [{"server_code": "visible-default-mcp"}]
+
+
 class _ResourceLegacyFactory:
     def create(self, **_kwargs):
         return _LegacySkillSetService()
@@ -802,6 +816,39 @@ def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
             "engine_type": "openclaw",
         }
     ]
+
+
+def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_scope():
+    repository = _DefaultResourceRepository()
+    authorization = _Collaborators()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=_ResourceLegacyFactory(),
+        passport=object(),
+        authorization=authorization,
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    result = service.resources(
+        bot_id="bot-1", owner_id="true-owner", user_id="collaborator"
+    )
+
+    assert result[0]["mcps"] == [{"server_code": "visible-default-mcp"}]
+    assert authorization.calls == [{
+        "bot_id": "bot-1", "owner_id": "true-owner", "actor_id": "collaborator"
+    }]
+    assert repository.list_mcp_calls == [{
+        "bot_id": "bot-1",
+        "owner_id": "true-owner",
+        "set_id": "global-default",
+        "engine_type": "openclaw",
+    }]
 
 
 @pytest.mark.asyncio

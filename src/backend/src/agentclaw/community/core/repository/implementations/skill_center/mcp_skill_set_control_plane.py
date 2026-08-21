@@ -25,15 +25,23 @@ class McpSkillSetControlPlaneCommands:
     prevents the SkillSet repository from growing into a mixed resource store.
     """
 
-    def list_mcps(self, *, bot_id: str, set_id: str, engine_type: str | None = None) -> list[dict]:
+    def list_mcps(self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None) -> list[dict]:
         with self._db.orm_session() as session:
-            row = self._set(session, bot_id=bot_id, set_id=set_id, engine_type=engine_type)
+            row = self._set(
+                session, bot_id=bot_id, owner_id=owner_id, set_id=set_id,
+                engine_type=engine_type,
+            )
             rows = (
                 self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer)
                 .filter(SkillSetMCPServer.skill_set_id == row.id)
                 .order_by(SkillSetMCPServer.server_code)
                 .all()
             )
+            if row.is_default:
+                excluded = self._default_excluded_mcp_codes(
+                    session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+                )
+                rows = [item for item in rows if item.server_code not in excluded]
             return [
                 {"id": str(item.id), "server_code": item.server_code, "name": item.name,
                  "description": item.description, "icon": item.icon}
@@ -42,7 +50,7 @@ class McpSkillSetControlPlaneCommands:
 
     def add_mcp(self, *, bot_id: str, owner_id: str, set_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
-            row = self._set(session, bot_id=bot_id, set_id=set_id, engine_type=engine_type, locked=True)
+            row = self._set(session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type, locked=True)
             self._ordinary(row)
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             current = (
@@ -81,7 +89,7 @@ class McpSkillSetControlPlaneCommands:
 
     def remove_mcp(self, *, bot_id: str, owner_id: str, set_id: str, server_code: str, engine_type: str | None = None) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
-            row = self._set(session, bot_id=bot_id, set_id=set_id, engine_type=engine_type, locked=True)
+            row = self._set(session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type, locked=True)
             self._ordinary(row)
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             membership = (

@@ -20,12 +20,17 @@ from agentclaw.community.core.models.mcp import (
     BotMCPInstallation,
     SkillSetMCPServer,
 )
+from agentclaw.community.core.skill_center.orm import (
+    DefaultSkillsetMcpExclusion,
+    DefaultSkillsetSkillExclusion,
+)
 from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
     SkillSetControlPlaneRepository,
 )
 from agentclaw.community.core.skill_center.errors import (
     SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneNotFoundError,
 )
 
 
@@ -171,6 +176,53 @@ def test_ensure_active_skillset_installations_only_materializes_active_ordinary_
                 ),
                 SkillSetSkill(
                     skill_set_id=default.id, skill_id=default_skill.id, env="dev"
+def test_global_default_reads_apply_owner_bot_exclusions_without_hiding_membership():
+    """Global Default is visible to every Bot, but its content is per Bot."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="system-default",
+            user_id="",
+            bolt_id="",
+            engine_type="openclaw",
+            is_default=True,
+            env="dev",
+        )
+        included = Skill(name="included", git_path="git://included", env="dev")
+        excluded = Skill(name="excluded", git_path="git://excluded", env="dev")
+        session.add_all([default, included, excluded])
+        session.flush()
+        session.add_all(
+            [
+                SkillSetSkill(
+                    skill_set_id=default.id, skill_id=included.id, env="dev"
+                ),
+                SkillSetSkill(
+                    skill_set_id=default.id, skill_id=excluded.id, env="dev"
+                ),
+                SkillSetMCPServer(
+                    skill_set_id=default.id,
+                    server_code="mcp.included",
+                    name="included",
+                    env="dev",
+                ),
+                SkillSetMCPServer(
+                    skill_set_id=default.id,
+                    server_code="mcp.excluded",
+                    name="excluded",
+                    env="dev",
+                ),
+                DefaultSkillsetSkillExclusion(
+                    user_id="owner-a",
+                    bot_id="default",
+                    skill_set_id=default.id,
+                    skill_id=excluded.id,
+                ),
+                DefaultSkillsetMcpExclusion(
+                    user_id="owner-a",
+                    bot_id="default",
+                    skill_set_id=default.id,
+                    server_code="mcp.excluded",
                 ),
             ]
         )
@@ -257,13 +309,46 @@ def test_ensure_active_skillset_installations_does_not_resurrect_deactivated_set
     )
     with db.orm_session() as session:
         assert session.query(BotSkillInstallation).count() == 0
+    assert repository.get_set(
+        bot_id="default", owner_id="owner-a", set_id=str(default.id), engine_type="openclaw"
+    )["is_default"] is True
+    assert [item["name"] for item in repository.list_skills(
+        bot_id="default", owner_id="owner-a", set_id=str(default.id), engine_type="openclaw"
+    )] == ["included"]
+    assert [item["server_code"] for item in repository.list_mcps(
+        bot_id="default", owner_id="owner-a", set_id=str(default.id), engine_type="openclaw"
+    )] == ["mcp.included"]
+    # The same system membership remains intact for another owner's Bot.
+    assert [item["name"] for item in repository.list_skills(
+        bot_id="default", owner_id="owner-b", set_id=str(default.id), engine_type="openclaw"
+    )] == ["included", "excluded"]
+
+
+def test_cross_owner_set_id_is_not_readable_or_mutable_for_shared_default_bot_id():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        session.add(
+            SkillSet(name="owner-b-set", user_id="owner-b", bolt_id="default", env="dev")
+        )
+
+    repository = SkillSetControlPlaneRepository(db)
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
+        repository.get_set(bot_id="default", owner_id="owner-a", set_id="1")
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
+        repository.update_set(
+            bot_id="default",
+            owner_id="owner-a",
+            set_id="1",
+            name="stolen",
+            description=None,
+        )
 
 
 def test_activation_rolls_back_all_membership_installations_when_nth_insert_fails():
     """No half-selected set can survive a storage failure at member N."""
     db = _Database()
     with db.transactional_orm_session() as session:
-        skill_set = SkillSet(name="set", bolt_id="bot", is_active=False, env="dev")
+        skill_set = SkillSet(name="set", user_id="owner", bolt_id="bot", is_active=False, env="dev")
         first = Skill(name="one", git_path="git://one", env="dev")
         second = Skill(name="two", git_path="git://two", env="dev")
         session.add_all([skill_set, first, second])
@@ -301,7 +386,7 @@ def test_activation_rolls_back_all_membership_installations_when_nth_insert_fail
 def test_activation_rejects_runtime_name_conflict_before_installation_write():
     db = _Database()
     with db.transactional_orm_session() as session:
-        skill_set = SkillSet(name="set", bolt_id="bot", is_active=False, env="dev")
+        skill_set = SkillSet(name="set", user_id="owner", bolt_id="bot", is_active=False, env="dev")
         active = Skill(name="same", git_path="git://active", env="dev")
         candidate = Skill(name="same", git_path="git://candidate", env="dev")
         session.add_all([skill_set, active, candidate])
@@ -333,7 +418,7 @@ def test_activation_rejects_runtime_name_conflict_before_installation_write():
 def test_legacy_switch_rejects_direct_runtime_name_conflict_before_writes():
     db = _Database()
     with db.transactional_orm_session() as session:
-        target = SkillSet(name="target", bolt_id="bot", is_active=False, env="dev")
+        target = SkillSet(name="target", user_id="owner", bolt_id="bot", is_active=False, env="dev")
         direct = Skill(name="same", git_path="git://direct", env="dev")
         candidate = Skill(name="same", git_path="git://candidate", env="dev")
         session.add_all([target, direct, candidate])
@@ -451,7 +536,7 @@ def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
     db = _Database()
     repository = SkillSetControlPlaneRepository(db)
     with db.transactional_orm_session() as session:
-        skill_set = SkillSet(name="set", bolt_id="bot", is_active=True, env="dev")
+        skill_set = SkillSet(name="set", user_id="owner", bolt_id="bot", is_active=True, env="dev")
         session.add(skill_set)
         session.flush()
 
@@ -478,7 +563,7 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
     db = _Database()
     repository = SkillSetControlPlaneRepository(db)
     with db.transactional_orm_session() as session:
-        skill_set = SkillSet(name="set", bolt_id="bot", is_active=False, env="dev")
+        skill_set = SkillSet(name="set", user_id="owner", bolt_id="bot", is_active=False, env="dev")
         session.add(skill_set)
         session.flush()
 
@@ -592,7 +677,8 @@ def test_skill_set_rename_is_unique_for_bot_across_engines():
         SkillSetControlPlaneConflictError, match="SKILL_SET_NAME_CONFLICT"
     ):
         repository.update_set(
-            bot_id="bot",
+                bot_id="bot",
+                owner_id="owner",
             set_id="2",
             name="openclaw-set",
             description=None,
@@ -604,8 +690,8 @@ def test_legacy_switch_replaces_all_ordinary_active_sets_in_one_uow():
     """The compatibility switch cannot expose a deactivate/activate gap."""
     db = _Database()
     with db.transactional_orm_session() as session:
-        old_set = SkillSet(name="old", bolt_id="bot", is_active=True, env="dev")
-        target_set = SkillSet(name="target", bolt_id="bot", is_active=False, env="dev")
+        old_set = SkillSet(name="old", user_id="owner", bolt_id="bot", is_active=True, env="dev")
+        target_set = SkillSet(name="target", user_id="owner", bolt_id="bot", is_active=False, env="dev")
         old_skill = Skill(name="old-skill", git_path="git://old", env="dev")
         target_skill = Skill(name="target-skill", git_path="git://target", env="dev")
         session.add_all([old_set, target_set, old_skill, target_skill])

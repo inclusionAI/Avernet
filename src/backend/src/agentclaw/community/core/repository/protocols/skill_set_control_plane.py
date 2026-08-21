@@ -41,13 +41,14 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
     ) -> dict: ...
     @abstractmethod
     def get_set(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None
     ) -> dict: ...
     @abstractmethod
     def update_set(
         self,
         *,
         bot_id: str,
+        owner_id: str,
         set_id: str,
         name: str | None,
         description: str | None,
@@ -55,15 +56,15 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
     ) -> dict: ...
     @abstractmethod
     def delete_set(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None
     ) -> None: ...
     @abstractmethod
     def list_skills(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None
     ) -> list[dict]: ...
     @abstractmethod
     def list_mcps(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None
     ) -> list[dict]: ...
     @abstractmethod
     def resolve_legacy_skill_id(self, *, bot_id: str, identifier: str) -> str: ...
