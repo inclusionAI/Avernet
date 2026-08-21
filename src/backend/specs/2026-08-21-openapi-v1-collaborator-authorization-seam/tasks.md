@@ -158,8 +158,8 @@
   - [ ] Every `spec.md` acceptance criterion checks off, walked one by one.
   - [ ] `OCB_PRE_PUSH_RUN_CI=1 scripts/ci/pre_push.sh` passes for the backend
         module, per `AGENTS.md`.
-  - [ ] The two live Open Questions in `spec.md` are either answered in the doc
-        or restated as follow-ups; neither is left implicitly decided by code.
+  - [ ] `spec.md` *Follow-ups* still names every deferred piece, and nothing
+        deferred was quietly decided in code instead.
   - [ ] PR #1323 body is updated to the trimmed scope and marked ready for
         review, per `AGENTS.md` *Pull Request Conventions*.
 - **Depends on:** Task 6

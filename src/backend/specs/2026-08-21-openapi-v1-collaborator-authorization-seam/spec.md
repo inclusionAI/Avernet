@@ -162,10 +162,26 @@ Settled here rather than left open:
    so it is a decision rather than an omission.
 
 3. **Which actions are audited follows the request method**, which the table
-   key already carries: reads are not audited, matching both surfaces today. An
-   operation that reads but is expressed as a non-read method would be audited
-   wrongly; none of the adjudicated operations is such a thing today, so no
-   per-row override is introduced until one exists.
+   key already carries: reads are not audited. This matches the internal
+   surface exactly, measured rather than assumed — of its 90 intercepted
+   routes, all 36 `GET` routes pass `persist_audit_log=False` and all 54
+   non-`GET` routes audit, with no exception in either direction. An operation
+   that reads but is expressed as a non-read method would be audited wrongly;
+   none of the adjudicated operations is such a thing today, so no per-row
+   override is introduced until one exists.
+
+4. **The seam ships with no adopter, deliberately.** Every row in this change
+   is `ServiceChecked` / `OWNER_SCOPED` / `SELF_CHECKED` / `NO_BOT`; no row is
+   `Editors`. This change builds the framework, and moving each group onto it
+   is its own session — per group, because each move is either a behaviour
+   comparison (a service's bar versus the seam's) or a policy decision (#906,
+   #907), and neither belongs in the change that introduces the mechanism.
+   The consequence is that the `Editors` path has no production caller until
+   the first of those sessions. The alternative — having one already-checked
+   group declare the seam redundantly, purely to give the path a live caller —
+   was rejected: it buys a warm code path at the cost of a permanent
+   inaccuracy in the table. The path is pinned by tests over a fixture router
+   instead.
 
 ## In Scope
 
@@ -203,16 +219,23 @@ Settled here rather than left open:
 
 ## Open Questions
 
-1. **The adjudicated path ships with no production caller.** With harness out
-   of scope, every table row is "enforced elsewhere" or "no collaborator
-   dimension yet", so the seam's own code path is exercised only by its tests
-   until #906/#907 land. That is normal for infrastructure that precedes
-   policy, but an unused branch is exactly what rots. Two ways to avoid it, if
-   preferred: have one group that a service already checks *also* declare the
-   seam at the identical level — redundant, zero behaviour change, one extra
-   bot resolve per request — or accept the gap and rely on tests. Proceeding on
-   the second unless told otherwise.
+None outstanding. Both are settled above — the unused `Editors` path is
+accepted rather than given an artificial caller (*Decisions* 4), and reads are
+not audited, matching the internal surface as measured (*Decisions* 3).
 
-2. **Audit scope for reads.** No read writes an audit record on either surface
-   today, and *Decisions* 3 keeps that. If any public read should become
-   audited, name it now rather than discovering it later.
+## Follow-ups
+
+Named here so the sequence after this change is not rediscovered:
+
+- **One session per group** to move a `ServiceChecked` group's enforcement onto
+  the seam: delete the service-local check, flip the row to `Editors` at the
+  same level, prove the answers are unchanged. Groups, in rough order of how
+  unambiguous their current bar is: channels, editors, skill sets, skills, MCP,
+  render screens, diagnostics, containers, service publications, chats, the
+  engine-runtime groups.
+- **#906 / #907** to give the `OWNER_SCOPED` groups a collaborator dimension.
+  These are policy decisions per operation — the level bar is the work, not the
+  wiring — and each flips its rows to `Editors` once decided.
+- **The harness defect**, described in *Motivation*, as that group's own change.
+- **The edit lock**, if the public surface should ever have one uniformly
+  (*Decisions* 1).

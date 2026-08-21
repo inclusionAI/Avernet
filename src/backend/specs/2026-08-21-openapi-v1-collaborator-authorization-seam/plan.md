@@ -51,28 +51,71 @@ seam reads and writes.
 
 ### The mode vocabulary
 
+Every row answers one question — **who enforces this operation's
+authorization, and at what level?** There are four possible answers, and the
+mode *is* the answer:
+
 ```python
 # openapi_v1/authorization.py (new)
 @dataclass(frozen=True)
 class Editors:
-    """Adjudicated *here*: the seam attaches its dependency and enforces."""
+    """**The seam enforces this.** Its dependency is attached to the route.
+
+    No row is `Editors` when this lands. It is what a follow-on session
+    switches a row *to* when it moves that group's enforcement here.
+    """
     level: PermissionLevel          # the minimum; OWNER always passes
 
 @dataclass(frozen=True)
 class ServiceChecked:
-    """Adjudicated *elsewhere*. Recorded, not attached."""
+    """**A service enforces this, elsewhere.** The seam attaches nothing.
+
+    The row exists because every operation must have one (see the totality
+    rule below) — this is how an operation says "I am covered, just not
+    here". It also records the bar to preserve, so the follow-on migration is
+    a comparison rather than a guess.
+    """
     level: PermissionLevel          # what that module actually enforces
     where: str                      # importable path — asserted to resolve
 
-OWNER_SCOPED = _Sentinel("owner-scoped")   # resolves by (bot_id, caller); no collaborator dimension yet
-SELF_CHECKED = _Sentinel("self-checked")   # owner arrives on a record, not the wire
-NO_BOT       = _Sentinel("no-bot")         # operation has no bot to adjudicate
+#: **Nobody enforces a collaborator dimension.** The operation resolves the bot
+#: as ``(bot_id, caller)``, so only the owner reaches it at all. These are the
+#: #906 / #907 rows.
+OWNER_SCOPED = _Sentinel("owner-scoped")
+
+#: No bot on the wire to adjudicate — the owner arrives on a record. The
+#: retiring addresses in ``deprecated/`` check themselves, first, before acting.
+SELF_CHECKED = _Sentinel("self-checked")
+
+#: The operation has no bot dimension at all (catalogue reads, name checks).
+NO_BOT       = _Sentinel("no-bot")
 ```
 
-The pair differs on one axis only — does the seam attach? — and both carry a
-level so the follow-on migration is a comparison rather than a guess. There is
-no `mutates` flag: with no lock, the only thing it distinguished was whether to
-audit, and the table key already carries the method (`spec.md` *Decisions* 3).
+Worked example, `POST /openapi/v1/bots/{bot_id}/channels`:
+
+```python
+# today — checked by channels/router.py:152 `_require_admin` at ADMIN
+("POST", "/openapi/v1/bots/{bot_id}/channels"): ServiceChecked(ADMIN, "…openapi_v1.channels.router")
+
+# after the channels follow-on: `_require_admin` is deleted, the row flips
+("POST", "/openapi/v1/bots/{bot_id}/channels"): Editors(ADMIN)
+```
+
+Same answer to the caller, from one place instead of two. Contrast
+`GET /openapi/v1/bots/{bot_id}`, which is `OWNER_SCOPED` today: #906 flipping it
+to `Editors(MEMBER)` **does** change behaviour — collaborators start getting
+through — which is why that is a policy decision and not a mechanical
+migration.
+
+`ServiceChecked`'s weakness, stated so it is not discovered later: it is a claim
+about code that lives somewhere else, and the `level` in particular can drift
+from what that code really does. The citation test proves the module exists and
+contains a permission call; it cannot prove the number is right. That is checked
+by hand when the row migrates.
+
+There is no `mutates` flag: with no lock, the only thing it distinguished was
+whether to audit, and the table key already carries the method (`spec.md`
+*Decisions* 3).
 
 ### The table
 
