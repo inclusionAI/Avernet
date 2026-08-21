@@ -1232,25 +1232,8 @@ fn provider_body_log(body: &ProviderWebhookRequest) -> String {
     })
 }
 
-fn sse_data_log(event: &str, data: &str) -> String {
-    if event != "interaction" {
-        return data.to_string();
-    }
-    let Ok(Value::Object(source)) = serde_json::from_str::<Value>(data) else {
-        return serde_json::json!({
-            "redacted": true,
-            "bytes": data.len(),
-        })
-        .to_string();
-    };
-    let mut safe = serde_json::Map::new();
-    for key in ["runId", "seq", "ts", "phase", "interactionId", "kind"] {
-        if let Some(value) = source.get(key) {
-            safe.insert(key.to_string(), value.clone());
-        }
-    }
-    safe.insert("redacted".to_string(), Value::Bool(true));
-    Value::Object(safe).to_string()
+fn sse_data_log(_event: &str, data: &str) -> String {
+    data.to_string()
 }
 
 fn provider_history_log(response: &ProviderHistoryResponse) -> String {
@@ -2275,19 +2258,17 @@ Connection: keep-alive\r\n\
     }
 
     #[test]
-    fn sse_detail_log_redacts_interaction_business_payload() {
+    fn sse_detail_log_preserves_interaction_business_payload() {
         let logged = sse_data_log(
             "interaction",
             r#"{"runId":"run-1","seq":7,"phase":"resolved","interactionId":"i-1","kind":"ask_user","command":"sensitive command","answers":{"name":{"values":["sensitive answer"]}}}"#,
         );
 
-        assert!(logged.contains("\"interactionId\":\"i-1\""));
-        assert!(logged.contains("\"phase\":\"resolved\""));
-        assert!(!logged.contains("sensitive command"));
-        assert!(!logged.contains("sensitive answer"));
+        assert!(logged.contains("\"command\":\"sensitive command\""));
+        assert!(logged.contains("sensitive answer"));
 
-        let malformed = sse_data_log("interaction", "not-json sensitive answer");
-        assert!(!malformed.contains("sensitive answer"));
+        let malformed = sse_data_log("interaction", "not-json interaction payload");
+        assert_eq!(malformed, "not-json interaction payload");
     }
 
     #[tokio::test]
