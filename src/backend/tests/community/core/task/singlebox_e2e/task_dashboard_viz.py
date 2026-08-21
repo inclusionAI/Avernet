@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """任务执行图谱可视化 — 赛博霓虹风, 自带 API 代理(规避 CORS), 每 10s 轮询。
 
-    python3 src/backend/tests/community/core/task/singlebox_e2e/test_task_dashboard_viz.py
+    python3 src/backend/tests/community/core/task/singlebox_e2e/task_dashboard_viz.py
     浏览器打开 http://localhost:8899/  (默认展示最新 task;可下拉按标题切换)
 """
 import http.server
@@ -162,7 +162,10 @@ const TN=document.getElementById('taskid');
 const TS=document.getElementById('tasksel');
 let CURRENT_TITLE='';
 function loadLists(){return fetch('/proxy-list').then(r=>r.json()).then(j=>{
-  const items=(j&&j.success&&j.data)||[];
+  if(!j || j.code !== 200000){
+    throw new Error((j&&j.message)||'任务列表请求失败');
+  }
+  const items=Array.isArray(j.data)?j.data:[];
   // 默认选最新(run_id 降序第一;list 接口已按 run_id desc)
   if(!TN.value && items.length){TN.value=items[0].task_id;}
   // 重建下拉(标题展示 + 状态色点)
@@ -176,8 +179,15 @@ function loadLists(){return fetch('/proxy-list').then(r=>r.json()).then(j=>{
   if(hit)CURRENT_TITLE=hit.title||hit.task_id;else CURRENT_TITLE=cur;
   return items;
 });}
-function load(){return fetch('/proxy?'+new URLSearchParams({task_id:TN.value})).then(r=>r.json()).then(j=>{
-  if(!j||!j.success)throw new Error((j&&j.message)||'请求失败');return j.data;});}
+function load(){
+  if(!TN.value)throw new Error('暂无可展示的任务');
+  return fetch('/proxy?'+new URLSearchParams({task_id:TN.value})).then(r=>r.json()).then(j=>{
+    if(!j || j.code !== 200000){
+      throw new Error((j&&j.message)||'任务图请求失败');
+    }
+    return j.data;
+  });
+}
 function truncate(s,n){s=String(s);return s.length>n?s.slice(0,n)+'…':s;}
 const R=14,CIRC=2*Math.PI*R;const cdprog=document.getElementById('cdprog');cdprog.setAttribute('stroke-dasharray',CIRC);
 function setCD(sec){cdprog.setAttribute('stroke-dashoffset',CIRC*(1-sec/10));document.getElementById('cdnum').textContent=sec;}
