@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import TaskCallbackData, TaskNode
     from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
         BcsCreateGroupRequest as BcsCreateGroupRequest, BcsCreateGroupResult as BcsCreateGroupResult,
+        BotTaskModeRoster as BotTaskModeRoster,
     )
 
 
@@ -52,6 +53,8 @@ class BcsClientPort(Protocol):
                                       input: dict[str, Any]) -> str: ...
     async def get_state_machine_run(self, run_id: str) -> dict[str, Any]: ...
     async def validate_definition(self, definition_yaml: str) -> None: ...
+    async def list_bots_by_task_modes(self, *, provider_id: str, claim: bool | None = None,
+                                      dream: bool | None = None, match: str = "any") -> list["BotTaskModeRoster"]: ...
 
 
 @runtime_checkable

@@ -52,7 +52,8 @@ class TaskService:
                  callback_repo: TaskCallbackRepositoryProtocol | None = None,
                  task_id_provider: Callable[[], str] | None = None,
                  task_node_repo: TaskNodeRepositoryProtocol | None = None,
-                 task_node_run_info_repo: TaskNodeRunInfoRepositoryProtocol | None = None) -> None:
+                 task_node_run_info_repo: TaskNodeRunInfoRepositoryProtocol | None = None,
+                 task_provider_id: str = "") -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
         bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
 
@@ -61,7 +62,8 @@ class TaskService:
         ``None`` 时回投不落 ``task_callback``,纯内核/单测路径用)。``task_id_provider``:task_id 生成器(默认 uuid4;
         测试注入确定性 provider)。``task_node_repo``/``task_node_run_info_repo``(可选):workflow/yaml
         分支落 ``task_node``(RUNNING)+ ``task_node_run_info``(retry=0,run_mode,assignee,session_id,
-        start_time)用;``None`` 时跳过持久化(纯内核/单测路径用,与 ``task_info_repo`` 同语义)。"""
+        start_time)用;``None`` 时跳过持久化(纯内核/单测路径用,与 ``task_info_repo`` 同语义)。
+        ``task_provider_id``:任务模式 roster 圈定的 provider(空=圈定关闭,旧行为),透传给引擎派发策略。"""
         self._graph = graph
         self._harness = harness
         self._bcs_identity = bcs_identity
@@ -69,6 +71,7 @@ class TaskService:
         self._task_id_provider = task_id_provider or (lambda: str(uuid.uuid4()))
         self._task_node_repo = task_node_repo
         self._run_info_repo = task_node_run_info_repo
+        self._task_provider_id = task_provider_id
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
         self._bg_tasks: set[asyncio.Task] = set()
@@ -86,7 +89,7 @@ class TaskService:
         接线 TaskExecutor。测试可经 facade/engine 子类覆写本方法注入 stub 策略/投递的引擎(测试 seam)。"""
         return ExecutionEngine(
             self._graph, bot=bot, bcs=bcs, discover=discover,
-            bcs_identity=self._bcs_identity,
+            bcs_identity=self._bcs_identity, task_provider_id=self._task_provider_id,
         )
 
     @property

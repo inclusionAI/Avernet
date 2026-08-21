@@ -88,6 +88,10 @@ pub struct UpdateBotRequest {
     pub status: Option<BotStatus>,
     #[serde(default)]
     pub descriptor: Option<UpdateBotDescriptorRequest>,
+    #[serde(default)]
+    pub task_claim_mode: Option<bool>,
+    #[serde(default)]
+    pub task_dream_mode: Option<bool>,
 }
 
 impl From<UpdateBotRequest> for BotPatch {
@@ -97,6 +101,8 @@ impl From<UpdateBotRequest> for BotPatch {
             visibility: value.visibility,
             status: value.status,
             descriptor: value.descriptor.map(BotDescriptorPatch::from),
+            task_claim_mode: value.task_claim_mode,
+            task_dream_mode: value.task_dream_mode,
         }
     }
 }
