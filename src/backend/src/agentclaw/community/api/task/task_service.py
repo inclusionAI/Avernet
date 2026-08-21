@@ -7,12 +7,12 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
     NodeOpResult,
     TaskExecutionGraph,
-    TaskInfo,
     TaskNode,
     TaskOpResult,
     TaskSpec,
     TaskSummary,
 )
+from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 
 
 @runtime_checkable
@@ -20,9 +20,9 @@ class TaskServiceProtocol(Protocol):
     """系统唯一对外入口(2 API)。facade 内部由 ExecutionEngine 编排核协调
     TaskGraphService/TaskPlanner/TaskDispatcher/TaskRunner。"""
 
-    async def execute(self, task_info: TaskInfo) -> TaskOpResult:
-        """提交执行任务:initialize_graph(根 PENDING)→ 编排核 on_execute
-        首帧推进(plan→add_task_nodes→dispatch→start_run)。返回 TaskOpResult。"""
+    async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
+        """提交执行任务:持久化 task_info(PENDING)→ initialize_graph(根 PENDING)→ 编排核 on_execute
+        首帧推进。task_id 服务端生成(uuid4)。返回 TaskOpResult(含 task_id + run_id)。"""
         ...
 
     def get_task_dashboard(

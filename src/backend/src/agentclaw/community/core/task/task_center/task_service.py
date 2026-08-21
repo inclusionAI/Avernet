@@ -9,10 +9,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+import uuid
+from typing import Callable
 
+from sqlalchemy.exc import IntegrityError
+
+from agentclaw.community.core.repository.protocols.task import (
+    TaskCallbackRepositoryProtocol,
+    TaskInfoRepositoryProtocol,
+    TaskNodeRepositoryProtocol,
+    TaskNodeRunInfoRepositoryProtocol,
+)
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceResult, NodeOpResult, Status, TaskExecutionGraph, TaskInfo, TaskNode, TaskNodePatch,
-    TaskOpResult, TaskSpec, TaskSummary,
+    AcceptanceResult, NodeOpResult, Status, TaskExecutionGraph, TaskNode, TaskNodePatch,
+    TaskOpResult, TaskSpec, TaskSummary, TaskType,
+)
+from agentclaw.community.core.task.domain.requests import TaskInfoRequest
+from agentclaw.community.core.task.repository.types import (
+    TaskInfoRecord, TaskNodeRecord, TaskNodeRunInfoRecord,
 )
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_runner.callback_adapter import (
@@ -33,17 +48,32 @@ class TaskService:
     """
 
     def __init__(self, graph, harness=None, *, bot=None, bcs=None, discover=None,
-                 bcs_identity=None) -> None:
+                 bcs_identity=None, task_info_repo: TaskInfoRepositoryProtocol | None = None,
+                 callback_repo: TaskCallbackRepositoryProtocol | None = None,
+                 task_id_provider: Callable[[], str] | None = None,
+                 task_node_repo: TaskNodeRepositoryProtocol | None = None,
+                 task_node_run_info_repo: TaskNodeRunInfoRepositoryProtocol | None = None) -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
-        bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。"""
+        bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
+
+        ``task_info_repo``(可选):task_info 持久化协议(DI 在 prod 注入真实实现;``None``
+        时 execute 跳过持久化,纯内核/单测路径用)。``callback_repo``(可选):回投落库协议(同上,
+        ``None`` 时回投不落 ``task_callback``,纯内核/单测路径用)。``task_id_provider``:task_id 生成器(默认 uuid4;
+        测试注入确定性 provider)。``task_node_repo``/``task_node_run_info_repo``(可选):workflow/yaml
+        分支落 ``task_node``(RUNNING)+ ``task_node_run_info``(retry=0,run_mode,assignee,session_id,
+        start_time)用;``None`` 时跳过持久化(纯内核/单测路径用,与 ``task_info_repo`` 同语义)。"""
         self._graph = graph
         self._harness = harness
         self._bcs_identity = bcs_identity
+        self._task_info_repo = task_info_repo
+        self._task_id_provider = task_id_provider or (lambda: str(uuid.uuid4()))
+        self._task_node_repo = task_node_repo
+        self._run_info_repo = task_node_run_info_repo
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
         self._bg_tasks: set[asyncio.Task] = set()
         # 回投适配层:执行实体 PUSH → 适配 → 编排核 on_report
-        self._callback = TaskLoopCallback(CallbackAdapter(), self._engine)
+        self._callback = TaskLoopCallback(CallbackAdapter(), self._engine, callback_repo=callback_repo)
         # harness 复位重投入口回填(编排核已建,harness 才能拿到 on_harness)+ 启动旁路巡检 daemon 线程
         if self._harness is not None:
             self._harness.set_on_harness(self._engine.on_harness)
@@ -64,26 +94,102 @@ class TaskService:
         """供执行实体(bot workflow / bcn 协作群)PUSH 回投的入口(适配层 → 编排核 on_report)。"""
         return self._callback
 
-    async def execute(self, task_info: TaskInfo) -> TaskOpResult:
-        """提交执行任务:initialize_graph(根 PENDING)+ harness.register 同步完成,
-        随即后台调度编排核 on_execute 首帧推进(plan→add_task_nodes→dispatch→start_run),
-        立即返回 TaskOpResult(含 run_id)。
+    async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
+        """提交执行任务:生成 task_id → 持久化 task_info(PENDING)→ initialize_graph →
+        后台 on_execute 首帧推进,立即返回 TaskOpResult(含 task_id + run_id)。
+
+        持久化失败(IntegrityError,如 task_id 冲突)→ 返回 success=False,不建图。
 
         fire-and-forget:on_execute 在后台 asyncio.Task 推进,不阻塞调用方(HTTP 响应秒回);
         长编排(owner bot ``send_and_wait_async`` 分钟级 + dispatch 投递)异步进行,
         调用方经 ``get_task_dashboard`` 轮询观察推进。后台任务异常经 done_callback 记 log
         (不向调用方抛;图停在中间态由 harness 旁路巡检兜底复位)。"""
+        task_id = self._task_id_provider()
+        task_info = request.to_task_info(task_id)
+        if self._task_info_repo is not None:
+            record = TaskInfoRecord(
+                id=0,
+                task_id=task_id,
+                source_type=request.source_type.value,
+                owner_user_id=request.owner_user_id,
+                owner_bot_id=request.owner_bot_id,
+                execution_config=dict(request.execution_config),
+                task_spec=task_info.task_spec.to_dict(),
+                status=Status.PENDING,
+            )
+            try:
+                self._task_info_repo.insert(record)
+            except IntegrityError as exc:
+                return TaskOpResult(task_id=task_id, success=False, error=f"persist failed: {exc}")
         graph = self._graph.initialize_graph(task_info)
-        task_id = task_info.task_spec.metadata.task_id
         logger.info("[execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute(后台推进)",
                     task_id, task_info.source_channel_id,
                     task_info.task_spec.metadata.title, graph.run_id)
+        task_type = request.execution_config.get("task_type")
+        if task_type == TaskType.WORKFLOW:
+            return await self._run_workflow(task_id, request, task_info, graph.run_id)
+        if task_type == TaskType.YAML:
+            return await self._run_yaml(task_id, request, task_info, graph.run_id)
+        # dynamic (default): fire-and-forget on_execute
         if self._harness is not None:
             self._harness.register(task_id)
         bg = asyncio.create_task(self._engine.on_execute(task_id))
         self._bg_tasks.add(bg)
         bg.add_done_callback(self._on_bg_done)
         return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
+
+    async def _run_workflow(self, task_id, request, task_info, run_id):
+        ec = request.execution_config
+        wf_id = ec.get("workflow_id")
+        args = ec.get("args", [])
+        message = f"/{wf_id} " + " ".join(args) if wf_id else " ".join(args)
+        try:
+            bot_result = await self._engine.trigger_single_bot_workflow(
+                task_id=task_id, bot_id=request.owner_bot_id, message=message)
+        except Exception as exc:
+            return TaskOpResult(task_id=task_id, success=False,
+                                error=f"workflow trigger failed: {exc}", run_id=run_id)
+        session_id = bot_result.session_id if bot_result is not None else None
+        self._graph.update_task_node_info(TaskNodePatch(
+            task_id=task_id, node_id=task_id, status=Status.RUNNING,
+            run_mode="single_bot", assignee=request.owner_bot_id))
+        self._persist_node_run(task_id, task_info, run_mode="single_bot",
+                               assignee=request.owner_bot_id, session_id=session_id)
+        return TaskOpResult(task_id=task_id, success=True, run_id=run_id)
+
+    async def _run_yaml(self, task_id, request, task_info, run_id):
+        from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+        ec = request.execution_config
+        has_yaml = bool(ec.get("yaml"))
+        gf = GroupFormation(
+            bot_ids=[request.owner_bot_id, *ec.get("participant_bot_ids", [])],
+            collab_mode="state_machine" if has_yaml else "manager_worker",
+            group_name=ec.get("group_name", f"task-{task_id}"),
+            members_info=[], extend_props={"definition_yaml": ec.get("yaml")},
+        )
+        try:
+            start = await self._engine.start_coop_group(gf)
+        except Exception as exc:
+            return TaskOpResult(task_id=task_id, success=False,
+                                error=f"yaml group failed: {exc}", run_id=run_id)
+        self._graph.update_task_node_info(TaskNodePatch(
+            task_id=task_id, node_id=task_id, status=Status.RUNNING,
+            run_mode="coop_group", assignee=start.group_id))
+        self._persist_node_run(task_id, task_info, run_mode="coop_group",
+                               assignee=start.group_id, session_id=start.session_id)
+        return TaskOpResult(task_id=task_id, success=True, run_id=run_id)
+
+    def _persist_node_run(self, task_id, task_info, *, run_mode, assignee, session_id):
+        if self._task_node_repo is not None:
+            self._task_node_repo.insert(TaskNodeRecord(
+                id=0, task_id=task_id, node_id=task_id,
+                task_spec=task_info.task_spec.to_dict(), status=Status.RUNNING))
+        if self._run_info_repo is not None:
+            now_ms = int(time.time() * 1000)
+            self._run_info_repo.insert(TaskNodeRunInfoRecord(
+                id=0, node_id=task_id, task_id=task_id, run_mode=run_mode, assignee=assignee,
+                output=None, acceptance_result=None, retry=0, session_id=session_id,
+                extend_props=None, start_time=now_ms, update_time=now_ms, end_time=None))
 
     def _on_bg_done(self, bg: "asyncio.Task") -> None:
         """后台 on_execute 完成:脱离跟踪集 + 异常可见(记 log,不抛)。"""
@@ -151,6 +257,6 @@ class TaskService:
         return await self._engine.on_bbs_report(patch)
 
 
-def run_execute(facade: TaskService, task_info: TaskInfo) -> TaskOpResult:
+def run_execute(facade: TaskService, request: TaskInfoRequest) -> TaskOpResult:
     """同步执行 ``execute``(无事件循环依赖的调用方/单测用)。"""
-    return asyncio.new_event_loop().run_until_complete(facade.execute(task_info))
+    return asyncio.new_event_loop().run_until_complete(facade.execute(request))

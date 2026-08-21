@@ -15,6 +15,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
 
 
 class DeliveryPort(Protocol):
@@ -114,6 +115,20 @@ class TaskRunner:
         gid = f"grp_{uuid.uuid4().hex[:8]}"
         self._groups[gid] = gf
         return gid
+
+    async def trigger_workflow(self, *, bot_id: str, message: str,
+                               metadata: dict[str, Any] | None = None) -> BotSendResult:
+        """Single-bot workflow trigger: send the message, return run_id + session_id."""
+        if self._execution_backend is not None:
+            return await self._execution_backend.trigger_workflow(
+                bot_id=bot_id, message=message, metadata=metadata)
+        return BotSendResult(run_id=f"stub_{uuid.uuid4().hex[:8]}", session_id=None)
+
+    async def get_group_session(self, group_id: str) -> str | None:
+        """Fetch the initial session_id for a coop group; create one if absent."""
+        if self._execution_backend is not None:
+            return await self._execution_backend.get_group_session(group_id)
+        return None
 
     def _build_context(self, task_id: str, node_id: str) -> dict[str, Any]:
         """上下文组装(Runner 内聚;内部自动判定,无 NODE/SUBTREE/TASK scope 入参)。

@@ -52,7 +52,9 @@ def test_cancel_run_stops_collector_and_marks_run_cancelled():
     adapter._resolve_roundtrip_inputs = _resolved
     adapter._ws_chat_roundtrip = _roundtrip
     try:
-        run_id = _run(adapter.send_message(bot_id="bot1", message="do", metadata={}))
+        sent = _run(adapter.send_message(bot_id="bot1", message="do", metadata={}))
+        run_id = sent.run_id
+        assert sent.session_id == "session-1"
         deadline = time.monotonic() + 2
         while not started.is_set() and time.monotonic() < deadline:
             time.sleep(0.01)

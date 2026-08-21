@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Success/error envelopes come from the unified /openapi/v1 contract
 # (``openapi_v1.contracts.Envelope`` / ``ErrorEnvelope``); this module keeps only
@@ -44,12 +44,47 @@ class TaskSpecDTO(BaseModel):
     goal: GoalDTO = Field(default_factory=GoalDTO)
 
 
-class TaskInfoDTO(BaseModel):
-    """POST /openapi/v1/collaboration/tasks/execute 请求体。"""
-    task_spec: TaskSpecDTO
-    source_channel_type: str = Field("bot", description="任务来源渠道: bot / coop_group")
-    source_channel_id: str = Field(..., description="来源ID: bot_id / 协作群id")
-    execution_config: dict[str, Any] = Field(default_factory=dict, description="执行配置(MAX_DEPTH/MAX_LOOP/MAX_HARNESS/bot/workflow 等)")
+class RequestMetadataDTO(BaseModel):
+    title: str = Field("", description="任务标题")
+    instruction: str = Field("", description="核心执行指令(Prompt)")
+
+
+class RequestAcceptanceDTO(BaseModel):
+    id: str = Field(..., description="验收标准唯一标识")
+    acceptance: str = Field("", description="验收标准具体描述")
+
+
+class RequestGoalDTO(BaseModel):
+    objective: str = Field("", description="任务目标描述")
+    acceptances: list[RequestAcceptanceDTO] = Field(default_factory=list, description="验收标准列表")
+
+
+class RequestTaskSpecDTO(BaseModel):
+    metadata: RequestMetadataDTO
+    context: ContextDTO = Field(default_factory=ContextDTO)
+    goal: RequestGoalDTO = Field(default_factory=GoalDTO)
+
+
+class ExecutionConfigDTO(BaseModel):
+    """执行配置(task_type 必填;yaml/workflow_id 可选;其余键允许透传)。"""
+
+    model_config = ConfigDict(extra="allow")
+    task_type: Literal["yaml", "workflow", "dynamic"] = Field(..., description="任务类型")
+    yaml: str | dict[str, Any] | None = Field(None, description="yaml 内联或引用")
+    workflow_id: str | None = Field(None, description="workflow id")
+
+
+class TaskInfoRequestDTO(BaseModel):
+    """POST .../collaboration/tasks/execute 请求体(对外扁平契约;task_id 服务端生成)。"""
+
+    task_spec: RequestTaskSpecDTO
+    source_type: Literal["bot", "coop_group", "api"] = Field("bot", description="触发渠道类型")
+    owner_user_id: str = Field(..., description="userId")
+    owner_bot_id: str = Field(..., description="botId")
+    execution_config: ExecutionConfigDTO = Field(
+        default_factory=lambda: ExecutionConfigDTO(task_type="dynamic"),
+        description="执行配置(task_type/yaml/workflow_id + 透传键)",
+    )
 
 
 class BbsClaimDTO(BaseModel):
@@ -182,25 +217,42 @@ def task_spec_from_dto(dto: TaskSpecDTO):
     )
 
 
-def task_info_from_dto(dto: TaskInfoDTO):
-    from agentclaw.community.core.task.domain.models import TaskInfo
-    return TaskInfo(
-        task_spec=task_spec_from_dto(dto.task_spec),
-        source_channel_type=dto.source_channel_type,
-        source_channel_id=dto.source_channel_id,
-        execution_config=dict(dto.execution_config),
+def task_info_request_from_dto(dto: TaskInfoRequestDTO):
+    """TaskInfoRequestDTO → domain TaskInfoRequest(Rule 22:adapter 唯一写翻译位)。"""
+    from agentclaw.community.core.task.domain.models import TaskSourceType, TaskType
+    from agentclaw.community.core.task.domain.requests import (
+        RequestAcceptance, RequestContext, RequestGoal, RequestMetadata,
+        RequestTaskSpec, TaskInfoRequest,
+    )
+    ec = dto.execution_config
+    execution_config: dict[str, Any] = dict(ec.model_dump(exclude_none=True))
+    execution_config["task_type"] = TaskType(ec.task_type)
+    return TaskInfoRequest(
+        task_spec=RequestTaskSpec(
+            metadata=RequestMetadata(title=dto.task_spec.metadata.title,
+                                     instruction=dto.task_spec.metadata.instruction),
+            context=RequestContext(background=dto.task_spec.context.background,
+                                   extend_props=dict(dto.task_spec.context.extend_props)),
+            goal=RequestGoal(objective=dto.task_spec.goal.objective,
+                             acceptances=[RequestAcceptance(id=a.id, acceptance=a.acceptance)
+                                          for a in dto.task_spec.goal.acceptances]),
+        ),
+        source_type=TaskSourceType(dto.source_type),
+        owner_user_id=dto.owner_user_id,
+        owner_bot_id=dto.owner_bot_id,
+        execution_config=execution_config,
     )
 
 
 def callback_from_dto(dto: TaskCallbackDataDTO):
     from agentclaw.community.core.task.domain.models import TaskCallbackData
-    return TaskCallbackData(
-        loop_task_id=dto.loop_task_id,
-        workflow_type=dto.workflow_type,
-        workflow_id=dto.workflow_id,
-        instance_id=dto.instance_id,
-        result=dict(dto.result),
-    )
+    return TaskCallbackData(data={
+        "loop_task_id": dto.loop_task_id,
+        "workflow_type": dto.workflow_type,
+        "workflow_id": dto.workflow_id,
+        "instance_id": dto.instance_id,
+        "result": dict(dto.result),
+    })
 
 
 def acceptance_result_from_dto(dto: AcceptanceResultDTO):

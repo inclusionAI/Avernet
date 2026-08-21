@@ -18,6 +18,7 @@ from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter impo
 from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
     OpenApiAuthError, OpenApiBadRequestError,
 )
+from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
 from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
     BcsGroupHandle, SingleBotHandle,
 )
@@ -61,20 +62,23 @@ class TaskExecutor:
     async def _dispatch_single_bot(self, node: TaskNode, sem: asyncio.Semaphore) -> bool:
         bot_id = node.run_info.assignee
         loop_task_id = f"{node.task_id}::{node.node_id}"
+        session_id: str | None = None
         async with sem:
             try:
                 await self._bot.ensure_grant(bot_id)
                 ctx = self._context.build(node.task_id, node.node_id)
                 message = self._formatter.format_execute(ctx, node)
-                run_id = await self._bot.send_message(
+                sent = await self._bot.send_message(
                     bot_id=bot_id, message=message,
                     metadata={"biz_task_id": node.task_id},
                 )
+                run_id = sent.run_id
+                session_id = sent.session_id
             except (OpenApiAuthError, OpenApiBadRequestError):
                 return False
             self._poller.register(SingleBotHandle(
                 loop_task_id=loop_task_id, run_id=run_id, bot_id=bot_id,
-                registered_at=time.monotonic(),
+                registered_at=time.monotonic(), session_id=session_id,
             ))
             return True
 
@@ -198,6 +202,27 @@ class TaskExecutor:
             "definition_ref": res.definition_ref, "session_id": res.session_id,
         }
         return res.group_id
+
+    async def trigger_workflow(self, *, bot_id: str, message: str,
+                               metadata: dict[str, Any] | None = None) -> BotSendResult:
+        """Single-bot workflow trigger: send + register a SingleBotHandle; return BotSendResult."""
+        sent = await self._bot.send_message(bot_id=bot_id, message=message,
+                                            metadata=metadata or {})
+        biz_task_id = (metadata or {}).get("biz_task_id", "")
+        self._poller.register(SingleBotHandle(
+            loop_task_id=f"{biz_task_id}::{biz_task_id}",  # root node_id == task_id
+            run_id=sent.run_id, bot_id=bot_id,
+            registered_at=time.monotonic(), session_id=sent.session_id,
+        ))
+        return sent
+
+    async def get_group_session(self, group_id: str) -> str | None:
+        """Fetch the initial session_id for a coop group; create one if absent."""
+        meta = self._group_meta.get(group_id)
+        sid = (meta or {}).get("session_id")
+        if sid is None and self._bcs is not None:
+            sid = await self._bcs.create_session(group_id)
+        return sid
 
     @staticmethod
     def _state_machine_bindings(gf: GroupFormation) -> dict[str, dict[str, Any]]:
