@@ -18,7 +18,7 @@ which exposes 6 **Selectors** that resolve the active implementation at runtime:
 
 | Selector              | Config Key                   | Bare Default              | Purpose                                  |
 |-----------------------|------------------------------|---------------------------|------------------------------------------|
-| `database`            | `plugins.database.plugin_database` | `sqlite`            | Database access (sync + async ORM; `mariadb` opts into the MariaDB backend) |
+| `database`            | `plugins.database`            | `sqlite`            | Database access (sync + async ORM; `mariadb` opts into the MariaDB backend) |
 | `forwarder`           | `plugins.forwarder`          | `bare`                    | Upstream HTTP request forwarding         |
 | `schema_catalog`      | `plugins.schema_catalog`     | `bare`                    | Upstream schema discovery and caching    |
 | `cache_plugin`        | `plugins.cache`              | `stub`                    | Distributed cache abstraction            |
@@ -37,8 +37,8 @@ application.yaml
                     ├── cache: "stub"           → InMemoryCachePlugin
                     ├── authn.app_token: "bare"    → StubAppTokenValidator
                     ├── authn.tenant: "bare"       → StubTenantResolver
-                    └── database.plugin_database: "sqlite" → SqliteDatabasePlugin
-                                         ("mariadb" → MariaDbOrmPlugin)
+└── database: "sqlite" → SqliteDatabasePlugin
+                                     ("mariadb" → MariaDbOrmPlugin)
 ```
 
 <details>
@@ -51,16 +51,16 @@ The `database` selector supports two community backends:
 - **`mariadb`** — self-managed MariaDB (MySQL-wire compatible). Uses
   `aiomysql` (async) + `mysql-connector-python` (sync ORM) drivers.
 
-MariaDB is configured with a single `database_url` under `plugins.database`
-(matching the BaaS backend contract):
+MariaDB is configured with a single `database_url` under the top-level
+`database` section (matching the BaaS backend contract):
 
 ```yaml
 plugins:
-  database:
-    plugin_database: "mariadb"
-    database_url: "mysql+aiomysql://gateway:gatewaypass@127.0.0.1:33306/gateway_test?charset=utf8mb4"
-    create_schema: true
-    seed_data: true
+  database: "mariadb"
+database:
+  database_url: "mysql+aiomysql://gateway:gatewaypass@127.0.0.1:33306/gateway_test?charset=utf8mb4"
+  create_schema: true
+  seed_data: true
 ```
 
 `create_schema` / `seed_data` default to `false`; enable them only in the E2E

@@ -1,75 +1,56 @@
-"""Redis cache plugin — redis-backed implementation of the gateway CachePlugin SPI.
+"""Redis cache plugin — Redis-backed key-value cache with TTL.
 
-Implements :class:`~gateway.community.spi.cache.CachePlugin` using Redis as the
-backing store, with TTL-based expiration handled server-side by Redis
-(``SET key value EX ttl_seconds``). Selected via ``plugins.cache = redis``.
-
-Connection settings come from :class:`RedisCacheConfig`; concrete credentials
-(password) are resolved by the composition root before the client is built, so
-the plugin never sees secret references and never starts an empty-value
-connection.
+Uses a synchronous redis-py client. The connection is established in
+``__init__`` so that connection errors surface at startup rather than
+on the first ``get`` / ``set`` call. Selected via ``plugins.cache = redis``.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from redis import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
-import redis as redis_lib
-
+from gateway.community.logger import get_logger
 from gateway.community.spi.cache import CachePlugin
 
-if TYPE_CHECKING:
-    from ._config import RedisCacheConfig
+logger = get_logger("cache")
 
 
 class RedisCachePlugin(CachePlugin):
-    """Redis-backed key-value cache plugin.
+    """Redis-backed cache plugin.
 
     Args:
-        config: Redis connection configuration with already-resolved values.
-        client: Optional pre-built Redis client. When omitted, one is built
-            lazily from ``config`` on first use. Injectable for tests.
+        url: Redis connection URL (e.g. ``redis://localhost:6379/0``).
+        socket_timeout: Per-command socket timeout in seconds.
+        socket_connect_timeout: Initial connection timeout in seconds.
     """
 
     def __init__(
         self,
-        config: RedisCacheConfig | dict[str, Any],
-        client: redis_lib.Redis | None = None,
+        url: str,
+        *,
+        socket_timeout: float = 5.0,
+        socket_connect_timeout: float = 5.0,
     ) -> None:
-        if isinstance(config, dict):
-            from ._config import RedisCacheConfig
-
-            config = RedisCacheConfig(**config)
-        self._config = config
-        self._client = client
-
-    def _get_client(self) -> redis_lib.Redis:
-        if self._client is None:
-            self._client = redis_lib.Redis(
-                host=self._config.host,
-                port=self._config.port,
-                username=self._config.username or None,
-                password=self._config.password or None,
-                db=self._config.db,
-                ssl=self._config.ssl,
-                socket_timeout=self._config.socket_timeout,
-            )
-        return self._client
+        self._redis: Redis = Redis.from_url(
+            url,
+            socket_timeout=socket_timeout,
+            socket_connect_timeout=socket_connect_timeout,
+            decode_responses=True,
+        )
+        try:
+            self._redis.ping()
+        except (RedisConnectionError, RedisTimeoutError) as e:
+            raise RuntimeError(f"Cannot connect to Redis at {url}: {e}") from e
+        logger.info("RedisCachePlugin connected to %s", url)
 
     def get(self, key: str) -> str | None:
-        client = self._get_client()
-        value: object = client.get(key)
-        if value is None:
-            return None
-        if isinstance(value, bytes):
-            return value.decode("utf-8")
-        return cast(str, value)
+        return self._redis.get(key)
 
     def set(self, key: str, value: str, ttl_seconds: int) -> None:
-        client = self._get_client()
-        client.set(key, value, ex=ttl_seconds)
+        self._redis.set(key, value, ex=ttl_seconds)
 
     def close(self) -> None:
-        if self._client is not None:
-            self._client.close()
-            self._client = None
+        self._redis.close()
+        logger.info("RedisCachePlugin connection closed")

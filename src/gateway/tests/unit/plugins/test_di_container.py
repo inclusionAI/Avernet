@@ -6,7 +6,6 @@ import pytest
 
 from gateway.community.bootstrap._configs import (
     AuthnPluginConfig,
-    DatabasePluginConfig,
     PluginConfig,
     init_container_config,
     load_container_config,
@@ -29,8 +28,7 @@ class TestPluginConfig:
         assert cfg.cache == "stub"
         assert cfg.authn.app_token == "stub"
         assert cfg.authn.tenant == "stub"
-        assert cfg.database.plugin_database == "sqlite"
-        assert cfg.database.database_url == ""
+        assert cfg.database == "sqlite"
 
     def test_arbitrary_forwarder_accepted(self) -> None:
         """Community does not restrict which values enterprise can use."""
@@ -58,9 +56,8 @@ class TestPluginConfig:
         assert cfg.tenant == "stub"
 
     def test_database_defaults(self) -> None:
-        cfg = DatabasePluginConfig()
-        assert cfg.plugin_database == "sqlite"
-        assert cfg.database_url == ""
+        cfg = PluginConfig()
+        assert cfg.database == "sqlite"
 
 
 class TestPluginContainerSelectors:
@@ -86,9 +83,7 @@ class TestPluginContainerSelectors:
     def test_mariadb_orm_selects_mariadb_plugin(self) -> None:
         container = ApplicationContainer()
         init_container_config(container)
-        container.config.from_dict(
-            {"plugins": {"database": {"plugin_database": "mariadb"}}}
-        )
+        container.config.from_dict({"plugins": {"database": "mariadb"}})
 
         db = container.plugins().database()
         assert isinstance(db, MariaDbOrmPlugin)
@@ -96,9 +91,7 @@ class TestPluginContainerSelectors:
     def test_sqlite_orm_selects_sqlite_plugin(self) -> None:
         container = ApplicationContainer()
         init_container_config(container)
-        container.config.from_dict(
-            {"plugins": {"database": {"plugin_database": "sqlite"}}}
-        )
+        container.config.from_dict({"plugins": {"database": "sqlite"}})
 
         db = container.plugins().database()
         assert isinstance(db, SqliteDatabasePlugin)
@@ -165,7 +158,7 @@ class TestApplicationContainer:
 
         assert container.config.plugins.forwarder() == "httpx"
         assert container.config.plugins.cache() == "stub"
-        assert container.config.plugins.database.plugin_database() == "sqlite"
+        assert container.config.plugins.database() == "sqlite"
 
     def test_config_overridable(self) -> None:
         """Container config can be overridden from YAML-like dict."""

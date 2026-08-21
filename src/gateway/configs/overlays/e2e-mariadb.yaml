@@ -7,8 +7,8 @@
 #   -e MARIADB_USER=gateway -e MARIADB_PASSWORD=gatewaypass mariadb:11).
 user_config:
   plugins:
-    database:
-      plugin_database: "mariadb"
-      database_url: "mysql+aiomysql://gateway:gatewaypass@127.0.0.1:33306/gateway_test?charset=utf8mb4"
-      create_schema: true
-      seed_data: true
+    database: "mariadb"
+  database:
+    database_url: "mysql+aiomysql://gateway:gatewaypass@127.0.0.1:33306/gateway_test?charset=utf8mb4"
+    create_schema: true
+    seed_data: true

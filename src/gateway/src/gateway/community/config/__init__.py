@@ -8,7 +8,6 @@ from ._config_utils import get_config, get_config_by_path, reset_config
 from ._models import (
     AuthnPluginConfig,
     Config,
-    DatabasePluginConfig,
     LogConfig,
     ModuleConfig,
     PluginConfig,
@@ -22,7 +21,6 @@ __all__ = [
     "AuthnPluginConfig",
     "Config",
     "ConfigLoader",
-    "DatabasePluginConfig",
     "LogConfig",
     "ModuleConfig",
     "PluginConfig",
