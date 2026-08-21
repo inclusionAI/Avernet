@@ -56,8 +56,10 @@ RUN npm config set registry "https://registry.npmmirror.com" \
     && npm install -g "openclaw@${OPENCLAW_VERSION}"
 
 # Install uv via pip (Aliyun mirror — astral.sh is unreachable in CN build envs).
+# --break-system-packages: required by PEP 668 on Debian 12 system Python.
 ARG UV_VERSION=
-RUN pip3 install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple \
+RUN pip3 install --no-cache-dir --break-system-packages \
+        -i https://mirrors.aliyun.com/pypi/simple \
         "uv${UV_VERSION:+==${UV_VERSION}}" \
     && which uv && uv --version
 
