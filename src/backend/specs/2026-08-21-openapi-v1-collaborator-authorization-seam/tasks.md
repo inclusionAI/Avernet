@@ -11,22 +11,25 @@
 > fix (`spec.md` *Out of Scope*). Every table row in this change records
 > today's behaviour; nothing adopts the seam yet.
 
-## Task 1: Prove the attach mechanism  `[ ]`
+## Task 1: Prove the attach mechanism  `[x]`
 
 - **Goal:** Settle whether `APIRouter(route_class=…)` survives assembly, before
   36 modules are edited on the assumption that it does.
 - **Files:**
   `src/backend/tests/community/adapters/http/openapi_v1/test_authorization_inventory.py` (new)
 - **Done when:**
-  - [ ] A throwaway `APIRoute` subclass on one existing sub-router is still that
-        subclass after `build_public_router()` assembles it, asserted by a test
-        that survives as `test_every_route_is_a_public_api_route`.
-  - [ ] A dependency appended inside that subclass is present in the assembled
-        route's **effective** dependant, not merely in `route.dependencies`.
-  - [ ] If either fails: `plan.md`'s *Risks* fallback is adopted — a post-build
-        pass using `fastapi.dependencies.utils.get_parameterless_sub_dependant`
-        — and Task 3's shape is rewritten to match. Recorded in `plan.md`
-        either way, in one line.
+  - [x] A custom `APIRoute` subclass on a sub-router is still that subclass
+        after assembly — `test_route_class_survives_include_router`. FastAPI
+        0.138.2 defers `include_router` into a lazy wrapper, so routes are
+        walked through `effective_route_contexts()`; the shared walker lives in
+        `tests/…/openapi_v1/_route_walk.py`.
+  - [x] A dependency appended inside that subclass is in the assembled route's
+        **effective** dependant, not merely in `route.dependencies`, runs on a
+        real request, and publishes its query parameter into the schema.
+  - [x] Neither failed, so the fallback is **not** adopted. Recorded in
+        `plan.md` *Risks*, together with the one correction the probe produced:
+        `PublicAPIRoute` raises at module import, earlier than
+        `build_public_router()`.
 - **Depends on:** —
 
 ## Task 2: The mode vocabulary and the table  `[ ]`

@@ -291,13 +291,20 @@ None. No new packages; `fastapi>=0.115` (`pyproject.toml:34`) already exposes
 
 ## Risks & Mitigations
 
-- **Risk:** `include_router` may not preserve a custom route class, making the
-  attach invisible after assembly.
-  **Mitigation:** Task 1 pins it with a test asserting every route in the
-  assembled router is a `PublicAPIRoute` and carries the expected dependency.
-  If it does not hold, fall back to a post-build pass over `public.routes` using
-  `fastapi.dependencies.utils.get_parameterless_sub_dependant` — same table,
-  same seam, one file instead of 36.
+- ~~**Risk:** `include_router` may not preserve a custom route class.~~
+  **Settled in Task 1, on FastAPI 0.138.2: it does.** The class survives
+  assembly, the appended dependency lands in the *effective* dependant, it runs
+  on a real request, and its query parameter reaches the published schema. The
+  fallback (a post-build pass using
+  `fastapi.dependencies.utils.get_parameterless_sub_dependant`) is not needed
+  and was not adopted; `test_authorization_inventory.py` keeps the four
+  mechanism tests so a FastAPI upgrade that breaks the claim says so.
+  **One correction to the design it produced:** this version defers
+  `include_router` into a lazy wrapper, so routes must be walked through
+  `effective_route_contexts()` (see `tests/…/openapi_v1/_route_walk.py`), and
+  `PublicAPIRoute` raises at *module import* — when the decorator constructs the
+  route — which is earlier than `build_public_router()`. The app still fails to
+  start either way, so the acceptance criterion holds as written.
 - **Risk:** The `Check` code path has no production caller until #906/#907,
   so it is an unused branch that can rot.
   **Mitigation:** its behaviour is pinned by direct tests over a fixture router
