@@ -105,7 +105,10 @@ sessions: APIRouter = relocate(
     # were introduced after bot-first addressing and therefore have no legacy
     # address to preserve.
     skip=lambda _method, path: (
-        path.endswith("/favorites") or path.endswith("/favorite")
+        path.endswith("/favorites")
+        or path.endswith("/favorite")
+        # Session File is new OpenAPI capability, with no frozen legacy address.
+        or "/files" in path
     ),
 )
 

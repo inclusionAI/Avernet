@@ -79,6 +79,14 @@ _SESSION_RESOURCES_EXEMPT_REASON = (
     "covers the module with core and HTTP API tests."
 )
 
+_RUNTIME_BINDING_EXEMPT_REASON = (
+    "Read-only binding selection used only by the Session File OpenAPI upload "
+    "intent. A real flow requires a signed OpenAPI principal and the same "
+    "Frontend/BaaS/Engine upload lifecycle as session_resources; covered by "
+    "core resolver and HTTP endpoint tests. Drain when that lifecycle can run "
+    "in singlebox."
+)
+
 _TASK_FRAMEWORK_EXEMPT_REASON = (
     "Task goal-driven execution framework skeleton (core/task). No HTTP/router or DI surface is wired yet (no adapters/http/openapi_v1/task/, no di/modules/task_module.py), so there is no endpoint for an e2e flow to drive. Covered by domain/unit tests on the graph, planner, dispatcher, runner, and harness as each lands. Drain this when a router + DI provider expose the TaskService facade over a real singlebox stack."
 )
@@ -198,6 +206,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "notify": _EXEMPT_REASON,
     "nas_usage": _EXEMPT_REASON,
     "service_bot": _EXEMPT_REASON,
+    "runtime_binding": _RUNTIME_BINDING_EXEMPT_REASON,
     "session_resources": _SESSION_RESOURCES_EXEMPT_REASON,
     "services": _EXEMPT_REASON,
     "skill_center": _EXEMPT_REASON,

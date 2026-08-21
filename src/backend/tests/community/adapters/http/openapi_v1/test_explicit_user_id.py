@@ -358,7 +358,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: ``none`` then moved 53 → 54 with the department directory search
 #: (``/openapi/v1/org/dept``), an account-level catalogue read that addresses no bot.
-_BOT_ID_PLACEMENT = {"path": 132, "query": 1, "none": 54}
+_BOT_ID_PLACEMENT = {"path": 138, "query": 1, "none": 54}
 
 
 def _schema() -> dict:
@@ -452,9 +452,9 @@ def test_the_pinned_number_of_operations_take_it():
     # +5 for Editors and +4 for render screens. The read-only Node inventory adds
     # the final operation. Skill Installation adds three further Bot-addressed
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
-    # MCP adds eight operations, and the Harness surface adds six
-    # Bot-addressed operations.
-    assert len(taking) == 170
+    # MCP adds eight operations, the Harness surface adds six Bot-addressed
+    # operations, and Session File adds six more.
+    assert len(taking) == 176
 
 
 def test_the_exempt_operations_take_none():

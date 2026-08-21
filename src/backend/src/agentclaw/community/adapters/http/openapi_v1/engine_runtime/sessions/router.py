@@ -8,10 +8,12 @@ see ``engine_runtime/gating.py`` and ``core/engine_runtime/gate.py``.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Path, Query, Request
+from fastapi.responses import StreamingResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
@@ -25,8 +27,17 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     Session,
     SessionCreate,
     SessionFavorite,
+    SessionFile,
+    SessionFileList,
+    SessionFileUploadCompleteRequest,
+    SessionFileUploadGrant,
+    SessionFileUploadIntentRequest,
+    SessionFileUploadIntentResult,
     SessionPage,
     SessionUpdate,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import (
+    OpenApiSessionFileAdapter,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     RuntimeStage,
@@ -51,6 +62,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineHistoryDepthExceededError,
     EngineResourceNotFoundError,
 )
+from agentclaw.community.core.session_resources.types import SessionResourceRecord
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
@@ -620,6 +632,291 @@ async def delete_session(
         method="DELETE",
         path=f"/api/sessions/{session_id}",
     )
+    return deleted(request)
+
+
+SessionFileResourceId = Annotated[
+    str,
+    Path(
+        min_length=1,
+        max_length=128,
+        description="Opaque Session File resource id returned by upload-intents.",
+    ),
+]
+
+DispositionQuery = Annotated[
+    str,
+    Query(
+        pattern="^(inline|attachment)$",
+        description="Render the file inline or download it as an attachment.",
+    ),
+]
+
+
+def _session_file_resource(record: SessionResourceRecord) -> SessionFile:
+    return SessionFile(
+        resource_id=record.resource_id,
+        display_name=record.display_name,
+        status=record.status.value,
+        size_bytes=record.size_bytes,
+        content_hash=record.client_content_hash,
+        task_version=record.task_version,
+        error_code=_session_file_public_error(record.error_code),
+    )
+
+
+def _session_file_public_error(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if value in {"dispatch_failed", "engine_unavailable"}:
+        return value
+    return "materialization_failed"
+
+
+def _session_file_not_found(exc: ValueError) -> EngineResourceNotFoundError:
+    raise EngineResourceNotFoundError("session file is unavailable") from exc
+
+
+def _session_file_headers(headers: object) -> dict[str, str]:
+    if not hasattr(headers, "items"):
+        return {"Content-Type": "application/octet-stream"}
+    # COSEC: the upstream header bag is untrusted at this public boundary;
+    # forward only a fixed response-header allowlist after rejecting CR/LF.
+    allowed = {"content-type", "content-length", "content-disposition"}
+    safe: dict[str, str] = {}
+    for key, value in headers.items():
+        normalized = str(key).lower()
+        if normalized not in allowed or not isinstance(value, str):
+            continue
+        if "\r" in value or "\n" in value:
+            continue
+        if normalized == "content-length" and not value.isdecimal():
+            continue
+        safe["-".join(part.capitalize() for part in normalized.split("-"))] = value
+    safe.setdefault("Content-Type", "application/octet-stream")
+    return safe
+
+
+@router.post(
+    "/{session_id}/files/upload-intents",
+    status_code=201,
+    response_model=Envelope[SessionFileUploadIntentResult],
+)
+@envelope_errors
+async def create_session_file_upload_intents(
+    bot_id: BotIdPath,
+    session_id: SessionIdPath,
+    body: SessionFileUploadIntentRequest,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
+) -> Envelope[SessionFileUploadIntentResult]:
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="sessions",
+    )
+    try:
+        intents = adapter.create_upload_intents(
+            actor_user_id=user_id,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            session_key=session_id,
+            stage=stage.value,
+            engine_type=facts.active_engine,
+            files=[
+                (item.filename, item.size_bytes, item.content_hash)
+                for item in body.files
+            ],
+        )
+    except ValueError as exc:
+        _session_file_not_found(exc)
+    files = [
+        SessionFileUploadGrant(
+            **_session_file_resource(intent.resource).model_dump(),
+            upload_url=intent.grant.upload_url,
+            transfer_id=intent.grant.transfer_id,
+            upload_type=intent.grant.upload_type,
+            http_method=intent.grant.http_method,
+            expires_at=intent.grant.expires_at,
+            upload_session_id=intent.grant.upload_session_id,
+            part_size=intent.grant.part_size,
+            part_count=intent.grant.part_count,
+            parts=intent.grant.parts,
+        )
+        for intent in intents
+    ]
+    return created(SessionFileUploadIntentResult(files=files), request)
+
+
+@router.post(
+    "/{session_id}/files/upload-complete", response_model=Envelope[SessionFile]
+)
+@envelope_errors
+async def complete_session_file_upload(
+    bot_id: BotIdPath,
+    session_id: SessionIdPath,
+    body: SessionFileUploadCompleteRequest,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
+) -> Envelope[SessionFile]:
+    await resolve_operable_bot(
+        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
+        surface="sessions",
+    )
+    try:
+        record = adapter.complete_upload(
+            owner_id=owner_id,
+            bot_id=bot_id,
+            session_key=session_id,
+            resource_id=body.resource_id,
+            transfer_id=body.transfer_id,
+        )
+    except ValueError as exc:
+        _session_file_not_found(exc)
+    return envelope(_session_file_resource(record), request)
+
+
+@router.get(
+    "/{session_id}/files/{resource_id}/materialize-status",
+    response_model=Envelope[SessionFile],
+)
+@envelope_errors
+async def session_file_materialize_status(
+    bot_id: BotIdPath,
+    session_id: SessionIdPath,
+    resource_id: SessionFileResourceId,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
+) -> Envelope[SessionFile]:
+    await resolve_operable_bot(
+        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
+        surface="sessions",
+    )
+    try:
+        record = adapter.get_status(
+            owner_id=owner_id,
+            bot_id=bot_id,
+            session_key=session_id,
+            resource_id=resource_id,
+        )
+    except ValueError as exc:
+        _session_file_not_found(exc)
+    return envelope(_session_file_resource(record), request)
+
+
+@router.get("/{session_id}/files", response_model=Envelope[SessionFileList])
+@envelope_errors
+async def list_ready_session_files(
+    bot_id: BotIdPath,
+    session_id: SessionIdPath,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
+) -> Envelope[SessionFileList]:
+    await resolve_operable_bot(
+        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
+        surface="sessions",
+    )
+    try:
+        records = adapter.list_ready(
+            owner_id=owner_id,
+            bot_id=bot_id,
+            session_key=session_id,
+        )
+    except ValueError as exc:
+        _session_file_not_found(exc)
+    return envelope(
+        SessionFileList(files=[_session_file_resource(record) for record in records]),
+        request,
+    )
+
+
+@router.get("/{session_id}/files/{resource_id}/content")
+@envelope_errors
+async def stream_session_file_content(
+    bot_id: BotIdPath,
+    session_id: SessionIdPath,
+    resource_id: SessionFileResourceId,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
+    disposition: DispositionQuery = "inline",
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
+) -> StreamingResponse:
+    await resolve_operable_bot(
+        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
+        surface="sessions",
+    )
+    try:
+        record, upstream = await adapter.open_content(
+            owner_id=owner_id,
+            bot_id=bot_id,
+            session_key=session_id,
+            resource_id=resource_id,
+            disposition=disposition,
+        )
+    except ValueError as exc:
+        _session_file_not_found(exc)
+    async def body() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in upstream.body:
+                if isinstance(chunk, bytes):
+                    yield chunk
+        finally:
+            await upstream.close()
+    headers = _session_file_headers(upstream.headers)
+    headers.setdefault(
+        "Content-Disposition", f'{disposition}; filename="{record.filename}"'
+    )
+    return StreamingResponse(body(), headers=headers)
+
+
+@router.delete("/{session_id}/files/{resource_id}", response_model=Envelope[Deleted])
+@envelope_errors
+async def delete_session_file(
+    bot_id: BotIdPath,
+    session_id: SessionIdPath,
+    resource_id: SessionFileResourceId,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
+) -> Envelope[Deleted]:
+    await resolve_operable_bot(
+        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
+        surface="sessions",
+    )
+    try:
+        adapter.delete(
+            owner_id=owner_id,
+            bot_id=bot_id,
+            session_key=session_id,
+            resource_id=resource_id,
+        )
+    except ValueError as exc:
+        _session_file_not_found(exc)
     return deleted(request)
 
 
