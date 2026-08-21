@@ -3,7 +3,7 @@
 -- 历史好友数据迁移到 08-12 边权限表 (edge_grants/permission_profiles/permission_requests).
 --
 -- 运行时: MySQL production. 所有 INSERT 用 INSERT IGNORE (幂等, 重复跑不报错).
--- 依赖: Phase 1 Build 已部署 (五表 DDL 006_edge_permission.sql 已 apply).
+-- 依赖: Phase 1 Build 已部署 (五表 DDL 009_edge_permission.sql 已 apply).
 -- 顺序: 脚本 0 → 1 → 2 → 3 → 4 → 5 → reconciliation.
 -- 来源: spec §8.4 + edge-permission-friend-migration-plan.md §3.
 
@@ -16,15 +16,14 @@ USE <your_database>;
 -- =========================================================================
 INSERT IGNORE INTO permission_profiles
   (permission_profile_id, bot_id, env, name, description, rules_template,
-   revision, digest, is_default, status, created_by, created_at, updated_at)
+   revision, digest, is_default, status, created_by)
 SELECT
   CONCAT('pp_', b.bot_uuid, '_default'),
   b.bot_uuid, b.env, 'default', NULL,
   '[{"tool":"*","specifier":"*","effect":"allow"}]',
   1,
   SHA2('[{"tool":"*","specifier":"*","effect":"allow"}]', 256),
-  TRUE, 'active', 'system',
-  UNIX_TIMESTAMP()*1000, UNIX_TIMESTAMP()*1000
+  TRUE, 'active', 'system'
 FROM bcs_bots b;
 
 
@@ -47,8 +46,7 @@ WHERE is_delete = 0;
 -- 2a. edge_grants（人→Bot 单向, 不建反向边）
 INSERT IGNORE INTO edge_grants
   (edge_id, env, from_id, to_id, grant_kind, grant_ref_id, rules,
-   status, originator_policy_type, originator_policy_data,
-   created_at, updated_at)
+   status, originator_policy_type, originator_policy_data)
 SELECT
   CONCAT('eg_', MD5(CONCAT(
     'human_', f.requester_entity_id, '|',
@@ -59,8 +57,7 @@ SELECT
   m.bot_uuid,
   'permission_profile',
   CONCAT('pp_', m.bot_uuid, '_default'),
-  NULL, 'approved', 'any', NULL,
-  UNIX_TIMESTAMP()*1000, UNIX_TIMESTAMP()*1000
+  NULL, 'approved', 'any', NULL
 FROM ac_bot_friend f
 JOIN v_ac_bot_map m
   ON m.bot_id = f.target_bot_id AND m.owner_id = f.target_entity_id
@@ -71,7 +68,7 @@ INSERT IGNORE INTO permission_requests
   (request_id, edge_id, env, from_id, to_id, request_kind,
    requested_ref_id, requested_rules, message, status,
    decision_reason, created_by, decided_by,
-   created_at, updated_at, decided_at)
+   decided_at)
 SELECT
   CONCAT('req_', MD5(CONCAT(
     'human_', f.requester_entity_id, '|', m.bot_uuid, '|', f.env, '|connect'
@@ -88,8 +85,7 @@ SELECT
   NULL,
   f.requester_entity_id,
   COALESCE(JSON_EXTRACT(f.ext, '$.approvals[0].approver'), f.target_entity_id),
-  UNIX_TIMESTAMP()*1000, UNIX_TIMESTAMP()*1000,
-  UNIX_TIMESTAMP()*1000
+  CURRENT_TIMESTAMP
 FROM ac_bot_friend f
 JOIN v_ac_bot_map m
   ON m.bot_id = f.target_bot_id AND m.owner_id = f.target_entity_id
@@ -103,7 +99,7 @@ INSERT IGNORE INTO permission_requests
   (request_id, edge_id, env, from_id, to_id, request_kind,
    requested_ref_id, requested_rules, message, status,
    decision_reason, created_by, decided_by,
-   created_at, updated_at, decided_at)
+   decided_at)
 SELECT
   CONCAT('req_', MD5(CONCAT(
     'human_', f.requester_entity_id, '|', m.bot_uuid, '|', f.env, '|connect'
@@ -127,8 +123,7 @@ SELECT
   CASE WHEN f.status = 'PENDING' THEN NULL
        ELSE COALESCE(JSON_EXTRACT(f.ext, '$.approvals[0].approver'), f.target_entity_id)
   END,
-  UNIX_TIMESTAMP()*1000, UNIX_TIMESTAMP()*1000,
-  UNIX_TIMESTAMP()*1000
+  CURRENT_TIMESTAMP
 FROM ac_bot_friend f
 JOIN v_ac_bot_map m
   ON m.bot_id = f.target_bot_id AND m.owner_id = f.target_entity_id
@@ -142,14 +137,12 @@ WHERE f.status IN ('PENDING', 'REJECTED', 'CANCELLED');
 -- 4a. 两条 edge_grants（A→B ref=B.default, B→A ref=A.default）
 INSERT IGNORE INTO edge_grants
   (edge_id, env, from_id, to_id, grant_kind, grant_ref_id, rules,
-   status, originator_policy_type, originator_policy_data,
-   created_at, updated_at)
+   status, originator_policy_type, originator_policy_data)
 SELECT
   CONCAT('eg_', MD5(CONCAT(left_bot, '|', right_bot, '|', env, '|pp_', right_bot, '_default'))),
   env, left_bot, right_bot,
   'permission_profile', CONCAT('pp_', right_bot, '_default'),
-  NULL, 'approved', 'any', NULL,
-  UNIX_TIMESTAMP()*1000, UNIX_TIMESTAMP()*1000
+  NULL, 'approved', 'any', NULL
 FROM bcs_friendships
 WHERE left_bot NOT LIKE 'human_%' AND right_bot NOT LIKE 'human_%'
 UNION ALL
@@ -157,8 +150,7 @@ SELECT
   CONCAT('eg_', MD5(CONCAT(right_bot, '|', left_bot, '|', env, '|pp_', left_bot, '_default'))),
   env, right_bot, left_bot,
   'permission_profile', CONCAT('pp_', left_bot, '_default'),
-  NULL, 'approved', 'any', NULL,
-  UNIX_TIMESTAMP()*1000, UNIX_TIMESTAMP()*1000
+  NULL, 'approved', 'any', NULL
 FROM bcs_friendships
 WHERE left_bot NOT LIKE 'human_%' AND right_bot NOT LIKE 'human_%';
 
@@ -167,7 +159,7 @@ INSERT IGNORE INTO permission_requests
   (request_id, edge_id, env, from_id, to_id, request_kind,
    requested_ref_id, requested_rules, message, status,
    decision_reason, created_by, decided_by,
-   created_at, updated_at, decided_at)
+   decided_at)
 SELECT
   CONCAT('req_', MD5(CONCAT(left_bot, '|', right_bot, '|', env, '|connect'))),
   CONCAT('eg_', MD5(CONCAT(left_bot, '|', right_bot, '|', env, '|pp_', right_bot, '_default'))),
@@ -175,7 +167,7 @@ SELECT
   NULL, NULL, NULL, 'approved',
   NULL, left_bot,
   (SELECT b.created_by FROM bcs_bots b WHERE b.bot_uuid = bcs_friendships.right_bot AND b.env = bcs_friendships.env LIMIT 1),
-  UNIX_TIMESTAMP()*1000, UNIX_TIMESTAMP()*1000, UNIX_TIMESTAMP()*1000
+  CURRENT_TIMESTAMP
 FROM bcs_friendships
 WHERE left_bot NOT LIKE 'human_%' AND right_bot NOT LIKE 'human_%'
 UNION ALL
@@ -186,7 +178,7 @@ SELECT
   NULL, NULL, NULL, 'approved',
   NULL, right_bot,
   (SELECT b.created_by FROM bcs_bots b WHERE b.bot_uuid = bcs_friendships.left_bot AND b.env = bcs_friendships.env LIMIT 1),
-  UNIX_TIMESTAMP()*1000, UNIX_TIMESTAMP()*1000, UNIX_TIMESTAMP()*1000
+  CURRENT_TIMESTAMP
 FROM bcs_friendships
 WHERE left_bot NOT LIKE 'human_%' AND right_bot NOT LIKE 'human_%';
 
@@ -198,7 +190,7 @@ INSERT IGNORE INTO permission_requests
   (request_id, edge_id, env, from_id, to_id, request_kind,
    requested_ref_id, requested_rules, message, status,
    decision_reason, created_by, decided_by,
-   created_at, updated_at, decided_at)
+   decided_at)
 SELECT
   CONCAT('req_', MD5(CONCAT(from_bot, '|', to_bot, '|', env, '|connect'))),
   NULL,
@@ -209,8 +201,7 @@ SELECT
     WHEN 'rejected'  THEN 'rejected'
   END,
   NULL,
-  from_bot, NULL,
-  UNIX_TIMESTAMP()*1000, UNIX_TIMESTAMP()*1000, NULL
+  from_bot, NULL, NULL
 FROM bcs_friend_requests
 WHERE status <> 'accepted';
 

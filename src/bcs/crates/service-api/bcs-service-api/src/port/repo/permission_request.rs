@@ -35,7 +35,6 @@ pub trait PermissionRequestRepoPort: Send + Sync {
         status: RequestStatus,
         decided_by: &str,
         decision_reason: Option<&str>,
-        decided_at: u64,
     ) -> ServiceResult<()>;
 
     /// Back-fill `edge_id` after approval creates the edge.

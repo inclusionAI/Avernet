@@ -52,8 +52,8 @@ pub async fn run_permission_profile_repo_contract<T: PermissionProfileRepoPort +
     );
 
     // upsert_revision: profile_id unchanged, revision bumped (D12 rule 2).
-    // Only rules_template / revision / digest / updated_by / updated_at move;
-    // bot_id/env/name/is_default/status/created_by/created_at are left as-is.
+    // Only rules_template / revision / digest / updated_by move (gmt_modified
+    // auto-advances); bot_id/env/name/is_default/status/created_by are left as-is.
     let mut p2 = p.clone();
     p2.revision = 2;
     p2.rules_template = serde_json::json!([
@@ -61,7 +61,6 @@ pub async fn run_permission_profile_repo_contract<T: PermissionProfileRepoPort +
     ]);
     p2.digest = "new_digest".to_string();
     p2.updated_by = Some("admin".to_string());
-    p2.updated_at = p.updated_at.saturating_add(1);
     repo.upsert_revision(p2).await.expect("upsert_revision");
 
     let p3 = repo
@@ -86,7 +85,6 @@ pub async fn run_permission_profile_repo_contract<T: PermissionProfileRepoPort +
     assert_eq!(p3.env, env, "env untouched");
     assert_eq!(p3.name, "default", "name untouched");
     assert_eq!(p3.created_by, "system", "created_by untouched");
-    assert_eq!(p3.created_at, p.created_at, "created_at untouched");
 
     // Missing default for an unknown bot → None.
     assert!(

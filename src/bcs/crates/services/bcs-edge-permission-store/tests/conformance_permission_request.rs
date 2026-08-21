@@ -40,9 +40,9 @@ async fn sqlite_with_schema() -> Arc<dyn DbPlugin> {
             decision_reason TEXT, \
             created_by VARCHAR(128) NOT NULL, \
             decided_by VARCHAR(128), \
-            created_at INTEGER NOT NULL, \
-            updated_at INTEGER NOT NULL, \
-            decided_at INTEGER, \
+            decided_at TEXT, \
+            gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+            gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
             PRIMARY KEY (request_id))",
     ))
     .await

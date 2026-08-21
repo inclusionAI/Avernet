@@ -41,7 +41,7 @@ impl PermissionRequestRepoPort for NoopPermissionRequestRepo {
     async fn get(&self, _: &str, _: &str) -> Option<PermissionRequest> { None }
     async fn list_inbox(&self, _: &str, _: &str, _: Option<RequestStatus>) -> Vec<PermissionRequest> { vec![] }
     async fn list_sent(&self, _: &str, _: &str, _: Option<RequestStatus>) -> Vec<PermissionRequest> { vec![] }
-    async fn decide(&self, _: &str, _: &str, _: RequestStatus, _: &str, _: Option<&str>, _: u64) -> ServiceResult<()> { Ok(()) }
+    async fn decide(&self, _: &str, _: &str, _: RequestStatus, _: &str, _: Option<&str>) -> ServiceResult<()> { Ok(()) }
     async fn backfill_edge_id(&self, _: &str, _: &str, _: &str) -> ServiceResult<()> { Ok(()) }
 }
 

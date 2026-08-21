@@ -11,7 +11,6 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bcs_db_api::{DbError, DbExecuteResult, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
@@ -96,16 +95,14 @@ impl DbEdgeGrantStore {
             EdgeGrantSqlFlavor::Mysql => {
                 "INSERT IGNORE INTO edge_grants \
                  (edge_id, env, from_id, to_id, grant_kind, grant_ref_id, rules, \
-                  status, originator_policy_type, originator_policy_data, \
-                  created_at, updated_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                  status, originator_policy_type, originator_policy_data) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             }
             EdgeGrantSqlFlavor::Sqlite => {
                 "INSERT INTO edge_grants \
                  (edge_id, env, from_id, to_id, grant_kind, grant_ref_id, rules, \
-                  status, originator_policy_type, originator_policy_data, \
-                  created_at, updated_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+                  status, originator_policy_type, originator_policy_data) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
                  ON CONFLICT(from_id, to_id, env, grant_ref_id) DO NOTHING"
             }
         }
@@ -273,7 +270,6 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
     }
 
     async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<()> {
-        let now = now_millis();
         let rules_val = json_to_db_value(&grant.rules);
         let policy_data_val = json_to_db_value(&grant.originator_policy_data);
         self.execute(
@@ -291,8 +287,6 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
                     DbValue::from(edge_status_str(grant.status)),
                     DbValue::from(originator_policy_type_str(grant.originator_policy_type)),
                     policy_data_val,
-                    DbValue::from(now as i64),
-                    DbValue::from(now as i64),
                 ],
             ),
         )
@@ -303,13 +297,10 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         self.execute(
             "revoke_grant",
             DbStatement::with_params(
-                "UPDATE edge_grants SET status = 'revoked', updated_at = ? \
+                "UPDATE edge_grants SET status = 'revoked', \
+                     gmt_modified = CURRENT_TIMESTAMP \
                  WHERE edge_id = ? AND env = ?",
-                vec![
-                    DbValue::from(now_millis() as i64),
-                    DbValue::from(edge_id),
-                    DbValue::from(env),
-                ],
+                vec![DbValue::from(edge_id), DbValue::from(env)],
             ),
         )
         .await
@@ -440,26 +431,23 @@ impl DbPermissionProfileStore {
             EdgeGrantSqlFlavor::Mysql => {
                 "INSERT IGNORE INTO permission_profiles \
                  (permission_profile_id, bot_id, env, name, description, rules_template, \
-                  revision, digest, is_default, status, created_by, updated_by, \
-                  created_at, updated_at) \
-                 VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 1, 'active', 'system', NULL, ?, ?)"
+                  revision, digest, is_default, status, created_by, updated_by) \
+                 VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 1, 'active', 'system', NULL)"
             }
             EdgeGrantSqlFlavor::Sqlite => {
                 "INSERT INTO permission_profiles \
                  (permission_profile_id, bot_id, env, name, description, rules_template, \
-                  revision, digest, is_default, status, created_by, updated_by, \
-                  created_at, updated_at) \
-                 VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 1, 'active', 'system', NULL, ?, ?) \
+                  revision, digest, is_default, status, created_by, updated_by) \
+                 VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 1, 'active', 'system', NULL) \
                  ON CONFLICT(permission_profile_id) DO NOTHING"
             }
         }
     }
 
-    /// SELECT all 14 columns of a default, active profile for (bot_id, env).
+    /// SELECT all columns of a default, active profile for (bot_id, env).
     const SELECT_DEFAULT_SQL: &'static str =
         "SELECT permission_profile_id, bot_id, env, name, description, rules_template, \
-                revision, digest, is_default, status, created_by, updated_by, \
-                created_at, updated_at \
+                revision, digest, is_default, status, created_by, updated_by \
          FROM permission_profiles \
          WHERE bot_id = ? AND env = ? AND is_default = 1 AND status = 'active' LIMIT 1";
 }
@@ -469,10 +457,9 @@ impl PermissionProfileRepoPort for DbPermissionProfileStore {
     async fn ensure_default_profile(&self, bot_id: &str, env: &str) -> ServiceResult<()> {
         let profile_id = format!("pp_{}_default", bot_id);
         let digest = sha256_hex(WILDCARD_ALLOW);
-        let now = now_millis();
-        // INSERT all 14 cols (description/updated_by NULL). Idempotent on PK: a
-        // pre-existing default is left untouched — its rules_template, revision,
-        // and digest are NOT overwritten (D12 rule 2).
+        // INSERT all cols (description/updated_by NULL; gmt_* default to now).
+        // Idempotent on PK: a pre-existing default is left untouched — its
+        // rules_template, revision, and digest are NOT overwritten (D12 rule 2).
         self.execute(
             "ensure_default_profile",
             DbStatement::with_params(
@@ -485,8 +472,6 @@ impl PermissionProfileRepoPort for DbPermissionProfileStore {
                     DbValue::from(WILDCARD_ALLOW),
                     DbValue::from(1_i64), // revision
                     DbValue::from(digest),
-                    DbValue::from(now as i64), // created_at
-                    DbValue::from(now as i64), // updated_at
                 ],
             ),
         )
@@ -522,21 +507,20 @@ impl PermissionProfileRepoPort for DbPermissionProfileStore {
 
     async fn upsert_revision(&self, profile: PermissionProfile) -> ServiceResult<()> {
         // D12 rule 2: profile_id is UNCHANGED. Only rules_template / revision /
-        // digest / updated_by / updated_at move; is_default/status/bot_id/env/
-        // name/created_by/created_at are left as-is.
+        // digest / updated_by move (gmt_modified auto-advances);
+        // is_default/status/bot_id/env/name/created_by are left as-is.
         let rules_val = json_to_db_value(&Some(profile.rules_template));
         self.execute(
             "upsert_revision",
             DbStatement::with_params(
                 "UPDATE permission_profiles SET rules_template = ?, revision = ?, \
-                     digest = ?, updated_by = ?, updated_at = ? \
+                     digest = ?, updated_by = ?, gmt_modified = CURRENT_TIMESTAMP \
                  WHERE permission_profile_id = ?",
                 vec![
                     rules_val,
                     DbValue::from(profile.revision as i64),
                     DbValue::from(profile.digest),
                     DbValue::from(profile.updated_by),
-                    DbValue::from(profile.updated_at as i64),
                     DbValue::from(profile.permission_profile_id),
                 ],
             ),
@@ -595,21 +579,30 @@ impl DbPermissionRequestStore {
 
     /// Idempotent INSERT on PK `request_id`: SQLite
     /// `ON CONFLICT(request_id) DO NOTHING` vs MySQL `INSERT IGNORE`.
+    ///
+    /// `decided_at` is a DB-managed timestamp: derived from `status` at insert
+    /// time (`CURRENT_TIMESTAMP` for a decided status, else NULL) so that
+    /// already-approved snapshots carry a decision time without an app-supplied
+    /// epoch. The domain `PermissionRequest.decided_at` field is read-only here.
     fn insert_request_sql(&self) -> &'static str {
         match self.flavor {
             EdgeGrantSqlFlavor::Mysql => {
                 "INSERT IGNORE INTO permission_requests \
                  (request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                   requested_rules, message, status, decision_reason, created_by, decided_by, \
-                  created_at, updated_at, decided_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                  decided_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
+                         CASE WHEN ? IN ('approved','rejected','cancelled') \
+                              THEN CURRENT_TIMESTAMP ELSE NULL END)"
             }
             EdgeGrantSqlFlavor::Sqlite => {
                 "INSERT INTO permission_requests \
                  (request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                   requested_rules, message, status, decision_reason, created_by, decided_by, \
-                  created_at, updated_at, decided_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+                  decided_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
+                         CASE WHEN ? IN ('approved','rejected','cancelled') \
+                              THEN CURRENT_TIMESTAMP ELSE NULL END) \
                  ON CONFLICT(request_id) DO NOTHING"
             }
         }
@@ -618,34 +611,34 @@ impl DbPermissionRequestStore {
     const SELECT_REQUEST_SQL: &'static str =
         "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
-                created_at, updated_at, decided_at \
+                decided_at \
          FROM permission_requests WHERE request_id = ? AND env = ? LIMIT 1";
 
     const LIST_INBOX_ALL_SQL: &'static str =
         "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
-                created_at, updated_at, decided_at \
-         FROM permission_requests WHERE to_id = ? AND env = ? ORDER BY updated_at DESC";
+                decided_at \
+         FROM permission_requests WHERE to_id = ? AND env = ? ORDER BY gmt_modified DESC";
 
     const LIST_INBOX_STATUS_SQL: &'static str =
         "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
-                created_at, updated_at, decided_at \
+                decided_at \
          FROM permission_requests WHERE to_id = ? AND env = ? AND status = ? \
-         ORDER BY updated_at DESC";
+         ORDER BY gmt_modified DESC";
 
     const LIST_SENT_ALL_SQL: &'static str =
         "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
-                created_at, updated_at, decided_at \
-         FROM permission_requests WHERE from_id = ? AND env = ? ORDER BY updated_at DESC";
+                decided_at \
+         FROM permission_requests WHERE from_id = ? AND env = ? ORDER BY gmt_modified DESC";
 
     const LIST_SENT_STATUS_SQL: &'static str =
         "SELECT request_id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
-                created_at, updated_at, decided_at \
+                decided_at \
          FROM permission_requests WHERE from_id = ? AND env = ? AND status = ? \
-         ORDER BY updated_at DESC";
+         ORDER BY gmt_modified DESC";
 }
 
 #[async_trait]
@@ -669,12 +662,8 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
                     DbValue::from(request.decision_reason),
                     DbValue::from(request.created_by),
                     DbValue::from(request.decided_by),
-                    DbValue::from(request.created_at as i64),
-                    DbValue::from(request.updated_at as i64),
-                    request
-                        .decided_at
-                        .map(|t| DbValue::from(t as i64))
-                        .unwrap_or(DbValue::Null),
+                    // The CASE in insert_request_sql keys decided_at off status.
+                    DbValue::from(request_status_str(request.status)),
                 ],
             ),
         )
@@ -767,7 +756,7 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
     ) -> Vec<PermissionRequest> {
         // Mirror list_inbox's two-branch pattern: a status-filtered SELECT
         // when a status is supplied, else the all-statuses SELECT. Both
-        // ordered by updated_at DESC.
+        // ordered by gmt_modified DESC.
         let rows = match status {
             Some(s) => {
                 self.query(
@@ -819,13 +808,15 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
         status: RequestStatus,
         decided_by: &str,
         decision_reason: Option<&str>,
-        decided_at: u64,
     ) -> ServiceResult<()> {
+        // decided_at is a DB-managed timestamp: set to CURRENT_TIMESTAMP at the
+        // moment the request is decided (gmt_modified advances too).
         self.execute(
             "decide_request",
             DbStatement::with_params(
                 "UPDATE permission_requests SET status = ?, decided_by = ?, \
-                     decision_reason = ?, decided_at = ?, updated_at = ? \
+                     decision_reason = ?, decided_at = CURRENT_TIMESTAMP, \
+                     gmt_modified = CURRENT_TIMESTAMP \
                  WHERE request_id = ? AND env = ?",
                 vec![
                     DbValue::from(request_status_str(status)),
@@ -834,8 +825,6 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
                         Some(s) => DbValue::from(s),
                         None => DbValue::Null,
                     },
-                    DbValue::from(decided_at as i64),
-                    DbValue::from(now_millis() as i64),
                     DbValue::from(request_id),
                     DbValue::from(env),
                 ],
@@ -853,11 +842,11 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
         self.execute(
             "backfill_edge_id",
             DbStatement::with_params(
-                "UPDATE permission_requests SET edge_id = ?, updated_at = ? \
+                "UPDATE permission_requests SET edge_id = ?, \
+                     gmt_modified = CURRENT_TIMESTAMP \
                  WHERE request_id = ? AND env = ?",
                 vec![
                     DbValue::from(edge_id),
-                    DbValue::from(now_millis() as i64),
                     DbValue::from(request_id),
                     DbValue::from(env),
                 ],
@@ -982,18 +971,10 @@ impl BotActorConfigRepoPort for DbBotActorConfigStore {
 }
 
 fn row_to_permission_request(row: &DbRow) -> ServiceResult<PermissionRequest> {
-    let created_at = row
-        .get_i64("created_at")
-        .map_err(|err| service_db_error("created_at", err))?
-        .unwrap_or(0) as u64;
-    let updated_at = row
-        .get_i64("updated_at")
-        .map_err(|err| service_db_error("updated_at", err))?
-        .unwrap_or(0) as u64;
-    let decided_at = row
-        .get_i64("decided_at")
-        .map_err(|err| service_db_error("decided_at", err))?
-        .map(|v| v as u64);
+    // decided_at is a DB-managed timestamp (TEXT/`timestamp NULL`); parse the
+    // stored instant back to epoch ms. `None` ⇒ not yet decided.
+    let decided_at = optional_string(row, "decided_at")?
+        .and_then(|s| parse_timestamp_epoch_ms(&s));
     Ok(PermissionRequest {
         request_id: required_string(row, "request_id")?,
         edge_id: optional_string(row, "edge_id")?,
@@ -1008,8 +989,6 @@ fn row_to_permission_request(row: &DbRow) -> ServiceResult<PermissionRequest> {
         decision_reason: optional_string(row, "decision_reason")?,
         created_by: required_string(row, "created_by")?,
         decided_by: optional_string(row, "decided_by")?,
-        created_at,
-        updated_at,
         decided_at,
     })
 }
@@ -1068,14 +1047,6 @@ fn row_to_permission_profile(row: &DbRow) -> ServiceResult<PermissionProfile> {
         .map_err(|err| service_db_error("is_default", err))?
         .unwrap_or(0)
         != 0;
-    let created_at = row
-        .get_i64("created_at")
-        .map_err(|err| service_db_error("created_at", err))?
-        .unwrap_or(0) as u64;
-    let updated_at = row
-        .get_i64("updated_at")
-        .map_err(|err| service_db_error("updated_at", err))?
-        .unwrap_or(0) as u64;
     // rules_template is NOT NULL in DDL, so it is always present; parse string→Value.
     let rules_template = match required_string(row, "rules_template")? {
         ref s if s.is_empty() => serde_json::Value::Null,
@@ -1096,8 +1067,6 @@ fn row_to_permission_profile(row: &DbRow) -> ServiceResult<PermissionProfile> {
         status: parse_profile_status(&required_string(row, "status")?)?,
         created_by: required_string(row, "created_by")?,
         updated_by: optional_string(row, "updated_by")?,
-        created_at,
-        updated_at,
     })
 }
 
@@ -1170,6 +1139,48 @@ fn parse_grant_kind(value: &str) -> ServiceResult<GrantKind> {
             other
         ))),
     }
+}
+
+/// Parse a DB-managed timestamp back to epoch milliseconds (UTC).
+///
+/// Accepts `YYYY-MM-DD HH:MM:SS` (SQLite `CURRENT_TIMESTAMP` / MySQL `timestamp`)
+/// and the ISO `T` separator variant, with optional fractional seconds. Returns
+/// `None` for an unparseable/empty value (e.g. NULL ⇒ already `None` upstream).
+fn parse_timestamp_epoch_ms(value: &str) -> Option<u64> {
+    let s = value.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let s = s.replacen('T', " ", 1);
+    let mut parts = s.split(' ');
+    let date = parts.next()?;
+    let time = parts.next()?;
+    let d: Vec<&str> = date.split('-').collect();
+    if d.len() != 3 {
+        return None;
+    }
+    let t_main = time.split('.').next()?;
+    let t: Vec<&str> = t_main.split(':').collect();
+    if t.len() != 3 {
+        return None;
+    }
+    let (y, mo, dy) = (d[0].parse::<i64>().ok()?, d[1].parse::<i64>().ok()?, d[2].parse::<i64>().ok()?);
+    let (h, mi, se) = (t[0].parse::<u64>().ok()?, t[1].parse::<u64>().ok()?, t[2].parse::<u64>().ok()?);
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&dy) {
+        return None;
+    }
+    // Howard Hinnant's days_from_civil — counts days since 1970-01-01 (UTC).
+    let y = if mo <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u64;
+    let doy = ((153 * (if mo > 2 { mo - 3 } else { mo + 9 }) + 2) / 5 + dy - 1) as u64;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = (era * 146097 + doe as i64 - 719468) as i64;
+    if days < 0 {
+        return None;
+    }
+    let epoch_ms = (days as u64) * 86_400_000 + h * 3_600_000 + mi * 60_000 + se * 1_000;
+    Some(epoch_ms)
 }
 
 fn parse_edge_status(value: &str) -> ServiceResult<EdgeStatus> {
@@ -1262,13 +1273,6 @@ fn json_to_db_value(value: &Option<serde_json::Value>) -> DbValue {
     }
 }
 
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
 fn service_db_error(operation: &'static str, err: DbError) -> ServiceError {
     ServiceError::InternalError(format!("edge_grants db {}: {}", operation, err))
 }
@@ -1277,6 +1281,19 @@ fn service_db_error(operation: &'static str, err: DbError) -> ServiceError {
 mod tests {
     use super::*;
     use bcs_db_local::LocalSqliteDbPlugin;
+
+    #[test]
+    fn parse_timestamp_epoch_ms_converts_db_timestamp() {
+        // SQLite CURRENT_TIMESTAMP / MySQL `timestamp` format, UTC.
+        // 2026-08-21 00:00:00 UTC == 1787270400_000 ms.
+        assert_eq!(parse_timestamp_epoch_ms("2026-08-21 00:00:00"), Some(1_787_270_400_000));
+        assert_eq!(parse_timestamp_epoch_ms("2026-08-21T12:34:56"), Some(1_787_315_696_000));
+        // Fractional seconds tolerated; ISO 'T' separator accepted.
+        assert_eq!(parse_timestamp_epoch_ms("2026-01-01 00:00:00.000"), Some(1_767_225_600_000));
+        // Empty / unparseable / pre-epoch → None (NULL upstream becomes None).
+        assert_eq!(parse_timestamp_epoch_ms(""), None);
+        assert_eq!(parse_timestamp_epoch_ms("not-a-date"), None);
+    }
 
     async fn sqlite_store() -> DbEdgeGrantStore {
         let db = LocalSqliteDbPlugin::new().expect("local sqlite");
@@ -1294,8 +1311,8 @@ mod tests {
                 status VARCHAR(16) NOT NULL DEFAULT 'approved', \
                 originator_policy_type VARCHAR(32) NOT NULL DEFAULT 'any', \
                 originator_policy_data TEXT, \
-                created_at INTEGER NOT NULL, \
-                updated_at INTEGER NOT NULL, \
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
                 PRIMARY KEY (edge_id), \
                 UNIQUE (from_id, to_id, env, grant_ref_id))",
         ))
@@ -1311,8 +1328,8 @@ mod tests {
                 is_default INTEGER NOT NULL DEFAULT 0, \
                 status VARCHAR(16) NOT NULL DEFAULT 'active', \
                 created_by VARCHAR(128) NOT NULL, \
-                created_at INTEGER NOT NULL, \
-                updated_at INTEGER NOT NULL, \
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
                 PRIMARY KEY (permission_profile_id))",
         ))
         .await
@@ -1327,8 +1344,8 @@ mod tests {
                 DbStatement::with_params(
                     "INSERT INTO permission_profiles \
                      (permission_profile_id, bot_id, env, name, rules_template, \
-                      is_default, status, created_by, created_at, updated_at) \
-                     VALUES (?, ?, ?, 'default', '{}', 1, 'active', 'test', 0, 0)",
+                      is_default, status, created_by) \
+                     VALUES (?, ?, ?, 'default', '{}', 1, 'active', 'test')",
                     vec![
                         DbValue::from(profile_id),
                         DbValue::from(bot_id),
@@ -1439,7 +1456,7 @@ mod tests {
     // ---- DbPermissionProfileStore (T8) ----
 
     /// Profile store backed by a fresh LocalSqliteDbPlugin with the full
-    /// 14-column `permission_profiles` schema (mirrors 009_edge_permission.sql).
+    /// `permission_profiles` schema (mirrors 009_edge_permission.sql).
     async fn profile_store() -> DbPermissionProfileStore {
         let db = LocalSqliteDbPlugin::new().expect("local sqlite");
         db.execute(DbStatement::new(
@@ -1456,8 +1473,8 @@ mod tests {
                 status VARCHAR(16) NOT NULL DEFAULT 'active', \
                 created_by VARCHAR(128) NOT NULL, \
                 updated_by VARCHAR(128), \
-                created_at INTEGER NOT NULL, \
-                updated_at INTEGER NOT NULL, \
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
                 PRIMARY KEY (permission_profile_id))",
         ))
         .await
@@ -1536,8 +1553,6 @@ mod tests {
             status: seeded.status,
             created_by: seeded.created_by.clone(),
             updated_by: Some("admin".to_string()),
-            created_at: seeded.created_at,
-            updated_at: now_millis(),
         };
         store
             .upsert_revision(updated)
@@ -1555,19 +1570,18 @@ mod tests {
         assert_eq!(after.rules_template, new_rules);
         assert_eq!(after.digest, new_digest);
         assert_eq!(after.updated_by.as_deref(), Some("admin"));
-        // is_default/status/bot_id/env/name/created_by/created_at untouched.
+        // is_default/status/bot_id/env/name/created_by untouched.
         assert!(after.is_default);
         assert_eq!(after.status, ProfileStatus::Active);
         assert_eq!(after.bot_id, "bot_y");
         assert_eq!(after.env, "prod");
         assert_eq!(after.created_by, "system");
-        assert_eq!(after.created_at, seeded.created_at);
     }
 
     // ---- DbPermissionRequestStore (T9) ----
 
     /// Request store backed by a fresh LocalSqliteDbPlugin with the full
-    /// 16-column `permission_requests` schema (mirrors 009_edge_permission.sql).
+    /// `permission_requests` schema (mirrors 009_edge_permission.sql).
     async fn request_store() -> DbPermissionRequestStore {
         let db = LocalSqliteDbPlugin::new().expect("local sqlite");
         db.execute(DbStatement::new(
@@ -1585,9 +1599,9 @@ mod tests {
                 decision_reason TEXT, \
                 created_by VARCHAR(128) NOT NULL, \
                 decided_by VARCHAR(128), \
-                created_at INTEGER NOT NULL, \
-                updated_at INTEGER NOT NULL, \
-                decided_at INTEGER, \
+                decided_at TEXT, \
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
                 PRIMARY KEY (request_id))",
         ))
         .await
@@ -1610,8 +1624,6 @@ mod tests {
             decision_reason: None,
             created_by: "human_a".to_string(),
             decided_by: None,
-            created_at: 1,
-            updated_at: 1,
             decided_at: None,
         }
     }
@@ -1643,7 +1655,7 @@ mod tests {
             .expect("insert r2");
         // decide r2 → approved
         store
-            .decide("r2", "dev", RequestStatus::Approved, "85020", Some("ok"), 99)
+            .decide("r2", "dev", RequestStatus::Approved, "85020", Some("ok"))
             .await
             .expect("decide");
         let all = store.list_inbox("bot_b", "dev", None).await;
@@ -1659,7 +1671,10 @@ mod tests {
         assert_eq!(approved.len(), 1);
         assert_eq!(approved[0].request_id, "r2");
         assert_eq!(approved[0].decided_by.as_deref(), Some("85020"));
-        assert_eq!(approved[0].decided_at, Some(99));
+        assert!(
+            approved[0].decided_at.is_some(),
+            "decided_at set to decision time"
+        );
     }
 
     #[tokio::test]

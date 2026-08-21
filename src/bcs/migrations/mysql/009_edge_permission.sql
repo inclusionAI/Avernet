@@ -1,4 +1,4 @@
--- 006_edge_permission.sql — 08-12 A2A edge-permission tables (friend unification).
+-- 009_edge_permission.sql — 08-12 A2A edge-permission tables (friend unification).
 -- Spec: docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md §3.1.
 -- Applied externally (ops/CI); the bcs binary runs only SQLite migrations.
 
@@ -9,12 +9,12 @@ CREATE TABLE IF NOT EXISTS `edge_grants` (
   `to_id`                    VARCHAR(256) NOT NULL,
   `grant_kind`               VARCHAR(16)  NOT NULL,           -- permission_profile | rules
   `grant_ref_id`             VARCHAR(128) NOT NULL,
-  `rules`                    JSON         DEFAULT NULL,
+  `rules`                    TEXT         DEFAULT NULL,
   `status`                   VARCHAR(16)  NOT NULL DEFAULT 'approved',
   `originator_policy_type`   VARCHAR(16)  NOT NULL DEFAULT 'any',
-  `originator_policy_data`   JSON         DEFAULT NULL,
-  `created_at`               BIGINT       NOT NULL,
-  `updated_at`               BIGINT       NOT NULL,
+  `originator_policy_data`   TEXT         DEFAULT NULL,
+  `gmt_create`               timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified`             timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`edge_id`),
   UNIQUE KEY `ux_edge_from_to_env_ref` (`from_id`, `to_id`, `env`, `grant_ref_id`),
   KEY `idx_edge_from_env_status` (`from_id`, `env`, `status`),
@@ -27,15 +27,15 @@ CREATE TABLE IF NOT EXISTS `permission_profiles` (
   `env`                      VARCHAR(16)  NOT NULL,
   `name`                     VARCHAR(64)  NOT NULL DEFAULT 'default',
   `description`              VARCHAR(512) DEFAULT NULL,
-  `rules_template`           JSON         NOT NULL,
+  `rules_template`           TEXT         NOT NULL,
   `revision`                 BIGINT       NOT NULL DEFAULT 1,
   `digest`                   VARCHAR(128) NOT NULL,
   `is_default`               TINYINT(1)   NOT NULL DEFAULT 0,
   `status`                   VARCHAR(16)  NOT NULL DEFAULT 'active',
   `created_by`               VARCHAR(64)  NOT NULL,
   `updated_by`               VARCHAR(64)  DEFAULT NULL,
-  `created_at`               BIGINT       NOT NULL,
-  `updated_at`               BIGINT       NOT NULL,
+  `gmt_create`               timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified`             timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`permission_profile_id`),
   UNIQUE KEY `ux_profile_bot_env_default` (`bot_id`, `env`, `is_default`, `status`),
   KEY `idx_profile_bot_env` (`bot_id`, `env`, `status`)
@@ -49,15 +49,15 @@ CREATE TABLE IF NOT EXISTS `permission_requests` (
   `to_id`             VARCHAR(256) NOT NULL,
   `request_kind`      VARCHAR(16)  NOT NULL,                  -- connect | permission_profile | rules | revoke
   `requested_ref_id`  VARCHAR(128) DEFAULT NULL,
-  `requested_rules`   JSON         DEFAULT NULL,
+  `requested_rules`   TEXT         DEFAULT NULL,
   `message`           TEXT         DEFAULT NULL,
   `status`            VARCHAR(16)  NOT NULL DEFAULT 'pending',
   `decision_reason`   TEXT         DEFAULT NULL,
   `created_by`        VARCHAR(64)  NOT NULL,
   `decided_by`        VARCHAR(64)  DEFAULT NULL,
-  `created_at`        BIGINT       NOT NULL,
-  `updated_at`        BIGINT       NOT NULL,
-  `decided_at`        BIGINT       DEFAULT NULL,
+  `decided_at`        timestamp    NULL DEFAULT NULL,
+  `gmt_create`        timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified`      timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`request_id`),
   KEY `idx_req_to_env_status` (`to_id`, `env`, `status`),
   KEY `idx_req_from_env_status` (`from_id`, `env`, `status`),
@@ -70,12 +70,12 @@ CREATE TABLE IF NOT EXISTS `capabilities` (
   `env`               VARCHAR(16)  NOT NULL,
   `tool`              VARCHAR(64)  NOT NULL,
   `operation`         VARCHAR(64)  DEFAULT NULL,
-  `specifier_schema`  JSON         DEFAULT NULL,
+  `specifier_schema`  TEXT         DEFAULT NULL,
   `source`            VARCHAR(16)  NOT NULL,                   -- system | agent_card | manual
   `status`            VARCHAR(16)  NOT NULL DEFAULT 'active',
-  `raw_metadata`      JSON         DEFAULT NULL,
-  `created_at`        BIGINT       NOT NULL,
-  `updated_at`        BIGINT       NOT NULL,
+  `raw_metadata`      TEXT         DEFAULT NULL,
+  `gmt_create`        timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified`      timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`capability_id`),
   KEY `idx_cap_bot_env` (`bot_id`, `env`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -91,9 +91,10 @@ CREATE TABLE IF NOT EXISTS `authz_decision_logs` (
   `context_type`  VARCHAR(16)  NOT NULL,
   `decision`      VARCHAR(16)  NOT NULL,
   `reason_code`   VARCHAR(64)  NOT NULL,
-  `grant_refs`    JSON         NOT NULL,
-  `context_json`  JSON         DEFAULT NULL,
-  `created_at`    BIGINT       NOT NULL,
+  `grant_refs`    TEXT         NOT NULL,
+  `context_json`  TEXT         DEFAULT NULL,
+  `gmt_create`    timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified`  timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`decision_id`),
   KEY `idx_adl_env_from_to` (`env`, `from_id`, `to_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -119,8 +119,6 @@ pub struct Capability {
     pub status: CapabilityStatus,
     #[serde(default)]
     pub raw_metadata: Option<serde_json::Value>,
-    pub created_at: u64,
-    pub updated_at: u64,
 }
 
 /// Effect of a single rule.
@@ -166,8 +164,6 @@ pub struct PermissionProfile {
     pub created_by: String,
     #[serde(default)]
     pub updated_by: Option<String>,
-    pub created_at: u64,
-    pub updated_at: u64,
 }
 
 /// Kind of a permission request.
@@ -218,8 +214,6 @@ pub struct PermissionRequest {
     pub created_by: String,
     #[serde(default)]
     pub decided_by: Option<String>,
-    pub created_at: u64,
-    pub updated_at: u64,
     #[serde(default)]
     pub decided_at: Option<u64>,
 }
@@ -364,7 +358,7 @@ mod tests {
             request_kind: RequestKind::Connect, requested_ref_id: None,
             requested_rules: None, message: None, status: RequestStatus::Pending,
             decision_reason: None, created_by: "human_88001".into(), decided_by: None,
-            created_at: 0, updated_at: 0, decided_at: None,
+            decided_at: None,
         };
         let s = serde_json::to_string(&r).unwrap();
         let back: PermissionRequest = serde_json::from_str(&s).unwrap();

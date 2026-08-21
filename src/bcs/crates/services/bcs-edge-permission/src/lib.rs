@@ -23,7 +23,6 @@
 //! `ConnectService`.
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bcs_domain::actor::ActorKind;
@@ -92,13 +91,6 @@ fn actor_kind_of(id: &str) -> ActorKind {
     } else {
         ActorKind::Bot
     }
-}
-
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 /// Fresh opaque id for a new edge grant. UUID v4 — collision-safe, unlike a
@@ -290,7 +282,6 @@ impl ConnectService for DbConnectService {
                 RequestStatus::Approved,
                 decider,
                 None,
-                now_millis(),
             )
             .await?;
 
@@ -313,7 +304,6 @@ impl ConnectService for DbConnectService {
                         RequestStatus::Approved,
                         decider,
                         None,
-                        now_millis(),
                     )
                     .await?;
             }
@@ -349,7 +339,6 @@ impl ConnectService for DbConnectService {
                 RequestStatus::Rejected,
                 decider,
                 reason.as_deref(),
-                now_millis(),
             )
             .await?;
 
@@ -369,7 +358,6 @@ impl ConnectService for DbConnectService {
                         RequestStatus::Rejected,
                         decider,
                         reason.as_deref(),
-                        now_millis(),
                     )
                     .await?;
             }
@@ -412,7 +400,6 @@ impl ConnectService for DbConnectService {
                 RequestStatus::Cancelled,
                 decider,
                 Some("cancelled by caller"),
-                now_millis(),
             )
             .await?;
 
@@ -432,7 +419,6 @@ impl ConnectService for DbConnectService {
                         RequestStatus::Cancelled,
                         decider,
                         Some("cancelled by caller"),
-                        now_millis(),
                     )
                     .await?;
             }
@@ -538,8 +524,10 @@ impl ConnectService for DbConnectService {
                 // rows for the same pair, but request_ids are unique per row,
                 // so dedup only collapses the identity overlap where the same
                 // request is both from+to — which cannot happen here; this is
-                // defensive). Preserve updated_at DESC order across the union
-                // by merging and re-sorting.
+                // defensive). Each repo list is already `gmt_modified DESC`,
+                // so chaining inbox then sent preserves recency within each
+                // direction (a global re-sort would need a row timestamp the
+                // domain `PermissionRequest` no longer carries).
                 let mut seen: std::collections::HashSet<String> =
                     std::collections::HashSet::new();
                 let mut combined: Vec<PermissionRequest> = Vec::with_capacity(
@@ -550,7 +538,6 @@ impl ConnectService for DbConnectService {
                         combined.push(r);
                     }
                 }
-                combined.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
                 combined
             }
         };
@@ -647,7 +634,6 @@ impl DbConnectService {
         target_kind: ActorKind,
         message: Option<String>,
     ) -> ServiceResult<Vec<String>> {
-        let now = now_millis();
         let mut ids = Vec::new();
 
         // Forward: caller → to_bot.
@@ -667,8 +653,6 @@ impl DbConnectService {
                 decision_reason: None,
                 created_by: caller.to_string(),
                 decided_by: None,
-                created_at: now,
-                updated_at: now,
                 decided_at: None,
             })
             .await?;
@@ -692,8 +676,6 @@ impl DbConnectService {
                     decision_reason: None,
                     created_by: caller.to_string(),
                     decided_by: None,
-                    created_at: now,
-                    updated_at: now,
                     decided_at: None,
                 })
                 .await?;
@@ -813,7 +795,6 @@ impl DbConnectService {
         default_refs: &[String; 2],
         message: Option<&str>,
     ) -> ServiceResult<Vec<String>> {
-        let now = now_millis();
         let mut request_ids = Vec::new();
 
         // Forward approved snapshot.
@@ -833,9 +814,8 @@ impl DbConnectService {
                 decision_reason: None,
                 created_by: caller.to_string(),
                 decided_by: Some(decider.to_string()),
-                created_at: now,
-                updated_at: now,
-                decided_at: Some(now),
+                // decided_at is DB-managed (CURRENT_TIMESTAMP on an approved insert).
+                decided_at: None,
             })
             .await?;
         request_ids.push(fwd_req_id);
@@ -861,9 +841,7 @@ impl DbConnectService {
                     decision_reason: None,
                     created_by: caller.to_string(),
                     decided_by: Some(decider.to_string()),
-                    created_at: now,
-                    updated_at: now,
-                    decided_at: Some(now),
+                    decided_at: None,
                 })
                 .await?;
             request_ids.push(rev_req_id);
@@ -1170,8 +1148,8 @@ mod tests {
                 status VARCHAR(16) NOT NULL DEFAULT 'approved', \
                 originator_policy_type VARCHAR(32) NOT NULL DEFAULT 'any', \
                 originator_policy_data TEXT, \
-                created_at INTEGER NOT NULL, \
-                updated_at INTEGER NOT NULL, \
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
                 PRIMARY KEY (edge_id), \
                 UNIQUE (from_id, to_id, env, grant_ref_id))",
         ))
@@ -1192,8 +1170,8 @@ mod tests {
                 status VARCHAR(16) NOT NULL DEFAULT 'active', \
                 created_by VARCHAR(128) NOT NULL, \
                 updated_by VARCHAR(128), \
-                created_at INTEGER NOT NULL, \
-                updated_at INTEGER NOT NULL, \
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
                 PRIMARY KEY (permission_profile_id))",
         ))
         .await
@@ -1214,9 +1192,9 @@ mod tests {
                 decision_reason TEXT, \
                 created_by VARCHAR(128) NOT NULL, \
                 decided_by VARCHAR(128), \
-                created_at INTEGER NOT NULL, \
-                updated_at INTEGER NOT NULL, \
-                decided_at INTEGER, \
+                decided_at TEXT, \
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
                 PRIMARY KEY (request_id))",
         ))
         .await
@@ -2149,7 +2127,7 @@ mod tests {
             .expect("page2 ok");
         assert_eq!(page2.items.len(), 1);
         // The two pages return distinct request_ids (union order is stable
-        // within a run: updated_at DESC).
+        // within a run: gmt_modified DESC).
         assert_ne!(page1.items[0].request_id, page2.items[0].request_id);
     }
 }

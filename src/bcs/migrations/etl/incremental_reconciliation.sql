@@ -36,7 +36,7 @@ INNER JOIN (
 INNER JOIN v_ac_bot_map m
   ON m.bot_id = latest.target_bot_id AND m.owner_id = latest.target_entity_id
 SET e.status = 'revoked',
-    e.updated_at = UNIX_TIMESTAMP() * 1000
+    e.gmt_modified = CURRENT_TIMESTAMP
 WHERE e.from_id = CONCAT('human_', latest.requester_entity_id)
   AND e.to_id = m.bot_uuid
   AND e.env = latest.env
@@ -47,7 +47,7 @@ WHERE e.from_id = CONCAT('human_', latest.requester_entity_id)
 -- 2b. System B: bcs_friendships pair 已不存在 → 撤 Bot↔Bot 双向 default 边
 UPDATE edge_grants e
 SET e.status = 'revoked',
-    e.updated_at = UNIX_TIMESTAMP() * 1000
+    e.gmt_modified = CURRENT_TIMESTAMP
 WHERE e.from_id NOT LIKE 'human_%'
   AND e.to_id NOT LIKE 'human_%'
   AND e.status = 'approved'
@@ -82,7 +82,7 @@ SET r.status = CASE latest.status
     WHEN 'REJECTED' THEN 'rejected'
     WHEN 'CANCELLED' THEN 'cancelled'
   END,
-    r.updated_at = UNIX_TIMESTAMP() * 1000
+    r.gmt_modified = CURRENT_TIMESTAMP
 WHERE r.from_id = CONCAT('human_', latest.requester_entity_id)
   AND r.to_id = m.bot_uuid
   AND r.env = latest.env
@@ -96,7 +96,7 @@ SET r.status = CASE fr.status
     WHEN 'pending'  THEN 'pending'
     WHEN 'rejected' THEN 'rejected'
   END,
-    r.updated_at = UNIX_TIMESTAMP() * 1000
+    r.gmt_modified = CURRENT_TIMESTAMP
 WHERE r.request_kind = 'connect'
   AND fr.status <> 'accepted';
 

@@ -31,8 +31,6 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
         decision_reason: None,
         created_by: "human_1".into(),
         decided_by: None,
-        created_at: 1,
-        updated_at: 1,
         decided_at: None,
     };
     repo.insert(req).await.expect("insert request");
@@ -79,14 +77,14 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
         RequestStatus::Approved,
         "owner",
         Some("ok"),
-        99,
     )
     .await
     .expect("decide");
     let got2 = repo.get("req_c1", env).await.expect("found after decide");
     assert_eq!(got2.status, RequestStatus::Approved, "status → approved");
     assert_eq!(got2.decided_by.as_deref(), Some("owner"), "decided_by set");
-    assert_eq!(got2.decided_at, Some(99), "decided_at set");
+    // decided_at is a DB-managed timestamp set at decision time.
+    assert!(got2.decided_at.is_some(), "decided_at set");
     assert_eq!(got2.decision_reason.as_deref(), Some("ok"), "decision_reason set");
 
     // backfill_edge_id — annotate the approved request with its new edge.

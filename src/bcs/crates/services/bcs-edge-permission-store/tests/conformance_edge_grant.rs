@@ -50,8 +50,8 @@ async fn sqlite_with_schema() -> Arc<dyn DbPlugin> {
             status VARCHAR(16) NOT NULL DEFAULT 'approved', \
             originator_policy_type VARCHAR(32) NOT NULL DEFAULT 'any', \
             originator_policy_data TEXT, \
-            created_at INTEGER NOT NULL, \
-            updated_at INTEGER NOT NULL, \
+            gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+            gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
             PRIMARY KEY (edge_id), \
             UNIQUE (from_id, to_id, env, grant_ref_id))",
     ))
@@ -71,8 +71,8 @@ async fn sqlite_with_schema() -> Arc<dyn DbPlugin> {
             status VARCHAR(16) NOT NULL DEFAULT 'active', \
             created_by VARCHAR(128) NOT NULL, \
             updated_by VARCHAR(128), \
-            created_at INTEGER NOT NULL, \
-            updated_at INTEGER NOT NULL, \
+            gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+            gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
             PRIMARY KEY (permission_profile_id))",
     ))
     .await
