@@ -31,6 +31,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "fakeredis" },
+    { name = "jieba" },
     { name = "jsonschema" },
     { name = "moto", extra = ["s3"] },
     { name = "pytest" },
@@ -69,6 +70,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "fakeredis", specifier = ">=2.20" },
+    { name = "jieba", specifier = ">=0.42" },
     { name = "jsonschema", specifier = ">=4.20" },
     { name = "moto", extras = ["s3"], specifier = ">=5.0" },
     { name = "pytest", specifier = ">=8.0.0" },
@@ -536,6 +538,12 @@ sdist = { url = "https://mirrors.aliyun.com/pypi/packages/17/6c/de0f64b2b8d7d8cd
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/5f/db/953aeee405f1466832f212f61496ee07c29f7f027f7591b71b06bd08a418/injector-0.24.0-py3-none-any.whl", hash = "sha256:47294c7a7fdb811f0d1b442a1e0152bb2fc28b2ccaaba4cba44e5e125e0da2d0" },
 ]
+
+[[package]]
+name = "jieba"
+version = "0.42.1"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/c6/cb/18eeb235f833b726522d7ebed54f2278ce28ba9438e3135ab0278d9792a2/jieba-0.42.1.tar.gz", hash = "sha256:055ca12f62674fafed09427f176506079bc135638a14e23e25be909131928db2" }
 
 [[package]]
 name = "jmespath"

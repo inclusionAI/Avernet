@@ -32,12 +32,15 @@ from agentclaw.community.core.config_compose.models import (
     CollectedSkill,
     ComposeRequest,
     McpComposeInput,
+    StdioLaunch,
 )
 from agentclaw.community.core.config_compose.protocols import ComposeInputCollector
 from agentclaw.community.core.config_compose.services.mcporter_composer import (
+    McporterComposeError,
     mcp_network_priority_for,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
 from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.workspace.path_factory import (
@@ -54,6 +57,17 @@ if TYPE_CHECKING:
     from agentclaw.community.core.services.identity import IdentityService
 
 logger = get_logger()
+
+
+class McpDetailUnavailableError(LookupError):
+    """MCP Center returned no record for a server code.
+
+    Distinct from a transport error out of the Center client: this one says the
+    lookup *worked* and came back empty, which for a remote server means the code
+    is unknown to Center — a bad entry in the bot's MCP set or in the per-engine
+    default list. Raised as the chained cause so that distinction survives into
+    the traceback.
+    """
 
 
 def bot_data_relpath(host_path: str) -> str:
@@ -90,6 +104,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         path_factory: WorkspacePathFactory,
         identity_service: "IdentityService",
         overrides_reader: ChannelEngineOverridesReader,
+        local_mcp_registry: LocalMCPRegistry | None = None,
     ) -> None:
         self._skill_set_service_factory = skill_set_service_factory
         self._mcp_config_service = mcp_config_service
@@ -98,6 +113,13 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         self._path_factory = path_factory
         self._identity_service = identity_service
         self._overrides_reader = overrides_reader
+        # Defaulting to the bare registry (its own default config path) matches
+        # what ``passport_scope`` already does for every caller, so "is this
+        # server local?" has one answer across the codebase. A divergent source
+        # here would let passport treat a server as local while compose treated
+        # it as remote — and the remote path would then fail looking for an
+        # endpoint that never existed. Injectable for tests.
+        self._local_mcp_registry = local_mcp_registry or LocalMCPRegistry()
 
     # ── skills ──────────────────────────────────────────────────────────
     def skills(self, req: ComposeRequest) -> list[CollectedSkill]:
@@ -190,7 +212,23 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         network_priority = mcp_network_priority_for(req.engine_type)
         inputs: list[McpComposeInput] = []
         for md in raw:
-            md = self._enrich_mcp_detail(svc, md)
+            md, detail_failure = self._enrich_mcp_detail(svc, md)
+            server_code = md.get("server_code") or md.get("serverCode") or ""
+            stdio = self._stdio_launch_for(server_code, md, req.engine_type)
+            if stdio is None and detail_failure is not None:
+                # Remote server we could not resolve. Fail here, at the point the
+                # lookup actually failed, with the cause chained — rather than
+                # composing an entry with no endpoints and letting the composer
+                # report "no usable endpoint", which reads as a misconfigured
+                # server and sends the reader hunting in MCP Center for a record
+                # the lookup never retrieved. A local server takes the branch
+                # above instead: Center having no record of it is expected.
+                raise McporterComposeError(
+                    f"MCP {server_code or '<no server_code>'}: could not resolve "
+                    "server detail, and it is not a local server either (the "
+                    "local-MCP registry has no entry for it). MCP Center is "
+                    "unreachable or holds no record for this code."
+                ) from detail_failure
             api_key, headers, endpoint_env, transport = (
                 self._mcp_config_service.build_mcp_sync_payload(
                     user_id=req.user_id,
@@ -206,11 +244,101 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     endpoint_env=endpoint_env,
                     transport_protocol=transport,
                     network_priority=network_priority,
+                    stdio=stdio,
                 )
             )
         return inputs
 
-    def _enrich_mcp_detail(self, svc: Any, md: dict[str, Any]) -> dict[str, Any]:
+    def _stdio_launch_for(
+        self, server_code: str, md: dict[str, Any], engine_type: str
+    ) -> StdioLaunch | None:
+        """Resolve a LOCAL server's launch instruction; ``None`` if it is remote.
+
+        A ``run_mode`` of REMOTE on the collected entry settles it. That value only
+        appears when the MCP Center lookup **succeeded**, and Center is
+        authoritative for the servers it knows, so a caller's own remote server is
+        never reclassified just because its ``server_code`` collides with a name in
+        the bundled registry (``hitl`` / ``clawmind``). The registry is a fallback
+        catalog for servers Center does not carry, not an override — which also
+        keeps a community deployment, where the MCP Center plugin deliberately
+        ignores that bundled file, from inheriting its company-only launch paths.
+
+        Otherwise the launch instruction is taken from the **resolved detail
+        first**, and only then from :class:`LocalMCPRegistry`. A deployment that
+        registers its own local server — including under a name the bundled
+        catalog also ships (``hitl``, ``clawmind``) — must keep its own command
+        rather than have it replaced by the bundled ``/home/admin/...`` path,
+        which that deployment's image need not even contain.
+
+        The registry is what makes the fallback work when there is nothing to
+        prefer: enrichment is best-effort, so on an MCP Center failure ``md``
+        carries neither ``runMode`` nor ``stdioConfigs``, and a local server —
+        having no endpoint to find — would otherwise fail the remote path
+        outright. Reading a local YAML needs no network, so a local server stays
+        recognizable exactly when Center cannot vouch for it.
+
+        Either source speaks ``stdioConfigs: [{command, arguments, envVariables}]``
+        — the registry normalizes the YAML's flat ``command``/``args``/``env`` into
+        exactly that. The list holds one entry per engine layout, discriminated by
+        ``engineType``; :meth:`_stdio_config_for_engine` picks the one for this
+        engine.
+        """
+        if not server_code:
+            return None
+        run_mode = md.get("run_mode") or md.get("runMode")
+        if isinstance(run_mode, str) and run_mode.strip().upper() == "REMOTE":
+            return None
+
+        cfg = self._stdio_config_for_engine(md, engine_type)
+        if cfg is None:
+            registry_detail = self._local_mcp_registry.get_mcp_detail(server_code)
+            cfg = self._stdio_config_for_engine(registry_detail or {}, engine_type)
+        if cfg is None:
+            return None
+        return StdioLaunch(
+            command=str(cfg["command"]),
+            args=[str(a) for a in (cfg.get("arguments") or cfg.get("args") or [])],
+            env={
+                str(k): str(v)
+                for k, v in (cfg.get("envVariables") or cfg.get("env") or {}).items()
+            },
+        )
+
+    @staticmethod
+    def _stdio_config_for_engine(
+        detail: dict[str, Any], engine_type: str
+    ) -> dict[str, Any] | None:
+        """The launchable ``stdioConfigs`` entry for ``engine_type``, or ``None``.
+
+        A launch instruction is a path into a specific image, so the same
+        ``server_code`` can need a different one per engine — ``hitl`` ships at
+        ``/usr/local/bin`` on teclaw and under ``/home/admin`` elsewhere. An entry
+        naming this engine in ``engineType`` wins; an entry naming no engine is
+        the default for the rest. An entry for a *different* engine is never a
+        fallback: launching another image's binary is worse than not launching.
+
+        An entry without a ``command`` is not a launch instruction, so it does not
+        count as a hit — the caller then falls through to its next source rather
+        than emitting a stdio server the engine cannot start.
+        """
+        configs = detail.get("stdioConfigs") or detail.get("stdio_configs") or []
+        if not isinstance(configs, list):
+            return None
+
+        default: dict[str, Any] | None = None
+        for cfg in configs:
+            if not isinstance(cfg, dict) or not cfg.get("command"):
+                continue
+            declared = cfg.get("engineType") or cfg.get("engine_type")
+            if declared is None:
+                default = default if default is not None else cfg
+            elif str(declared).strip().lower() == engine_type.strip().lower():
+                return cfg
+        return default
+
+    def _enrich_mcp_detail(
+        self, svc: Any, md: dict[str, Any]
+    ) -> tuple[dict[str, Any], Exception | None]:
         """Merge MCP Center detail (endpoints/runMode/…) over a bare association.
 
         ``collect_bot_active_mcps`` returns only the skill-set association fields;
@@ -218,28 +346,28 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         detail per server (same source ``add_mcp_to_skill_set`` validates against)
         and merge it over the bare dict — Center is authoritative for endpoints,
         while locally-set fields absent from Center (e.g. default-MCP ``headers``)
-        are preserved. Best-effort: a missing detail or a Center error leaves the
-        bare dict unchanged (the composer then surfaces the "no usable endpoint"
-        error, same as before).
+        are preserved.
+
+        Returns ``(merged, failure)``. A lookup that raised or returned nothing
+        yields the bare dict plus the **cause**, which is deliberately *carried*
+        rather than logged and dropped: only the caller knows whether the server
+        is local — Center legitimately has no record of a stdio server — so only
+        the caller can decide whether the failure is fatal. It raises with this
+        exception chained, so the root cause survives into the traceback instead
+        of resurfacing three layers down as a misleading "no usable endpoint".
         """
         server_code = md.get("server_code") or md.get("serverCode")
         if not server_code:
-            return md
+            return md, None
         try:
             detail = svc.mcp_center.get_mcp_detail(server_code)
-        except Exception as e:
-            logger.warning(
-                "[ConfigComposerInputCollector] MCP Center detail fetch failed "
-                "for %s: %s", server_code, e,
-            )
-            return md
+        except Exception as e:  # noqa: BLE001 — returned to the caller, not swallowed
+            return md, e
         if not detail:
-            logger.warning(
-                "[ConfigComposerInputCollector] MCP Center has no detail for %s; "
-                "composing without endpoints", server_code,
+            return md, McpDetailUnavailableError(
+                f"MCP Center returned no detail for {server_code}"
             )
-            return md
-        return {**md, **detail}
+        return {**md, **detail}, None
 
     # ── resources ───────────────────────────────────────────────────────
     def resources(self, req: ComposeRequest) -> list[CollectedFile]:

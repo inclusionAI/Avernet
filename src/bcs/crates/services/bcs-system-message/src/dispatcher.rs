@@ -35,6 +35,8 @@ pub struct SystemMessageDispatcherImpl {
     frontend_delivery: Arc<dyn FrontendDeliveryPort>,
     /// Optional run-context registry for HTTP-provider final callbacks.
     bot_run_context: Option<Arc<dyn BotRunContextPort>>,
+    /// Fallback deadline for Provider `chat.send` runs without an explicit timeout.
+    provider_chat_run_timeout_ms: u64,
     /// Optional message repo for persisting system messages to history.
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     /// Deprecated compatibility setting. Provider 2.0 `chat.send` is always
@@ -58,6 +60,7 @@ pub struct SystemMessageDispatcherBuilder {
     delivery: Option<Arc<dyn BotDeliveryPort>>,
     frontend_delivery: Option<Arc<dyn FrontendDeliveryPort>>,
     bot_run_context: Option<Arc<dyn BotRunContextPort>>,
+    provider_chat_run_timeout_ms: Option<u64>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
 }
@@ -84,6 +87,12 @@ impl SystemMessageDispatcherBuilder {
     /// Set the run-context registry used by HTTP provider callbacks.
     pub fn with_bot_run_context(mut self, bot_run_context: Arc<dyn BotRunContextPort>) -> Self {
         self.bot_run_context = Some(bot_run_context);
+        self
+    }
+
+    /// Set the fallback deadline for Provider `chat.send` run contexts.
+    pub fn with_provider_chat_run_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.provider_chat_run_timeout_ms = Some(timeout_ms);
         self
     }
 
@@ -118,6 +127,9 @@ impl SystemMessageDispatcherBuilder {
             delivery: self.delivery.ok_or("delivery required")?,
             frontend_delivery: self.frontend_delivery.ok_or("frontend_delivery required")?,
             bot_run_context: self.bot_run_context,
+            provider_chat_run_timeout_ms: self
+                .provider_chat_run_timeout_ms
+                .unwrap_or(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS),
             message_repo: self.message_repo,
             _provider_stream_gray_list: self.provider_stream_gray_list,
         })
@@ -292,6 +304,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
 
         let delivery = self.delivery.clone();
         let bot_run_context = self.bot_run_context.clone();
+        let provider_chat_run_timeout_ms = self.provider_chat_run_timeout_ms;
         results.extend(join_all(commands.into_iter().map(|cmd| {
             let recipient = cmd.recipient_id.clone();
             let delivery = delivery.clone();
@@ -313,7 +326,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                                 group_id: cmd.group_id,
                                 bcs_session_id: cmd.bcs_session_id,
                                 deadline_ms: now_ms()
-                                    .saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS),
+                                    .saturating_add(provider_chat_run_timeout_ms),
                                 terminal: false,
                             })
                             .await;

@@ -35,6 +35,10 @@ from agentclaw.community.core.repository.protocols.skill_installation import (
     SkillInstallationRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
+from agentclaw.community.core.skill_center.policies.default_skill_set_selection import (
+    DefaultSkillSetSelection,
+    DefaultSkillSetSelectionPolicy,
+)
 from agentclaw.community.core.skill_center.path_resolution import (
     canonical_pool_local_path,
 )
@@ -154,12 +158,14 @@ class SkillSetService:
         entity_id: str | None = None,
         bot_id: str | None = None,
         engine_type: str | None = None,
+        runtime_engine_type: str | None = None,
         entity_type: str | None = None,
         resolver: "DeviceContextResolver | None" = None,
         device_sync_dispatcher: "DeviceSyncDispatcher | None" = None,
         mcp_sync_service=None,
         device_plugin: DeviceAccessor | None = None,
         ext_info_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
+        default_skill_set_selection_policy: DefaultSkillSetSelectionPolicy | None = None,
         *,
         path_factory: WorkspacePathFactory,
         pool_layout_paths: Callable[
@@ -201,6 +207,7 @@ class SkillSetService:
         self.entity_id = entity_id
         self.entity_type = entity_type or "staff"
         self.engine_type = engine_type or DEFAULT_ENGINE_TYPE
+        self.runtime_engine_type = runtime_engine_type or self.engine_type
 
         self.device_plugin = device_plugin
         self._ext_info_provider = ext_info_provider
@@ -236,7 +243,7 @@ class SkillSetService:
                 user_id=user_id,
                 entity_id=entity_id,
                 bot_id=bot_id,
-                engine_type=engine_type,
+                engine_type=self.runtime_engine_type,
                 entity_type=entity_type,
                 is_desktop=self.is_desktop,
             )
@@ -253,7 +260,7 @@ class SkillSetService:
             pool_paths = self._pool_layout_paths(
                 str(effective_owner),
                 str(self.bot_id),
-                self.engine_type,
+                self.runtime_engine_type,
             )
             if pool_paths is not None:
                 active_path, local_path, repo_path = pool_paths
@@ -266,6 +273,133 @@ class SkillSetService:
         self._resolver = resolver
         self._device_sync_dispatcher = device_sync_dispatcher
         self._mcp_sync_service = mcp_sync_service
+        self._default_skill_set_selection_policy = (
+            default_skill_set_selection_policy or DefaultSkillSetSelectionPolicy()
+        )
+
+    def _default_skill_set_selection(
+        self, engine_type: str | None = None
+    ) -> DefaultSkillSetSelection:
+        return self._default_skill_set_selection_candidates(engine_type)[0]
+
+    def _default_skill_set_selection_candidates(
+        self, engine_type: str | None = None, bolt_id: str | None = None
+    ) -> tuple[DefaultSkillSetSelection, ...]:
+        return self._default_skill_set_selection_policy.resolve_candidates(
+            persisted_engine_type=self.engine_type if engine_type is None else engine_type,
+            runtime_engine_type=self.runtime_engine_type,
+            bolt_id=bolt_id,
+        )
+
+    def _default_skill_set_query_kwargs(
+        self,
+        engine_type: str | None = None,
+        selection: DefaultSkillSetSelection | None = None,
+    ) -> dict[str, str | None]:
+        """Return repository kwargs only when compatibility needs them.
+
+        OpenClaw and ordinary Claude Code keep the exact historical query shape.
+        Routed Claude Code can provide ordered global default lookup candidates
+        through the default SkillSet selection policy.
+        """
+        persisted_engine = self.engine_type if engine_type is None else engine_type
+        effective_selection = selection or self._default_skill_set_selection(persisted_engine)
+        if (
+            effective_selection.bolt_id is None
+            and effective_selection.engine_type == persisted_engine
+        ):
+            return {}
+        return {
+            "default_skill_set_bolt_id": effective_selection.bolt_id,
+            "default_skill_set_engine_type": effective_selection.engine_type,
+        }
+
+    @staticmethod
+    def _has_default_skill_set(skill_sets: list[dict]) -> bool:
+        return any(skill_set.get("is_default") for skill_set in skill_sets)
+
+    def _ordered_active_default_selections(
+        self, *, bolt_id: str | None, engine_type: str | None
+    ) -> tuple[DefaultSkillSetSelection, ...] | None:
+        candidates = self._default_skill_set_selection_candidates(
+            engine_type, bolt_id=bolt_id
+        )
+        if (
+            len(candidates) == 1
+            and candidates[0].bolt_id is None
+            and candidates[0].engine_type == engine_type
+        ):
+            return None
+
+        # Compatibility-only path. Keep the generic repository query primitive
+        # unchanged, and let engine-specific resolvers contribute the lookup
+        # order (for example: bot-scoped default -> global fallbacks).
+        return candidates
+
+    def _get_all_active_skill_sets_with_default_fallback(
+        self,
+        *,
+        user_id: str | None,
+        bolt_id: str | None,
+        engine_type: str | None,
+    ) -> list[dict]:
+        selections = self._ordered_active_default_selections(
+            bolt_id=bolt_id, engine_type=engine_type
+        )
+        if selections is None:
+            return self.skill_set_repo.get_all_active_skill_sets(
+                user_id=user_id,
+                bolt_id=bolt_id,
+                engine_type=engine_type,
+            )
+
+        first_result: list[dict] | None = None
+        for selection in selections:
+            result = self.skill_set_repo.get_all_active_skill_sets(
+                user_id=user_id,
+                bolt_id=bolt_id,
+                engine_type=engine_type,
+                **self._default_skill_set_query_kwargs(engine_type, selection),
+            )
+            if first_result is None:
+                first_result = result
+            if self._has_default_skill_set(result):
+                return result
+        return first_result or []
+
+    def _get_all_active_skill_sets_for_env_with_default_fallback(
+        self,
+        *,
+        user_id: str | None,
+        bolt_id: str | None,
+        engine_type: str | None,
+        env: str,
+    ) -> list[dict]:
+        selections = self._ordered_active_default_selections(
+            bolt_id=bolt_id, engine_type=engine_type
+        )
+        if selections is None:
+            return self.skill_set_repo.get_all_active_skill_sets_for_env(
+                user_id=user_id,
+                bolt_id=bolt_id,
+                engine_type=engine_type,
+                env=env,
+            )
+
+        first_result: list[dict] | None = None
+        for selection in selections:
+            result = self.skill_set_repo.get_all_active_skill_sets_for_env(
+                user_id=user_id,
+                bolt_id=bolt_id,
+                engine_type=engine_type,
+                env=env,
+                **self._default_skill_set_query_kwargs(engine_type, selection),
+            )
+            if first_result is None:
+                first_result = result
+            if self._has_default_skill_set(result):
+                return result
+        return first_result or []
 
     def _get_default_capabilities_ext_info(
         self,
@@ -532,7 +666,29 @@ class SkillSetService:
             List of SkillSet dicts
         """
         effective_bolt_id = bolt_id if bolt_id else self.bot_id
-        return self.skill_set_repo.list_all(user_id, bolt_id=effective_bolt_id, engine_type=self.engine_type)
+        selections = self._ordered_active_default_selections(
+            bolt_id=effective_bolt_id, engine_type=self.engine_type
+        )
+        if selections is None:
+            return self.skill_set_repo.list_all(
+                user_id,
+                bolt_id=effective_bolt_id,
+                engine_type=self.engine_type,
+            )
+
+        first_result: list[dict] | None = None
+        for selection in selections:
+            result = self.skill_set_repo.list_all(
+                user_id=user_id,
+                bolt_id=effective_bolt_id,
+                engine_type=self.engine_type,
+                **self._default_skill_set_query_kwargs(self.engine_type, selection),
+            )
+            if first_result is None:
+                first_result = result
+            if self._has_default_skill_set(result):
+                return result
+        return first_result or []
 
     def update_skill_set(
         self,
@@ -1038,8 +1194,10 @@ class SkillSetService:
         # 查当前 bot_id 下所有激活集，集合判断替换 LIMIT 1 单值比较
         current_active_ids = {
             str(s.get('id'))
-            for s in self.skill_set_repo.get_all_active_skill_sets(
-                user_id=self.entity_id, bolt_id=self.bot_id, engine_type=self.engine_type
+            for s in self._get_all_active_skill_sets_with_default_fallback(
+                user_id=self.entity_id,
+                bolt_id=self.bot_id,
+                engine_type=self.engine_type,
             )
         }
         logger.info(
@@ -1203,7 +1361,7 @@ class SkillSetService:
         skill_sets = self.skill_set_repo.list_all(
             user_id=effective_user_id,
             bolt_id=effective_bolt_id,
-            engine_type=self.engine_type
+            engine_type=self.engine_type,
         )
 
         logger.info(f"[get_all_skill_sets_with_skills] 找到 {len(skill_sets)} 个能力集")
@@ -1271,7 +1429,7 @@ class SkillSetService:
         skill_sets = self.skill_set_repo.list_all(
             user_id=effective_user_id,
             bolt_id=effective_bolt_id,
-            engine_type=self.engine_type
+            engine_type=self.engine_type,
         )
 
         # 排序：默认能力集在前，然后按创建时间排序
@@ -1290,6 +1448,29 @@ class SkillSetService:
             logger.debug(f"[get_all_skill_sets_with_mcps] 能力集 {skill_set.get('name')} 包含 {len(mcps)} 个 MCP")
 
         return skill_sets
+
+
+    def list_active_skill_sets(
+        self,
+        *,
+        user_id: str | None = None,
+        bolt_id: str | None = None,
+        engine_type: str | None = None,
+    ) -> list[dict]:
+        """Return active SkillSets using the service-owned default lookup policy.
+
+        This keeps delivery adapters from re-deriving default SkillSet
+        compatibility kwargs while preserving historical query shape for engines
+        that do not need a compatibility override.
+        """
+        effective_user_id = user_id if user_id is not None else self.entity_id
+        effective_bolt_id = bolt_id if bolt_id is not None else self.bot_id
+        effective_engine = engine_type if engine_type is not None else self.engine_type
+        return self._get_all_active_skill_sets_with_default_fallback(
+            user_id=effective_user_id,
+            bolt_id=effective_bolt_id,
+            engine_type=effective_engine,
+        )
 
     def get_active_skills(
         self,
@@ -1318,10 +1499,9 @@ class SkillSetService:
             bot_id=effective_bolt_id,
         )
         # 1. 查询所有激活的技能集（包含默认能力集）
-        active_skill_sets = self.skill_set_repo.get_all_active_skill_sets(
+        active_skill_sets = self.list_active_skill_sets(
             user_id=effective_user_id,
             bolt_id=effective_bolt_id,
-            engine_type=self.engine_type
         )
         if not active_skill_sets and not installed_skills:
             logger.warning(f"[get_active_skills] 未找到激活的技能集: user_id={effective_user_id}, bolt_id={effective_bolt_id}")
@@ -1428,11 +1608,16 @@ class SkillSetService:
             "hermes": "/home/admin/.hermes/skills-repo",
         }
         base_skills_dir = Path(
-            ENGINE_SKILLS_DIR_MAP.get(self.engine_type, "/home/admin/.openclaw/workspace/skills")
+            ENGINE_SKILLS_DIR_MAP.get(
+                self.runtime_engine_type,
+                "/home/admin/.openclaw/workspace/skills",
+            )
         )
         # aicoding 引擎使用独立的 skills-repo 目录
         skills_repo_dir = Path(
-            ENGINE_SKILLS_REPO_DIR_MAP.get(self.engine_type, str(base_skills_dir / "skills-repo"))
+            ENGINE_SKILLS_REPO_DIR_MAP.get(
+                self.runtime_engine_type, str(base_skills_dir / "skills-repo")
+            )
         )
         pool_layout_paths = None
         pool_owner_id = self.user_id or self.entity_id
@@ -1440,7 +1625,7 @@ class SkillSetService:
             pool_layout_paths = self._pool_layout_paths(
                 str(pool_owner_id),
                 str(self.bot_id),
-                self.engine_type,
+                self.runtime_engine_type,
             )
         if pool_layout_paths is not None:
             active_path, local_path, repo_path = pool_layout_paths
@@ -1464,7 +1649,7 @@ class SkillSetService:
                 get_bot_engine_dir(
                     self.entity_id or "default",
                     self.bot_id,
-                    self.engine_type,
+                    self.runtime_engine_type,
                     self.entity_type or "staff",
                 )
                 / "workspace"
@@ -1478,7 +1663,7 @@ class SkillSetService:
             logger.info(
                 "[get_symlink_mappings] LOCAL+non-desktop → per-bot paths: "
                 "entity=%s bot=%s engine=%s base_skills_dir=%s skills_repo_dir=%s",
-                self.entity_id, self.bot_id, self.engine_type, base_skills_dir, skills_repo_dir,
+                self.entity_id, self.bot_id, self.runtime_engine_type, base_skills_dir, skills_repo_dir,
             )
 
         skills_local_dir = base_skills_dir / "skills-local"
@@ -1952,7 +2137,7 @@ class SkillSetService:
             bot_id,
         )
         effective_template_type = self._get_default_capabilities_template_type(bot_id)
-        active_skill_sets = self.skill_set_repo.get_all_active_skill_sets(
+        active_skill_sets = self._get_all_active_skill_sets_with_default_fallback(
             user_id=entity_id,
             bolt_id=bot_id,
             engine_type=effective_engine,
@@ -2127,7 +2312,7 @@ class SkillSetService:
         if target_env not in {"pre", "prod"}:
             raise ValueError("target_env must be pre or prod")
         effective_engine = engine_type if engine_type is not None else self.engine_type
-        active_skill_sets = self.skill_set_repo.get_all_active_skill_sets_for_env(
+        active_skill_sets = self._get_all_active_skill_sets_for_env_with_default_fallback(
             user_id=entity_id,
             bolt_id=bot_id,
             engine_type=effective_engine,
@@ -2184,7 +2369,7 @@ class SkillSetService:
             bot_id,
         )
         effective_template_type = self._get_default_capabilities_template_type(bot_id)
-        active_skill_sets = self.skill_set_repo.get_all_active_skill_sets(
+        active_skill_sets = self._get_all_active_skill_sets_with_default_fallback(
             user_id=entity_id,
             bolt_id=bot_id,
             engine_type=effective_engine,

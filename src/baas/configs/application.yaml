@@ -117,6 +117,12 @@ user_config:
   oauth:
     base_url: "https://oauth.example.com"
 
+  # ARCA TTL 续期调度器引擎选择 (Phase 5 config switch)
+  # "legacy": DeviceTtlTimerTask 运行，DeadlineRenewalScheduler 不启动
+  # "deadline": DeadlineRenewalScheduler 运行，DeviceTtlTimerTask 不启动
+  renewal_scheduler:
+    engine: "legacy"
+
   # 设备 TTL 定时器配置（每 30 分钟扫描整个到期队列并续期+探活）
   device_ttl_timer:
     enabled: true  # 是否启用定时任务
@@ -124,9 +130,8 @@ user_config:
     batch_size: 100  # 每页拉取条数，默认: 100
     max_page_concurrency: 10  # 每页内并发续期的最大并发数
     query_retries: 3  # 单页查询 DB 失败时的重试次数
-    lock_name: "device_ttl_timer_lock"  # 分布式锁名称
-    lock_expire_seconds: 1800  # 分布式锁租约（秒），须 >= cron 间隔，默认: 1800
-    lock_renew_interval_seconds: 60  # 分布式锁自动续期间隔（秒），默认: 60
+    lock_name: "device_ttl_timer_lock"  # 分布式锁名称基准，运行时追加环境后缀（如 _pre/_prod）以实现环境隔离
+    lock_expire_seconds: 1750  # 分布式锁租约（秒），须 < cron 间隔以允许其它实例在轮次间获取，默认: 1750
     dry_run: false  # 测试模式：只打印日志
 
   # 文件传输轮询器配置（定期检测 OSS 上传完成并触发 device 下载）

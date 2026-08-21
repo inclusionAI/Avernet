@@ -3,6 +3,8 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
+use bcs_config_api::PrivateEndpointAllowlistEntryConfig;
+use ipnet::IpNet;
 use tokio::net::lookup_host;
 use url::{Host, Url};
 
@@ -10,8 +12,17 @@ use url::{Host, Url};
 pub struct OutboundUrlGuard {
     block_private_networks: bool,
     allow_loopback: bool,
+    private_endpoint_allowlist: Vec<CompiledPrivateEndpointAllowlistEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CompiledPrivateEndpointAllowlistEntry {
+    config: PrivateEndpointAllowlistEntryConfig,
+    cidrs: Vec<IpNet>,
+}
+
+/// One request-time validation result. Callers must not cache or persist it
+/// across outbound attempts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedRequestUrl {
     raw_url: String,
@@ -36,7 +47,36 @@ impl OutboundUrlGuard {
         Self {
             block_private_networks,
             allow_loopback,
+            private_endpoint_allowlist: Vec::new(),
         }
+    }
+
+    pub fn with_private_endpoint_allowlist(
+        mut self,
+        entries: &[PrivateEndpointAllowlistEntryConfig],
+    ) -> Result<Self, String> {
+        let mut compiled = Vec::with_capacity(entries.len());
+        for entry in entries {
+            entry.validate()?;
+            let cidrs = entry
+                .cidrs
+                .iter()
+                .map(|cidr| {
+                    cidr.parse::<IpNet>().map_err(|_| {
+                        format!(
+                            "eventing.webhook private endpoint '{}' contains invalid CIDR '{cidr}'",
+                            entry.host
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            compiled.push(CompiledPrivateEndpointAllowlistEntry {
+                config: entry.clone(),
+                cidrs,
+            });
+        }
+        self.private_endpoint_allowlist = compiled;
+        Ok(self)
     }
 
     pub fn strict() -> Self {
@@ -50,6 +90,19 @@ impl OutboundUrlGuard {
     pub fn validate_configured_http_url(&self, raw_url: &str) -> Result<(), OutboundUrlError> {
         let url = parse_http_url(raw_url)?;
         self.validate_host_literal(&url)
+    }
+
+    pub fn allows_allowlisted_host_port(&self, raw_url: &str) -> bool {
+        let Ok(url) = parse_http_url(raw_url) else {
+            return false;
+        };
+        let (Some(Host::Domain(host)), Some(port)) = (url.host(), url.port_or_known_default())
+        else {
+            return false;
+        };
+        self.private_endpoint_allowlist
+            .iter()
+            .any(|entry| entry.config.matches_host_and_port(host, port))
     }
 
     pub async fn validate_request_http_url(&self, raw_url: &str) -> Result<(), OutboundUrlError> {
@@ -102,7 +155,11 @@ impl OutboundUrlGuard {
             .map_err(|error| OutboundUrlError::ResolveFailed(error.to_string()))?;
         let mut addrs = Vec::new();
         for addr in resolved.by_ref() {
-            self.validate_ip(addr.ip())?;
+            if let Err(error) = self.validate_ip(addr.ip())
+                && !self.is_allowlisted_private_address(domain, port, addr.ip())
+            {
+                return Err(error);
+            }
             addrs.push(addr);
         }
         if addrs.is_empty() {
@@ -112,6 +169,13 @@ impl OutboundUrlGuard {
         } else {
             Ok((Some(domain.to_string()), addrs))
         }
+    }
+
+    fn is_allowlisted_private_address(&self, host: &str, port: u16, ip: IpAddr) -> bool {
+        self.private_endpoint_allowlist.iter().any(|entry| {
+            entry.config.matches_host_and_port(host, port)
+                && entry.cidrs.iter().any(|cidr| cidr.contains(&ip))
+        })
     }
 
     fn validate_ip(&self, ip: IpAddr) -> Result<(), OutboundUrlError> {
@@ -310,6 +374,52 @@ mod tests {
         assert!(guard.validate_configured_http_url("http://127.0.0.1/hook").is_ok());
         assert!(guard.validate_configured_http_url("http://localhost/hook").is_ok());
         assert!(guard.validate_configured_http_url("http://10.0.0.1/hook").is_err());
+    }
+
+    #[test]
+    fn private_endpoint_allowlist_requires_host_port_and_cidr_to_match() {
+        let entry = PrivateEndpointAllowlistEntryConfig {
+            host: "*.hooks.example.internal".to_string(),
+            cidrs: vec!["10.20.0.0/16".to_string()],
+            ports: vec![443, 8443],
+        };
+        let guard = OutboundUrlGuard::strict()
+            .with_private_endpoint_allowlist(&[entry])
+            .expect("valid private endpoint allowlist");
+        let allowed = IpAddr::V4(Ipv4Addr::new(10, 20, 7, 9));
+        let other_private = IpAddr::V4(Ipv4Addr::new(10, 21, 7, 9));
+
+        assert!(guard.is_allowlisted_private_address(
+            "worker.hooks.example.internal",
+            443,
+            allowed
+        ));
+        assert!(guard.is_allowlisted_private_address(
+            "a.b.hooks.example.internal",
+            8443,
+            allowed
+        ));
+        assert!(!guard.is_allowlisted_private_address(
+            "hooks.example.internal",
+            443,
+            allowed
+        ));
+        assert!(!guard.is_allowlisted_private_address(
+            "worker.hooks.example.internal",
+            9443,
+            allowed
+        ));
+        assert!(!guard.is_allowlisted_private_address(
+            "worker.hooks.example.internal",
+            443,
+            other_private
+        ));
+        assert!(guard.allows_allowlisted_host_port(
+            "https://worker.hooks.example.internal:8443/events"
+        ));
+        assert!(!guard.allows_allowlisted_host_port(
+            "https://hooks.example.internal:8443/events"
+        ));
     }
 
     #[tokio::test]

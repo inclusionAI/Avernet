@@ -9,17 +9,80 @@ use bcs_db_api::{
     DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
     DbTransactionStepResult, DbValue,
 };
+use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_domain::{
     CollaborationDefinition, CollaborationDefinitionRef, ParticipantRole, ResolvedParticipant,
     ResolvedParticipantBinding, RuntimeParticipantBinding, StateMachineDeliveryCorrelation,
     StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
+use bcs_event_store::DbEventStore;
+use bcs_service_api::port::repo::{AppendEventRecord, StateMachineEventfulTransition};
+use bcs_service_api::port::{EventRepoPort, NewEvent};
+use bcs_service_api::types::{EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject};
 use bcs_service_api::{
     CollaborationEventRepoPort, GroupRuntimeBindingRepoPort, MarkHumanNodeRunningCommand,
     StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
 };
 use serde_json::json;
 use tokio::sync::Mutex;
+
+#[path = "../../../bootstrap/bcs/src/migrations.rs"]
+#[allow(dead_code)]
+mod bootstrap_migrations;
+
+#[tokio::test]
+async fn sqlite_run_start_and_public_event_batch_commit_in_one_transaction() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().expect("SQLite plugin"));
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref())
+        .await
+        .expect("apply SQLite schema");
+    let store = MySqlCollaborationStore::sqlite(db.clone(), "test".to_string());
+    let events = DbEventStore::sqlite(db);
+    let mut run = test_run();
+    run.run_id = "sm-run-atomic".to_string();
+    run.status = StateMachineRunStatus::Pending;
+    store
+        .create_run(run, Vec::new())
+        .await
+        .expect("create pending run");
+
+    assert!(
+        store
+            .commit_eventful_transition(StateMachineEventfulTransition::StartRun {
+                run_id: "sm-run-atomic".to_string(),
+                started_at_ms: 2,
+                events: vec![
+                    public_event("evt-sqlite-run-created", "state_machine.run.created", None),
+                    public_event(
+                        "evt-sqlite-run-started",
+                        "state_machine.run.started",
+                        Some("evt-sqlite-run-created"),
+                    ),
+                ],
+            })
+            .await
+            .expect("commit eventful run start")
+    );
+
+    let run = store
+        .get_run("sm-run-atomic")
+        .await
+        .expect("load run")
+        .expect("run");
+    assert_eq!(run.status, StateMachineRunStatus::Running);
+    let created = events
+        .get_event("evt-sqlite-run-created", "test")
+        .await
+        .expect("load created Event")
+        .expect("created Event");
+    let started = events
+        .get_event("evt-sqlite-run-started", "test")
+        .await
+        .expect("load started Event")
+        .expect("started Event");
+    assert_eq!(created.envelope.stream.sequence, 1);
+    assert_eq!(started.envelope.stream.sequence, 2);
+}
 
 #[tokio::test]
 async fn mysql_definition_upsert_and_get_use_009_definition_table() {
@@ -1227,6 +1290,42 @@ fn test_run() -> StateMachineRun {
         created_at: 1,
         updated_at: 1,
         completed_at: None,
+    }
+}
+
+fn public_event(
+    event_id: &str,
+    event_type: &str,
+    causation_event_id: Option<&str>,
+) -> AppendEventRecord {
+    AppendEventRecord {
+        event: NewEvent {
+            event_id: event_id.to_string(),
+            event_type: event_type.to_string(),
+            schema_version: EVENT_SCHEMA_VERSION_V1.to_string(),
+            producer: "bcs-collaboration-runtime".to_string(),
+            producer_key: event_id.to_string(),
+            occurred_at: "2026-08-19T00:00:00.000Z".to_string(),
+            subject: EventSubject {
+                subject_type: "state_machine.run".to_string(),
+                id: "sm-run-atomic".to_string(),
+            },
+            scope: EventScope {
+                group_id: Some("group-1".to_string()),
+                session_id: Some("group-1:abcdef12".to_string()),
+                run_id: Some("sm-run-atomic".to_string()),
+                ..EventScope::default()
+            },
+            stream_key: "state-machine-run:sm-run-atomic".to_string(),
+            actor: None,
+            correlation_id: None,
+            causation_event_id: causation_event_id.map(str::to_string),
+            trace_id: None,
+            data: Default::default(),
+        },
+        recorded_at: "2026-08-19T00:00:00.001Z".to_string(),
+        retention_until_ms: 2_000_000_000_000,
+        env: "test".to_string(),
     }
 }
 

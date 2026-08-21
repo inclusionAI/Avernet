@@ -132,6 +132,12 @@ provides:
   - ResourceRepositoryProtocol
   - SessionResourceRepositoryProtocol
   - TaskQueueRepositoryProtocol
+  # task
+  - TaskInfoRepositoryProtocol
+  - TaskNodeRepositoryProtocol
+  - TaskNodeRunInfoRepositoryProtocol
+  - TaskNodeRelationRepositoryProtocol
+  - TaskCallbackRepositoryProtocol
   # publishing
   - BotPublishRepositoryProtocol
   - PublishOperationRepository    # an ABC, not a Protocol — same role, same surface
@@ -194,6 +200,12 @@ provides:
   # skills_pool
   - SkillsPoolLayoutRepository
   - SkillsPoolRolloutRepository
+  # task
+  - TaskInfoRepository
+  - TaskNodeRepository
+  - TaskNodeRunInfoRepository
+  - TaskNodeRelationRepository
+  - TaskCallbackRepository
 consumes:
   - DatabasePlugin                # the per-profile session seam, injected into every implementation
   - get_current_env               # environment scoping (utils.env_utils)
@@ -226,6 +238,7 @@ internal_dependencies:
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.system_config
+  - agentclaw.community.core.task
   - agentclaw.community.core.task_queue
   - agentclaw.community.core.user_list
   - agentclaw.community.core.workspace

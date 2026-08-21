@@ -405,8 +405,9 @@ class _TeclawRuntimeBots(_RuntimeBots):
 
 
 class _McpInstallations:
-    def list_installed_mcps(self, *, bot_id: str) -> set[str]:
+    def list_installed_mcps(self, *, bot_id: str, owner_id: str) -> set[str]:
         assert bot_id == "bot-1"
+        assert owner_id == "true-owner"
         return {"mcp.weather"}
 
 
@@ -640,7 +641,6 @@ def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
             actor_id="actor",
             name="set",
             description=None,
-            idempotency_key="request-1",
         )
 
 
@@ -666,7 +666,6 @@ def test_legacy_create_retains_only_virtual_default_bot_compatibility():
         actor_id="actor",
         name="set",
         description=None,
-        idempotency_key="request-1",
     )
 
     assert result["bolt_id"] == "default"
@@ -837,7 +836,6 @@ def test_skill_set_metadata_mutations_share_the_runtime_matrix_gate():
             user_id="true-owner",
             name="set",
             description=None,
-            idempotency_key="request-1",
         ),
         lambda: service.update_set(
             bot_id="bot-1",

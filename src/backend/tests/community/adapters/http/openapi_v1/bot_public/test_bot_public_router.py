@@ -15,7 +15,16 @@ from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
-from agentclaw.community.core.gateway_principal.models import AppPrincipal, GatewayApp
+from agentclaw.community.core.bot_public.catalog_metadata import (
+    BotCatalogCaller,
+    BotCatalogSearchUnavailableError,
+)
+from agentclaw.community.core.gateway_principal.models import (
+    AppPrincipal,
+    GatewayApp,
+    GatewayUser,
+    UserPrincipal,
+)
 from agentclaw.community.core.gateway_principal.verifier import VerifiedCaller
 from tests.community.adapters.http.openapi_v1.conftest import mount_public_error_handlers
 
@@ -53,7 +62,7 @@ class _PublicService:
     )
     calls: list[dict[str, Any]] = field(default_factory=list)
 
-    def search_public_bots_by_keyword(self, **kwargs: Any) -> dict[str, Any]:
+    def search_catalog_public_bots_by_keyword(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
         return self.result
 
@@ -100,7 +109,11 @@ def app(services: tuple[_PublicService, _DiscoverService]) -> FastAPI:
 
     app = FastAPI()
     app.include_router(build_public_router())
-    app.dependency_overrides[require_principal] = lambda: {"user_id": "caller-1"}
+    app.dependency_overrides[require_principal] = lambda: VerifiedCaller(
+        principals=(
+            UserPrincipal(subject=GatewayUser(id="caller-1", username="caller-1")),
+        )
+    )
     attach_injector(app, Injector([_Bindings()]))
     mount_public_error_handlers(app)
     return app
@@ -145,8 +158,96 @@ def test_search_projects_only_catalog_fields(
     ):
         assert forbidden not in rendered
     assert services[0].calls == [
-        {"search": "catalog", "page": 2, "page_size": 5}
+        {
+            "search": "catalog",
+            "page": 2,
+            "page_size": 5,
+            "caller": BotCatalogCaller(
+                tenant_id="teamclaw", user_id="caller-1", app_id=None
+            ),
+            "request_id": "",
+        }
     ]
+
+
+def test_search_openapi_declares_the_fixed_catalog_unavailable_envelope(
+    app: FastAPI,
+) -> None:
+    """Catches generated clients losing the fixed 502 catalog error contract."""
+    response = app.openapi()["paths"][_SEARCH_PATH]["get"]["responses"]["502"]
+
+    assert response["description"] == "Catalog service unavailable"
+    content = response["content"]["application/json"]
+    assert content["schema"] == {"$ref": "#/components/schemas/ErrorEnvelope"}
+    assert content["example"] == {
+        "code": 502000,
+        "message": "Catalog service unavailable",
+        "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+    }
+
+
+@pytest.mark.parametrize(
+    ("principal", "expected_caller"),
+    [
+        (
+            VerifiedCaller(
+                principals=(
+                    UserPrincipal(
+                        subject=GatewayUser(id="user-1", username="user-1")
+                    ),
+                )
+            ),
+            BotCatalogCaller(tenant_id="teamclaw", user_id="user-1", app_id=None),
+        ),
+        (
+            VerifiedCaller(
+                principals=(
+                    AppPrincipal(
+                        tenant="tenant-2",
+                        app=GatewayApp(
+                            app_id=2,
+                            app_name="partner",
+                            owners="team",
+                            tenant="tenant-2",
+                        ),
+                    ),
+                )
+            ),
+            BotCatalogCaller(tenant_id="tenant-2", user_id=None, app_id=2),
+        ),
+        (
+            VerifiedCaller(
+                principals=(
+                    UserPrincipal(
+                        subject=GatewayUser(id="user-3", username="user-3")
+                    ),
+                    AppPrincipal(
+                        tenant="tenant-3",
+                        app=GatewayApp(
+                            app_id=3,
+                            app_name="partner",
+                            owners="team",
+                            tenant="tenant-3",
+                        ),
+                    ),
+                )
+            ),
+            BotCatalogCaller(tenant_id="tenant-3", user_id="user-3", app_id=3),
+        ),
+    ],
+)
+def test_search_projects_the_verified_principal_to_catalog_caller(
+    app: FastAPI,
+    services: tuple[_PublicService, _DiscoverService],
+    principal: VerifiedCaller,
+    expected_caller: BotCatalogCaller,
+) -> None:
+    app.dependency_overrides[require_principal] = lambda: principal
+
+    response = TestClient(app, raise_server_exceptions=False).get(_SEARCH_PATH)
+
+    assert response.status_code == 200, response.text
+    assert services[0].calls[-1]["caller"] == expected_caller
 
 
 def test_discover_uses_online_filter_by_default(
@@ -202,6 +303,21 @@ def test_discover_returns_fixed_502_when_recommender_is_unavailable(
     }
 
     response = client.get(_DISCOVER_PATH, params={"keyword": "automation"})
+
+    assert response.status_code == 502, response.text
+    assert response.json()["code"] == 502000
+    assert response.json()["data"] is None
+
+
+def test_search_returns_fixed_502_when_bcs_catalog_is_unavailable(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    def _unavailable(**_kwargs: Any) -> dict[str, Any]:
+        raise BotCatalogSearchUnavailableError("upstream unavailable")
+
+    services[0].search_catalog_public_bots_by_keyword = _unavailable
+
+    response = client.get(_SEARCH_PATH, params={"search": "catalog"})
 
     assert response.status_code == 502, response.text
     assert response.json()["code"] == 502000

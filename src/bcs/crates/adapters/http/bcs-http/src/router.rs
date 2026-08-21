@@ -205,7 +205,9 @@ fn build_api_routes() -> Router<HttpAppState> {
         .route("/groups/my", get(routes::groups::list_my_groups))
         .route(
             "/groups/{id}",
-            get(routes::groups::get_group).delete(routes::groups::delete_group),
+            get(routes::groups::get_group)
+                .patch(routes::groups::patch_group)
+                .delete(routes::groups::delete_group),
         )
         .route(
             "/groups/{id}/collaboration-definition",

@@ -89,6 +89,10 @@ dev = [
   # payloads against JSON Schemas. Test-only (no runtime src import); transitive
   # in the monorepo, must be named for the standalone community suite.
   "jsonschema>=4.20",
+  # jieba: 中文分词,供 SearchBasedDispatchStrategy._prefetch_candidates 对节点
+  # title/objective/background 拆词做 LIKE 预查(避免整串 LIKE 命中 0);singlebox 本地
+  # 候选预查用,corp 走 BCSFuse 语义搜索不依赖。strategies 内 lazy import,未装则退回整串。
+  "jieba>=0.42",
 ]
 
 # Specify pypi index

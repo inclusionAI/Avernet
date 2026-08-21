@@ -172,7 +172,7 @@ class ProgressSyncMixin:
         if not bot:
             return
         try:
-            self._publish_provider_behavior(publish_record).refresh_after_upgrade(
+            self.provider_behavior(bot).refresh_after_upgrade(
                 bot_uuid=binding.device_id, bot=bot
             )
         except Exception as e:
@@ -259,7 +259,7 @@ class ProgressSyncMixin:
                 f"Bot does not exist: {publish_record.source_bot_id}"
             )
 
-        if not self._publish_provider_behavior(publish_record).destroys_verify_bot_on_online:
+        if not self.provider_behavior(bot).destroys_verify_bot_on_online:
             logger.info(
                 "[PublishFlowService._destroy_verify_bot_after_online_success] "
                 "Skip destroying verify BaaS bot for this provider: "

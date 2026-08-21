@@ -36,10 +36,6 @@ class SkillSetMCPServer(Base):
     icon = Column(String(500), nullable=True)  # MCP server icon URL
     user_id = Column(String(100), nullable=True, index=True)  # 用户工号
     env = Column(String(50), nullable=True)  # 环境标识: dev/pre/prod
-    # Like SkillSetSkill.bot_id, this denormalization makes the ordinary-set
-    # ownership invariant database-expressible.  System Default and historical
-    # records remain NULL; canonical writers always persist the parent Bot id.
-    bot_id = Column(String(100), nullable=True, index=True)
     # The association is tenant-owned alongside its Skill Set. Keep the field
     # out of to_dict() so existing Skills API payloads do not change.
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
@@ -55,10 +51,6 @@ class SkillSetMCPServer(Base):
         UniqueConstraint(
             "avernet_tenant", "env", "skill_set_id", "server_code",
             name="uk_skill_set_mcp",
-        ),
-        UniqueConstraint(
-            "avernet_tenant", "env", "bot_id", "server_code",
-            name="uk_bot_skill_set_mcp",
         ),
     )
 
@@ -95,8 +87,9 @@ class BotMCPInstallation(Base):
 
     __tablename__ = "ac_bot_mcp_installation"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(_UNSIGNED_BIGINT, primary_key=True, autoincrement=True)
     bot_id = Column(String(100), nullable=False, index=True)
+    owner_id = Column(String(128), nullable=False, index=True)
     server_code = Column(String(256), nullable=False, index=True)
     env = Column(String(50), nullable=False)
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
@@ -107,7 +100,7 @@ class BotMCPInstallation(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "avernet_tenant", "env", "bot_id", "server_code",
+            "avernet_tenant", "env", "owner_id", "bot_id", "server_code",
             name="uk_bot_mcp_installation",
         ),
     )

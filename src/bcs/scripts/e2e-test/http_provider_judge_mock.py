@@ -15,12 +15,14 @@ class MockState:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.provider_requests: list[dict[str, Any]] = []
+        self.event_webhook_requests: list[dict[str, Any]] = []
         self.judge_started = threading.Event()
         self.judge_release = threading.Event()
 
     def reset(self) -> None:
         with self.lock:
             self.provider_requests.clear()
+            self.event_webhook_requests.clear()
         self.judge_started.clear()
         self.judge_release.clear()
 
@@ -56,6 +58,11 @@ class Handler(BaseHTTPRequestHandler):
                 requests = list(STATE.provider_requests)
             self.send_json(200, {"requests": requests})
             return
+        if self.path == "/control/event-webhook/requests":
+            with STATE.lock:
+                requests = list(STATE.event_webhook_requests)
+            self.send_json(200, {"requests": requests})
+            return
         if self.path == "/control/judge/status":
             self.send_json(
                 200,
@@ -77,6 +84,11 @@ class Handler(BaseHTTPRequestHandler):
                 STATE.provider_requests.clear()
             self.send_json(200, {"ok": True})
             return
+        if self.path == "/control/event-webhook/clear":
+            with STATE.lock:
+                STATE.event_webhook_requests.clear()
+            self.send_json(200, {"ok": True})
+            return
         if self.path == "/control/judge/release":
             STATE.judge_release.set()
             self.send_json(200, {"ok": True})
@@ -87,6 +99,18 @@ class Handler(BaseHTTPRequestHandler):
                 STATE.provider_requests.append(
                     {
                         "authorization": self.headers.get("authorization"),
+                        "body": body,
+                    }
+                )
+            self.send_json(200, {"ok": True})
+            return
+        if self.path == "/event-webhook":
+            body = self.read_json()
+            with STATE.lock:
+                STATE.event_webhook_requests.append(
+                    {
+                        "authorization": self.headers.get("authorization"),
+                        "content_type": self.headers.get("content-type"),
                         "body": body,
                     }
                 )

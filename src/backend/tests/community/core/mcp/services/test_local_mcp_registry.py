@@ -125,11 +125,54 @@ def test_environment_variable_is_ignored(monkeypatch, tmp_path):
 
 
 def test_default_config_path_loads_repo_hitl_config():
+    """``hitl`` carries one launch instruction per engine layout.
+
+    Asserted by ``engineType`` rather than by position: the entries are a set of
+    variants that a consumer selects from, so nothing may depend on their order.
+    """
     detail = LocalMCPRegistry().get_mcp_detail("hitl")
 
     assert detail is not None
-    assert detail["stdioConfigs"][0]["command"] == "python3"
-    assert detail["stdioConfigs"][0]["arguments"] == ["/home/admin/hitl/hitl_mcp_server.py"]
+    by_engine = {
+        cfg.get("engineType"): cfg for cfg in detail["stdioConfigs"]
+    }
+
+    # teclaw ships the server under /usr/local/bin …
+    assert by_engine["teclaw"]["command"] == "python3"
+    assert by_engine["teclaw"]["arguments"] == [
+        "/usr/local/bin/teclaw_hitl_mcp_server.py"
+    ]
+    # … and the engine-agnostic entry (no engineType) covers everyone else.
+    assert by_engine[None]["command"] == "python3"
+    assert by_engine[None]["arguments"] == ["/home/admin/hitl/hitl_mcp_server.py"]
+
+
+def test_shipped_multi_variant_servers_put_the_engine_agnostic_entry_first():
+    """Every shipped ``stdioConfigs`` list must lead with its engine-agnostic entry.
+
+    The teclaw compose path selects by ``engineType`` and does not care about
+    order, but the arca/baas device path — ``convert_to_device_format`` in the
+    corp-side ``plugins/prod/mcp_device_payload`` — does
+    ``stdio_configs[0]`` with no ``engineType`` awareness. Whatever sits first is
+    therefore what every non-teclaw container is told to launch, and a
+    teclaw-specific entry in that slot hands them a path their image does not
+    carry.
+
+    That consumer is not in this repo, so nothing else here would catch a
+    reorder. This test is the guard.
+    """
+    registry = LocalMCPRegistry()
+
+    for detail in registry.list_mcp_details():
+        configs = detail.get("stdioConfigs") or []
+        if len(configs) < 2:
+            continue  # single-entry lists cannot pick the wrong default
+        first = configs[0]
+        assert not (first.get("engineType") or first.get("engine_type")), (
+            f"{detail['serverCode']}: stdioConfigs[0] is engine-specific "
+            f"({first.get('engineType')!r}). The arca/baas device path takes "
+            "index 0 blindly — the engine-agnostic entry must come first."
+        )
 
 
 def test_default_config_path_loads_repo_clawmind_config():

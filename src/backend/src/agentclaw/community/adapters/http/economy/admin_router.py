@@ -386,7 +386,7 @@ async def trigger_scan(
     summary="扫描+投递通知 (可指定收件人, 可 dry-run)",
 )
 async def scan_and_deliver(
-    ctx: RequestContext = None,  # TODO: revert — temporarily disabled auth for dev testing
+    ctx: RequestContext = Depends(get_request_context),
     override_recipient: str = Query(
         ...,
         pattern=r"^\d{4,10}$",

@@ -12,14 +12,23 @@
 
 use async_trait::async_trait;
 use bcs_db_api::{
-    DbError, DbPlugin, DbResult, DbRow, DbSqlFlavor, DbStatement, DbTransactionStep,
-    DbTransactionStepResult, DbValue as Value, db_get_column, db_get_column_opt,
+    DbError, DbPlugin, DbResult, DbRow, DbSqlFlavor, DbStatement, DbTransactionParam,
+    DbTransactionStep, DbTransactionStepResult, DbValue as Value, db_get_column, db_get_column_opt,
 };
+use bcs_event_store::{
+    EventAppendTransactionPlan, GroupDeletionEventTransactionPlan,
+    GroupProvisioningEventTransactionPlan,
+};
+use chrono::{SecondsFormat, TimeZone, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+use bcs_service_api::port::repo::{
+    CommitGroupEventfulMutation, FinalizeGroupProvisioning, GroupEventfulMutation,
+};
+use bcs_service_api::types::OpeningMessage;
 use bcs_service_api::{
     ActorKind, DefaultDelivery, Group, GroupMessage, GroupMetricCount, GroupMetricsSnapshotPort,
     GroupMutableFieldsPatch, GroupStatus, GroupStrategy, Participant, ParticipantKind,
@@ -76,6 +85,167 @@ fn assert_empty_logical_db(logical_db: &str) -> DbResult<()> {
                 .to_string(),
         ))
     }
+}
+
+fn db_timestamp_from_millis(timestamp_ms: u64) -> ServiceResult<String> {
+    let timestamp_ms = i64::try_from(timestamp_ms)
+        .map_err(|_| ServiceError::InternalError("Group timestamp is out of range".to_string()))?;
+    Utc.timestamp_millis_opt(timestamp_ms)
+        .single()
+        .map(|timestamp| timestamp.to_rfc3339_opts(SecondsFormat::Millis, true))
+        .ok_or_else(|| ServiceError::InternalError("Group timestamp is invalid".to_string()))
+}
+
+fn group_version_update_step(
+    env: &str,
+    group_id: DbTransactionParam,
+    mutated_at: &str,
+) -> DbTransactionStep {
+    DbTransactionStep::Execute(DbStatement::with_transaction_params(
+        "UPDATE bcs_groups SET version = version + 1, gmt_modified = ? \
+         WHERE env = ? AND group_id = ?",
+        vec![
+            DbTransactionParam::value(mutated_at),
+            DbTransactionParam::value(env),
+            group_id,
+        ],
+    ))
+}
+
+fn apply_db_group_mutation_candidate(
+    group: &mut Group,
+    mutation: &GroupEventfulMutation,
+    mutated_at_ms: u64,
+) -> ServiceResult<()> {
+    let changed = match mutation {
+        GroupEventfulMutation::PatchMutableFields(patch) => {
+            let mut changed = false;
+            if let Some(label) = &patch.label
+                && group.label.as_ref() != Some(label)
+            {
+                group.label = Some(label.clone());
+                changed = true;
+            }
+            if let Some(context) = &patch.context
+                && group.context.as_ref() != Some(context)
+            {
+                group.context = Some(context.clone());
+                changed = true;
+            }
+            if let Some(opening_message) = &patch.opening_message
+                && group.opening_message != *opening_message
+            {
+                group.opening_message = opening_message.clone();
+                changed = true;
+            }
+            if let Some(visibility) = &patch.visibility
+                && group.visibility != *visibility
+            {
+                group.visibility = visibility.clone();
+                changed = true;
+            }
+            if let Some(delivery) = patch.default_bot_final_delivery {
+                let current = group
+                    .routing_policy
+                    .as_ref()
+                    .map(|policy| policy.default_bot_final_delivery)
+                    .unwrap_or_default();
+                if current != delivery {
+                    group
+                        .routing_policy
+                        .get_or_insert_with(Default::default)
+                        .default_bot_final_delivery = delivery;
+                    changed = true;
+                }
+            }
+            changed
+        }
+        GroupEventfulMutation::UpdateStatus(status) => {
+            if group.status == *status {
+                false
+            } else {
+                group.status = *status;
+                true
+            }
+        }
+        GroupEventfulMutation::AddParticipant {
+            participant,
+            actor_is_public,
+        } => {
+            if group
+                .participants
+                .iter()
+                .any(|existing| existing.bot_uuid == participant.bot_uuid)
+            {
+                false
+            } else {
+                if participant.is_bot() && group.visibility == "public" && !actor_is_public {
+                    return Err(ServiceError::ExistNonPublicBots {
+                        bots: vec![(participant.bot_uuid.clone(), participant.bot_name.clone())],
+                    });
+                }
+                group.participants.push(participant.clone());
+                true
+            }
+        }
+        GroupEventfulMutation::RemoveParticipant { actor_id } => {
+            let initial_len = group.participants.len();
+            group
+                .participants
+                .retain(|participant| participant.bot_uuid != *actor_id);
+            group.participants.len() != initial_len
+        }
+        GroupEventfulMutation::UpdateParticipantMode { actor_id, mode } => {
+            let participant = group
+                .participants
+                .iter_mut()
+                .find(|participant| participant.bot_uuid == *actor_id)
+                .ok_or_else(|| ServiceError::ParticipantNotFound(actor_id.clone()))?;
+            if participant.effective_mode() == *mode {
+                false
+            } else {
+                participant.mode = Some(*mode);
+                true
+            }
+        }
+        GroupEventfulMutation::UpdateRoutingPolicy(policy) => {
+            let current = serde_json::to_value(&group.routing_policy)
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            let requested = serde_json::to_value(Some(policy))
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            if current == requested {
+                false
+            } else {
+                group.routing_policy = Some(policy.clone());
+                true
+            }
+        }
+        GroupEventfulMutation::UpdateServiceSpec(service_spec) => {
+            let current = serde_json::to_value(&group.service_spec)
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            let requested = serde_json::to_value(service_spec)
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            if current == requested {
+                false
+            } else {
+                group.service_spec = service_spec.clone();
+                true
+            }
+        }
+        GroupEventfulMutation::Delete => true,
+    };
+    if !changed {
+        return Err(ServiceError::Conflict(format!(
+            "Group '{}' mutation is already applied",
+            group.id
+        )));
+    }
+    group.version = group
+        .version
+        .checked_add(1)
+        .ok_or_else(|| ServiceError::Conflict(format!("Group '{}' version overflow", group.id)))?;
+    group.updated_at = mutated_at_ms;
+    Ok(())
 }
 
 /// MySQL-backed group session store.
@@ -367,12 +537,39 @@ impl MySqlGroupStore {
         })
     }
 
+    fn deserialize_opening_message(
+        json_str: Option<String>,
+    ) -> ServiceResult<Option<OpeningMessage>> {
+        match json_str.as_deref() {
+            None => Ok(None),
+            Some(json) => serde_json::from_str(json).map(Some).map_err(|error| {
+                ServiceError::InternalError(format!("deserialize opening_message_json: {error}"))
+            }),
+        }
+    }
+
+    fn opening_message_from_row(
+        row: &DbRow,
+        group_id: &str,
+    ) -> ServiceResult<Option<OpeningMessage>> {
+        let json = db_get_column_opt(row, "opening_message_json").map_err(|error| {
+            ServiceError::InternalError(format!(
+                "read Group '{group_id}' opening_message_json: {error}"
+            ))
+        })?;
+        Self::deserialize_opening_message(json).map_err(|error| {
+            ServiceError::InternalError(format!(
+                "read Group '{group_id}' opening_message_json: {error}"
+            ))
+        })
+    }
+
     /// Load session from MySQL.
     async fn load_group_from_mysql(&self, group_id: &str) -> ServiceResult<Option<Group>> {
         // Task G.2 / migration 005: read group_kind + dm_pair_key from DB so
         // dm groups round-trip through `get()` without losing their identity.
         let sql = format!(
-            "SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, \
+            "SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
              service_group_uuid, service_mode, service_spec, version, record_status, \
              {} AS created_ts, {} AS updated_ts, \
              group_kind, dm_pair_key, group_strategy, visibility \
@@ -406,6 +603,7 @@ impl MySqlGroupStore {
             let routing_policy_json: Option<String> =
                 db_get_column_opt(row, "routing_policy_json").ok().flatten();
             let context: Option<String> = db_get_column_opt(row, "context").ok().flatten();
+            let opening_message = Self::opening_message_from_row(row, group_id)?;
             let service_group_uuid: Option<String> =
                 db_get_column_opt(row, "service_group_uuid").ok().flatten();
             let service_mode: Option<String> =
@@ -448,6 +646,7 @@ impl MySqlGroupStore {
                 originator,
                 routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                 context,
+                opening_message,
                 participants,
                 messages: Vec::new(),            // Not persisted
                 workspace: Workspace::default(), // Not persisted
@@ -535,7 +734,7 @@ impl MySqlGroupStore {
         let _start = std::time::Instant::now();
         let sql = format!(
             "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, \
+                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     {} AS created_ts, {} AS updated_ts, \
                     gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
@@ -577,6 +776,13 @@ impl MySqlGroupStore {
             let group_id: String = match db_get_column(row, "group_id") {
                 Ok(v) => v,
                 Err(_) => continue,
+            };
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
             };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
@@ -621,13 +827,14 @@ impl MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -804,6 +1011,14 @@ impl GroupRepoPort for MySqlGroupStore {
             .routing_policy
             .as_ref()
             .and_then(|rp| serde_json::to_string(rp).ok());
+        let opening_message_json = group
+            .opening_message
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| {
+                ServiceError::InternalError(format!("serialize opening_message: {error}"))
+            })?;
         // Task G.2 / migration 005: persist `group_kind` + `dm_pair_key`.
         // - `group_kind` is always written (defaults to "normal" via the
         //   in-memory enum default, but we still write the explicit value
@@ -824,6 +1039,7 @@ impl GroupRepoPort for MySqlGroupStore {
         let g_driver_bot = group.driver_bot.clone();
         let g_originator: Option<String> = group.originator.clone();
         let g_context: Option<String> = group.context.clone();
+        let g_opening_message_json = opening_message_json;
         let g_dm_pair_key: Option<String> = group.dm_pair_key.clone();
         let g_group_strategy_str = Self::group_strategy_to_str(group.group_strategy);
         let g_service_group_uuid: Option<String> = group.service_group_uuid.clone();
@@ -862,6 +1078,7 @@ impl GroupRepoPort for MySqlGroupStore {
                 "originator",
                 "routing_policy_json",
                 "context",
+                "opening_message_json",
                 "service_spec",
                 "version",
                 "record_status",
@@ -870,8 +1087,8 @@ impl GroupRepoPort for MySqlGroupStore {
             &[("gmt_modified", self.flavor.now())],
         );
         let upsert_sql = format!(
-            "INSERT INTO bcs_groups (group_id, label, status, driver_bot, originator, env, routing_policy_json, context, group_kind, dm_pair_key, group_strategy, service_group_uuid, service_mode, service_spec, version, record_status, visibility, gmt_create, gmt_modified) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {now}, {now}) \
+            "INSERT INTO bcs_groups (group_id, label, status, driver_bot, originator, env, routing_policy_json, context, opening_message_json, group_kind, dm_pair_key, group_strategy, service_group_uuid, service_mode, service_spec, version, record_status, visibility, gmt_create, gmt_modified) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {now}, {now}) \
              {upsert}",
             now = self.flavor.now(),
             upsert = upsert_clause,
@@ -890,6 +1107,7 @@ impl GroupRepoPort for MySqlGroupStore {
                 Value::from(env.as_str()),
                 Value::from(routing_policy_json.as_deref()),
                 Value::from(g_context.as_deref()),
+                Value::from(g_opening_message_json.as_deref()),
                 Value::from(group_kind_str),
                 Value::from(g_dm_pair_key.as_deref()),
                 Value::from(g_group_strategy_str),
@@ -944,6 +1162,382 @@ impl GroupRepoPort for MySqlGroupStore {
         Ok(())
     }
 
+    async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {
+        if command.env != self.env || command.events.iter().any(|event| event.env != self.env) {
+            return Err(ServiceError::InvalidOperation {
+                message: "Group provisioning Event environment mismatch".to_string(),
+                request_id: None,
+            });
+        }
+        let group_query_sql = match self.flavor {
+            DbSqlFlavor::Mysql => {
+                "SELECT group_id FROM bcs_groups WHERE env = ? AND group_id = ? \
+                 AND record_status = 'provisioning' FOR UPDATE"
+            }
+            DbSqlFlavor::Sqlite => {
+                "SELECT group_id FROM bcs_groups WHERE env = ? AND group_id = ? \
+                 AND record_status = 'provisioning'"
+            }
+        };
+        let mut steps = vec![DbTransactionStep::Query(DbStatement::with_params(
+            group_query_sql,
+            vec![
+                Value::from(self.env.as_str()),
+                Value::from(command.group_id.as_str()),
+            ],
+        ))];
+        steps.push(DbTransactionStep::Execute(
+            DbStatement::with_transaction_params(
+                "UPDATE bcs_groups SET record_status = 'active', gmt_modified = CURRENT_TIMESTAMP \
+                 WHERE env = ? AND group_id = ? AND record_status = 'provisioning'",
+                vec![
+                    DbTransactionParam::value(self.env.as_str()),
+                    DbTransactionParam::query_result(0, 0, "group_id"),
+                ],
+            ),
+        ));
+        let event_plan = GroupProvisioningEventTransactionPlan::build(
+            &command.group_id,
+            &command.subscription_ids,
+            &command.actor,
+            command.finalized_at_ms,
+            &self.env,
+            &command.events,
+            self.flavor,
+            steps.len(),
+        )
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        steps.extend(event_plan.steps);
+        self.db.plugin().transaction(steps).await.map_err(|error| {
+            ServiceError::InternalError(format!("Group provisioning finalization failed: {error}"))
+        })?;
+        if let Some(group) = self.cache.write().await.get_mut(&command.group_id) {
+            group.record_status = "active".to_string();
+        }
+        Ok(())
+    }
+
+    async fn commit_eventful_mutation(
+        &self,
+        command: CommitGroupEventfulMutation,
+    ) -> ServiceResult<Group> {
+        if let Some(event) = command.event.as_ref()
+            && (event.env != self.env
+                || event.event.scope.group_id.as_deref() != Some(command.group_id.as_str()))
+        {
+            return Err(ServiceError::InvalidOperation {
+                message: "Group mutation Event environment or scope mismatch".to_string(),
+                request_id: None,
+            });
+        }
+        let current = self
+            .try_get(&command.group_id)
+            .await?
+            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        if current.version != command.expected_version {
+            return Err(ServiceError::Conflict(format!(
+                "Group '{}' expected version {}, found {}",
+                command.group_id, command.expected_version, current.version
+            )));
+        }
+        let deleting = matches!(&command.mutation, GroupEventfulMutation::Delete);
+        if deleting && command.event.is_some() {
+            return Err(ServiceError::InvalidOperation {
+                message: "Group deletion is not part of the public Event Catalog".to_string(),
+                request_id: None,
+            });
+        }
+        let mut terminal = current;
+        apply_db_group_mutation_candidate(&mut terminal, &command.mutation, command.mutated_at_ms)?;
+        let mutated_at = db_timestamp_from_millis(command.mutated_at_ms)?;
+        let lock_sql = match self.flavor {
+            DbSqlFlavor::Mysql => {
+                "SELECT group_id FROM bcs_groups WHERE env = ? AND group_id = ? \
+                 AND version = ? AND record_status = 'active' FOR UPDATE"
+            }
+            DbSqlFlavor::Sqlite => {
+                "SELECT group_id FROM bcs_groups WHERE env = ? AND group_id = ? \
+                 AND version = ? AND record_status = 'active'"
+            }
+        };
+        let mut steps = vec![DbTransactionStep::Query(DbStatement::with_params(
+            lock_sql,
+            vec![
+                Value::from(self.env.as_str()),
+                Value::from(command.group_id.as_str()),
+                Value::from(command.expected_version),
+            ],
+        ))];
+        let group_id = DbTransactionParam::query_result(0, 0, "group_id");
+
+        match &command.mutation {
+            GroupEventfulMutation::PatchMutableFields(patch) => {
+                let mut assignments = Vec::new();
+                let mut params = Vec::new();
+                if let Some(label) = &patch.label {
+                    assignments.push("label = ?".to_string());
+                    params.push(DbTransactionParam::value(label.as_str()));
+                }
+                if let Some(context) = &patch.context {
+                    assignments.push("context = ?".to_string());
+                    params.push(DbTransactionParam::value(context.as_str()));
+                }
+                if let Some(opening_message) = &patch.opening_message {
+                    let json = opening_message
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(|error| {
+                            ServiceError::InternalError(format!(
+                                "serialize opening_message: {error}"
+                            ))
+                        })?;
+                    assignments.push("opening_message_json = ?".to_string());
+                    params.push(DbTransactionParam::value(json));
+                }
+                if let Some(visibility) = &patch.visibility {
+                    assignments.push("visibility = ?".to_string());
+                    params.push(DbTransactionParam::value(visibility.as_str()));
+                }
+                if let Some(delivery) = patch.default_bot_final_delivery {
+                    assignments.push(match self.flavor {
+                        DbSqlFlavor::Mysql => "routing_policy_json = JSON_SET(COALESCE(routing_policy_json, JSON_OBJECT()), '$.default_bot_final_delivery', ?)".to_string(),
+                        DbSqlFlavor::Sqlite => "routing_policy_json = json_set(COALESCE(routing_policy_json, '{}'), '$.default_bot_final_delivery', ?)".to_string(),
+                    });
+                    params.push(DbTransactionParam::value(match delivery {
+                        DefaultDelivery::SendToDriver => "send_to_driver",
+                        DefaultDelivery::InjectObservers => "inject_observers",
+                    }));
+                }
+                if assignments.is_empty() {
+                    return Err(ServiceError::Conflict(
+                        "Group mutation contains no changed fields".to_string(),
+                    ));
+                }
+                assignments.push("version = version + 1".to_string());
+                assignments.push("gmt_modified = ?".to_string());
+                params.push(DbTransactionParam::value(mutated_at.as_str()));
+                params.push(DbTransactionParam::value(self.env.as_str()));
+                params.push(group_id.clone());
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        format!(
+                            "UPDATE bcs_groups SET {} WHERE env = ? AND group_id = ?",
+                            assignments.join(", ")
+                        ),
+                        params,
+                    ),
+                ));
+            }
+            GroupEventfulMutation::UpdateStatus(status) => {
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        "UPDATE bcs_groups SET status = ?, version = version + 1, \
+                         gmt_modified = ? WHERE env = ? AND group_id = ?",
+                        vec![
+                            DbTransactionParam::value(Self::status_to_str(status)),
+                            DbTransactionParam::value(mutated_at.as_str()),
+                            DbTransactionParam::value(self.env.as_str()),
+                            group_id.clone(),
+                        ],
+                    ),
+                ));
+            }
+            GroupEventfulMutation::AddParticipant {
+                participant,
+                actor_is_public,
+            } => {
+                if participant.is_bot() && terminal.visibility == "public" && !actor_is_public {
+                    return Err(ServiceError::ExistNonPublicBots {
+                        bots: vec![(participant.bot_uuid.clone(), participant.bot_name.clone())],
+                    });
+                }
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        "INSERT INTO bcs_group_participants \
+                         (group_id, bot_uuid, role, env, actor_kind, mode) \
+                         VALUES (?, ?, ?, ?, ?, ?)",
+                        vec![
+                            group_id.clone(),
+                            DbTransactionParam::value(participant.bot_uuid.as_str()),
+                            DbTransactionParam::value(Self::role_to_str(&participant.role)),
+                            DbTransactionParam::value(self.env.as_str()),
+                            DbTransactionParam::value(Self::actor_kind_to_str(
+                                participant.actor_kind,
+                            )),
+                            DbTransactionParam::value(Self::mode_to_str(
+                                participant.effective_mode(),
+                            )),
+                        ],
+                    ),
+                ));
+                steps.push(group_version_update_step(
+                    &self.env,
+                    group_id.clone(),
+                    &mutated_at,
+                ));
+            }
+            GroupEventfulMutation::RemoveParticipant { actor_id } => {
+                let participant_query_step = steps.len();
+                let participant_lock = match self.flavor {
+                    DbSqlFlavor::Mysql => {
+                        "SELECT bot_uuid FROM bcs_group_participants \
+                         WHERE env = ? AND group_id = ? AND bot_uuid = ? FOR UPDATE"
+                    }
+                    DbSqlFlavor::Sqlite => {
+                        "SELECT bot_uuid FROM bcs_group_participants \
+                         WHERE env = ? AND group_id = ? AND bot_uuid = ?"
+                    }
+                };
+                steps.push(DbTransactionStep::Query(
+                    DbStatement::with_transaction_params(
+                        participant_lock,
+                        vec![
+                            DbTransactionParam::value(self.env.as_str()),
+                            group_id.clone(),
+                            DbTransactionParam::value(actor_id.as_str()),
+                        ],
+                    ),
+                ));
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        "DELETE FROM bcs_group_participants \
+                         WHERE env = ? AND group_id = ? AND bot_uuid = ?",
+                        vec![
+                            DbTransactionParam::value(self.env.as_str()),
+                            group_id.clone(),
+                            DbTransactionParam::query_result(participant_query_step, 0, "bot_uuid"),
+                        ],
+                    ),
+                ));
+                steps.push(group_version_update_step(
+                    &self.env,
+                    group_id.clone(),
+                    &mutated_at,
+                ));
+            }
+            GroupEventfulMutation::UpdateParticipantMode { actor_id, mode } => {
+                let participant_query_step = steps.len();
+                let participant_lock = match self.flavor {
+                    DbSqlFlavor::Mysql => {
+                        "SELECT bot_uuid FROM bcs_group_participants \
+                         WHERE env = ? AND group_id = ? AND bot_uuid = ? FOR UPDATE"
+                    }
+                    DbSqlFlavor::Sqlite => {
+                        "SELECT bot_uuid FROM bcs_group_participants \
+                         WHERE env = ? AND group_id = ? AND bot_uuid = ?"
+                    }
+                };
+                steps.push(DbTransactionStep::Query(
+                    DbStatement::with_transaction_params(
+                        participant_lock,
+                        vec![
+                            DbTransactionParam::value(self.env.as_str()),
+                            group_id.clone(),
+                            DbTransactionParam::value(actor_id.as_str()),
+                        ],
+                    ),
+                ));
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        "UPDATE bcs_group_participants SET mode = ? \
+                         WHERE env = ? AND group_id = ? AND bot_uuid = ?",
+                        vec![
+                            DbTransactionParam::value(Self::mode_to_str(*mode)),
+                            DbTransactionParam::value(self.env.as_str()),
+                            group_id.clone(),
+                            DbTransactionParam::query_result(participant_query_step, 0, "bot_uuid"),
+                        ],
+                    ),
+                ));
+                steps.push(group_version_update_step(
+                    &self.env,
+                    group_id.clone(),
+                    &mutated_at,
+                ));
+            }
+            GroupEventfulMutation::UpdateRoutingPolicy(policy) => {
+                let policy_json = serde_json::to_string(policy)
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        "UPDATE bcs_groups SET routing_policy_json = ?, version = version + 1, \
+                         gmt_modified = ? WHERE env = ? AND group_id = ?",
+                        vec![
+                            DbTransactionParam::value(policy_json),
+                            DbTransactionParam::value(mutated_at.as_str()),
+                            DbTransactionParam::value(self.env.as_str()),
+                            group_id.clone(),
+                        ],
+                    ),
+                ));
+            }
+            GroupEventfulMutation::UpdateServiceSpec(service_spec) => {
+                let spec_json = service_spec
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        "UPDATE bcs_groups SET service_spec = ?, version = version + 1, \
+                         gmt_modified = ? WHERE env = ? AND group_id = ?",
+                        vec![
+                            DbTransactionParam::value(
+                                spec_json.as_deref().map(Value::from).unwrap_or(Value::Null),
+                            ),
+                            DbTransactionParam::value(mutated_at.as_str()),
+                            DbTransactionParam::value(self.env.as_str()),
+                            group_id.clone(),
+                        ],
+                    ),
+                ));
+            }
+            GroupEventfulMutation::Delete => {}
+        }
+
+        if let Some(event) = command.event.as_ref() {
+            let event_plan = EventAppendTransactionPlan::build(event, self.flavor, steps.len())
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            steps.extend(event_plan.steps);
+        }
+        if deleting {
+            let cleanup_plan = GroupDeletionEventTransactionPlan::build(
+                &command.group_id,
+                &self.env,
+                command.mutated_at_ms,
+                self.flavor,
+            )
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            steps.extend(cleanup_plan.steps);
+            steps.push(DbTransactionStep::Execute(
+                DbStatement::with_transaction_params(
+                    "DELETE FROM bcs_group_participants WHERE env = ? AND group_id = ?",
+                    vec![
+                        DbTransactionParam::value(self.env.as_str()),
+                        group_id.clone(),
+                    ],
+                ),
+            ));
+            steps.push(DbTransactionStep::Execute(
+                DbStatement::with_transaction_params(
+                    "DELETE FROM bcs_groups WHERE env = ? AND group_id = ?",
+                    vec![DbTransactionParam::value(self.env.as_str()), group_id],
+                ),
+            ));
+        }
+        self.db.plugin().transaction(steps).await.map_err(|error| {
+            ServiceError::InternalError(format!("Eventful Group mutation failed: {error}"))
+        })?;
+        self.cache.write().await.remove(&command.group_id);
+        if deleting {
+            return Ok(terminal);
+        }
+        self.try_get(&command.group_id)
+            .await?
+            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id))
+    }
+
     async fn patch_mutable_fields(
         &self,
         id: &str,
@@ -962,6 +1556,17 @@ impl GroupRepoPort for MySqlGroupStore {
         if let Some(context) = patch.context {
             assignments.push("context = ?".to_string());
             params.push(Value::from(context.as_str()));
+        }
+        if let Some(opening_message) = patch.opening_message {
+            let json = opening_message
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| {
+                    ServiceError::InternalError(format!("serialize opening_message: {error}"))
+                })?;
+            assignments.push("opening_message_json = ?".to_string());
+            params.push(Value::from(json.as_deref()));
         }
         if let Some(visibility) = patch.visibility {
             assignments.push("visibility = ?".to_string());
@@ -1448,11 +2053,11 @@ impl GroupRepoPort for MySqlGroupStore {
         let _start = std::time::Instant::now();
         let paginated_sql = format!(
             "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, \
+                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     gs.created_ts, gs.updated_ts, \
                     gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
-             FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, \
+             FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                           service_group_uuid, service_mode, service_spec, version, record_status, \
                           {} AS created_ts, {} AS updated_ts, \
                           group_kind, dm_pair_key, group_strategy, visibility \
@@ -1495,6 +2100,13 @@ impl GroupRepoPort for MySqlGroupStore {
             let group_id: String = match db_get_column(row, "group_id") {
                 Ok(v) => v,
                 Err(_) => continue,
+            };
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
             };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
@@ -1539,13 +2151,14 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -1608,7 +2221,7 @@ impl GroupRepoPort for MySqlGroupStore {
         let sql = format!(
             "SELECT \
                 gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, \
+                gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                 gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                 {} AS created_ts, {} AS updated_ts, \
                 gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, \
@@ -1663,6 +2276,13 @@ impl GroupRepoPort for MySqlGroupStore {
                 Err(_) => continue,
             };
 
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
+            };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
                 let status_str: String = db_get_column(row, "status").unwrap_or_default();
@@ -1706,13 +2326,14 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -1817,7 +2438,7 @@ impl GroupRepoPort for MySqlGroupStore {
         let mut sql = format!(
             "SELECT \
                 gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, \
+                gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                 gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                 {} AS created_ts, {} AS updated_ts, \
                 gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, \
@@ -1868,6 +2489,13 @@ impl GroupRepoPort for MySqlGroupStore {
                 Err(_) => continue,
             };
 
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
+            };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
                 let status_str: String = db_get_column(row, "status").unwrap_or_default();
@@ -1911,13 +2539,14 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -2046,11 +2675,11 @@ impl GroupRepoPort for MySqlGroupStore {
             None => {
                 let sql = format!(
                     "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                            gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, \
+                            gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                             gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                             gs.created_ts, gs.updated_ts, \
                             gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
-                     FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, \
+                     FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                                   service_group_uuid, service_mode, service_spec, version, record_status, \
                                   {} AS created_ts, {} AS updated_ts, \
                                   group_kind, dm_pair_key, group_strategy, visibility \
@@ -2075,11 +2704,11 @@ impl GroupRepoPort for MySqlGroupStore {
                 let kind_str = Self::group_kind_to_str(k);
                 let sql = format!(
                     "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                            gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, \
+                            gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                             gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                             gs.created_ts, gs.updated_ts, \
                             gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
-                     FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, \
+                     FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                                   service_group_uuid, service_mode, service_spec, version, record_status, \
                                   {} AS created_ts, {} AS updated_ts, \
                                   group_kind, dm_pair_key, group_strategy, visibility \
@@ -2117,6 +2746,13 @@ impl GroupRepoPort for MySqlGroupStore {
             let group_id: String = match db_get_column(row, "group_id") {
                 Ok(v) => v,
                 Err(_) => continue,
+            };
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
             };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
@@ -2161,13 +2797,14 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -2256,7 +2893,7 @@ impl GroupRepoPort for MySqlGroupStore {
         // and outer SELECT so dm groups remain tagged through pagination.
         let participant_paginated_sql = format!(
             "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                    gp2.bot_uuid, gp2.role, gs.routing_policy_json, gs.context, \
+                    gp2.bot_uuid, gp2.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     gs.created_ts, gs.updated_ts, \
                     gp2.actor_kind, gp2.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
@@ -2305,6 +2942,13 @@ impl GroupRepoPort for MySqlGroupStore {
                 Ok(v) => v,
                 Err(_) => continue,
             };
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
+            };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
                 let status_str: String = db_get_column(row, "status").unwrap_or_default();
@@ -2348,13 +2992,14 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -2765,7 +3410,7 @@ impl GroupRepoPort for MySqlGroupStore {
         label: Option<&str>,
     ) -> Vec<Group> {
         let mut inner_sql = format!(
-            "SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, \
+            "SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                               service_group_uuid, service_mode, service_spec, version, record_status, \
                               {} AS created_ts, {} AS updated_ts, \
                               group_kind, dm_pair_key, group_strategy, visibility \
@@ -2799,7 +3444,7 @@ impl GroupRepoPort for MySqlGroupStore {
 
         let sql = format!(
             "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, \
+                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     gs.created_ts, gs.updated_ts, \
                     gp.actor_kind, gp.mode, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
@@ -2822,6 +3467,13 @@ impl GroupRepoPort for MySqlGroupStore {
             let group_id: String = match db_get_column(row, "group_id") {
                 Ok(v) => v,
                 Err(_) => continue,
+            };
+            let opening_message = match Self::opening_message_from_row(row, &group_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    error!(%group_id, %error, "Failed to load Group opening_message_json");
+                    return Vec::new();
+                }
             };
             let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
                 let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
@@ -2866,13 +3518,14 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_else(|| "private".to_string());
 
                 Group {
-                    id: group_id,
+                    id: group_id.clone(),
                     label,
                     status: Self::str_to_status(&status_str),
                     driver_bot,
                     originator,
                     routing_policy: Self::deserialize_routing_policy(routing_policy_json),
                     context,
+                    opening_message,
                     participants: Vec::new(),
                     messages: Vec::new(),
                     workspace: Workspace::default(),
@@ -3047,6 +3700,17 @@ mod tests {
             assert_empty_logical_db("legacy-db"),
             Err(DbError::InvalidInput(_))
         ));
+    }
+
+    #[test]
+    fn empty_opening_message_json_is_invalid_persisted_data() {
+        let error = MySqlGroupStore::deserialize_opening_message(Some(String::new()))
+            .expect_err("an empty persisted value is not valid JSON");
+        assert!(
+            error
+                .to_string()
+                .contains("deserialize opening_message_json")
+        );
     }
 
     #[tokio::test]

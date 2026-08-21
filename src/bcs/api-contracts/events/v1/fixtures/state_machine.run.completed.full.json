@@ -1,0 +1,41 @@
+{
+  "spec_version": "1.0",
+  "event_id": "evt-run-completed-1",
+  "event_type": "state_machine.run.completed",
+  "schema_version": "1.0",
+  "source": "bcs",
+  "occurred_at": "2026-08-18T10:09:00.000Z",
+  "recorded_at": "2026-08-18T10:09:00.004Z",
+  "subject": {
+    "type": "state_machine.run",
+    "id": "run-1"
+  },
+  "scope": {
+    "group_id": "group-1",
+    "session_id": "session-1",
+    "run_id": "run-1"
+  },
+  "stream": {
+    "key": "state-machine-run:run-1",
+    "sequence": 12
+  },
+  "actor": {
+    "type": "system",
+    "id": "bcs-runtime"
+  },
+  "correlation_id": "run-1",
+  "causation_event_id": "evt-node-completed-2",
+  "data": {
+    "completed_at": "2026-08-18T10:09:00.000Z",
+    "output": {
+      "included": true,
+      "content_type": "text/plain",
+      "size_bytes": 18,
+      "delivered_bytes": 18,
+      "text": "Release is approved",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "truncated": false
+    },
+    "duration_ms": 540000
+  }
+}

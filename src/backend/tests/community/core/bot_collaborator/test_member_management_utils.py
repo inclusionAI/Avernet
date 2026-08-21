@@ -17,15 +17,37 @@ def _capability_service(template_service=None):
     )
 
 
-def test_aicoding_capability_matches_only_application_coding():
+def test_aicoding_capability_matches_coding_bots():
     capability = AICodingMemberManagementCapability()
 
+    # 应用 Coding Bot 与个人 Coding Bot（均在 claude_code 引擎上）放行
     assert capability.is_member_management_enabled(
         {"active_engine": "claude_code", "template_type": "applicationCoding"}, None
     ) is True
     assert capability.is_member_management_enabled(
+        {"active_engine": "claude_code", "template_type": "personalCoding"}, None
+    ) is True
+    # 非 coding 模板仍拒绝
+    assert capability.is_member_management_enabled(
         {"active_engine": "claude_code", "template_type": "chat"}, None
     ) is False
+    # personalCoding 仅 claude_code 引擎放行，其它引擎拒绝（实际不存在该组合，但保守不放行）
+    assert capability.is_member_management_enabled(
+        {"active_engine": "aicoding", "template_type": "personalCoding"}, None
+    ) is False
+    assert capability.is_member_management_enabled(
+        {"active_engine": "openclaw", "template_type": "personalCoding"}, None
+    ) is False
+
+
+def test_capability_service_can_manage_collaborators_allows_personal_coding():
+    service = _capability_service()
+
+    # bot_type 非 service 的个人 Coding Bot（claude_code 引擎）应允许成员管理
+    assert service.can_manage_collaborators(
+        {"bot_type": "personal", "active_engine": "claude_code", "template_type": "personalCoding"},
+        "bot-123",
+    ) is True
 
 
 def test_has_member_management_enabled_requires_boolean_true():

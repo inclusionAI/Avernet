@@ -6,35 +6,6 @@ pre-production credentials, one ready owner Bot, and one authorized service-Bot
 collaborator. Do not run production or pre-production schema changes from an
 application shell without the normal database change approval.
 
-## Deploy-before-code schema gate
-
-Apply `src/backend/src/agentclaw/community/core/skill_center/sql/2026_08_04_local_skill_cleanup_work.sql`
-before deploying code that can commit Local Skill replacement or deletion. #726
-introduces no additional DDL.
-
-Before rollout, an approved database operator must record the target database
-version and verify that `ac_local_skill_cleanup_work` exists with the expected
-SHA-256 locator key:
-
-```sql
-SELECT @@version, @@character_set_server;
-SHOW CREATE TABLE ac_local_skill_cleanup_work;
-SELECT index_name, column_name, seq_in_index
-FROM information_schema.statistics
-WHERE table_schema = DATABASE()
-  AND table_name = 'ac_local_skill_cleanup_work'
-ORDER BY index_name, seq_in_index;
-```
-
-The required unique-key dimensions are `env, owner_id, bot_id,
-package_locator_hash`; the digest is a 64-character SHA-256 value. Save the
-query output, migration identifier, deploy timestamp, and operator identity in
-the release evidence.
-
-Rollback is only `DROP TABLE ac_local_skill_cleanup_work` **before** any
-application version that uses it is deployed. After rollout, use forward repair
-and retain pending cleanup work; dropping the table can lose recovery evidence.
-
 ## Test data and evidence
 
 Record these values before starting: environment, deployment version and commit,

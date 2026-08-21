@@ -150,10 +150,21 @@ class _SessionPortMixin:
         sessions fall within it (exact legacy behaviour).
         """
         client = await self._pooled_client(token)
+        requested_session_key = (
+            session_key if session_key and session_key.strip() else None
+        )
+
+        # Push the lookup into the gateway before its default result cap is
+        # applied. Keep the exact local filter because gateway search is fuzzy.
+        list_params = (
+            {"search": requested_session_key}
+            if requested_session_key is not None
+            else {}
+        )
 
         # Step 1: sessions.list RPC
         try:
-            response = await client.send_request("sessions.list", {})
+            response = await client.send_request("sessions.list", list_params)
         except (ConnectionError, TimeoutError):
             # An empty list is a valid answer, so it must not mask an upstream outage.
             raise
@@ -184,7 +195,6 @@ class _SessionPortMixin:
         if agent_id is not None:
             raw_sessions = [s for s in raw_sessions if s.get("agentId") == agent_id]
 
-        requested_session_key = session_key if session_key and session_key.strip() else None
         if requested_session_key is not None:
             # Filter before pagination so a copied key can be found beyond the current page.
             raw_sessions = [s for s in raw_sessions if s.get("key") == requested_session_key]

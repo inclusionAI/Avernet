@@ -111,15 +111,23 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         contract["paths"][GROUPS_PATH]["post"]["responses"]["409"][
             "x-error-codes"
         ]
-    ) == {"conflict", "non_public_participant"}
+    ) == {
+        "conflict",
+        "non_public_participant",
+        "event_subscription_limit_reached",
+        "eventing_disabled",
+    }
     assert set(
         contract["paths"][GROUPS_PATH]["post"]["responses"]["400"][
             "x-error-codes"
         ]
     ) == {
         "invalid_request",
+        "invalid_opening_message",
         "invalid_participant",
         "invalid_participant_binding",
+        "invalid_event_filter",
+        "invalid_webhook_url",
     }
     assert set(
         contract["paths"][GROUP_PATH]["get"]["responses"]["409"][
@@ -132,6 +140,11 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         ]
         == ["invalid_request"]
     )
+    assert set(
+        contract["paths"][GROUP_PATH]["patch"]["responses"]["400"][
+            "x-error-codes"
+        ]
+    ) == {"invalid_request", "invalid_opening_message"}
     assert set(
         contract["paths"][GROUP_PATH]["patch"]["responses"][
             "404"
@@ -152,12 +165,68 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         ]["x-error-codes"]
         == ["invalid_request"]
     )
+
+
+def test_group_opening_message_contract_is_state_machine_scoped_and_nullable() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    request_variants = contract["paths"][GROUPS_PATH]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["schema"]["oneOf"]
+    collaboration_request, dm_request = request_variants
+
+    opening_create = collaboration_request["properties"]["opening_message"]
+    assert opening_create["oneOf"][1] == {"type": "null"}
+    assert "opening_message" not in dm_request["properties"]
+
+    opening_patch = contract["paths"][GROUP_PATH]["patch"]["requestBody"][
+        "content"
+    ]["application/json"]["schema"]["properties"]["opening_message"]
+    assert opening_patch["oneOf"][1] == {"type": "null"}
+
+    detail_variants = contract["paths"][GROUP_PATH]["get"]["responses"]["200"][
+        "content"
+    ]["application/json"]["schema"]["properties"]["data"]["oneOf"]
+    collaboration_detail, dm_detail = detail_variants
+    assert "opening_message" in collaboration_detail["properties"]
+    assert "opening_message" not in collaboration_detail["required"]
+    assert "opening_message" not in dm_detail["properties"]
+
+    opening_schema = collaboration_detail["properties"]["opening_message"]
+    text_schema, aixui_schema = opening_schema["oneOf"]
+    assert text_schema["maxLength"] == 65_536
+    assert aixui_schema["additionalProperties"] is False
+    assert set(aixui_schema["required"]) == {"type", "component"}
+    assert aixui_schema["properties"]["type"]["enum"] == ["card", "panel"]
     assert (
         contract["paths"][GROUPS_PATH]["post"]["responses"]["200"]["content"][
             "application/json"
         ]["schema"]["properties"]["code"]["const"]
         == 20_000
     )
+
+
+def test_group_create_inline_event_subscriptions_cannot_supply_scope() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    request_variants = contract["paths"][GROUPS_PATH]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["schema"]["oneOf"]
+    assert len(request_variants) == 2
+    for request_variant in request_variants:
+        subscriptions = request_variant["properties"]["event_subscriptions"]
+        assert subscriptions["type"] == "array"
+        inline = subscriptions["items"]
+        assert inline["additionalProperties"] is False
+        assert set(inline["required"]) == {"name", "event_filters", "sink"}
+        assert "scope" not in inline["properties"]
+
+    response_variants = contract["paths"][GROUPS_PATH]["post"]["responses"]["201"][
+        "content"
+    ]["application/json"]["schema"]["properties"]["data"]["oneOf"]
+    assert len(response_variants) == 2
+    for response_variant in response_variants:
+        response_property = response_variant["properties"]["event_subscriptions"]
+        assert response_property["type"] == "array"
+        assert "event_subscriptions" not in response_variant["required"]
 
 
 def test_group_detail_uses_implicit_human_or_owned_bot_participant_access() -> None:

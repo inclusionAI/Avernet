@@ -11,7 +11,7 @@
 """
 
 from agentclaw.community.core.models.skill import (  # noqa: F401
-    BotSkillInstallation, SkillSetCreateIdempotency,
+    BotSkillInstallation,
     Skill,
     SkillSet,
     SkillSetSkill,

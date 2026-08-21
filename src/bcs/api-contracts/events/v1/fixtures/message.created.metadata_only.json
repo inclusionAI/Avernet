@@ -1,0 +1,43 @@
+{
+  "spec_version": "1.0",
+  "event_id": "evt-message-metadata-1",
+  "event_type": "message.created",
+  "schema_version": "1.0",
+  "source": "bcs",
+  "occurred_at": "2026-08-18T10:01:00.000Z",
+  "recorded_at": "2026-08-18T10:01:00.005Z",
+  "subject": {
+    "type": "message",
+    "id": "logical-message-1"
+  },
+  "scope": {
+    "group_id": "group-1",
+    "session_id": "session-1"
+  },
+  "stream": {
+    "key": "session:session-1",
+    "sequence": 18
+  },
+  "actor": {
+    "type": "human",
+    "id": "human-1",
+    "display_name": "Alice"
+  },
+  "correlation_id": "request-1",
+  "data": {
+    "logical_message_id": "logical-message-1",
+    "message_type": "chat",
+    "sender": {
+      "type": "human",
+      "id": "human-1",
+      "display_name": "Alice"
+    },
+    "content": {
+      "included": false,
+      "content_type": "text/plain",
+      "size_bytes": 15,
+      "truncated": false
+    },
+    "attachments": []
+  }
+}

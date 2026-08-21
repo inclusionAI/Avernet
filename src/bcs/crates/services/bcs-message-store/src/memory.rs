@@ -1,20 +1,27 @@
 //! In-memory message repository for local dev and testing.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use bcs_domain::{MessageOwnerFilter, MessagePage, MessageQuery, NewMessage, PersistedMessage, PersistedMessageStatus};
-use bcs_service_api::port::repo::{MessageRepoError, MessageRepoPort};
+use bcs_event_store::MemoryEventStore;
+
+use bcs_domain::{
+    MessageOwnerFilter, MessagePage, MessageQuery, NewMessage, PersistedMessage,
+    PersistedMessageStatus,
+};
 use bcs_service_api::ServiceResult;
+use bcs_service_api::port::repo::{AppendMessageWithEvent, MessageRepoError, MessageRepoPort};
 
 /// In-memory implementation of [`MessageRepoPort`].
 #[derive(Debug, Default)]
 pub struct MemoryMessageRepo {
     /// messages keyed by session_id, each session is a Vec ordered by session_seq.
     sessions: RwLock<HashMap<String, SessionMessages>>,
+    event_store: Option<Arc<MemoryEventStore>>,
 }
 
 #[derive(Debug, Default)]
@@ -26,6 +33,11 @@ struct SessionMessages {
 impl MemoryMessageRepo {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_event_store(mut self, event_store: Arc<MemoryEventStore>) -> Self {
+        self.event_store = Some(event_store);
+        self
     }
 }
 
@@ -69,6 +81,67 @@ impl MessageRepoPort for MemoryMessageRepo {
             session_seq = persisted.session_seq,
             "message persisted (memory)"
         );
+        Ok(persisted)
+    }
+
+    async fn append_message_with_event(
+        &self,
+        command: AppendMessageWithEvent,
+    ) -> Result<PersistedMessage, MessageRepoError> {
+        let event_store = self.event_store.as_ref().ok_or_else(|| {
+            MessageRepoError::StorageError(
+                "Eventful Memory message persistence requires the shared Memory Event Store"
+                    .to_string(),
+            )
+        })?;
+        if command.event.event.subject.id != command.message_id
+            || command.event.event.scope.group_id.as_deref()
+                != Some(command.message.group_id.as_str())
+            || command.event.event.scope.session_id.as_deref()
+                != Some(command.message.session_id.as_str())
+        {
+            return Err(MessageRepoError::StorageError(
+                "message Event does not match the persisted logical message".to_string(),
+            ));
+        }
+        let mut sessions = self.sessions.write().await;
+        let entry = sessions
+            .entry(command.message.session_id.clone())
+            .or_default();
+        if let Some(client_msg_id) = command.message.client_msg_id.as_deref()
+            && let Some(existing) = entry.messages.iter().find(|message| {
+                message.sender_id == command.message.sender_id
+                    && message.client_msg_id.as_deref() == Some(client_msg_id)
+            })
+        {
+            return Ok(existing.clone());
+        }
+        let next_seq = entry.seq.checked_add(1).ok_or_else(|| {
+            MessageRepoError::InvalidSequence("session sequence overflow".to_string())
+        })?;
+        let persisted = PersistedMessage {
+            message_id: command.message_id,
+            group_id: command.message.group_id,
+            session_id: command.message.session_id,
+            session_seq: next_seq,
+            sender_id: command.message.sender_id,
+            sender_type: command.message.sender_type,
+            message_type: command.message.message_type,
+            content: command.message.content,
+            client_msg_id: command.message.client_msg_id,
+            owner_bot_id: command.message.owner_bot_id,
+            status: PersistedMessageStatus::Normal,
+            created_at: command.message.created_at,
+            run_id: command.message.run_id,
+        };
+        event_store
+            .commit_business_mutation(&command.event, || {
+                entry.seq = next_seq;
+                entry.messages.push(persisted.clone());
+                Ok(())
+            })
+            .await
+            .map_err(|error| MessageRepoError::StorageError(error.to_string()))?;
         Ok(persisted)
     }
 

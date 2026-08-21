@@ -128,7 +128,6 @@ def _seed(world, *, member: bool = False) -> None:
             owner_id=_OWNER,
             name="Endpoint set",
             description=None,
-            idempotency_key="endpoint-set",
             engine_type="openclaw",
         )
         skill = world.get(SkillRepository).create(

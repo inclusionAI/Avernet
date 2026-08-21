@@ -130,7 +130,6 @@ def test_delete_removes_all_associations_for_active_and_inactive_local_skills(
             SkillSetSkill(
                 skill_set_id=int(extra_set["id"]),
                 skill_id=int(active_skill["id"]),
-                bot_id=None,
                 env="dev",
             )
         )
@@ -552,7 +551,6 @@ def test_list_skill_set_references_includes_active_and_inactive_sets(
             SkillSetSkill(
                 skill_set_id=int(inactive_set["id"]),
                 skill_id=int(skill["id"]),
-                bot_id=None,
                 env="dev",
             )
         )

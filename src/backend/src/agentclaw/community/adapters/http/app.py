@@ -117,6 +117,17 @@ from agentclaw.community.adapters.http.skills_pool import router as skills_pool_
 from agentclaw.community.adapters.http.beta_quota.router import router as beta_quota_router  # noqa: E402
 from agentclaw.community.adapters.http.channel.router import router as channel_router  # noqa: E402
 from agentclaw.community.adapters.http.quality.router import router as quality_router  # noqa: E402
+# The task surface is internal: execute/dashboard/list, the report and bbs
+# operations, the discovery phase and the engine's push callbacks all answer
+# under ``/api/v1/collaboration/tasks`` in ``adapters/http/task``. The
+# ``/openapi/v1`` namespace is reserved for the domains the gateway's shipped
+# configuration routes and secures (tests/community/contracts/gateway/
+# test_public_namespace.py), so ``openapi_v1/task`` stays unmounted until that
+# configuration declares the collaboration domain.
+from agentclaw.community.adapters.http.task import (  # noqa: E402
+    task_callback_router,
+    task_internal_router,
+)
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
@@ -316,6 +327,8 @@ from agentclaw.community.core.aicoding.services.data_proxy_service import (  # n
     EngineUrlNotConfigured,
 )
 from agentclaw.community.core.errors import (  # noqa: E402
+    CallbackAuthError,
+    CallbackCorrelationError,
     Conflict,
     DomainError,
     Forbidden,
@@ -351,6 +364,8 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
 _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     ValidationError:       400,
     Unauthorized:          401,
+    CallbackAuthError:     401,
+    CallbackCorrelationError: 400,
     LoginRedirectRequired: 302,
     Forbidden:             403,
     NotFound:              404,
@@ -764,6 +779,8 @@ app.include_router(skills_pool_ops_router)
 app.include_router(beta_quota_router)
 app.include_router(channel_router)
 app.include_router(quality_router)
+app.include_router(task_internal_router)
+app.include_router(task_callback_router)
 try:
     app.include_router(render_screen_router)
     logger.info("[RenderScreen] Router registered successfully: prefix=%s", render_screen_router.prefix)
@@ -812,7 +829,7 @@ app.include_router(verify.router)
 app.include_router(sync.router)
 app.include_router(batch_sync.router)
 app.include_router(cron_router)
-app.include_router(cron_noauth_router) 
+app.include_router(cron_noauth_router)
 app.include_router(notify_router)
 # Harness Engineering: patch template management & diagnosis
 app.include_router(harness_router)

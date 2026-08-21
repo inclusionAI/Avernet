@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from secbaas.community.api.bot_interaction import InteractionResolution
 from secbaas.community.core.service.bot_run._bot_websocket_client import (
     BotWebSocketClient,
     ChatRequestError,
@@ -145,6 +146,46 @@ class TestInit:
 )
 def test_is_loopback_websocket_uri_handles_hostname_edges(uri, expected):
     assert _is_loopback_websocket_uri(uri) is expected
+
+
+@pytest.mark.asyncio
+async def test_interaction_resolve_sends_complete_normalized_frame(client) -> None:
+    client._send_request_frame = AsyncMock(
+        return_value={"type": "res", "id": "1", "ok": True}
+    )
+    resolution = InteractionResolution(
+        kind="ask_user",
+        decision="submit",
+        answer="target: staging",
+        message="target: staging",
+        values={"target": "staging"},
+        answers={"Where?": "staging"},
+        selected_options=(("staging",),),
+    )
+
+    exchange = await client.interaction_resolve(
+        interaction_id="int-1",
+        resolution=resolution,
+    )
+
+    assert exchange.accepted is True
+    client._send_request_frame.assert_awaited_once_with(
+        {
+            "type": "req",
+            "id": "1",
+            "method": "interaction.resolve",
+            "params": {
+                "interactionId": "int-1",
+                "decision": "submit",
+                "answer": "target: staging",
+                "message": "target: staging",
+                "values": {"target": "staging"},
+                "answers": {"Where?": "staging"},
+                "selectedOptions": [["staging"]],
+            },
+        },
+        timeout=30.0,
+    )
 
 
 # ==================== Tests: _next_request_id ====================
@@ -506,6 +547,25 @@ class TestSendRequest:
 
 class TestHandleMessage:
     """Tests for BotWebSocketClient._handle_message."""
+
+    async def test_handle_message_does_not_log_raw_interaction_answers(self, client):
+        message = json.dumps(
+            {
+                "type": "event",
+                "event": "interaction.resolved",
+                "payload": {
+                    "interactionId": "int-1",
+                    "answers": {"Question?": "answer-must-not-leak"},
+                },
+            }
+        )
+
+        with patch(
+            "secbaas.community.core.service.bot_run._bot_websocket_client.logger"
+        ) as mock_logger:
+            await client._handle_message(message)
+
+        assert "answer-must-not-leak" not in str(mock_logger.debug.call_args_list)
 
     # [单测用例]测试场景：响应帧路由到 pending future
     async def test_handle_message_routes_response_to_pending_request(self, client):

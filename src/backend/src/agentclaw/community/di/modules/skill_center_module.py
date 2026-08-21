@@ -9,53 +9,91 @@ from __future__ import annotations
 import dataclasses
 from typing import Callable
 
+from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import (
+    SqlLocalSkillCleanupRepository,
+)
 from injector import Binder, Injector, Module, inject, provider, singleton
 
-from agentclaw.community.api.skill_parameter_service_factory import (
-    SkillParameterServiceFactoryProtocol,
-)
-from agentclaw.community.api.skill_market_service import SkillMarketServiceProtocol
-from agentclaw.community.api.repository_catalog_service import (
-    RepositoryCatalogServiceProtocol,
-)
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
-)
-from agentclaw.community.api.local_skill_upload_service import (
-    LocalSkillUploadServiceProtocol,
-)
-from agentclaw.community.api.local_skill_delete_service import (
-    LocalSkillDeleteServiceProtocol,
+from agentclaw.community.api.bot_runtime_projection_reconciler import (
+    BotRuntimeProjectionReconcilerProtocol as ApiBotRuntimeProjectionReconcilerProtocol,
 )
 from agentclaw.community.api.bot_skill_asset_service import (
     BotSkillAssetServiceProtocol,
 )
-from agentclaw.community.api.skill_set_control_plane import (
-    SkillSetControlPlaneServiceProtocol,
+from agentclaw.community.api.local_skill_delete_service import (
+    LocalSkillDeleteServiceProtocol,
+)
+from agentclaw.community.api.local_skill_query_service import (
+    LocalSkillQueryServiceProtocol,
 )
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
 )
-from agentclaw.community.di import config as cfg
-from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
+)
+from agentclaw.community.api.repository_catalog_service import (
+    RepositoryCatalogServiceProtocol,
+)
+from agentclaw.community.api.skill_market_service import SkillMarketServiceProtocol
+from agentclaw.community.api.skill_parameter_service_factory import (
+    SkillParameterServiceFactoryProtocol,
+)
+from agentclaw.community.api.skill_set_control_plane import (
+    SkillSetControlPlaneServiceProtocol,
+)
+from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+)
+from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
+from agentclaw.community.core.devices.services.device_filesystem_dispatcher import (
+    DeviceFilesystemDispatcher,
+    DeviceFileSystemResolver,
+)
+from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+    DeviceSyncDispatcher,
+)
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
-from agentclaw.community.core.skill_center.services.git_sync import (
-    GitSyncConfig,
-    GitSyncService,
+from agentclaw.community.core.repository.implementations.skill_center.installation import (
+    SkillInstallationRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.propagation_log import \
+    SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository
+from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
+    SkillSetControlPlaneRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
+    SpaceSkillRepository as UnifiedSpaceSkillRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.sync_log import \
+    SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository
+from agentclaw.community.core.repository.protocols.bot import (
+    BotCollabLogRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    LocalSkillCleanupRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
-    SkillSetRepository,
+    SkillCategoryRepository,
 )
-from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillCenterSyncLogRepository,
+)
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillMemberRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
-    SkillCategoryRepository,
+    SkillPropagationLogRepository,
+)
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillSetRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
     SpaceSkillRepository,
@@ -63,14 +101,58 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 from agentclaw.community.core.repository.protocols.skill_installation import (
     SkillInstallationRepositoryProtocol,
 )
-from agentclaw.community.core.repository.implementations.skill_center.installation import (
-    SkillInstallationRepository,
-)
-from agentclaw.community.core.repository.implementations.skill_center.skill_set_control_plane import (
-    SkillSetControlPlaneRepository,
-)
 from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
     SkillSetControlPlaneRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolSkillRepositoryProtocol,
+)
+from agentclaw.community.core.skill_center.authorization_hook import (
+    BotCapabilityAuthorizationHookProtocol,
+    CollaboratorBotCapabilityAuthorizationHook,
+)
+from agentclaw.community.core.skill_center.factories import (
+    SkillParameterServiceFactory,
+    SkillServiceFactory,
+    SkillSetServiceFactory,
+)
+from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
+    LegacySkillSetCompatibilityFactoryProtocol,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    BotRuntimeProjectionReconcilerProtocol as CoreBotRuntimeProjectionReconcilerProtocol,
+)
+from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
+    BotCapabilityMutationGuard,
+)
+from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
+    BotRuntimeProjectionReconciler,
+)
+from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
+    BotSkillAssetService,
+)
+from agentclaw.community.core.skill_center.services.git_sync import (
+    GitSyncConfig,
+    GitSyncService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
+    LocalSkillDeleteService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_query_service import (
+    LocalSkillQueryService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_state_service import (
+    LocalSkillStateService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
+    LocalSkillUploadService,
+)
+from agentclaw.community.core.skill_center.services.market_sync import MarketSyncService
+from agentclaw.community.core.skill_center.services.repository_catalog_service import (
+    RepositoryCatalogService,
 )
 from agentclaw.community.core.skill_center.services.skill_auth_service import (
     SkillAuthService,
@@ -78,146 +160,63 @@ from agentclaw.community.core.skill_center.services.skill_auth_service import (
 from agentclaw.community.core.skill_center.services.skill_batch_sync_service import (
     SkillBatchSyncService,
 )
+from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
     SkillCenterSyncService,
-)
-from agentclaw.community.core.repository.protocols.skill_center import (
-    SkillCenterSyncLogRepository,
-)
-from agentclaw.community.core.skill_center.services.skill_member_service import (
-    SkillMemberService,
-)
-from agentclaw.community.core.skill_center.services.market_sync import MarketSyncService
-from agentclaw.community.core.skill_center.services.repository_catalog_service import (
-    RepositoryCatalogService,
 )
 from agentclaw.community.core.skill_center.services.skill_market_service import (
     SkillMarketService,
 )
-from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
-from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
+from agentclaw.community.core.skill_center.services.skill_member_service import (
+    SkillMemberService,
+)
 from agentclaw.community.core.skill_center.services.skill_propagation_service import (
     SkillPropagationService,
-)
-from agentclaw.community.core.repository.protocols.skill_center import (
-    SkillPropagationLogRepository,
 )
 from agentclaw.community.core.skill_center.services.skill_publish_service import (
     SkillPublishService,
 )
-from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
-from agentclaw.community.core.skill_center.factories import (
-    SkillParameterServiceFactory,
-    SkillServiceFactory,
-    SkillSetServiceFactory,
-)
-from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
-from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
-    LegacySkillSetCompatibilityFactoryProtocol,
+from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
+from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
+    SkillSetControlPlaneService,
 )
 from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetActivatorFactory,
     SkillSetSwitcherFactory,
 )
-from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
-from agentclaw.community.core.repository.protocols.skills_pool import (
-    SkillsPoolLayoutRepositoryProtocol,
+from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
+    SkillSymlinkListener,
 )
-from agentclaw.community.core.repository.protocols.skills_pool import (
-    SkillsPoolSkillRepositoryProtocol,
+from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
+from agentclaw.community.core.skills_pool.models import (
+    pool_paths_for_engine,
 )
 from agentclaw.community.core.skills_pool.reconcile_task import (
     SkillsPoolReconcileWakeupListener,
 )
-from agentclaw.community.core.workspace.skill_layout import (
-    pool_paths_for_engine,
-    runtime_layout_engine_for_bot,
-)
-from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     SkillLayoutPhase,
     runtime_uses_pool_paths,
 )
-from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
-    SkillSymlinkListener,
+from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
+from agentclaw.community.core.workspace.skill_layout import (
+    runtime_layout_engine_for_bot,
 )
-
-from agentclaw.community.core.skill_center.services.local_skill_query_service import (
-    LocalSkillQueryService,
-)
-from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
-    LocalSkillUploadService,
-)
-from agentclaw.community.core.skill_center.services.local_skill_state_service import (
-    LocalSkillStateService,
-)
-from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
-    LocalSkillDeleteService,
-)
-from agentclaw.community.core.skill_center.services.bot_skill_asset_service import (
-    BotSkillAssetService,
-)
-from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
-    SkillSetControlPlaneService,
-)
-from agentclaw.community.api.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconcilerProtocol as ApiBotRuntimeProjectionReconcilerProtocol,
-)
-from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectionReconcilerProtocol as CoreBotRuntimeProjectionReconcilerProtocol,
-)
-from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
-    BotRuntimeProjectionReconciler,
-)
-from agentclaw.community.core.skill_center.authorization_hook import (
-    BotCapabilityAuthorizationHookProtocol,
-    CollaboratorBotCapabilityAuthorizationHook,
-)
-from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
-    BotCapabilityMutationGuard,
-)
-from agentclaw.community.core.repository.protocols.skill_center import (
-    LocalSkillCleanupRepository,
-)
-from agentclaw.community.core.bot_collaborator.protocols import (
-    CollaboratorServiceProtocol,
-)
-from agentclaw.community.core.repository.protocols.bot import (
-    BotCollabLogRepositoryProtocol,
+from agentclaw.community.di import config as cfg
+from agentclaw.community.di.modules.skill_center_protocols import (
+    SkillCenterProtocolBindings,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.devices.services.device_sync_dispatcher import (
-    DeviceSyncDispatcher,
-)
-from agentclaw.community.core.devices.services.device_filesystem_dispatcher import (
-    DeviceFilesystemDispatcher,
-    DeviceFileSystemResolver,
-)
-from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.plugin_api.impl_registry import IMPL_REGISTRY, Mode
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
-from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
+from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
-from agentclaw.community.di.modules.skill_center_protocols import (
-    SkillCenterProtocolBindings,
-)
-from agentclaw.community.core.repository.implementations.skill_center.sync_log import (
-    SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository,
-)
-from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
-    SpaceSkillRepository as UnifiedSpaceSkillRepository,
-)
-from agentclaw.community.core.repository.implementations.skill_center.propagation_log import (
-    SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository,
-)
-from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import (
-    SqlLocalSkillCleanupRepository,
-)
+from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 
 
 def _template_service_cls():
@@ -698,13 +697,10 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         def resolve_pool_paths(
             owner_id: str,
             bot_id: str,
-            _requested_engine: str,
+            requested_runtime_engine: str,
         ) -> tuple[str, str, str] | None:
             bot = bot_repo.get_by_id_and_owner(bot_id, owner_id)
             if bot is None:
-                return None
-            engine = bot.get("active_engine")
-            if not isinstance(engine, str):
                 return None
             state = layout_repository.get(
                 BotSkillLayoutScope(
@@ -720,6 +716,7 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
 
         return SkillServiceFactory(
             skill_repo=skill_repo,
+            bot_repo=bot_repo,
             skill_repo_sync=skill_repo_sync,
             category_repo=category_repo,
             device_fs_dispatcher=device_fs_dispatcher,

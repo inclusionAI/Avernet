@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -16,31 +16,31 @@ use bcs_group_store::MySqlGroupStore;
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, BotFinalDelivery,
-    ChatConfiguration,
-    CollaborationConfiguration, CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroup,
-    CreateGroupSpec, CreateParticipant, DeleteGroup, GetGroup, GroupDeliveryPolicy, GroupDetail,
+    ChatConfiguration, CollaborationConfiguration, CreateCollaborationGroup,
+    CreateDirectMessageGroup, CreateGroup, CreateGroupSpec, CreateParticipant, DeleteGroup,
+    EventSinkInput, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupEventSubscriptionProvisioner,
     GroupKindFilter, GroupPatch, GroupService, GroupStrategy as V1GroupStrategy, GroupSummary,
-    GroupVisibility, ListGroups, Membership, MembershipFilter, UpdateGroup,
+    GroupVisibility, InlineGroupEventSubscriptionRequest, ListGroups, Membership, MembershipFilter,
+    PendingGroupEventSubscriptions, PreparedGroupEventSubscriptions, UpdateGroup,
 };
+use bcs_service_api::types::{EventActor, EventActorType, EventPayload, OpeningMessage};
 use bcs_service_api::{
-    BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand, CollaborationDefinition,
-    CollaborationDefinitionRef, ChannelBindingCleanupPort, CollaborationRuntimeError,
-    CollaborationRuntimeService,
-    ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand,
-    DefaultDelivery, DefinitionYamlSource, FriendCoreService, FriendRepoPort, Group,
-    GroupCollaborationDefinitionView, GroupCoreService, GroupStrategy,
-    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, NewSessionParams, Participant,
-    ParticipantRole, RelationCoreService, RoutingMode, RoutingPolicy, ServiceError, ServiceResult,
-    SessionHistoryResult,
-    SessionManagementService, StartStateMachineRunCommand, StartStateMachineRunOutcome,
-    StateMachineDeliveryCorrelation, StateMachineRun, StateMachineRunStatus, StateMachineRunView,
-    SystemMessageService,
+    BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand,
+    ChannelBindingCleanupPort, CollaborationDefinition, CollaborationDefinitionRef,
+    CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
+    ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand, DefaultDelivery, DefinitionYamlSource,
+    FriendCoreService, FriendRepoPort, Group, GroupCollaborationDefinitionView, GroupCoreService,
+    GroupStrategy, HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, NewSessionParams,
+    Participant, ParticipantRole, RelationCoreService, RoutingMode, RoutingPolicy, ServiceError,
+    ServiceResult, SessionHistoryResult, SessionManagementService, StartStateMachineRunCommand,
+    StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
+    StateMachineRunStatus, StateMachineRunView, SystemMessageService,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::NoopSystemMessageService;
 
-use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
+use bcs_app_group::{GroupProvisioningReconciler, GroupServiceConfig, GroupServiceImpl};
 
 struct Fixture {
     service: GroupServiceImpl,
@@ -56,6 +56,16 @@ impl Fixture {
         Self::build(None, None, None).await
     }
 
+    fn with_event_subscription_provisioner(
+        mut self,
+        provisioner: Arc<dyn GroupEventSubscriptionProvisioner>,
+    ) -> Self {
+        self.service = self
+            .service
+            .with_event_subscription_provisioner(provisioner);
+        self
+    }
+
     async fn new_with_runtime(runtime: Arc<dyn CollaborationRuntimeService>) -> Self {
         Self::build(Some(runtime), None, None).await
     }
@@ -69,10 +79,7 @@ impl Fixture {
     }
 
     async fn new_with_failing_group_store() -> Self {
-        let group_repo = Arc::new(MySqlGroupStore::new(
-            Arc::new(FailingDb),
-            "dev".to_string(),
-        ));
+        let group_repo = Arc::new(MySqlGroupStore::new(Arc::new(FailingDb), "dev".to_string()));
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
         let bots = Arc::new(BotCore::memory());
         let relation = Arc::new(RelationCore::memory());
@@ -81,8 +88,7 @@ impl Fixture {
             Arc::new(MemorySessionRepo::new()),
             group_repo,
         ));
-        let system_message: Arc<dyn SystemMessageService> =
-            Arc::new(NoopSystemMessageService);
+        let system_message: Arc<dyn SystemMessageService> = Arc::new(NoopSystemMessageService);
         let management = Arc::new(
             GroupManagement::new(
                 groups.clone(),
@@ -247,6 +253,27 @@ impl Fixture {
             .await
             .expect("assign test Bot owner");
     }
+
+    async fn add_bot_owned_by(
+        &self,
+        bot_uuid: &str,
+        owner_staff_no: &str,
+        visibility: &str,
+    ) {
+        let capabilities = BotCapabilities {
+            name: Some(bot_uuid.to_string()),
+            visibility: visibility.into(),
+            ..Default::default()
+        };
+        self.bots
+            .register(bot_uuid.to_string(), capabilities)
+            .await
+            .expect("register bot");
+        self.bots
+            .save_created_by(bot_uuid, owner_staff_no, true)
+            .await
+            .expect("assign test Bot owner");
+    }
 }
 
 struct FailingDb;
@@ -377,6 +404,131 @@ impl ChannelBindingCleanupPort for FailingChannelBindingCleanup {
             "channel binding cleanup failed".to_string(),
         ))
     }
+
+    async fn delete_bindings_for_bot(&self, _bot_id: &str) -> ServiceResult<u64> {
+        Err(ServiceError::InternalError(
+            "channel binding cleanup failed".to_string(),
+        ))
+    }
+}
+
+struct RecordingGroupProvisioner {
+    groups: Arc<dyn GroupCoreService>,
+    prepared_group_ids: Mutex<Vec<String>>,
+    cancelled_group_ids: Mutex<Vec<String>>,
+    finalized_group_ids: Mutex<Vec<String>>,
+    pending_groups: Mutex<Vec<PendingGroupEventSubscriptions>>,
+    fail_prepare: AtomicBool,
+    fail_finalize: AtomicBool,
+}
+
+impl RecordingGroupProvisioner {
+    fn new(groups: Arc<dyn GroupCoreService>) -> Self {
+        Self {
+            groups,
+            prepared_group_ids: Mutex::new(Vec::new()),
+            cancelled_group_ids: Mutex::new(Vec::new()),
+            finalized_group_ids: Mutex::new(Vec::new()),
+            pending_groups: Mutex::new(Vec::new()),
+            fail_prepare: AtomicBool::new(false),
+            fail_finalize: AtomicBool::new(false),
+        }
+    }
+}
+
+#[async_trait]
+impl GroupEventSubscriptionProvisioner for RecordingGroupProvisioner {
+    async fn prepare(
+        &self,
+        _caller: &AuthenticatedCaller,
+        group_id: &str,
+        _requests: Vec<InlineGroupEventSubscriptionRequest>,
+    ) -> Result<PreparedGroupEventSubscriptions, ApplicationError> {
+        self.prepared_group_ids
+            .lock()
+            .expect("provisioner lock")
+            .push(group_id.to_string());
+        if self.fail_prepare.load(Ordering::SeqCst) {
+            return Err(ApplicationError::invalid(
+                "invalid_event_filter",
+                "test validation failure",
+            ));
+        }
+        Ok(PreparedGroupEventSubscriptions {
+            group_id: group_id.to_string(),
+            subscription_ids: vec!["sub-inline".to_string()],
+            actor: EventActor {
+                actor_type: EventActorType::Human,
+                id: "human_alice".to_string(),
+                display_name: Some("Alice".to_string()),
+            },
+        })
+    }
+
+    async fn cancel(
+        &self,
+        prepared: &PreparedGroupEventSubscriptions,
+        _reason: &str,
+    ) -> Result<(), ApplicationError> {
+        self.cancelled_group_ids
+            .lock()
+            .expect("provisioner lock")
+            .push(prepared.group_id.clone());
+        Ok(())
+    }
+
+    async fn finalize(
+        &self,
+        prepared: &PreparedGroupEventSubscriptions,
+        group: &Group,
+        _initial_session: Option<&bcs_service_api::Session>,
+    ) -> Result<(), ApplicationError> {
+        self.finalized_group_ids
+            .lock()
+            .expect("provisioner lock")
+            .push(prepared.group_id.clone());
+        if self.fail_finalize.load(Ordering::SeqCst) {
+            return Err(ApplicationError::internal("test finalization failure"));
+        }
+        let mut active = group.clone();
+        active.record_status = "active".to_string();
+        self.groups
+            .upsert(active)
+            .await
+            .map_err(|error| ApplicationError::internal(format!("test activation failed: {error}")))
+    }
+
+    async fn recover_pending(
+        &self,
+        group_id: &str,
+    ) -> Result<PreparedGroupEventSubscriptions, ApplicationError> {
+        Ok(PreparedGroupEventSubscriptions {
+            group_id: group_id.to_string(),
+            subscription_ids: vec!["sub-inline".to_string()],
+            actor: EventActor {
+                actor_type: EventActorType::System,
+                id: "test-reconciler".to_string(),
+                display_name: None,
+            },
+        })
+    }
+
+    async fn list_pending_groups(
+        &self,
+    ) -> Result<Vec<PendingGroupEventSubscriptions>, ApplicationError> {
+        Ok(self
+            .pending_groups
+            .lock()
+            .expect("provisioner lock")
+            .clone())
+    }
+
+    async fn load_activated(
+        &self,
+        _prepared: &PreparedGroupEventSubscriptions,
+    ) -> Result<Vec<bcs_service_api::application::v1::EventSubscription>, ApplicationError> {
+        Ok(Vec::new())
+    }
 }
 
 #[derive(Default)]
@@ -490,10 +642,12 @@ impl CollaborationRuntimeService for RecordingRuntime {
         let outcome = ConfigureGroupRuntimeOutcome {
             group_id: cmd.group_id.clone(),
             default_definition: cmd.definition_ref.clone().or_else(|| {
-                cmd.definition_yaml.as_ref().map(|_| CollaborationDefinitionRef {
-                    id: "generated-definition".into(),
-                    version: 1,
-                })
+                cmd.definition_yaml
+                    .as_ref()
+                    .map(|_| CollaborationDefinitionRef {
+                        id: "generated-definition".into(),
+                        version: 1,
+                    })
             }),
             auto_start_on_service_invocation: cmd.auto_start_on_service_invocation,
             requires_human_input_channel: self.requires_human_input_channel,
@@ -559,6 +713,49 @@ impl CollaborationRuntimeService for RecordingRuntime {
 
 fn bot_principal(bot_uuid: &str) -> AuthenticatedCaller {
     human_principal_with_profile(bot_uuid, bot_uuid, None, None)
+}
+
+fn inline_group_subscription() -> InlineGroupEventSubscriptionRequest {
+    InlineGroupEventSubscriptionRequest {
+        name: "group-create-events".to_string(),
+        event_filters: vec!["group.created".to_string(), "session.created".to_string()],
+        payload: EventPayload::default(),
+        sink: EventSinkInput::Webhook {
+            url: "https://events.example.com/groups".to_string(),
+            request_timeout_ms: None,
+        },
+    }
+}
+
+fn collaboration_create_command() -> CreateGroup {
+    CreateGroup {
+        caller: bot_principal("alice"),
+        group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            originator: None,
+            name: Some("Provisioned Group".to_string()),
+            context: None,
+            opening_message: None,
+            visibility: GroupVisibility::Private,
+            driver_bot_uuid: "driver".to_string(),
+            participants: Vec::new(),
+            collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                delivery_policy: GroupDeliveryPolicy {
+                    bot_final_delivery: BotFinalDelivery::SendToDriver,
+                },
+            }),
+        }),
+    }
+}
+
+fn dm_create_command() -> CreateGroup {
+    CreateGroup {
+        caller: bot_principal("alice"),
+        group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+            name: Some("Alice and Assistant".to_string()),
+            context: None,
+            target_actor_id: "assistant".to_string(),
+        }),
+    }
 }
 
 fn bot_principal_in_tenant(bot_uuid: &str, tenant: &str) -> AuthenticatedCaller {
@@ -805,10 +1002,7 @@ async fn list_session_only_groups_filters_by_visibility() {
                 group_id: group_id.into(),
                 session_id: None,
                 params: NewSessionParams {
-                    participants: vec![Participant::bot(
-                        "target",
-                        ParticipantRole::Consultant,
-                    )],
+                    participants: vec![Participant::bot("target", ParticipantRole::Consultant)],
                     ..Default::default()
                 },
             })
@@ -876,7 +1070,10 @@ async fn list_defaults_to_the_authenticated_human_and_accepts_only_authorized_vi
         .upsert(normal_group(
             "owned-bot-group",
             "owned-by-someone-else",
-            vec![Participant::bot("owned-by-alice", ParticipantRole::Consultant)],
+            vec![Participant::bot(
+                "owned-by-alice",
+                ParticipantRole::Consultant,
+            )],
             GroupStrategy::Chat,
             1,
         ))
@@ -1011,10 +1208,7 @@ async fn group_detail_accepts_human_or_exact_owned_bot_participation_only() {
 #[tokio::test]
 async fn group_detail_propagates_owned_bot_lookup_database_failure() {
     let bots = Arc::new(BotCore::with_repo(Arc::new(
-        PersistentBotRepo::with_plugins(
-            Arc::new(InMemoryCachePlugin::new()),
-            Arc::new(FailingDb),
-        ),
+        PersistentBotRepo::with_plugins(Arc::new(InMemoryCachePlugin::new()), Arc::new(FailingDb)),
     )));
     let fixture = Fixture::new_with_bots(bots).await;
     fixture
@@ -1142,21 +1336,21 @@ async fn create_uses_the_authenticated_human_as_originator() {
         .create(CreateGroup {
             caller: bot_principal("requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("Planning".into()),
                 context: Some("Plan the release".into()),
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
                 }],
-                collaboration: CollaborationConfiguration::Chat(
-                    ChatConfiguration {
-                        delivery_policy: GroupDeliveryPolicy {
-                            bot_final_delivery: BotFinalDelivery::SendToDriver,
-                        },
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
                     },
-                ),
+                }),
             }),
         })
         .await
@@ -1176,6 +1370,453 @@ async fn create_uses_the_authenticated_human_as_originator() {
 }
 
 #[tokio::test]
+async fn inline_subscription_create_uses_provisioning_and_finalizes_initial_session() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+    let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
+    let fixture = fixture.with_event_subscription_provisioner(provisioner.clone());
+
+    let outcome = fixture
+        .service
+        .create_with_event_subscriptions(
+            collaboration_create_command(),
+            vec![inline_group_subscription()],
+        )
+        .await
+        .expect("create Group with inline Subscription");
+
+    assert!(outcome.created);
+    let group_id = provisioner
+        .prepared_group_ids
+        .lock()
+        .expect("provisioner lock")[0]
+        .clone();
+    assert_eq!(
+        provisioner
+            .finalized_group_ids
+            .lock()
+            .expect("provisioner lock")
+            .as_slice(),
+        [group_id.as_str()]
+    );
+    let group = fixture
+        .groups
+        .try_get(&group_id)
+        .await
+        .expect("load Group")
+        .expect("created Group");
+    assert_eq!(group.record_status, "active");
+    let sessions = fixture
+        .sessions
+        .list_by_group(&group_id, None, 0, 10, None, None)
+        .await
+        .expect("list initial Sessions");
+    assert_eq!(sessions.len(), 1);
+}
+
+#[tokio::test]
+async fn eventing_enabled_create_without_inline_subscription_still_finalizes_events() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+    let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
+    let fixture = fixture.with_event_subscription_provisioner(provisioner.clone());
+
+    fixture
+        .service
+        .create(collaboration_create_command())
+        .await
+        .expect("create Group without an inline Subscription");
+
+    let prepared = provisioner
+        .prepared_group_ids
+        .lock()
+        .expect("provisioner lock");
+    let finalized = provisioner
+        .finalized_group_ids
+        .lock()
+        .expect("provisioner lock");
+    assert_eq!(prepared.len(), 1);
+    assert_eq!(finalized.as_slice(), prepared.as_slice());
+}
+
+#[tokio::test]
+async fn inline_subscription_dm_create_finalizes_without_an_initial_session() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("assistant").await;
+    let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
+    let fixture = fixture.with_event_subscription_provisioner(provisioner.clone());
+
+    let outcome = fixture
+        .service
+        .create_with_event_subscriptions(dm_create_command(), vec![inline_group_subscription()])
+        .await
+        .expect("create DM with inline Subscription");
+
+    assert!(outcome.created);
+    let group_id = provisioner
+        .prepared_group_ids
+        .lock()
+        .expect("provisioner lock")[0]
+        .clone();
+    assert_eq!(
+        fixture
+            .groups
+            .try_get(&group_id)
+            .await
+            .expect("load DM")
+            .expect("created DM")
+            .record_status,
+        "active"
+    );
+    assert!(
+        fixture
+            .sessions
+            .list_by_group(&group_id, None, 0, 10, None, None)
+            .await
+            .expect("list DM Sessions")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn inline_subscription_dm_reuse_cancels_the_new_pending_set() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("assistant").await;
+    let existing = fixture
+        .service
+        .create_with_outcome(dm_create_command())
+        .await
+        .expect("create canonical DM");
+    assert!(existing.created);
+    let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
+    let fixture = fixture.with_event_subscription_provisioner(provisioner.clone());
+
+    let reused = fixture
+        .service
+        .create_with_event_subscriptions(dm_create_command(), vec![inline_group_subscription()])
+        .await
+        .expect("reuse canonical DM");
+
+    assert!(!reused.created);
+    assert!(
+        provisioner
+            .finalized_group_ids
+            .lock()
+            .expect("provisioner lock")
+            .is_empty()
+    );
+    assert_eq!(
+        provisioner
+            .cancelled_group_ids
+            .lock()
+            .expect("provisioner lock")
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn inline_subscription_validation_failure_creates_no_group_or_session() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+    let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
+    provisioner.fail_prepare.store(true, Ordering::SeqCst);
+    let fixture = fixture.with_event_subscription_provisioner(provisioner.clone());
+
+    let error = fixture
+        .service
+        .create_with_event_subscriptions(
+            collaboration_create_command(),
+            vec![inline_group_subscription()],
+        )
+        .await
+        .expect_err("Subscription validation must fail before Group creation");
+    assert_eq!(error.code(), "invalid_event_filter");
+    let group_id = provisioner
+        .prepared_group_ids
+        .lock()
+        .expect("provisioner lock")[0]
+        .clone();
+    assert!(fixture.groups.try_get(&group_id).await.unwrap().is_none());
+    assert!(
+        fixture
+            .sessions
+            .list_by_group(&group_id, None, 0, 10, None, None)
+            .await
+            .expect("list Sessions")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn inline_subscription_finalization_failure_compensates_group_session_and_pending_set() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+    let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
+    provisioner.fail_finalize.store(true, Ordering::SeqCst);
+    let fixture = fixture.with_event_subscription_provisioner(provisioner.clone());
+
+    let error = fixture
+        .service
+        .create_with_event_subscriptions(
+            collaboration_create_command(),
+            vec![inline_group_subscription()],
+        )
+        .await
+        .expect_err("finalization failure must fail Group creation");
+    assert!(error.to_string().contains("test finalization failure"));
+    let group_id = provisioner
+        .prepared_group_ids
+        .lock()
+        .expect("provisioner lock")[0]
+        .clone();
+    assert!(fixture.groups.try_get(&group_id).await.unwrap().is_none());
+    assert!(
+        fixture
+            .sessions
+            .list_by_group(&group_id, None, 0, 10, None, None)
+            .await
+            .expect("list Sessions")
+            .is_empty()
+    );
+    assert_eq!(
+        provisioner
+            .cancelled_group_ids
+            .lock()
+            .expect("provisioner lock")
+            .as_slice(),
+        [group_id.as_str()]
+    );
+}
+
+#[tokio::test]
+async fn provisioning_groups_are_hidden_from_v1_reads_and_lists() {
+    let fixture = Fixture::new().await;
+    let mut group = normal_group(
+        "hidden-provisioning",
+        "driver",
+        vec![Participant::human("human_alice", ParticipantRole::Observer)],
+        GroupStrategy::Chat,
+        1,
+    );
+    group.record_status = "provisioning".to_string();
+    fixture.groups.upsert(group).await.expect("seed Group");
+
+    let error = fixture
+        .service
+        .get(GetGroup {
+            caller: bot_principal("alice"),
+            group_id: "hidden-provisioning".to_string(),
+        })
+        .await
+        .expect_err("provisioning Group must be hidden");
+    assert_eq!(error.code(), "group_not_found");
+    let page = fixture
+        .service
+        .list_groups(ListGroups {
+            caller: bot_principal("alice"),
+            view_bot_id: None,
+            offset: 0,
+            limit: 10,
+            q: None,
+            visibility: None,
+            membership: MembershipFilter::All,
+            kind: GroupKindFilter::All,
+            strategy: None,
+        })
+        .await
+        .expect("list Groups");
+    assert_eq!(page.total, 0);
+}
+
+#[tokio::test]
+async fn provisioning_reconciler_completes_a_crash_interrupted_group() {
+    let fixture = Fixture::new().await;
+    let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
+    let mut group = Group::new(
+        "crash-interrupted",
+        "driver",
+        vec![Participant::bot("driver", ParticipantRole::Driver)],
+    );
+    group.label = Some("Recovered".to_string());
+    group.record_status = "provisioning".to_string();
+    fixture
+        .groups
+        .upsert(group.clone())
+        .await
+        .expect("seed provisioning Group");
+    fixture
+        .sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                participants: group.participants.clone(),
+                created_by: Some("human_alice".to_string()),
+                ..NewSessionParams::default()
+            },
+        })
+        .await
+        .expect("seed initial Session");
+    let reconciler = GroupProvisioningReconciler::new(
+        fixture.groups.clone(),
+        fixture.sessions.clone(),
+        None,
+        provisioner,
+    );
+
+    let outcome = reconciler.reconcile_once(u64::MAX, 0).await;
+
+    assert_eq!(outcome.finalized, 1);
+    assert_eq!(outcome.compensated, 0);
+    assert_eq!(outcome.deferred, 0);
+    assert_eq!(
+        fixture
+            .groups
+            .try_get(&group.id)
+            .await
+            .expect("load Group")
+            .expect("recovered Group")
+            .record_status,
+        "active"
+    );
+}
+
+#[tokio::test]
+async fn provisioning_reconciler_compensates_an_incomplete_group() {
+    let fixture = Fixture::new().await;
+    let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
+    let mut group = Group::new(
+        "crash-incomplete",
+        "driver",
+        vec![Participant::bot("driver", ParticipantRole::Driver)],
+    );
+    group.record_status = "provisioning".to_string();
+    fixture
+        .groups
+        .upsert(group.clone())
+        .await
+        .expect("seed incomplete Group");
+    let reconciler = GroupProvisioningReconciler::new(
+        fixture.groups.clone(),
+        fixture.sessions.clone(),
+        None,
+        provisioner.clone(),
+    );
+
+    let outcome = reconciler.reconcile_once(u64::MAX, 0).await;
+
+    assert_eq!(outcome.finalized, 0);
+    assert_eq!(outcome.compensated, 1);
+    assert!(fixture.groups.try_get(&group.id).await.unwrap().is_none());
+    assert_eq!(
+        provisioner
+            .cancelled_group_ids
+            .lock()
+            .expect("provisioner lock")
+            .as_slice(),
+        [group.id.as_str()]
+    );
+}
+
+#[tokio::test]
+async fn provisioning_reconciler_compensates_state_machine_without_runtime_state() {
+    let fixture = Fixture::new().await;
+    let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
+    let mut group = Group::new(
+        "crash-state-machine",
+        "driver",
+        vec![Participant::bot("driver", ParticipantRole::Driver)],
+    );
+    group.group_strategy = GroupStrategy::StateMachine;
+    group.record_status = "provisioning".to_string();
+    fixture
+        .groups
+        .upsert(group.clone())
+        .await
+        .expect("seed provisioning Group");
+    fixture
+        .sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                participants: group.participants.clone(),
+                created_by: Some("human_alice".to_string()),
+                ..NewSessionParams::default()
+            },
+        })
+        .await
+        .expect("seed initial Session");
+    let reconciler = GroupProvisioningReconciler::new(
+        fixture.groups.clone(),
+        fixture.sessions.clone(),
+        None,
+        provisioner.clone(),
+    );
+
+    let outcome = reconciler.reconcile_once(u64::MAX, 0).await;
+
+    assert_eq!(outcome.finalized, 0);
+    assert_eq!(outcome.compensated, 1);
+    assert_eq!(outcome.deferred, 0);
+    assert!(fixture.groups.try_get(&group.id).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn provisioning_reconciler_cancels_only_stale_orphaned_pending_sets() {
+    let fixture = Fixture::new().await;
+    let provisioner = Arc::new(RecordingGroupProvisioner::new(fixture.groups.clone()));
+    let recovery_actor = EventActor {
+        actor_type: EventActorType::System,
+        id: "test-reconciler".to_string(),
+        display_name: None,
+    };
+    provisioner
+        .pending_groups
+        .lock()
+        .expect("provisioner lock")
+        .extend([
+            PendingGroupEventSubscriptions {
+                prepared: PreparedGroupEventSubscriptions {
+                    group_id: "orphan-stale".to_string(),
+                    subscription_ids: vec!["sub-stale".to_string()],
+                    actor: recovery_actor.clone(),
+                },
+                created_at_ms: 100,
+            },
+            PendingGroupEventSubscriptions {
+                prepared: PreparedGroupEventSubscriptions {
+                    group_id: "orphan-in-flight".to_string(),
+                    subscription_ids: vec!["sub-in-flight".to_string()],
+                    actor: recovery_actor,
+                },
+                created_at_ms: 250,
+            },
+        ]);
+    let reconciler = GroupProvisioningReconciler::new(
+        fixture.groups.clone(),
+        fixture.sessions.clone(),
+        None,
+        provisioner.clone(),
+    );
+
+    let outcome = reconciler.reconcile_once(300, 100).await;
+
+    assert_eq!(outcome.finalized, 0);
+    assert_eq!(outcome.compensated, 1);
+    assert_eq!(outcome.deferred, 0);
+    assert_eq!(
+        provisioner
+            .cancelled_group_ids
+            .lock()
+            .expect("provisioner lock")
+            .as_slice(),
+        ["orphan-stale"]
+    );
+}
+
+#[tokio::test]
 async fn human_participant_can_create_with_driver_reachable_protected_participants() {
     let fixture = Fixture::new().await;
     fixture.add_public_bot("driver").await;
@@ -1189,15 +1830,12 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
     let detail = fixture
         .service
         .create(CreateGroup {
-            caller: human_principal_with_profile(
-                "staff-1",
-                "alice-login",
-                Some("Alice"),
-                None,
-            ),
+            caller: human_principal_with_profile("staff-1", "alice-login", Some("Alice"), None),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("Protected collaboration".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![
@@ -1210,13 +1848,11 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
                         role: ParticipantRole::Consultant,
                     },
                 ],
-                collaboration: CollaborationConfiguration::Chat(
-                    ChatConfiguration {
-                        delivery_policy: GroupDeliveryPolicy {
-                            bot_final_delivery: BotFinalDelivery::SendToDriver,
-                        },
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
                     },
-                ),
+                }),
             }),
         })
         .await
@@ -1315,19 +1951,13 @@ async fn explicit_view_requires_the_target_bot_to_exist_and_be_owned() {
         })
         .await;
 
-    assert!(matches!(
-        result,
-        Err(ApplicationError::Forbidden(_))
-    ));
+    assert!(matches!(result, Err(ApplicationError::Forbidden(_))));
 }
 
 #[tokio::test]
 async fn explicit_view_propagates_registry_database_failure() {
     let bots = Arc::new(BotCore::with_repo(Arc::new(
-        PersistentBotRepo::with_plugins(
-            Arc::new(InMemoryCachePlugin::new()),
-            Arc::new(FailingDb),
-        ),
+        PersistentBotRepo::with_plugins(Arc::new(InMemoryCachePlugin::new()), Arc::new(FailingDb)),
     )));
     let fixture = Fixture::new_with_bots(bots).await;
 
@@ -1363,9 +1993,11 @@ async fn create_group_propagates_quota_lookup_database_failure() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 driver_bot_uuid: "driver".into(),
                 name: Some("quota lookup failure".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 participants: Vec::new(),
                 collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
@@ -1399,9 +2031,11 @@ async fn create_group_propagates_non_driver_registry_database_failure() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 driver_bot_uuid: "driver".into(),
                 name: Some("registry failure".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
@@ -1495,8 +2129,10 @@ async fn create_rejects_non_bot_driver_and_dm_target_with_declared_code() {
         .create(CreateGroup {
             caller: bot_principal("requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "human_staff-1".into(),
                 participants: Vec::new(),
@@ -1545,30 +2181,33 @@ async fn state_machine_create_without_runtime_fails_before_persisting_group() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
                 }],
-                collaboration:
-                    CollaborationConfiguration::StateMachine(
-                        bcs_service_api::application::v1::StateMachineConfiguration {
-                            definition:
-                                bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
+                collaboration: CollaborationConfiguration::StateMachine(
+                    bcs_service_api::application::v1::StateMachineConfiguration {
+                        definition:
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
                                     definition_id: "definition-1".into(),
                                     version: 1,
-                                }),
-                            participant_bindings: vec![
-                                bcs_service_api::application::v1::StateMachineParticipantBinding {
-                                    binding: "worker".into(),
-                                    actor_ids: vec!["worker".into()],
                                 },
-                            ],
-                        },
-                    ),
+                            ),
+                        participant_bindings: vec![
+                            bcs_service_api::application::v1::StateMachineParticipantBinding {
+                                binding: "worker".into(),
+                                actor_ids: vec!["worker".into()],
+                            },
+                        ],
+                    },
+                ),
             }),
         })
         .await;
@@ -1589,34 +2228,37 @@ async fn state_machine_create_rejects_duplicate_participant_binding_names() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
                 }],
-                collaboration:
-                    CollaborationConfiguration::StateMachine(
-                        bcs_service_api::application::v1::StateMachineConfiguration {
-                            definition:
-                                bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
+                collaboration: CollaborationConfiguration::StateMachine(
+                    bcs_service_api::application::v1::StateMachineConfiguration {
+                        definition:
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
                                     definition_id: "definition-1".into(),
                                     version: 1,
-                                }),
-                            participant_bindings: vec![
-                                bcs_service_api::application::v1::StateMachineParticipantBinding {
-                                    binding: "worker".into(),
-                                    actor_ids: vec!["worker".into()],
                                 },
-                                bcs_service_api::application::v1::StateMachineParticipantBinding {
-                                    binding: "worker".into(),
-                                    actor_ids: vec!["driver".into()],
-                                },
-                            ],
-                        },
-                    ),
+                            ),
+                        participant_bindings: vec![
+                            bcs_service_api::application::v1::StateMachineParticipantBinding {
+                                binding: "worker".into(),
+                                actor_ids: vec!["worker".into()],
+                            },
+                            bcs_service_api::application::v1::StateMachineParticipantBinding {
+                                binding: "worker".into(),
+                                actor_ids: vec!["driver".into()],
+                            },
+                        ],
+                    },
+                ),
             }),
         })
         .await;
@@ -1644,25 +2286,28 @@ async fn state_machine_runtime_failure_rolls_back_created_group() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
                 }],
-                collaboration:
-                    CollaborationConfiguration::StateMachine(
-                        bcs_service_api::application::v1::StateMachineConfiguration {
-                            definition:
-                                bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
+                collaboration: CollaborationConfiguration::StateMachine(
+                    bcs_service_api::application::v1::StateMachineConfiguration {
+                        definition:
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
                                     definition_id: "definition-1".into(),
                                     version: 1,
-                                }),
-                            participant_bindings: vec![],
-                        },
-                    ),
+                                },
+                            ),
+                        participant_bindings: vec![],
+                    },
+                ),
             }),
         })
         .await;
@@ -1686,30 +2331,33 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: Some("Execute the workflow".into()),
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
                     role: ParticipantRole::Consultant,
                 }],
-                collaboration:
-                    CollaborationConfiguration::StateMachine(
-                        bcs_service_api::application::v1::StateMachineConfiguration {
-                            definition:
-                                bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
+                collaboration: CollaborationConfiguration::StateMachine(
+                    bcs_service_api::application::v1::StateMachineConfiguration {
+                        definition:
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
                                     definition_id: "definition-1".into(),
                                     version: 3,
-                                }),
-                            participant_bindings: vec![
-                                bcs_service_api::application::v1::StateMachineParticipantBinding {
-                                    binding: "worker".into(),
-                                    actor_ids: vec!["worker".into()],
                                 },
-                            ],
-                        },
-                    ),
+                            ),
+                        participant_bindings: vec![
+                            bcs_service_api::application::v1::StateMachineParticipantBinding {
+                                binding: "worker".into(),
+                                actor_ids: vec!["worker".into()],
+                            },
+                        ],
+                    },
+                ),
             }),
         })
         .await
@@ -1718,9 +2366,7 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
     let GroupDetail::Collaboration(detail) = detail else {
         panic!("expected collaboration detail");
     };
-    let CollaborationConfiguration::StateMachine(collaboration) =
-        detail.collaboration
-    else {
+    let CollaborationConfiguration::StateMachine(collaboration) = detail.collaboration else {
         panic!("expected state-machine collaboration");
     };
     match &collaboration.definition {
@@ -1785,8 +2431,10 @@ async fn state_machine_create_with_inline_yaml_returns_persisted_definition_ref(
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -1796,9 +2444,11 @@ async fn state_machine_create_with_inline_yaml_returns_persisted_definition_ref(
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinition::Content(bcs_service_api::application::v1::StateMachineDefinitionContent {
-                                content_yaml: "version: 1\n".into(),
-                            }),
+                            bcs_service_api::application::v1::StateMachineDefinition::Content(
+                                bcs_service_api::application::v1::StateMachineDefinitionContent {
+                                    content_yaml: "version: 1\n".into(),
+                                },
+                            ),
                         participant_bindings: Vec::new(),
                     },
                 ),
@@ -1843,8 +2493,10 @@ async fn state_machine_create_defers_initial_run_until_required_channel_is_bound
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("Human review".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -1854,10 +2506,12 @@ async fn state_machine_create_defers_initial_run_until_required_channel_is_bound
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
-                                definition_id: "bot-human-bot-review".into(),
-                                version: 1,
-                            }),
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                    definition_id: "bot-human-bot-review".into(),
+                                    version: 1,
+                                },
+                            ),
                         participant_bindings: Vec::new(),
                     },
                 ),
@@ -1887,8 +2541,10 @@ async fn state_machine_create_rejects_human_actors_in_bot_bindings() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -1898,10 +2554,12 @@ async fn state_machine_create_rejects_human_actors_in_bot_bindings() {
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
-                                definition_id: "definition-1".into(),
-                                version: 1,
-                            }),
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                    definition_id: "definition-1".into(),
+                                    version: 1,
+                                },
+                            ),
                         participant_bindings: vec![
                             bcs_service_api::application::v1::StateMachineParticipantBinding {
                                 binding: "worker".into(),
@@ -1935,8 +2593,10 @@ async fn state_machine_create_preserves_authenticated_human_in_audit_and_start()
         .create(CreateGroup {
             caller: human_principal_with_profile("staff-1", "alice", Some("Alice"), None),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: Some("Review the release".into()),
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -1946,10 +2606,12 @@ async fn state_machine_create_preserves_authenticated_human_in_audit_and_start()
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
-                                definition_id: "definition-1".into(),
-                                version: 1,
-                            }),
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                    definition_id: "definition-1".into(),
+                                    version: 1,
+                                },
+                            ),
                         participant_bindings: Vec::new(),
                     },
                 ),
@@ -2001,8 +2663,10 @@ async fn state_machine_create_does_not_reread_runtime_for_its_response() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2012,10 +2676,12 @@ async fn state_machine_create_does_not_reread_runtime_for_its_response() {
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
-                                definition_id: "definition-1".into(),
-                                version: 1,
-                            }),
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                    definition_id: "definition-1".into(),
+                                    version: 1,
+                                },
+                            ),
                         participant_bindings: Vec::new(),
                     },
                 ),
@@ -2039,8 +2705,10 @@ async fn state_machine_start_failure_removes_runtime_session_and_group() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2050,10 +2718,12 @@ async fn state_machine_start_failure_removes_runtime_session_and_group() {
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
-                                definition_id: "definition-1".into(),
-                                version: 1,
-                            }),
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                    definition_id: "definition-1".into(),
+                                    version: 1,
+                                },
+                            ),
                         participant_bindings: Vec::new(),
                     },
                 ),
@@ -2104,8 +2774,10 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("State machine".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2115,10 +2787,12 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
-                                definition_id: "definition-1".into(),
-                                version: 1,
-                            }),
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                    definition_id: "definition-1".into(),
+                                    version: 1,
+                                },
+                            ),
                         participant_bindings: Vec::new(),
                     },
                 ),
@@ -2160,10 +2834,9 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
 }
 
 #[tokio::test]
-async fn failed_group_delete_does_not_cancel_runs_before_group_rollback() {
+async fn failed_binding_cleanup_keeps_deletion_and_cleans_state_machine_runtime() {
     let runtime = Arc::new(RecordingRuntime::default());
-    let fixture =
-        Fixture::new_with_runtime_and_failing_channel_cleanup(runtime.clone()).await;
+    let fixture = Fixture::new_with_runtime_and_failing_channel_cleanup(runtime.clone()).await;
     fixture.add_public_bot("driver").await;
     fixture
         .groups
@@ -2188,20 +2861,22 @@ async fn failed_group_delete_does_not_cancel_runs_before_group_rollback() {
         .expect_err("binding cleanup failure must fail deletion");
 
     assert!(matches!(error, ApplicationError::Internal(_)));
-    assert!(fixture.groups.get("group-1").await.is_some());
-    assert!(
+    assert!(fixture.groups.get("group-1").await.is_none());
+    assert_eq!(
         runtime
             .cancelled_groups
             .lock()
             .expect("runtime lock")
-            .is_empty()
+            .as_slice(),
+        &["group-1".to_string()]
     );
-    assert!(
+    assert_eq!(
         runtime
             .deleted_group_state
             .lock()
             .expect("runtime lock")
-            .is_empty()
+            .as_slice(),
+        &["group-1".to_string()]
     );
 }
 
@@ -2238,6 +2913,7 @@ async fn update_preserves_hidden_legacy_routing_fields() {
             group_id: "group-1".into(),
             patch: GroupPatch {
                 name: Some("Renamed".into()),
+                context: Some("测试1".into()),
                 delivery_policy: Some(GroupDeliveryPolicy {
                     bot_final_delivery: BotFinalDelivery::InjectObservers,
                 }),
@@ -2252,8 +2928,8 @@ async fn update_preserves_hidden_legacy_routing_fields() {
         panic!("expected collaboration detail");
     };
     assert_eq!(detail.updated_at, stored.updated_at);
-    assert_eq!(stored.version, original_version);
-    assert_eq!(detail.version, original_version);
+    assert_eq!(stored.version, original_version + 1);
+    assert_eq!(detail.version, original_version + 1);
     let policy = stored.routing_policy.expect("routing policy");
     assert_eq!(policy.mode, RoutingMode::Structured);
     assert_eq!(policy.sender_routes, sender_routes);
@@ -2262,6 +2938,8 @@ async fn update_preserves_hidden_legacy_routing_fields() {
         DefaultDelivery::InjectObservers
     );
     assert_eq!(stored.label.as_deref(), Some("Renamed"));
+    assert_eq!(stored.context.as_deref(), Some("测试1"));
+    assert_eq!(detail.context.as_deref(), Some("测试1"));
 }
 
 #[tokio::test]
@@ -2289,10 +2967,7 @@ async fn get_requires_a_group_relation_and_delete_is_idempotent() {
             group_id: "group-1".into(),
         })
         .await;
-    assert!(matches!(
-        denied,
-        Err(ApplicationError::Forbidden(_))
-    ));
+    assert!(matches!(denied, Err(ApplicationError::Forbidden(_))));
 
     let first = fixture
         .service
@@ -2329,8 +3004,10 @@ async fn tenant_metadata_does_not_restrict_bot_collaboration() {
         .create(CreateGroup {
             caller: bot_principal_in_tenant("driver", "tenant-b"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("Cross-tenant collaboration".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2445,25 +3122,28 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: Some("Before".into()),
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
                 }],
-                collaboration:
-                    CollaborationConfiguration::StateMachine(
-                        bcs_service_api::application::v1::StateMachineConfiguration {
-                            definition:
-                                bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
+                collaboration: CollaborationConfiguration::StateMachine(
+                    bcs_service_api::application::v1::StateMachineConfiguration {
+                        definition:
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
                                     definition_id: "definition-1".into(),
                                     version: 1,
-                                }),
-                            participant_bindings: Vec::new(),
-                        },
-                    ),
+                                },
+                            ),
+                        participant_bindings: Vec::new(),
+                    },
+                ),
             }),
         })
         .await
@@ -2506,7 +3186,11 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
 }
 
 #[tokio::test]
-async fn create_propagates_friendship_lookup_failure() {
+async fn create_does_not_friendship_check_driver_against_caller() {
+    // caller↔driver was dropped: a protected driver the caller neither owns nor
+    // is friends with is no longer friendship-checked (there are no protected
+    // participants that would consult the friend store either), so even a
+    // failing friend store must not block creation of the group.
     let friends = Arc::new(FriendCore::with_repo(Arc::new(FailingFriendRepo)));
     let fixture = Fixture::new_with_friends(friends).await;
     fixture.add_public_bot("requester").await;
@@ -2517,8 +3201,10 @@ async fn create_propagates_friendship_lookup_failure() {
         .create(CreateGroup {
             caller: bot_principal("requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: Vec::new(),
@@ -2531,10 +3217,10 @@ async fn create_propagates_friendship_lookup_failure() {
         })
         .await;
 
-    assert!(matches!(
-        result,
-        Err(ApplicationError::Internal(message)) if message.contains("friend store unavailable")
-    ));
+    assert!(
+        result.is_ok(),
+        "driver must be ungated vs caller; got {result:?}"
+    );
 }
 
 #[tokio::test]
@@ -2549,8 +3235,10 @@ async fn create_propagates_protected_participant_friendship_lookup_failure() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
@@ -2615,6 +3303,147 @@ async fn update_rejects_delivery_policy_for_non_chat_strategy() {
 }
 
 #[tokio::test]
+async fn update_opening_message_preserves_patch_states_and_strategy_guard() {
+    let runtime = Arc::new(RecordingRuntime::default());
+    let fixture = Fixture::new_with_runtime(runtime.clone()).await;
+    for bot in ["driver", "helper"] {
+        fixture.add_public_bot(bot).await;
+    }
+    fixture
+        .service
+        .create(CreateGroup {
+            caller: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
+                name: Some("StateMachine".into()),
+                context: None,
+                opening_message: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "helper".into(),
+                    role: ParticipantRole::Consultant,
+                }],
+                collaboration: CollaborationConfiguration::StateMachine(
+                    bcs_service_api::application::v1::StateMachineConfiguration {
+                        definition:
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                    definition_id: "definition-1".into(),
+                                    version: 1,
+                                },
+                            ),
+                        participant_bindings: Vec::new(),
+                    },
+                ),
+            }),
+        })
+        .await
+        .expect("create StateMachine Group");
+    let group_id = runtime
+        .configured
+        .lock()
+        .expect("runtime lock")
+        .as_ref()
+        .expect("configured runtime")
+        .group_id
+        .clone();
+
+    let configured = OpeningMessage::Text("Run {{bcs.run_id}}".to_string());
+    fixture
+        .service
+        .update(UpdateGroup {
+            caller: bot_principal("driver"),
+            group_id: group_id.clone(),
+            patch: GroupPatch {
+                opening_message: Some(Some(configured.clone())),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("configure opening message");
+    assert_eq!(
+        fixture
+            .groups
+            .get(&group_id)
+            .await
+            .expect("stored StateMachine Group")
+            .opening_message,
+        Some(configured.clone())
+    );
+
+    fixture
+        .service
+        .update(UpdateGroup {
+            caller: bot_principal("driver"),
+            group_id: group_id.clone(),
+            patch: GroupPatch {
+                name: Some("Renamed".into()),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("omit opening-message patch");
+    assert_eq!(
+        fixture
+            .groups
+            .get(&group_id)
+            .await
+            .expect("stored StateMachine Group")
+            .opening_message,
+        Some(configured)
+    );
+
+    fixture
+        .service
+        .update(UpdateGroup {
+            caller: bot_principal("driver"),
+            group_id: group_id.clone(),
+            patch: GroupPatch {
+                opening_message: Some(None),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("clear opening message");
+    assert_eq!(
+        fixture
+            .groups
+            .get(&group_id)
+            .await
+            .expect("stored StateMachine Group")
+            .opening_message,
+        None
+    );
+
+    let mut chat = normal_group(
+        "chat",
+        "driver",
+        vec![Participant::bot("driver", ParticipantRole::Driver)],
+        GroupStrategy::Chat,
+        1,
+    );
+    chat.opening_message = None;
+    fixture.groups.upsert(chat).await.expect("store Chat Group");
+    let error = fixture
+        .service
+        .update(UpdateGroup {
+            caller: bot_principal("driver"),
+            group_id: "chat".into(),
+            patch: GroupPatch {
+                opening_message: Some(Some(OpeningMessage::Text("hello".into()))),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect_err("Chat Group must reject opening message");
+    assert!(matches!(
+        error,
+        ApplicationError::InvalidInput { code, .. } if code == "invalid_opening_message"
+    ));
+}
+
+#[tokio::test]
 async fn create_rejects_duplicate_participant_actor_ids() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "helper"] {
@@ -2626,8 +3455,10 @@ async fn create_rejects_duplicate_participant_actor_ids() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![
@@ -2667,21 +3498,21 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
                     actor_id: "manager".into(),
                     role: ParticipantRole::Manager,
                 }],
-                collaboration: CollaborationConfiguration::Chat(
-                    ChatConfiguration {
-                        delivery_policy: GroupDeliveryPolicy {
-                            bot_final_delivery: BotFinalDelivery::SendToDriver,
-                        },
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
                     },
-                ),
+                }),
             }),
         })
         .await;
@@ -2695,8 +3526,10 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Private,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![
@@ -2709,10 +3542,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
                         role: ParticipantRole::Worker,
                     },
                 ],
-                collaboration:
-                    CollaborationConfiguration::ManagerWorker(
-                        Default::default(),
-                    ),
+                collaboration: CollaborationConfiguration::ManagerWorker(Default::default()),
             }),
         })
         .await;
@@ -2747,12 +3577,7 @@ async fn human_principal_creates_legacy_actor_with_current_display_name_priority
         let detail = fixture
             .service
             .create(CreateGroup {
-                caller: human_principal_with_profile(
-                    staff_no,
-                    username,
-                    display_name,
-                    full_name,
-                ),
+                caller: human_principal_with_profile(staff_no, username, display_name, full_name),
                 group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
                     name: Some("Human and B".into()),
                     context: None,
@@ -2870,21 +3695,21 @@ async fn client_caused_group_errors_map_to_documented_4xx_classes() {
         .create(CreateGroup {
             caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
                 name: None,
                 context: None,
+                opening_message: None,
                 visibility: GroupVisibility::Public,
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
                     actor_id: "protected".into(),
                     role: ParticipantRole::Consultant,
                 }],
-                collaboration: CollaborationConfiguration::Chat(
-                    ChatConfiguration {
-                        delivery_policy: GroupDeliveryPolicy {
-                            bot_final_delivery: BotFinalDelivery::SendToDriver,
-                        },
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
                     },
-                ),
+                }),
             }),
         })
         .await;
@@ -3009,4 +3834,212 @@ async fn session_only_nonmember_dm_summary_omits_peer_actor() {
         panic!("expected DM summary");
     };
     assert!(summary.peer_actor.is_none());
+}
+
+mod originator_v1_policy {
+    //! V1 create-group originator authorization (caller↔originator, not
+    //! caller↔driver). Tests run the `for_v1_openapi` core branch.
+    use super::*;
+
+    fn chat_group(
+        originator: Option<String>,
+        participants: Vec<CreateParticipant>,
+    ) -> CreateGroup {
+        chat_group_with_driver("driver", originator, participants)
+    }
+
+    fn chat_group_with_driver(
+        driver: &str,
+        originator: Option<String>,
+        participants: Vec<CreateParticipant>,
+    ) -> CreateGroup {
+        CreateGroup {
+            caller: human_principal_with_profile("staff-1", "alice", Some("Alice"), None),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: Some("Planning".into()),
+                context: None,
+                opening_message: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: driver.into(),
+                participants,
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
+                    },
+                }),
+                originator,
+            }),
+        }
+    }
+
+    fn collaboration_originator(detail: GroupDetail) -> String {
+        let GroupDetail::Collaboration(it) = detail else {
+            panic!("expected collaboration detail, got {detail:?}");
+        };
+        it.originator_actor_id.to_string()
+    }
+
+    #[tokio::test]
+    async fn originator_defaults_to_caller_when_omitted() {
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        let detail = fixture
+            .service
+            .create(chat_group(None, vec![]))
+            .await
+            .expect("create group");
+        assert_eq!(collaboration_originator(detail), "human_staff-1");
+    }
+
+    #[tokio::test]
+    async fn originator_accepts_explicit_caller_self() {
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        let detail = fixture
+            .service
+            .create(chat_group(Some("human_staff-1".into()), vec![]))
+            .await
+            .expect("create group");
+        assert_eq!(collaboration_originator(detail), "human_staff-1");
+    }
+
+    #[tokio::test]
+    async fn originator_rejects_bot_not_owned_by_caller() {
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        fixture.add_bot_owned_by("bot-other", "someone-else", "public").await;
+        let err = fixture
+            .service
+            .create(chat_group(Some("bot-other".into()), vec![]))
+            .await
+            .expect_err("unowned originator must be rejected");
+        assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn originator_rejects_unregistered_originator() {
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        let err = fixture
+            .service
+            .create(chat_group(Some("does-not-exist".into()), vec![]))
+            .await
+            .expect_err("unregistered originator must be rejected");
+        assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn originator_rejects_other_human_originator() {
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        let err = fixture
+            .service
+            .create(chat_group(Some("human_staff-2".into()), vec![]))
+            .await
+            .expect_err("another human as originator must be rejected");
+        assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn owned_bot_originator_accepted_when_driver_reachable() {
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        fixture.add_bot_owned_by("bot-o", "staff-1", "public").await;
+        let detail = fixture
+            .service
+            .create(chat_group(Some("bot-o".into()), vec![]))
+            .await
+            .expect("owned-bot originator with public driver");
+        assert_eq!(collaboration_originator(detail), "bot-o");
+    }
+
+    #[tokio::test]
+    async fn owned_bot_originator_rejects_unreachable_driver() {
+        let fixture = Fixture::new().await;
+        fixture.add_bot_owned_by("driver", "someone-else", "protected").await;
+        fixture.add_bot_owned_by("bot-o", "staff-1", "public").await;
+        let err = fixture
+            .service
+            .create(chat_group_with_driver(
+                "driver",
+                Some("bot-o".into()),
+                vec![],
+            ))
+            .await
+            .expect_err("driver not reachable from originator bot");
+        assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn driver_not_gated_against_caller_when_originator_is_human() {
+        // caller staff-1 does NOT own the driver and is not its friend; with
+        // caller↔driver dropped and originator=caller (default), the group
+        // must still be created (driver ungated vs caller).
+        let fixture = Fixture::new().await;
+        fixture.add_bot_owned_by("driver", "someone-else", "protected").await;
+        let detail = fixture
+            .service
+            .create(chat_group_with_driver("driver", None, vec![]))
+            .await
+            .expect("driver ungated vs caller");
+        assert_eq!(collaboration_originator(detail), "human_staff-1");
+    }
+
+    #[tokio::test]
+    async fn owned_bot_originator_equal_to_driver_succeeds() {
+        // A human designates an owned bot as BOTH originator and driver. The
+        // driver is self-reachable — must not require self-friendship.
+        let fixture = Fixture::new().await;
+        fixture.add_bot_owned_by("bot-o", "staff-1", "protected").await;
+        let detail = fixture
+            .service
+            .create(chat_group_with_driver("bot-o", Some("bot-o".into()), vec![]))
+            .await
+            .expect("originator==driver must succeed without self-friendship");
+        assert_eq!(collaboration_originator(detail), "bot-o");
+    }
+
+    #[tokio::test]
+    async fn owned_bot_originator_accepts_friend_driver() {
+        // When the originator is a caller-owned Bot distinct from the driver,
+        // the driver must be reachable from that originator bot — here, a
+        // friend (covers the try_are_friends==true reachable branch).
+        let fixture = Fixture::new().await;
+        fixture.add_bot_owned_by("bot-o", "staff-1", "public").await;
+        fixture.add_bot_owned_by("driver", "someone-else", "protected").await;
+        fixture
+            .friends
+            .add_friendship("bot-o", "driver")
+            .await
+            .expect("originator/driver friendship");
+        let detail = fixture
+            .service
+            .create(chat_group_with_driver("driver", Some("bot-o".into()), vec![]))
+            .await
+            .expect("friend driver reachable from originator bot");
+        assert_eq!(collaboration_originator(detail), "bot-o");
+    }
+
+    #[tokio::test]
+    async fn originator_rejects_registered_human_as_originator() {
+        // A registered non-Bot actor (a human) passed as originator is not
+        // the caller-self and is not a Bot, so it must be rejected with
+        // invalid_originator (covers authorize_originator's actor_kind arm).
+        let fixture = Fixture::new().await;
+        fixture.add_public_bot("driver").await;
+        fixture
+            .bots
+            .ensure_human_actor("staff-2", "Bob")
+            .await
+            .expect("register Human actor");
+        let err = fixture
+            .service
+            .create(chat_group(Some("human_staff-2".into()), vec![]))
+            .await
+            .expect_err("registered non-bot originator must be rejected");
+        assert!(
+            matches!(err, ApplicationError::InvalidInput { ref code, .. } if code == "invalid_originator"),
+            "got {err:?}"
+        );
+    }
 }

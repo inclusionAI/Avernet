@@ -7,17 +7,12 @@ would make a SkillSet only *eventually* atomic.
 
 from __future__ import annotations
 
-import hashlib
-import json
-
 from injector import inject
 from sqlalchemy import or_
-from sqlalchemy.exc import IntegrityError
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
     Skill,
     SkillSet,
-    SkillSetCreateIdempotency,
     SkillSetSkill,
 )
 from agentclaw.community.core.models.mcp import (
@@ -113,87 +108,31 @@ class SkillSetControlPlaneRepository(
         owner_id: str,
         name: str,
         description: str | None,
-        idempotency_key: str,
         engine_type: str | None = None,
     ) -> dict:
-        request_hash = self._create_request_hash(name=name, description=description)
-        try:
-            with self._db.transactional_orm_session() as session:
-                replay = self._idempotency_record(
-                    session,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    idempotency_key=idempotency_key,
-                    locked=True,
-                )
-                if replay is not None:
-                    return self._replay_create(
-                        session,
-                        replay=replay,
-                        bot_id=bot_id,
-                        request_hash=request_hash,
-                        engine_type=engine_type,
-                    )
-                duplicate = (
-                    self._scope(session.query(SkillSet), SkillSet)
-                    .filter(
-                        SkillSet.bolt_id == bot_id,
-                        SkillSet.name == name,
-                    )
-                    .first()
-                )
-                if duplicate is not None:
-                    raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_CONFLICT")
-                row = SkillSet(
-                    name=name,
-                    description=description,
-                    bolt_id=bot_id,
-                    user_id=owner_id,
-                    is_default=False,
-                    is_builtin=False,
-                    is_active=False,
-                    env=get_current_env(),
-                    avernet_tenant=get_current_avernet_tenant(),
-                    engine_type=engine_type,
-                )
-                session.add(row)
-                session.flush()
-                session.add(
-                    SkillSetCreateIdempotency(
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        idempotency_key=idempotency_key,
-                        request_name=name,
-                        request_description=description,
-                        request_hash=request_hash,
-                        skill_set_id=row.id,
-                        env=get_current_env(),
-                        avernet_tenant=get_current_avernet_tenant(),
-                    )
-                )
-                session.flush()
-                return _item(row)
-        except IntegrityError as exc:
-            # The idempotency table's unique key is the concurrency arbiter.
-            # A competing command can commit after our initial SELECT but before
-            # our INSERT; re-read the durable result instead of surfacing 500.
-            with self._db.orm_session() as session:
-                replay = self._idempotency_record(
-                    session,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    idempotency_key=idempotency_key,
-                    locked=False,
-                )
-                if replay is not None:
-                    return self._replay_create(
-                        session,
-                        replay=replay,
-                        bot_id=bot_id,
-                        request_hash=request_hash,
-                        engine_type=engine_type,
-                    )
-            raise exc
+        with self._db.transactional_orm_session() as session:
+            duplicate = (
+                self._scope(session.query(SkillSet), SkillSet)
+                .filter(SkillSet.bolt_id == bot_id, SkillSet.name == name)
+                .first()
+            )
+            if duplicate is not None:
+                raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_CONFLICT")
+            row = SkillSet(
+                name=name,
+                description=description,
+                bolt_id=bot_id,
+                user_id=owner_id,
+                is_default=False,
+                is_builtin=False,
+                is_active=False,
+                env=get_current_env(),
+                avernet_tenant=get_current_avernet_tenant(),
+                engine_type=engine_type,
+            )
+            session.add(row)
+            session.flush()
+            return _item(row)
 
     def update_set(
         self,
@@ -253,16 +192,6 @@ class SkillSetControlPlaneRepository(
             self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer).filter(
                 SkillSetMCPServer.skill_set_id == row.id
             ).delete(synchronize_session=False)
-            # Create idempotency records intentionally retain the original
-            # response only while their SkillSet exists.  Delete them in the
-            # same UoW before removing the parent row; otherwise SQLite and
-            # production FK enforcement reject a perfectly valid inactive-set
-            # delete.
-            self._scope(
-                session.query(SkillSetCreateIdempotency), SkillSetCreateIdempotency
-            ).filter(SkillSetCreateIdempotency.skill_set_id == row.id).delete(
-                synchronize_session=False
-            )
             session.delete(row)
 
     def list_skills(
@@ -388,7 +317,6 @@ class SkillSetControlPlaneRepository(
                 SkillSetSkill(
                     skill_set_id=row.id,
                     skill_id=skill.id,
-                    bot_id=bot_id,
                     user_id=row.user_id,
                     env=get_current_env(),
                     avernet_tenant=get_current_avernet_tenant(),
@@ -513,11 +441,12 @@ class SkillSetControlPlaneRepository(
                             avernet_tenant=get_current_avernet_tenant(),
                         )
                     )
-                existing_mcps = self._mcp_installations(session, bot_id)
+                existing_mcps = self._mcp_installations(session, bot_id, owner_id)
                 for server_code in mcp_codes - existing_mcps:
                     session.add(
                         BotMCPInstallation(
                             bot_id=bot_id,
+                            owner_id=owner_id,
                             server_code=server_code,
                             env=get_current_env(),
                             avernet_tenant=get_current_avernet_tenant(),
@@ -536,6 +465,7 @@ class SkillSetControlPlaneRepository(
                     session.query(BotMCPInstallation), BotMCPInstallation
                 ).filter(
                     BotMCPInstallation.bot_id == bot_id,
+                    BotMCPInstallation.owner_id == owner_id,
                     BotMCPInstallation.server_code.in_(mcp_codes),
                 ).delete(synchronize_session=False)
             session.flush()
@@ -646,13 +576,15 @@ class SkillSetControlPlaneRepository(
                     session.query(BotMCPInstallation), BotMCPInstallation
                 ).filter(
                     BotMCPInstallation.bot_id == bot_id,
+                    BotMCPInstallation.owner_id == owner_id,
                     BotMCPInstallation.server_code.in_(active_mcp_codes),
                 ).delete(synchronize_session=False)
-            existing_mcps = self._mcp_installations(session, bot_id)
+            existing_mcps = self._mcp_installations(session, bot_id, owner_id)
             for server_code in target_mcp_codes - existing_mcps:
                 session.add(
                     BotMCPInstallation(
                         bot_id=bot_id,
+                        owner_id=owner_id,
                         server_code=server_code,
                         env=get_current_env(),
                         avernet_tenant=get_current_avernet_tenant(),
@@ -716,7 +648,6 @@ class SkillSetControlPlaneRepository(
                         SkillSetSkill(
                             skill_set_id=set_id,
                             skill_id=skill_id,
-                            bot_id=bot_id,
                             user_id=user_id,
                             skill_uuid=skill_uuid,
                             env=get_current_env(),
@@ -733,7 +664,6 @@ class SkillSetControlPlaneRepository(
                             skill_set_id=set_id,
                             server_code=server_code,
                             name=server_code,
-                            bot_id=bot_id,
                             user_id=set_row.user_id,
                             env=get_current_env(),
                             avernet_tenant=get_current_avernet_tenant(),
@@ -760,13 +690,17 @@ class SkillSetControlPlaneRepository(
                 )
             self._scope(
                 session.query(BotMCPInstallation), BotMCPInstallation
-            ).filter(BotMCPInstallation.bot_id == bot_id).delete(
+            ).filter(
+                BotMCPInstallation.bot_id == bot_id,
+                BotMCPInstallation.owner_id == owner_id,
+            ).delete(
                 synchronize_session=False
             )
             for server_code in state.mcp_installations:
                 session.add(
                     BotMCPInstallation(
                         bot_id=bot_id,
+                        owner_id=owner_id,
                         server_code=server_code,
                         env=get_current_env(),
                         avernet_tenant=get_current_avernet_tenant(),
@@ -803,58 +737,6 @@ class SkillSetControlPlaneRepository(
             raise SkillSetControlPlaneNotFoundError()
         return row
 
-    def _idempotency_record(
-        self,
-        session,
-        *,
-        bot_id: str,
-        owner_id: str,
-        idempotency_key: str,
-        locked: bool,
-    ) -> SkillSetCreateIdempotency | None:
-        query = self._scope(
-            session.query(SkillSetCreateIdempotency), SkillSetCreateIdempotency
-        ).filter(
-            SkillSetCreateIdempotency.bot_id == bot_id,
-            SkillSetCreateIdempotency.owner_id == owner_id,
-            SkillSetCreateIdempotency.idempotency_key == idempotency_key,
-        )
-        if locked:
-            query = query.with_for_update()
-        return query.one_or_none()
-
-    def _replay_create(
-        self,
-        session,
-        *,
-        replay: SkillSetCreateIdempotency,
-        bot_id: str,
-        request_hash: str,
-        engine_type: str | None,
-    ) -> dict:
-        replay_hash = replay.request_hash or self._create_request_hash(
-            name=replay.request_name, description=replay.request_description
-        )
-        if replay_hash != request_hash:
-            raise SkillSetControlPlaneConflictError("IDEMPOTENCY_KEY_REUSED")
-        row = self._set(
-            session,
-            bot_id=bot_id,
-            set_id=str(replay.skill_set_id),
-            engine_type=engine_type,
-        )
-        return _item(row)
-
-    @staticmethod
-    def _create_request_hash(*, name: str, description: str | None) -> str:
-        payload = json.dumps(
-            {"description": description, "name": name},
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
     @staticmethod
     def _ordinary(row: SkillSet) -> None:
         if row.is_default:
@@ -873,17 +755,22 @@ class SkillSetControlPlaneRepository(
             .all()
         }
 
-    def _mcp_installations(self, session, bot_id: str) -> set[str]:
+    def _mcp_installations(self, session, bot_id: str, owner_id: str) -> set[str]:
         return {
             str(value[0])
             for value in self._scope(
                 session.query(BotMCPInstallation.server_code), BotMCPInstallation
             )
-            .filter(BotMCPInstallation.bot_id == bot_id)
+            .filter(
+                BotMCPInstallation.bot_id == bot_id,
+                BotMCPInstallation.owner_id == owner_id,
+            )
             .all()
         }
 
-    def _mcp_has_ordinary_membership(self, session, bot_id: str, server_code: str) -> bool:
+    def _mcp_has_ordinary_membership(
+        self, session, bot_id: str, owner_id: str, server_code: str
+    ) -> bool:
         return (
             self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer)
             .join(SkillSet, SkillSet.id == SkillSetMCPServer.skill_set_id)
@@ -934,7 +821,8 @@ class SkillSetControlPlaneRepository(
     ) -> SkillSetDesiredState:
         """Lock and capture every ordinary-set desired fact for this Bot."""
         query = self._scope(session.query(SkillSet), SkillSet).filter(
-            SkillSet.bolt_id == bot_id, SkillSet.is_default.is_(False)
+            SkillSet.bolt_id == bot_id,
+            SkillSet.is_default.is_(False),
         )
         if engine_type is not None:
             query = query.filter(SkillSet.engine_type == engine_type)
@@ -972,7 +860,7 @@ class SkillSetControlPlaneRepository(
             installations=self._installations(session, bot_id, owner_id),
             set_active={int(row.id): bool(row.is_active) for row in sets},
             memberships={set_id: tuple(items) for set_id, items in memberships.items()},
-            mcp_installations=self._mcp_installations(session, bot_id),
+            mcp_installations=self._mcp_installations(session, bot_id, owner_id),
             mcp_memberships={
                 set_id: tuple(items) for set_id, items in mcp_memberships.items()
             },

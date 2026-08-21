@@ -358,3 +358,61 @@ def test_build_uses_original_active_engine_for_nas_source_bucket_when_routed_to_
         "2",
         "aicoding",
     )
+
+
+# ---- repo-exclude integration via get_build_plan(bot=...) ----
+
+
+@pytest.mark.unit
+class TestBotBuildServiceBotParamForwarding:
+    """验证 build()/restore_draft() 把 bot 透传给 get_build_plan，
+    repo 排除由 aicoding provider 内部消费，build 服务不感知。"""
+
+    def _setup(self):
+        mock_provider = MagicMock()
+        mock_build_plan = EngineBuildPlan(
+            engine_type="openclaw",
+            source_root_name=".openclaw",
+            migration_subpath="openclaw",
+            workspace_subdir="workspace",
+            mcp_config_relpath="workspace/config/mcporter.json",
+            skill_source_relpath="workspace/skills",
+            skill_target_relpath="workspace/skills",
+            rsync_excludes=["workspace/memory/", "logs/"],
+        )
+        mock_provider.get_build_plan.return_value = mock_build_plan
+        service = BotBuildService.__new__(BotBuildService)
+        service._device_service = MagicMock()
+        service._migrate_bot_instance = MagicMock(return_value=True)
+        service._generate_mcp_config = MagicMock(return_value=True)
+        service._generate_openclaw_stage_configs = MagicMock(return_value=True)
+        service._get_migration_path_base = MagicMock(return_value="/fake/path")
+        service._resolve_sandbox_provider = MagicMock(return_value=mock_provider)
+        return service, mock_provider
+
+    def test_build_forwards_bot_to_get_build_plan(self):
+        bot = {
+            "bot_id": "b", "entity_id": "e", "entity_type": "staff",
+            "device_id": "d",
+            "ext": {"build_rsync_excludes": ["custom/"]},
+            "template_config": {"backend_repo": [
+                {"repo_url": "https://code.alipay.com/ASF/repo.git"}
+            ]},
+        }
+        service, mock_provider = self._setup()
+        try:
+            service.build(bot, version=1)
+        except Exception:
+            pass
+        mock_provider.get_build_plan.assert_called_once()
+        assert mock_provider.get_build_plan.call_args.kwargs["bot"] is bot
+
+    def test_build_forwards_bot_even_without_repos(self):
+        bot = {"bot_id": "b", "entity_id": "e", "entity_type": "staff",
+               "device_id": "d"}
+        service, mock_provider = self._setup()
+        try:
+            service.build(bot, version=1)
+        except Exception:
+            pass
+        assert mock_provider.get_build_plan.call_args.kwargs["bot"] is bot

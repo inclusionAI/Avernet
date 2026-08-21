@@ -7,7 +7,8 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from secbaas.community.api import ApiResponse, DomainError
+from secbaas.community.adapters.web.dependencies import get_op_ctx
+from secbaas.community.api import ApiResponse, DomainError, OperationContext
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.spi.cache import CachePlugin
 
@@ -66,9 +67,10 @@ async def set_cache(
 @inject
 async def get_cache(
     key: str,
+    op_ctx: OperationContext = Depends(get_op_ctx),
     cache: CachePlugin = Depends(Provide[ApplicationContainer.plugins.cache_plugin]),
 ) -> ApiResponse[CacheGetResponse]:
-    """读取缓存中 ``key`` 对应的值，未命中返回 404。"""
+    """读取缓存中 ``key`` 对应的值，未命中返回 404。需登录鉴权。"""
     value = cache.get(key)
     if value is None:
         raise CacheKeyNotFoundError(f"cache key not found: {key}")
