@@ -28,9 +28,11 @@
 #       --build-arg UV_VERSION=0.8.14 --no-cache
 #
 # Options:
-#   <dockerfile>  Filename under docker/ (e.g. baas.dockerfile), or a path
-#                 relative to the repo root. Build context is always the
-#                 repo root (same as Dockerfile.ocb).
+#   <dockerfile>  Filename under docker/ or its subdirectories (e.g.
+#                 baas.dockerfile, services/baas.dockerfile), or a path
+#                 relative to the repo root. A bare filename is searched
+#                 recursively under docker/. Build context is always the
+#                 repo root.
 #   --image NAME  Image name without tag, e.g. baas or reg.example.com/ns/baas
 #                 (registry may include a port, e.g. reg:5000/ns/baas). Defaults
 #                 to <dockerfile> with .dockerfile/Dockerfile stripped. Only
@@ -118,14 +120,20 @@ fi
 
 command -v docker >/dev/null 2>&1 || { echo "error: docker command not found" >&2; exit 1; }
 
-# --- Resolve dockerfile path (prefer docker/, else relative to repo root)
+# --- Resolve dockerfile path (prefer docker/ and its subdirs, else repo root)
 if [ -f "${SCRIPT_DIR}/${DOCKERFILE}" ]; then
     DOCKERFILE_PATH="${SCRIPT_DIR}/${DOCKERFILE}"
 elif [ -f "${REPO_ROOT}/${DOCKERFILE}" ]; then
     DOCKERFILE_PATH="${REPO_ROOT}/${DOCKERFILE}"
 else
-    echo "error: dockerfile not found: ${DOCKERFILE} (not under docker/ nor repo root)" >&2
-    exit 1
+    # Search recursively under docker/ for a bare filename
+    FOUND=$(find "${SCRIPT_DIR}" -name "${DOCKERFILE}" -type f 2>/dev/null | head -1)
+    if [ -n "$FOUND" ]; then
+        DOCKERFILE_PATH="$FOUND"
+    else
+        echo "error: dockerfile not found: ${DOCKERFILE} (not under docker/ nor repo root)" >&2
+        exit 1
+    fi
 fi
 
 # --- Derive default image name: strip .dockerfile / Dockerfile suffix
