@@ -22,6 +22,12 @@ from agentclaw.community.core.models.mcp import (
 from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
     SkillSetControlPlaneRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
+)
+from agentclaw.community.core.repository.implementations.skill_center.installation import (
+    SkillInstallationRepository,
+)
 from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_set_control_plane import (
     McpSkillSetControlPlaneCommands,
 )
@@ -68,8 +74,17 @@ class SkillSetControlPlaneRepository(
     """Desired-state UoW for SkillSet Membership and Installations."""
 
     @inject
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(
+        self,
+        db: DatabasePlugin,
+        installation_repository: SkillInstallationRepositoryProtocol | None = None,
+    ) -> None:
         self._db = db
+        # Direct construction remains a supported test seam; the fallback
+        # preserves the same Install-or-already-present repository semantics.
+        self._installation_repository = (
+            installation_repository or SkillInstallationRepository(db)
+        )
 
     @staticmethod
     def _as_item(row: SkillSet) -> dict:
@@ -113,7 +128,7 @@ class SkillSetControlPlaneRepository(
         Default Set, never removes rows, and never changes existing Direct
         desired state.
         """
-        with self._db.transactional_orm_session() as session:
+        with self._db.orm_session() as session:
             sets = self._scope(session.query(SkillSet), SkillSet).filter(
                 SkillSet.bolt_id == bot_id,
                 SkillSet.user_id == owner_id,
@@ -137,20 +152,15 @@ class SkillSetControlPlaneRepository(
             if not member_ids:
                 return 0
 
-            existing_ids = self._installations(session, bot_id, owner_id)
-            missing_ids = member_ids - existing_ids
-            for skill_id in missing_ids:
-                session.add(
-                    BotSkillInstallation(
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        skill_id=skill_id,
-                        env=get_current_env(),
-                        avernet_tenant=get_current_avernet_tenant(),
-                    )
-                )
-            session.flush()
-            return len(missing_ids)
+        return sum(
+            self._installation_repository.install(
+                env=get_current_env(),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                skill_id=skill_id,
+            )
+            for skill_id in member_ids
+        )
 
     def get_set(
         self, *, bot_id: str, set_id: str, engine_type: str | None = None

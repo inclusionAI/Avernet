@@ -53,6 +53,15 @@ class _Database:
             session.close()
 
 
+class _InstallationRecorder:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def install(self, **kwargs) -> bool:
+        self.calls.append(kwargs)
+        return True
+
+
 def test_list_sets_is_scoped_to_exact_owner_for_shared_default_bot_id():
     """``bot_id=default`` is reused, so it cannot identify a user's sets."""
     db = _Database()
@@ -171,6 +180,37 @@ def test_ensure_active_skillset_installations_only_materializes_active_ordinary_
             row.skill_id for row in session.query(BotSkillInstallation).all()
         }
         assert installed == {1}
+
+
+def test_ensure_active_skillset_installations_uses_install_repository_upsert_seam():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        skill_set = SkillSet(
+            name="active",
+            bolt_id="bot",
+            user_id="owner",
+            engine_type="openclaw",
+            is_active=True,
+            env="dev",
+        )
+        skill = Skill(name="member", git_path="git://member", env="dev")
+        session.add_all([skill_set, skill])
+        session.flush()
+        session.add(
+            SkillSetSkill(skill_set_id=skill_set.id, skill_id=skill.id, env="dev")
+        )
+
+    installs = _InstallationRecorder()
+    result = SkillSetControlPlaneRepository(
+        db, installation_repository=installs
+    ).ensure_active_skillset_installations(
+        bot_id="bot", owner_id="owner", engine_type="openclaw"
+    )
+
+    assert result == 1
+    assert installs.calls == [
+        {"env": "dev", "owner_id": "owner", "bot_id": "bot", "skill_id": 1}
+    ]
 
 
 def test_ensure_active_skillset_installations_does_not_resurrect_deactivated_set_member():
