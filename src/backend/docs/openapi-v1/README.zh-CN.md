@@ -684,17 +684,19 @@ id 恰好等于该段上的某个字面量，它在该地址上就不可达。�
 
 <!-- reserved-component-names -->
 ```text
-approvals  authorized  all  ceiling  check-name  connection  engine  identity
-loadtest  local  logs  mcp  models  resources  routines  sessions
-skills
+all  approvals  authorized  catalog  ceiling  check-name  connection  engine  identity
+loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
+work-order-notifications  work-orders
 ```
 
-其中九个 —— `approvals`、`connection`、`engine`、`identity`、`models`、`resources`、
-`routines`、`sessions`、`skills` —— **只被待退役的旧地址占着**。Agent 在前的寻址已把每个
-带 Agent 作用域的组件移出了那一段，因此旧地址删除之后，清单只剩下六个：
+其中八个 —— `approvals`、`connection`、`engine`、`identity`、`models`、`resources`、
+`routines`、`sessions` —— **只被待退役的旧地址占着**。Agent 在前的寻址已把每个
+带 Agent 作用域的组件移出了那一段；租户级 Skill Workbench 状态接口仍占用 `skills`，
+因此旧地址删除之后，清单只剩下十五个：
 
 ```text
-authorized  ceiling  check-name  loadtest  logs  mcp
+all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  metadata  mcp  skills  spaces
+work-order-notifications  work-orders
 ```
 
 在旧地址还在应答的这段时间里，上面那份长清单才是准确的：id 为 `sessions` 的 Agent 在

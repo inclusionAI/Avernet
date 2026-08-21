@@ -134,10 +134,8 @@ class AdmissionMode(StrEnum):
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
-    # Tenant-wide, display-only lookup by known identifiers. It intentionally
-    # returns no ownership, device, runtime, credential, or extension fields.
+    # Tenant-wide lookup returns display fields, never ownership or runtime internals.
     ("POST", "/openapi/v1/bots/metadata/search"): AdmissionMode.OPEN,
-    # Sensitive first-party identity operations always require a human user.
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): AdmissionMode.REFUSED,
     # The item routes resolve the addressed owner from the asset and perform
     # the grant check against that exact Bot/owner pair in their handler.

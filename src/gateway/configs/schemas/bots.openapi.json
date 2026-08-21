@@ -23874,7 +23874,7 @@
     },
     "/openapi/v1/bots/metadata/search": {
       "post": {
-        "description": "Resolve display metadata for a caller-supplied set of known Bot IDs.\n\nThe identifiers may originate from BCN, search, recommendations, persisted\nclient state, or another source. Authentication is required, but this is a\ntenant-wide metadata lookup rather than an ownership check. The response is\nintentionally limited to display fields and never exposes owners, device\nbindings, runtime configuration, credentials, or extension payloads.\n\nUnknown identifiers are omitted. Filtering happens in the repository before\npagination, so ``total`` is the number of matching Bot records.",
+        "description": "Resolve display metadata for a caller-supplied set of known Bot IDs.\n\nThe identifiers may originate from BCN, search, recommendations, persisted\nclient state, or another source. Authentication is required, but this is a\ntenant-wide metadata lookup rather than an ownership check. The response is\nintentionally limited to display fields and never exposes owners, device\nbindings, runtime configuration, credentials, or extension payloads.\n\nUnknown identifiers are omitted. Filtering happens in the repository before\npagination, so total is the number of matching Bot records.",
         "operationId": "search_bot_metadata_openapi_v1_bots_metadata_search_post",
         "parameters": [
           {

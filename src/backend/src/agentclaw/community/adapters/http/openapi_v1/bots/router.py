@@ -500,7 +500,11 @@ async def list_bots(
     return page(result["total"], items, request)
 
 
-@router.post("/metadata/search", response_model=Envelope[Page[BotMetadata]])
+@router.post(
+    "/metadata/search",
+    response_model=Envelope[Page[BotMetadata]],
+    dependencies=[Depends(require_principal)],
+)
 @envelope_errors
 async def search_bot_metadata(
     body: BotMetadataSearch,
@@ -517,7 +521,7 @@ async def search_bot_metadata(
     bindings, runtime configuration, credentials, or extension payloads.
 
     Unknown identifiers are omitted. Filtering happens in the repository before
-    pagination, so ``total`` is the number of matching Bot records.
+    pagination, so total is the number of matching Bot records.
     """
     bot_ids = list(dict.fromkeys(body.bot_ids))
     result = bot_service.list_bots_by_conditions(

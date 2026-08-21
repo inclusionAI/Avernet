@@ -1106,19 +1106,19 @@ literals the routes actually publish:
 <!-- reserved-component-names -->
 ```text
 all  approvals  authorized  catalog  ceiling  check-name  connection  engine  identity
-loadtest  local  logs  market  mcp  models  resources  routines  sessions  skills  spaces
+loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
 work-order-notifications  work-orders
 ```
 
-Eight of those twenty-two — `approvals`, `connection`, `engine`, `identity`,
+Eight of those twenty-three — `approvals`, `connection`, `engine`, `identity`,
 `models`, `resources`, `routines`, and `sessions` — are held **only by the
 retiring addresses**. Bot-first addressing moved every bot-scoped component out
 of that segment. The tenant-level Skill Workbench status route now keeps
 `skills` current at this level, so once the deprecated addresses are removed the
-list is the fourteen that remain:
+list is the fifteen that remain:
 
 ```text
-all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  mcp  skills
+all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  metadata  mcp  skills
 spaces  work-order-notifications  work-orders
 ```
 
