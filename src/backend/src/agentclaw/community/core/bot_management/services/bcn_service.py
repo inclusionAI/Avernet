@@ -155,7 +155,7 @@ class BcnService:
 
         Returns:
             BCN 返回的结果，包含：
-            - bot_uid: Bot UUID
+            - bot_uuid: Bot UUID
             - onboarded: 是否已入网
             - name: Bot 名称
 
@@ -189,19 +189,19 @@ class BcnService:
 
             response_data = response.json()
 
-            # BCN 接口返回格式：{"bot_uid": "xxx", "onboarded": true, "name": "xxx"}
+            # BCN 接口返回格式：{"bot_uuid": "xxx", "onboarded": true, "name": "xxx"}
             # 或者错误格式：{"error": "xxx"} 或 {"message": "xxx"}
             if "error" in response_data:
                 raise BcnServiceError(
                     f"BCN API error: {response_data.get('error')}"
                 )
 
-            bot_uid = response_data.get("bot_uid")
+            bot_uuid = response_data.get("bot_uuid")
             onboarded = response_data.get("onboarded", False)
 
             logger.info(
                 f"[BcnService.onboard_bot] BCN onboard succeeded: "
-                f"bot_id={bot_id}, bot_uid={bot_uid}, onboarded={onboarded}"
+                f"bot_id={bot_id}, bot_uuid={bot_uuid}, onboarded={onboarded}"
             )
 
             return response_data
@@ -243,7 +243,7 @@ class BcnService:
 
         Returns:
             BCN 返回的 dict, 关键字段:
-              - bot_uid
+              - bot_uuid
               - provider_id
               - provider_bot_ref (= "{teamclaw_bot_uuid}:{owner_workno}")
               - bot_runtime_token (后续下行调用凭据)
@@ -265,7 +265,7 @@ class BcnService:
                 f"(no provider credentials), provider_bot_ref={provider_bot_ref}"
             )
             return {
-                "bot_uid": "",
+                "bot_uuid": "",
                 "provider_id": "",
                 "provider_bot_ref": provider_bot_ref,
                 "bot_runtime_token": "",
@@ -318,7 +318,7 @@ class BcnService:
             response_data = response.json()
             logger.info(
                 f"[BcnService.register_provider_bot] OK "
-                f"bot_uid={response_data.get('bot_uid')} "
+                f"bot_uuid={response_data.get('bot_uuid')} "
                 f"provider_bot_ref={provider_bot_ref}"
             )
             return response_data
