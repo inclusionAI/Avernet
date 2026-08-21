@@ -1,44 +1,29 @@
-"""Community device-runtime no-ops (BaaS-team-owned runtime is out of B6 scope).
+"""Community DeviceSync dispatcher wiring.
 
-Community ships no container runtime, so the device-runtime seams that DON'T
-gate the community injector are bound to honest no-ops here:
-
-- ``DeviceSyncDispatcher`` → :class:`CommunityDeviceSyncDispatcher` (selection
-  only; receives a DI-constructed Core ``DeviceSync`` factory)
-- ``DeviceAdapterTransport`` → :class:`CommunityDeviceAdapterTransport` (keeps the
-  base-list ``CronRelayService`` constructable in community; it previously rode
-  ``cron_module``'s prod binding, removed in B6 T26).
-
-The heavier device-runtime keys (``DeviceAccessor`` / ``DeviceFileSystemResolver``)
-stay unbound — community has no filesystem/device-plugin runtime. Imports only
-``plugins.community`` / ``core`` / ``plugin_api`` — never ``plugins.prod`` /
-``plugins.local`` — per the community isolation guard.
+Community devices are BaaS-backed. The module binds only the Plugin dispatcher
+and injects a factory for the shared Core ``BaasDeviceSyncService``.
 """
 from __future__ import annotations
 
-from injector import Binder, Injector, Module, inject, provider, singleton
+from injector import Binder, Module, inject, provider, singleton
 
+from agentclaw.community.core.devices.services.baas_device_sync import BaasDeviceSyncService
+from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+from agentclaw.community.core.devices.services.device_context import DeviceContext
+from agentclaw.community.core.devices.services.device_sync import DeviceSync
+from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
 from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 
 
 class CommunityDeviceSyncModule(Module):
-    """community: no-op device-sync dispatcher + adapter transport."""
+    """Bind the community dispatcher and shared BaaS DeviceSync factory."""
 
     def configure(self, binder: Binder) -> None:
-        from agentclaw.community.core.devices.services.community_device_sync import (
-            CommunityDeviceSyncService,
-        )
         from agentclaw.community.plugins.community.device_adapter_transport import (
             CommunityDeviceAdapterTransport,
         )
-        # Bind the Core service here; the Plugin receives only a DeviceSync
-        # factory and does not import this concrete service.
-        binder.bind(
-            CommunityDeviceSyncService,
-            to=CommunityDeviceSyncService,
-            scope=singleton,
-        )
+
         binder.bind(
             DeviceAdapterTransport,
             to=CommunityDeviceAdapterTransport,
@@ -50,15 +35,21 @@ class CommunityDeviceSyncModule(Module):
     @inject
     def device_sync_dispatcher(
         self,
-        injector: Injector,
+        baas_service: BaasService,
     ) -> DeviceSyncDispatcher:
-        from agentclaw.community.core.devices.services.community_device_sync import (
-            CommunityDeviceSyncService,
-        )
         from agentclaw.community.plugins.community.device_sync_dispatcher import (
             CommunityDeviceSyncDispatcher,
         )
 
-        return CommunityDeviceSyncDispatcher(
-            device_sync_factory=lambda: injector.get(CommunityDeviceSyncService),
-        )
+        def baas_device_sync(ctx: DeviceContext) -> DeviceSync:
+            conn_info = ctx.conn_info
+            transport = BaasInvokeTransport(
+                bind_id=conn_info["bind_id"],
+                engine_port=conn_info["engine_port"],
+                tenant=conn_info.get("tenant", ""),
+                baas_service=baas_service,
+                device_uuid=conn_info.get("device_uuid"),
+            )
+            return BaasDeviceSyncService(transport=transport, conn_info=conn_info)
+
+        return CommunityDeviceSyncDispatcher(device_sync_factory=baas_device_sync)

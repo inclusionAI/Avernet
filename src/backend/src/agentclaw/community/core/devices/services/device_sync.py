@@ -4,9 +4,9 @@ This is the non-Plugin Core contract for pushing symlink/bot-config/MCP
 changes to a device runtime. It deliberately does NOT inherit ``Plugin`` nor
 use ``@plugin_impl`` -- it is a plain ``Protocol`` consumed by Core callers and
 returned by the Plugin Protocol :class:`DeviceSyncDispatcher` (see
-``plugin_api/device_sync_dispatcher.py``). Concrete behavior lives in Core
-services (Community/Local under the community tree, Arca/BaaS/Teclaw under the
-corp tree) and is selected by the dispatcher implementations.
+``plugin_api/device_sync_dispatcher.py``). Concrete behavior lives in shared Core services (including the BaaS service)
+and is selected by the dispatcher implementations. Provider-specific Corp
+services remain in the Corp package.
 
 ``DeviceSyncUnavailableError`` is part of the Core contract surface so
 callers do not depend on a concrete dispatcher implementation.
@@ -108,7 +108,7 @@ class DeviceSync(Protocol):
         """Probe whether the device reports the MCP installed.
 
         Used by the multi-bot batch push to skip devices that don't have the
-        MCP. Whole-artifact devices (teclaw) and local no-op impls return
-        ``True`` (always deliver + count in the batch — Option B).
+        MCP. Whole-artifact devices such as Teclaw return ``True`` so the
+        batch always delivers and counts them.
         """
         ...

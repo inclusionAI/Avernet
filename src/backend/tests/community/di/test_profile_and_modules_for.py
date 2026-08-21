@@ -201,6 +201,7 @@ def test_test_and_singlebox_have_explicit_access_and_http_bindings():
             "SingleboxAccessModule",
             "SingleboxCallerIdentityModule",
             "SingleboxDevicesModule",
+            "SingleboxDeviceSyncModule",
         }
     )
 

@@ -19,7 +19,7 @@ Differences from ``TestingDevicesModule``:
 """
 from __future__ import annotations
 
-from typing import Annotated, Callable, cast  # noqa: UP035 - injector binding key must match provider side
+from typing import Callable, cast  # noqa: UP035 - injector binding key must match provider side
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
@@ -33,7 +33,6 @@ from agentclaw.community.core.devices.protocols import (
     BotSyncProtocol,
     McpSyncProtocol,
 )
-from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_policy import (
@@ -48,48 +47,18 @@ from agentclaw.community.core.devices.services.device_service import (
 from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.core.devices.services.local_device_accessor import LocalDeviceAccessor
-from agentclaw.community.core.devices.services.local_device_sync import (
-    LocalDeviceSyncService,
-)
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.notify.protocol import NotifyBotLister
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.workspace.path_factory import _get_aidesktop_root
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
-from agentclaw.community.plugin_api.http_client import QUALIFIER_GENERAL, HttpClient
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 from agentclaw.community.plugins.local.local_device_lifecycle import LocalDeviceLifecycle
 
 
 logger = get_logger()
-
-
-class _LocalDeviceSyncModule(Module):
-    """Provide the pathlib-mode ``LocalDeviceSyncService`` as the Core
-    ``DeviceSync`` dependency for ``LocalDeviceLifecycle`` (TEST/CORP_TEST).
-
-    Constructed with the original ``skills_dir`` (pathlib mode) and the EXISTING
-    ``Annotated[HttpClient, QUALIFIER_GENERAL]`` instance (the BaaS compat branch
-    dep — unused in pathlib mode, but wired so the same service shape is
-    DI-constructed everywhere). No ``BaasService``/``binding_ctx`` is passed:
-    those are only for concrete-device-context callers/tests.
-    """
-
-    @singleton
-    @provider
-    @inject
-    def local_device_sync(
-        self,
-        general_http_client: Annotated[HttpClient, QUALIFIER_GENERAL],
-    ) -> DeviceSync:
-        from pathlib import Path
-
-        return LocalDeviceSyncService(
-            skills_dir=Path.home() / ".openclaw" / "workspace" / "skills",
-            http_client=general_http_client,
-        )
 
 
 def configure_local_device_test_runtime(binder: Binder) -> None:
@@ -114,9 +83,6 @@ def configure_local_device_test_runtime(binder: Binder) -> None:
     )
     binder.bind(LocalDeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
     binder.bind(DeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
-    # Core ``DeviceSync`` for the lifecycle — pathlib-mode LocalDeviceSyncService
-    # (constructed with the original skills_dir; no BaasService/binding_ctx).
-    binder.install(_LocalDeviceSyncModule())
     binder.bind(LocalDeviceLifecycle, to=LocalDeviceLifecycle, scope=singleton)
 
 

@@ -2,8 +2,8 @@
 
 A selection-only dispatcher that inherits :class:`DeviceSyncDispatcher` and is
 decorated ``@plugin_impl``. It holds a DI-injected
-``Callable[[], DeviceSync]`` factory and returns its Core service for any
-``ctx``, preserving the no-op log line. Concrete service construction stays in
+``Callable[[DeviceContext], DeviceSync]`` factory and returns its Core service for any
+``ctx``, Concrete service construction stays in
 the DI module.
 """
 from __future__ import annotations
@@ -25,23 +25,22 @@ logger = get_logger()
 
 @plugin_impl(
     mode=Mode.PROD,
-    rationale="community no-op DeviceSync dispatcher",
+    rationale="community BaaS DeviceSync dispatcher",
 )
 class CommunityDeviceSyncDispatcher(DeviceSyncDispatcher):
-    """No-op ``DeviceSyncDispatcher`` for community.
+    """BaaS ``DeviceSyncDispatcher`` for community.
 
-    Returns the DI-factory-produced Core ``DeviceSync`` for any ``ctx`` —
-    community bots have no remote device to push to.
+    Returns the DI-factory-produced BaaS ``DeviceSync`` for ``ctx``.
     """
 
     @inject
-    def __init__(self, device_sync_factory: Callable[[], DeviceSync]) -> None:
+    def __init__(self, device_sync_factory: Callable[[DeviceContext], DeviceSync]) -> None:
         self._device_sync_factory = device_sync_factory
 
     def dispatch(self, ctx: "DeviceContext") -> DeviceSync:
         logger.info(
-            "[CommunityDeviceSyncDispatcher] no-op (bot=%s, provider=%s)",
+            "[CommunityDeviceSyncDispatcher] route (bot=%s, provider=%s)",
             getattr(ctx, "bot_id", "?"),
             getattr(ctx, "provider", "?"),
         )
-        return self._device_sync_factory()
+        return self._device_sync_factory(ctx)

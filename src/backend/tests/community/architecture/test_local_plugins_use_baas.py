@@ -43,7 +43,6 @@ _SRC_ROOT = Path(__file__).resolve().parents[3] / "src" / "agentclaw"
 # the catch-all coverage doesn't silently narrow.
 EXTRA_SCAN_FILES = [
     _SRC_ROOT / "community" / "core" / "devices" / "services" / "local_device_filesystem.py",
-    _SRC_ROOT / "community" / "core" / "devices" / "services" / "local_device_sync.py",
 ]
 
 # Files exempt from the FS-ops rules (full-file allowlist):

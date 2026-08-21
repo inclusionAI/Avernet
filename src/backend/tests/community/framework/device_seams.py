@@ -15,9 +15,6 @@ from agentclaw.community.core.devices.services.device_context import DeviceConte
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
-from agentclaw.community.core.devices.services.local_device_sync import (
-    LocalDeviceSyncService,
-)
 from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 
 
@@ -30,47 +27,38 @@ class _CallRecord:
     kwargs: dict
 
 
-class RecordingLocalDeviceSync(LocalDeviceSyncService):
-    """Recording test double over the Core ``LocalDeviceSyncService``.
-
-    Adds call recording around the real Core local service.
-    Exposes ``calls`` / ``calls_to(method)`` so golden-master device-push
-    tests can assert the device-sync call shape; the underlying behavior is
-    the real Core service (``skills_dir=None`` → no-op skip dict).
-    """
-
-    calls: list
+class RecordingLocalDeviceSync:
+    """Recording DeviceSync test double with deterministic no-network results."""
 
     def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.calls = []
+        self.calls: list[_CallRecord] = []
 
     def sync_symlinks(self, symlinks):  # type: ignore[no-untyped-def]
         self.calls.append(_CallRecord("sync_symlinks", (symlinks,), {}))
-        return super().sync_symlinks(symlinks)
+        return {"success": True}
 
     def sync_bot_config(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         self.calls.append(_CallRecord("sync_bot_config", args, kwargs))
-        return super().sync_bot_config(*args, **kwargs)
+        return {"success": True}
 
     def sync_all_mcp_servers(self, mcp_servers):  # type: ignore[no-untyped-def]
         self.calls.append(_CallRecord("sync_all_mcp_servers", (mcp_servers,), {}))
-        return super().sync_all_mcp_servers(mcp_servers)
+        return True
 
     def sync_single_mcp(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         self.calls.append(_CallRecord("sync_single_mcp", args, kwargs))
-        return super().sync_single_mcp(*args, **kwargs)
+        return True
 
     def sync_remove_mcp(self, server_code):  # type: ignore[no-untyped-def]
         self.calls.append(_CallRecord("sync_remove_mcp", (server_code,), {}))
-        return super().sync_remove_mcp(server_code)
+        return True
 
     def has_mcp(self, server_code):  # type: ignore[no-untyped-def]
         self.calls.append(_CallRecord("has_mcp", (server_code,), {}))
-        return super().has_mcp(server_code)
+        return True
 
-    def calls_to(self, method: str) -> list:
-        return [c for c in self.calls if c.method == method]
+    def calls_to(self, method: str) -> list[_CallRecord]:
+        return [call for call in self.calls if call.method == method]
 
 
 def install_fake_resolver(

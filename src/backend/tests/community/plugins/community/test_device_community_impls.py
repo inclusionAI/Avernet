@@ -18,14 +18,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 
-from agentclaw.community.core.devices.services.community_device_sync import (
-    CommunityDeviceSyncService,
-)
 from agentclaw.community.plugins.community.device_adapter_transport import (
     CommunityDeviceAdapterTransport,
-)
-from agentclaw.community.plugins.community.device_sync_dispatcher import (
-    CommunityDeviceSyncDispatcher,
 )
 from agentclaw.community.plugins.community.health_probe import CommunityHealthProbe
 
@@ -175,28 +169,6 @@ def test_sandbox_health_unsupported():
     assert out["code"] == 1
     assert out["instances"] == []
     assert "no sandbox runtime" in out["message"]
-
-
-# ── CommunityDeviceSyncDispatcher / CommunityDeviceSyncService ────────────────
-
-def test_device_sync_dispatcher_returns_noop_service():
-    ctx = SimpleNamespace(bot_id="bot-1", provider="baas")
-    dispatcher = CommunityDeviceSyncDispatcher(
-        device_sync_factory=lambda: CommunityDeviceSyncService()
-    )
-    service = dispatcher.dispatch(ctx)
-    assert isinstance(service, CommunityDeviceSyncService)
-
-
-def test_device_sync_service_noop_results():
-    p = CommunityDeviceSyncService()
-    assert p.sync_symlinks([{"source": "a", "target": "b"}])["success"] is False
-    assert p.sync_bot_config("bot", 1, "1", "OWNER", "u", "nick")["success"] is False
-    # MCP bool methods return True (Option B: counted, no network call)
-    assert p.sync_all_mcp_servers([{"server_code": "x"}]) is True
-    assert p.sync_single_mcp({"server_code": "x"}, api_key="k") is True
-    assert p.sync_remove_mcp("x") is True
-    assert p.has_mcp("x") is True
 
 
 # ── CommunityDeviceAdapterTransport ──────────────────────────────────────────
