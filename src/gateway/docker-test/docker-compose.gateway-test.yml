@@ -1,0 +1,52 @@
+services:
+  mariadb:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpass
+      MARIADB_DATABASE: gateway_test
+      MARIADB_USER: gateway
+      MARIADB_PASSWORD: gatewaypass
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - gateway-net
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - gateway-net
+
+  gateway:
+    image: gateway:local
+    environment:
+      SERVER_ENV: prod
+      DATABASE_URL: "${DATABASE_URL:-mysql+aiomysql://gateway:gatewaypass@mariadb:3306/gateway_test?charset=utf8mb4}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
+      GATEWAY_PORT: "${GATEWAY_PORT:-8888}"
+      BACKEND_SERVER_URL: "${BACKEND_SERVER_URL:-https://backend.avernet.com}"
+      BAAS_SERVER_URL: "${BAAS_SERVER_URL:-https://baas.avernet.com}"
+      BCS_SERVER_URL: "${BCS_SERVER_URL:-https://bcs.avernet.com}"
+      ENGINE_PROXY_SERVER_URL: "${ENGINE_PROXY_SERVER_URL:-https://engineproxy.avernet.com}"
+      BCSFUSE_SERVER_URL: "${BCSFUSE_SERVER_URL:-https://bcsfuse.avernet.com}"
+      # Test-only HMAC signing key (community resolver reads AVERNET_SECRET_<NAME>_VALUE).
+      AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE: "${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-gateway-test-signing-key-not-for-prod}"
+    ports:
+      - "${HOST_PORT:-18888}:8888"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gateway-net
+
+networks:
+  gateway-net:
