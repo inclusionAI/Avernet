@@ -19,6 +19,10 @@ from agentclaw.community.core.models.mcp import (
     BotMCPInstallation,
     SkillSetMCPServer,
 )
+from agentclaw.community.core.skill_center.orm import (
+    DefaultSkillsetMcpExclusion,
+    DefaultSkillsetSkillExclusion,
+)
 from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
     SkillSetControlPlaneRepositoryProtocol,
 )
@@ -172,11 +176,11 @@ class SkillSetControlPlaneRepository(
         )
 
     def get_set(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None
     ) -> dict:
         with self._db.orm_session() as session:
             row = self._set(
-                session, bot_id=bot_id, set_id=set_id, engine_type=engine_type
+                session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type
             )
             return _item(row)
 
@@ -192,7 +196,11 @@ class SkillSetControlPlaneRepository(
         with self._db.transactional_orm_session() as session:
             duplicate = (
                 self._scope(session.query(SkillSet), SkillSet)
-                .filter(SkillSet.bolt_id == bot_id, SkillSet.name == name)
+                .filter(
+                    SkillSet.bolt_id == bot_id,
+                    SkillSet.user_id == owner_id,
+                    SkillSet.name == name,
+                )
                 .first()
             )
             if duplicate is not None:
@@ -217,6 +225,7 @@ class SkillSetControlPlaneRepository(
         self,
         *,
         bot_id: str,
+        owner_id: str,
         set_id: str,
         name: str | None,
         description: str | None,
@@ -226,6 +235,7 @@ class SkillSetControlPlaneRepository(
             row = self._set(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 set_id=set_id,
                 engine_type=engine_type,
                 locked=True,
@@ -237,6 +247,7 @@ class SkillSetControlPlaneRepository(
                     self._scope(session.query(SkillSet), SkillSet)
                     .filter(
                         SkillSet.bolt_id == bot_id,
+                        SkillSet.user_id == owner_id,
                         SkillSet.name == name,
                         SkillSet.id != row.id,
                     )
@@ -251,12 +262,13 @@ class SkillSetControlPlaneRepository(
             return _item(row)
 
     def delete_set(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None
     ) -> None:
         with self._db.transactional_orm_session() as session:
             row = self._set(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 set_id=set_id,
                 engine_type=engine_type,
                 locked=True,
@@ -274,11 +286,11 @@ class SkillSetControlPlaneRepository(
             session.delete(row)
 
     def list_skills(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None
     ) -> list[dict]:
         with self._db.orm_session() as session:
             row = self._set(
-                session, bot_id=bot_id, set_id=set_id, engine_type=engine_type
+                session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type
             )
             rows = (
                 self._scope(session.query(Skill), Skill)
@@ -287,6 +299,11 @@ class SkillSetControlPlaneRepository(
                 .order_by(Skill.id)
                 .all()
             )
+            if row.is_default:
+                excluded = self._default_excluded_skill_ids(
+                    session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+                )
+                rows = [skill for skill in rows if int(skill.id) not in excluded]
             return [
                 {
                     "id": str(skill.id),
@@ -339,6 +356,7 @@ class SkillSetControlPlaneRepository(
             row = self._set(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 set_id=set_id,
                 engine_type=engine_type,
                 locked=True,
@@ -376,6 +394,7 @@ class SkillSetControlPlaneRepository(
                 .join(SkillSetSkill, SkillSetSkill.skill_set_id == SkillSet.id)
                 .filter(
                     SkillSet.bolt_id == bot_id,
+                    SkillSet.user_id == owner_id,
                     SkillSet.is_default.is_(False),
                     SkillSetSkill.skill_id == skill.id,
                 )
@@ -427,6 +446,7 @@ class SkillSetControlPlaneRepository(
             row = self._set(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 set_id=set_id,
                 engine_type=engine_type,
                 locked=True,
@@ -470,6 +490,7 @@ class SkillSetControlPlaneRepository(
             row = self._set(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 set_id=set_id,
                 engine_type=engine_type,
                 locked=True,
@@ -569,6 +590,7 @@ class SkillSetControlPlaneRepository(
             target = self._set(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 set_id=set_id,
                 engine_type=engine_type,
                 locked=True,
@@ -578,7 +600,9 @@ class SkillSetControlPlaneRepository(
                 session, bot_id, owner_id, engine_type=engine_type
             )
             query = self._scope(session.query(SkillSet), SkillSet).filter(
-                SkillSet.bolt_id == bot_id, SkillSet.is_default.is_(False)
+                SkillSet.bolt_id == bot_id,
+                SkillSet.user_id == owner_id,
+                SkillSet.is_default.is_(False),
             )
             if engine_type is not None:
                 query = query.filter(SkillSet.engine_type == engine_type)
@@ -704,7 +728,9 @@ class SkillSetControlPlaneRepository(
         """Atomically restore Membership, set-state and Installation facts."""
         with self._db.transactional_orm_session() as session:
             query = self._scope(session.query(SkillSet), SkillSet).filter(
-                SkillSet.bolt_id == bot_id, SkillSet.is_default.is_(False)
+                SkillSet.bolt_id == bot_id,
+                SkillSet.user_id == owner_id,
+                SkillSet.is_default.is_(False),
             )
             if engine_type is not None:
                 query = query.filter(SkillSet.engine_type == engine_type)
@@ -800,12 +826,21 @@ class SkillSetControlPlaneRepository(
         session,
         *,
         bot_id: str,
+        owner_id: str,
         set_id: str,
         engine_type: str | None = None,
         locked: bool = False,
     ) -> SkillSet:
         query = self._scope(session.query(SkillSet), SkillSet).filter(
-            SkillSet.id == int(set_id), SkillSet.bolt_id == bot_id
+            SkillSet.id == int(set_id),
+            or_(
+                and_(SkillSet.bolt_id == bot_id, SkillSet.user_id == owner_id),
+                and_(
+                    SkillSet.is_default.is_(True),
+                    or_(SkillSet.bolt_id == "", SkillSet.bolt_id.is_(None)),
+                    or_(SkillSet.user_id == "", SkillSet.user_id.is_(None)),
+                ),
+            ),
         )
         if engine_type is not None:
             query = query.filter(SkillSet.engine_type == engine_type)
@@ -847,6 +882,44 @@ class SkillSetControlPlaneRepository(
             .all()
         }
 
+    def _default_excluded_skill_ids(
+        self, session, *, bot_id: str, owner_id: str, set_id: int
+    ) -> set[int]:
+        """Return this Bot owner's exclusions from the shared Default set.
+
+        Default memberships are platform-wide.  Exclusions are deliberately
+        addressed by the concrete Bot owner, so reading the same Default set
+        for two ``bot_id=default`` Bots must produce different projections.
+        """
+        return {
+            int(value[0])
+            for value in session.query(DefaultSkillsetSkillExclusion.skill_id)
+            .filter(
+                DefaultSkillsetSkillExclusion.avernet_tenant
+                == get_current_avernet_tenant(),
+                DefaultSkillsetSkillExclusion.user_id == owner_id,
+                DefaultSkillsetSkillExclusion.bot_id == bot_id,
+                DefaultSkillsetSkillExclusion.skill_set_id == set_id,
+            )
+            .all()
+        }
+
+    def _default_excluded_mcp_codes(
+        self, session, *, bot_id: str, owner_id: str, set_id: int
+    ) -> set[str]:
+        return {
+            str(value[0])
+            for value in session.query(DefaultSkillsetMcpExclusion.server_code)
+            .filter(
+                DefaultSkillsetMcpExclusion.avernet_tenant
+                == get_current_avernet_tenant(),
+                DefaultSkillsetMcpExclusion.user_id == owner_id,
+                DefaultSkillsetMcpExclusion.bot_id == bot_id,
+                DefaultSkillsetMcpExclusion.skill_set_id == set_id,
+            )
+            .all()
+        }
+
     def _mcp_has_ordinary_membership(
         self, session, bot_id: str, owner_id: str, server_code: str
     ) -> bool:
@@ -855,6 +928,7 @@ class SkillSetControlPlaneRepository(
             .join(SkillSet, SkillSet.id == SkillSetMCPServer.skill_set_id)
             .filter(
                 SkillSet.bolt_id == bot_id,
+                SkillSet.user_id == owner_id,
                 SkillSet.is_default.is_(False),
                 SkillSetMCPServer.server_code == server_code,
             )
@@ -901,6 +975,7 @@ class SkillSetControlPlaneRepository(
         """Lock and capture every ordinary-set desired fact for this Bot."""
         query = self._scope(session.query(SkillSet), SkillSet).filter(
             SkillSet.bolt_id == bot_id,
+            SkillSet.user_id == owner_id,
             SkillSet.is_default.is_(False),
         )
         if engine_type is not None:
