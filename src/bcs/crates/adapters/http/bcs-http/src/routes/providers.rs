@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path, State, rejection::JsonRejection},
+    extract::{Path, Query, State, rejection::JsonRejection},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
@@ -16,9 +16,11 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::{
     BotUseCaseError, CoordinationMode, DeleteProviderBotCommand, ProviderAuthMode,
-    ProviderBotBinding, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
-    ProviderRecord, RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
-    SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult, UpdateProviderCommand,
+    ProviderBotBinding, ProviderBotRosterItem, ProviderBotTaskModesFilter,
+    ProviderCoordinationConfig, ProviderOrganizationManagementConfig, ProviderRecord,
+    RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
+    SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult, TaskModeMatch,
+    UpdateProviderCommand,
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value, json};
@@ -262,6 +264,40 @@ pub async fn list_provider_bots(
         .await
         .map_err(provider_error)?;
     let items: Vec<Value> = bindings.into_iter().map(binding_to_json).collect();
+    Ok(Json(json!({ "items": items })))
+}
+
+/// `GET /providers/{provider_id}/bots/by-task-modes` — internal (non-OpenAPI)
+/// roster consumed by backend task discovery/dispatch. Mirrors
+/// `list_provider_bots` admin-token validation, then intersects the provider's
+/// bot bindings with bots whose control-plane toggles satisfy the filter.
+pub async fn list_provider_bots_by_task_modes(
+    State(state): State<HttpAppState>,
+    Path(provider_id): Path<String>,
+    headers: HeaderMap,
+    Query(params): Query<TaskModesQueryParams>,
+) -> Result<Json<Value>, ProviderRouteError> {
+    let provider_admin_token = bearer_token(&headers)?;
+    let filter = ProviderBotTaskModesFilter {
+        task_claim_mode: parse_task_mode_toggle("task_claim_mode", &params.task_claim_mode)?,
+        task_dream_mode: parse_task_mode_toggle("task_dream_mode", &params.task_dream_mode)?,
+        match_mode: match params
+            .match_mode
+            .as_deref()
+            .map(str::trim)
+            .map(|value| value.eq_ignore_ascii_case("all"))
+        {
+            Some(true) => TaskModeMatch::All,
+            _ => TaskModeMatch::Any,
+        },
+    };
+    let items = state
+        .services
+        .provider_management
+        .list_provider_bots_by_task_modes(&provider_id, &provider_admin_token, filter)
+        .await
+        .map_err(provider_error)?;
+    let items: Vec<Value> = items.into_iter().map(roster_item_to_json).collect();
     Ok(Json(json!({ "items": items })))
 }
 
@@ -761,6 +797,42 @@ fn binding_to_json(binding: ProviderBotBinding) -> Value {
         "created_at": binding.created_at,
         "updated_at": binding.updated_at,
     })
+}
+
+fn roster_item_to_json(item: ProviderBotRosterItem) -> Value {
+    json!({
+        "bot_id": item.bot_id,
+        "name": item.name,
+        "env": item.env,
+        "task_claim_mode": item.task_claim_mode,
+        "task_dream_mode": item.task_dream_mode,
+    })
+}
+
+/// Query params for `GET /providers/{provider_id}/bots/by-task-modes`. Toggles
+/// arrive as strings so empty/absent values can be tolerated as "do not filter".
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct TaskModesQueryParams {
+    pub task_claim_mode: Option<String>,
+    pub task_dream_mode: Option<String>,
+    #[serde(rename = "match")]
+    pub match_mode: Option<String>,
+}
+
+/// Parse a task-mode toggle query param. `None`/empty => do not filter on this
+/// toggle; `true`/`1` => filter for the toggle ON; `false`/`0` => filter OFF.
+fn parse_task_mode_toggle(
+    name: &str,
+    value: &Option<String>,
+) -> Result<Option<bool>, ProviderRouteError> {
+    match value.as_deref().map(str::trim) {
+        None | Some("") => Ok(None),
+        Some("true") | Some("1") => Ok(Some(true)),
+        Some("false") | Some("0") => Ok(Some(false)),
+        Some(other) => Err(ProviderRouteError::bad_request(format!(
+            "invalid {name} value '{other}'; expected true|false"
+        ))),
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
