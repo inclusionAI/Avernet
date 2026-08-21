@@ -1798,12 +1798,11 @@ assert_eq!(report.pending_versions[10].version, 11);
         .await?;
 
         let before = check_sqlite_migrations(&db).await?;
-        // v12 (add_bot_task_modes) stays applied after we delete only v11
-        // (group_opening_message), so max applied is now 12 even though v11 is
-        // the sole pending migration. origin's version had group_opening_message
-        // as the tail; the merge appends task_modes at v12, so current_version
-        // drops to 12 (not 10) and v11 remains the only pending re-apply.
-        assert_eq!(before.current_version, Some(12));
+        // Deleting only the v11 (group_opening_message) record leaves v12
+        // (add_bot_task_modes) and v13 (edge_permission) applied, so the max
+        // applied version stays 13 (the edge_permission tail) even though v11 is
+        // the sole pending re-apply.
+        assert_eq!(before.current_version, Some(13));
         assert_eq!(
             before
                 .pending_versions
