@@ -177,7 +177,10 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         """
         image = self._default_images.get(template_id, "openclaw:latest")
         variables = _build_template_vars(
-            uid, namespace, image, storage=storage,
+            uid,
+            namespace,
+            image,
+            storage=storage,
             resource_spec=resource_spec,
         )
         rendered = _render_template(template_id, variables)

@@ -22,7 +22,7 @@ _SANDBOX = "secbaas.community.plugins.sandbox.arca.aliyun_ack._sandbox"
 _PLUGIN = "secbaas.community.plugins.sandbox.arca.aliyun_ack._sandbox_plugin"
 _MGR = "secbaas.community.plugins.sandbox.arca.aliyun_ack._client_manager"
 
-TEMPLATE_ID = "ALIYUN_ACK_OPENCLAW"
+TEMPLATE_ID = "ALIYUN_ACK_DEFAULT"
 
 
 def _creds(arca_template_id: str = TEMPLATE_ID) -> ArcaCredentials:

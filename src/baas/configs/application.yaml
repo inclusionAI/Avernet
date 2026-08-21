@@ -43,7 +43,7 @@ user_config:
     token: ""
     namespace: "default"
     default_images:
-      ALIYUN_ACK_OPENCLAW: "openclaw:latest"
+      ALIYUN_ACK_DEFAULT: "openclaw:latest"
 
   bot_service:
     proxy_base_url: "https://bot_service.example.com"
