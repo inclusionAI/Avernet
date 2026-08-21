@@ -15,6 +15,8 @@
 **Files:**
 - Modify: `src/baas/tests/unit/adapters/web/open_api/test_bcn_router.py`
 - Modify: `src/baas/tests/unit/core/service/bcn/test_bcn_service.py`
+- Modify: `src/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py`
+- Modify: `src/baas/tests/unit/core/service/test_bot_interaction_service.py`
 - Modify: `src/baas/tests/e2e/asgi/baseline/test_bcn_downlink_extended.py`
 
 **Step 1: Write the failing tests**
@@ -40,6 +42,7 @@ Expected: skip acceptance tests fail at Pydantic or normalization.
 ### Task 2: Relax BaaS value validation
 
 **Files:**
+- Modify: `src/baas/src/secbaas/community/api/bot_interaction/_models.py`
 - Modify: `src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py`
 - Modify: `src/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
 
@@ -48,6 +51,8 @@ Expected: skip acceptance tests fail at Pydantic or normalization.
 - Remove the `values` minimum-length constraint.
 - Remove the non-blank string validator while retaining `list[str]` typing.
 - Remove the defensive non-empty/non-blank normalization rejection.
+- Allow blank string map values, empty `selectedOptions` groups, and blank
+  selected option strings in the durable interaction resolution model.
 - Preserve all values exactly in existing output projections.
 
 **Step 2: Run tests to verify GREEN**
