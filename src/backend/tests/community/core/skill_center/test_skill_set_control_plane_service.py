@@ -420,10 +420,22 @@ class _TeclawRuntimeBots(_RuntimeBots):
 
 
 class _McpInstallations:
+    def __init__(self) -> None:
+        self.materialize_calls: list[dict] = []
+
+    def ensure_active_skillset_installations(self, **kwargs) -> int:
+        self.materialize_calls.append(kwargs)
+        return 0
+
     def list_installed_mcps(self, *, bot_id: str, owner_id: str) -> set[str]:
         assert bot_id == "bot-1"
         assert owner_id == "true-owner"
         return {"mcp.weather"}
+
+
+class _FailingMaterializationRepository(_McpInstallations):
+    def ensure_active_skillset_installations(self, **_kwargs) -> int:
+        raise RuntimeError("installation persistence unavailable")
 
 
 class _RuntimeSkills:
@@ -1062,6 +1074,46 @@ async def test_mcp_direct_activation_denies_before_writing_desired_state():
             server_code="mcp.weather",
         )
     assert repository.direct_calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_reconcile_materializes_active_ordinary_skillset_members_first():
+    repository = _McpInstallations()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=repository,
+        pool_skills=_RuntimeSkills(),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
+
+    assert repository.materialize_calls == [
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "engine_type": "openclaw",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_reconcile_fails_before_runtime_projection_when_materialization_fails():
+    runtime = BotRuntimeProjectionReconciler(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=_FailingMaterializationRepository(),
+        pool_skills=_RuntimeSkills(),
+        pool_runtime=_RuntimePool(),
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    with pytest.raises(RuntimeError, match="installation persistence unavailable"):
+        await runtime.reconcile(bot_id="bot-1", owner_id="true-owner")
 
 
 @pytest.mark.asyncio

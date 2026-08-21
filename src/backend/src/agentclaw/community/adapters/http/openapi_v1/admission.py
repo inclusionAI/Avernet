@@ -135,11 +135,11 @@ class AdmissionMode(StrEnum):
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    # Sensitive first-party identity operations always require a human user.
     ("GET", "/openapi/v1/org/user/iam-token"): AdmissionMode.REFUSED,
-    (
-        "POST",
-        "/openapi/v1/bots/{bot_id}/caller-identity",
-    ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/{bot_id}/caller-identity"): AdmissionMode.REFUSED,
+    # The item routes resolve the addressed owner from the asset and perform
+    # the grant check against that exact Bot/owner pair in their handler.
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content",
@@ -633,13 +633,13 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/mcp/servers"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/servers/{server_code}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/tenants"): AdmissionMode.OPEN,
+    # New-version bcs publish-to-users: auth baseline only, no grant check; authz deferred.
+    ("POST", "/openapi/v1/bots/{bot_id}/public-bcs"): AdmissionMode.OPEN,
     # Department directory search — a tenant-wide catalogue read, not a user's.
     ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skill-center/skills"): AdmissionMode.OPEN,
-    ("GET", "/openapi/v1/bots/market/skill-center/tags"): AdmissionMode.OPEN,
-    ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/catalog/search"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/catalog/discover"): AdmissionMode.OPEN,
     # ── Space and work-order APIs ───────────────────────────────────────────
@@ -651,6 +651,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/spaces/personal/initialize"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/create"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.USER_GATED,
+    # The caller must arrive on behalf of a real user.  The handler then
+    # resolves that user as the actor and SpaceAccessService enforces the
+    # concrete space membership; this is deliberately not OPEN or
+    # GRANT_FILTERED because the result is scoped by the path's space_id.
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): AdmissionMode.USER_GATED,
     ("POST", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.REFUSED,
     (
@@ -683,10 +687,6 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/work-orders"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/work-orders/{work_order_id}"): AdmissionMode.USER_GATED,
-    (
-        "POST",
-        "/openapi/v1/bots/work-orders/{work_order_id}/approval",
-    ): AdmissionMode.USER_GATED,
     (
         "POST",
         "/openapi/v1/bots/work-orders/{work_order_id}/approve",
@@ -778,6 +778,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "DELETE",
         "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # ── REFUSED — each for its own reason ────────────────────────────────────
     # The caller's own identity. An app-only caller names no end user, so there
     # is nothing to return — its scope question is answered by
     # ``GET /openapi/v1/bots/authorized`` instead.

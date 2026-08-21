@@ -28,6 +28,7 @@ from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.services.bot_discover_service import BotDiscoverService
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
@@ -107,6 +108,7 @@ class BotPublicModule(Module):
         bot_repository: BotRepository,
         process_service: ApprovalWorkflowPlugin,
         bot_service: BotService,
+        bcn_service: BcnService,
         passport_plugin: PassportPlugin,
         auth_relationship_plugin: AuthRelationshipPlugin,
         publish_approval_plugin: BotPublishApprovalPlugin,
@@ -124,6 +126,7 @@ class BotPublicModule(Module):
             bot_repository=bot_repository,
             process_service=process_service,
             bot_service=bot_service,
+            bcn_service=bcn_service,
             passport_plugin=passport_plugin,
             auth_relationship_plugin=auth_relationship_plugin,
             publish_approval_plugin=publish_approval_plugin,

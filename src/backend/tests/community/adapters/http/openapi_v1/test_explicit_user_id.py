@@ -282,9 +282,6 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
     # The department directory is a tenant-wide catalogue — not the caller's.
     ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
-    ("get", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/tags"),
-    # Publish status is tenant-identical Skill Center workflow state.
-    ("get", f"{PUBLIC_API_PREFIX}/bots/skills/{{skill_code}}/publish/status"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
     # Tenant-identical marketplace searches expose no user-scoped state.
@@ -361,7 +358,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: ``none`` then moved 53 → 54 with the department directory search
 #: (``/openapi/v1/org/dept``), an account-level catalogue read that addresses no bot.
-_BOT_ID_PLACEMENT = {"path": 138, "query": 1, "none": 57}
+#:
+#: ``path`` then moved 132 → 133 with the BCS publish-to-users operation
+#: (``POST /openapi/v1/bots/{bot_id}/public-bcs``): it addresses a bot and acts
+#: for the operator, so it is bot-path-addressed like the rest of the surface.
+_BOT_ID_PLACEMENT = {"path": 139, "query": 1, "none": 54}
 
 
 def _schema() -> dict:

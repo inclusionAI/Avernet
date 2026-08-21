@@ -93,6 +93,9 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     DeviceLimitError,
 )
+from agentclaw.community.core.bot_public.services.bot_public_service import (
+    BotNotFoundError as BotPublicBotNotFoundError,
+)
 from agentclaw.community.core.channel.errors import (
     ChannelEditLockedError,
     ChannelNotFoundError,
@@ -410,6 +413,12 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Another authorization for this bot id is already live",
     ),
     CollaboratorBotNotFoundError: (404, "Not found"),
+    # The bot-public service's own ``BotNotFoundError`` — a distinct class from
+    # the bot-management and collaborator ones above, raised by the BCS
+    # publish-to-users flow — is the same outcome (a missing bot addressed on a
+    # public route), so it answers the same 404 the surface answers everywhere a
+    # bot is addressed that does not exist.
+    BotPublicBotNotFoundError: (404, "Not found"),
     CollaboratorPermissionDeniedError: (404, "Not found"),
     CollaboratorNotFoundError: (404, "Not found"),
     CollaboratorAlreadyExistsError: (409, "Editor already exists"),

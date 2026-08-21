@@ -8,7 +8,7 @@ would make a SkillSet only *eventually* atomic.
 from __future__ import annotations
 
 from injector import inject
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
     Skill,
@@ -21,6 +21,12 @@ from agentclaw.community.core.models.mcp import (
 )
 from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
     SkillSetControlPlaneRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
+)
+from agentclaw.community.core.repository.implementations.skill_center.installation import (
+    SkillInstallationRepository,
 )
 from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_set_control_plane import (
     McpSkillSetControlPlaneCommands,
@@ -68,8 +74,17 @@ class SkillSetControlPlaneRepository(
     """Desired-state UoW for SkillSet Membership and Installations."""
 
     @inject
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(
+        self,
+        db: DatabasePlugin,
+        installation_repository: SkillInstallationRepositoryProtocol | None = None,
+    ) -> None:
         self._db = db
+        # Direct construction remains a supported test seam; the fallback
+        # preserves the same Install-or-already-present repository semantics.
+        self._installation_repository = (
+            installation_repository or SkillInstallationRepository(db)
+        )
 
     @staticmethod
     def _as_item(row: SkillSet) -> dict:
@@ -91,13 +106,70 @@ class SkillSetControlPlaneRepository(
     ) -> list[dict]:
         with self._db.orm_session() as session:
             query = self._scope(session.query(SkillSet), SkillSet).filter(
-                SkillSet.bolt_id == bot_id,
-                SkillSet.user_id == owner_id,
+                or_(
+                    and_(
+                        SkillSet.bolt_id == bot_id,
+                        SkillSet.user_id == owner_id,
+                    ),
+                    and_(
+                        SkillSet.is_default.is_(True),
+                        or_(SkillSet.bolt_id == "", SkillSet.bolt_id.is_(None)),
+                        or_(SkillSet.user_id == "", SkillSet.user_id.is_(None)),
+                    ),
+                )
             )
             if engine_type is not None:
                 query = query.filter(SkillSet.engine_type == engine_type)
             rows = query.order_by(SkillSet.is_default.desc(), SkillSet.id).all()
             return [_item(row) for row in rows]
+
+    def ensure_active_skillset_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None = None,
+    ) -> int:
+        """Insert only missing rows for legacy active ordinary SkillSet members.
+
+        The canonical mutation commands already keep Installation rows in sync.
+        This is intentionally a narrow cutover repair: it never reads the
+        Default Set, never removes rows, and never changes existing Direct
+        desired state.
+        """
+        with self._db.orm_session() as session:
+            sets = self._scope(session.query(SkillSet), SkillSet).filter(
+                SkillSet.bolt_id == bot_id,
+                SkillSet.user_id == owner_id,
+                SkillSet.is_default.is_(False),
+                SkillSet.is_active.is_(True),
+            )
+            if engine_type is not None:
+                sets = sets.filter(SkillSet.engine_type == engine_type)
+            active_set_ids = {int(row.id) for row in sets.all()}
+            if not active_set_ids:
+                return 0
+
+            member_ids = {
+                int(row.skill_id)
+                for row in self._scope(
+                    session.query(SkillSetSkill), SkillSetSkill
+                )
+                .filter(SkillSetSkill.skill_set_id.in_(active_set_ids))
+                .all()
+            }
+            if not member_ids:
+                return 0
+
+        return sum(
+            self._installation_repository.install(
+                env=get_current_env(),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                skill_id=skill_id,
+            )
+            for skill_id in member_ids
+        )
 
     def get_set(
         self, *, bot_id: str, set_id: str, engine_type: str | None = None
