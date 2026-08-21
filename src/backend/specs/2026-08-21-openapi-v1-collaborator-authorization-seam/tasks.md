@@ -168,7 +168,7 @@
         reversal.
 - **Depends on:** Task 5
 
-## Task 7: Tests & Verification  `[ ]`
+## Task 7: Tests & Verification  `[~]`
 
 - **Goal:** Ensure the feature meets every spec acceptance criterion.
 - **Files:** —

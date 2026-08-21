@@ -36,6 +36,7 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import (
     PublicAPIRoute,
     PublicRouteNotAuthorized,
     ServiceChecked,
+    UNMOUNTED_OPERATIONS,
     assert_every_route_authorized,
     scaffolding_row_count,
 )
@@ -147,11 +148,30 @@ def test_the_surface_and_the_table_agree_exactly():
     The first half is also enforced structurally — an operation with no row
     cannot be constructed — so this failing means something got past that,
     which is worth knowing loudly.
+
+    ``UNMOUNTED_OPERATIONS`` is subtracted rather than ignored: those rows are
+    real decisions about routers that exist but are not mounted, and the set
+    naming them is what keeps "not on the surface yet" distinguishable from
+    "left behind by a rename".
     """
-    live, table = _live_operations(), set(AUTHORIZATION)
+    live, table = _live_operations(), set(AUTHORIZATION) - UNMOUNTED_OPERATIONS
 
     assert live - table == set(), "operations with no AUTHORIZATION row"
     assert table - live == set(), "AUTHORIZATION rows matching no operation"
+
+
+def test_every_unmounted_row_is_really_unmounted():
+    """The exemption must stay honest as routers get mounted.
+
+    An entry that stops being unmounted turns into a permanent hole in the
+    orphan check — the one place a stale row could hide — so mounting an
+    operation has to delete its entry here.
+    """
+    live = _live_operations()
+
+    assert UNMOUNTED_OPERATIONS & live == set(), (
+        "these operations are mounted now; remove them from UNMOUNTED_OPERATIONS"
+    )
 
 
 def test_authorization_and_admission_cover_the_same_operations():
@@ -162,7 +182,7 @@ def test_authorization_and_admission_cover_the_same_operations():
     deliberately separate, but they describe the same set of operations, and a
     row added to one and forgotten in the other is the drift this catches.
     """
-    assert set(AUTHORIZATION) == set(ADMISSION)
+    assert set(AUTHORIZATION) - UNMOUNTED_OPERATIONS == set(ADMISSION)
 
 
 def test_every_route_is_a_public_api_route():

@@ -471,6 +471,14 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/caller"): NoCheck("the caller's own verified identity"),
     ("GET", "/openapi/v1/org/user/iam-token"): NoCheck("the caller's own credential"),
 
+    # ── Declared but not mounted (see UNMOUNTED_OPERATIONS) ───────────────
+    ("POST", "/openapi/v1/collaboration/tasks/execute"):
+        NoCheck("a task, not a bot; the surface is not mounted"),
+    ("GET", "/openapi/v1/collaboration/tasks/dashboard"):
+        NoCheck("a task, not a bot; the surface is not mounted"),
+    ("GET", "/openapi/v1/collaboration/tasks/list"):
+        NoCheck("a task, not a bot; the surface is not mounted"),
+
     # ── Retiring addresses in ``deprecated/`` ─────────────────────────────
     ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): SELF_CHECKED,
     ("PUT", "/openapi/v1/bots/approvals/{bot_id}/mode"): SELF_CHECKED,
@@ -517,6 +525,32 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("PUT", "/openapi/v1/bots/{bot_id}/engine-config"): SELF_CHECKED,}
 
 
+#: Operations whose router exists but which ``build_public_router`` does not
+#: mount, so they are in the table without being on the surface.
+#:
+#: Only ``openapi_v1/task`` today: the collaboration surface answers under
+#: ``/api/v1`` in ``adapters/http/task``, and its ``/openapi/v1`` twin stays
+#: unmounted until the gateway's configuration declares that domain (see the
+#: comment at ``adapters/http/app.py``'s task import).
+#:
+#: They carry rows anyway, and that is the point. The router is built with
+#: ``PublicAPIRoute`` like every other, so **whoever mounts it later cannot do
+#: so unguarded** — they will have to replace these placeholder rows with a
+#: real decision. Leaving the router without a route class would have been the
+#: easy fix and the wrong one: it would mount silently unchecked.
+#:
+#: :func:`assert_every_route_authorized` subtracts these before reporting
+#: orphans, so an unmounted row is not mistaken for a decision left behind by a
+#: rename. Delete an entry the moment its operation is mounted.
+UNMOUNTED_OPERATIONS = frozenset(
+    {
+        ("POST", "/openapi/v1/collaboration/tasks/execute"),
+        ("GET", "/openapi/v1/collaboration/tasks/dashboard"),
+        ("GET", "/openapi/v1/collaboration/tasks/list"),
+    }
+)
+
+
 def scaffolding_row_count() -> int:
     """How many operations are still in a mode that must eventually be empty.
 
@@ -537,6 +571,7 @@ __all__ = [
     "OWNER_SCOPED",
     "SCAFFOLDING_MODES",
     "SELF_CHECKED",
+    "UNMOUNTED_OPERATIONS",
     "ServiceChecked",
     "scaffolding_row_count",
 ]
@@ -634,7 +669,7 @@ def assert_every_route_authorized(router: APIRouter) -> None:
             "these routes were not built with route_class=PublicAPIRoute, so "
             "their AUTHORIZATION row was never read: " + ", ".join(sorted(unguarded))
         )
-    orphans = set(AUTHORIZATION) - seen
+    orphans = set(AUTHORIZATION) - seen - UNMOUNTED_OPERATIONS
     if orphans:
         raise PublicRouteNotAuthorized(
             "these AUTHORIZATION rows match no live operation (renamed or "
