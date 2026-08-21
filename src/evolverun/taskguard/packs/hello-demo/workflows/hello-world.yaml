@@ -1,0 +1,88 @@
+id: hello-world
+version: "1.0.0"
+title: Hello World
+
+description: |
+  Minimal 3-phase workflow: receive a name, generate a greeting, and finish.
+
+input:
+  mode: mixed
+  requiredParams: [name]
+  sources:
+    params: true
+    message: true
+
+identity:
+  key: "{{input.params.name}}"
+  label: "Hello {{input.params.name}}"
+  duplicatePolicy: allow
+
+outputs:
+  greeting:
+    from: "{{nodeOutput.format.greeting}}"
+    public: true
+    description: "Final greeting message"
+
+defaults:
+  progress:
+    enabled: true
+    sink: chat
+
+messages:
+  onCreated: "Hello workflow started for: {{input.params.name}}"
+  onFinished: "Hello workflow finished."
+
+nodes:
+  - id: greet
+    title: Greet
+    phase: P1
+    dependsOn: []
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        The user said: "{{input.message}}"
+        Their name is: {{input.params.name}}
+        Return a JSON object:
+        {
+          "rawGreeting": "a short greeting using the name"
+        }
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [rawGreeting]
+        properties:
+          rawGreeting:
+            type: string
+
+  - id: format
+    title: Format Greeting
+    phase: P2
+    dependsOn: [greet]
+    executor:
+      type: embedded-agent
+      outputMode: json
+      prompt: >
+        Format this raw greeting into a friendly final message:
+        {{nodeOutput.greet.rawGreeting}}
+
+        Return JSON:
+        {
+          "greeting": "the final greeting string"
+        }
+    outputContract:
+      required: true
+      schema:
+        type: object
+        required: [greeting]
+        properties:
+          greeting:
+            type: string
+
+  - id: done
+    title: Done
+    phase: P3
+    dependsOn: [format]
+    executor:
+      type: done
