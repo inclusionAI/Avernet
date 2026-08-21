@@ -14,6 +14,8 @@ The open-source v1 baseline starts from a single MySQL/OceanBase init schema:
 | 006 | `mysql/006_session_files.sql` | Add session file metadata |
 | 007 | `mysql/007_add_human_input_runtime.sql` | Add generic node outcome and HumanInput responder metadata |
 | 008 | `mysql/008_human_input_im_requests.sql` | Add persisted HumanInput IM request and queue state |
+| 009 | `mysql/009_eventing.sql` | Add public Event, Subscription, fanout, Delivery, Attempt, and audit storage |
+| 010 | `mysql/010_group_opening_message.sql` | Add Group opening-message configuration |
 
 The previous internal incremental SQL files were removed from the public
 migration path and replaced by the v1 baseline. New public migrations should be
@@ -81,10 +83,13 @@ The startup runner executes SQLite schema work in this order:
 Each migration is recorded only after all of its steps succeed. Re-running
 startup must be idempotent, and checksum mismatches fail startup.
 
-The current SQLite migration chain records versions `001` through `007`.
+The current SQLite migration chain records versions `001` through `011`.
 Versions whose schema is already created by the startup bootstrap record
 progress as no-ops; version `007` repairs the HumanInput output metadata on
-existing databases. Future schema changes should use later numeric versions.
+existing databases, versions `008` and `009` add their tables through the
+additive bootstrap DDL, version `010` migrates Eventing endpoint storage to
+plaintext, and version `011` adds Group opening-message configuration. Future
+schema changes should use later numeric versions.
 Do not add pre-open-source local schema repairs to the baseline migration.
 Pre-baseline local SQLite files are not a compatibility target; recreate them
 from the current bootstrap schema if needed.

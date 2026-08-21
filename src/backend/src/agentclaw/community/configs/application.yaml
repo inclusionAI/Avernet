@@ -1,5 +1,5 @@
 # 基础配置
-app_name: "agentclawengine"
+app_name: "agentclaw"
 enable_sidecar: true
 workers: 6
 
@@ -31,7 +31,7 @@ module_config:
     enabled: true
     tenant: "ALIPAY" # 必填，主站为'ALIPAY'
     mode: "prod" # 必填，需与机密平台上配置的'mode'一致
-    app_name: "agentclawengine" # 需与机密平台上的授权应用一致
+    app_name: "agentclaw" # 需与机密平台上的授权应用一致
 
   zdas:
     enabled: true

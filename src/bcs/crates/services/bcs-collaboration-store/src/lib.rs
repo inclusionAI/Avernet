@@ -5,14 +5,16 @@ use std::{
 
 use async_trait::async_trait;
 use bcs_db_api::{
-    DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionStep, DbTransactionStepResult,
-    DbValue, db_get_column, db_get_column_opt,
+    DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionParam, DbTransactionStep,
+    DbTransactionStepResult, DbValue, db_get_column, db_get_column_opt,
 };
 use bcs_domain::{
     CollaborationDefinition, CollaborationDefinitionRef, GroupRuntimeBinding,
     ResolvedParticipantBinding, RuntimeParticipantBinding, StateMachineDeliveryCorrelation,
     StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
+use bcs_event_store::{EventAppendTransactionPlan, MemoryEventStore};
+use bcs_service_api::port::repo::StateMachineEventfulTransition;
 use bcs_service_api::{
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
     CollaborationTemplateEntry, CollaborationTemplateRepoPort, GroupRuntimeBindingRepoPort,
@@ -33,7 +35,7 @@ const SM_NODE_SELECT_COLS: &str = "run_id, node_id, status, attempt, node_timeou
 const SM_CORRELATION_SELECT_COLS: &str = "state_machine_run_id, node_id, attempt, \
     assignee_bot_id, delivery_request_id, bot_delivery_run_id";
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct StoreInner {
     definitions: BTreeMap<(String, i32), CollaborationDefinition>,
     definition_sources: BTreeMap<(String, i32), DefinitionSourceRecord>,
@@ -58,11 +60,17 @@ struct DefinitionSourceRecord {
 #[derive(Debug, Default, Clone)]
 pub struct MemoryCollaborationStore {
     inner: Arc<RwLock<StoreInner>>,
+    event_store: Option<Arc<MemoryEventStore>>,
 }
 
 impl MemoryCollaborationStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_event_store(mut self, event_store: Arc<MemoryEventStore>) -> Self {
+        self.event_store = Some(event_store);
+        self
     }
 }
 
@@ -293,6 +301,34 @@ impl GroupRuntimeBindingRepoPort for MemoryCollaborationStore {
 
 #[async_trait]
 impl StateMachineRunRepoPort for MemoryCollaborationStore {
+    async fn commit_eventful_transition(
+        &self,
+        transition: StateMachineEventfulTransition,
+    ) -> ServiceResult<bool> {
+        let event_store = self
+            .event_store
+            .as_ref()
+            .ok_or_else(|| ServiceError::InvalidOperation {
+                message: "Eventful Memory state-machine transition requires the shared Memory Event Store"
+                    .to_string(),
+                request_id: None,
+            })?;
+        let mut inner = self.inner.write().await;
+        let mut candidate = inner.clone();
+        if !apply_memory_state_machine_transition(&mut candidate, &transition)? {
+            return Ok(false);
+        }
+        let events = state_machine_transition_events(&transition);
+        event_store
+            .commit_business_mutations(&events, || {
+                *inner = candidate;
+                Ok(())
+            })
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        Ok(true)
+    }
+
     async fn create_run(
         &self,
         run: StateMachineRun,
@@ -553,11 +589,14 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
             return Ok(false);
         }
         let node = node_mut(&mut inner, run_id, node_id)?;
-        if node.status != StateMachineNodeStatus::Running
-            || node.attempt != attempt
-            || node.artifact_text.is_some()
-        {
+        if node.status != StateMachineNodeStatus::Running || node.attempt != attempt {
             return Ok(false);
+        }
+        if node.artifact_text.is_some() {
+            return Ok(
+                node.artifact_text.as_deref() == Some(artifact_text.as_str())
+                    && node.responded_by.as_deref() == Some(responded_by.as_str()),
+            );
         }
         node.artifact_text = Some(artifact_text);
         node.responded_by = Some(responded_by);
@@ -793,6 +832,172 @@ impl CollaborationEventRepoPort for MemoryCollaborationStore {
             })
             .cloned()
             .collect())
+    }
+}
+
+fn state_machine_transition_events(
+    transition: &StateMachineEventfulTransition,
+) -> Vec<bcs_service_api::port::repo::AppendEventRecord> {
+    match transition {
+        StateMachineEventfulTransition::StartRun { events, .. } => events.clone(),
+        StateMachineEventfulTransition::StartBotNode { event, .. }
+        | StateMachineEventfulTransition::StartHumanNode { event, .. }
+        | StateMachineEventfulTransition::CompleteNode { event, .. }
+        | StateMachineEventfulTransition::ScheduleNodeRetry { event, .. }
+        | StateMachineEventfulTransition::CompleteRun { event, .. } => vec![event.clone()],
+    }
+}
+
+fn apply_memory_state_machine_transition(
+    inner: &mut StoreInner,
+    transition: &StateMachineEventfulTransition,
+) -> ServiceResult<bool> {
+    match transition {
+        StateMachineEventfulTransition::StartRun {
+            run_id,
+            started_at_ms,
+            ..
+        } => {
+            let run = inner.runs.get_mut(run_id).ok_or_else(|| {
+                ServiceError::InternalError(format!("state machine run not found: {run_id}"))
+            })?;
+            if run.status != StateMachineRunStatus::Pending {
+                return Ok(false);
+            }
+            run.status = StateMachineRunStatus::Running;
+            run.updated_at = *started_at_ms;
+            Ok(true)
+        }
+        StateMachineEventfulTransition::StartBotNode {
+            run_id,
+            node_id,
+            attempt,
+            delivery_request_id,
+            started_at_ms,
+            ..
+        } => {
+            if !run_is_running(inner, run_id)? {
+                return Ok(false);
+            }
+            let node = node_mut(inner, run_id, node_id)?;
+            if !matches!(
+                node.status,
+                StateMachineNodeStatus::Pending
+                    | StateMachineNodeStatus::Ready
+                    | StateMachineNodeStatus::RetryScheduled
+            ) || node.attempt != *attempt
+            {
+                return Ok(false);
+            }
+            node.status = StateMachineNodeStatus::Running;
+            node.delivery_request_id = Some(delivery_request_id.clone());
+            node.bot_delivery_run_id = None;
+            node.outcome = None;
+            node.responded_by = None;
+            node.artifact_text = None;
+            node.error = None;
+            node.started_at = Some(*started_at_ms);
+            node.completed_at = None;
+            node.timeout_deadline_ms = node
+                .node_timeout_ms
+                .map(|timeout_ms| started_at_ms.saturating_add(timeout_ms));
+            Ok(true)
+        }
+        StateMachineEventfulTransition::StartHumanNode { command, .. } => {
+            if !run_is_running(inner, &command.run_id)? {
+                return Ok(false);
+            }
+            let node = node_mut(inner, &command.run_id, &command.node_id)?;
+            if !matches!(
+                node.status,
+                StateMachineNodeStatus::Pending | StateMachineNodeStatus::Ready
+            ) || node.attempt != command.attempt
+            {
+                return Ok(false);
+            }
+            node.status = StateMachineNodeStatus::Running;
+            node.assignee_bot_id = None;
+            node.delivery_request_id = None;
+            node.bot_delivery_run_id = None;
+            node.outcome = None;
+            node.responded_by = None;
+            node.artifact_text = None;
+            node.error = None;
+            node.started_at = Some(command.started_at_ms);
+            node.completed_at = None;
+            node.timeout_deadline_ms = Some(command.timeout_deadline_ms);
+            Ok(true)
+        }
+        StateMachineEventfulTransition::CompleteNode {
+            run_id,
+            node_id,
+            attempt,
+            outcome,
+            artifact_text,
+            responded_by,
+            completed_at_ms,
+            ..
+        } => {
+            if !run_is_running(inner, run_id)? {
+                return Ok(false);
+            }
+            let node = node_mut(inner, run_id, node_id)?;
+            if node.status != StateMachineNodeStatus::Running || node.attempt != *attempt {
+                return Ok(false);
+            }
+            node.status = StateMachineNodeStatus::Completed;
+            node.outcome = Some(outcome.clone());
+            node.responded_by = responded_by.clone();
+            node.artifact_text = Some(artifact_text.clone());
+            node.error = None;
+            node.completed_at = Some(*completed_at_ms);
+            node.timeout_deadline_ms = None;
+            Ok(true)
+        }
+        StateMachineEventfulTransition::ScheduleNodeRetry {
+            run_id,
+            node_id,
+            failed_attempt,
+            next_attempt,
+            ..
+        } => {
+            if !run_is_running(inner, run_id)? {
+                return Ok(false);
+            }
+            let node = node_mut(inner, run_id, node_id)?;
+            if node.status != StateMachineNodeStatus::Failed || node.attempt != *failed_attempt {
+                return Ok(false);
+            }
+            node.status = StateMachineNodeStatus::RetryScheduled;
+            node.attempt = *next_attempt;
+            node.delivery_request_id = None;
+            node.bot_delivery_run_id = None;
+            node.artifact_text = None;
+            node.error = None;
+            node.started_at = None;
+            node.completed_at = None;
+            node.timeout_deadline_ms = None;
+            Ok(true)
+        }
+        StateMachineEventfulTransition::CompleteRun {
+            run_id,
+            output,
+            completed_at_ms,
+            ..
+        } => {
+            let run = inner.runs.get_mut(run_id).ok_or_else(|| {
+                ServiceError::InternalError(format!("state machine run not found: {run_id}"))
+            })?;
+            if run.status != StateMachineRunStatus::Running {
+                return Ok(false);
+            }
+            run.status = StateMachineRunStatus::Completed;
+            run.output = output.clone();
+            run.error = None;
+            run.updated_at = *completed_at_ms;
+            run.completed_at = Some(*completed_at_ms);
+            Ok(true)
+        }
     }
 }
 
@@ -1468,6 +1673,291 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
 
 #[async_trait]
 impl StateMachineRunRepoPort for MySqlCollaborationStore {
+    async fn commit_eventful_transition(
+        &self,
+        transition: StateMachineEventfulTransition,
+    ) -> ServiceResult<bool> {
+        let lock_suffix = match self.flavor {
+            DbSqlFlavor::Mysql => " FOR UPDATE",
+            DbSqlFlavor::Sqlite => "",
+        };
+        let mut steps = Vec::new();
+        let events = state_machine_transition_events(&transition);
+        match &transition {
+            StateMachineEventfulTransition::StartRun {
+                run_id,
+                started_at_ms,
+                ..
+            } => {
+                steps.push(DbTransactionStep::Query(DbStatement::with_params(
+                    format!(
+                        "SELECT run_id FROM bcs_state_machine_runs \
+                         WHERE env = ? AND run_id = ? AND status = 'pending' \
+                           AND record_status = 'active'{lock_suffix}"
+                    ),
+                    vec![
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(run_id.as_str()),
+                    ],
+                )));
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        format!(
+                            "UPDATE bcs_state_machine_runs SET status = 'running', \
+                             updated_at_ms = ?, {} WHERE env = ? AND run_id = ? \
+                             AND status = 'pending' AND record_status = 'active'",
+                            self.flavor.set_modified_now()
+                        ),
+                        vec![
+                            DbTransactionParam::value(*started_at_ms),
+                            DbTransactionParam::value(self.env.as_str()),
+                            DbTransactionParam::query_result(0, 0, "run_id"),
+                        ],
+                    ),
+                ));
+            }
+            StateMachineEventfulTransition::StartBotNode {
+                run_id,
+                node_id,
+                attempt,
+                delivery_request_id,
+                started_at_ms,
+                ..
+            } => {
+                steps.push(DbTransactionStep::Query(DbStatement::with_params(
+                    format!(
+                        "SELECT n.run_id, n.node_id FROM bcs_state_machine_node_runs n \
+                         WHERE n.env = ? AND n.run_id = ? AND n.node_id = ? AND n.attempt = ? \
+                           AND n.status IN ('pending', 'ready', 'retry_scheduled') \
+                           AND n.record_status = 'active' AND EXISTS ( \
+                             SELECT 1 FROM bcs_state_machine_runs r \
+                             WHERE r.env = n.env AND r.run_id = n.run_id \
+                               AND r.status = 'running' AND r.record_status = 'active' \
+                           ){lock_suffix}"
+                    ),
+                    vec![
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(run_id.as_str()),
+                        DbValue::from(node_id.as_str()),
+                        DbValue::from(*attempt),
+                    ],
+                )));
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        format!(
+                            "UPDATE bcs_state_machine_node_runs SET status = 'running', \
+                             delivery_request_id = ?, bot_delivery_run_id = NULL, outcome = NULL, \
+                             responded_by = NULL, artifact_text = NULL, error_message = NULL, \
+                             started_at_ms = ?, completed_at_ms = NULL, \
+                             timeout_deadline_ms = CASE WHEN node_timeout_ms IS NULL THEN NULL \
+                               ELSE ? + node_timeout_ms END, {} \
+                             WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? \
+                               AND status IN ('pending', 'ready', 'retry_scheduled') \
+                               AND record_status = 'active'",
+                            self.flavor.set_modified_now()
+                        ),
+                        vec![
+                            DbTransactionParam::value(delivery_request_id.as_str()),
+                            DbTransactionParam::value(*started_at_ms),
+                            DbTransactionParam::value(*started_at_ms),
+                            DbTransactionParam::value(self.env.as_str()),
+                            DbTransactionParam::query_result(0, 0, "run_id"),
+                            DbTransactionParam::query_result(0, 0, "node_id"),
+                            DbTransactionParam::value(*attempt),
+                        ],
+                    ),
+                ));
+            }
+            StateMachineEventfulTransition::StartHumanNode { command, .. } => {
+                steps.push(DbTransactionStep::Query(DbStatement::with_params(
+                    format!(
+                        "SELECT n.run_id, n.node_id FROM bcs_state_machine_node_runs n \
+                         WHERE n.env = ? AND n.run_id = ? AND n.node_id = ? AND n.attempt = ? \
+                           AND n.status IN ('pending', 'ready') AND n.assignee_bot_id = '' \
+                           AND n.record_status = 'active' AND EXISTS ( \
+                             SELECT 1 FROM bcs_state_machine_runs r \
+                             WHERE r.env = n.env AND r.run_id = n.run_id \
+                               AND r.status = 'running' AND r.record_status = 'active' \
+                           ){lock_suffix}"
+                    ),
+                    vec![
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(command.run_id.as_str()),
+                        DbValue::from(command.node_id.as_str()),
+                        DbValue::from(command.attempt),
+                    ],
+                )));
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        format!(
+                            "UPDATE bcs_state_machine_node_runs SET status = 'running', \
+                             delivery_request_id = NULL, bot_delivery_run_id = NULL, outcome = NULL, \
+                             responded_by = NULL, artifact_text = NULL, error_message = NULL, \
+                             started_at_ms = ?, completed_at_ms = NULL, timeout_deadline_ms = ?, {} \
+                             WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? \
+                               AND status IN ('pending', 'ready') AND record_status = 'active'",
+                            self.flavor.set_modified_now()
+                        ),
+                        vec![
+                            DbTransactionParam::value(command.started_at_ms),
+                            DbTransactionParam::value(command.timeout_deadline_ms),
+                            DbTransactionParam::value(self.env.as_str()),
+                            DbTransactionParam::query_result(0, 0, "run_id"),
+                            DbTransactionParam::query_result(0, 0, "node_id"),
+                            DbTransactionParam::value(command.attempt),
+                        ],
+                    ),
+                ));
+            }
+            StateMachineEventfulTransition::CompleteNode {
+                run_id,
+                node_id,
+                attempt,
+                outcome,
+                artifact_text,
+                responded_by,
+                completed_at_ms,
+                ..
+            } => {
+                steps.push(DbTransactionStep::Query(DbStatement::with_params(
+                    format!(
+                        "SELECT n.run_id, n.node_id FROM bcs_state_machine_node_runs n \
+                         WHERE n.env = ? AND n.run_id = ? AND n.node_id = ? AND n.attempt = ? \
+                           AND n.status = 'running' AND n.record_status = 'active' AND EXISTS ( \
+                             SELECT 1 FROM bcs_state_machine_runs r \
+                             WHERE r.env = n.env AND r.run_id = n.run_id \
+                               AND r.status = 'running' AND r.record_status = 'active' \
+                           ){lock_suffix}"
+                    ),
+                    vec![
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(run_id.as_str()),
+                        DbValue::from(node_id.as_str()),
+                        DbValue::from(*attempt),
+                    ],
+                )));
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        format!(
+                            "UPDATE bcs_state_machine_node_runs SET status = 'completed', \
+                             outcome = ?, responded_by = ?, artifact_text = ?, error_message = NULL, \
+                             completed_at_ms = ?, timeout_deadline_ms = NULL, {} \
+                             WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? \
+                               AND status = 'running' AND record_status = 'active'",
+                            self.flavor.set_modified_now()
+                        ),
+                        vec![
+                            DbTransactionParam::value(outcome.as_str()),
+                            DbTransactionParam::value(DbValue::from(responded_by.as_deref())),
+                            DbTransactionParam::value(artifact_text.as_str()),
+                            DbTransactionParam::value(*completed_at_ms),
+                            DbTransactionParam::value(self.env.as_str()),
+                            DbTransactionParam::query_result(0, 0, "run_id"),
+                            DbTransactionParam::query_result(0, 0, "node_id"),
+                            DbTransactionParam::value(*attempt),
+                        ],
+                    ),
+                ));
+            }
+            StateMachineEventfulTransition::ScheduleNodeRetry {
+                run_id,
+                node_id,
+                failed_attempt,
+                next_attempt,
+                ..
+            } => {
+                steps.push(DbTransactionStep::Query(DbStatement::with_params(
+                    format!(
+                        "SELECT n.run_id, n.node_id FROM bcs_state_machine_node_runs n \
+                         WHERE n.env = ? AND n.run_id = ? AND n.node_id = ? AND n.attempt = ? \
+                           AND n.status = 'failed' AND n.record_status = 'active' AND EXISTS ( \
+                             SELECT 1 FROM bcs_state_machine_runs r \
+                             WHERE r.env = n.env AND r.run_id = n.run_id \
+                               AND r.status = 'running' AND r.record_status = 'active' \
+                           ){lock_suffix}"
+                    ),
+                    vec![
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(run_id.as_str()),
+                        DbValue::from(node_id.as_str()),
+                        DbValue::from(*failed_attempt),
+                    ],
+                )));
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        format!(
+                            "UPDATE bcs_state_machine_node_runs SET status = 'retry_scheduled', \
+                             attempt = ?, delivery_request_id = NULL, bot_delivery_run_id = NULL, \
+                             artifact_text = NULL, error_message = NULL, started_at_ms = NULL, \
+                             completed_at_ms = NULL, timeout_deadline_ms = NULL, {} \
+                             WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? \
+                               AND status = 'failed' AND record_status = 'active'",
+                            self.flavor.set_modified_now()
+                        ),
+                        vec![
+                            DbTransactionParam::value(*next_attempt),
+                            DbTransactionParam::value(self.env.as_str()),
+                            DbTransactionParam::query_result(0, 0, "run_id"),
+                            DbTransactionParam::query_result(0, 0, "node_id"),
+                            DbTransactionParam::value(*failed_attempt),
+                        ],
+                    ),
+                ));
+            }
+            StateMachineEventfulTransition::CompleteRun {
+                run_id,
+                output,
+                completed_at_ms,
+                ..
+            } => {
+                steps.push(DbTransactionStep::Query(DbStatement::with_params(
+                    format!(
+                        "SELECT run_id FROM bcs_state_machine_runs \
+                         WHERE env = ? AND run_id = ? AND status = 'running' \
+                           AND record_status = 'active'{lock_suffix}"
+                    ),
+                    vec![
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(run_id.as_str()),
+                    ],
+                )));
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(
+                        format!(
+                            "UPDATE bcs_state_machine_runs SET status = 'completed', output_text = ?, \
+                             error_message = NULL, updated_at_ms = ?, completed_at_ms = ?, {} \
+                             WHERE env = ? AND run_id = ? AND status = 'running' \
+                               AND record_status = 'active'",
+                            self.flavor.set_modified_now()
+                        ),
+                        vec![
+                            DbTransactionParam::value(DbValue::from(output.as_deref())),
+                            DbTransactionParam::value(*completed_at_ms),
+                            DbTransactionParam::value(*completed_at_ms),
+                            DbTransactionParam::value(self.env.as_str()),
+                            DbTransactionParam::query_result(0, 0, "run_id"),
+                        ],
+                    ),
+                ));
+            }
+        }
+        for event in &events {
+            let event_plan = EventAppendTransactionPlan::build(event, self.flavor, steps.len())
+                .map_err(|error| {
+                    ServiceError::InternalError(format!(
+                        "prepare state-machine transition Event: {error}"
+                    ))
+                })?;
+            steps.extend(event_plan.steps);
+        }
+        self.db.transaction(steps).await.map_err(|error| {
+            ServiceError::Conflict(format!(
+                "state-machine transition changed concurrently: {error}"
+            ))
+        })?;
+        Ok(true)
+    }
+
     async fn create_run(
         &self,
         run: StateMachineRun,
@@ -1940,6 +2430,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         artifact_text: String,
         responded_by: String,
     ) -> ServiceResult<bool> {
+        let expected_artifact = artifact_text.clone();
+        let expected_responder = responded_by.clone();
         let sql = format!(
             "UPDATE bcs_state_machine_node_runs \
              SET artifact_text = ?, responded_by = ?, error_message = NULL, {} \
@@ -1971,7 +2463,16 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             .map_err(|error| {
                 ServiceError::InternalError(format!("state machine human response record: {error}"))
             })?;
-        Ok(result.affected_rows > 0)
+        if result.affected_rows > 0 {
+            return Ok(true);
+        }
+        let Some(node) = self.get_node_run(run_id, node_id).await? else {
+            return Ok(false);
+        };
+        Ok(node.status == StateMachineNodeStatus::Running
+            && node.attempt == attempt
+            && node.artifact_text.as_deref() == Some(expected_artifact.as_str())
+            && node.responded_by.as_deref() == Some(expected_responder.as_str()))
     }
 
     async fn fail_node_attempt(

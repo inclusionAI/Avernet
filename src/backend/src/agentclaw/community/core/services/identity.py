@@ -20,7 +20,7 @@ from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import (
-    resolve_engine_for_bot,
+    resolve_runtime_engine_for_bot,
 )
 from agentclaw.community.core.config_compose.teclaw_paths import IDENTITY_NS
 from agentclaw.community.core.devices.services.device_context import (
@@ -384,7 +384,7 @@ class IdentityService:
         file as ``identity/<file_type>`` and lets the factory compose the device
         address.
         """
-        eng = resolve_engine_for_bot(
+        eng = resolve_runtime_engine_for_bot(
             bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
         )
         return await self._device_read(
@@ -409,7 +409,7 @@ class IdentityService:
         engine_type: str | None = None,
     ) -> None:
         """Write a bot-level **identity** file (provider-blind, coordinate-based)."""
-        eng = resolve_engine_for_bot(
+        eng = resolve_runtime_engine_for_bot(
             bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
         )
         await self._device_write(
@@ -676,7 +676,7 @@ class IdentityService:
         # a caller who passed a stage name that is not one should hear about it
         # rather than have the argument silently discarded.
         require_known_stage(stage)
-        eng = resolve_engine_for_bot(
+        eng = resolve_runtime_engine_for_bot(
             bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
         )
         file_path = f"{IDENTITY_NS}/{file_type}"
@@ -756,7 +756,7 @@ class IdentityService:
         # runs before its first ``await``, so ``gather`` would execute sixteen
         # of them back to back on the event loop rather than concurrently. One
         # resolution, sixteen reads through it.
-        eng = resolve_engine_for_bot(
+        eng = resolve_runtime_engine_for_bot(
             bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
         )
         device_fs = self._identity_device_fs(
@@ -890,7 +890,7 @@ class IdentityService:
         self.validate_entity_type(entity_type)
         self.validate_file_type(file_type)
         require_stage_writable(stage)
-        eng = resolve_engine_for_bot(
+        eng = resolve_runtime_engine_for_bot(
             bot_id, entity_id, override=engine_type, bot_repo=self._bot_repo
         )
         await self.write_identity_file(

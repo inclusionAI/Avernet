@@ -67,7 +67,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     with_interceptors,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
+from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
 from agentclaw.community.core.devices.services import device_info as device_info_lookup
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 
@@ -126,7 +126,7 @@ def _get_path_params(
     return (
         entity_id or ctx.user_id or "default",
         effective_bot_id,
-        resolve_engine_for_bot(
+        resolve_runtime_engine_for_bot(
             bot_id=effective_bot_id,
             owner_id=owner_id_for_lookup,
             override=engine_type,

@@ -1,8 +1,8 @@
 """Tests for InfraContainer — standalone, no database needed.
 
 Config-based providers (bot_service_config, baas_bot_service_config) are
-testable with config.from_dict.  The chat_client_pool resolves without any
-dependencies.  Providers that require MOSN/Layotto (claw_bot_service,
+testable with config.from_dict. The chat_client_pool resolves with its repository
+dependencies overridden.  Providers that require MOSN/Layotto (claw_bot_service,
 baas_bot_service, etc.) are verified structurally — they exist and accept
 overrides.
 """
@@ -59,10 +59,11 @@ class TestInfraContainerStandalone:
         for attr in expected:
             assert hasattr(container, attr), f"Missing provider: {attr}"
 
-    def test_chat_client_pool_resolves_without_deps(self):
-        """AsyncChatClientPool resolves with system_config_repo mocked."""
+    def test_chat_client_pool_resolves_with_mocked_repositories(self):
+        """AsyncChatClientPool resolves with its repository dependencies mocked."""
         container = InfraContainer()
         container.system_config_repo.override(MagicMock())
+        container.bot_run_interaction_repository.override(MagicMock())
         pool = container.chat_client_pool()
         assert isinstance(pool, AsyncChatClientPool)
 
@@ -70,6 +71,7 @@ class TestInfraContainerStandalone:
         """AsyncChatClientPool is a singleton — same instance returned."""
         container = InfraContainer()
         container.system_config_repo.override(MagicMock())
+        container.bot_run_interaction_repository.override(MagicMock())
         pool1 = container.chat_client_pool()
         pool2 = container.chat_client_pool()
         assert pool1 is pool2
@@ -133,6 +135,7 @@ class TestInfraContainerStandalone:
         container.ac_bot_publish_repo.override(mock_repo)
         container.device_binding_repo.override(mock_repo)
         container.system_config_repo.override(mock_repo)
+        container.bot_run_interaction_repository.override(mock_repo)
 
         store = container.chat_client_pool()
         assert isinstance(store, AsyncChatClientPool)

@@ -24,6 +24,7 @@ E2E_TESTS_STORIES=(
     "story_session_file_workspace"
 )
 if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+    E2E_TESTS_STORIES+=("story_user_receives_group_event_webhooks")
     E2E_TESTS_STORIES+=("story_provider_callback_survives_slow_judge")
 fi
 
@@ -74,6 +75,33 @@ try:
 except Exception:
     print("")
 ' "$method")
+        if [[ -n "$request" ]]; then
+            printf '%s\n' "$request"
+            return 0
+        fi
+        sleep 0.05
+    done
+    return 1
+}
+
+wait_for_event_webhook_type() {
+    local event_type="$1" group_id="$2" payload request
+    for _ in $(seq 1 200); do
+        payload=$(curl --noproxy '*' -fsS \
+            "${BCS_E2E_MOCK_BASE_URL}/control/event-webhook/requests" 2>/dev/null || true)
+        request=$(printf '%s' "$payload" | python3 -c '
+import json,sys
+try:
+    event_type=sys.argv[1]
+    group_id=sys.argv[2]
+    requests=json.load(sys.stdin).get("requests", [])
+    match=next((item for item in requests
+        if item.get("body", {}).get("event_type") == event_type
+        and item.get("body", {}).get("scope", {}).get("group_id") == group_id), None)
+    print(json.dumps(match, separators=(",", ":")) if match else "")
+except Exception:
+    print("")
+' "$event_type" "$group_id")
         if [[ -n "$request" ]]; then
             printf '%s\n' "$request"
             return 0
@@ -316,6 +344,7 @@ story_user_operates_group_workspace() {
     test_create_group
     test_create_group_with_members
     test_get_group_detail
+    test_patch_group
     test_list_groups
     test_add_member
     test_remove_member
@@ -892,6 +921,221 @@ print(json.dumps({
 
     api_delete "/groups/${group_id}?bot_id=${BOT_CEO_UUID}"
     require_status "structured collaboration fixture is cleaned up" "200" || return
+}
+
+# Coverage-only user story: a signed-in user creates a Group with an inline
+# Event Subscription and observes real asynchronous Webhook deliveries. This
+# deliberately crosses the public API, Event Store, fanout worker, Delivery
+# state machine, and HTTP client boundaries instead of invoking Eventing core
+# helpers directly for coverage.
+story_user_receives_group_event_webhooks() {
+    info "Story: a user subscribes to Group events and receives ordered Webhooks"
+
+    local control_status
+    control_status=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' \
+        -X POST "${BCS_E2E_MOCK_BASE_URL}/control/event-webhook/clear" 2>/dev/null) || control_status="000"
+    assert_eq "Event Webhook mock resets before the story" "$control_status" "200"
+    [[ "$control_status" == "200" ]] || return
+
+    local public_prefix signing_key probe principal
+    public_prefix="/openapi/v1/collaboration"
+    signing_key="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+    probe="${SCRIPT_DIR}/group_session_ws_probe.py"
+    if ! principal=$(python3 "$probe" principal \
+        --user-id "$BCS_MOCK_USER_ID" \
+        --username "$BCS_MOCK_USER_NICK_NAME" \
+        --tenant "bcs-e2e" \
+        --signing-key "$signing_key"); then
+        fail "Gateway Principal generation failed for Event Webhook story"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return
+    fi
+
+    local group_body
+    group_body=$(python3 -c '
+import json,sys
+print(json.dumps({
+  "group_kind": "normal",
+  "name": "Event Webhook E2E",
+  "context": "Observe collaboration lifecycle events",
+  "driver_bot_uuid": sys.argv[1],
+  "participants": [
+    {"actor_id": sys.argv[1], "role": "driver"},
+    {"actor_id": sys.argv[2], "role": "consultant"}
+  ],
+  "collaboration": {
+    "strategy": "chat",
+    "delivery_policy": {"bot_final_delivery": "send_to_driver"}
+  },
+  "event_subscriptions": [{
+    "name": "E2E lifecycle observer",
+    "event_filters": ["group.*", "session.*", "message.*"],
+    "payload": {"mode": "full"},
+    "sink": {
+      "type": "webhook",
+      "url": sys.argv[3] + "/event-webhook",
+      "request_timeout_ms": 5000
+    }
+  }]
+}, separators=(",", ":")))
+' "$BOT_PM_UUID" "$BOT_ENG_UUID" "$BCS_E2E_MOCK_BASE_URL")
+    api_request_headers POST "${public_prefix}/groups" "$group_body" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "user creates a Group with an inline Event Subscription" "201" || return
+
+    local group_id subscription_id
+    group_id=$(json_path "$RESPONSE" "data.group_id")
+    subscription_id=$(json_path "$RESPONSE" "data.event_subscriptions.0.subscription_id")
+    assert_not_empty "Event Webhook Group has an id" "$group_id"
+    assert_not_empty "inline Event Subscription is returned" "$subscription_id"
+    [[ -n "$group_id" && -n "$subscription_id" ]] || return
+
+    local webhook_request
+    if webhook_request=$(wait_for_event_webhook_type "group.created" "$group_id"); then
+        pass "Group creation is delivered to the configured Webhook"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        fail "Group creation was not delivered to the configured Webhook"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        webhook_request="{}"
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    assert_json_eq "Webhook payload identifies group.created" \
+        "$webhook_request" "body.event_type" "group.created"
+    assert_json_eq "Webhook payload carries the created Group scope" \
+        "$webhook_request" "body.scope.group_id" "$group_id"
+    assert_json_eq "internal Webhook delivery does not invent an Authorization header" \
+        "$webhook_request" "authorization" "null"
+
+    api_request_headers GET \
+        "${public_prefix}/event-subscriptions?scope_type=group&scope_id=$(urlencode "$group_id")&limit=20" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "user lists Event Subscriptions for the Group" "200" || true
+    assert_json_eq "Event Subscription list contains the inline Subscription" \
+        "$RESPONSE" "data.items.0.subscription_id" "$subscription_id"
+
+    api_request_headers GET "${public_prefix}/event-subscriptions/${subscription_id}" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "user reads the redacted Event Subscription" "200" || true
+    assert_json_eq "Event Subscription read keeps its active status" \
+        "$RESPONSE" "data.status" "active"
+    assert_json_eq "Event Subscription read keeps revision one" \
+        "$RESPONSE" "data.revision" "1"
+
+    api_request_headers POST "${public_prefix}/event-subscriptions/${subscription_id}:test" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "user sends a synchronous Event Subscription test" "200" || true
+    assert_json_eq "Event Subscription test reports successful delivery" \
+        "$RESPONSE" "data.delivered" "true"
+    if webhook_request=$(wait_for_event_webhook_type "event_subscription.test" "$group_id"); then
+        pass "Event Subscription test reaches the same Webhook"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        fail "Event Subscription test did not reach the Webhook"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    api_request_headers PATCH "${public_prefix}/event-subscriptions/${subscription_id}" \
+        '{"revision":1,"name":"E2E lifecycle observer paused","status":"disabled"}' \
+        "X-Avernet-Principal: ${principal}"
+    require_status "user disables the Event Subscription with optimistic concurrency" "200" || true
+    assert_json_eq "disabled Event Subscription advances to revision two" \
+        "$RESPONSE" "data.revision" "2"
+    assert_json_eq "Event Subscription is disabled" "$RESPONSE" "data.status" "disabled"
+
+    api_request_headers PATCH "${public_prefix}/event-subscriptions/${subscription_id}" \
+        '{"revision":2,"name":"E2E lifecycle observer","status":"active"}' \
+        "X-Avernet-Principal: ${principal}"
+    require_status "user re-enables the Event Subscription" "200" || true
+    assert_json_eq "re-enabled Event Subscription advances to revision three" \
+        "$RESPONSE" "data.revision" "3"
+
+    api_request_headers POST "${public_prefix}/groups/${group_id}/sessions" \
+        '{"title":"Event Webhook E2E session","input":{"source":"e2e"}}' \
+        "X-Avernet-Principal: ${principal}"
+    local session_id
+    if require_status "user creates a Session under the subscribed Group" "201"; then
+        session_id=$(json_path "$RESPONSE" "data.session_id")
+        assert_not_empty "Event Webhook Session has an id" "$session_id"
+    else
+        session_id=""
+    fi
+    if [[ -n "$session_id" ]]; then
+        if webhook_request=$(wait_for_event_webhook_type "session.created" "$group_id"); then
+            pass "Session creation is delivered to the Group Webhook"
+            TESTS_PASSED=$((TESTS_PASSED + 1))
+        else
+            fail "Session creation was not delivered to the Group Webhook"
+            TESTS_FAILED=$((TESTS_FAILED + 1))
+        fi
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    fi
+
+    api_post "/groups/${group_id}/messages" \
+        "{\"sender\":\"${BOT_PM_UUID}\",\"content\":\"Webhook delivery verification\",\"message_type\":\"bot\",\"role\":\"user\"}"
+    require_status "user persists a message in the subscribed Group" "200" || true
+    if webhook_request=$(wait_for_event_webhook_type "message.created" "$group_id"); then
+        pass "Message creation is delivered to the Group Webhook"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        fail "Message creation was not delivered to the Group Webhook"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    local order_ok
+    order_ok=$(curl --noproxy '*' -fsS \
+        "${BCS_E2E_MOCK_BASE_URL}/control/event-webhook/requests" 2>/dev/null | python3 -c '
+import json,sys
+requests=json.load(sys.stdin).get("requests", [])
+streams={}
+for item in requests:
+    body=item.get("body", {})
+    if body.get("scope", {}).get("group_id") != sys.argv[1]:
+        continue
+    stream=body.get("stream", {})
+    streams.setdefault(stream.get("key"), []).append(stream.get("sequence"))
+valid=all(all(isinstance(value, int) for value in values)
+          and values == sorted(values)
+          and len(values) == len(set(values))
+          for values in streams.values())
+print("1" if streams and valid else "0")
+' "$group_id")
+    assert_eq "Webhook requests preserve strict order within every Event stream" "$order_ok" "1"
+
+    api_request_headers GET \
+        "${public_prefix}/event-subscriptions/${subscription_id}/deliveries?status=succeeded&limit=20" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "user lists successful Event deliveries" "200" || true
+    local delivery_id
+    delivery_id=$(json_path "$RESPONSE" "data.items.0.delivery_id")
+    assert_not_empty "successful Event delivery has an id" "$delivery_id"
+    if [[ -n "$delivery_id" ]]; then
+        api_request_headers GET "${public_prefix}/event-deliveries/${delivery_id}" "" \
+            "X-Avernet-Principal: ${principal}"
+        require_status "user inspects an Event delivery and its Attempts" "200" || true
+        assert_json_eq "Event delivery belongs to the inline Subscription" \
+            "$RESPONSE" "data.delivery.subscription_id" "$subscription_id"
+    fi
+
+    api_request_headers DELETE \
+        "${public_prefix}/event-subscriptions/${subscription_id}?revision=3" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "user deletes the Event Subscription" "200" || true
+    assert_json_eq "deleted Event Subscription advances to revision four" \
+        "$RESPONSE" "data.revision" "4"
+    assert_json_eq "Event Subscription is tombstoned" "$RESPONSE" "data.status" "deleted"
+
+    if [[ -n "$session_id" ]]; then
+        api_request_headers DELETE "${public_prefix}/sessions/${session_id}" "" \
+            "X-Avernet-Principal: ${principal}"
+        require_status "Event Webhook Session fixture is cleaned up" "200" || true
+    fi
+    api_request_headers DELETE "${public_prefix}/groups/${group_id}" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "Event Webhook Group fixture is cleaned up" "200" || true
 }
 
 # Coverage-only user story: a Provider-backed state-machine node returns while

@@ -5,7 +5,8 @@ use bcs_service_api::application::v1::{
     CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant, GetSession,
     ListSessionMessages, ListSessions, Page, ParticipantMode, SessionCollectionResult,
     SessionCompletionResult, SessionDetail, SessionMessageService, SessionParticipant,
-    SessionService, SessionStatus, UncollectSession, UpdateSession, UpdateSessionParticipant,
+    SessionCaller, SessionService, SessionStatus, UncollectSession, UpdateSession,
+    UpdateSessionParticipant,
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};
 use bcs_service_api::{GroupMessage, GroupMessageType, MessageRole};
@@ -122,10 +123,19 @@ fn session_service_is_object_safe() {
 fn session_commands_carry_caller_and_no_raw_credentials() {
     let caller = human_caller();
     let create = CreateSession {
-        caller: caller.clone(),
+        caller: SessionCaller::Human {
+            actor_id: "human_staff-1".into(),
+            owner_id: "staff-1".into(),
+            display_name: None,
+        },
         group_id: "g1".into(),
         title: Some("plan".into()),
+        kind: None,
+        acting_bot_id: None,
+        creator_role: None,
         input: None,
+        meta: None,
+        context_delivery: None,
     };
     let list = ListSessions {
         caller: caller.clone(),
@@ -179,8 +189,13 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
         session_id: "s1".into(),
         bot_uuid: "bot-3".into(),
     };
+    let create_caller = format!("{:?}", &create.caller);
+    assert!(
+        !create_caller.contains("Cookie")
+            && !create_caller.contains("Bearer")
+            && !create_caller.contains("sender")
+    );
     for cmd in [
-        &create.caller,
         &list.caller,
         &get.caller,
         &update.caller,

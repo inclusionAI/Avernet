@@ -1,0 +1,33 @@
+[package]
+name = "bcs-eventing"
+description = "Transport-neutral public Event catalog and eventing policy for BCS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-config-api = { workspace = true }
+bcs-service-api = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+bcs-event-store = { workspace = true }
+bcs-group = { workspace = true }
+bcs-test-support = { workspace = true }

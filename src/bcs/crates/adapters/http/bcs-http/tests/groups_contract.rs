@@ -35,6 +35,7 @@ use bcs_service_api::{
     StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus, StateMachineRunView, Workspace,
     ValidateCollaborationDefinitionYamlCommand,
 };
+use bcs_service_api::types::OpeningMessage;
 use bcs_service_api::{
     CreateOrReactivateCommand, NewSessionParams, SessionKind, SessionManagementService,
 };
@@ -362,6 +363,7 @@ impl GroupQueryService for RecordingGroupQuery {
             driver_bot_id: "driver-bot".to_string(),
             originator: None,
             context: Some("Shared context".to_string()),
+            opening_message: None,
             participants: vec![participant_view("driver-bot", "driver")],
             message_count: 0,
             workspace: Workspace::default(),
@@ -439,6 +441,7 @@ impl GroupManagementService for RecordingGroupManagement {
             driver_bot_id: cmd.target_actor_id.clone(),
             originator: cmd.caller_actor_id.clone(),
             context: cmd.context.clone(),
+            opening_message: None,
             participants,
             message_count: 0,
             workspace: Workspace::default(),
@@ -483,6 +486,7 @@ impl GroupManagementService for RecordingGroupManagement {
                 .unwrap_or_else(|| "driver-bot".to_string()),
             originator: cmd.caller_actor_id.clone(),
             context: None,
+            opening_message: None,
             participants: vec![participant_view(
                 cmd.caller_actor_id.as_deref().unwrap_or("driver-bot"),
                 "driver",
@@ -551,6 +555,7 @@ impl GroupManagementService for RecordingGroupManagement {
             driver_bot_id: cmd.caller_actor_id.clone(),
             originator: Some(cmd.caller_actor_id.clone()),
             context: None,
+            opening_message: None,
             participants: vec![participant_view(&cmd.caller_actor_id, "driver")],
             message_count: 0,
             workspace: Workspace::default(),
@@ -582,6 +587,7 @@ impl GroupManagementService for RecordingGroupManagement {
             driver_bot_id: cmd.caller_actor_id.clone(),
             originator: Some(cmd.caller_actor_id.clone()),
             context: None,
+            opening_message: None,
             participants: vec![participant_view(&cmd.caller_actor_id, "driver")],
             message_count: 0,
             workspace: Workspace::default(),
@@ -881,6 +887,7 @@ async fn post_groups_delegates_to_group_management_create_and_preserves_response
     );
     assert_eq!(json["context"], "Coordinate the release");
     assert_eq!(json["created"], true);
+    assert!(json.get("opening_message").is_none());
     assert!(json.get("scene_group_id").is_none());
     assert!(json.get("scene_group_name").is_none());
 
@@ -910,6 +917,39 @@ async fn post_groups_delegates_to_group_management_create_and_preserves_response
         policy.sender_routes.get("driver-bot"),
         Some(&vec!["target-bot".to_string()])
     );
+}
+
+#[tokio::test]
+async fn post_groups_rejects_opening_message_for_chat_with_declared_code() {
+    let (app, recorder, _temp_dir) = test_app().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups")
+                .header("authorization", "Bearer driver-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "driver_bot": "driver-bot",
+                        "opening_message": "hello",
+                        "participants": [
+                            { "bot_uuid": "driver-bot", "role": "driver" }
+                        ]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["code"], "invalid_opening_message");
+    assert!(recorder.create_calls.lock().await.is_empty());
 }
 
 #[tokio::test]
@@ -953,7 +993,7 @@ runtime:
                     serde_json::json!({
                         "id": "group-sm-yaml",
                         "driver_bot": "driver-bot",
-                        "group_strategy": "state_machine",
+                        "opening_message": "Run {{bcs.run_id}}",
                         "auto_start_on_service_invocation": true,
                         "participant_bindings": {
                             "speaker_a": {
@@ -979,11 +1019,18 @@ runtime:
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let response_json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(response_json["opening_message"], "Run {{bcs.run_id}}");
     let calls = recorder.create_calls.lock().await;
     assert_eq!(calls.len(), 1);
     let cmd = &calls[0];
     assert_eq!(cmd.group_id.as_deref(), Some("group-sm-yaml"));
     assert_eq!(cmd.driver_bot_id, "driver-bot");
+    assert_eq!(
+        cmd.opening_message,
+        Some(OpeningMessage::Text("Run {{bcs.run_id}}".to_string()))
+    );
     assert_eq!(
         cmd.participants
             .iter()
@@ -2767,6 +2814,7 @@ fn detail_from_create(cmd: &GroupCreateCommand) -> GroupDetailResult {
         driver_bot_id: cmd.driver_bot_id.clone(),
         originator: cmd.originator.clone(),
         context: cmd.context.clone(),
+        opening_message: cmd.opening_message.clone(),
         participants: cmd
             .participants
             .iter()

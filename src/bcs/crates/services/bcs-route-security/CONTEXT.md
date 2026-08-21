@@ -5,9 +5,12 @@
 - Route-time security service implementation for BCS.
 - Security intercept, pass, block, and degraded decision logic.
 - A transport-agnostic policy boundary for outbound security checks.
+- Per-request DNS validation for exact or leading-wildcard private endpoint
+  rules, with host, effective port, and CIDR intersection matching.
 
 ## Consumes
 
+- `bcs-config-api` validated private endpoint allowlist entries.
 - `bcs-service-api` contract traits and DTOs.
 - No runtime dependencies yet; implementation currently lives inline in
   `services/bcs-routing`.
@@ -28,7 +31,8 @@
 
 ## Configuration
 
-- Bootstrap injects gateway clients, thresholds, and degrade policy explicitly.
+- Bootstrap injects gateway clients, thresholds, degrade policy, and validated
+  private endpoint rules explicitly.
 - This crate must not read process env or extract request principals itself.
 
 ## Runtime ownership

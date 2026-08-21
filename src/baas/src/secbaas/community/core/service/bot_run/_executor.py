@@ -530,6 +530,9 @@ class BotRunRequestExecutor:
                     stream_error = chunk.content or "stream error"
                     _write_chunk(chunk)
                     last_flush_ts = time.monotonic()
+                elif chunk.type == "interaction":
+                    _write_chunk(chunk)
+                    last_flush_ts = time.monotonic()
                 else:
                     logger.debug(
                         "[BotRequestWorker] ignore chunk type: %s, run_id: %s",

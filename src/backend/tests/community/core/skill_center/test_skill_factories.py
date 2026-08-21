@@ -219,6 +219,32 @@ def test_local_skill_package_storage_splits_path_entity_from_device_owner(
     assert device_calls == [("bot-1", "owner-7")]
 
 
+def test_pool_local_skill_package_storage_uses_the_canonical_pool_local_root(
+    test_injector,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: (
+        "/pool/active",
+        "/pool/skills-local",
+        "/pool/skills-repo",
+    )
+    factory._device_fs_dispatcher.for_bot = lambda *_: object()
+
+    directory, storage = factory.local_skill_package_storage(
+        entity_id="project-42",
+        owner_id="owner-7",
+        bot_id="bot-1",
+        engine_type="hermes",
+        entity_type="project",
+        is_desktop=False,
+        is_teclaw=False,
+        name="reviewer",
+    )
+
+    assert directory == "/pool/skills-local/reviewer"
+    assert storage.directory == "/pool/skills-local/reviewer"
+
+
 def test_teclaw_legacy_local_skill_package_storage_uses_workspace_adapter(
     test_injector,
 ):
@@ -273,9 +299,7 @@ def test_legacy_relative_locator_cleanup_resolves_against_bot_local_dir(
         locator="reviewer",
     )
 
-    assert storage._device_directory == (
-        "/bots/project-42/bot-1/skills-local/reviewer"
-    )
+    assert storage._device_directory == ("/bots/project-42/bot-1/skills-local/reviewer")
 
 
 @pytest.mark.parametrize("locator", ["../skills-repo", "skills-local/.."])
@@ -370,6 +394,37 @@ def test_real_skill_set_service_factory_create_default_branch(test_injector):
     svc = factory.create()
     assert isinstance(svc, SkillSetService)
 
+
+
+def test_skill_set_factory_threads_explicit_runtime_engine_to_pool_paths(
+    test_injector,
+):
+    factory = test_injector.get(SkillSetServiceFactory)
+    pool_resolution_calls = []
+
+    def resolve_pool_paths(owner_id, bot_id, engine_type):
+        pool_resolution_calls.append((owner_id, bot_id, engine_type))
+        return (
+            "/pool/active",
+            "/pool/local",
+            "/pool/repo",
+        )
+
+    factory._pool_layout_paths = resolve_pool_paths
+
+    svc = factory.create(
+        user_id="owner-1",
+        entity_id="owner-1",
+        bot_id="bot-1",
+        engine_type="claude_code",
+        runtime_engine_type="aicoding",
+    )
+
+    assert pool_resolution_calls[-1] == ("owner-1", "bot-1", "aicoding")
+    assert svc.engine_type == "claude_code"
+    assert svc.runtime_engine_type == "aicoding"
+    assert str(svc.local_dir) == "/pool/local"
+    assert str(svc.repo_dir) == "/pool/repo"
 
 def test_real_skill_set_service_factory_create_bot_paths_branch(test_injector):
     """user_id/entity_id present → the _get_bot_paths (if) branch the
@@ -689,7 +744,8 @@ async def test_bot_skill_set_activation_holds_the_layout_edit_lease(test_injecto
     guard = _Guard()
     activator._edit_guard = guard
     activator.skill_set_service._bot_repo.get_by_id_and_owner = lambda *_: {
-        "env": "dev", "entity_id": "owner",
+        "env": "dev",
+        "entity_id": "owner",
     }
     unlocked = AsyncMock(return_value=ActivateResult(success=True, message="ok"))
     activator._activate_skill_set_unlocked = unlocked
@@ -730,7 +786,8 @@ async def test_bot_skill_set_activation_uses_entity_id_for_the_layout_edit_lease
     guard = _Guard()
     activator._edit_guard = guard
     activator.skill_set_service._bot_repo.get_by_id_and_owner = lambda *_: {
-        "env": "dev", "entity_id": "owner",
+        "env": "dev",
+        "entity_id": "owner",
     }
     unlocked = AsyncMock(return_value=ActivateResult(success=True, message="ok"))
     activator._activate_skill_set_unlocked = unlocked
@@ -768,7 +825,8 @@ async def test_bot_skill_set_deactivation_holds_the_layout_edit_lease(test_injec
     guard = _Guard()
     activator._edit_guard = guard
     activator.skill_set_service._bot_repo.get_by_id_and_owner = lambda *_: {
-        "env": "dev", "entity_id": "owner",
+        "env": "dev",
+        "entity_id": "owner",
     }
     unlocked = AsyncMock(return_value=DeactivateResult(success=True, message="ok"))
     activator._deactivate_skill_set_unlocked = unlocked
@@ -871,11 +929,15 @@ async def test_bot_skill_set_switch_and_sync_use_the_resolved_owner_edit_lease(
     assert (await switcher.sync_skill_set_to_active("8", user_id="owner")).success
 
     assert [event[0] for event in guard.events] == [
-        "acquire", "release", "acquire", "release"
+        "acquire",
+        "release",
+        "acquire",
+        "release",
     ]
     assert owner_lookups == [("bot", "owner"), ("bot", "owner")]
     assert [event[1].entity_id for event in guard.events if event[0] == "acquire"] == [
-        "project-42", "project-42"
+        "project-42",
+        "project-42",
     ]
     switch_unlocked.assert_awaited_once_with("7", user_id="owner", proxy_token=None)
     sync_unlocked.assert_awaited_once_with("8", "owner")

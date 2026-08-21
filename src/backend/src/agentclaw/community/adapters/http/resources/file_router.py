@@ -35,7 +35,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
+from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
 from agentclaw.community.core.services.resource_file_service import (
     ResourceFileService,
     is_readonly,
@@ -87,7 +87,7 @@ def _resolve_params(
     return (
         effective_owner_id,
         effective_bot_id,
-        resolve_engine_for_bot(
+        resolve_runtime_engine_for_bot(
             bot_id=effective_bot_id,
             owner_id=effective_owner_id,
             override=engine_type,

@@ -194,6 +194,19 @@ def test_candidate_search_contract_matches_legacy_search_semantics() -> None:
     parameters = _parameters(operation)
 
     assert operation["operationId"] == "search_bot_candidates"
+    assert operation["x-avernet-security"] == {
+        "user": "optional",
+        "app": "optional",
+        "bot": "optional",
+    }
+    assert operation["responses"]["401"]["description"] == (
+        "A supplied Gateway Principal is invalid."
+    )
+    assert operation["responses"]["403"]["description"] == (
+        "BCS requires a usable Human identity; the current Human must manage "
+        "the selected physical Bot, or the selected Human Actor must represent "
+        "that Human."
+    )
     assert set(parameters) == {"bot_id", "q", "purpose"}
     assert parameters["q"].get("required", False) is False
     assert parameters["q"]["schema"] == {"type": "string"}

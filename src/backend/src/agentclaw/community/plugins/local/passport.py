@@ -208,7 +208,13 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
         )
         return {
             "agent_id": bot_id,
-            "agent_code": None,
+            # An issued Passport carries an identity: ``query_auth_status``
+            # above answers ISSUED for every bot, and completion rejects an
+            # issued authorization whose agent_code is missing
+            # (``create_flow._require_agent_code``). A ``None`` here made the
+            # stub contradict itself — every test/singlebox creation that ran
+            # the real completion path answered 502.
+            "agent_code": f"mock_agent_code_{bot_id}",
             "credential_id": None,
             "expire_at": None,
             "engine_type": None,

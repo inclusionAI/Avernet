@@ -350,9 +350,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: Bot-addressed operation, yielding 104/1/49. Skill Installation then adds
 #: three Bot-addressed operations. Repo Catalog then adds three more
 #: Bot-addressed plus eight account-level operations, yielding 110/1/57.
-#: The merged contract contains 126 path-addressed Bots, one legacy
-#: query-addressed operation, and 53 non-Bot operations.
-_BOT_ID_PLACEMENT = {"path": 126, "query": 1, "none": 53}
+#: The merged contract contains 132 path-addressed Bots, one legacy
+#: query-addressed operation, and 53 non-Bot operations — the six Harness
+#: operations are Bot-addressed under ``/bots/{bot_id}/harness``.
+_BOT_ID_PLACEMENT = {"path": 132, "query": 1, "none": 53}
 
 
 def _schema() -> dict:
@@ -446,8 +447,9 @@ def test_the_pinned_number_of_operations_take_it():
     # +5 for Editors and +4 for render screens. The read-only Node inventory adds
     # the final operation. Skill Installation adds three further Bot-addressed
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
-    # MCP adds eight operations.
-    assert len(taking) == 164
+    # MCP adds eight operations, and the Harness surface adds six
+    # Bot-addressed operations.
+    assert len(taking) == 170
 
 
 def test_the_exempt_operations_take_none():

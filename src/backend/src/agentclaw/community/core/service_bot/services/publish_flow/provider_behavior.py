@@ -10,7 +10,8 @@ This is deliberately distinct from the artifact *producer* seam
 (``deploy/producer.py``): the producer *builds* the artifact for a
 ``(bot, version)`` at build time; this owns the *deploy-time* steps that differ
 by container — post-build file staging, post-upgrade MCP-rule refresh, whether
-scale is supported, and whether the verify bot is destroyed on online success.
+scale is supported, whether an upgrade can revive a not-live bot, and whether the
+verify bot is destroyed on online success.
 """
 from __future__ import annotations
 
@@ -114,6 +115,16 @@ class ProviderBehavior(ABC):
 
     @property
     @abstractmethod
+    def upgrade_recovers_not_live_bot(self) -> bool:
+        """Whether an upgrade can revive a candidate BaaS bot that is no longer
+        live (``FAILED`` / ``STOPPED``). ``True`` when the provider's UPDATE
+        destroys and recreates the device in place; ``False`` when it cannot
+        rebuild a gone container, so the online deploy must retire the candidate
+        and release a fresh one instead."""
+        ...
+
+    @property
+    @abstractmethod
     def destroys_verify_bot_on_online(self) -> bool:
         """Whether the verify-stage BaaS bot is torn down after online success."""
         ...
@@ -123,8 +134,9 @@ class DefaultProviderBehavior(ProviderBehavior):
     """ARCA / baas container behavior — the historical default (no teclaw steps).
 
     Files already mirror to storage (no snapshot needed), an ARCA upgrade rebuilds
-    the container and refreshes MCP auth via its startup callback, scale is
-    supported, and the verify bot is destroyed once online succeeds.
+    the container and refreshes MCP auth via its startup callback (so an upgrade
+    also revives a FAILED/STOPPED bot), scale is supported, and the verify bot is
+    destroyed once online succeeds.
     """
 
     async def stage_build_files(
@@ -177,6 +189,12 @@ class DefaultProviderBehavior(ProviderBehavior):
         return True
 
     @property
+    def upgrade_recovers_not_live_bot(self) -> bool:
+        # The ARCA/baas UPDATE destroys + recreates the device in place, so a
+        # FAILED/STOPPED candidate is recovered by upgrading it.
+        return True
+
+    @property
     def destroys_verify_bot_on_online(self) -> bool:
         return True
 
@@ -188,8 +206,9 @@ class TeclawProviderBehavior(ProviderBehavior):
     of them), so a build snapshots ``/workspace`` + identity files into OSS and
     embeds the refs;
     a teclaw upgrade has no startup callback, so the MCP outbound rule is refreshed
-    explicitly; teclaw service bots do not support scale; and the verify bot is
-    kept (not destroyed) when online succeeds.
+    explicitly; its UPDATE cannot rebuild a gone container, so a not-live bot is
+    retired rather than upgraded; teclaw service bots do not support scale; and the
+    verify bot is kept (not destroyed) when online succeeds.
     """
 
     def __init__(
@@ -284,6 +303,13 @@ class TeclawProviderBehavior(ProviderBehavior):
 
     @property
     def supports_scale(self) -> bool:
+        return False
+
+    @property
+    def upgrade_recovers_not_live_bot(self) -> bool:
+        # A teclaw UPDATE cannot rebuild a gone container — it would just fail the
+        # publish and strand the record, so a not-live candidate is retired and
+        # replaced by a fresh first release.
         return False
 
     @property

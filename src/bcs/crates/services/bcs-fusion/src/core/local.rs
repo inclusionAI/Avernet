@@ -985,7 +985,6 @@ emoji: "🧑‍💻"
     }
 
     #[test]
-    #[ignore = "blocked by #1063 minimal merchant profile; see #1076"]
     fn test_load_merchant_operations_manager_context() {
         // Resolve the profile directory from the crate root so this test works on
         // CI/Linux runners as well as local macOS dev machines.

@@ -1,0 +1,38 @@
+# Evolvetrace example configuration.
+# Copy this file to application.yaml (or application.yml) and edit values.
+# Environment variables always take precedence over this file.
+
+# Server configuration
+server:
+  port: 3001
+
+# Database configuration
+# mode: sqlite | mysql | noop
+database:
+  mode: sqlite
+
+  sqlite:
+    # Path to SQLite database file. Supports ~ for home directory.
+    path: ~/.evolvetrace/engine.db
+
+  mysql:
+    host: 127.0.0.1
+    port: 3306
+    user: evolvetrace
+    password: changeme
+    database: evolvetrace
+
+# Admin users (comma-separated user IDs). These users can manage workflows and view all logs.
+security:
+  admin_user_ids: "admin,user1,user2"
+
+# Internal API signature verification (Ed25519 public key, base64-encoded).
+# Used by ClawMind / internal runs endpoints.
+internal:
+  public_key_b64: ""
+
+# Static asset serving
+static:
+  enabled: true
+  # Path is relative to project root; defaults to dist/ (Vite build output).
+  path: dist

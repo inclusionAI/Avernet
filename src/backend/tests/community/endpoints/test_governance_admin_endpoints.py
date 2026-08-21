@@ -700,6 +700,17 @@ def scan_and_deliver_error():
     """Error path: scan-and-deliver with invalid recipient -> 422."""
 
 
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/admin/scan-and-deliver",
+    scenario="no_auth",
+    input=CaseInput(query_params={"override_recipient": "10001"}),
+    expect=ExpectError(status=401),
+)
+def scan_and_deliver_no_auth():
+    """Security regression: unauthenticated scan-and-deliver is rejected."""
+
+
 # ---------------------------------------------------------------------------
 # 10. /admin/brake (GET) — no auth
 # ---------------------------------------------------------------------------

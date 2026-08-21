@@ -154,11 +154,11 @@ def test_result_route_pass_marks_scoped_done_and_releases_claim(bbs_task_with_cl
 
 
 def test_result_route_non_owner_409(bbs_task_with_claimed_node):
-    """非 claim 持有者 report → 被拒(TaskStateError 上抛;owner 校验抛,不释放他卡)。
+    """非 claim 持有者 report → 被拒(409 ErrorEnvelope;owner 校验抛,不释放他卡)。
 
-    当前内部路由尚未经 @envelope_errors 把 TaskStateError 映射为 409 envelope,异常经
-    TestClient 直接上抛,故断言领域错误上抛(等价"非持有者 report 被拒")而非 409 响应体。
+    ``@envelope_errors`` 经 ``ENVELOPE_ERRORS`` 把 TaskStateError 映射为 409 envelope。
     """
     c, task_id, node_id, bot = bbs_task_with_claimed_node
-    with pytest.raises(TaskStateError):
-        c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(task_id, node_id, "botOTHER"))
+    r = c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(task_id, node_id, "botOTHER"))
+    assert r.status_code == 409, r.text
+    assert r.json()["code"] == 409000

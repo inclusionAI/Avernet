@@ -49,6 +49,14 @@ class SystemConfigKey(StrEnum):
     SessionKeyMatcher performs case-insensitive contains matching.
     """
 
+    INTERACTION_PROCESS = "bot_run.interaction_process"
+    """Whether engine interaction events are persisted and forwarded to SSE.
+
+    Value: "true" or "false" (default: "false")
+    Usage: Read when a new pooled AsyncChatClient connection is created.
+    Existing pooled connections keep the value selected at creation time.
+    """
+
     # Add more system config keys here as needed
     # Example:
     # ARCA_DEFAULT_TIMEOUT = "arca.default_timeout"

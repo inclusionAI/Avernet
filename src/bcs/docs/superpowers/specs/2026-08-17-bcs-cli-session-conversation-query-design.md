@@ -17,8 +17,9 @@ BCS 已持久化 `bcs_session_id` 到 IM conversation 的映射，出站投递�
 2. 复用 `ConversationSessionRepoPort::list_by_bcs_session`；不新增 SQL。数据库实现继续使用
    参数绑定，应用服务通过 binding 识别 channel 类型，不向 CLI 暴露 provider 配置或
    IM 用户 ID。
-3. 新增人类身份保护的管理接口：
+3. 新增 Bot/Human 双身份保护的管理接口：
    `GET /channels/conversations/by-session?bcs_session_id=...&channel_type=dingtalk`。
+   Bot 仅可查询自己参与的 session；Human 仅可查询本人参与或其名下 Bot 参与的 session。
 4. 新增 `bcs-cli channel conversation-id --session <session_id>`。CLI 固定查询
    `dingtalk`，普通输出展示 conversation ID、binding ID 和 session scope；`--json`
    返回完整 `items`。
@@ -35,7 +36,8 @@ BCS 已持久化 `bcs_session_id` 到 IM conversation 的映射，出站投递�
 
 ## 验收标准
 
-- 缺少合法人类身份时返回未授权。
+- 缺少合法 Bot/Human 身份时返回未授权。
+- Bot 或 Human 与目标 session 无参与或归属关系时返回禁止访问。
 - 空白 `bcs_session_id` 返回参数错误。
 - CLI 查询只返回 `dingtalk` binding 对应的映射。
 - 同一 session 的多条映射全部返回且顺序沿用 repository 的稳定顺序。

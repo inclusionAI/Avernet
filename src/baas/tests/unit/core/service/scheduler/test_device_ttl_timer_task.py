@@ -7,7 +7,7 @@ stall trailing devices. Also covers the per-record digest logging.
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -100,7 +100,56 @@ class TestDefaults:
         assert task.interval_seconds == 42
         assert task._config.batch_size == 100
         assert task._config.lock_name == "device_ttl_timer_lock"
-        assert task._config.lock_expire_seconds == 1800
+        assert task._config.lock_expire_seconds == 1750
+
+
+class TestResolvedLockName:
+    def test_dev_suffix(self):
+        with patch(
+            "secbaas.community.core.service.scheduler._tasks._device_ttl_timer_task.get_current_env",
+            return_value="dev",
+        ):
+            cfg = DeviceTtlTimerTaskConfig()
+            assert cfg.resolved_lock_name() == "device_ttl_timer_lock_dev"
+
+    def test_pre_suffix(self):
+        with patch(
+            "secbaas.community.core.service.scheduler._tasks._device_ttl_timer_task.get_current_env",
+            return_value="pre",
+        ):
+            cfg = DeviceTtlTimerTaskConfig()
+            assert cfg.resolved_lock_name() == "device_ttl_timer_lock_pre"
+
+    def test_prod_suffix(self):
+        with patch(
+            "secbaas.community.core.service.scheduler._tasks._device_ttl_timer_task.get_current_env",
+            return_value="prod",
+        ):
+            cfg = DeviceTtlTimerTaskConfig()
+            assert cfg.resolved_lock_name() == "device_ttl_timer_lock_prod"
+
+    def test_explicit_lock_name_still_env_suffixed(self):
+        with patch(
+            "secbaas.community.core.service.scheduler._tasks._device_ttl_timer_task.get_current_env",
+            return_value="pre",
+        ):
+            cfg = DeviceTtlTimerTaskConfig(lock_name="custom_timer_lock")
+            assert cfg.resolved_lock_name() == "custom_timer_lock_pre"
+
+    @pytest.mark.asyncio
+    async def test_run_uses_resolved_lock_name(self):
+        cfg = DeviceTtlTimerTaskConfig(enabled=True)
+        lock_service = MagicMock()
+        lock_service.try_lock.return_value.__enter__.return_value = _not_acquired_lock()
+        task = DeviceTtlTimerTask(cfg, lock_service, MagicMock(), MagicMock())
+        with patch(
+            "secbaas.community.core.service.scheduler._tasks._device_ttl_timer_task.get_current_env",
+            return_value="prod",
+        ):
+            await task.run()
+        lock_service.try_lock.assert_called_once()
+        call_kwargs = lock_service.try_lock.call_args
+        assert call_kwargs.kwargs["lock_name"] == "device_ttl_timer_lock_prod"
 
 
 class TestEarlyReturns:

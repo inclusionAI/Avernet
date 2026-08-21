@@ -11,16 +11,16 @@ use bcs_collaboration_runtime::CollaborationRuntime;
 use bcs_collaboration_store::MemoryCollaborationStore;
 use bcs_domain::{
     ActorKind, CollaborationDefinition, CollaborationDefinitionRef,
-    CollaborationRuntimeDefinition, Group, GroupMessageType, GroupStrategy, MessageRole,
-    Participant, ParticipantMode, ParticipantRole, ResolvedParticipantBinding,
-    RuntimeParticipantBinding, SessionStatus, StateMachineNodeStatus, StateMachineRun,
-    StateMachineRunStatus, StateMachineTransition,
+    CollaborationRuntimeDefinition, Group, GroupMessageType, GroupStrategy, MessagePage,
+    MessageRole, NewMessage, OpeningMessage, Participant, ParticipantMode, ParticipantRole,
+    PersistedMessage, ResolvedParticipantBinding, RuntimeParticipantBinding, SessionStatus,
+    StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus, StateMachineTransition,
 };
 use bcs_group::{GroupManagement, GroupManagementWithRuntimeCleanup, GroupStore};
 use bcs_group_store::MemoryGroupRepo;
 use bcs_message_store::MemoryMessageRepo;
 use bcs_protocol::{BcsFrame, ChatSendParams};
-use bcs_service_api::port::repo::MessageRepoPort;
+use bcs_service_api::port::repo::{MessageRepoError, MessageRepoPort};
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult,
     BotDeliveryTarget, BotRunContext, BotRunContextPort, CallbackChannelConfig, CallbackConfig,
@@ -47,6 +47,49 @@ use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, Notify};
+
+macro_rules! test_runtime {
+    ($($argument:expr),+ $(,)?) => {
+        CollaborationRuntime::new($($argument),+)
+            .with_message_repo(Arc::new(MemoryMessageRepo::new()))
+    };
+}
+
+#[derive(Default)]
+struct FailingAppendMessageRepo {
+    inner: MemoryMessageRepo,
+}
+
+#[async_trait]
+impl MessageRepoPort for FailingAppendMessageRepo {
+    async fn append_message(
+        &self,
+        _message: NewMessage,
+    ) -> Result<PersistedMessage, MessageRepoError> {
+        Err(MessageRepoError::StorageError(
+            "opening message write failed".to_string(),
+        ))
+    }
+
+    async fn query_messages(
+        &self,
+        query: MessageQuery,
+    ) -> Result<MessagePage, MessageRepoError> {
+        self.inner.query_messages(query).await
+    }
+
+    async fn get_message_by_id(
+        &self,
+        session_id: &str,
+        message_id: &str,
+    ) -> Result<Option<PersistedMessage>, MessageRepoError> {
+        self.inner.get_message_by_id(session_id, message_id).await
+    }
+
+    async fn get_current_seq(&self, session_id: &str) -> Result<i64, MessageRepoError> {
+        self.inner.get_current_seq(session_id).await
+    }
+}
 
 #[derive(Clone, Default)]
 struct SharedLogBuffer(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -194,7 +237,7 @@ async fn current_session_permission_is_owned_by_chat_and_manager_group_driver() 
         .expect("seed chat session")
         .session;
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -317,7 +360,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
     let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
     let result_publisher = Arc::new(RecordingResultPublisher::default());
     let message_repo = Arc::new(MemoryMessageRepo::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -514,7 +557,7 @@ async fn one_shot_result_publication_failure_marks_run_failed_instead_of_complet
         .session;
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -596,7 +639,7 @@ async fn human_input_without_authenticated_or_present_human_is_invalid_request()
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -655,7 +698,7 @@ async fn human_input_can_start_without_authenticated_human_when_session_has_pres
         .expect("seed session")
         .session;
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -710,7 +753,7 @@ async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
         .expect("seed session")
         .session;
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -816,7 +859,7 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
     let channel_outbound = Arc::new(RecordingSessionChannelOutbound::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1018,7 +1061,7 @@ async fn frontend_human_input_skips_im_delivery_and_accepts_present_human() {
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let channel_outbound = Arc::new(RecordingSessionChannelOutbound::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1105,7 +1148,7 @@ async fn im_human_input_rejects_a_different_present_human() {
         .expect("seed session")
         .session;
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1163,7 +1206,7 @@ async fn state_machine_session_rejects_message_without_pending_human_input() {
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1228,7 +1271,7 @@ async fn human_run_owner_can_cancel_through_human_access_api() {
         .expect("seed group");
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1293,7 +1336,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
         .expect("seed regular group");
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1487,7 +1530,7 @@ async fn human_input_uses_the_same_judge_contract_as_bot_output() {
         retry_instruction: "unused by the regular judge contract".to_string(),
         raw_response: None,
     }]));
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1539,7 +1582,7 @@ async fn human_input_is_persisted_and_no_longer_pending_while_judging() {
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let judge = Arc::new(BlockingJudge::new("approved"));
-    let runtime = Arc::new(CollaborationRuntime::new(
+    let runtime = Arc::new(test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1631,7 +1674,7 @@ async fn human_input_remains_persisted_when_judge_fails() {
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let judge = Arc::new(RecordingJudge::with_error("judge provider unavailable"));
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1691,7 +1734,7 @@ async fn human_input_timeout_ignores_global_retries_and_rejects_late_response() 
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1761,7 +1804,7 @@ async fn timeout_scanner_aborts_run_when_group_is_missing() {
     group.upsert(test_group()).await.expect("seed group");
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1813,7 +1856,7 @@ async fn timeout_scanner_aborts_run_when_session_is_missing() {
     group.upsert(test_group()).await.expect("seed group");
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1868,7 +1911,7 @@ async fn timeout_scanner_skips_invalid_candidate_and_processes_later_run() {
     group.upsert(test_group()).await.expect("seed group");
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -1968,7 +2011,7 @@ async fn single_node_run_completes_session_with_bot_final_text() {
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
     let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -2230,12 +2273,14 @@ async fn single_node_run_completes_session_with_bot_final_text() {
 
 #[tokio::test]
 async fn state_machine_bot_delivery_registers_message_flow_run_context() {
+    const CONFIGURED_TIMEOUT_MS: u64 = 7_200_000;
+
     let group = Arc::new(GroupStore::new());
     group.upsert(test_group()).await.expect("seed group");
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
     let run_context = Arc::new(RecordingBotRunContext::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -2245,7 +2290,67 @@ async fn state_machine_bot_delivery_registers_message_flow_run_context() {
         delivery.clone(),
         noop_judge(),
     )
+    .with_provider_chat_run_timeout_ms(CONFIGURED_TIMEOUT_MS)
     .with_bot_run_context(run_context.clone());
+
+    let definition_yaml = single_node_yaml()
+        .replace("      node_timeout_ms: 120000\n", "")
+        .replace("        node_timeout_ms: 60000\n", "");
+    let before_start_ms = bcs_protocol::now_ms();
+    runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(definition_yaml),
+            definition: None,
+            definition_ref: None,
+            participant_bindings: None,
+            input: json!({"question": "stream this"}),
+            caller_id: None,
+            authenticated_human: None,
+        })
+        .await
+        .expect("start run");
+    let after_start_ms = bcs_protocol::now_ms();
+
+    let delivery_run_id = delivery.commands.lock().await[0].run_id.clone();
+    let context = run_context
+        .get_context(&delivery_run_id)
+        .await
+        .expect("state-machine delivery run context");
+    assert_eq!(context.bot_id, "driver-bot");
+    assert!(context.group_id.is_empty());
+    assert!(context.bcs_session_id.is_none());
+    assert!(!context.terminal);
+    assert!(
+        context.deadline_ms
+            >= before_start_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
+    );
+    assert!(
+        context.deadline_ms
+            <= after_start_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
+    );
+}
+
+#[tokio::test]
+async fn state_machine_explicit_node_timeout_overrides_provider_chat_default() {
+    const CONFIGURED_TIMEOUT_MS: u64 = 7_200_000;
+
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let runtime = test_runtime!(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        test_sessions(),
+        delivery.clone(),
+        noop_judge(),
+    )
+    .with_provider_chat_run_timeout_ms(CONFIGURED_TIMEOUT_MS);
 
     runtime
         .start_state_machine_run(StartStateMachineRunCommand {
@@ -2262,16 +2367,19 @@ async fn state_machine_bot_delivery_registers_message_flow_run_context() {
         .await
         .expect("start run");
 
-    let delivery_run_id = delivery.commands.lock().await[0].run_id.clone();
-    let context = run_context
-        .get_context(&delivery_run_id)
-        .await
-        .expect("state-machine delivery run context");
-    assert_eq!(context.bot_id, "driver-bot");
-    assert!(context.group_id.is_empty());
-    assert!(context.bcs_session_id.is_none());
-    assert!(!context.terminal);
-    assert!(context.deadline_ms > bcs_protocol::now_ms());
+    let commands = delivery.commands.lock().await;
+    let BcsFrame::Request(request) = &commands[0].frame else {
+        panic!("state-machine bot delivery must use a request frame");
+    };
+    let timeout_ms = request
+        .params
+        .as_ref()
+        .and_then(|params| params.get("timeout_ms"))
+        .and_then(Value::as_u64)
+        .expect("explicit node timeout must reach Provider chat.send");
+    assert!(timeout_ms > 0);
+    assert!(timeout_ms <= 60_000);
+    assert_ne!(timeout_ms, CONFIGURED_TIMEOUT_MS);
 }
 
 #[tokio::test]
@@ -2281,7 +2389,7 @@ async fn start_run_fails_and_marks_node_failed_when_delivery_returns_not_deliver
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RejectingDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -2343,7 +2451,7 @@ async fn message_less_final_fails_attempt_and_schedules_retry() {
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
     let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -2460,7 +2568,7 @@ async fn state_machine_completion_dispatches_service_callback() {
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -2512,7 +2620,7 @@ async fn state_machine_runtime_logs_run_node_and_terminal_lifecycle() {
         let sessions = test_sessions();
         let store = Arc::new(MemoryCollaborationStore::new());
         let delivery = Arc::new(RecordingDelivery::default());
-        let runtime = CollaborationRuntime::new(
+        let runtime = test_runtime!(
             store.clone(),
             store.clone(),
             store.clone(),
@@ -2595,7 +2703,7 @@ async fn start_run_uses_group_default_definition_binding() {
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -2648,7 +2756,7 @@ async fn deleting_session_aborts_all_active_state_machine_runs() {
     group.upsert(test_group()).await.expect("seed group");
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = Arc::new(CollaborationRuntime::new(
+    let runtime = Arc::new(test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -2710,7 +2818,7 @@ async fn deleting_group_aborts_active_state_machine_runs() {
     group.upsert(test_group()).await.expect("seed group");
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = Arc::new(CollaborationRuntime::new(
+    let runtime = Arc::new(test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -2764,7 +2872,7 @@ async fn retrying_deleted_group_cleanup_aborts_orphaned_active_runs() {
     group.upsert(test_group()).await.expect("seed group");
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = Arc::new(CollaborationRuntime::new(
+    let runtime = Arc::new(test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -2819,7 +2927,7 @@ async fn group_runtime_cleanup_aborts_runs_and_removes_sessions_and_binding() {
     group.upsert(test_group()).await.expect("seed group");
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -2912,7 +3020,7 @@ async fn configure_im_definition_defers_channel_validation_until_run_start() {
     let channel_outbound = Arc::new(RecordingSessionChannelOutbound::default());
     *channel_outbound.validation_error.lock().await =
         Some("no active dingtalk ChannelBinding exists".to_string());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -2965,7 +3073,7 @@ async fn group_collaboration_definition_get_and_patch_preserve_source_yaml() {
     group.upsert(test_group()).await.expect("seed group");
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -3038,7 +3146,7 @@ async fn group_collaboration_definition_get_generates_legacy_authoring_yaml_with
     group.upsert(test_group()).await.expect("seed group");
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -3179,7 +3287,7 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
     let definitions = Arc::new(CountingDefinitionRepo::new(backing_store.clone()));
     let delivery = Arc::new(RecordingDelivery::default());
     let message_repo = Arc::new(MemoryMessageRepo::new());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         definitions.clone(),
         backing_store.clone(),
         backing_store.clone(),
@@ -3247,10 +3355,165 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
         })
         .await
         .expect("query generic run panel anchors");
-    assert!(
-        panels.messages.is_empty(),
-        "configured service-invocation runs must not write chat panel anchors"
+    assert_eq!(panels.messages.len(), 1);
+    assert_eq!(
+        panels.messages[0].client_msg_id.as_deref(),
+        Some(format!("{}:000-panel", started.view.run.run_id).as_str())
     );
+}
+
+#[tokio::test]
+async fn custom_opening_message_is_rendered_once_and_reused_from_history() {
+    let groups = Arc::new(GroupStore::new());
+    let mut group = state_machine_test_group();
+    group.label = Some("发布检查".to_string());
+    group.opening_message = Some(OpeningMessage::Text(
+        "群={{bcs.group_name}} session={{bcs.session_name}} group={{bcs.group_id}} session_id={{bcs.session_id}} run={{bcs.run_id}}"
+            .to_string(),
+    ));
+    groups.upsert(group.clone()).await.expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let message_repo = Arc::new(MemoryMessageRepo::new());
+    let runtime = test_runtime!(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        groups.clone(),
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    )
+    .with_message_repo(message_repo.clone());
+
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: group.id.clone(),
+            session_id: None,
+            definition_yaml: Some(single_node_yaml()),
+            definition: None,
+            definition_ref: None,
+            participant_bindings: None,
+            input: Value::Null,
+            caller_id: None,
+            authenticated_human: None,
+        })
+        .await
+        .expect("start run");
+    let expected = format!(
+        "群=发布检查 session=Single Node group=group-1 session_id={} run={}",
+        started.view.run.session_id, started.view.run.run_id
+    );
+    let persisted = message_repo
+        .query_messages(MessageQuery {
+            group_id: group.id.clone(),
+            session_id: started.view.run.session_id.clone(),
+            cursor: None,
+            limit: 10,
+            keyword: None,
+            sender_id: None,
+            message_type: Some(STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string()),
+            owner_filter: MessageOwnerFilter::Any,
+            time_range: None,
+            visible_from_seq: None,
+        })
+        .await
+        .expect("query opening message");
+    assert_eq!(persisted.messages[0].content["text"], expected);
+
+    group.opening_message = Some(OpeningMessage::Text("后来修改".to_string()));
+    groups.upsert(group).await.expect("update group template");
+    let history = runtime
+        .get_state_machine_session_history(&started.view.run.session_id, 20, None)
+        .await
+        .expect("history")
+        .expect("state-machine history");
+    assert_eq!(history.messages[0].content, expected);
+
+    let next = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(single_node_yaml()),
+            definition: None,
+            definition_ref: None,
+            participant_bindings: None,
+            input: Value::Null,
+            caller_id: None,
+            authenticated_human: None,
+        })
+        .await
+        .expect("start next run");
+    let next_messages = message_repo
+        .query_messages(MessageQuery {
+            group_id: "group-1".to_string(),
+            session_id: next.view.run.session_id,
+            cursor: None,
+            limit: 10,
+            keyword: None,
+            sender_id: None,
+            message_type: Some(STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string()),
+            owner_filter: MessageOwnerFilter::Any,
+            time_range: None,
+            visible_from_seq: None,
+        })
+        .await
+        .expect("query next opening message");
+    assert_eq!(next_messages.messages[0].content["text"], "后来修改");
+}
+
+#[tokio::test]
+async fn opening_message_persistence_failure_fails_run_before_node_dispatch() {
+    let groups = Arc::new(GroupStore::new());
+    groups
+        .upsert(state_machine_test_group())
+        .await
+        .expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let runtime = test_runtime!(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        groups,
+        sessions.clone(),
+        delivery.clone(),
+        noop_judge(),
+    )
+    .with_message_repo(Arc::new(FailingAppendMessageRepo::default()));
+
+    let error = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(single_node_yaml()),
+            definition: None,
+            definition_ref: None,
+            participant_bindings: None,
+            input: Value::Null,
+            caller_id: None,
+            authenticated_human: None,
+        })
+        .await
+        .expect_err("opening message persistence failure must abort startup");
+    assert!(error.to_string().contains("panel history persistence failed"));
+    assert!(delivery.commands.lock().await.is_empty());
+
+    let session = sessions
+        .list_by_group("group-1", None, 0, 10, None, None)
+        .await
+        .expect("list state-machine session")
+        .into_iter()
+        .next()
+        .expect("state-machine session");
+    let run = StateMachineRunRepoPort::get_run_by_session_id(&*store, &session.id)
+        .await
+        .expect("load failed run")
+        .expect("failed run");
+    assert_eq!(run.status, StateMachineRunStatus::Failed);
 }
 
 #[tokio::test]
@@ -3260,7 +3523,7 @@ async fn start_run_uses_group_participant_bindings_for_template_definition() {
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -3328,7 +3591,7 @@ async fn start_run_rejects_multi_bot_slot_with_current_single_assignee_runtime()
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -3383,7 +3646,7 @@ async fn graph_view_returns_snapshot_edges_and_node_status() {
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -3455,7 +3718,7 @@ async fn complete_transitions_support_fan_out_and_implicit_all_join() {
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -3530,7 +3793,7 @@ async fn judged_node_routes_selected_outcome_and_skips_unselected_branch() {
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
     let judge = Arc::new(RecordingJudge::with_outcome("approved"));
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -3619,7 +3882,7 @@ async fn judged_node_publishes_bot_output_but_not_judge_message_to_workbench() {
     let delivery = Arc::new(RecordingDelivery::default());
     let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
     let judge = Arc::new(RecordingJudge::with_outcome("approved"));
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -3685,7 +3948,7 @@ async fn judged_node_failure_records_runtime_event_and_fails_run() {
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
     let judge = Arc::new(RecordingJudge::with_error("judge provider timed out"));
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -3765,7 +4028,7 @@ async fn judged_node_timeout_records_runtime_event_and_fails_run() {
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
     let judge = Arc::new(RecordingJudge::with_delayed_outcome("approved", 25));
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
@@ -3841,7 +4104,7 @@ async fn judged_node_keeps_shared_merge_reachable_from_selected_branch() {
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let runtime = CollaborationRuntime::new(
+    let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),

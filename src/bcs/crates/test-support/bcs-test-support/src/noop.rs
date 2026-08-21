@@ -2118,7 +2118,7 @@ fn service_not_configured(name: &str) -> ServiceError {
     }
 }
 
-pub use bcs_session::NoopSessionManagementService;
+pub use bcs_session::{NoopSessionLaunchService, NoopSessionManagementService};
 
 pub use bcs_session_file::NoopSessionFileService;
 

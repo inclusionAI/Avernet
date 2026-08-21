@@ -151,6 +151,9 @@ bcs-storage-local = { workspace = true }
 bcs-storage-baas  = { path = "../../plugins/bcs-storage-baas" }
 bcs-message = { workspace = true }
 bcs-message-store = { workspace = true }
+bcs-event-store = { workspace = true }
+bcs-eventing = { workspace = true }
+bcs-webhook-client = { workspace = true }
 bcs-callback = { workspace = true }
 bcs-collaboration-template = { workspace = true }
 bcs-collaboration-runtime = { workspace = true }

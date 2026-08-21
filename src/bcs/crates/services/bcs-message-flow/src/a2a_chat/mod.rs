@@ -1157,7 +1157,7 @@ fn direct_chat_failure_reason(error: &str) -> DirectChatRunReason {
     // This is intentionally limited to bot-emitted chat.event error text.
     // Store and transport paths pass typed DirectChatRunReason values.
     let normalized = error.to_ascii_lowercase();
-    if normalized.contains("timeout") {
+    if is_timeout_text(&normalized) {
         DirectChatRunReason::Timeout
     } else if normalized.contains("bot_not_connected") || normalized.contains("not connected") {
         DirectChatRunReason::BotNotConnected
@@ -1177,8 +1177,17 @@ fn direct_chat_service_error_reason(error: &ServiceError) -> DirectChatRunReason
             DirectChatRunReason::Blocked
         }
         ServiceError::MessageLimitReached(_) => DirectChatRunReason::StoreCapacity,
+        ServiceError::InternalError(message) if is_timeout_text(&message.to_ascii_lowercase()) => {
+            DirectChatRunReason::Timeout
+        }
         _ => DirectChatRunReason::InternalError,
     }
+}
+
+fn is_timeout_text(normalized: &str) -> bool {
+    normalized.contains("timeout")
+        || normalized.contains("timed out")
+        || normalized.contains("time out")
 }
 
 fn ensure_run_owner(record: &ChatRunRecord, from_bot_id: &str) -> ServiceResult<()> {
@@ -1342,6 +1351,14 @@ mod tests {
             DirectChatRunReason::Timeout
         );
         assert_eq!(
+            direct_chat_failure_reason("Agent response timed out before completion."),
+            DirectChatRunReason::Timeout
+        );
+        assert_eq!(
+            direct_chat_failure_reason("executor safety-net: time out"),
+            DirectChatRunReason::Timeout
+        );
+        assert_eq!(
             direct_chat_failure_reason("target bot is not connected"),
             DirectChatRunReason::BotNotConnected
         );
@@ -1352,6 +1369,18 @@ mod tests {
         assert_eq!(
             direct_chat_failure_reason("unexpected model error"),
             DirectChatRunReason::InternalError
+        );
+        assert_eq!(
+            direct_chat_service_error_reason(&ServiceError::InternalError(
+                "provider response header timeout after 5000ms".to_string()
+            )),
+            DirectChatRunReason::Timeout
+        );
+        assert_eq!(
+            direct_chat_service_error_reason(&ServiceError::InternalError(
+                "provider request failed: operation timed out".to_string()
+            )),
+            DirectChatRunReason::Timeout
         );
     }
 }
