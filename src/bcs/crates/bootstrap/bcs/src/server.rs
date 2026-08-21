@@ -5062,6 +5062,7 @@ mod tests {
         let temp_dir = tempfile::TempDir::new().expect("temp dir");
         let provider_repos = memory_provider_repos();
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+        let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_provider_repos(
             bot_repo,
             provider_repos.provider_repo.clone(),
@@ -5071,6 +5072,12 @@ mod tests {
         let relation: Arc<dyn bcs_service_api::RelationCoreService> =
             Arc::new(RelationCore::memory());
         let cleanup = Arc::new(RecordingChannelBindingCleanup::default());
+        let provider_control_plane: Arc<dyn BotControlPlaneCoreService> =
+            Arc::new(BotControlPlaneCore::new(
+                control_plane_repo,
+                provider_repos.provider_repo.clone(),
+                provider_repos.provider_bindings.clone(),
+            ));
         let (_provider_core, _provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -5078,6 +5085,7 @@ mod tests {
                 relation,
                 None,
                 OutboundUrlGuard::allowing_private_networks_for_tests(),
+                provider_control_plane,
                 cleanup.clone(),
             );
 
