@@ -7,8 +7,12 @@
 
 成功经 ``envelope()`` → ``Envelope{code,message,data,request_id}``;失败上抛
 ``InternalError`` → 经 ``@envelope_errors`` 重抛到中央 ``DomainError`` handler →
-500 ``ErrorEnvelope``。与 dev 进化后的 DiscoveryService 对齐:经 backend connection
-API 定位 per-bot engine 创建 session,经 ``NotifySenderPlugin`` 投递通知。
+500 ``ErrorEnvelope``。
+
+``discover`` 复用 ``TaskDiscoveryModule`` 绑定的 ``DiscoveryService`` 单例 —— 与
+``TaskDiscoveryScheduler`` 定时触发的是同一个实例、同一条 reader/initiator/notify
+链路,手动与定时两条触发路径因此不会漂移。``status`` 仍按请求新建 reader:db 路径
+来自 ``TASK_DISCOVERY_DATA_FILE``,须在请求时读取而非在容器构建时定格。
 """
 from __future__ import annotations
 
@@ -25,17 +29,12 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.core.errors import InternalError
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
-    create_default_service,
-)
-from agentclaw.community.core.task.task_discovery.session_creator import (
-    HttpSessionCreator,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
     SqliteTaskReader,
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
 
 logger = get_logger()
 
@@ -55,15 +54,6 @@ def _resolve_db_path() -> str:
     return os.environ.get("TASK_DISCOVERY_DATA_FILE", _DEFAULT_DB)
 
 
-def _build_service(notify_sender: NotifySenderPlugin) -> DiscoveryService:
-    """构建 DiscoveryService(经 backend connection API 定位 per-bot engine)。"""
-    return create_default_service(
-        data_file=_resolve_db_path(),
-        notify_sender=notify_sender,
-        session_creator=HttpSessionCreator(),
-    )
-
-
 @router.post("/discover", response_model=Envelope[dict])
 @envelope_errors
 async def discover_tasks(
@@ -72,7 +62,7 @@ async def discover_tasks(
     agent_id: str = Query("bot_001", description="Bot/Agent ID"),
     bot_id: str = Query(..., description="Bot ID"),
     owner_id: str = Query(..., description="Bot 所有者 ID"),
-    notify_sender: NotifySenderPlugin = Injected(NotifySenderPlugin),  # noqa: B008
+    service: DiscoveryService = Injected(DiscoveryService),  # noqa: B008
 ) -> Envelope[dict]:
     """手动触发任务发现:读取任务 → 在 per-bot engine 创建 session → 投递通知。
 
@@ -85,9 +75,8 @@ async def discover_tasks(
         user_id, agent_id, bot_id,
     )
     try:
-        service = _build_service(notify_sender=notify_sender)
         results = await service.discover(
-            user_id=user_id, agent_id=agent_id, bot_id=bot_id, owner_id=owner_id,
+            bot_id=bot_id, owner_id=owner_id, agent_id=agent_id,
         )
     except Exception as exc:
         logger.error("[task_discovery] discover failed: %s", exc, exc_info=True)

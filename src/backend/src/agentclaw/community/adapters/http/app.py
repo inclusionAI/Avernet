@@ -118,7 +118,10 @@ from agentclaw.community.adapters.http.beta_quota.router import router as beta_q
 from agentclaw.community.adapters.http.channel.router import router as channel_router  # noqa: E402
 from agentclaw.community.adapters.http.quality.router import router as quality_router  # noqa: E402
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router  # noqa: E402
-from agentclaw.community.adapters.http.openapi_v1.task.router import task_callback_router  # noqa: E402
+# The engine's task callbacks are an internal surface: they live under
+# ``/api/v1/collaboration/tasks/callback`` in ``adapters/http/task``, not on
+# the public ``/openapi/v1`` router next to execute/dashboard/list.
+from agentclaw.community.adapters.http.task import task_callback_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402

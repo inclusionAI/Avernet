@@ -293,6 +293,11 @@ class BotAuthStatusPoll(BaseModel):
         description="Echo of the bot type the bot was requested with; "
         "defaults to 'personal' when omitted.",
     )
+    space_id: str | None = Field(
+        default=None,
+        description="Echo of the business space the bot was requested with; "
+        "omitted resolves the caller's current space, exactly as on create.",
+    )
 
 
 class BotAuthStatus(BaseModel):

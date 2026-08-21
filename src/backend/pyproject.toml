@@ -61,6 +61,12 @@ dependencies = [
   #    Aliyun-OSS S3 endpoint). Corp runtime never uses it; the corp manifest
   #    declares no community deps (its test venv gets boto3 via moto[s3]). ──
   "boto3>=1.34",
+  # ── Community-only public dep: APScheduler backs TaskDiscoveryScheduler, the
+  #    thread-level cron scheduler bound as a lifecycle singleton by
+  #    ``TaskDiscoveryModule``. The DI container registers that module
+  #    unconditionally, so the import must resolve at app boot — an undeclared
+  #    apscheduler fails the whole container, not just the scheduler. ──
+  "apscheduler>=3.10",
 ]
 
 # Community test tooling — so the extracted community repo can run its own CI.
