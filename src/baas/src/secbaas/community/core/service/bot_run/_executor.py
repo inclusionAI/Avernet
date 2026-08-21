@@ -21,6 +21,7 @@ BCN uplink 逻辑已从执行器链中剥离，改为 ``BcnUplinkCallback``（Po
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import TYPE_CHECKING, Any
@@ -107,6 +108,13 @@ class ResultGuardExecutor:
         try:
             await self._inner.execute(record)
         except RequeuedToPendingError:
+            raise
+        except asyncio.CancelledError:
+            logger.warning(
+                "[ResultGuardExecutor] executor cancelled run_id=%s",
+                record.run_id,
+            )
+            self._mark_failed(record.run_id, "execution cancelled (timeout)")
             raise
         except TimeoutError:
             logger.warning(
@@ -275,7 +283,11 @@ class BotRunRequestExecutor:
         )
         request_type = metadata.get("request_type", "chat")
         stream = metadata.get("stream", "false") == "true"
-        timeout_sec = metadata.get("timeout")
+        timeout_sec = (
+            metadata.get("timeout")
+            if metadata.get("timeout")
+            else queue_meta.get("timeout")
+        )
         chat_metadata = build_chat_metadata(metadata, run.run_id)
 
         context = _rebuild_context(

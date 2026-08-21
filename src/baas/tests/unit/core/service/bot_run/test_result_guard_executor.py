@@ -6,6 +6,7 @@ ResultGuardExecutor 是 executor 链的业务结果兜底层：Worker 不直接�
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from uuid import uuid4
 
@@ -62,6 +63,13 @@ class _TimeoutInner:
 class _RequeueInner:
     async def execute(self, record: BotRunQueueRecord) -> None:
         raise RequeuedToPendingError(record.run_id, "sess-1")
+
+
+class _CancelledInner:
+    async def execute(self, record: BotRunQueueRecord) -> None:
+        import asyncio
+
+        raise asyncio.CancelledError()
 
 
 class _RecordingInner:
@@ -147,3 +155,15 @@ async def test_timeout_error_inner_marks_failed(repo: OrmBotRunRepository):
     rec = repo.get_by_run_id(run_id)
     assert rec.status == "FAILED"
     assert "Task execution timeout" in (rec.error or "")
+
+
+async def test_cancelled_error_marks_failed_and_reraises(repo: OrmBotRunRepository):
+    run_id = _insert_run(repo)
+    ex = ResultGuardExecutor(_CancelledInner(), repo)
+
+    with pytest.raises(asyncio.CancelledError):
+        await ex.execute(_record(run_id))
+
+    rec = repo.get_by_run_id(run_id)
+    assert rec.status == "FAILED"
+    assert "execution cancelled" in (rec.error or "")
