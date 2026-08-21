@@ -1782,6 +1782,7 @@ impl GroupManagementService for GroupManagement {
                     role: ParticipantRole::Observer,
                     actor_kind: ActorKind::Human,
                     mode: Some(cmd.mode),
+                    tags: Vec::new(),
                 },
                 actor_is_public: true,
             }

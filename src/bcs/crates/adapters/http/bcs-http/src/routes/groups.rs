@@ -615,6 +615,7 @@ fn legacy_create_group_spec(
                     strategy,
                 )?,
                 actor_id: participant.bot_id,
+                tags: participant.tags,
             })
         })
         .collect::<Result<Vec<_>, HttpAdapterError>>()?;

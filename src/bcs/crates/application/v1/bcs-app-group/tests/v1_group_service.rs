@@ -3354,6 +3354,7 @@ async fn update_opening_message_preserves_patch_states_and_strategy_guard() {
                 participants: vec![CreateParticipant {
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
                 }],
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
