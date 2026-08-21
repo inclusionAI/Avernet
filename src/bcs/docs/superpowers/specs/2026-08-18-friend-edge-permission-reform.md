@@ -1,6 +1,6 @@
 # 好友关系 → 边权限 改造 · 合并文档（Spec + Plan Installments + Review Fixes）
 
-> 状态：合并稿（2026-08-19 规整；5 个原始文档已删除，本文件为该主题唯一来源，归档于 `src/bcs/docs/`）
+> 状态：合并稿（2026-08-19 规整；5 个原始文档已删除，本文件为该主题唯一来源，归档于 `src/bcs/docs/superpowers/specs/`）
 > 工作仓库：Avernet（路径前缀 `src/...`）
 > 范围：把两套互不相通的好友关系统一到 08-12 边权限模型，BCS `edge_grants` 作为好友关系唯一事实源（SoR）。
 >
