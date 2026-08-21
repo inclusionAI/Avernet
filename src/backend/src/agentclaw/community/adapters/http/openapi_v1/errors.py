@@ -118,6 +118,19 @@ class StartupScriptUnsupportedError(Exception):
     """
 
 
+class DeptLookupError(Exception):
+    """The staff directory could not answer a department lookup (→ 502).
+
+    Distinct from "no dept" (a 200 with null ``dept_*``): this is infrastructure
+    failure — the backing master-data service was unreachable, errored, or a
+    needed secret could not be resolved. ``StaffDeptPlugin.get_dept_by_work_no``
+    raises it on those, and the ``org/user`` whoami surfaces it as a 5xx so an
+    operator can tell "directory down" from "person has no dept" from "not
+    authenticated" (401). Fixed message: the specific cause is logged, never
+    returned, mirroring how ``MissingPrincipalError`` keeps its reason off the wire.
+    """
+
+
 class BotAccessRefusedError(Exception):
     """Raised when a caller is below an operation's collaborator level (→ 404).
 

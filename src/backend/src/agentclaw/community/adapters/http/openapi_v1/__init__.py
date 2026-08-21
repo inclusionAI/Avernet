@@ -176,8 +176,10 @@ from fastapi import APIRouter, Depends
 from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
+from .collaboration_bots import router as collaboration_bots_router
 from .bots.engine_config import router as engine_config_router
-from .caller import router as caller_router
+from .org import dept_router as org_dept_router
+from .org import router as org_router
 from .channels import router as channels_router
 from .containers import router as containers_router
 from .diagnostics import router as diagnostics_router
@@ -407,7 +409,14 @@ def build_public_router() -> APIRouter:
     # table, not the user-scoped one. The caller is the sole top-level public
     # resource here because it describes the authenticated principal itself.
     public.include_router(
-        caller_router,
+        org_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Department directory search — a tenant-wide catalogue read (no ``user_id``),
+    # backed by the same StaffDeptPlugin as the whoami's dept fields.
+    public.include_router(
+        org_dept_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
@@ -501,6 +510,15 @@ def build_public_router() -> APIRouter:
     # `bots` is mixed too, but stays last for the wildcard-ordering rule above.
     public.include_router(
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+    )
+    # New-version bcs publish-to-users (backend route: /openapi/v1/bots/{bot_id}/public-bcs;
+    # the gateway rewrites the external /openapi/v1/collaboration/bots/{bot_uuid}/public onto
+    # it). Declares user-scoped responses for the openapi_v1 admission contract; authz
+    # is deferred per design (caller identity via _PUBLIC_AUTH/UserIdDep, no grant check yet).
+    public.include_router(
+        collaboration_bots_router,
+        responses=USER_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
     )
     # The two failures `PublicAPIRoute` cannot see itself: a router built
     # without it (whose routes never ran its `__init__`), and a table row left

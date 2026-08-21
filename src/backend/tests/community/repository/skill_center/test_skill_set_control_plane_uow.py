@@ -53,6 +53,52 @@ class _Database:
             session.close()
 
 
+def test_list_sets_is_scoped_to_exact_owner_for_shared_default_bot_id():
+    """``bot_id=default`` is reused, so it cannot identify a user's sets."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        session.add_all(
+            [
+                SkillSet(
+                    name="mine",
+                    user_id="owner-a",
+                    bolt_id="default",
+                    engine_type="openclaw",
+                    env="dev",
+                ),
+                SkillSet(
+                    name="other-owner",
+                    user_id="owner-b",
+                    bolt_id="default",
+                    engine_type="openclaw",
+                    env="dev",
+                ),
+                SkillSet(
+                    name="system-default",
+                    user_id="",
+                    bolt_id="",
+                    engine_type="openclaw",
+                    is_default=True,
+                    env="dev",
+                ),
+                SkillSet(
+                    name="other-engine-default",
+                    user_id="",
+                    bolt_id="",
+                    engine_type="hermes",
+                    is_default=True,
+                    env="dev",
+                ),
+            ]
+        )
+
+    items = SkillSetControlPlaneRepository(db).list_sets(
+        bot_id="default", owner_id="owner-a", engine_type="openclaw"
+    )
+
+    assert [item["name"] for item in items] == ["system-default", "mine"]
+
+
 def test_activation_rolls_back_all_membership_installations_when_nth_insert_fails():
     """No half-selected set can survive a storage failure at member N."""
     db = _Database()
@@ -181,6 +227,7 @@ def test_default_projection_is_always_active_even_for_historical_false_row():
         session.add(
             SkillSet(
                 name="default",
+                user_id="owner",
                 bolt_id="bot",
                 is_default=True,
                 is_active=False,
@@ -189,7 +236,7 @@ def test_default_projection_is_always_active_even_for_historical_false_row():
         )
 
     repository = SkillSetControlPlaneRepository(db)
-    assert repository.list_sets(bot_id="bot")[0]["is_active"] is True
+    assert repository.list_sets(bot_id="bot", owner_id="owner")[0]["is_active"] is True
     result = repository.set_active(
         bot_id="bot", owner_id="owner", set_id="1", active=True
     )

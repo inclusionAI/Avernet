@@ -119,7 +119,11 @@ class SkillSetControlPlaneService:
 
     def list_sets(self, *, bot_id: str, owner_id: str, user_id: str) -> list[dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        return self._repository.list_sets(bot_id=bot_id, engine_type=self._engine(bot))
+        return self._repository.list_sets(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            engine_type=self._engine(bot),
+        )
 
     def create_set(
         self,
@@ -650,7 +654,11 @@ class SkillSetControlPlaneService:
             )
         except Exception:
             default_clis = []
-        items = self._repository.list_sets(bot_id=bot_id, engine_type=self._engine(bot))
+        items = self._repository.list_sets(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            engine_type=self._engine(bot),
+        )
         return [
             {
                 **item,

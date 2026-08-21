@@ -1,8 +1,10 @@
-"""Fail-closed implementation of the catalog metadata port."""
+"""BCS adapter for the catalog metadata port."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+
+import httpx
 
 from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogAddress,
@@ -11,24 +13,95 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogMetadataUnavailableError,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.http_client import HttpClient
 
 logger = get_logger()
 
 
-class UnavailableBotCatalogMetadataService:
-    """Temporary binding used until the BCS metadata protocol is configured."""
+class BcsBotCatalogMetadataService:
+    """Resolve the requested BCS catalog page into Backend address pairs."""
 
-    def query_public_bot_metadata(
+    def __init__(self, http_client: HttpClient, timeout: float = 30.0) -> None:
+        self._http = http_client
+        self._timeout = timeout
+
+    def search_public_bot_metadata(
         self,
         *,
-        addresses: Sequence[BotCatalogAddress],
+        search: str | None,
+        page: int,
+        page_size: int,
         caller: BotCatalogCaller,
         request_id: str,
     ) -> Sequence[BotCatalogMetadata]:
+        """Read one BCS result page without exposing BCS response data."""
         del caller
-        logger.warning(
-            "[BotCatalogMetadata] request_id=%s candidate_count=%s failure=unconfigured",
+        params: dict[str, str | int] = {
+            "offset": (page - 1) * page_size,
+            "limit": page_size,
+            "tc_bot": True,
+        }
+        if search and search.strip():
+            params["q"] = search
+        try:
+            # COSEC: The injected BCS client supplies the configured upstream host and
+            # this constant relative path prevents request data from selecting a target.
+            response = self._http.get(
+                "/v2/bots/search", params=params, timeout=self._timeout
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, Mapping) or not isinstance(
+                payload.get("items"), list
+            ):
+                raise BotCatalogMetadataUnavailableError()
+
+            seen: set[BotCatalogAddress] = set()
+            metadata: list[BotCatalogMetadata] = []
+            for item in payload["items"]:
+                if not isinstance(item, Mapping) or item.get("actor_kind") != "bot":
+                    raise BotCatalogMetadataUnavailableError()
+                address = self._address_from_bot_uuid(item.get("bot_uuid"))
+                if address is None or address in seen:
+                    raise BotCatalogMetadataUnavailableError()
+                seen.add(address)
+                metadata.append(BotCatalogMetadata(address=address, kind="bot"))
+        except BotCatalogMetadataUnavailableError:
+            logger.warning(
+                "[BcsBotCatalogMetadataService.search] request_id=%s "
+                "failure=invalid_response",
+                request_id,
+            )
+            raise
+        except (httpx.HTTPError, ValueError, TypeError):
+            logger.warning(
+                "[BcsBotCatalogMetadataService.search] request_id=%s "
+                "failure=upstream_unavailable",
+                request_id,
+            )
+            raise BotCatalogMetadataUnavailableError() from None
+        except Exception:  # noqa: BLE001 - BCS failures must fail closed
+            logger.warning(
+                "[BcsBotCatalogMetadataService.search] request_id=%s "
+                "failure=upstream_unavailable",
+                request_id,
+            )
+            raise BotCatalogMetadataUnavailableError() from None
+        logger.info(
+            "[BcsBotCatalogMetadataService.search] request_id=%s result_count=%s",
             request_id,
-            len(addresses),
+            len(metadata),
         )
-        raise BotCatalogMetadataUnavailableError()
+        return metadata
+
+    @staticmethod
+    def _address_from_bot_uuid(value: object) -> BotCatalogAddress | None:
+        if not isinstance(value, str):
+            return None
+        parts = value.rsplit(":", 1)
+        if len(parts) != 2:
+            return None
+        bot_id, entity_id = (part.strip() for part in parts)
+        if not bot_id or not entity_id:
+            return None
+        return BotCatalogAddress(bot_id=bot_id, entity_id=entity_id)

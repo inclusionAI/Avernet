@@ -7,11 +7,12 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
     get_current_avernet_tenant,
@@ -61,6 +62,35 @@ def _resolve_access_mode(public: str, friend_approval: str) -> str:
     return "RESTRICTED"
 
 
+# BCS-publish destination label for the approval prompt, keyed by public_scope.
+_BCS_PUBLISH_SCENE: dict[str, str] = {
+    "user": "加好友场景",
+    "agent": "群聊场景",
+}
+
+# visibility=private 直连路径下更新的 BCS 属性字段随 public_scope 联动:
+# "user" 发布进用户可见域 (BCS user_visibility); "agent" 发布进 agent/群聊域 (BCS visibility)。
+_BCS_VISIBILITY_FIELD_BY_SCOPE: dict[str, str] = {
+    "user": "user_visibility",
+    "agent": "visibility",
+}
+
+# 慢连路径(走工单)在 BCS friend_ext 下记录工单的 sub-key 随 public_scope 联动:
+# user → public_user_approval; agent → public_public_approval。内层 block 形状一致。
+_BCS_APPROVAL_KEY_BY_SCOPE: dict[str, str] = {
+    "user": "public_user_approval",
+    "agent": "public_public_approval",
+}
+
+# AGREE 回调时把 public_*_approval 子块里的 view_friend_deps 提到 friend_ext 顶层,
+# 也随 public_scope 联动 key: user → view_scope_user_friend_deps;
+# agent → view_scope_agent_friend_deps。
+_BCS_VIEW_SCOPE_DEPS_KEY_BY_SCOPE: dict[str, str] = {
+    "user": "view_scope_user_friend_deps",
+    "agent": "view_scope_agent_friend_deps",
+}
+
+
 class BotNotPublicError(Exception):
     """Exception raised when bot is not public."""
     def __init__(self, bot_id: str, message: str = "Bot is not public"):
@@ -96,6 +126,7 @@ class BotPublicService:
         bot_repository: BotRepository,
         process_service: ApprovalWorkflowPlugin,
         bot_service: BotService,
+        bcn_service: BcnService,
         passport_plugin: PassportPlugin,
         auth_relationship_plugin: AuthRelationshipPlugin,
         publish_approval_plugin: BotPublishApprovalPlugin,
@@ -108,6 +139,7 @@ class BotPublicService:
         self._bot_repository = bot_repository
         self._process_service = process_service
         self._bot_service = bot_service
+        self._bcn_service = bcn_service
         self._passport_plugin = passport_plugin
         self._auth_relationship_plugin = auth_relationship_plugin
         self._publish_approval_plugin = publish_approval_plugin
@@ -396,6 +428,118 @@ class BotPublicService:
             callbacks=self._publish_callbacks(),
         )
 
+    def public_bcs_bot(
+        self,
+        bot_uid: str,
+        owner_id: str,
+        public_scope: str,
+        operator: OperatorContext,
+        view_depts: Optional[List[Dict[str, str]]] = None,
+        visibility: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """New-version publish-to-users (BCS-delegated) — parallel to public_bot.
+
+        ``bot_uid`` is the **BCS bot identity**, not ``ac_bots.bot_id``: the
+        legacy ``_bot_repository.get_by_id_and_owner`` reverse-lookup does not
+        apply, and no ``access_mode`` / ``permission_owner`` / ``friend_approval``
+        branch is taken — a BCS publish opens an approval ticket (unless
+        ``visibility="private"``, which patch_attrs BCS directly without approval).
+
+        Starts the approval workflow (``ApprovalWorkflowPlugin`` — the
+        "AntProcessService") directly (bypassing the publish strategy, so no
+        ``ac_bots`` write). The ticket ``context`` mirrors the normal-bot publish
+        — ``_build_public_approval_context`` (``publishHint`` / ``botSkills`` /
+        ``botMcps``) — plus two new-version fields: ``public_scope`` (drives the
+        callback's BCS-vs-legacy branch) and ``viewFriendDeps`` (``view_depts``
+        deptName values joined by ``,``; empty when ``view_depts`` is empty/None).
+        """
+        if not owner_id:
+            raise BotPublicServiceError("Owner ID is required")
+        if not public_scope:
+            raise BotPublicServiceError("public_scope is required")
+        if public_scope not in ("user", "agent"):
+            raise BotPublicServiceError(
+                f"public_scope must be 'user' or 'agent', got: {public_scope!r}"
+            )
+        if view_depts is not None and not isinstance(view_depts, list):
+            raise BotPublicServiceError("view_depts must be a list or None")
+        if view_depts:
+            for dept in view_depts:
+                if not isinstance(dept, dict) or not dept.get("deptNo") or not dept.get("deptName"):
+                    raise BotPublicServiceError(
+                        "each view_depts item must be a dict with deptNo and deptName"
+                    )
+        if visibility is not None and visibility not in ("public", "protected", "private"):
+            raise BotPublicServiceError(
+                f"visibility must be 'public'/'protected'/'private' or None, got: {visibility!r}"
+            )
+        # visibility=private 直连: 不走审批, 直接 PATCH BCS 属性 (值 "private");
+        # 更新的字段随 public_scope 联动 (agent→visibility, user→user_visibility)。
+        if visibility == "private":
+            return self._apply_visibility_direct(
+                bot_uid=bot_uid, public_scope=public_scope
+            )
+        # bot_uid is the BCS bot identity ("{backend_bot_id}:{entity_id}"); the
+        # bot / skills lookup keys on the backend bot_id, so split on ':'.
+        backend_bot_id = bot_uid.split(":")[0]
+        bot = self._bot_repository.get_by_id_and_owner(backend_bot_id, owner_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot not found: {bot_uid}")
+        operator_id = operator.staff_id if operator else owner_id
+        # Context mirrors the normal-bot publish (publishHint/botSkills/botMcps
+        # via _build_public_approval_context) plus the two new-version fields.
+        # All values are str -> stays dict[str, str] for the antprocess echo.
+        context: Dict[str, str] = self._build_public_approval_context(bot, operator)
+        # BCS publish uses its own approval prompt (发布→开放, scene resolved
+        # from public_scope) instead of the normal-bot publishHint.
+        context["publishHint"] = self._build_bcs_publish_hint(bot, operator, public_scope)
+        context["public_scope"] = public_scope
+        context["viewFriendDeps"] = self._build_view_friend_deps(view_depts)
+        approval_result = self._process_service.start_approval(
+            applicant=operator_id,
+            biz_id=f"{bot_uid}{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            biz_type="botpublic",
+            context=context,
+        )
+        if not approval_result.get("success"):
+            raise BotPublicServiceError(
+                f"创建审批失败: {approval_result.get('error_msg')}"
+            )
+        # 记录工单信息到 BCS friend_ext.public_user_approval (PROCESSING):
+        # GET→merge→PATCH (Provider 管理 API, 同 BcnService 鉴权). 失败不中断已建工单.
+        try:
+            self._persist_public_approval(
+                bot_uid=bot_uid,
+                public_scope=public_scope,
+                puid=approval_result.get("puid"),
+                approval_url=approval_result.get("approval_url"),
+                view_depts=view_depts,
+                visibility=visibility,
+            )
+        except Exception as exc:  # noqa: BLE001 — must not abort a started approval
+            logger.warning(
+                "[public_bcs_bot] BCS friend_ext persist failed: %s", exc
+            )
+        # Mirror the legacy botpublish flow: if the approval auto-completed, run
+        # the public_scope callback inline so the caller gets the final state in one
+        # round-trip. The public_scope path logs (BCS update pending) and writes no
+        # ac_bots. viewFriendDeps rides the ticket context only — it is NOT
+        # forwarded to the callback (no reverse round-trip needed).
+        if str(approval_result.get("state", "")).upper() == "COMPLETED":
+            try:
+                self.handle_public_approval_callback(
+                    bot_id=bot_uid,
+                    owner_id=owner_id,
+                    puid=approval_result.get("puid"),
+                    last_operate=str(approval_result.get("lastOperate", "")).lower(),
+                    public_scope=public_scope,
+                )
+            except Exception as exc:  # noqa: BLE001 — must not abort a started approval
+                logger.warning(
+                    "[public_bcs_bot] COMPLETED inline callback failed: %s", exc
+                )
+        return approval_result
+
     def _publish_callbacks(self) -> BotPublishCallbacks:
         """Bind the publish-approval plugin's callback bag to this
         service's bound methods.
@@ -545,9 +689,159 @@ class BotPublicService:
         except Exception as e:
             logger.warning(f"[_build_public_approval_context] Failed to get mcp sets for bot {bot_id}: {e}")
             bot_mcps_str = "获取失败"
-        return {"publishHint": publish_hint, "botSkills": bot_skills_str, "botMcps": bot_mcps_str}
+        context = {"publishHint": publish_hint, "botSkills": bot_skills_str, "botMcps": bot_mcps_str}
+        return context
 
-    def handle_public_approval_callback(self, bot_id: str, owner_id: str, puid: str, last_operate: str) -> Dict[str, Any]:
+    def _build_view_friend_deps(self, view_depts: Optional[List[Dict[str, str]]]) -> str:
+        """Join ``view_depts`` deptName values into the ``viewFriendDeps``
+        ticket-context field (comma-separated). Empty/None ``view_depts`` -> "".
+        Only deptName is carried downstream — deptNo is not (yet) consumed.
+        """
+        if not view_depts:
+            return ""
+        names = [
+            dept["deptName"]
+            for dept in view_depts
+            if isinstance(dept, dict) and dept.get("deptName")
+        ]
+        return ",".join(names)
+
+    def _build_bcs_publish_hint(
+        self,
+        bot: Dict[str, Any],
+        operator: Optional[OperatorContext],
+        public_scope: str,
+    ) -> str:
+        """BCS-publish approval prompt — mirrors the normal-bot publishHint but
+        swaps 发布→开放 and the destination is a ``{scene}`` resolved from
+        ``public_scope`` (user→加好友场景, agent→群聊场景). Kept separate from
+        ``_build_public_approval_context`` so the normal-bot hint is untouched.
+        """
+        owner_name = bot.get("owner_name") or ""
+        if not owner_name and operator:
+            owner_name = (
+                operator.nick_name or operator.operator_name
+                or operator.staff_id or ""
+            )
+        bot_name = bot.get("bot_name") or bot.get("bot_id") or ""
+        scene = _BCS_PUBLISH_SCENE.get(public_scope, public_scope or "")
+        return f"{owner_name}同学正在开放{bot_name}bot到{scene}，审批通过后平台全体成员均可基于{owner_name}权限进行服务调用。在服务发布前，请您审核：该Agent是否涉及敏感数据处理或核心业务操作；如涉及，为避免造成由于权限扩散造成的不必要风险，请重新考虑是否发布。"
+
+    def _persist_public_approval(
+        self,
+        *,
+        bot_uid: str,
+        public_scope: str,
+        puid: Optional[str],
+        approval_url: Optional[str],
+        view_depts: Optional[List[Dict[str, str]]],
+        visibility: Optional[str] = None,
+    ) -> None:
+        """工单创建后把工单信息记到 BCS friend_ext.public_user_approval(PROCESSING)。
+
+        GET /providers/{provider_id}/bots/{bot_uid}/attributes 拿当前 friend_ext,
+        合并(不破坏现有子键)后 PATCH 整个 friend_ext 回去(协议: friend_ext 顶层对象
+        整体替换)。view_friend_deps 用入参 view_depts 原样(空/None → [])。BCS 调用
+        跳过(非 prod/pre 或凭据空)时静默返回。
+        """
+        attrs = self._bcn_service.get_attributes(bot_uuid=bot_uid)
+        if attrs.get("skipped"):
+            return
+        friend_ext = dict(attrs.get("friend_ext") or {})
+        block: Dict[str, Any] = {
+            "puid": puid,
+            "approval_url": approval_url,
+            "view_friend_deps": list(view_depts) if view_depts else [],
+            "status": "PROCESSING",
+        }
+        if visibility:
+            block["visibility"] = visibility
+        friend_ext[_BCS_APPROVAL_KEY_BY_SCOPE[public_scope]] = block
+        self._bcn_service.patch_attributes(
+            bot_uuid=bot_uid, body={"friend_ext": friend_ext}
+        )
+
+    def _apply_visibility_direct(
+        self,
+        *,
+        bot_uid: str,
+        public_scope: str,
+    ) -> Dict[str, Any]:
+        """visibility=private 直连路径: 不走审批, 直接 PATCH BCS 属性。
+
+        只设 "private"(收回可见性无需审批);更新的字段随 public_scope 联动:
+        ``public_scope=agent`` → BCS ``visibility`` 字段;``public_scope=user``
+        → BCS ``user_visibility`` 字段(见 _BCS_VISIBILITY_FIELD_BY_SCOPE)。
+        public/protected 仍走工单, 见 public_bcs_bot 主流程。
+        """
+        field = _BCS_VISIBILITY_FIELD_BY_SCOPE[public_scope]
+        self._bcn_service.patch_attributes(bot_uuid=bot_uid, body={field: "private"})
+        return {
+            "success": True,
+            "state": "COMPLETED",
+            "puid": None,
+            "approval_url": None,
+            "visibility": "private",
+            "visibility_field": field,
+        }
+
+    def _apply_callback_decision(
+        self, *, bot_uid: str, public_scope: str, last_operate: str,
+    ) -> Dict[str, Any]:
+        """审批回调落 BCS: 更新 sub-block status; AGREE 时再把 BCS 可见性字段翻转。
+
+        public_scope 非空即新版发布回调 (caller 保证 bot_id == bot_uid):
+        - 把 (_BCS_APPROVAL_KEY_BY_SCOPE) 对应的 friend_ext 子块
+          (public_user_approval/public_public_approval) 的 status 写成 last_operate
+          (AGREE/DISAGREE/CANCEL)。
+        - AGREE 时同时翻 BCS 可见性字段 (_BCS_VISIBILITY_FIELD_BY_SCOPE):
+            - public_scope=user → user_visibility = block.visibility (block 存的请求值,
+              缺省 protected);
+            - public_scope=agent → visibility = "public" if
+              BCS friend_check_in_strategy=="OPEN" else "protected" (BCS top-level
+              friend_check_in_strategy; agent 要考虑它, user 不考虑)。
+        所有变更合一 PATCH (friend_ext + 可见性字段) 回。BCS 跳过 (非 prod/pre 或
+        凭据空) 时静默返回。
+        """
+        attrs = self._bcn_service.get_attributes(bot_uuid=bot_uid)
+        if attrs.get("skipped"):
+            return {
+                "success": True, "public": None,
+                "message": f"public_scope={public_scope} callback skipped (BCS creds)",
+            }
+        key = _BCS_APPROVAL_KEY_BY_SCOPE.get(public_scope)
+        if not key:
+            return {
+                "success": True, "public": None,
+                "message": f"public_scope={public_scope} callback noop (unknown scope)",
+            }
+        friend_ext = dict(attrs.get("friend_ext") or {})
+        block = dict(friend_ext.get(key) or {})
+        block["status"] = (last_operate or "").upper()
+        friend_ext[key] = block
+        body: Dict[str, Any] = {"friend_ext": friend_ext}
+        if block["status"] == "AGREE":
+            field = _BCS_VISIBILITY_FIELD_BY_SCOPE.get(public_scope)
+            if field:
+                if public_scope == "user":
+                    # user: user_visibility 直接取 block 里存的 visibility 字段
+                    body[field] = block.get("visibility") or "protected"
+                else:  # agent: 由 BCS friend_check_in_strategy 决断
+                    strategy = str(attrs.get("friend_check_in_strategy") or "").upper()
+                    body[field] = "public" if strategy == "OPEN" else "protected"
+            # AGREE 还把 block.view_friend_deps 从 public_*_approval 子块提升到
+            # friend_ext 顶层(scope-联动 key: user→view_scope_user_friend_deps;
+            # agent→view_scope_agent_friend_deps)。
+            friend_ext[_BCS_VIEW_SCOPE_DEPS_KEY_BY_SCOPE[public_scope]] = (
+                block.get("view_friend_deps") or []
+            )
+        self._bcn_service.patch_attributes(bot_uuid=bot_uid, body=body)
+        return {
+            "success": True, "public": None,
+            "message": f"public_scope={public_scope} callback status={block['status']}",
+        }
+
+    def handle_public_approval_callback(self, bot_id: str, owner_id: str, puid: str, last_operate: str, public_scope: str | None = None) -> Dict[str, Any]:
         """
         处理 Bot 公开审批回调。
 
@@ -562,6 +856,30 @@ class BotPublicService:
         Returns:
             操作结果字典 {"success": bool, "public": str|None, "message": str}
         """
+        # New-version publish (public_scope non-empty, e.g. "user"/"agent"): the
+        # bot's visibility is delegated to BCS, so this callback must NOT flip
+        # ac_bots.public or run the passport / auth-relationship / device-sync
+        # side effects of the legacy path. For now we only LOG the would-be BCS
+        # status update; the real call is wired once BCS exposes its internal
+        # (no-auth) API, invoked via httpclient — no end-user cookie is involved
+        # on this callback path. public_scope's value is preserved for that call.
+        if public_scope:
+            # New-version callback (public_scope 非空 → bot_id 即 bot_uid):
+            # GET friend_ext → 按 public_scope 子块 (public_user_approval/
+            # public_public_approval) 写 status = last_operate → PATCH 回。
+            try:
+                return self._apply_callback_decision(
+                    bot_uid=bot_id, public_scope=public_scope, last_operate=last_operate
+                )
+            except Exception as exc:  # noqa: BLE001 — callback must not crash antprocess
+                logger.warning(
+                    "[handle_public_approval_callback] BCS friend_ext update failed: %s", exc
+                )
+                return {
+                    "success": True,
+                    "public": None,
+                    "message": f"public_scope={public_scope} callback; BCS update logged",
+                }
         bot = self._bot_repository.get_by_id_and_owner(bot_id, owner_id)
         if not bot:
             logger.error(f"[bot_service.handle_public_approval_callback] Bot not found: {bot_id}")
@@ -1111,40 +1429,38 @@ class BotPublicService:
         caller: BotCatalogCaller,
         request_id: str,
     ) -> Dict[str, Any]:
-        """Return public Backend Bots admitted by the metadata port."""
-        public_bot_result = self._bot_service.list_bots_by_search(
-            public="1", search=search, page=None, page_size=None
-        )
-        candidates = public_bot_result.get("items", [])
-        addresses = self._catalog_addresses(candidates)
+        """Return the current BCS catalog page joined to public Backend Bots."""
         try:
-            metadata = self._catalog_metadata_service.query_public_bot_metadata(
-                addresses=addresses,
+            metadata = self._catalog_metadata_service.search_public_bot_metadata(
+                search=search,
+                page=page,
+                page_size=page_size,
                 caller=caller,
                 request_id=request_id,
             )
-            admitted = self._validated_catalog_addresses(metadata, addresses)
+            addresses = self._validated_catalog_addresses(metadata)
         except BotCatalogMetadataUnavailableError as exc:
             logger.warning(
-                "[BotPublicService.catalog_search] request_id=%s candidate_count=%s "
+                "[BotPublicService.catalog_search] request_id=%s "
                 "failure=metadata_unavailable",
                 request_id,
-                len(candidates),
             )
             raise BotCatalogSearchUnavailableError() from exc
         except Exception as exc:  # noqa: BLE001 - metadata is fail-closed
             logger.warning(
-                "[BotPublicService.catalog_search] request_id=%s candidate_count=%s "
-                "failure=invalid_metadata",
+                "[BotPublicService.catalog_search] request_id=%s failure=invalid_metadata",
                 request_id,
-                len(candidates),
             )
             raise BotCatalogSearchUnavailableError() from exc
-        items = [
-            bot
-            for bot in candidates
-            if self._catalog_address(bot) in admitted
-        ]
+        backend_bots = self._bot_repository.list_public_bots_by_owner_bot_pairs(
+            [(address.bot_id, address.entity_id) for address in addresses]
+        )
+        bots_by_address = {
+            address: bot
+            for bot in backend_bots
+            if (address := self._catalog_address(bot)) in addresses
+        }
+        items = [bots_by_address[address] for address in addresses if address in bots_by_address]
         # Sanitize sensitive fields before pagination and public projection.
         EXT_SENSITIVE_KEYS = {"iam_token"}
         for bot in items:
@@ -1164,46 +1480,31 @@ class BotPublicService:
                         ext[key] = None
                 bot["ext"] = ext
         total = len(items)
-        page_items = items[(page - 1) * page_size:page * page_size]
         logger.info(
-            "[BotPublicService.catalog_search] request_id=%s candidate_count=%s "
-            "joined_count=%s page_count=%s",
+            "[BotPublicService.catalog_search] request_id=%s bcs_count=%s "
+            "joined_count=%s",
             request_id,
-            len(candidates),
+            len(addresses),
             total,
-            len(page_items),
         )
-        return {"total": total, "items": page_items}
+        return {"total": total, "items": items}
 
     @staticmethod
     def _catalog_address(bot: dict[str, Any]) -> BotCatalogAddress | None:
         bot_id = bot.get("bot_id")
-        entity_id = bot.get("entity_id")
+        entity_id = bot.get("entity_id") or bot.get("owner_id")
         if not isinstance(bot_id, str) or not bot_id.strip():
             return None
         if not isinstance(entity_id, str) or not entity_id.strip():
             return None
         return BotCatalogAddress(bot_id=bot_id, entity_id=entity_id)
 
-    @classmethod
-    def _catalog_addresses(
-        cls, candidates: list[dict[str, Any]]
-    ) -> tuple[BotCatalogAddress, ...]:
-        return tuple(
-            dict.fromkeys(
-                address
-                for candidate in candidates
-                if (address := cls._catalog_address(candidate)) is not None
-            )
-        )
-
     @staticmethod
     def _validated_catalog_addresses(
         metadata: Any,
-        requested: tuple[BotCatalogAddress, ...],
-    ) -> set[BotCatalogAddress]:
-        requested_set = set(requested)
-        admitted: set[BotCatalogAddress] = set()
+    ) -> tuple[BotCatalogAddress, ...]:
+        addresses: list[BotCatalogAddress] = []
+        seen: set[BotCatalogAddress] = set()
         for item in metadata:
             if not isinstance(item, BotCatalogMetadata) or item.kind != "bot":
                 raise BotCatalogMetadataUnavailableError()
@@ -1212,12 +1513,12 @@ class BotPublicService:
                 not isinstance(address, BotCatalogAddress)
                 or not address.bot_id.strip()
                 or not address.entity_id.strip()
-                or address not in requested_set
-                or address in admitted
+                or address in seen
             ):
                 raise BotCatalogMetadataUnavailableError()
-            admitted.add(address)
-        return admitted
+            seen.add(address)
+            addresses.append(address)
+        return tuple(addresses)
 
     def list_my_bot_friends(
         self,

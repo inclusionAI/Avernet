@@ -271,6 +271,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/nodes"):
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
     ("GET", "/openapi/v1/bots/{bot_id}/passport"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/bots/{bot_id}/public-bcs"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/render-screens"):
         NoCheck("share and group viewers must render panels without an Editor relation"),
     ("POST", "/openapi/v1/bots/{bot_id}/render-screens"):
@@ -297,6 +298,20 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/sessions"):
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
     ("POST", "/openapi/v1/bots/{bot_id}/sessions"):
+        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+    ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"):
+        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+    ("POST", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-intents"):
+        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+    ("POST", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-complete"):
+        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}"):
+        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+    ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content"):
+        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+    ("GET",
+     "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}"
+     "/materialize-status"):
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
     ("GET", "/openapi/v1/bots/{bot_id}/sessions/favorites"):
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
@@ -371,6 +386,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/status"): OWNER_SCOPED,
 
     # ── Operations that address no bot ────────────────────────────────────
+    ("GET", "/openapi/v1/org/user"): NoCheck("the caller's own verified identity"),
+    ("GET", "/openapi/v1/org/dept"):
+        NoCheck("the caller's own directory record"),
     ("GET", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),
     ("POST", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),
     ("GET", "/openapi/v1/bots/all"): NoCheck("a collection, not one addressed bot"),
@@ -468,7 +486,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the named user's own work orders and notifications"),
     ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/reject"):
         NoCheck("the named user's own work orders and notifications"),
-    ("GET", "/openapi/v1/caller"): NoCheck("the caller's own verified identity"),
     ("GET", "/openapi/v1/org/user/iam-token"): NoCheck("the caller's own credential"),
 
     # ── Declared but not mounted (see UNMOUNTED_OPERATIONS) ───────────────

@@ -8,7 +8,7 @@ would make a SkillSet only *eventually* atomic.
 from __future__ import annotations
 
 from injector import inject
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
     Skill,
@@ -82,10 +82,26 @@ class SkillSetControlPlaneRepository(
             model.env == get_current_env(),
         )
 
-    def list_sets(self, *, bot_id: str, engine_type: str | None = None) -> list[dict]:
+    def list_sets(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None = None,
+    ) -> list[dict]:
         with self._db.orm_session() as session:
             query = self._scope(session.query(SkillSet), SkillSet).filter(
-                SkillSet.bolt_id == bot_id
+                or_(
+                    and_(
+                        SkillSet.bolt_id == bot_id,
+                        SkillSet.user_id == owner_id,
+                    ),
+                    and_(
+                        SkillSet.is_default.is_(True),
+                        or_(SkillSet.bolt_id == "", SkillSet.bolt_id.is_(None)),
+                        or_(SkillSet.user_id == "", SkillSet.user_id.is_(None)),
+                    ),
+                )
             )
             if engine_type is not None:
                 query = query.filter(SkillSet.engine_type == engine_type)

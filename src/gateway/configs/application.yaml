@@ -206,12 +206,18 @@ user_config:
 
     # ── The refusals: operations that still require a human on the wire ──────
 
-    # The caller-identity read: its answer IS the end user, so a caller with no
+    # The user-identity read: its answer IS the end user, so a caller with no
     # human on the wire has nothing to ask. Explicit even though /** already
     # requires a user, for the same reason the spaces rules below are: when the
     # broader policy evolves, this route must remain fail-closed.
-    "/openapi/v1/caller":
+    "/openapi/v1/org/user":
       user: required
+    # Department directory search — a tenant-wide catalogue read, identical for
+    # every caller, so it admits an application acting alone (OPEN). Mirrors the
+    # mcp catalogue rules: explicit even though it could default.
+    "/openapi/v1/org/dept":
+      user: optional
+      app: optional
 
     # Space/member/favorite OpenAPI operations are user-only in the first
     # refactor phase. Keep this explicit even though /** also requires a user:
@@ -332,6 +338,15 @@ user_config:
     "/openapi/v1/collaboration/**":
       user: required
       app: required
+
+    # New-version publish-to-users: served by the backend (the antprocess
+    # approval + bcs_pub callback live there), pulled out of the
+    # collaboration→bcs domain by the `collaboration-publish` match upstream. A
+    # logged-in end user via cookie SSO — no app credential — mirroring the legacy
+    # POST /api/bots/{bot_id}/public this replaces. The method-qualified exact
+    # path outranks the broad collaboration/** (app: required) rule above.
+    "POST /openapi/v1/collaboration/bots/{bot_uuid}/public":
+      user: required
 
     "/api/v1/collaboration/**":
       user: optional
@@ -508,6 +523,12 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
+      dept:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
       repository-skills:
         match: /openapi/v1/bots/skills/**
         server: backend
@@ -547,6 +568,17 @@ user_config:
       collaboration-internal:
         match: /api/v1/collaboration/**
         server: bcs
+        protocols: [http]
+      # New-version publish-to-users is served by the backend (it owns the
+      # antprocess approval flow + the bcs_pub callback), even though the rest of
+      # the collaboration namespace goes to BCS. The `public` leaf keeps this
+      # subtree disjoint from BCS's bots/{bot_uuid}/friendships,
+      # friend-requests, mine, query, and the match outranks the broad
+      # collaboration→bcs rule behind it; the rewrite onto the backend route
+      # /openapi/v1/bots/{bot_id}/public-bcs is gateway-side.
+      collaboration-publish:
+        match: /openapi/v1/collaboration/bots/{bot_uuid}/public/**
+        server: backend
         protocols: [http]
       # bcsfuse public surface: fusion + fusable worker-config queries, served
       # under clean, version-free sub-prefixes. bcsfuse still serves its own /api/v1

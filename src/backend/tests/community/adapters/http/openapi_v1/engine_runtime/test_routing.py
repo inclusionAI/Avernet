@@ -11,8 +11,8 @@ from agentclaw.community.adapters.http.openapi_v1 import (
     build_public_router,
 )
 
-#: sessions 10 + engine 4 + models 2 + nodes 1 + approvals 3 + connection 1
-_EXPECTED_ROUTE_COUNT = 21
+#: sessions 10 + session files 6 + engine 4 + models 2 + nodes 1 + approvals 3 + connection 1
+_EXPECTED_ROUTE_COUNT = 27
 
 _BOTS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/"
 
@@ -121,6 +121,14 @@ def test_groups_are_mounted_and_reachable_in_the_public_router():
         f"{_BOTS_PREFIX}{{bot_id}}/connection",
     ):
         assert expected in paths, f"{expected} not mounted"
+
+
+def test_session_file_upload_intents_are_published_on_the_openapi_surface():
+    """Files are a new capability on the bot-first Sessions surface."""
+    assert (
+        f"{_BOTS_PREFIX}{{bot_id}}/sessions/{{session_id}}/files/upload-intents"
+        in _document()["paths"]
+    )
 
 
 def test_literal_groups_are_registered_before_the_bot_id_wildcard():

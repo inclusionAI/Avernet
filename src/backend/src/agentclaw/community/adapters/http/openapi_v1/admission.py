@@ -137,10 +137,7 @@ class AdmissionMode(StrEnum):
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # Sensitive first-party identity operations always require a human user.
     ("GET", "/openapi/v1/org/user/iam-token"): AdmissionMode.REFUSED,
-    (
-        "POST",
-        "/openapi/v1/bots/{bot_id}/caller-identity",
-    ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/{bot_id}/caller-identity"): AdmissionMode.REFUSED,
     # The item routes resolve the addressed owner from the asset and perform
     # the grant check against that exact Bot/owner pair in their handler.
     (
@@ -430,6 +427,30 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-intents",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-complete",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/materialize-status",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
         "GET",
         "/openapi/v1/bots/{bot_id}/engine/available",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
@@ -612,6 +633,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/mcp/servers"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/servers/{server_code}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/mcp/tenants"): AdmissionMode.OPEN,
+    # New-version bcs publish-to-users: auth baseline only, no grant check; authz deferred.
+    ("POST", "/openapi/v1/bots/{bot_id}/public-bcs"): AdmissionMode.OPEN,
+    # Department directory search — a tenant-wide catalogue read, not a user's.
+    ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skill-center/skills"): AdmissionMode.OPEN,
@@ -757,7 +782,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # The caller's own identity. An app-only caller names no end user, so there
     # is nothing to return — its scope question is answered by
     # ``GET /openapi/v1/bots/authorized`` instead.
-    ("GET", "/openapi/v1/caller"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/org/user"): AdmissionMode.REFUSED,
     # Local creation has no existing bot for a grant to cover and may initiate
     # Passport consent. Polling completes that same creation transaction, so
     # both require a human on the wire.

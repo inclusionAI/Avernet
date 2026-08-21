@@ -17,7 +17,7 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
 
     @abstractmethod
     def list_sets(
-        self, *, bot_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, engine_type: str | None = None
     ) -> list[dict]: ...
     @abstractmethod
     def create_set(

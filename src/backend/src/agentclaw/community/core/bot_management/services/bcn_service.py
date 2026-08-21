@@ -553,6 +553,80 @@ class BcnService:
             )
             raise BcnServiceError(f"BCN delete_provider_bot error: {e}")
 
+    def get_attributes(self, *, bot_uuid: str) -> Dict[str, Any]:
+        """读取已注册 Bot 的协作属性 (Provider 管理 API GET)。
+
+        GET /providers/{provider_id}/bots/{bot_uuid}/attributes — 与
+        register/switch/delete provider-bot 同套鉴权:仅 ``Authorization:
+        Bearer {provider_admin_token}``，``provider_id`` 在 path，不传
+        ``X-BCN-Provider-Id``。响应直接是属性对象 (``user_visibility`` /
+        ``friend_ext`` / ``friend_check_in_strategy``)。非 prod/pre 或凭据
+        空时跳过 (返 ``{"skipped": True}``)。
+        """
+        env = get_current_env()
+        provider_cfg = _get_provider_config(env, self._config)
+        if not provider_cfg:
+            return {"skipped": True}
+        provider_id = provider_cfg["provider_id"]
+        token = provider_cfg["provider_admin_token"]
+        path = f"/providers/{provider_id}/bots/{bot_uuid}/attributes"
+        try:
+            response = self._http.get(
+                path, headers={"Authorization": f"Bearer {token}"}, timeout=self._timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, dict) else {}
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else "No response"
+            status = e.response.status_code if e.response else "N/A"
+            raise BcnServiceError(
+                f"BCS attributes get HTTP error: {status} - {error_body}"
+            )
+        except httpx.TimeoutException as e:
+            raise BcnServiceError(f"BCS attributes get timeout: {e}")
+        except Exception as e:
+            raise BcnServiceError(f"BCS attributes get error: {e}")
+
+    def patch_attributes(
+        self, *, bot_uuid: str, body: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """局部更新 Bot 协作属性 (Provider 管理 API PATCH)。
+
+        PATCH /providers/{provider_id}/bots/{bot_uuid}/attributes，同套鉴权。
+        body 至少含一个可更新字段 (``user_visibility`` / ``friend_ext`` /
+        ``friend_check_in_strategy``)；``friend_ext`` 顶层对象整体替换、传
+        ``{}`` 清空。非 prod/pre 或凭据空时跳过。
+        """
+        env = get_current_env()
+        provider_cfg = _get_provider_config(env, self._config)
+        if not provider_cfg:
+            return {"skipped": True}
+        provider_id = provider_cfg["provider_id"]
+        token = provider_cfg["provider_admin_token"]
+        path = f"/providers/{provider_id}/bots/{bot_uuid}/attributes"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = self._http.patch(
+                path, json=body, headers=headers, timeout=self._timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, dict) else {}
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else "No response"
+            status = e.response.status_code if e.response else "N/A"
+            raise BcnServiceError(
+                f"BCS attributes patch HTTP error: {status} - {error_body}"
+            )
+        except httpx.TimeoutException as e:
+            raise BcnServiceError(f"BCS attributes patch timeout: {e}")
+        except Exception as e:
+            raise BcnServiceError(f"BCS attributes patch error: {e}")
+
 
 # ``BcnService`` is wired as a @singleton via the injector
 # (BotManagementModule binds it; BotService receives it by ctor).
