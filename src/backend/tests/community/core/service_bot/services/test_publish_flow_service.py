@@ -117,7 +117,7 @@ def _pf(*args, **kw):
     kw.setdefault("teclaw_file_promotion", Mock())
     kw.setdefault("device_binding_repo", Mock())
     kw.setdefault("publish_operation_repo", _real_ledger())
-    kw.setdefault("skill_set_control_plane_repository", Mock())
+    kw.setdefault("active_skillset_materializer", Mock())
     # The operation runner queries baas_service.list_bot_publishes for adopt-by-
     # query; a bare Mock returns a non-iterable Mock. Default it to "no prior
     # workflows" so upgrade/existing-bot flow tests issue normally.
@@ -1057,13 +1057,13 @@ async def test_build_phase_materializes_active_skillset_installations_before_art
     svc, _ = _build_svc_with_router(
         router,
         {"bot_id": "b1", "active_engine": "openclaw"},
-        skill_set_control_plane_repository=materializer,
+        active_skillset_materializer=materializer,
     )
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
     await svc.execute_build_phase(record, "op")
 
-    materializer.ensure_active_skillset_installations.assert_called_once_with(
+    materializer.materialize.assert_called_once_with(
         bot_id="bot-source", owner_id="u1", engine_type="openclaw"
     )
     assert arca.calls == [({"bot_id": "b1", "active_engine": "openclaw"}, 3)]
@@ -1076,13 +1076,13 @@ async def test_build_phase_fails_without_producing_artifact_when_materialization
         providers={"baas": arca}, default_provider_key="baas"
     )
     materializer = Mock()
-    materializer.ensure_active_skillset_installations.side_effect = RuntimeError(
+    materializer.materialize.side_effect = RuntimeError(
         "installation persistence unavailable"
     )
     svc, _ = _build_svc_with_router(
         router,
         {"bot_id": "b1", "active_engine": "openclaw"},
-        skill_set_control_plane_repository=materializer,
+        active_skillset_materializer=materializer,
     )
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)

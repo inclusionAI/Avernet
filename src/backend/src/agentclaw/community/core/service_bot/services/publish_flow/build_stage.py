@@ -30,8 +30,8 @@ from agentclaw.community.core.service_bot.services.publish_flow.ext_state import
 from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
     ProviderBehaviorRouter,
 )
-from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
-    SkillSetControlPlaneRepositoryProtocol,
+from agentclaw.community.core.skill_center.services.active_skillset_installation_materializer import (
+    ActiveSkillSetInstallationMaterializer,
 )
 from agentclaw.community.log import get_logger
 
@@ -54,14 +54,14 @@ class BuildStageRunner:
         baas_service: BaasService,
         producer_router: DeployArtifactProducerRouter,
         provider_behaviors: ProviderBehaviorRouter,
-        skill_set_control_plane_repository: SkillSetControlPlaneRepositoryProtocol,
+        active_skillset_materializer: ActiveSkillSetInstallationMaterializer,
     ) -> None:
         self._ext_state = ext_state
         self._bot_service = bot_service
         self._baas_service = baas_service
         self._producer_router = producer_router
         self._provider_behaviors = provider_behaviors
-        self._skill_set_control_plane_repository = skill_set_control_plane_repository
+        self._active_skillset_materializer = active_skillset_materializer
 
     async def build(
         self,
@@ -92,7 +92,7 @@ class BuildStageRunner:
             # state that a runtime reconcile would project. This narrowly
             # fills legacy ordinary active SkillSet rows; it never runs for
             # restart, scale, or rollback of an already frozen artifact.
-            self._skill_set_control_plane_repository.ensure_active_skillset_installations(
+            self._active_skillset_materializer.materialize(
                 bot_id=bot_id,
                 owner_id=owner_id,
                 engine_type=str(bot.get("active_engine") or "openclaw"),

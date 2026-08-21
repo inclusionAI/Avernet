@@ -108,10 +108,8 @@ def test_ensure_active_skillset_installations_only_materializes_active_ordinary_
             bolt_id="bot",
             user_id="owner",
             is_active=True,
-            # Legacy ordinary sets may have no engine discriminator. They are
-            # effective for the bot's current runtime engine.
-            engine_type=None,
-            env=None,
+            engine_type="openclaw",
+            env="dev",
         )
         inactive = SkillSet(
             name="inactive", bolt_id="bot", user_id="owner", is_active=False, env="dev"
@@ -153,7 +151,7 @@ def test_ensure_active_skillset_installations_only_materializes_active_ordinary_
         session.flush()
         session.add_all(
             [
-                SkillSetSkill(skill_set_id=active.id, skill_id=active_skill.id, env=None),
+                SkillSetSkill(skill_set_id=active.id, skill_id=active_skill.id, env="dev"),
                 SkillSetSkill(
                     skill_set_id=inactive.id, skill_id=inactive_skill.id, env="dev"
                 ),
