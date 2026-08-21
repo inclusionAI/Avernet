@@ -38,6 +38,7 @@ the *lock* too — which is how a policy ends up being made by a flag name.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -133,7 +134,7 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
         yield
 
         if _succeeded(request) and _is_audited(request) and level < PermissionLevel.OWNER:
-            _audit(
+            await _audit(
                 request,
                 bot_id=bot_id,
                 owner_id=owner_id,
@@ -218,7 +219,7 @@ def _succeeded(request: Request) -> bool:
     return not isinstance(status, int) or status < 400
 
 
-def _audit(
+async def _audit(
     request: Request, *, bot_id: str, owner_id: str, actor_id: str, route: str
 ) -> None:
     """Record one non-owner action, and never fail the request for it.
@@ -239,16 +240,27 @@ def _audit(
         log_repo = _service(request, BotCollabLogRepositoryProtocol)
         if log_repo is None:
             raise RuntimeError("no BotCollabLogRepository bound")
-        log_repo.insert(
-            {
-                "bot_id": bot_id,
-                "owner_id": owner_id,
-                "operator_id": actor_id,
-                "detail": json.dumps(
-                    {"route": route, "method": request.method.upper()}
-                ),
-            }
-        )
+        row = {
+            "bot_id": bot_id,
+            "owner_id": owner_id,
+            "operator_id": actor_id,
+            "detail": json.dumps({"route": route, "method": request.method.upper()}),
+        }
+        # The repository is synchronous, and this runs inside an async teardown,
+        # so calling it directly would block the worker's event loop on a
+        # database write and stall every other request that worker is serving.
+        # ``CollaboratorPermissionInterceptor.after`` offloads the same write
+        # for the same reason, and this package already does it in five places
+        # (``repository_catalog``, ``engine_runtime/connection``).
+        #
+        # Awaited rather than fire-and-forget, unlike the interceptor's
+        # ``create_task``: the teardown runs *after* the response is sent, so
+        # waiting costs the caller nothing, and it keeps the ``except`` below
+        # able to see the failure. A detached task would drop that, which is
+        # the one thing this function must not do quietly. Only the write goes
+        # to the thread — resolving the repository stays on the loop, so
+        # nothing touches the injector off it.
+        await asyncio.to_thread(log_repo.insert, row)
     except Exception:
         # ``for_log`` here too, so the module has one rule for rendering a
         # caller-supplied id rather than one per branch. These three reached a

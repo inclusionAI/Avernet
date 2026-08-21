@@ -15,6 +15,7 @@ is the wiring and not a hand-called function.
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 from fastapi import APIRouter, FastAPI, HTTPException, Request
@@ -92,12 +93,19 @@ class _Collaborators:
 
 
 class _Audit:
-    """Collects rows, or refuses to accept them."""
+    """Collects rows, or refuses to accept them.
+
+    Records the thread it was called on: the repository is synchronous, so
+    *where* the write runs is part of the contract, not an implementation
+    detail.
+    """
 
     def __init__(self, *, raises: bool = False) -> None:
         self.rows, self.raises = [], raises
+        self.threads: list[int] = []
 
     def insert(self, data):
+        self.threads.append(threading.get_ident())
         if self.raises:
             raise RuntimeError("audit table is unavailable")
         self.rows.append(data)
@@ -114,6 +122,8 @@ def _surface(*, level, bots=None, collaborators=None, audit=None, bar=None, writ
     collaborators = collaborators or _Collaborators(level)
     audit = audit or _Audit()
 
+    loop_thread: list[int] = []
+    audit.loop_thread = loop_thread
     row = Check(bar or PermissionLevel.MEMBER)
     authz.AUTHORIZATION[("GET", PATH)] = row
     authz.AUTHORIZATION[("POST", PATH)] = row
@@ -126,6 +136,7 @@ def _surface(*, level, bots=None, collaborators=None, audit=None, bar=None, writ
 
         @router.post(PATH)
         async def write(bot_id: str) -> dict:
+            loop_thread.append(threading.get_ident())
             if write_raises is not None:
                 raise write_raises
             return {"ok": "write"}
@@ -382,6 +393,31 @@ def test_a_mutation_that_never_produced_a_response_writes_no_audit_row(failure):
         pass  # escaped every handler, which is the case under test
 
     assert audit.rows == []
+
+
+def test_the_audit_write_does_not_run_on_the_event_loop():
+    """A synchronous database write inside an async teardown blocks the worker.
+
+    The teardown is ``async``, and the audit repository is not — so calling it
+    directly would stall every other request that worker is serving for the
+    length of a database insert. ``CollaboratorPermissionInterceptor.after``
+    offloads the same write, and this package already does it in five other
+    places.
+
+    Asserted on the thread the write actually ran on rather than by mocking
+    ``asyncio.to_thread``, because the claim is about where the blocking call
+    executes, and a mock would pass just as happily if it were awaited on the
+    loop.
+    """
+    client, audit = _surface(level=PermissionLevel.ADMIN, bar=PermissionLevel.MEMBER)
+
+    assert _post(client).status_code == 200
+
+    assert audit.threads, "the audit write never happened"
+    assert audit.loop_thread, "the handler never ran"
+    assert audit.threads[0] != audit.loop_thread[0], (
+        "the audit write ran on the event loop thread, blocking the worker"
+    )
 
 
 def test_audit_failure_does_not_fail_the_request():
