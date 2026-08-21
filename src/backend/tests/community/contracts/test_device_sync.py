@@ -17,15 +17,6 @@ executed; an empty-list short-circuit would not produce it.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
-from agentclaw.community.core.devices.services.device_context import DeviceContext
-from agentclaw.community.core.skill_center.services.skill_set_service import (
-    SkillSetService,
-)
-from agentclaw.community.plugins.community.device_sync import (
-    CommunityDeviceSyncDispatcher,
-)
 from agentclaw.community.plugins.local.device_sync import LocalDeviceSyncPlugin
 
 
@@ -51,35 +42,3 @@ def test_local_plugin_serves_mcp_methods(tmp_path) -> None:
     assert plugin.sync_single_mcp({"server_code": "svc_a"}) is True
     assert plugin.sync_remove_mcp("svc_a") is True
     assert plugin.has_mcp("svc_a") is True
-
-
-def test_community_no_remote_runtime_is_a_successful_skipped_projection(
-    tmp_path,
-) -> None:
-    resolver = MagicMock()
-    resolver.resolve_for_bot.return_value = DeviceContext(
-        provider="baas",
-        conn_info={"engine_type": "openclaw"},
-        binding_id=42,
-        bot_id="bot-1",
-        user_id="owner-1",
-    )
-    service = SkillSetService(
-        skill_repo=MagicMock(),
-        skill_set_repo=MagicMock(),
-        mcp_center=MagicMock(),
-        mcp_config_service=MagicMock(),
-        skill_service=MagicMock(),
-        bot_repo=MagicMock(),
-        skills_dir=tmp_path / "skills",
-        repo_dir=tmp_path / "skills-repo",
-        local_dir=tmp_path / "skills-local",
-        bot_id="bot-1",
-        resolver=resolver,
-        device_sync_dispatcher=CommunityDeviceSyncDispatcher(),
-        path_factory=MagicMock(),
-    )
-    service.get_symlink_mappings = MagicMock(return_value=[])
-
-    assert service.sync_runtime(desired_skills=[]) is True
-    resolver.resolve_for_bot.assert_called_once_with("bot-1", "default")

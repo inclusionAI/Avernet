@@ -41,9 +41,6 @@ class DeviceSyncPlugin(Plugin, Protocol):
 
         Returns:
             Result dict with at least ``{"success": bool, "message": str}``.
-            Implementations without a remote runtime may report a successful
-            no-op as ``{"success": True, "skipped": True, ...}``. Transport or
-            device failures must continue to report ``success=False``.
         """
         ...
 

@@ -29,16 +29,14 @@ _NOOP_MESSAGE = "community mode — device sync not configured (no container run
 class CommunityDeviceSyncPlugin(DeviceSyncPlugin):
     """No-op :class:`DeviceSyncPlugin` for the community profile.
 
-    Symlink sync reports a successful, explicitly skipped no-op because the
-    community profile has no remote runtime to reconcile. Bot-config sync keeps
-    returning ``{"success": False}`` because callers use that operation to
-    detect unavailable device configuration. MCP bool methods return ``True``
-    so the multi-bot batch push counts the bot (Option B parity with the
-    local/teclaw whole-artifact impls) without making any network call.
+    Symlink / bot-config sync return a uniform ``{"success": False}`` result
+    so callers degrade gracefully; the MCP bool methods return ``True`` so the
+    multi-bot batch push counts the bot (Option B parity with the local/teclaw
+    whole-artifact impls) without making any network call.
     """
 
     def sync_symlinks(self, symlinks: list[dict[str, str]]) -> dict[str, Any]:
-        return {"success": True, "skipped": True, "message": _NOOP_MESSAGE}
+        return {"success": False, "message": _NOOP_MESSAGE}
 
     def sync_bot_config(
         self,
