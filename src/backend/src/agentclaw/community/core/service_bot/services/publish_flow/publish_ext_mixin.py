@@ -12,9 +12,6 @@ from __future__ import annotations
 import copy
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
-from agentclaw.community.core.service_bot.services.publish_flow.errors import (
-    PublishFlowServiceError,
-)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
@@ -46,12 +43,7 @@ class PublishExtMixin:
         expected_ext = copy.deepcopy(ext)
         ext.setdefault("binding", {})[stage.value] = binding_id
         ext.setdefault("publish", {})[stage.value] = baas_publish_id
-        publish_record = self.get_publish_record(publish_id)
-        if publish_record is None:
-            raise PublishFlowServiceError(
-                f"Publish record not found: publish_id={publish_id}"
-            )
-        self._publish_provider_behavior(publish_record).persist_stage_promotion(
+        self.provider_behavior(bot).persist_stage_promotion(
             ext=ext, stage=stage, engine_overrides=engine_overrides
         )
         self._update_publish_status(

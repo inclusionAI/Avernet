@@ -303,7 +303,7 @@ def test_template_config_mcps_append_and_override_defaults():
         }
     }
 
-    ext_info = {"aicoding": {"template_config": template_config}}
+    ext_info = {"template_config": template_config}
     servers = get_default_mcp_servers("aicoding", ext_info=ext_info)
     codes = [s["server_code"] for s in servers]
 
@@ -339,7 +339,7 @@ def test_resolved_template_config_mcps_append_defaults():
 
     codes = get_default_mcp_server_codes(
         "aicoding",
-        ext_info={"aicoding": {"template_config": template_config}},
+        ext_info={"template_config": template_config},
     )
 
     assert "mcp.ant.agentix.112858.baishitong" in codes
@@ -359,7 +359,7 @@ def test_template_config_top_level_mcp_presets_are_ignored():
     }
 
     assert "mcp.ant.custom.template.server" not in get_default_mcp_server_codes(
-        "aicoding", ext_info={"aicoding": {"template_config": template_config}}
+        "aicoding", ext_info={"template_config": template_config}
     )
 
 
@@ -378,7 +378,7 @@ def test_legacy_wrapped_template_config_mcp_presets_are_ignored():
     }
 
     assert "mcp.ant.custom.template.server" not in get_default_mcp_server_codes(
-        "aicoding", ext_info={"aicoding": {"template_config": template_config}}
+        "aicoding", ext_info={"template_config": template_config}
     )
 
 
@@ -398,13 +398,13 @@ def test_template_config_mcp_presets_are_aicoding_specific():
     }
 
     assert "mcp.ant.custom.template.server" in get_default_mcp_server_codes(
-        "aicoding", ext_info={"aicoding": {"template_config": template_config}}
+        "aicoding", ext_info={"template_config": template_config}
     )
     assert "mcp.ant.custom.template.server" not in get_default_mcp_server_codes(
-        "claude_code", ext_info={"aicoding": {"template_config": template_config}}
+        "claude_code", ext_info={"template_config": template_config}
     )
     assert "mcp.ant.custom.template.server" not in get_default_mcp_server_codes(
-        "openclaw", ext_info={"aicoding": {"template_config": template_config}}
+        "openclaw", ext_info={"template_config": template_config}
     )
 
 
@@ -421,7 +421,7 @@ def test_claude_code_coding_template_uses_aicoding_mcp_bucket():
             }
         }
     }
-    ext_info = {"aicoding": {"template_config": template_config}}
+    ext_info = {"template_config": template_config}
 
     codes = get_default_mcp_server_codes(
         "claude_code",
@@ -447,7 +447,7 @@ def test_claude_code_template_factory_non_normal_uses_aicoding_mcp_bucket():
             }
         }
     }
-    ext_info = {"aicoding": {"template_config": template_config}}
+    ext_info = {"template_config": template_config}
 
     codes = get_default_mcp_server_codes(
         "claude_code",
@@ -468,3 +468,124 @@ def test_claude_code_normal_template_keeps_claude_mcp_bucket():
 
     assert "clawmind" in codes
     assert "mcp.ant.agentix.112858.aixAicoding" not in codes
+
+
+def test_template_config_clis_append_and_override_defaults():
+    template_config = {
+        "bot_template_config": {
+            "preset_capabilities": {
+                "cli": [
+                    {
+                        "cli_code": "antcode-cli",
+                        "cli_name": "Template AntCode",
+                        "cli_desc": "template override",
+                    },
+                    {
+                        "cli_code": "custom-cli",
+                        "cli_name": "Custom CLI",
+                        "cli_desc": "template appended",
+                    },
+                ]
+            }
+        }
+    }
+
+    items = get_default_cli_items(
+        "aicoding",
+        ext_info={"template_config": template_config},
+    )
+    codes = [it["cli_code"] for it in items]
+
+    assert codes.count("antcode-cli") == 1
+    assert "custom-cli" in codes
+    overridden = next(it for it in items if it["cli_code"] == "antcode-cli")
+    assert overridden["cli_name"] == "Template AntCode"
+    assert overridden["cli_desc"] == "template override"
+    appended = next(it for it in items if it["cli_code"] == "custom-cli")
+    assert appended["cli_name"] == "Custom CLI"
+
+
+def test_template_config_top_level_cli_presets_are_ignored():
+    template_config = {
+        "preset_capabilities": {
+            "cli": [
+                {
+                    "cli_code": "custom-cli",
+                    "cli_name": "Custom CLI",
+                }
+            ]
+        }
+    }
+
+    codes = [
+        it["cli_code"]
+        for it in get_default_cli_items(
+            "aicoding",
+            ext_info={"template_config": template_config},
+        )
+    ]
+    assert "custom-cli" not in codes
+
+
+def test_template_config_cli_presets_are_aicoding_specific():
+    template_config = {
+        "bot_template_config": {
+            "preset_capabilities": {
+                "cli": [
+                    {
+                        "cli_code": "custom-cli",
+                        "cli_name": "Custom CLI",
+                    }
+                ]
+            }
+        }
+    }
+
+    assert get_default_cli_items(
+        "openclaw",
+        ext_info={"template_config": template_config},
+    ) == []
+
+
+# teclaw ships no default MCP servers: a teclaw bot starts empty and every MCP
+# it runs comes from its owner's own skill-set configuration. The publish suite's
+# ``_install_default_mcp_catalog`` derives its mock *from*
+# ``_DEFAULT_MCP_SERVERS_BY_ENGINE["teclaw"]``, so it only ever proves that a
+# build resolves whatever the roster happens to hold — a roster that silently
+# regrew an entry would sail straight through it. These cases are what make such
+# an edit fail loudly.
+
+
+def test_teclaw_has_no_default_mcp_servers():
+    """teclaw's roster is empty — no MCP is granted without the owner asking."""
+    assert get_default_mcp_servers("teclaw") == []
+    assert get_default_mcp_server_codes("teclaw") == []
+    # ``hitl`` is local/stdio and was the roster's last entry; it is not an
+    # exception to the empty default, only an MCP the owner may add explicitly.
+    assert "hitl" not in get_default_mcp_server_codes("teclaw")
+
+
+def test_teclaw_roster_is_its_own_bucket():
+    """teclaw resolves its own (empty) defaults rather than inheriting another
+    engine's.
+
+    ``_resolve_default_mcp_engine_bucket`` normalizes case and delegates bucket
+    overrides to the engine registry; an alias onto ``openclaw`` would silently
+    hand teclaw a full roster, so pin both the normalization and the emptiness.
+    """
+    assert get_default_mcp_servers("TECLAW") == []
+    assert get_default_mcp_servers("openclaw") != []
+
+
+def test_teclaw_bucket_is_declared_not_missing():
+    """The empty roster is a declared decision, not an unknown-engine fallback.
+
+    ``get_default_mcp_servers`` fails closed for engines it does not know, so an
+    accidentally deleted ``teclaw`` key would return the same ``[]`` while losing
+    the bucket that keeps teclaw distinguishable from a typo'd engine name.
+    """
+    from agentclaw.community.core.mcp.services._defaults import (
+        _DEFAULT_MCP_SERVERS_BY_ENGINE,
+    )
+
+    assert _DEFAULT_MCP_SERVERS_BY_ENGINE["teclaw"] == []

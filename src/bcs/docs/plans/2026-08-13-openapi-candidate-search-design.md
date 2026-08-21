@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-13
 - **Status:** Approved
-- **Scope:** BCN OpenAPI V1 Bot candidate search
+- **Scope:** BCN internal V1 Bot candidate search
 - **Legacy reference:** `GET /actors/search`
 
 ## Problem
@@ -26,7 +26,7 @@ query combination and would weaken its deterministic pagination guarantee.
 Add a separate versioned operation:
 
 ```http
-GET /openapi/v1/collaboration/bots/{bot_id}/candidates/search
+GET /api/v1/collaboration/bots/{bot_id}/candidates/search
     ?q=<optional natural-language query>
     &purpose=discovery|collaboration
 ```
@@ -52,12 +52,14 @@ total-count pagination is advertised for relevance-ranked search.
 The operation uses the same perspective authorization as the existing
 candidate list:
 
-- the caller must have valid Human and App Gateway Principals;
+- Gateway admits the route with User, App, and Bot Principals all optional;
+- BCS requires a usable Human identity; App and Bot identities do not replace it;
 - a physical acting Bot must be managed by the current Human;
 - a Human Actor perspective must be exactly `human_{subject.id}`;
 - a missing or unmaterialized perspective returns `bot_not_found`; and
 - an unauthorized perspective returns `forbidden`.
 
+Gateway admission is intentionally weaker than application authorization.
 Authorization is completed by the V1 application before invoking the shared
 candidate-search Core.
 
@@ -88,12 +90,12 @@ The shared Core behavior is:
 
 The shared Core may retain the opaque recommendation response only as an
 internal legacy-compatibility value. The legacy application may project it into
-the existing `/actors/search` context. It is never exposed through OpenAPI V1.
+the existing `/actors/search` context. It is never exposed through internal V1.
 
 The legacy actor-directory application remains responsible for the legacy
 `ActorDirectoryEntry` shape, dynamic `active`/`offline` status, downlink flag,
-and fallback skill-summary text. The V1 application remains responsible for
-Human perspective authorization and the V1 Bot projection.
+and fallback skill-summary text. The internal V1 application remains
+responsible for Human perspective authorization and the V1 Bot projection.
 
 The OpenAPI facade hydrates returned IDs through the Bot control-plane service
 so each result uses the existing secret-free `PhysicalBot` projection,
@@ -184,4 +186,4 @@ complete PhysicalBot body, and absence of raw BCSFuse data, `ctoken`,
 - `bcs-app-bot` application tests for authorization and projection.
 - `bcs-api-http` route tests for parameter forwarding and rejection behavior.
 - BCS architecture checks and targeted Cargo tests.
-- Regenerated Gateway BCN OpenAPI snapshot.
+- Regenerated Gateway BCN internal OpenAPI snapshot.

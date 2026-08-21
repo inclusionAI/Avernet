@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 async-trait = { workspace = true }
 axum = { workspace = true }
+bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-storage-api = { workspace = true }
 bytes = { workspace = true }

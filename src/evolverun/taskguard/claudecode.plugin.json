@@ -1,0 +1,26 @@
+{
+  "id": "clawmind",
+  "name": "clawmind",
+  "description": "通用 YAML DAG 工作流引擎 — Claude Code MCP Server 适配层",
+  "version": "0.1.0",
+  "platform": "claudecode",
+  "entry": "./dist/esm/platform/mcp-entry.js",
+  "contracts": {
+    "tools": [
+      "workflow_engine_dispatch",
+      "workflow_list",
+      "workflow_state",
+      "workflow_flows",
+      "workflow_confirm",
+      "workflow_reject",
+      "workflow_retry",
+      "workflow_validate",
+      "workflow_help"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}

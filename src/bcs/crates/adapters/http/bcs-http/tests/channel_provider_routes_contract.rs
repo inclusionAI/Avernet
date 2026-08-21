@@ -170,6 +170,33 @@ async fn channel_binding_target_query_is_mounted_for_human_identity() {
     assert_eq!(body, serde_json::json!({ "items": [] }));
 }
 
+#[tokio::test]
+async fn channel_conversation_query_rejects_human_without_session_access() {
+    let chain = static_auth_chain("alice");
+    let app = build_router(
+        HttpAppState::new(Services::noop())
+            .with_user_identity(Arc::new(ChainUserIdentityPort::new(chain))),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(
+                    "/channels/conversations/by-session?bcs_session_id=group_1%3Asession_1&channel_type=dingtalk",
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["error"], "caller cannot access this session");
+}
+
 #[derive(Clone)]
 struct ObservedRequest {
     method: ChannelHttpMethod,

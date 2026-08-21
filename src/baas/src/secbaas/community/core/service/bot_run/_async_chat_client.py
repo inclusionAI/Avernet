@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -25,9 +26,15 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.logger import get_logger
 from secbaas.community.tracer import get_tracer_plugin
 
+from ..bot_interaction import BotInteractionService
 from ._bot_websocket_client import BotWebSocketClient, ChatRequestError
+from ._interaction_protocol import (
+    EngineInteractionRequestedEvent,
+    EngineInteractionResolvedEvent,
+    JsonObject,
+)
 from ._session_key_matcher import SessionKeyMatcher
-from ._session_state import _SessionState
+from ._session_state import SessionState
 
 logger = get_logger("core-bot-run")
 
@@ -150,6 +157,7 @@ class AsyncChatClient:
         max_retries: int = 1,
         retry_base_backoff: float = 0.5,
         ignore_case: bool = False,
+        interaction_service: BotInteractionService | None = None,
     ):
         """初始化客户端
 
@@ -176,6 +184,8 @@ class AsyncChatClient:
         self._max_retries = max_retries
         self._retry_base_backoff = retry_base_backoff
         self._ignore_case = ignore_case
+        self._interaction_service = interaction_service
+        self._interaction_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
 
         # 并发信号量：限制单连接总并发会话数，提供背压
         self._concurrency_sem: asyncio.Semaphore | None = (
@@ -191,7 +201,7 @@ class AsyncChatClient:
         self._condition = asyncio.Condition()
 
         # sessionKey → _SessionState 分流表
-        self._sessions: dict[str, _SessionState] = {}
+        self._sessions: dict[str, SessionState] = {}
 
         # sessionKey 模糊匹配器：服务端返回的 sessionKey 可能比客户端注册的长，
         # 通过 contains 匹配从 store 中回溯查找客户端注册的原始 key
@@ -252,6 +262,9 @@ class AsyncChatClient:
 
         _client.on_event("chat", self._on_chat)
         _client.on_event("agent", self._on_agent)
+        _client.on_event("interaction.requested", self._on_interaction_requested)
+        _client.on_event("interaction.resolved", self._on_interaction_resolved)
+        _client.on_event("mode_transition.resolved", self._on_mode_transition_resolved)
         _client.on_event("error", self._on_error)
         _client.on_event("*", self._log_event)
         _client.on_disconnect(self._on_disconnect)
@@ -260,7 +273,12 @@ class AsyncChatClient:
             logger.info("Connecting...")
 
         # 直接 await 异步连接，不再需要 run_in_executor
-        hello = await _client.connect()
+        hello: dict[str, Any] | None = None
+        try:
+            hello = await _client.connect()
+        except Exception as e:
+            logger.error(f"Connect failed: {e}")
+            raise e
         self._client = _client
         # 启动后台重连监控（仅在 max_retries > 0 时）
         if self._max_retries > 0 and self._reconnect_monitor is None:
@@ -354,7 +372,7 @@ class AsyncChatClient:
                     state.agent_complete.clear()
                     state.trace_context = trace_ctx
                 else:
-                    state = _SessionState(trace_context=trace_ctx)
+                    state = SessionState(trace_context=trace_ctx)
                     self._sessions[session_key] = state
 
             try:
@@ -481,7 +499,7 @@ class AsyncChatClient:
                     state.agent_complete.clear()
                     state.trace_context = trace_ctx
                 else:
-                    state = _SessionState(trace_context=trace_ctx)
+                    state = SessionState(trace_context=trace_ctx)
                     self._sessions[session_key] = state
 
                 # 流式模式：创建 queue 并绑定到 state
@@ -556,6 +574,7 @@ class AsyncChatClient:
             message: 要注入的消息内容
             session_key: 会话 key，不传则自动生成
             auth_token: 认证令牌，为空时传 OPEN_API:NOT_PROVIDED
+            chat_metadata: 对话元数据
         """
         if session_key is None:
             session_key = f"{uuid.uuid4().hex}"
@@ -604,6 +623,13 @@ class AsyncChatClient:
             await self._client.close()
             self._client = None
 
+        interaction_tasks = list(self._interaction_tasks.values())
+        for task in interaction_tasks:
+            task.cancel()
+        if interaction_tasks:
+            await asyncio.gather(*interaction_tasks, return_exceptions=True)
+        self._interaction_tasks.clear()
+
         # 清理所有 session state，并唤醒等待中的协程
         async with self._condition:
             self._sessions.clear()
@@ -645,19 +671,19 @@ class AsyncChatClient:
 
     # ── 私有方法 ──────────────────────────────────────────────────────────
 
-    def _get_session(self, session_key: str) -> _SessionState | None:
+    def _get_session(self, session_key: str) -> SessionState | None:
         """获取指定 sessionKey 的状态（支持模糊匹配）。"""
         result = self._session_matcher.find(session_key)
         return result.state if result else None
 
     @staticmethod
-    def _emit_stream_chunk(state: _SessionState, chunk: StreamChunk) -> None:
+    def _emit_stream_chunk(state: SessionState, chunk: StreamChunk) -> None:
         if state.stream_queue is not None:
             state.stream_queue.put_nowait(chunk)
 
     @staticmethod
     def _handle_terminal_error(
-        state: _SessionState, session_key: str, error_msg: str, source: str
+        state: SessionState, session_key: str, error_msg: str, source: str
     ) -> None:
         msg = error_msg or f"{source} error"
         logger.warning("[%s] error: sessionKey=%s, errMsg=%s", source, session_key, msg)
@@ -673,7 +699,7 @@ class AsyncChatClient:
         payload: dict[str, Any],
         *,
         session_key: str,
-        state: _SessionState | None,
+        state: SessionState | None,
     ) -> None:
         """内部 chat 事件处理器。
 
@@ -759,7 +785,7 @@ class AsyncChatClient:
         payload: dict[str, Any],
         *,
         session_key: str,
-        state: _SessionState | None,
+        state: SessionState | None,
     ) -> None:
         """内部 agent 事件处理器。
 
@@ -840,13 +866,256 @@ class AsyncChatClient:
         else:
             state.last_stream_is_assistant = False
 
+    @_with_session_trace("_on_interaction_requested")
+    def _on_interaction_requested(
+        self,
+        payload: JsonObject,
+        *,
+        session_key: str,
+        state: SessionState | None,
+    ) -> None:
+        """Persist and expose a validated engine interaction request."""
+        if self._interaction_service is None:
+            logger.debug("interaction processing is disabled; skip requested event")
+            return
+
+        event = EngineInteractionRequestedEvent.from_payload(
+            session_key=session_key,
+            payload=payload,
+        )
+        created = self._interaction_service.record_requested(
+            session_key=event.session_key,
+            interaction_id=event.interaction_id,
+            envelope=event.envelope,
+            allowed_decisions=event.allowed_decisions,
+            expires_at_ms=event.expires_at_ms,
+        )
+        if created and state is not None:
+            self._emit_stream_chunk(
+                state,
+                StreamChunk(
+                    type="interaction",
+                    content="",
+                    metadata={
+                        "event": "interaction.requested",
+                        "payload": event.envelope,
+                    },
+                ),
+            )
+            if state.stream_queue is not None and payload.get("kind") == "mode_switch":
+                state.pending_mode_transition_ids.add(event.interaction_id)
+
+        # Engine events normally arrive only on an active client. Keep persistence
+        # and SSE delivery above, but do not start a dispatcher without an uplink.
+        if self._client is None:
+            return
+
+        task_key = (event.session_key, event.interaction_id)
+        if task_key in self._interaction_tasks:
+            return
+        task = asyncio.create_task(
+            self._dispatch_interaction_answer(
+                session_key=event.session_key,
+                interaction_id=event.interaction_id,
+                deadline_ms=event.expires_at_ms,
+            )
+        )
+        self._interaction_tasks[task_key] = task
+        task.add_done_callback(
+            lambda completed, key=task_key: self._discard_interaction_task(
+                key, completed
+            )
+        )
+
+    @_with_session_trace("_on_interaction_resolved")
+    def _on_interaction_resolved(
+        self,
+        payload: JsonObject,
+        *,
+        session_key: str,
+        state: SessionState | None,
+    ) -> None:
+        """Persist and expose one terminal interaction.resolved event."""
+        if self._interaction_service is None:
+            logger.debug("interaction processing is disabled; skip resolved event")
+            return
+
+        event = EngineInteractionResolvedEvent.from_payload(
+            session_key=session_key,
+            payload=payload,
+        )
+        applied = self._interaction_service.mark_resolved(
+            session_key=event.session_key,
+            interaction_id=event.interaction_id,
+            envelope=event.envelope,
+        )
+        if not applied:
+            return
+
+        if state is not None:
+            self._emit_stream_chunk(
+                state,
+                StreamChunk(
+                    type="interaction",
+                    content="",
+                    metadata={
+                        "event": "interaction.resolved",
+                        "payload": event.envelope,
+                    },
+                ),
+            )
+
+    @_with_session_trace("_on_mode_transition_resolved")
+    def _on_mode_transition_resolved(
+        self,
+        payload: JsonObject,
+        *,
+        session_key: str,
+        state: SessionState | None,
+    ) -> None:
+        """Persist a raw mode terminal event and expose it once to its stream."""
+        if self._interaction_service is None:
+            logger.debug(
+                "interaction processing is disabled; skip mode transition event"
+            )
+            return
+
+        event = EngineInteractionResolvedEvent.from_mode_transition_payload(
+            session_key=session_key,
+            payload=payload,
+        )
+        self._interaction_service.mark_resolved(
+            session_key=event.session_key,
+            interaction_id=event.interaction_id,
+            envelope=event.envelope,
+        )
+        if (
+            state is None
+            or event.interaction_id not in state.pending_mode_transition_ids
+        ):
+            return
+
+        state.pending_mode_transition_ids.remove(event.interaction_id)
+        self._emit_stream_chunk(
+            state,
+            StreamChunk(
+                type="interaction",
+                content="",
+                metadata={
+                    "event": "mode_transition.resolved",
+                    "payload": event.envelope,
+                },
+            ),
+        )
+
+    def _discard_interaction_task(
+        self,
+        key: tuple[str, str],
+        completed: asyncio.Task[None],
+    ) -> None:
+        if self._interaction_tasks.get(key) is completed:
+            self._interaction_tasks.pop(key, None)
+        if completed.cancelled():
+            return
+        error = completed.exception()
+        if error is not None:
+            logger.error(
+                "[interaction] dispatch task failed: sessionKey=%s interactionId=%s",
+                key[0],
+                key[1],
+                exc_info=(type(error), error, error.__traceback__),
+            )
+
+    async def _dispatch_interaction_answer(
+        self,
+        *,
+        session_key: str,
+        interaction_id: str,
+        deadline_ms: int | None,
+    ) -> None:
+        """Poll the DB, claim one queued answer, and send it to the engine."""
+        interaction_service = self._interaction_service
+        if interaction_service is None:
+            return
+        if deadline_ms is None:
+            deadline_ms = int(time.time() * 1000) + 300_000
+
+        while int(time.time() * 1000) <= deadline_ms:
+            command = interaction_service.claim_for_dispatch(
+                session_key=session_key,
+                interaction_id=interaction_id,
+            )
+            if command is not None:
+                client = self._client
+                if client is None:
+                    interaction_service.mark_failed(
+                        session_key=session_key,
+                        interaction_id=interaction_id,
+                        error="engine websocket is disconnected",
+                    )
+                    return
+                try:
+                    exchange = await client.interaction_resolve(
+                        interaction_id=command.interaction_id,
+                        resolution=command.resolution,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[interaction] dispatch failed: sessionKey=%s interactionId=%s",
+                        session_key,
+                        interaction_id,
+                        exc_info=True,
+                    )
+                    interaction_service.mark_failed(
+                        session_key=session_key,
+                        interaction_id=interaction_id,
+                        error=str(exc),
+                    )
+                    return
+
+                interaction_service.record_engine_exchange(
+                    session_key=session_key,
+                    interaction_id=interaction_id,
+                    engine_req=exchange.request,
+                    engine_res=exchange.response,
+                )
+                if not exchange.accepted:
+                    interaction_service.mark_failed(
+                        session_key=session_key,
+                        interaction_id=interaction_id,
+                        error=exchange.error_message
+                        or "engine rejected interaction.resolve",
+                    )
+                elif command.resolution.kind == "mode_switch":
+                    # The Engine resolves mode transitions through the RPC response
+                    # and a compatibility agent stream; it does not emit the
+                    # top-level interaction.resolved event used by other kinds.
+                    interaction_service.mark_resolved(
+                        session_key=session_key,
+                        interaction_id=interaction_id,
+                        envelope=exchange.response,
+                    )
+                return
+
+            if not interaction_service.should_poll(
+                session_key=session_key,
+                interaction_id=interaction_id,
+            ):
+                return
+            await asyncio.sleep(0.2)
+
+        interaction_service.mark_expired(
+            session_key=session_key,
+            interaction_id=interaction_id,
+        )
+
     @_with_session_trace("_on_error")
     def _on_error(
         self,
         payload: dict[str, Any],
         *,
         session_key: str,
-        state: _SessionState | None,
+        state: SessionState | None,
     ) -> None:
         """error 处理器
         Args:
@@ -875,7 +1144,7 @@ class AsyncChatClient:
         payload: dict[str, Any],
         *,
         session_key: str,
-        state: _SessionState | None,
+        state: SessionState | None,
     ) -> None:
         """兜底事件处理器
 
@@ -896,12 +1165,32 @@ class AsyncChatClient:
             "chat": ("message", "deltaText", "delta"),
             "agent": ("data",),
         }
-        sensitive_keys = _sensitive_keys.get(event_name)
-        if sensitive_keys:
+        if event_name in {
+            "interaction.requested",
+            "interaction.resolved",
+            "mode_transition.resolved",
+        }:
+            metadata_keys = (
+                "interactionId",
+                "id",
+                "runId",
+                "sessionKey",
+                "kind",
+                "phase",
+                "status",
+                "toolCallId",
+                "seq",
+                "ts",
+            )
+            safe_payload = {
+                key: payload[key] for key in metadata_keys if key in payload
+            }
+            logger.info("[log_event] event=%s, payload=%s", event_name, safe_payload)
+        elif sensitive_keys := _sensitive_keys.get(event_name):
             safe_payload = {k: v for k, v in payload.items() if k not in sensitive_keys}
-            logger.info(f"[log_event] event={event_name}, payload={safe_payload}")
+            logger.info("[log_event] event=%s, payload=%s", event_name, safe_payload)
         else:
-            logger.info(f"[log_event] event={event_name}, payload={payload}")
+            logger.info("[log_event] event=%s, payload=%s", event_name, payload)
 
     def _on_disconnect(self, event_name: str, payload: dict[str, Any]) -> None:
         """断连回调：通知 _reconnect_loop 立即感知断连。
@@ -995,6 +1284,16 @@ class AsyncChatClient:
                     )
                     new_client.on_event("chat", self._on_chat)
                     new_client.on_event("agent", self._on_agent)
+                    new_client.on_event(
+                        "interaction.requested", self._on_interaction_requested
+                    )
+                    new_client.on_event(
+                        "interaction.resolved", self._on_interaction_resolved
+                    )
+                    new_client.on_event(
+                        "mode_transition.resolved",
+                        self._on_mode_transition_resolved,
+                    )
                     new_client.on_event("error", self._on_error)
                     new_client.on_event("*", self._log_event)
                     new_client.on_disconnect(self._on_disconnect)

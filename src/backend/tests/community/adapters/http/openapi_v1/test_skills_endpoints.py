@@ -39,6 +39,7 @@ from agentclaw.community.api.local_skill_delete_service import (
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillActiveError,
+    LocalSkillInvalidPackageError,
     LocalSkillNotFoundError,
     LocalSkillOwnerAmbiguousError,
 )
@@ -138,12 +139,15 @@ class _Delete:
 
 
 def _client(
-    query: _Query, state: _State | None = None, delete: _Delete | None = None
+    query: _Query,
+    state: _State | None = None,
+    delete: _Delete | None = None,
+    upload: _Upload | None = None,
 ) -> TestClient:
     class Bindings(Module):
         def configure(self, binder):
             binder.bind(LocalSkillQueryServiceProtocol, to=query)
-            binder.bind(LocalSkillUploadServiceProtocol, to=_Upload())
+            binder.bind(LocalSkillUploadServiceProtocol, to=upload or _Upload())
             binder.bind(LocalSkillStateServiceProtocol, to=state or _State())
             binder.bind(LocalSkillDeleteServiceProtocol, to=delete or _Delete())
 
@@ -214,6 +218,24 @@ def test_upload_rejects_multipart_and_other_content_types_before_service_call():
         )
         assert response.status_code == 400
         assert response.json()["code"] == 400101
+
+
+def test_upload_returns_a_safe_actionable_invalid_package_reason():
+    class _InvalidUpload(_Upload):
+        async def upload_local_skill(self, **kwargs):
+            raise LocalSkillInvalidPackageError("multiple_skill_files")
+
+    response = _client(_Query(), upload=_InvalidUpload()).post(
+        "/openapi/v1/bots/bot-1/skills",
+        content=b"PK\x03\x04",
+        headers={"content-type": "application/zip"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 400101
+    assert response.json()["message"] == (
+        "Skill package must contain exactly one SKILL.md file"
+    )
 
 
 def test_activate_and_deactivate_derive_scope_from_id_and_return_desired_state():

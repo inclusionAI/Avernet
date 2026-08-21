@@ -84,7 +84,9 @@ class EvalPublishMixin:
         # config_artifact read above is only the build-artifact presence guard. Eval
         # does not persist, so the applied overrides are discarded.
         delivery, _ = self._ext_state.compose_live(publish_record, publish_stage)
-        image_pin = self.resolve_publish_image_pin(publish_record)
+        image_pin = self.resolve_publish_image_pin(
+            publish_record, device_provider=self.device_provider(bot)
+        )
 
         ext_info = {}
         if biz_id:
@@ -115,7 +117,6 @@ class EvalPublishMixin:
                 delivery=delivery,
                 ext_info=ext_info,
                 docker_image=image_pin.docker_image,
-                runtime_kind=self.resolve_publish_runtime_kind(publish_record),
                 template_config=service_publish_template_config(bot),
             )
             if template_uuid:

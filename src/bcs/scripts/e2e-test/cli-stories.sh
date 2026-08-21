@@ -471,16 +471,19 @@ story_cli_operator_runs_sessions_and_services() {
 # User story: An operator validates channel-management behavior before a provider is installed.
 #
 # Flow:
-#   Attempt to bind a channel -> list bindings -> unbind a missing binding -> list again.
+#   Attempt to bind a channel -> list bindings -> create an authorized session
+#   -> resolve its conversations -> unbind a missing binding -> list again.
 #
 # Critical assertions:
 #   - Bind fails with the explicit disabled-bridge contract and never leaks the supplied secret.
 #   - List returns a well-formed items array.
+#   - Conversation lookup accepts a participating Bot and returns no mapping
+#     when that authorized session has not received a DingTalk message.
 #   - Disabled-bridge unbind follows the documented no-op acknowledgement.
 #   - No phantom binding appears after the rejected and no-op operations.
 story_cli_operator_validates_channel_management() {
     info "Story: an operator validates channel management through bcs-cli"
-    local account="cli-channel-$$" missing_id="cli-missing-binding-$$"
+    local account="cli-channel-$$" missing_id="cli-missing-binding-$$" group_id session_id
 
     info "CLI story: bcs-cli channel bind"
     if bcs_cli_json CEO channel bind \
@@ -505,9 +508,26 @@ story_cli_operator_validates_channel_management() {
     _cli_story_run "operator lists channel bindings" CEO channel list || return
     assert_eq "CLI channel list exposes items" "$(_cli_json_has_path "$BCS_CLI_STDOUT" "items")" "1"
 
+    _cli_story_create_pm_group "CLI channel conversation lookup" || return
+    group_id="$CLI_STORY_GROUP_ID"
+    _cli_story_run "operator creates an authorized channel lookup session" PM session create \
+        --group "$group_id" --title "CLI channel lookup" || return
+    session_id=$(json_path "$BCS_CLI_STDOUT" "session_id")
+    assert_not_empty "CLI channel lookup fixture returns a session id" "$session_id"
+    [[ -n "$session_id" ]] || return
+
+    _cli_story_run "participating bot resolves DingTalk conversations for a session" PM channel conversation-id \
+        --session "$session_id" || return
+    assert_json_eq "CLI channel conversation lookup remains empty" "$BCS_CLI_STDOUT" "items" "[]"
+
     _cli_story_run "operator unbinds a missing disabled-bridge binding" CEO channel unbind --id "$missing_id" || return
     assert_json_eq "CLI channel unbind acknowledges the no-op" "$BCS_CLI_STDOUT" "ok" "true"
 
     _cli_story_run "operator confirms no phantom channel binding exists" CEO channel list || return
     assert_json_eq "CLI channel list remains empty" "$BCS_CLI_STDOUT" "items" "[]"
+
+    api_delete "/sessions/${session_id}?bot_id=${BOT_PM_UUID}"
+    require_status "CLI channel lookup session is cleaned up" "200" || return
+    api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+    require_status "CLI channel lookup group is cleaned up" "200" || return
 }

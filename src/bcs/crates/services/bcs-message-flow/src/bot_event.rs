@@ -107,8 +107,9 @@ pub async fn handle_bot_event(
         match phase {
             "start" => cache_tool_start(flow, &cmd, data).await,
             "result" => {
-                persist_tool_result(flow, &cmd, data).await;
-                if let Some(coordination) = maybe_handle_coordination_echo(flow, &cmd, data).await? {
+                persist_tool_result(flow, &cmd, data).await?;
+                if let Some(coordination) = maybe_handle_coordination_echo(flow, &cmd, data).await?
+                {
                     bot_deliveries.extend(coordination.bot_deliveries);
                     frontend_deliveries.extend(coordination.frontend_deliveries);
                 }
@@ -123,7 +124,7 @@ pub async fn handle_bot_event(
     // flushes visible reply text before every non-assistant event). Repeated
     // thinking frames are cheap no-ops once the buffer is drained.
     if is_chat_segment_boundary_stream(&cmd.event_payload) {
-        flush_chat_segment(flow, &cmd, None).await;
+        flush_chat_segment(flow, &cmd, None).await?;
     }
     if is_terminal_state(&cmd.state) {
         flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
@@ -139,7 +140,7 @@ pub async fn handle_bot_event(
         && matches!(cmd.state, ChatEventState::Error | ChatEventState::Aborted)
         && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
     {
-        flush_chat_segment(flow, &cmd, None).await;
+        flush_chat_segment(flow, &cmd, None).await?;
         flow.message_tracker.cleanup_run(&cmd.run_id).await;
     }
 
@@ -407,9 +408,14 @@ async fn relay_final_chat_event(
     if flow.bot_relay_turn_limit > 0 {
         let count = flow.group.message_count(&cmd.group_id).await.unwrap_or(0);
         if count >= flow.bot_relay_turn_limit as usize {
-            flow.group
-                .update_status(&cmd.group_id, GroupStatus::Inactive)
-                .await?;
+            crate::update_group_status(
+                flow.group.as_ref(),
+                &cmd.group_id,
+                GroupStatus::Inactive,
+                "bot_relay_turn_limit_reached",
+                crate::bot_event_actor(&cmd.bot_id),
+            )
+            .await?;
             let frontend = publish_system_event(
                 flow,
                 &cmd.group_id,
@@ -586,7 +592,7 @@ async fn relay_final_chat_event(
     // Finalize the run's open chat segment: flush the buffered streaming text
     // as ONE row, using the final frame's complete text. (Final-only runs with
     // no buffered deltas just insert the final text.)
-    persist_final_chat(flow, &cmd, cleaned.clone()).await;
+    persist_final_chat(flow, &cmd, cleaned.clone()).await?;
 
     for target in &decision.targets {
         let directive = build_response_directive(
@@ -731,6 +737,7 @@ async fn relay_final_chat_event(
                 run_id: run_id.clone(),
                 frame,
                 delivery_kind,
+                provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             })
             .await;
@@ -865,6 +872,7 @@ async fn handle_task_bot_event(
             run_id: manager_result_run_id.clone(),
             frame,
             delivery_kind,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await?;
@@ -889,9 +897,9 @@ async fn handle_task_bot_event(
     // retryable and no history side effect is committed.
     if matches!(cmd.event_type.as_str(), "chat" | "chat.event") {
         if matches!(cmd.state, ChatEventState::Final) {
-            persist_task_final_chat(flow, cmd, response_text.clone()).await;
+            persist_task_final_chat(flow, cmd, response_text.clone()).await?;
         } else {
-            flush_chat_segment(flow, cmd, None).await;
+            flush_chat_segment(flow, cmd, None).await?;
         }
         flow.message_tracker.cleanup_run(&cmd.run_id).await;
     }
@@ -910,8 +918,11 @@ async fn handle_task_bot_event(
                 None,
                 &entry.task_id,
             )
-            .await;
+            .await?;
         }
+    }
+    if matches!(cmd.state, ChatEventState::Final) {
+        crate::task_flow::record_task_completed(flow, &entry, &response_text, now_ms()).await?;
     }
     flow.task_store.mark_replied(task_id).await;
     if let Some(group) = group.as_ref() {
@@ -1246,15 +1257,19 @@ async fn cache_tool_start(flow: &BcsMessageFlow, cmd: &BotEventCommand, data: &V
         .await;
 }
 
-async fn persist_tool_result(flow: &BcsMessageFlow, cmd: &BotEventCommand, data: &Value) {
+async fn persist_tool_result(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+    data: &Value,
+) -> ServiceResult<()> {
     if cmd.group_id.is_empty() {
-        return;
+        return Ok(());
     }
 
     // A tool_call ends the run's current chat text segment. Flush any buffered
     // chat deltas as ONE row FIRST, so the persisted order is chat → tool_call
     // → (next) chat, matching the BCN plugin path.
-    flush_chat_segment(flow, cmd, None).await;
+    flush_chat_segment(flow, cmd, None).await?;
 
     let tool_call_id = data.get("toolCallId").and_then(|v| v.as_str()).unwrap_or("");
     let is_error = data.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -1308,7 +1323,8 @@ async fn persist_tool_result(flow: &BcsMessageFlow, cmd: &BotEventCommand, data:
         .await,
         &run_id,
     )
-    .await;
+    .await?;
+    Ok(())
 }
 
 struct CoordinationEchoDispatch {
@@ -1697,15 +1713,15 @@ async fn flush_chat_segment(
     flow: &BcsMessageFlow,
     cmd: &BotEventCommand,
     final_text: Option<String>,
-) {
+) -> ServiceResult<()> {
     let buffered = flow.message_tracker.take_chat_buf(&cmd.run_id).await;
     let text = match (final_text, buffered) {
-        (Some(t), _) => t,         // final frame wins
-        (None, Some(t)) => t,      // flush buffered delta text
-        (None, None) => return,    // nothing streamed in this segment
+        (Some(t), _) => t,      // final frame wins
+        (None, Some(t)) => t,   // flush buffered delta text
+        (None, None) => return Ok(()), // nothing streamed in this segment
     };
     if text.is_empty() || cmd.group_id.is_empty() {
-        return;
+        return Ok(());
     }
     crate::group_flow::try_persist_group_message(
         flow,
@@ -1725,7 +1741,8 @@ async fn flush_chat_segment(
         .await,
         &cmd.run_id,
     )
-    .await;
+    .await?;
+    Ok(())
 }
 
 /// Persist the run's final chat text as a single row.
@@ -1738,20 +1755,25 @@ async fn flush_chat_segment(
 ///   written.
 /// - **Legacy plugin mode**: no `delta_text` was seen; the final frame carries
 ///   the authoritative full text and supersedes any buffered segment text.
-async fn persist_final_chat(flow: &BcsMessageFlow, cmd: &BotEventCommand, text: String) {
+async fn persist_final_chat(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+    text: String,
+) -> ServiceResult<()> {
     if flow.message_tracker.is_chat_delta_mode(&cmd.run_id).await {
-        flush_chat_segment(flow, cmd, None).await;
+        flush_chat_segment(flow, cmd, None).await?;
     } else {
-        flush_chat_segment(flow, cmd, Some(text)).await;
+        flush_chat_segment(flow, cmd, Some(text)).await?;
     }
+    Ok(())
 }
 
 async fn persist_task_final_chat(
     flow: &BcsMessageFlow,
     cmd: &BotEventCommand,
     response_text: String,
-) {
-    persist_final_chat(flow, cmd, response_text).await;
+) -> ServiceResult<()> {
+    persist_final_chat(flow, cmd, response_text).await
 }
 
 fn build_default_policy_decision(

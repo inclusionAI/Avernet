@@ -131,6 +131,18 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTimeoutError,
 )
 from agentclaw.community.plugin_api.passport import PassportError
+from agentclaw.community.core.errors import (
+    CallbackAuthError,
+    CallbackCorrelationError,
+)
+from agentclaw.community.core.task.domain.errors import (
+    GraphAlreadyInitializedError,
+    GraphIntegrityError,
+    NodeNotFoundError,
+    TaskError,
+    TaskNotFoundError,
+    TaskStateError,
+)
 
 T = TypeVar("T")
 
@@ -388,6 +400,27 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # re-raise and the app's catch-all would answer with {"detail": ...}, which
     # is not an Envelope and breaks the public contract.
     BotServiceError: (500, "Internal error"),
+    # Task goal-driven execution framework: the task / callback endpoints raise
+    # these domain errors and let ``@envelope_errors`` map them, so the router
+    # stays a thin protocol layer (no hand-rolled ``HTTPException`` for domain
+    # failures). ``TaskError`` is not a ``DomainError`` — it has no app-level
+    # handler — so every task subclass that can reach a handler needs an entry
+    # here (concrete leaves first, ``TaskError`` base last as a 500 fallback) or
+    # it would escape the envelope as a bare 500. ``CallbackAuthError`` /
+    # ``CallbackCorrelationError`` ARE ``DomainError`` (already in the app's
+    # ``_DOMAIN_ERROR_STATUS_MAP``) but are mapped here too so the decorator owns
+    # them directly; only task code raises them. Discovery's unexpected-failure
+    # catch-all raises generic ``InternalError`` (also a ``DomainError``), which
+    # is NOT mapped here — it re-raises out of ``@envelope_errors`` to the app's
+    # ``DomainError`` handler, keeping this table task-specific.
+    TaskNotFoundError: (404, "Not found"),
+    NodeNotFoundError: (404, "Not found"),
+    GraphAlreadyInitializedError: (409, "Task graph already exists"),
+    GraphIntegrityError: (409, "Graph integrity violated"),
+    TaskStateError: (409, "Illegal state transition"),
+    CallbackAuthError: (401, "Unauthorized"),
+    CallbackCorrelationError: (400, "Bad request"),
+    TaskError: (500, "Internal error"),
 }
 
 # Most public categories retain the ordinary ``xxx000`` business code.  A
@@ -576,6 +609,8 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
     """
     for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
         if isinstance(exc, error_type):
+            if isinstance(exc, LocalSkillInvalidPackageError):
+                message = exc.public_message
             return _error_response(
                 http_status,
                 message,

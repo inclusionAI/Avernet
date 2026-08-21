@@ -22,11 +22,16 @@ from fastapi import FastAPI
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
+from agentclaw.community.adapters.http.openapi_v1.admission import (
+    ADMISSION,
+    AdmissionMode,
+)
 from agentclaw.community.adapters.http.openapi_v1.authorized_apps import (
     app_view_router,
 )
 from agentclaw.community.adapters.http.openapi_v1.bots import router as bots_router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
@@ -393,3 +398,87 @@ def test_the_name_check_needs_no_delegation(make_client):
 
     assert response.status_code == 200, response.json()
     assert response.json()["data"]["exists"] is False
+
+
+# ── derived from the table: every filtered/gated operation is covered ────────
+#
+# The hand-written tests above pin the *behavior* of the three operations that
+# exist today. What they cannot do is notice a fourth: GRANT_FILTERED and
+# USER_GATED have no dependency a structural test could look for — the
+# narrowing is the handler's own work, through `granted_bot_ids` — so an
+# operation added tomorrow with a correct table entry and no narrowing in its
+# handler would fail nothing. These two tests parametrize over the table
+# itself: a new entry appears here automatically, and until someone writes it
+# an ungranted-app case in `_UNGRANTED_APP_CASES`, the test fails loudly
+# instead of silently covering nothing. That is the same ratchet
+# `test_self_checked_routes_refuse.py` uses for its BODIES map.
+
+#: How to call each filtered/gated operation as an application granted
+#: *nothing*, and what the empty answer must look like. `assert_starved` gets
+#: the response; it must assert the app learned nothing.
+_UNGRANTED_APP_CASES = {
+    ("GET", "/openapi/v1/bots"): {
+        "request": lambda client: client.get("/openapi/v1/bots"),
+        "assert_starved": lambda response: (
+            _data(response)["items"] == [] and _data(response)["total"] == 0
+        ),
+    },
+    ("GET", "/openapi/v1/bots/authorized"): {
+        "request": lambda client: client.get("/openapi/v1/bots/authorized"),
+        "assert_starved": lambda response: (
+            _data(response)["items"] == [] and _data(response)["total"] == 0
+        ),
+    },
+    ("GET", "/openapi/v1/bots/ceiling"): {
+        "request": lambda client: client.get("/openapi/v1/bots/ceiling"),
+        # USER_GATED: no delegation, no relationship — masked as not-found, so
+        # a stranger app cannot read a person's quota by naming them.
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+}
+
+_FILTERED_OR_GATED = sorted(
+    key
+    for key, mode in ADMISSION.items()
+    if mode in {AdmissionMode.GRANT_FILTERED, AdmissionMode.USER_GATED}
+    and key not in LEGACY_ROUTES
+)
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    _FILTERED_OR_GATED,
+    ids=[f"{m} {p}" for m, p in _FILTERED_OR_GATED],
+)
+def test_every_filtered_or_gated_operation_starves_an_ungranted_app(
+    make_client, method, path
+):
+    """An application granted nothing learns nothing, on every such operation.
+
+    Parametrized over the admission table so a new GRANT_FILTERED or USER_GATED
+    entry is covered the day it is written — the failure below is the demand
+    for its case, not a bug in this test.
+    """
+    case = _UNGRANTED_APP_CASES.get((method, path))
+    assert case is not None, (
+        f"{method} {path} is GRANT_FILTERED or USER_GATED but has no "
+        "ungranted-app case in _UNGRANTED_APP_CASES. Add one asserting an "
+        "application granted nothing gets an empty answer (filtered) or a "
+        "masked 404 (gated) — the mode's promise is only real if it is tested."
+    )
+    client = make_client()  # no grants at all
+
+    response = case["request"](client)
+
+    assert case["assert_starved"](response), (
+        f"{method} {path} answered an application granted nothing with "
+        f"{response.status_code}: {response.text[:300]}"
+    )
+
+
+def test_the_derived_set_is_not_empty():
+    """If both modes ever empty out, delete the ratchet deliberately."""
+    assert _FILTERED_OR_GATED, (
+        "no GRANT_FILTERED or USER_GATED operations left — remove these "
+        "derived tests along with the modes, not silently"
+    )

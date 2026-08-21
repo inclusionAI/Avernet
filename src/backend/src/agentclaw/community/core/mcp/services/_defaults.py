@@ -13,6 +13,7 @@ from agentclaw.community.core.default_capabilities import (
     resolve_default_capabilities_engine_type,
 )
 from agentclaw.community.core.bot_management.engines.registry import (
+    get_cli_defaults_resolver_registry,
     get_mcp_defaults_resolver_registry,
 )
 
@@ -45,6 +46,12 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "hitl"},
     ],
     "moltis": [],
+    # Intentionally empty: teclaw bots start with no default MCP servers and
+    # get every MCP from their owner's own skill-set configuration. The key
+    # stays declared (like ``moltis``) so teclaw keeps resolving its own
+    # bucket — dropping it would make teclaw indistinguishable from an
+    # unknown engine and hide a future bucket-aliasing regression.
+    "teclaw": [],
     "claude_code": [
         {"server_code": "mcp.ant.antprocessai.anttaskmcp", "name": "任务中心MCP", "description": "任务中心待办任务，已办任务等相关任务查询MCP"},
         {"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima MCP", "description": "Dima MCP"},
@@ -145,6 +152,20 @@ class _EngineMcpDefaultsResolver:
 
 
 _DEFAULT_MCP_RESOLVER = _EngineMcpDefaultsResolver()
+
+
+class _EngineCliDefaultsResolver:
+    """Default hook for deriving effective CLI configs."""
+
+    def resolve(
+        self,
+        default_items: List[dict],
+        ext_info: Optional[Mapping[str, Any]] = None,
+    ) -> List[dict]:
+        return [dict(item) for item in default_items]
+
+
+_DEFAULT_CLI_RESOLVER = _EngineCliDefaultsResolver()
 
 
 def _resolve_default_mcp_engine_bucket(
@@ -253,21 +274,31 @@ _DEFAULT_CLI_ITEMS_BY_ENGINE: Dict[str, List[dict]] = {
 }
 
 
+def _cli_defaults_resolver(engine_bucket: str):
+    return (
+        get_cli_defaults_resolver_registry().resolve(engine_bucket)
+        or _DEFAULT_CLI_RESOLVER
+    )
+
+
 def get_default_cli_items(
     engine_type: Optional[str] = None,
     template_type: Optional[str] = None,
+    *,
+    ext_info: Optional[Mapping[str, Any]] = None,
 ) -> List[dict]:
     """返回默认 CLI 列表（CliItem dict 形式）。
 
     默认能力分桶规则由对应引擎维护；CLI 这里只按分桶结果读取默认
     CLI 列表，未知桶返回空列表（fail-closed，避免误授权 CLI）。
+    引擎可通过 resolver 基于 ext_info 合并模板预置 CLI。
     """
-    from agentclaw.community.core.default_capabilities import (
-        resolve_default_capabilities_engine_type,
-    )
-
     key = resolve_default_capabilities_engine_type(
         engine_type,
         template_type,
     )
-    return [dict(item) for item in _DEFAULT_CLI_ITEMS_BY_ENGINE.get(key, [])]
+    resolver = _cli_defaults_resolver(key)
+    return resolver.resolve(
+        _DEFAULT_CLI_ITEMS_BY_ENGINE.get(key, []),
+        ext_info,
+    )

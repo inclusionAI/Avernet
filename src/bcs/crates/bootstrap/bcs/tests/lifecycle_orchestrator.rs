@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
@@ -34,6 +35,30 @@ impl ServiceLifecycle for CountingService {
 
 struct FailingService {
     initialized: AtomicBool,
+}
+
+struct OrderedService {
+    name: &'static str,
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl ServiceLifecycle for OrderedService {
+    async fn initialize(&self) -> Result<(), LifecycleError> {
+        self.calls
+            .lock()
+            .expect("call order lock")
+            .push(format!("init:{}", self.name));
+        Ok(())
+    }
+
+    async fn shutdown(&self) -> Result<(), LifecycleError> {
+        self.calls
+            .lock()
+            .expect("call order lock")
+            .push(format!("shutdown:{}", self.name));
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -83,4 +108,34 @@ async fn orchestrator_rolls_back_initialized_services_after_failure() {
     assert!(failing.initialized.load(Ordering::SeqCst));
     assert_eq!(first.init_count.load(Ordering::SeqCst), 1);
     assert_eq!(first.shutdown_count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn orchestrator_initializes_in_registration_order_and_shuts_down_in_reverse() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let mut orchestrator = LifecycleOrchestrator::new();
+    for name in ["store", "client", "eventing"] {
+        orchestrator.register(
+            name,
+            Arc::new(OrderedService {
+                name,
+                calls: calls.clone(),
+            }),
+        );
+    }
+
+    orchestrator.initialize_all().await.expect("initialize all");
+    orchestrator.shutdown_all().await.expect("shutdown all");
+
+    assert_eq!(
+        *calls.lock().expect("call order lock"),
+        vec![
+            "init:store",
+            "init:client",
+            "init:eventing",
+            "shutdown:eventing",
+            "shutdown:client",
+            "shutdown:store",
+        ]
+    );
 }

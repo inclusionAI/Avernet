@@ -479,6 +479,7 @@ fn group_detail(status: GroupStatus, group_kind: GroupKind) -> GroupDetailResult
         status,
         driver_bot_id: "bot-driver".to_string(),
         context: None,
+        opening_message: None,
         participants: vec![participant_view("bot-driver")],
         message_count: 0,
         workspace: Workspace::default(),
@@ -518,6 +519,7 @@ fn group_create_cmd() -> GroupCreateCommand {
         label: None,
         topic: None,
         context: None,
+        opening_message: None,
         routing_policy: None,
         participants: vec![],
         member_bot_ids: vec![],
@@ -525,6 +527,7 @@ fn group_create_cmd() -> GroupCreateCommand {
         service_spec: None,
         group_strategy: None,
         visibility: None,
+        provisioning: false,
     }
 }
 
@@ -671,6 +674,7 @@ fn bot_delivery_cmd(delivery_kind: BotDeliveryKind) -> BotDeliveryCommand {
         run_id: "run-wrapper".to_string(),
         frame: BcsFrame::Request(RequestFrame::new("run-wrapper", "chat.send", None)),
         delivery_kind,
+        provider_transport: Default::default(),
         provider_bypass_headers: Vec::new(),
     }
 }

@@ -21,33 +21,71 @@ use bcs_domain::{AttachmentType, MessageAttachment};
 use bcs_friend::FriendCore;
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_relation::RelationCore;
+use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
-    AddSessionParticipant, AuthenticatedAppIdentity, AuthenticatedBotIdentity,
-    AuthenticatedCaller, AuthenticatedUserIdentity, BotParticipantMode, CollectSession,
-    CompleteSession, CreateSession, DeleteSession, DeleteSessionParticipant, GetSession,
-    ListSessionMessages, ListSessions, SessionInput, SessionMessageService,
-    SessionParticipantInput, SessionService, SessionStatus as V1SessionStatus, UncollectSession,
-    UpdateSession, UpdateSessionParticipant,
+    AddSessionParticipant, AuthenticatedAppIdentity, AuthenticatedBotIdentity, AuthenticatedCaller,
+    AuthenticatedUserIdentity, CollectSession, CompleteSession, CreateSession, DeleteSession,
+    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, SessionMessageService,
+    SessionParticipantInput, SessionService,
+    SessionStatus as V1SessionStatus, UncollectSession, UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
-    ActorKind, BotCapabilities, BotRegistryCoreService, CallerContext,
+    ActorKind, ActorStatus, BotCapabilities, BotRegistryCoreService, CallerContext,
     CancelStateMachineRunCommand, CollaborationDefinition, CollaborationRuntimeError,
-    CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, Group,
+    CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
+    FriendCoreService, Group,
     GroupCoreService, GroupHistoryCommand, GroupHistoryResult, GroupMessage,
     GroupMessageHistoryService, GroupMessageType, GroupStrategy, GroupUseCaseError,
     HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanActor, MessageRole,
-    Participant, ParticipantMode, ParticipantRole, SessionHistoryCommand, SessionHistoryResult,
-    SessionKind, StartStateMachineRunCommand, StartStateMachineRunOutcome,
-    StateMachineDeliveryCorrelation, StateMachineRunView,
+    Participant, ParticipantMode, ParticipantRole, ServiceResult, SessionCaller,
+    SessionHistoryCommand, SessionHistoryResult, SessionKind, StartStateMachineRunCommand,
+    StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
+    StateMachineRunStatus, StateMachineRunView, SystemMessageEvent,
 };
-use bcs_session::SessionManagementServiceImpl;
+use bcs_session::{SessionLaunchApplication, SessionManagementServiceImpl};
 use bcs_session_store::MemorySessionRepo;
+use bcs_test_support::NoopSystemMessageService;
 
 #[derive(Default)]
 struct RecordingHistoryService {
     session_calls: Mutex<Vec<SessionHistoryCommand>>,
     messages: Mutex<Vec<GroupMessage>>,
+}
+
+/// Records every `SystemMessageService::notify` call so tests can assert that
+/// `SessionServiceImpl::update_participant` emits `ParticipantModeChanged`.
+#[derive(Default)]
+struct RecordingSystemMessageService {
+    events: Mutex<Vec<RecordedSystemMessage>>,
+}
+
+struct RecordedSystemMessage {
+    #[allow(dead_code)]
+    group_id: String,
+    session_id: String,
+    event: SystemMessageEvent,
+}
+
+#[async_trait]
+impl SystemMessageService for RecordingSystemMessageService {
+    async fn notify(
+        &self,
+        group_id: &str,
+        event: SystemMessageEvent,
+        session_id: &str,
+        _participants: &[Participant],
+    ) -> ServiceResult<usize> {
+        self.events
+            .lock()
+            .expect("sysmsg lock")
+            .push(RecordedSystemMessage {
+                group_id: group_id.to_string(),
+                session_id: session_id.to_string(),
+                event,
+            });
+        Ok(0)
+    }
 }
 
 #[async_trait]
@@ -80,6 +118,7 @@ impl GroupMessageHistoryService for RecordingHistoryService {
 
 #[derive(Default)]
 struct RecordingRuntime {
+    start_calls: Mutex<Vec<StartStateMachineRunCommand>>,
     history_calls: Mutex<Vec<(String, u64, Option<u64>)>>,
     history_result: Mutex<Option<SessionHistoryResult>>,
 }
@@ -88,9 +127,35 @@ struct RecordingRuntime {
 impl CollaborationRuntimeService for RecordingRuntime {
     async fn start_state_machine_run(
         &self,
-        _cmd: StartStateMachineRunCommand,
+        cmd: StartStateMachineRunCommand,
     ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> {
-        panic!("start_state_machine_run is not used by SessionServiceImpl")
+        self.start_calls
+            .lock()
+            .expect("runtime start lock")
+            .push(cmd.clone());
+        let session_id = cmd.session_id.expect("Session launch pins id");
+        Ok(StartStateMachineRunOutcome {
+            view: StateMachineRunView {
+                run: StateMachineRun {
+                    run_id: "run-1".into(),
+                    definition_id: "definition-1".into(),
+                    definition_version: 1,
+                    group_id: cmd.group_id,
+                    group_version: 1,
+                    session_id,
+                    created_by: cmd.caller_id,
+                    status: StateMachineRunStatus::Running,
+                    input: cmd.input,
+                    output: None,
+                    error: None,
+                    created_at: 1,
+                    updated_at: 1,
+                    completed_at: None,
+                },
+                nodes: Vec::new(),
+                judge_outputs: Vec::new(),
+            },
+        })
     }
 
     async fn get_state_machine_run(
@@ -190,8 +255,10 @@ struct Fixture {
     service: SessionServiceImpl,
     groups: Arc<GroupCore>,
     bots: Arc<BotCore>,
+    friends: Arc<FriendCore>,
     history: Arc<RecordingHistoryService>,
     runtime: Arc<RecordingRuntime>,
+    system_messages: Arc<RecordingSystemMessageService>,
     session_repo: Arc<dyn SessionRepoPort>,
 }
 
@@ -206,14 +273,24 @@ impl Fixture {
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
         let relation = Arc::new(RelationCore::memory());
         let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
+        let friends_handle = friends.clone();
         let session_repo: Arc<dyn SessionRepoPort> = Arc::new(MemorySessionRepo::new());
         let history = Arc::new(RecordingHistoryService::default());
         let runtime = Arc::new(RecordingRuntime::default());
+        let system_messages = Arc::new(RecordingSystemMessageService::default());
         let sessions = Arc::new(SessionManagementServiceImpl::new(
             session_repo.clone(),
             group_repo,
         ));
+        let launch = Arc::new(SessionLaunchApplication::new(
+            bots.clone(),
+            groups.clone(),
+            sessions.clone(),
+            runtime.clone(),
+            Arc::new(NoopSystemMessageService),
+        ));
         let service = SessionServiceImpl::new(
+            launch,
             sessions,
             groups.clone(),
             bots.clone(),
@@ -222,6 +299,7 @@ impl Fixture {
             session_repo.clone(),
             history.clone(),
             runtime.clone(),
+            system_messages.clone(),
             SessionServiceConfig {
                 relation_env: "dev".to_string(),
             },
@@ -230,8 +308,10 @@ impl Fixture {
             service,
             groups,
             bots,
+            friends: friends_handle,
             history,
             runtime,
+            system_messages,
             session_repo,
         }
     }
@@ -254,9 +334,40 @@ impl Fixture {
             .expect("assign test Bot owner");
     }
 
+    /// Register a Bot with explicit `visibility` and `created_by` owner, for
+    /// collaboration-eligibility tests that need a non-public or non-caller-owned
+    /// actor (the default `add_bot` always registers a `public` Bot owned by
+    /// itself).
+    async fn add_bot_with(&self, bot_uuid: &str, visibility: &str, created_by: &str) {
+        self.bots
+            .register(
+                bot_uuid.to_string(),
+                BotCapabilities {
+                    name: Some(bot_uuid.to_string()),
+                    visibility: visibility.to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("register bot");
+        self.bots
+            .save_created_by(bot_uuid, created_by, true)
+            .await
+            .expect("assign test Bot owner");
+    }
+
+    /// Establish a bidirectional friendship between two Bots in the fixture's
+    /// shared in-memory friend repo.
+    async fn befriend(&self, bot_a: &str, bot_b: &str) {
+        self.friends
+            .add_friendship(bot_a, bot_b)
+            .await
+            .expect("establish friendship");
+    }
+
     async fn store_group(&self, group_id: &str, driver: &str, context: Option<&str>) {
         self.store_group_with_originator(group_id, driver, &format!("human_{driver}"), context)
-        .await;
+            .await;
     }
 
     /// Like `store_group` but lets the caller name a distinct group
@@ -392,7 +503,21 @@ fn app_only_caller() -> AuthenticatedCaller {
     }
 }
 
-fn participant_input(bot_uuid: &str, _mode: Option<BotParticipantMode>) -> SessionParticipantInput {
+fn launch_caller(caller: AuthenticatedCaller) -> SessionCaller {
+    if let Some(bot) = caller.bot {
+        return SessionCaller::Bot {
+            bot_uuid: bot.bot_uuid,
+        };
+    }
+    let user = caller.user.expect("launch test caller identity");
+    SessionCaller::Human {
+        actor_id: format!("human_{}", user.id),
+        owner_id: user.id,
+        display_name: user.display_name.or(user.full_name),
+    }
+}
+
+fn participant_input(bot_uuid: &str, _mode: Option<ParticipantMode>) -> SessionParticipantInput {
     SessionParticipantInput {
         bot_uuid: bot_uuid.to_string(),
     }
@@ -404,16 +529,21 @@ async fn create_session(
     group_id: &str,
     _driver: &str,
     _participants: Vec<SessionParticipantInput>,
-    input: Option<SessionInput>,
+    input: Option<serde_json::Value>,
     title: Option<&str>,
 ) -> bcs_service_api::application::v1::CreateSessionOutcome {
     fixture
         .service
         .create(CreateSession {
-            caller,
+            caller: launch_caller(caller),
             group_id: group_id.to_string(),
             title: title.map(str::to_string),
+            kind: None,
+            acting_bot_id: None,
+            creator_role: None,
             input,
+            meta: None,
+            context_delivery: None,
         })
         .await
         .expect("create session")
@@ -440,7 +570,7 @@ async fn create_as_manager_succeeds_and_projects_participants() {
         bot_principal("driver"),
         "g1",
         "driver",
-        vec![participant_input("expert", Some(BotParticipantMode::Muted))],
+        vec![participant_input("expert", Some(ParticipantMode::Muted))],
         None,
         Some("session title"),
     )
@@ -451,13 +581,8 @@ async fn create_as_manager_succeeds_and_projects_participants() {
     assert_eq!(detail.group_id, "g1");
     assert_eq!(detail.status, V1SessionStatus::Running);
     assert_eq!(detail.title.as_deref(), Some("session title"));
-    // Input falls back to the parent group's context.
-    assert_eq!(
-        detail.input,
-        Some(SessionInput {
-            query: Some("the task".into())
-        })
-    );
+    // Omitted input stays omitted; shared launch logic does not synthesize it.
+    assert_eq!(detail.input, None);
     // Driver (Driver role) + inherited expert from the parent group.
     assert_eq!(detail.participants.len(), 2);
     let expert = detail
@@ -493,19 +618,66 @@ async fn create_with_explicit_input_does_not_fall_back() {
         "g1",
         "driver",
         vec![participant_input("expert", None)],
-        Some(SessionInput {
-            query: Some("explicit query".into()),
-        }),
+        Some(serde_json::json!({"query": "explicit query"})),
         None,
     )
     .await;
 
     assert_eq!(
         outcome.session.input,
-        Some(SessionInput {
-            query: Some("explicit query".into())
-        })
+        Some(serde_json::json!({"query": "explicit query"}))
     );
+}
+
+#[tokio::test]
+async fn state_machine_service_create_projects_raw_fields_and_run() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture.store_state_machine_group("g1", "driver").await;
+    let input = serde_json::json!("run this task");
+    let meta = serde_json::json!({
+        "callback_target": {"baas_session_id": "baas-1"},
+        "channel": {"source": "caller-value"}
+    });
+
+    let outcome = fixture
+        .service
+        .create(CreateSession {
+            caller: launch_caller(bot_principal("driver")),
+            group_id: "g1".into(),
+            title: Some("Invocation".into()),
+            kind: Some(SessionKind::ServiceInvocation),
+            acting_bot_id: Some("driver".into()),
+            creator_role: None,
+            input: Some(input.clone()),
+            meta: Some(meta.clone()),
+            context_delivery: None,
+        })
+        .await
+        .expect("StateMachine service invocation");
+
+    assert_eq!(outcome.session.kind, SessionKind::ServiceInvocation);
+    assert_eq!(outcome.session.input, Some(input.clone()));
+    assert_eq!(outcome.session.meta, Some(meta));
+    assert_eq!(
+        outcome.session.state_machine_run_id.as_deref(),
+        Some("run-1")
+    );
+    assert_eq!(
+        outcome
+            .session
+            .state_machine_run
+            .as_ref()
+            .map(|view| view.run.run_id.as_str()),
+        Some("run-1")
+    );
+    let calls = fixture
+        .runtime
+        .start_calls
+        .lock()
+        .expect("runtime start lock");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].input, input);
 }
 
 #[tokio::test]
@@ -517,10 +689,15 @@ async fn create_as_non_manager_is_forbidden() {
     let error = fixture
         .service
         .create(CreateSession {
-            caller: bot_principal("outsider"),
+            caller: launch_caller(bot_principal("outsider")),
             group_id: "g1".into(),
             title: None,
+            kind: None,
+            acting_bot_id: None,
+            creator_role: None,
             input: None,
+            meta: None,
+            context_delivery: None,
         })
         .await
         .expect_err("non-manager should be forbidden");
@@ -538,10 +715,15 @@ async fn create_with_unknown_group_is_not_found() {
     let error = fixture
         .service
         .create(CreateSession {
-            caller: bot_principal("driver"),
+            caller: launch_caller(bot_principal("driver")),
             group_id: "missing-group".into(),
             title: None,
+            kind: None,
+            acting_bot_id: None,
+            creator_role: None,
             input: None,
+            meta: None,
+            context_delivery: None,
         })
         .await
         .expect_err("unknown group should 404");
@@ -665,8 +847,8 @@ async fn session_list_uses_only_the_selected_authorized_view_actor() {
         .expect("omission selects the authenticated Human");
     assert_eq!(default_human.total, 1);
     let explicit_human = SessionService::list(&fixture.service, list(Some("human_alice".into())))
-    .await
-    .expect("the authenticated Human is a valid explicit view");
+        .await
+        .expect("the authenticated Human is a valid explicit view");
     assert_eq!(explicit_human.total, 1);
     let owned_bot = SessionService::list(&fixture.service, list(Some("owned".into())))
         .await
@@ -675,8 +857,8 @@ async fn session_list_uses_only_the_selected_authorized_view_actor() {
 
     for invalid_view in ["human_bob", "unowned", "missing"] {
         let error = SessionService::list(&fixture.service, list(Some(invalid_view.into())))
-        .await
-        .expect_err("an unauthorized explicit view never falls back to Human");
+            .await
+            .expect_err("an unauthorized explicit view never falls back to Human");
         assert!(matches!(
             error,
             bcs_service_api::application::v1::ApplicationError::Forbidden(_)
@@ -740,6 +922,40 @@ async fn session_detail_accepts_human_or_exact_owned_bot_participation_only() {
         error,
         bcs_service_api::application::v1::ApplicationError::Forbidden(_)
     ));
+}
+
+#[tokio::test]
+async fn session_detail_preserves_legacy_json_input_and_metadata() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture.store_group("g1", "driver", None).await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![Participant::bot("driver", ParticipantRole::Driver)],
+                group_version: Some(group.version),
+                input: Some(serde_json::json!(["legacy", 1])),
+                meta: Some(serde_json::json!("legacy-metadata")),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed legacy-shaped Session");
+
+    let detail = fixture
+        .service
+        .get(GetSession {
+            caller: bot_principal("driver"),
+            session_id: session.id,
+        })
+        .await
+        .expect("read legacy-shaped Session through V1");
+
+    assert_eq!(detail.input, Some(serde_json::json!(["legacy", 1])));
+    assert_eq!(detail.meta, Some(serde_json::json!("legacy-metadata")));
 }
 
 #[tokio::test]
@@ -1007,10 +1223,7 @@ async fn human_collects_and_uncollects_for_owned_participant_bot_idempotently() 
         .create(
             "g1",
             NewSessionParams {
-                participants: vec![Participant::bot(
-                    "bot-1",
-                    ParticipantRole::Driver,
-                )],
+                participants: vec![Participant::bot("bot-1", ParticipantRole::Driver)],
                 group_version: Some(group.version),
                 ..Default::default()
             },
@@ -1062,6 +1275,231 @@ async fn human_collects_and_uncollects_for_owned_participant_bot_idempotently() 
 }
 
 #[tokio::test]
+async fn human_collects_as_own_human_actor_idempotently() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    // Register the human's own actor entry (`human_owner-1`) the way
+    // `ensure_human_actor` does: actor_kind = Human, created_by = the staff_no.
+    fixture
+        .bots
+        .ensure_human_actor("owner-1", "Owner")
+        .await
+        .expect("provision human actor");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_owner-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    // Collect as the human's own actor id (participant = "human_owner-1").
+    for _ in 0..2 {
+        let result = fixture
+            .service
+            .collect(CollectSession {
+                caller: human_principal("owner-1"),
+                session_id: session.id.clone(),
+                participant: "human_owner-1".into(),
+            })
+            .await
+            .expect("human can collect as its own actor");
+        assert_eq!(result.session_id, session.id);
+        assert_eq!(result.participant, "human_owner-1");
+        assert!(result.collected);
+    }
+    let collected = fixture
+        .session_repo
+        .collected_at_map(&[session.id.as_str()], "human_owner-1")
+        .await;
+    assert_eq!(collected.len(), 1);
+    assert_eq!(collected[0].0, session.id);
+
+    // Uncollecting as the human actor is idempotent.
+    for _ in 0..2 {
+        let result = fixture
+            .service
+            .uncollect(UncollectSession {
+                caller: human_principal("owner-1"),
+                session_id: session.id.clone(),
+                participant: "human_owner-1".into(),
+            })
+            .await
+            .expect("human can uncollect as its own actor");
+        assert_eq!(result.participant, "human_owner-1");
+        assert!(!result.collected);
+    }
+    assert!(
+        fixture
+            .session_repo
+            .collected_at_map(&[session.id.as_str()], "human_owner-1")
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn collect_rejects_participant_not_owned_by_authenticated_human() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .bots
+        .ensure_human_actor("owner-1", "Owner")
+        .await
+        .expect("provision authenticated human actor");
+    fixture
+        .bots
+        .ensure_human_actor("other", "Other")
+        .await
+        .expect("provision a different human actor");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_owner-1", ParticipantRole::Observer),
+                    Participant::human("human_other", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let error = fixture
+        .service
+        .collect(CollectSession {
+            caller: human_principal("owner-1"),
+            session_id: session.id.clone(),
+            // `human_other` is registered, but not owned by the authenticated
+            // human (`owner-1`); collecting on its behalf must be forbidden.
+            participant: "human_other".into(),
+        })
+        .await
+        .expect_err("must not collect as an actor the human does not own");
+    assert!(
+        matches!(error, bcs_service_api::application::v1::ApplicationError::Forbidden(_)),
+        "expected forbidden, got {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn list_surfaces_per_session_collected_for_explicit_view_actor() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("bot-1").await;
+    fixture
+        .bots
+        .save_created_by("bot-1", "owner-1", true)
+        .await
+        .expect("assign Bot ownership");
+    fixture
+        .store_group_with_originator("g1", "bot-1", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+
+    // Seed two sessions both listing bot-1 as a participant.
+    let mk = || Participant::bot("bot-1", ParticipantRole::Driver);
+    let s_a = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![mk()],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session A");
+    let s_b = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![mk()],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session B");
+
+    // Collect only session A as the owned participant bot.
+    fixture
+        .service
+        .collect(CollectSession {
+            caller: human_principal("owner-1"),
+            session_id: s_a.id.clone(),
+            participant: "bot-1".into(),
+        })
+        .await
+        .expect("collect session A");
+
+    let page = SessionService::list(
+        &fixture.service,
+        ListSessions {
+            caller: human_principal("owner-1"),
+            group_id: "g1".into(),
+            view_bot_id: Some("bot-1".into()),
+            offset: 0,
+            limit: 10,
+            status: None,
+        },
+    )
+    .await
+    .expect("list sessions");
+
+    let by_id = page
+        .items
+        .iter()
+        .map(|s| (s.session_id.as_str(), s.collected))
+        .collect::<std::collections::HashMap<&str, Option<bool>>>();
+    // The explicitly named view actor sees its per-session collected state.
+    assert_eq!(by_id.get(s_a.id.as_str()), Some(&Some(true)));
+    assert_eq!(by_id.get(s_b.id.as_str()), Some(&Some(false)));
+
+    // When no view actor is named the field is left absent (None). Here the
+    // human views as themselves, so the bot-participant sessions are filtered
+    // out and the page is empty — confirming collected is not synthesized.
+    let none_page = SessionService::list(
+        &fixture.service,
+        ListSessions {
+            caller: human_principal("owner-1"),
+            group_id: "g1".into(),
+            view_bot_id: None,
+            offset: 0,
+            limit: 10,
+            status: None,
+        },
+    )
+    .await
+    .expect("list sessions (no view actor)");
+    assert!(
+        none_page.items.iter().all(|s| s.collected.is_none()),
+        "collected must be absent when view_bot_id is not specified"
+    );
+}
+
+#[tokio::test]
 async fn session_collection_rejects_an_unowned_bot() {
     let fixture = Fixture::new().await;
     fixture.add_bot("bot-1").await;
@@ -1104,10 +1542,7 @@ async fn session_collection_hides_an_owned_bot_membership_miss() {
         .create(
             "g1",
             NewSessionParams {
-                participants: vec![Participant::bot(
-                    "driver",
-                    ParticipantRole::Driver,
-                )],
+                participants: vec![Participant::bot("driver", ParticipantRole::Driver)],
                 group_version: Some(group.version),
                 ..Default::default()
             },
@@ -1185,7 +1620,7 @@ async fn list_messages_delegates_and_returns_legacy_group_messages_unchanged() {
     let session = fixture
         .session_repo
         .create(
-        "g1",
+            "g1",
             NewSessionParams {
                 session_kind: SessionKind::Chat,
                 participants: vec![
@@ -1195,8 +1630,8 @@ async fn list_messages_delegates_and_returns_legacy_group_messages_unchanged() {
                 group_version: Some(group.version),
                 ..Default::default()
             },
-    )
-            .await
+        )
+        .await
         .expect("seed session");
     let expected = rich_group_message();
     *fixture.history.messages.lock().expect("messages lock") = vec![expected.clone()];
@@ -1217,7 +1652,7 @@ async fn list_messages_delegates_and_returns_legacy_group_messages_unchanged() {
     assert_eq!(
         serde_json::to_value(&messages).expect("serialize messages"),
         serde_json::to_value([expected]).expect("serialize expected")
-        );
+    );
     let calls = fixture.history.session_calls.lock().expect("history lock");
     let call = calls.last().expect("history call");
     assert_eq!(call.group_id, "g1");
@@ -1281,7 +1716,7 @@ async fn state_machine_session_history_uses_runtime_and_returns_messages_unchang
     let session = fixture
         .session_repo
         .create(
-        "g1",
+            "g1",
             NewSessionParams {
                 session_kind: SessionKind::Chat,
                 participants: vec![
@@ -1291,7 +1726,7 @@ async fn state_machine_session_history_uses_runtime_and_returns_messages_unchang
                 group_version: Some(group.version),
                 ..Default::default()
             },
-    )
+        )
         .await
         .expect("seed state-machine session");
     let expected = rich_group_message();
@@ -1566,7 +2001,7 @@ async fn participant_add_update_remove_lifecycle() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
-            mode: BotParticipantMode::Muted,
+            mode: ParticipantMode::Muted,
         })
         .await
         .expect("update participant");
@@ -1595,6 +2030,794 @@ async fn participant_add_update_remove_lifecycle() {
         .await
         .expect("idempotent delete participant");
     assert!(!again.deleted);
+}
+
+#[tokio::test]
+async fn update_participant_emits_mode_changed_system_message_only_on_change() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    // Add expert (defaults to Auto) so its mode can be updated.
+    let added = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect("add expert");
+    assert_eq!(added.mode, ParticipantMode::Auto);
+
+    // Changing expert Auto -> Muted must emit ParticipantModeChanged.
+    fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+            mode: ParticipantMode::Muted,
+        })
+        .await
+        .expect("mute expert");
+
+    let mode_changes = recorded_mode_changes(&fixture, &session_id);
+    assert_eq!(mode_changes.len(), 1, "exactly one mode-change event");
+    assert_eq!(mode_changes[0].0, "expert");
+    assert_eq!(mode_changes[0].1, Some(ParticipantMode::Auto));
+    assert_eq!(mode_changes[0].2, ParticipantMode::Muted);
+
+    // Re-applying the same mode is a no-op and must NOT emit another event.
+    fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+            mode: ParticipantMode::Muted,
+        })
+        .await
+        .expect("re-mute expert is idempotent");
+
+    let mode_changes = recorded_mode_changes(&fixture, &session_id);
+    assert_eq!(
+        mode_changes.len(),
+        1,
+        "no new event when the mode is unchanged"
+    );
+}
+
+#[tokio::test]
+async fn add_participant_emits_bot_joined_system_message() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    // Adding a participant must emit a BotJoined notification (parity with the
+    // legacy `add_session_participant` route).
+    fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect("add expert");
+
+    let joined = recorded_bot_joined(&fixture, &session_id);
+    assert_eq!(joined.len(), 1, "exactly one BotJoined event");
+    assert_eq!(joined[0], "expert");
+
+    // A duplicate add is a conflict and must NOT emit another event.
+    let error = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect_err("duplicate add should conflict");
+    assert_eq!(error.code(), "participant_already_exists");
+    assert_eq!(
+        recorded_bot_joined(&fixture, &session_id).len(),
+        1,
+        "no new event on duplicate add"
+    );
+}
+
+#[tokio::test]
+async fn delete_participant_emits_bot_left_system_message() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+    fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect("add expert");
+
+    // Removing a participant must emit a BotLeft notification (parity with the
+    // legacy `remove_session_participant` route).
+    let removed = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect("delete expert");
+    assert!(removed.deleted);
+
+    let left = recorded_bot_left(&fixture, &session_id);
+    assert_eq!(left.len(), 1, "exactly one BotLeft event");
+    assert_eq!(left[0], "expert");
+
+    // Removing an already-absent participant is idempotent and must NOT emit
+    // another event.
+    let again = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect("idempotent delete");
+    assert!(!again.deleted);
+    assert_eq!(
+        recorded_bot_left(&fixture, &session_id).len(),
+        1,
+        "no new event on idempotent delete"
+    );
+}
+
+#[tokio::test]
+async fn delete_participant_allows_removing_group_originator() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    // Group whose originator is the human `human_owner-1` (distinct from the
+    // driver bot). The originator is a session participant and must be allowed
+    // to leave the session — only the driver/manager are structurally pinned.
+    fixture
+        .store_group_with_originator("g1", "driver", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_owner-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let removed = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: human_principal("owner-1"),
+            session_id: session.id.clone(),
+            bot_uuid: "human_owner-1".into(),
+        })
+        .await
+        .expect("originator can leave the session");
+    assert!(removed.deleted);
+    let left = recorded_bot_left(&fixture, &session.id);
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0], "human_owner-1");
+}
+
+#[tokio::test]
+async fn delete_participant_still_rejects_group_driver() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .store_group_with_originator("g1", "driver", "human_owner-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_owner-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let error = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: human_principal("owner-1"),
+            session_id: session.id.clone(),
+            bot_uuid: "driver".into(),
+        })
+        .await
+        .expect_err("driver remains pinned");
+    assert!(
+        matches!(error, bcs_service_api::application::v1::ApplicationError::InvalidInput { .. }),
+        "expected invalid_request, got {error:?}"
+    );
+    // No leave event when removal is rejected.
+    assert!(recorded_bot_left(&fixture, &session.id).is_empty());
+}
+
+/// Collect `ParticipantModeChanged` events recorded for `session_id`.
+fn recorded_mode_changes(
+    fixture: &Fixture,
+    session_id: &str,
+) -> Vec<(String, Option<ParticipantMode>, ParticipantMode)> {
+    fixture
+        .system_messages
+        .events
+        .lock()
+        .expect("sysmsg lock")
+        .iter()
+        .filter(|recorded| recorded.session_id == session_id)
+        .filter_map(|recorded| {
+            if let SystemMessageEvent::ParticipantModeChanged {
+                actor_id,
+                from,
+                to,
+                ..
+            } = &recorded.event
+            {
+                Some((actor_id.clone(), *from, *to))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Collect `BotJoined` actor ids recorded for `session_id`.
+fn recorded_bot_joined(fixture: &Fixture, session_id: &str) -> Vec<String> {
+    fixture
+        .system_messages
+        .events
+        .lock()
+        .expect("sysmsg lock")
+        .iter()
+        .filter(|recorded| recorded.session_id == session_id)
+        .filter_map(|recorded| match &recorded.event {
+            SystemMessageEvent::BotJoined { actor, .. } => Some(actor.bot_uuid.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Collect `BotLeft` actor ids recorded for `session_id`.
+fn recorded_bot_left(fixture: &Fixture, session_id: &str) -> Vec<String> {
+    fixture
+        .system_messages
+        .events
+        .lock()
+        .expect("sysmsg lock")
+        .iter()
+        .filter(|recorded| recorded.session_id == session_id)
+        .filter_map(|recorded| match &recorded.event {
+            SystemMessageEvent::BotLeft { actor, .. } => Some(actor.bot_uuid.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn human_participant_can_update_own_mode_without_session_management() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_staff-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+
+    let updated = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("staff-1"),
+            session_id: session.id,
+            bot_uuid: "human_staff-1".into(),
+            mode: ParticipantMode::Present,
+        })
+        .await
+        .expect("Human participant updates own presence");
+
+    assert_eq!(updated.actor_kind, ActorKind::Human);
+    assert_eq!(updated.role, ParticipantRole::Observer);
+    assert_eq!(updated.mode, ParticipantMode::Present);
+}
+
+#[tokio::test]
+async fn readable_session_auto_adds_missing_human_as_present_observer() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "owned-bot"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .bots
+        .save_created_by("owned-bot", "staff-1", true)
+        .await
+        .expect("assign owned Bot");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::bot("owned-bot", ParticipantRole::Consultant),
+                ],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+    let session_id = session.id.clone();
+
+    let inserted = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("staff-1"),
+            session_id: session.id,
+            bot_uuid: "human_staff-1".into(),
+            mode: ParticipantMode::Present,
+        })
+        .await
+        .expect("missing Human self-inserts into readable Session");
+
+    assert_eq!(inserted.actor_kind, ActorKind::Human);
+    assert_eq!(inserted.role, ParticipantRole::Observer);
+    assert_eq!(inserted.mode, ParticipantMode::Present);
+    let stored = fixture
+        .session_repo
+        .get(&session_id)
+        .await
+        .expect("stored session");
+    let matching = stored
+        .participants
+        .iter()
+        .filter(|participant| participant.bot_uuid == "human_staff-1")
+        .collect::<Vec<_>>();
+    assert_eq!(matching.len(), 1);
+    assert_eq!(matching[0].role, ParticipantRole::Observer);
+    assert_eq!(matching[0].mode, Some(ParticipantMode::Present));
+}
+
+#[tokio::test]
+async fn readable_session_auto_adds_missing_human_as_absent_observer() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "owned-bot"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .bots
+        .save_created_by("owned-bot", "staff-1", true)
+        .await
+        .expect("assign owned Bot");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::bot("owned-bot", ParticipantRole::Consultant),
+                ],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+    let session_id = session.id.clone();
+
+    let inserted = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("staff-1"),
+            session_id: session.id,
+            bot_uuid: "human_staff-1".into(),
+            mode: ParticipantMode::Absent,
+        })
+        .await
+        .expect("missing Human self-inserts as absent");
+
+    assert_eq!(inserted.actor_kind, ActorKind::Human);
+    assert_eq!(inserted.role, ParticipantRole::Observer);
+    assert_eq!(inserted.mode, ParticipantMode::Absent);
+    let stored = fixture
+        .session_repo
+        .get(&session_id)
+        .await
+        .expect("stored session");
+    let matching = stored
+        .participants
+        .iter()
+        .filter(|participant| participant.bot_uuid == "human_staff-1")
+        .collect::<Vec<_>>();
+    assert_eq!(matching.len(), 1);
+    assert_eq!(matching[0].role, ParticipantRole::Observer);
+    assert_eq!(matching[0].mode, Some(ParticipantMode::Absent));
+}
+
+#[tokio::test]
+async fn session_manager_cannot_update_another_human_mode() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .bots
+        .save_created_by("driver", "staff-manager", true)
+        .await
+        .expect("assign driver owner");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_target", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+
+    let error = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("staff-manager"),
+            session_id: session.id,
+            bot_uuid: "human_target".into(),
+            mode: ParticipantMode::Present,
+        })
+        .await
+        .expect_err("Session manager cannot control another Human's presence");
+
+    assert!(matches!(
+        error,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+}
+
+#[tokio::test]
+async fn session_manager_cannot_auto_add_another_human() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .bots
+        .save_created_by("driver", "staff-manager", true)
+        .await
+        .expect("assign driver owner");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![Participant::bot("driver", ParticipantRole::Driver)],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+    let session_id = session.id.clone();
+
+    let error = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("staff-manager"),
+            session_id: session.id,
+            bot_uuid: "human_target".into(),
+            mode: ParticipantMode::Present,
+        })
+        .await
+        .expect_err("Session manager cannot auto-add another Human");
+    assert!(matches!(
+        error,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+
+    let stored = fixture
+        .session_repo
+        .get(&session_id)
+        .await
+        .expect("stored session");
+    assert!(
+        stored
+            .participants
+            .iter()
+            .all(|participant| participant.bot_uuid != "human_target")
+    );
+}
+
+#[tokio::test]
+async fn human_cannot_auto_join_an_unreadable_session() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![Participant::bot("driver", ParticipantRole::Driver)],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+
+    let error = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("staff-1"),
+            session_id: session.id,
+            bot_uuid: "human_staff-1".into(),
+            mode: ParticipantMode::Present,
+        })
+        .await
+        .expect_err("Human cannot join a Session it cannot read");
+
+    assert!(matches!(
+        error,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+}
+
+#[tokio::test]
+async fn participant_mode_must_match_the_target_actor_kind() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture.store_group("g1", "driver", None).await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_staff-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+
+    let human_error = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("staff-1"),
+            session_id: session.id.clone(),
+            bot_uuid: "human_staff-1".into(),
+            mode: ParticipantMode::Auto,
+        })
+        .await
+        .expect_err("Human rejects Bot-only mode");
+    assert_eq!(human_error.code(), "invalid_participant_mode");
+
+    let bot_error = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("driver"),
+            session_id: session.id,
+            bot_uuid: "driver".into(),
+            mode: ParticipantMode::Present,
+        })
+        .await
+        .expect_err("Bot rejects Human-only mode");
+    assert_eq!(bot_error.code(), "invalid_participant_mode");
+}
+
+#[tokio::test]
+async fn bot_mode_does_not_auto_add_a_missing_human() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "owned-bot"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .bots
+        .save_created_by("owned-bot", "staff-1", true)
+        .await
+        .expect("assign owned Bot");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::bot("owned-bot", ParticipantRole::Consultant),
+                ],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+    let session_id = session.id.clone();
+
+    let error = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("staff-1"),
+            session_id: session.id,
+            bot_uuid: "human_staff-1".into(),
+            mode: ParticipantMode::Auto,
+        })
+        .await
+        .expect_err("Bot-only mode cannot auto-add a Human");
+    assert_eq!(error.code(), "invalid_participant_mode");
+
+    let stored = fixture
+        .session_repo
+        .get(&session_id)
+        .await
+        .expect("stored session");
+    assert!(
+        stored
+            .participants
+            .iter()
+            .all(|participant| participant.bot_uuid != "human_staff-1")
+    );
+}
+
+#[tokio::test]
+async fn update_mode_does_not_auto_add_a_missing_bot() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture.store_group("g1", "driver", None).await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![Participant::bot("driver", ParticipantRole::Driver)],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+    let session_id = session.id.clone();
+
+    let error = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("driver"),
+            session_id: session.id,
+            bot_uuid: "missing-bot".into(),
+            mode: ParticipantMode::Auto,
+        })
+        .await
+        .expect_err("missing Bot is not auto-added");
+    assert_eq!(error.code(), "participant_not_found");
+
+    let stored = fixture
+        .session_repo
+        .get(&session_id)
+        .await
+        .expect("stored session");
+    assert!(
+        stored
+            .participants
+            .iter()
+            .all(|participant| participant.bot_uuid != "missing-bot")
+    );
 }
 
 #[tokio::test]
@@ -1683,7 +2906,7 @@ async fn owned_bot_does_not_grant_session_participant_update_permission() {
             caller: human_principal("staff-1"),
             session_id: session_id.clone(),
             bot_uuid: "bot-a".into(),
-            mode: BotParticipantMode::Muted,
+            mode: ParticipantMode::Muted,
         })
         .await
         .expect_err("Bot ownership grants detail read only, not management");
@@ -1699,7 +2922,7 @@ async fn owned_bot_does_not_grant_session_participant_update_permission() {
             caller: human_principal("staff-2"),
             session_id,
             bot_uuid: "bot-a".into(),
-            mode: BotParticipantMode::Auto,
+            mode: ParticipantMode::Auto,
         })
         .await
         .expect_err("non-owner human should be forbidden");
@@ -1942,10 +3165,15 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
     let outcome = fixture
         .service
         .create(CreateSession {
-            caller: bot_principal("driver"),
+            caller: launch_caller(bot_principal("driver")),
             group_id: "g1".into(),
             title: None,
+            kind: None,
+            acting_bot_id: None,
+            creator_role: None,
             input: None,
+            meta: None,
+            context_delivery: None,
         })
         .await
         .expect("session should inherit parent group roster");
@@ -1966,9 +3194,9 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
     assert_eq!(inherited_human.actor_kind, ActorKind::Human);
     assert!(
         outcome
-        .session
-        .participants
-        .iter()
+            .session
+            .participants
+            .iter()
             .any(|p| p.actor_id == "driver" && p.role == ParticipantRole::Driver)
     );
 }
@@ -2541,4 +3769,208 @@ async fn add_participant_derives_worker_role_for_manager_worker() {
         "VfhG3: ManagerWorker Worker gains Worker role on add_participant, not Consultant"
     );
     assert_eq!(worker.mode, ParticipantMode::Auto);
+}
+
+// ── ensure_collaboration_eligible: session add-participant anchor set ──
+//
+// VSN7B (revised): an added Bot is admitted when collaboration-reachable from
+// the caller OR from the parent Group's driver/originator. These tests pin the
+// widened behavior so a manager is not blocked from pulling a Bot the group's
+// driver/originator already collaborates with.
+
+async fn eligibility_fixture(group_id: &str, driver: &str, originator: &str) -> Fixture {
+    let fixture = Fixture::new().await;
+    // The Human caller `manager` owns the public driver Bot, which grants group
+    // access for session creation and group-management authority.
+    fixture.add_bot_with(driver, "public", "manager").await;
+    fixture
+        .store_group_with_originator(group_id, driver, originator, None)
+        .await;
+    fixture
+}
+
+#[tokio::test]
+async fn add_participant_admits_protected_bot_reachable_from_driver_friend() {
+    // Protected Bot not owned by / friends with the caller, but friends with the
+    // group driver → admitted via the driver anchor.
+    let fixture = eligibility_fixture("g1", "driver-bot", "human_manager").await;
+    fixture
+        .add_bot_with("px", "protected", "other-owner")
+        .await;
+    fixture.befriend("driver-bot", "px").await;
+
+    let outcome = create_session(
+        &fixture,
+        human_principal("manager"),
+        "g1",
+        "driver-bot",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    let added = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("manager"),
+            session_id: session_id.clone(),
+            bot_uuid: "px".into(),
+        })
+        .await
+        .expect("driver-friend Bot should be admitted");
+    assert_eq!(added.actor_id, "px");
+}
+
+#[tokio::test]
+async fn add_participant_rejects_protected_bot_unreachable_from_all_anchors() {
+    // Protected Bot reachable from none of caller/driver/originator → 403.
+    let fixture = eligibility_fixture("g1", "driver-bot", "human_manager").await;
+    fixture
+        .add_bot_with("px", "protected", "other-owner")
+        .await;
+
+    let outcome = create_session(
+        &fixture,
+        human_principal("manager"),
+        "g1",
+        "driver-bot",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    let error = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("manager"),
+            session_id: session_id.clone(),
+            bot_uuid: "px".into(),
+        })
+        .await
+        .expect_err("unreachable Bot should be rejected");
+    assert!(
+        matches!(
+            error,
+            bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+        ),
+        "expected Forbidden, got {error:?}",
+    );
+    assert_eq!(error.code(), "forbidden");
+}
+
+#[tokio::test]
+async fn add_participant_admits_protected_bot_owned_by_caller() {
+    // Protected Bot whose `created_by` matches the Human caller → admitted via
+    // the caller (Human) anchor's ownership rule.
+    let fixture = eligibility_fixture("g1", "driver-bot", "human_manager").await;
+    fixture.add_bot_with("px", "protected", "manager").await;
+
+    let outcome = create_session(
+        &fixture,
+        human_principal("manager"),
+        "g1",
+        "driver-bot",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    let added = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("manager"),
+            session_id: session_id.clone(),
+            bot_uuid: "px".into(),
+        })
+        .await
+        .expect("caller-owned protected Bot should be admitted");
+    assert_eq!(added.actor_id, "px");
+}
+
+#[tokio::test]
+async fn add_participant_admits_protected_bot_reachable_from_originator_friend() {
+    // Distinct Bot originator (not the driver) is the only anchor that reaches
+    // the target → admitted via the originator anchor, proving the anchor set is
+    // not collapsed to caller+driver only.
+    let fixture = eligibility_fixture("g1", "driver-bot", "originator-bot").await;
+    fixture
+        .add_bot_with("px", "protected", "other-owner")
+        .await;
+    fixture.befriend("originator-bot", "px").await;
+
+    let outcome = create_session(
+        &fixture,
+        human_principal("manager"),
+        "g1",
+        "driver-bot",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    let added = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("manager"),
+            session_id: session_id.clone(),
+            bot_uuid: "px".into(),
+        })
+        .await
+        .expect("originator-friend Bot should be admitted");
+    assert_eq!(added.actor_id, "px");
+}
+
+#[tokio::test]
+async fn add_participant_rejects_hidden_bot_regardless_of_anchors() {
+    // A Hidden Bot is rejected outright before any anchor is consulted, even when
+    // the driver is its friend.
+    let fixture = eligibility_fixture("g1", "driver-bot", "human_manager").await;
+    fixture
+        .add_bot_with("px", "protected", "other-owner")
+        .await;
+    fixture.befriend("driver-bot", "px").await;
+    fixture
+        .bots
+        .update_actor_status("px", ActorStatus::Hidden)
+        .await
+        .expect("hide bot");
+
+    let outcome = create_session(
+        &fixture,
+        human_principal("manager"),
+        "g1",
+        "driver-bot",
+        vec![],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    let error = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("manager"),
+            session_id: session_id.clone(),
+            bot_uuid: "px".into(),
+        })
+        .await
+        .expect_err("hidden Bot should be rejected");
+    assert!(
+        matches!(
+            error,
+            bcs_service_api::application::v1::ApplicationError::Forbidden(ref message)
+                if message.contains("hidden")
+        ),
+        "expected hidden-Bot Forbidden, got {error:?}",
+    );
+    assert_eq!(error.code(), "forbidden");
 }

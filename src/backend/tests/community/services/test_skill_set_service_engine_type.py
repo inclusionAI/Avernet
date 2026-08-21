@@ -96,6 +96,7 @@ class TestSkillSetServiceEngineTypeThreading:
         self, skill_set_service
     ):
         skill_set_service.engine_type = "moltis"
+        skill_set_service.runtime_engine_type = "moltis"
         skill_set_service.is_desktop = True
         skill_set_service.get_active_skills = MagicMock(
             return_value=[
@@ -116,6 +117,31 @@ class TestSkillSetServiceEngineTypeThreading:
                 "version": None,
             }
         ]
+
+
+    async def test_get_symlink_mappings_unknown_engine_falls_back_to_default(
+        self, skill_set_service
+    ):
+        """未知引擎不报错，回落到 openclaw 默认技能目录（保留原 default 兜底语义）。
+
+        曾误加 ``not in ... raise`` check 拦住了 teclaw 等未在 ENGINE_SKILLS_DIR_MAP
+        里的引擎(它们不走容器软链，本就不该被此处拦下)。现恢复 ``.get(engine, 默认)``
+        兜底，未知引擎产出指向默认目录的软链配置、不抛错。
+        """
+        skill_set_service.runtime_engine_type = "unknown_engine"
+        skill_set_service.get_active_skills = MagicMock(
+            return_value=[
+                {"name": "reviewer", "git_path": "git://business/reviewer"}
+            ]
+        )
+
+        mappings = skill_set_service.get_symlink_mappings()
+
+        assert len(mappings) == 1
+        m = mappings[0].to_dict()
+        # git:// business/reviewer → source skills-repo/business/reviewer, target reviewer
+        assert m["target"].endswith("/skills/reviewer")
+        assert m["source"].endswith("/skills/skills-repo/business/reviewer")
 
     def test_get_all_skill_sets_with_skills_passes_engine_type(self, skill_set_service, mock_skill_set_repo):
         """get_all_skill_sets_with_skills should pass engine_type to repo.list_all."""
@@ -171,3 +197,315 @@ class TestSkillSetServiceEngineTypeThreading:
         mock_skill_set_repo.get_all_active_skill_sets.assert_called_once()
         call_kwargs = mock_skill_set_repo.get_all_active_skill_sets.call_args.kwargs
         assert call_kwargs.get("engine_type") == "claude-code"
+
+
+def _make_skill_set_service_for_default_selection(
+    tmp_path, *, engine_type, runtime_engine_type, default_skill_set_selection_policy=None
+):
+    from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
+
+    return SkillSetService(
+        skill_repo=MagicMock(),
+        skill_set_repo=MagicMock(),
+        mcp_center=MagicMock(),
+        mcp_config_service=MagicMock(),
+        skill_service=MagicMock(),
+        skills_dir=tmp_path / "skills",
+        repo_dir=tmp_path / "skills-repo",
+        local_dir=tmp_path / "skills-local",
+        engine_type=engine_type,
+        runtime_engine_type=runtime_engine_type,
+        bot_repo=MagicMock(),
+        default_skill_set_selection_policy=default_skill_set_selection_policy,
+        path_factory=MagicMock(),
+    )
+
+
+def test_default_skill_set_query_kwargs_keeps_openclaw_query_shape(tmp_path):
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="openclaw",
+        runtime_engine_type="openclaw",
+    )
+
+    assert service._default_skill_set_query_kwargs() == {}
+
+
+def test_default_skill_set_query_kwargs_keeps_normal_claude_code_query_shape(tmp_path):
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="claude_code",
+        runtime_engine_type="claude_code",
+    )
+
+    assert service._default_skill_set_query_kwargs() == {}
+
+
+def test_default_skill_set_query_kwargs_routes_claude_code_null_default_to_aicoding(tmp_path):
+    from agentclaw.community.core.bot_management.engines.registry import (
+        get_default_skill_set_selection_policy,
+    )
+
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="claude_code",
+        runtime_engine_type="aicoding",
+        default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
+    )
+
+    assert service._default_skill_set_query_kwargs() == {
+        "default_skill_set_bolt_id": None,
+        "default_skill_set_engine_type": "aicoding",
+    }
+
+
+def test_active_skill_sets_falls_back_to_aicoding_legacy_null_then_claude_code_default(tmp_path):
+    from agentclaw.community.core.bot_management.engines.registry import (
+        get_default_skill_set_selection_policy,
+    )
+
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="claude_code",
+        runtime_engine_type="aicoding",
+        default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
+    )
+    repo = service.skill_set_repo
+    repo.get_all_active_skill_sets.side_effect = [
+        [{"id": "custom-1", "is_default": False}],
+        [{"id": "custom-1", "is_default": False}],
+        [{"id": "global-claude", "is_default": True}],
+    ]
+
+    result = service.list_active_skill_sets(user_id="owner", bolt_id="bot")
+
+    assert result == [{"id": "global-claude", "is_default": True}]
+    assert repo.get_all_active_skill_sets.call_count == 3
+    first_kwargs = repo.get_all_active_skill_sets.call_args_list[0].kwargs
+    second_kwargs = repo.get_all_active_skill_sets.call_args_list[1].kwargs
+    third_kwargs = repo.get_all_active_skill_sets.call_args_list[2].kwargs
+    assert first_kwargs["default_skill_set_bolt_id"] == "bot"
+    assert first_kwargs["default_skill_set_engine_type"] == "claude_code"
+    assert second_kwargs["default_skill_set_bolt_id"] is None
+    assert second_kwargs["default_skill_set_engine_type"] == "aicoding"
+    assert "default_skill_set_bolt_id" not in third_kwargs
+    assert "default_skill_set_engine_type" not in third_kwargs
+
+
+def test_active_skill_sets_stops_when_bot_default_exists(tmp_path):
+    from agentclaw.community.core.bot_management.engines.registry import (
+        get_default_skill_set_selection_policy,
+    )
+
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="claude_code",
+        runtime_engine_type="aicoding",
+        default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
+    )
+    repo = service.skill_set_repo
+    repo.get_all_active_skill_sets.return_value = [{"id": "bot-default", "is_default": True}]
+
+    result = service.list_active_skill_sets(user_id="owner", bolt_id="bot")
+
+    assert result == [{"id": "bot-default", "is_default": True}]
+    assert repo.get_all_active_skill_sets.call_count == 1
+
+
+def test_active_skill_sets_returns_first_result_when_no_default_candidate_exists(tmp_path):
+    from agentclaw.community.core.bot_management.engines.registry import (
+        get_default_skill_set_selection_policy,
+    )
+
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="claude_code",
+        runtime_engine_type="aicoding",
+        default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
+    )
+    repo = service.skill_set_repo
+    first = [{"id": "custom-1", "is_default": False}]
+    repo.get_all_active_skill_sets.side_effect = [
+        first,
+        [{"id": "custom-2", "is_default": False}],
+        [{"id": "custom-3", "is_default": False}],
+    ]
+
+    result = service.list_active_skill_sets(user_id="owner", bolt_id="bot")
+
+    assert result == first
+    assert repo.get_all_active_skill_sets.call_count == 3
+
+
+
+def test_list_skill_sets_uses_aicoding_scoped_default_candidates(tmp_path):
+    from agentclaw.community.core.bot_management.engines.registry import (
+        get_default_skill_set_selection_policy,
+    )
+
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="claude_code",
+        runtime_engine_type="aicoding",
+        default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
+    )
+    repo = service.skill_set_repo
+    repo.list_all.side_effect = [
+        [{"id": "custom-1", "is_default": False}],
+        [{"id": "global-aicoding", "is_default": True}],
+    ]
+
+    result = service.list_skill_sets(user_id="owner", bolt_id="bot")
+
+    assert result == [{"id": "global-aicoding", "is_default": True}]
+    assert repo.list_all.call_count == 2
+    first_kwargs = repo.list_all.call_args_list[0].kwargs
+    second_kwargs = repo.list_all.call_args_list[1].kwargs
+    assert first_kwargs["bolt_id"] == "bot"
+    assert first_kwargs["engine_type"] == "claude_code"
+    assert first_kwargs["default_skill_set_bolt_id"] == "bot"
+    assert first_kwargs["default_skill_set_engine_type"] == "claude_code"
+    assert second_kwargs["bolt_id"] == "bot"
+    assert second_kwargs["engine_type"] == "claude_code"
+    assert second_kwargs["default_skill_set_bolt_id"] is None
+    assert second_kwargs["default_skill_set_engine_type"] == "aicoding"
+
+
+
+def test_list_skill_sets_keeps_normal_claude_code_query_shape_with_bot_id(tmp_path):
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="claude_code",
+        runtime_engine_type="claude_code",
+    )
+    repo = service.skill_set_repo
+    repo.list_all.return_value = []
+
+    assert service.list_skill_sets(user_id="owner", bolt_id="bot") == []
+
+    repo.list_all.assert_called_once()
+    call_args = repo.list_all.call_args.args
+    call_kwargs = repo.list_all.call_args.kwargs
+    assert call_args == ("owner",)
+    assert call_kwargs["bolt_id"] == "bot"
+    assert call_kwargs["engine_type"] == "claude_code"
+    assert "default_skill_set_bolt_id" not in call_kwargs
+    assert "default_skill_set_engine_type" not in call_kwargs
+
+
+def test_list_skill_sets_keeps_openclaw_query_shape_with_bot_id(tmp_path):
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="openclaw",
+        runtime_engine_type="openclaw",
+    )
+    repo = service.skill_set_repo
+    repo.list_all.return_value = []
+
+    assert service.list_skill_sets(user_id="owner", bolt_id="bot") == []
+
+    repo.list_all.assert_called_once()
+    call_args = repo.list_all.call_args.args
+    call_kwargs = repo.list_all.call_args.kwargs
+    assert call_args == ("owner",)
+    assert call_kwargs["bolt_id"] == "bot"
+    assert call_kwargs["engine_type"] == "openclaw"
+    assert "default_skill_set_bolt_id" not in call_kwargs
+    assert "default_skill_set_engine_type" not in call_kwargs
+
+
+def test_get_all_skill_sets_with_mcps_keeps_direct_list_all_for_routed_aicoding(tmp_path):
+    from agentclaw.community.core.bot_management.engines.registry import (
+        get_default_skill_set_selection_policy,
+    )
+
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="claude_code",
+        runtime_engine_type="aicoding",
+        default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
+    )
+    service.entity_id = "owner"
+    repo = service.skill_set_repo
+    repo.list_all.return_value = [
+        {"id": "1", "is_default": False, "gmt_created": "2026-01-01"}
+    ]
+    repo.get_by_id.return_value = {"id": "1", "is_default": False}
+    repo.get_mcp_servers_in_set.return_value = []
+
+    result = service.get_all_skill_sets_with_mcps(user_id="owner", bolt_id="bot")
+
+    assert [item["id"] for item in result] == ["1"]
+    repo.list_all.assert_called_once()
+    call_kwargs = repo.list_all.call_args.kwargs
+    assert call_kwargs["user_id"] == "owner"
+    assert call_kwargs["bolt_id"] == "bot"
+    assert call_kwargs["engine_type"] == "claude_code"
+    assert "default_skill_set_bolt_id" not in call_kwargs
+    assert "default_skill_set_engine_type" not in call_kwargs
+    repo.get_mcp_servers_in_set.assert_called_once_with("1")
+
+def test_env_active_skill_sets_fallback_stops_when_default_exists(tmp_path):
+    from agentclaw.community.core.bot_management.engines.registry import (
+        get_default_skill_set_selection_policy,
+    )
+
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="claude_code",
+        runtime_engine_type="aicoding",
+        default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
+    )
+    repo = service.skill_set_repo
+    repo.get_all_active_skill_sets_for_env.side_effect = [
+        [{"id": "custom-1", "is_default": False}],
+        [{"id": "global-aicoding", "is_default": True}],
+    ]
+
+    result = service._get_all_active_skill_sets_for_env_with_default_fallback(
+        user_id="owner",
+        bolt_id="bot",
+        engine_type="claude_code",
+        env="pre",
+    )
+
+    assert result == [{"id": "global-aicoding", "is_default": True}]
+    assert repo.get_all_active_skill_sets_for_env.call_count == 2
+    first_kwargs = repo.get_all_active_skill_sets_for_env.call_args_list[0].kwargs
+    second_kwargs = repo.get_all_active_skill_sets_for_env.call_args_list[1].kwargs
+    assert first_kwargs["default_skill_set_bolt_id"] == "bot"
+    assert first_kwargs["default_skill_set_engine_type"] == "claude_code"
+    assert first_kwargs["env"] == "pre"
+    assert second_kwargs["default_skill_set_bolt_id"] is None
+    assert second_kwargs["default_skill_set_engine_type"] == "aicoding"
+    assert second_kwargs["env"] == "pre"
+
+
+def test_env_active_skill_sets_returns_first_result_when_no_default_candidate_exists(tmp_path):
+    from agentclaw.community.core.bot_management.engines.registry import (
+        get_default_skill_set_selection_policy,
+    )
+
+    service = _make_skill_set_service_for_default_selection(
+        tmp_path,
+        engine_type="claude_code",
+        runtime_engine_type="aicoding",
+        default_skill_set_selection_policy=get_default_skill_set_selection_policy(),
+    )
+    repo = service.skill_set_repo
+    first = [{"id": "custom-1", "is_default": False}]
+    repo.get_all_active_skill_sets_for_env.side_effect = [
+        first,
+        [{"id": "custom-2", "is_default": False}],
+        [{"id": "custom-3", "is_default": False}],
+    ]
+
+    result = service._get_all_active_skill_sets_for_env_with_default_fallback(
+        user_id="owner",
+        bolt_id="bot",
+        engine_type="claude_code",
+        env="prod",
+    )
+
+    assert result == first
+    assert repo.get_all_active_skill_sets_for_env.call_count == 3

@@ -1,40 +1,19 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use super::group::{DeleteResult, Page};
 use super::{ApplicationError, AuthenticatedCaller};
+use crate::StateMachineRunView;
 
 pub use bcs_domain::{ActorKind, ParticipantMode, ParticipantRole};
-
-/// Per-session bot collaboration mode for *client input* only.
-///
-/// V1 session participants can be Bots (added by clients via
-/// `create` / `add_participant` / `update_participant`) or Humans (added by
-/// the legacy invitation-accept path, `join_session_by_invite`, with
-/// `actor_kind: Human, mode: Present`). The V1 `SessionParticipant` *output*
-/// therefore carries the full domain `ParticipantMode` (4 values) so a Human
-/// participant is surfaced verbatim. Client *input* still admits only the two
-/// Bot-valid variants (`auto`, `muted`); Humans never enter via client input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BotParticipantMode {
-    Auto,
-    Muted,
-}
+pub use crate::{DeliveryType, SessionCaller, SessionKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionStatus {
     Running,
     Completed,
-}
-
-/// Optional task input for a session. If omitted on creation, the session
-/// reuses the parent group's context as its task.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct SessionInput {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub query: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,21 +40,34 @@ pub struct SessionSummary {
     pub participant_count: Option<usize>,
     pub created_at: u64,
     pub updated_at: u64,
+    /// Whether the view actor (`view_bot_id`) has collected this session.
+    /// Populated only when the request explicitly passes `view_bot_id`; absent
+    /// otherwise. Mirrors the legacy `list_sessions_for_group` participant
+    /// gating (collected is meaningful only relative to a named viewer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collected: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDetail {
     pub session_id: String,
     pub version: i32,
     pub group_id: String,
     pub status: SessionStatus,
+    pub kind: SessionKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input: Option<SessionInput>,
+    pub input: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Value>,
     pub participants: Vec<SessionParticipant>,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_machine_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_machine_run: Option<StateMachineRunView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,7 +93,7 @@ pub struct SessionParticipantInput {
     pub bot_uuid: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct CreateSessionOutcome {
     pub session: SessionDetail,
     pub created: bool,
@@ -109,10 +101,17 @@ pub struct CreateSessionOutcome {
 
 #[derive(Debug, Clone)]
 pub struct CreateSession {
-    pub caller: AuthenticatedCaller,
+    pub caller: SessionCaller,
     pub group_id: String,
     pub title: Option<String>,
-    pub input: Option<SessionInput>,
+    pub kind: Option<SessionKind>,
+    /// Optional explicit creator Actor ID supplied through V1
+    /// `acting_bot_id`; Human callers may select themselves or an owned Bot.
+    pub acting_bot_id: Option<String>,
+    pub creator_role: Option<ParticipantRole>,
+    pub input: Option<Value>,
+    pub meta: Option<Value>,
+    pub context_delivery: Option<DeliveryType>,
 }
 
 #[derive(Debug, Clone)]
@@ -177,7 +176,7 @@ pub struct UpdateSessionParticipant {
     pub caller: AuthenticatedCaller,
     pub session_id: String,
     pub bot_uuid: String,
-    pub mode: BotParticipantMode,
+    pub mode: ParticipantMode,
 }
 
 #[derive(Debug, Clone)]

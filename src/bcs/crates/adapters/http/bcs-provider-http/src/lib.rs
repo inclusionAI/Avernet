@@ -22,7 +22,7 @@ use bcs_service_api::{
     InteractionProviderCommand, InteractionProviderPort, InteractionService,
     ProviderInteractionRequestedCommand, ProviderInteractionResolvedCommand,
     ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
-    ProviderRunTransport, ServiceError, ServiceResult,
+    ProviderRunTransport, ProviderTransportPreference, ServiceError, ServiceResult,
 };
 use opentelemetry::global;
 use opentelemetry_http::HeaderInjector;
@@ -46,6 +46,9 @@ const SSE_RESPONSE_HEADER_TIMEOUT_MS: u64 = 125_000;
 /// Maximum time to read the finite JSON acknowledgement when an SSE-preferred
 /// request falls back to `application/json`.
 const JSON_FALLBACK_BODY_TIMEOUT_MS: u64 = SSE_RESPONSE_HEADER_TIMEOUT_MS;
+/// Existing provider execution budget for methods other than `chat.send`.
+/// This is intentionally independent from configurable chat runs.
+const NON_CHAT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
 /// Bounded retry for resolving run context after `deliver()` returns but before
 /// `put_context` lands (#2 put_context race): ~50ms * 20 ≈ 1s.
 const SSE_CTX_RETRY_INTERVAL_MS: u64 = 50;
@@ -141,6 +144,7 @@ pub struct HttpProviderTransport {
     /// a long-lived stream. HTTP/1.1 remains enabled for JSON callback fallback.
     sse_client: reqwest::Client,
     url_guard: OutboundUrlGuard,
+    chat_run_timeout_ms: u64,
     event_ingest: std::sync::RwLock<Option<Arc<dyn ProviderEventIngestService>>>,
     bot_run_context: std::sync::RwLock<Option<Arc<dyn BotRunContextPort>>>,
     interactions: std::sync::RwLock<Option<std::sync::Weak<dyn InteractionService>>>,
@@ -177,10 +181,18 @@ impl HttpProviderTransport {
                 .build()
                 .expect("build provider sse client"),
             url_guard,
+            chat_run_timeout_ms: DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
             event_ingest: std::sync::RwLock::new(None),
             bot_run_context: std::sync::RwLock::new(None),
             interactions: std::sync::RwLock::new(None),
         }
+    }
+
+    /// Override the fallback deadline for `chat.send` frames that do not
+    /// provide an explicit `params.timeout_ms`.
+    pub fn with_chat_run_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.chat_run_timeout_ms = timeout_ms;
+        self
     }
 
     /// Inject the ingest dependencies needed by the 2.0 SSE branch after
@@ -281,7 +293,7 @@ impl InteractionProviderPort for HttpProviderTransport {
             before: None,
             after: None,
             limit: None,
-            timeout_ms: DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+            timeout_ms: NON_CHAT_PROVIDER_REQUEST_TIMEOUT_MS,
             extensions: None,
         };
         let ack = post_provider::<ProviderAckResponse>(
@@ -339,7 +351,7 @@ impl BotDeliveryPort for HttpProviderTransport {
         let body = provider_request_from_frame(
             &cmd.target,
             &cmd.frame,
-            DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+            self.chat_run_timeout_ms,
         )?;
         let provider_id = body.to_bot.provider_id.clone();
         let provider_bot_ref = body.to_bot.provider_bot_ref.clone();
@@ -363,14 +375,16 @@ impl BotDeliveryPort for HttpProviderTransport {
             BotDeliveryTarget::HttpProvider { protocol_version, .. } if protocol_version == "2.0"
         );
         if is_proto2 {
-            let wants_sse = method == "chat.send";
+            let is_chat_send = method == "chat.send";
+            let wants_sse = is_chat_send
+                && cmd.provider_transport == ProviderTransportPreference::SseFirst;
             let client = if wants_sse { &self.sse_client } else { &self.client };
             let run_context = self
                 .bot_run_context
                 .read()
                 .expect("bot_run_context lock poisoned")
                 .clone();
-            if wants_sse {
+            if is_chat_send {
                 if let Some(context) = run_context.as_ref() {
                     let began = context
                         .begin_provider_transport(
@@ -526,7 +540,7 @@ impl BotDeliveryPort for HttpProviderTransport {
                 }
             };
             if ack.ok {
-                if wants_sse {
+                if is_chat_send {
                     if let Some(context) = run_context.as_ref() {
                         let bound = context
                             .bind_provider_transport(&run_id, ProviderRunTransport::Callback)
@@ -785,7 +799,7 @@ fn provider_request_from_frame(
             .and_then(Value::as_u64)
             .unwrap_or(timeout_ms)
     } else {
-        timeout_ms
+        NON_CHAT_PROVIDER_REQUEST_TIMEOUT_MS
     };
     let attachments = params
         .get("attachments")

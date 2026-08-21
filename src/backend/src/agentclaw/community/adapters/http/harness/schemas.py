@@ -53,7 +53,7 @@ class PatchOperationItem(BaseModel):
     """Operation definition within a patch template.
 
     Fixed fields: op, target, template.
-    Custom fields (e.g. src_md_content, dst_md_content) go into ``detail``.
+    Custom fields (e.g. src_md_content, dst_md_content) go into 'detail'.
     """
 
     op: str = Field(..., description="Operation type: update_md / rewrite_section / ...")
@@ -63,6 +63,8 @@ class PatchOperationItem(BaseModel):
 
 
 class PreviewOperationItem(BaseModel):
+    """One operation in a preview result, with its rendered diff."""
+
     op: str = Field(..., description="Operation type: update_md / rewrite_section / ...")
     target: str = Field(..., description="Target file name")
     diff: str = Field(..., description="Unified diff text for this operation")
@@ -85,12 +87,14 @@ class DiagnoseRequest(BaseModel):
 
 
 class DiagnoseStartResponse(BaseModel):
-    success: bool = Field(default=True)
-    scan_id: int
-    bot_id: str
-    entity_id: str
-    status: str = Field(default="scanning")
-    message: str = Field(default="Scan started")
+    """Acknowledgement that a diagnose scan has started."""
+
+    success: bool = Field(default=True, description="Whether the scan was accepted")
+    scan_id: int = Field(..., description="Scan record ID, used to poll progress")
+    bot_id: str = Field(..., description="Bot ID")
+    entity_id: str = Field(..., description="Entity ID (owner/workNo)")
+    status: str = Field(default="scanning", description="Initial scan status")
+    message: str = Field(default="Scan started", description="Human-readable status message")
 
 
 # ── /diagnose/{scan_id} — GET (poll progress) ───────────────
@@ -253,12 +257,14 @@ class PreviewRequest(BaseModel):
 
 
 class PreviewResponse(BaseModel):
-    success: bool = Field(default=True)
-    bot_id: str
+    """Rendered preview of applying a set of patches, without persisting."""
+
+    success: bool = Field(default=True, description="Whether the preview rendered")
+    bot_id: str = Field(..., description="Bot ID")
     scan_id: int | None = Field(None, description="Associated scan ID")
     risk_level: str = Field(..., description="Overall risk level: low / medium / high")
     final_content: str = Field(..., description="Full document content after all patches are applied")
-    operations: list[PreviewOperationItem] = Field(default_factory=list)
+    operations: list[PreviewOperationItem] = Field(default_factory=list, description="Per-operation diffs")
 
 
 # ── /apply ──────────────────────────────────────────────────
@@ -273,7 +279,9 @@ class ApplyRequest(BaseModel):
 
 
 class ApplyResponse(BaseModel):
-    success: bool = Field(default=True)
+    """Result of an apply or rollback request."""
+
+    success: bool = Field(default=True, description="Whether the operation succeeded")
     err_msg: str | None = Field(default=None, description="Error message when success=false")
 
 
@@ -409,6 +417,8 @@ class PatchItem(BaseModel):
 
 
 class DimReportItem(BaseModel):
+    """Latest scan result for one dimension in the dim-report."""
+
     scan_dim: str | None = Field(default=None, description="体检维度")
     health_score: int | None = Field(default=None, description="健康分（0-100）")
     grade: str | None = Field(default=None, description="评分等级：excellent / good / warning / critical")
@@ -427,15 +437,17 @@ class DimReportItem(BaseModel):
     )
     patch_ids: str | None = Field(default=None, description="补丁 ID 列表 JSON")
     patches: list[PatchItem] = Field(default_factory=list, description="补丁详细信息列表")
-    gmt_create: str | None = None
+    gmt_create: str | None = Field(default=None, description="创建时间")
 
 
 class DimReportResponse(BaseModel):
-    success: bool = Field(default=True)
-    bot_id: str
-    entity_id: str
-    bot_publish_id: str | None = Field(default=None)
-    items: list[DimReportItem] = Field(default_factory=list)
+    """Latest per-dimension scan report for a bot."""
+
+    success: bool = Field(default=True, description="Whether the query succeeded")
+    bot_id: str = Field(..., description="Bot ID")
+    entity_id: str = Field(..., description="Entity ID")
+    bot_publish_id: str | None = Field(default=None, description="Bot publish ID filter")
+    items: list[DimReportItem] = Field(default_factory=list, description="Per-dimension report items")
 
 
 # ── /diagnose/dim-history — GET (dimension history list) ─────
@@ -465,18 +477,18 @@ class DimHistoryRecordItem(BaseModel):
     patch_ids: str | None = Field(default=None, description="补丁 ID 列表 JSON")
     patches: list[PatchItem] = Field(default_factory=list, description="补丁详细信息列表")
     bot_publish_id: str | None = Field(default=None, description="Bot publish ID")
-    gmt_create: str | None = None
-    gmt_modified: str | None = None
+    gmt_create: str | None = Field(default=None, description="创建时间")
+    gmt_modified: str | None = Field(default=None, description="最后修改时间")
 
 
 class DimHistoryResponse(BaseModel):
     """Response for dimension history list endpoint."""
 
-    success: bool = Field(default=True)
-    bot_id: str
-    entity_id: str
+    success: bool = Field(default=True, description="Whether the query succeeded")
+    bot_id: str = Field(..., description="Bot ID")
+    entity_id: str = Field(..., description="Entity ID")
     scan_dim: str | None = Field(default=None, description="体检维度筛选条件")
-    bot_publish_id: str | None = Field(default=None)
+    bot_publish_id: str | None = Field(default=None, description="Bot publish ID filter")
     total: int = Field(default=0, description="总记录数")
     page: int = Field(default=1, description="当前页码")
     size: int = Field(default=20, description="每页大小")

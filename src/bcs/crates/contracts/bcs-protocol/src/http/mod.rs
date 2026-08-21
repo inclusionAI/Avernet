@@ -22,7 +22,9 @@ pub use friends::{
 };
 pub use groups::{
     ConfirmProposalResponse, CreateGroupRequest, CreateGroupResponse, EvaluateProposalRequest,
-    ParticipantBindingInfo, ParticipantInfo, ProposalContext, ProposalResponse,
+    InlineEventPayloadInfo, InlineEventPayloadMode, InlineEventSinkInfo,
+    InlineGroupEventSubscriptionInfo, ParticipantBindingInfo, ParticipantInfo, ProposalContext,
+    ProposalResponse,
 };
 pub use messages::{
     BotContextSummary, Conflict, ConflictPosition, FusionRequest, FusionResponse,

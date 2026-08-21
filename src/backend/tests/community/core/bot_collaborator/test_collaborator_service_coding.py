@@ -102,6 +102,20 @@ def test_add_collaborator_coding_app_allowed(service, bot_repo, collaborator_rep
     collaborator_repo.insert.assert_called_once()
 
 
+def test_add_collaborator_personal_coding_claude_code_allowed(service, bot_repo, collaborator_repo):
+    """个人 Coding Bot（claude_code + personalCoding，bot_type 非 service）-> 放行。"""
+    bot_repo.get_by_id_and_owner.return_value = _bot(
+        bot_type="personal",
+        active_engine="claude_code",
+        template_type="personalCoding",
+    )
+
+    record = _add(service)
+
+    assert record is collaborator_repo.insert.return_value
+    collaborator_repo.insert.assert_called_once()
+
+
 def test_add_collaborator_member_management_flag_allowed(
     service, bot_repo, collaborator_repo, template_service
 ):

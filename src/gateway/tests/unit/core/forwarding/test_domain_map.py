@@ -18,6 +18,7 @@ _VARS = {
     "bcs_server_url": "http://bcs:8081",
     "engine_proxy_server_url": "https://engineproxy:20003",
     "bcsfuse_server_url": "http://bcsfuse:8765",
+    "clawweb_server_url": "http://clawweb:8082",
 }
 
 
@@ -134,8 +135,9 @@ def test_shipped_config_routes_internal_collaboration_verbatim_to_bcs() -> None:
         "GET", "/api/v1/collaboration/bots/bot-1/candidates/search"
     )
     assert requirement is not None
-    assert requirement[PrincipalType.USER] is Presence.REQUIRED
-    assert requirement[PrincipalType.APP] is Presence.REQUIRED
+    assert requirement[PrincipalType.USER] is Presence.OPTIONAL
+    assert requirement[PrincipalType.APP] is Presence.OPTIONAL
+    assert requirement[PrincipalType.BOT] is Presence.OPTIONAL
 
     file_requirement = security.resolve(
         "PUT", "/api/v1/collaboration/sessions/session-1/files/file-1/content"
@@ -243,6 +245,50 @@ def test_shipped_config_routes_bcsfuse_clean_paths() -> None:
         requirement = security.resolve(method, path)
         assert requirement is not None, path
         assert requirement[PrincipalType.USER] is Presence.REQUIRED, path
+
+
+def test_shipped_config_routes_harness_to_backend() -> None:
+    """Harness operations ride the bots domain; only their auth rule is their own.
+
+    They moved under ``/openapi/v1/bots/{bot_id}/harness/**``, a shape no domain
+    match can pin (a parameter stands between the literals), and they forward to
+    the same backend the bots domain already serves — so the bots domain claims
+    them and there is no separate harness domain to configure.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
+    security = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    harness = dm.http_domain_for("/openapi/v1/bots/bot-1/harness/diagnose")
+    assert harness is not None
+    assert harness.name == "bots"
+    assert harness.server.name == "backend"
+    assert harness.server.base_url == "http://backend:8080"
+    assert harness.serves_http
+    assert harness.rewrite is None
+    assert (
+        harness.upstream_path("/openapi/v1/bots/bot-1/harness/diagnose")
+        == "/openapi/v1/bots/bot-1/harness/diagnose"
+    )
+    assert harness.schema.location == "schemas/bots.openapi.json"
+
+    # One rule beneath /openapi/v1/bots/** keeps a user on the wire for every
+    # harness operation, outranking the wide prefix on literal segments.
+    for method, path in [
+        ("POST", "/openapi/v1/bots/bot-1/harness/diagnose"),
+        ("POST", "/openapi/v1/bots/bot-1/harness/preview"),
+        ("POST", "/openapi/v1/bots/bot-1/harness/apply"),
+        ("POST", "/openapi/v1/bots/bot-1/harness/rollback"),
+        ("GET", "/openapi/v1/bots/bot-1/harness/dim-report"),
+        ("GET", "/openapi/v1/bots/bot-1/harness/dim-history"),
+    ]:
+        requirement = security.resolve(method, path)
+        assert requirement is not None, path
+        assert requirement[PrincipalType.USER] is Presence.REQUIRED, path
+
+    # The old shape is unrouted: with the harness domain gone, no domain claims
+    # /openapi/v1/harness/** and the gateway refuses it rather than forwarding.
+    assert dm.http_domain_for("/openapi/v1/harness/bots/bot-1/diagnose") is None
 
 
 # ── protocols ────────────────────────────────────────────────────────────────

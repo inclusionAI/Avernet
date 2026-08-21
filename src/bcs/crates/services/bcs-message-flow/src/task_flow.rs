@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use bcs_domain::{LedgerSummary, SenderType};
 use bcs_protocol::{BcsFrame, GroupContext, RequestFrame};
 use bcs_service_api::{
@@ -9,14 +11,113 @@ use bcs_service_api::{
     Session, SessionKind, SessionStatus, SystemMessageEvent, TaskCompleteCommand,
     TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome, TaskMessageCommand,
     TaskMessageOutcome,
+    port::NewEvent,
+    types::{EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject},
 };
+use chrono::{SecondsFormat, TimeZone, Utc};
 use serde_json::Value;
 use tracing::{info, warn};
 
 use crate::BcsMessageFlow;
-use crate::protocol_context::group_type_wire;
-use crate::task_store::new_task_entry;
 use crate::MSG_LOG_TARGET;
+use crate::protocol_context::group_type_wire;
+use crate::task_store::{TaskEntry, new_task_entry};
+
+async fn record_task_event(
+    flow: &BcsMessageFlow,
+    event_type: &str,
+    entry: &TaskEntry,
+    actor_id: &str,
+    occurred_at_ms: u64,
+    data: BTreeMap<String, Value>,
+) -> ServiceResult<()> {
+    let Some(recorder) = flow.event_recorder.as_ref() else {
+        return Ok(());
+    };
+    let occurred_at = Utc
+        .timestamp_millis_opt(i64::try_from(occurred_at_ms).map_err(|_| {
+            ServiceError::InternalError("Task Event timestamp is out of range".to_string())
+        })?)
+        .single()
+        .ok_or_else(|| ServiceError::InternalError("Task Event timestamp is invalid".to_string()))?
+        .to_rfc3339_opts(SecondsFormat::Millis, true);
+    recorder
+        .record(NewEvent {
+            event_id: format!("evt_{}", uuid::Uuid::new_v4()),
+            event_type: event_type.to_string(),
+            schema_version: EVENT_SCHEMA_VERSION_V1.to_string(),
+            producer: "bcs-manager-worker".to_string(),
+            producer_key: format!("{event_type}:{}", entry.task_id),
+            occurred_at,
+            subject: EventSubject {
+                subject_type: "task".to_string(),
+                id: entry.task_id.clone(),
+            },
+            scope: EventScope {
+                group_id: Some(entry.group_id.clone()),
+                session_id: entry.session_id.clone(),
+                task_id: Some(entry.task_id.clone()),
+                ..EventScope::default()
+            },
+            stream_key: format!("task:{}", entry.task_id),
+            actor: Some(crate::bot_event_actor(actor_id)),
+            correlation_id: Some(entry.task_id.clone()),
+            causation_event_id: None,
+            trace_id: None,
+            data,
+        })
+        .await
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+    Ok(())
+}
+
+pub(crate) async fn record_task_completed(
+    flow: &BcsMessageFlow,
+    entry: &TaskEntry,
+    result: &str,
+    completed_at_ms: u64,
+) -> ServiceResult<()> {
+    let result_bytes = result.len();
+    let completed_at = Utc
+        .timestamp_millis_opt(i64::try_from(completed_at_ms).map_err(|_| {
+            ServiceError::InternalError("Task completion timestamp is out of range".to_string())
+        })?)
+        .single()
+        .ok_or_else(|| {
+            ServiceError::InternalError("Task completion timestamp is invalid".to_string())
+        })?
+        .to_rfc3339_opts(SecondsFormat::Millis, true);
+    let mut data = BTreeMap::from([
+        ("task_id".to_string(), serde_json::json!(entry.task_id)),
+        ("manager_id".to_string(), serde_json::json!(entry.driver_bot)),
+        ("worker_id".to_string(), serde_json::json!(entry.target_bot)),
+        (
+            "result".to_string(),
+            serde_json::json!({
+                "content_type": "text/plain",
+                "size_bytes": result_bytes,
+                "text": result,
+                "truncated": false
+            }),
+        ),
+        (
+            "completed_at".to_string(),
+            serde_json::json!(completed_at),
+        ),
+    ]);
+    if let Some(session_id) = entry.session_id.as_ref() {
+        data.insert("session_id".to_string(), serde_json::json!(session_id));
+    }
+    record_task_event(
+        flow,
+        "task.completed",
+        entry,
+        &entry.target_bot,
+        completed_at_ms,
+        data,
+    )
+    .await
+}
 
 pub async fn handle_task_dispatch(
     flow: &BcsMessageFlow,
@@ -130,18 +231,52 @@ pub async fn handle_task_dispatch(
     };
 
     let response_mode = task_response_mode(&group, &cmd.payload);
-    flow.task_store
-        .register(new_task_entry(
-            effective_task_id.clone(),
-            group_id.clone(),
-            (manager_session_id != group_id).then(|| manager_session_id.clone()),
-            cmd.driver_bot_id.clone(),
-            target_bot_id.clone(),
-            Some(target_bot_name.clone()),
-            now,
-            response_mode,
-        ))
-        .await;
+    let task_entry = new_task_entry(
+        effective_task_id.clone(),
+        group_id.clone(),
+        (manager_session_id != group_id).then(|| manager_session_id.clone()),
+        cmd.driver_bot_id.clone(),
+        target_bot_id.clone(),
+        Some(target_bot_name.clone()),
+        now,
+        response_mode,
+    );
+    let mut assignment_data = BTreeMap::from([
+        (
+            "task_id".to_string(),
+            serde_json::json!(effective_task_id.clone()),
+        ),
+        (
+            "manager_id".to_string(),
+            serde_json::json!(cmd.driver_bot_id.clone()),
+        ),
+        (
+            "worker_id".to_string(),
+            serde_json::json!(target_bot_id.clone()),
+        ),
+        (
+            "assignment".to_string(),
+            serde_json::json!({
+                "content_type": "text/plain",
+                "size_bytes": message.len(),
+                "text": message.clone(),
+                "truncated": false
+            }),
+        ),
+    ]);
+    if let Some(session_id) = task_entry.session_id.as_ref() {
+        assignment_data.insert("session_id".to_string(), serde_json::json!(session_id));
+    }
+    record_task_event(
+        flow,
+        "task.assigned",
+        &task_entry,
+        &cmd.driver_bot_id,
+        now,
+        assignment_data,
+    )
+    .await?;
+    flow.task_store.register(task_entry).await;
 
     // Resolve driver_name with registry fallback: prefer
     // participant.bot_name, then registry capabilities.name, then bot_uuid.
@@ -214,6 +349,7 @@ pub async fn handle_task_dispatch(
             run_id: effective_task_id.clone(),
             frame,
             delivery_kind,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -252,7 +388,7 @@ pub async fn handle_task_dispatch(
                     Some(target_bot_id.clone()),
                     &effective_task_id,
                 )
-                .await;
+                .await?;
             }
             result
         }
@@ -490,8 +626,16 @@ pub async fn handle_task_complete(
     let completed_session = if let Some(session_id) = scope.session_id.as_deref() {
         complete_session_target(flow, &scope.group_id, session_id, status, &cmd.payload).await?
     } else {
-        flow.group.update_status(&scope.group_id, group_status).await?;
-        complete_service_session_if_needed(flow, &group, &scope.group_id, status, &cmd.payload).await?
+        crate::update_group_status(
+            flow.group.as_ref(),
+            &scope.group_id,
+            group_status,
+            format!("task_{status}"),
+            crate::bot_event_actor(&cmd.bot_id),
+        )
+        .await?;
+        complete_service_session_if_needed(flow, &group, &scope.group_id, status, &cmd.payload)
+            .await?
     };
     log_task_complete(
         &scope.group_id,
@@ -611,6 +755,7 @@ pub async fn handle_task_message(
             run_id: run_id.clone(),
             frame,
             delivery_kind,
+            provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
         .await?;
@@ -654,7 +799,7 @@ pub async fn handle_task_message(
         None,
         &run_id,
     )
-    .await;
+    .await?;
     let frontend_deliveries = publish_task_message_to_workbench(
         flow,
         &group,

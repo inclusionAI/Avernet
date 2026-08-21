@@ -82,6 +82,7 @@ mod tests {
             originator: Some("bot-2".into()),
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants: vec![
                 Participant {
                     bot_uuid: "bot-1".into(),
@@ -154,6 +155,7 @@ mod tests {
             originator: Some("bot-1".into()),
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants: vec![Participant {
                 bot_uuid: "bot-1".into(),
                 bot_name: Some("测试Bot".into()),

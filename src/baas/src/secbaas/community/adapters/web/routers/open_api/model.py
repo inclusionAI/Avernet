@@ -1,7 +1,7 @@
 """Open API request/response model definitions"""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -113,6 +113,59 @@ class StreamMessageRequest(BaseModel):
             "bot_options.lifecycle_stage (str, optional): Bot lifecycle stage, set to 'eval' for eval routing."
         ),
     )
+
+
+class InteractionResolveParams(BaseModel):
+    """Validated parameters for ``interaction.resolve``."""
+
+    session_key: str = Field(..., alias="sessionKey", min_length=1)
+    interaction_id: str = Field(..., alias="interactionId", min_length=1)
+    decision: str = Field(..., min_length=1)
+
+    model_config = {"populate_by_name": True, "extra": "forbid"}
+
+
+class InteractionResolveEnvelope(BaseModel):
+    """HTTP uplink envelope for ``interaction.resolve``."""
+
+    type: Literal["req"]
+    id: str = Field(..., min_length=1, description="Client request id")
+    method: Literal["interaction.resolve"]
+    params: InteractionResolveParams
+
+    model_config = {"extra": "forbid"}
+
+
+class InteractionResolveAcceptedPayload(BaseModel):
+    interaction_id: str = Field(..., alias="interactionId")
+    accepted: Literal[True] = True
+    delivery_status: Literal["queued"] = Field(default="queued", alias="deliveryStatus")
+
+    model_config = {"populate_by_name": True, "extra": "forbid"}
+
+
+class InteractionResolveError(BaseModel):
+    code: str
+    message: str
+
+
+class InteractionResolveSuccessEnvelope(BaseModel):
+    type: Literal["res"] = "res"
+    id: str
+    ok: Literal[True] = True
+    payload: InteractionResolveAcceptedPayload
+
+
+class InteractionResolveErrorEnvelope(BaseModel):
+    type: Literal["res"] = "res"
+    id: str
+    ok: Literal[False] = False
+    error: InteractionResolveError
+
+
+InteractionResolveResponse = (
+    InteractionResolveSuccessEnvelope | InteractionResolveErrorEnvelope
+)
 
 
 class MessageResponseData(BaseModel):

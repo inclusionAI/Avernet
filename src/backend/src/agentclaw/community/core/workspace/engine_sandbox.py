@@ -1,6 +1,6 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,9 @@ class EngineBuildPlan:
     # 两者同时为空时跳过额外同步。
     extra_sync_source_relpath: str = ""
     extra_sync_target_relpath: str = ""
+    # Extra individual files to copy after the primary rsync. Useful for
+    # preserving a small allowlist inside an otherwise excluded runtime dir.
+    extra_include_files: list[str] = field(default_factory=list)
 
 
 @runtime_checkable
@@ -60,6 +63,7 @@ class EngineSandboxProvider(Protocol):
     def get_build_plan(
         self,
         build_rsync_excludes_append: list[str] | None = None,
+        bot: dict[str, Any] | None = None,
     ) -> EngineBuildPlan:
         """Return build plan with optional Bot-level build_rsync_excludes append.
 
@@ -67,6 +71,14 @@ class EngineSandboxProvider(Protocol):
             build_rsync_excludes_append: Bot-level excludes from ac_bots.ext.
                 可选参数，为 None 时使用模块级默认值。
                 **合并语义**：与默认值合并（去重），而非完全覆盖。
+            bot: 可选的 per-Bot 上下文，实现可用来定制 build plan（例如派生
+                额外的 rsync excludes）。为 None 表示无 Bot 上下文，实现应回退
+                到默认行为。**默认 no-op 语义**：不消费本参数的实现（如
+                openclaw / claude_code）必须接受并忽略它；只有需要 per-Bot
+                定制的实现（如 aicoding）才会读取它。当前 aicoding 据此从
+                ``bot["template_config"]``（ac_templates.ext）派生 workspace
+                下声明仓库的排除项，且仅在 get_build_plan 内部消费，不会把
+                该参数透出到更上层。
         """
         ...
 

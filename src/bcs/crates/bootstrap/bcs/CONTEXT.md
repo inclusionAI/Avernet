@@ -14,12 +14,17 @@
   Upgrade Routers.
 - Composition adapter that publishes a completed one-shot state-machine result
   through the message-flow service under the initiating Bot identity.
+- Composition of the Event Subscription application service from the selected
+  Memory/SQL Event Store, shared outbound URL guard, Webhook client, and managed
+  Eventing worker lifecycle.
 
 ## Consumes
 
 - `bcs-config-api` config DTOs and bootstrap-owned config loading helpers.
 - `adapters/*`, `services/*`, `plugin-api/*`, `plugins/*`, and `external-clients/*` crates.
 - `bcs-api-http` and its application-only V1 contract boundary.
+- `bcs-eventing`, `bcs-event-store`, and `bcs-webhook-client` concrete runtime
+  assembly boundaries.
 - Process env, config files, and CLI flags.
 
 ## Allowed dependencies
@@ -51,10 +56,15 @@
   Mist or other non-env deployments may set the field to their deployment-specific
   logical secret name. Missing or empty material aborts Router construction and
   is never replaced by another JWT secret.
+- Production Eventing refuses weak outbound security or localhost/non-standard-port
+  escape settings; local test assembly must opt in explicitly.
 
 ## Runtime ownership
 
 The crate owns process lifecycle, adapter mounting, and startup/shutdown wiring.
+Eventing workers initialize in orchestrator registration order and shut down in
+reverse order; disabled Eventing injects a capability-disabled application
+service and registers no worker lifecycle.
 It selects concrete V1 application facades and injects their Gateway Principal
 verifier, but does not own request-time business policy.
 

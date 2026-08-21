@@ -42,6 +42,40 @@ def test_real_skill_service_factory_create(test_injector):
     assert svc.runtime_uses_pool_paths is False
 
 
+def test_default_capabilities_ext_info_provider_uses_unwrapped_template_config(
+    monkeypatch,
+):
+    from agentclaw.community.di.modules import skill_center_module
+
+    template_config = {
+        "bot_template_config": {
+            "preset_capabilities": {
+                "mcp": [{"server_code": "mcp.ant.custom.template.server"}],
+            }
+        }
+    }
+
+    class FakeTemplateService:
+        def get_template_config(self, bot_id):
+            assert bot_id == "bot-1"
+            return template_config
+
+    class FakeInjector:
+        def get(self, cls):
+            assert cls is FakeTemplateService
+            return FakeTemplateService()
+
+    monkeypatch.setattr(
+        skill_center_module,
+        "_template_service_cls",
+        lambda: FakeTemplateService,
+    )
+
+    provider = skill_center_module._build__ext_info_provider(FakeInjector())
+
+    assert provider("bot-1") == {"template_config": template_config}
+
+
 @pytest.mark.parametrize(
     ("engine", "engine_root", "active_dir"),
     [
@@ -360,6 +394,37 @@ def test_real_skill_set_service_factory_create_default_branch(test_injector):
     svc = factory.create()
     assert isinstance(svc, SkillSetService)
 
+
+
+def test_skill_set_factory_threads_explicit_runtime_engine_to_pool_paths(
+    test_injector,
+):
+    factory = test_injector.get(SkillSetServiceFactory)
+    pool_resolution_calls = []
+
+    def resolve_pool_paths(owner_id, bot_id, engine_type):
+        pool_resolution_calls.append((owner_id, bot_id, engine_type))
+        return (
+            "/pool/active",
+            "/pool/local",
+            "/pool/repo",
+        )
+
+    factory._pool_layout_paths = resolve_pool_paths
+
+    svc = factory.create(
+        user_id="owner-1",
+        entity_id="owner-1",
+        bot_id="bot-1",
+        engine_type="claude_code",
+        runtime_engine_type="aicoding",
+    )
+
+    assert pool_resolution_calls[-1] == ("owner-1", "bot-1", "aicoding")
+    assert svc.engine_type == "claude_code"
+    assert svc.runtime_engine_type == "aicoding"
+    assert str(svc.local_dir) == "/pool/local"
+    assert str(svc.repo_dir) == "/pool/repo"
 
 def test_real_skill_set_service_factory_create_bot_paths_branch(test_injector):
     """user_id/entity_id present → the _get_bot_paths (if) branch the

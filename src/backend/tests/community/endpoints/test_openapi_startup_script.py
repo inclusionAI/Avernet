@@ -8,7 +8,7 @@ These are declared cases, not baseline entries. The claim that ``/openapi/v1``
 routes cannot be covered until the #651 principal minter exists does not hold
 for them — a case can mint its own gateway principal (as the skills group
 already does), and a **user** principal is enough here because
-``require_granted_bot`` is a no-op for a human caller; only an application
+``require_granted_own_bot`` is a no-op for a human caller; only an application
 needs a live grant.
 """
 
@@ -59,7 +59,7 @@ def _principal() -> str:
     """A gateway-signed principal naming a **user** and no application.
 
     No ``app`` entry on purpose: that is what makes the caller a human, and a
-    human is waved through ``require_granted_bot`` because the operation's own
+    human is waved through ``require_granted_own_bot`` because the operation's own
     owner-scoped resolve already refuses a bot that is not theirs.
     """
     now = int(time.time())

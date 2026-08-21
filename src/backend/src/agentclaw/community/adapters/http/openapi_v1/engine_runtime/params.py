@@ -43,7 +43,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
-    GrantCheckedDep,
+    AddressedBotGrantDep,
 )
 from agentclaw.community.log import get_logger
 
@@ -85,7 +85,7 @@ WRITE_STAGE_DESCRIPTION = (
 
 async def resolve_owner_id(
     caller: ActingCallerDep,
-    granted_owner_id: GrantCheckedDep,
+    granted_owner_id: AddressedBotGrantDep,
     owner_id: Annotated[
         str | None,
         Query(

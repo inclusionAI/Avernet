@@ -10,8 +10,12 @@ use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::debug;
 
+use bcs_event_store::MemoryEventStore;
 use bcs_service_api::core::session::{can_reactivate, new_session_id, validate_session_id};
-use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
+use bcs_service_api::port::repo::{
+    AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent,
+    NewSessionParams, RemoveSessionParticipantWithEvent, SessionRepoPort,
+};
 use bcs_service_api::{
     GroupSessionMetricCount, GroupSessionMetricsSnapshotPort, Participant, ParticipantMode,
     ServiceError, ServiceResult, Session, SessionKind, SessionStatus,
@@ -37,6 +41,54 @@ fn initial_callback_status(kind: SessionKind) -> Option<String> {
     }
 }
 
+fn session_from_params(
+    id: String,
+    group_id: &str,
+    params: &NewSessionParams,
+    now: u64,
+) -> Session {
+    Session {
+        id,
+        group_id: group_id.to_string(),
+        session_title: params.session_title.clone(),
+        env: None,
+        status: SessionStatus::Running,
+        session_kind: params.session_kind,
+        participants: params.participants.clone(),
+        group_version: params.group_version,
+        caller_id: params.caller_id.clone(),
+        input: params.input.clone(),
+        output: None,
+        error_message: None,
+        callback_status: initial_callback_status(params.session_kind),
+        activation_count: 1,
+        caller_principal: params.caller_principal.clone(),
+        created_by: params.created_by.clone(),
+        meta: params.meta.clone(),
+        current_msg_seq: 0,
+        participant_join_seq: None,
+        created_at: now,
+        updated_at: now,
+        completed_at: None,
+        collected_at: None,
+    }
+}
+
+fn validate_session_event_scope(
+    session: &Session,
+    event: &bcs_service_api::port::repo::AppendEventRecord,
+) -> ServiceResult<()> {
+    if event.event.scope.group_id.as_deref() != Some(session.group_id.as_str())
+        || event.event.scope.session_id.as_deref() != Some(session.id.as_str())
+    {
+        return Err(ServiceError::InvalidOperation {
+            message: "Session Event scope does not match the mutated Session".to_string(),
+            request_id: None,
+        });
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -60,12 +112,18 @@ struct MemoryState {
 #[derive(Default)]
 pub struct MemorySessionRepo {
     state: Arc<RwLock<MemoryState>>,
+    event_store: Option<Arc<MemoryEventStore>>,
 }
 
 impl MemorySessionRepo {
     /// Create a new empty in-memory session repository.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_event_store(mut self, event_store: Arc<MemoryEventStore>) -> Self {
+        self.event_store = Some(event_store);
+        self
     }
 }
 
@@ -113,69 +171,20 @@ impl SessionRepoPort for MemorySessionRepo {
                     "session {id} already exists"
                 )));
             }
-            let sess = Session {
-                id: id.clone(),
-                group_id: group_id.to_string(),
-                session_title: params.session_title.clone(),
-                env: None,
-                status: SessionStatus::Running,
-                session_kind: params.session_kind,
-                participants: params.participants.clone(),
-                group_version: params.group_version,
-                caller_id: params.caller_id.clone(),
-                input: params.input.clone(),
-                output: None,
-                error_message: None,
-                callback_status: initial_callback_status(params.session_kind),
-                activation_count: 1,
-                caller_principal: params.caller_principal.clone(),
-                created_by: params.created_by.clone(),
-                meta: params.meta.clone(),
-                current_msg_seq: 0,
-                participant_join_seq: None,
-                created_at: now,
-                updated_at: now,
-                completed_at: None,
-                collected_at: None,
-            };
+            let sess = session_from_params(id.clone(), group_id, &params, now);
             st.sessions.insert(id.clone(), sess.clone());
             return Ok(sess);
         }
 
         // Auto-generated id: retry 3 times to handle the ~0 probability collision.
         for _attempt in 0..3 {
-            let id = new_session_id(group_id).map_err(|error| {
-                ServiceError::SessionInvalidParams(error.to_string())
-            })?;
+            let id = new_session_id(group_id)
+                .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
             let mut st = self.state.write().await;
             if st.sessions.contains_key(&id) {
                 continue;
             }
-            let sess = Session {
-                id: id.clone(),
-                group_id: group_id.to_string(),
-                session_title: params.session_title.clone(),
-                env: None,
-                status: SessionStatus::Running,
-                session_kind: params.session_kind,
-                participants: params.participants.clone(),
-                group_version: params.group_version,
-                caller_id: params.caller_id.clone(),
-                input: params.input.clone(),
-                output: None,
-                error_message: None,
-                callback_status: initial_callback_status(params.session_kind),
-                activation_count: 1,
-                caller_principal: params.caller_principal.clone(),
-                created_by: params.created_by.clone(),
-                meta: params.meta.clone(),
-                current_msg_seq: 0,
-                participant_join_seq: None,
-                created_at: now,
-                updated_at: now,
-                completed_at: None,
-                collected_at: None,
-            };
+            let sess = session_from_params(id.clone(), group_id, &params, now);
             st.sessions.insert(id.clone(), sess.clone());
             return Ok(sess);
         }
@@ -183,6 +192,47 @@ impl SessionRepoPort for MemorySessionRepo {
         Err(ServiceError::SessionInvalidParams(
             "session_id collision retry exhausted (3 attempts)".to_string(),
         ))
+    }
+
+    async fn create_with_event(&self, command: CreateSessionWithEvent) -> ServiceResult<Session> {
+        let event_store = self.event_store.as_ref().ok_or_else(|| {
+            ServiceError::InternalError(
+                "Eventful Memory Session creation requires the shared Memory Event Store"
+                    .to_string(),
+            )
+        })?;
+        let session_id = command.params.id.clone().ok_or_else(|| {
+            ServiceError::SessionInvalidParams(
+                "Eventful Session creation requires a preallocated session_id".to_string(),
+            )
+        })?;
+        if !validate_session_id(&session_id, &command.group_id) {
+            return Err(ServiceError::SessionInvalidParams(format!(
+                "session_id {session_id} not valid for group {}",
+                command.group_id
+            )));
+        }
+        let candidate = session_from_params(
+            session_id.clone(),
+            &command.group_id,
+            &command.params,
+            now_ms(),
+        );
+        validate_session_event_scope(&candidate, &command.event)?;
+        let mut state = self.state.write().await;
+        if state.sessions.contains_key(&session_id) {
+            return Err(ServiceError::SessionInvalidParams(format!(
+                "session {session_id} already exists"
+            )));
+        }
+        event_store
+            .commit_business_mutation(&command.event, || {
+                state.sessions.insert(session_id, candidate.clone());
+                Ok(())
+            })
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        Ok(candidate)
     }
 
     async fn get(&self, session_id: &str) -> Option<Session> {
@@ -224,9 +274,7 @@ impl SessionRepoPort for MemorySessionRepo {
                 })
             })
             .filter(|s| {
-                participant_id.map_or(true, |pid| {
-                    s.participants.iter().any(|p| p.bot_uuid == pid)
-                })
+                participant_id.map_or(true, |pid| s.participants.iter().any(|p| p.bot_uuid == pid))
             })
             .cloned()
             .collect();
@@ -287,9 +335,7 @@ impl SessionRepoPort for MemorySessionRepo {
                 })
             })
             .filter(|s| {
-                participant_id.map_or(true, |pid| {
-                    s.participants.iter().any(|p| p.bot_uuid == pid)
-                })
+                participant_id.map_or(true, |pid| s.participants.iter().any(|p| p.bot_uuid == pid))
             })
             .count() as u64)
     }
@@ -339,6 +385,51 @@ impl SessionRepoPort for MemorySessionRepo {
         sess.completed_at = Some(now);
         debug!(session_id = %session_id, "Session completed");
         Ok(Some(sess.clone()))
+    }
+
+    async fn complete_if_running_with_event(
+        &self,
+        command: CompleteSessionWithEvent,
+    ) -> ServiceResult<Option<Session>> {
+        let event_store = self.event_store.as_ref().ok_or_else(|| {
+            ServiceError::InternalError(
+                "Eventful Memory Session completion requires the shared Memory Event Store"
+                    .to_string(),
+            )
+        })?;
+        let mut state = self.state.write().await;
+        let current = state
+            .sessions
+            .get(&command.session_id)
+            .cloned()
+            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
+        if current.status == SessionStatus::Completed {
+            return Ok(None);
+        }
+        if current.activation_count != command.expected_activation_count {
+            return Err(ServiceError::Conflict(format!(
+                "Session '{}' activation changed during completion",
+                command.session_id
+            )));
+        }
+        let mut candidate = current;
+        let now = now_ms();
+        candidate.status = SessionStatus::Completed;
+        candidate.output = command.output;
+        candidate.error_message = command.error;
+        candidate.updated_at = now;
+        candidate.completed_at = Some(now);
+        validate_session_event_scope(&candidate, &command.event)?;
+        event_store
+            .commit_business_mutation(&command.event, || {
+                state
+                    .sessions
+                    .insert(command.session_id.clone(), candidate.clone());
+                Ok(())
+            })
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        Ok(Some(candidate))
     }
 
     async fn reactivate(
@@ -394,11 +485,7 @@ impl SessionRepoPort for MemorySessionRepo {
 
         // Idempotent: skip if bot already in list.
         let bot_uuid = participant.bot_uuid.clone();
-        if !sess
-            .participants
-            .iter()
-            .any(|p| p.bot_uuid == bot_uuid)
-        {
+        if !sess.participants.iter().any(|p| p.bot_uuid == bot_uuid) {
             sess.participants.push(participant);
             sess.updated_at = now;
         }
@@ -420,11 +507,63 @@ impl SessionRepoPort for MemorySessionRepo {
         Ok(sess.clone())
     }
 
-    async fn remove_participant(
+    async fn add_participant_with_event(
         &self,
-        session_id: &str,
-        bot_uuid: &str,
+        command: AddSessionParticipantWithEvent,
     ) -> ServiceResult<Session> {
+        let event_store = self.event_store.as_ref().ok_or_else(|| {
+            ServiceError::InternalError(
+                "Eventful Memory Session participant addition requires the shared Memory Event Store"
+                    .to_string(),
+            )
+        })?;
+        let mut state = self.state.write().await;
+        let current = state
+            .sessions
+            .get(&command.session_id)
+            .cloned()
+            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
+        if current
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == command.participant.bot_uuid)
+        {
+            return Ok(current);
+        }
+        if serde_json::to_value(&current.participants).ok()
+            != serde_json::to_value(&command.expected_participants).ok()
+        {
+            return Err(ServiceError::Conflict(format!(
+                "Session '{}' participants changed during addition",
+                command.session_id
+            )));
+        }
+        let mut candidate = current;
+        let bot_uuid = command.participant.bot_uuid.clone();
+        candidate.participants.push(command.participant);
+        candidate.updated_at = now_ms();
+        let mut join_map = candidate
+            .participant_join_seq
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        join_map.insert(bot_uuid, serde_json::json!(candidate.current_msg_seq));
+        candidate.participant_join_seq = Some(serde_json::Value::Object(join_map));
+        validate_session_event_scope(&candidate, &command.event)?;
+        event_store
+            .commit_business_mutation(&command.event, || {
+                state
+                    .sessions
+                    .insert(command.session_id.clone(), candidate.clone());
+                Ok(())
+            })
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        Ok(candidate)
+    }
+
+    async fn remove_participant(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<Session> {
         let now = now_ms();
         let mut st = self.state.write().await;
         let sess = st
@@ -447,6 +586,58 @@ impl SessionRepoPort for MemorySessionRepo {
         Ok(updated)
     }
 
+    async fn remove_participant_with_event(
+        &self,
+        command: RemoveSessionParticipantWithEvent,
+    ) -> ServiceResult<Session> {
+        let event_store = self.event_store.as_ref().ok_or_else(|| {
+            ServiceError::InternalError(
+                "Eventful Memory Session participant removal requires the shared Memory Event Store"
+                    .to_string(),
+            )
+        })?;
+        let mut state = self.state.write().await;
+        let current = state
+            .sessions
+            .get(&command.session_id)
+            .cloned()
+            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
+        if serde_json::to_value(&current.participants).ok()
+            != serde_json::to_value(&command.expected_participants).ok()
+        {
+            return Err(ServiceError::Conflict(format!(
+                "Session '{}' participants changed during removal",
+                command.session_id
+            )));
+        }
+        let mut candidate = current;
+        let previous_len = candidate.participants.len();
+        candidate
+            .participants
+            .retain(|participant| participant.bot_uuid != command.bot_uuid);
+        if candidate.participants.len() == previous_len {
+            return Err(ServiceError::SessionInvalidParams(format!(
+                "participant {} not in session {}",
+                command.bot_uuid, command.session_id
+            )));
+        }
+        candidate.updated_at = now_ms();
+        validate_session_event_scope(&candidate, &command.event)?;
+        event_store
+            .commit_business_mutation(&command.event, || {
+                state
+                    .sessions
+                    .insert(command.session_id.clone(), candidate.clone());
+                state.collected.retain(|key, _| {
+                    !(key.0 == command.session_id && key.1 == command.bot_uuid)
+                });
+                Ok(())
+            })
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        Ok(candidate)
+    }
+
     async fn update_participant_mode(
         &self,
         session_id: &str,
@@ -464,9 +655,11 @@ impl SessionRepoPort for MemorySessionRepo {
             .participants
             .iter_mut()
             .find(|p| p.bot_uuid == bot_uuid)
-            .ok_or_else(|| ServiceError::SessionInvalidParams(format!(
-                "participant {bot_uuid} not in session {session_id}"
-            )))?;
+            .ok_or_else(|| {
+                ServiceError::SessionInvalidParams(format!(
+                    "participant {bot_uuid} not in session {session_id}"
+                ))
+            })?;
 
         p.mode = Some(mode);
         sess.updated_at = now;
@@ -544,7 +737,8 @@ impl SessionRepoPort for MemorySessionRepo {
         if !st.sessions.contains_key(session_id) {
             return Err(ServiceError::SessionNotFound(session_id.to_string()));
         }
-        st.collected.remove(&(session_id.to_string(), bot_uuid.to_string()));
+        st.collected
+            .remove(&(session_id.to_string(), bot_uuid.to_string()));
         Ok(())
     }
 
@@ -595,14 +789,13 @@ impl SessionRepoPort for MemorySessionRepo {
             let kb = b.collected_at.unwrap_or(b.created_at);
             kb.cmp(&ka).then(b.id.cmp(&a.id))
         });
-        v.into_iter().skip(offset as usize).take(limit as usize).collect()
+        v.into_iter()
+            .skip(offset as usize)
+            .take(limit as usize)
+            .collect()
     }
 
-    async fn collected_at_map(
-        &self,
-        session_ids: &[&str],
-        bot_uuid: &str,
-    ) -> Vec<(String, u64)> {
+    async fn collected_at_map(&self, session_ids: &[&str], bot_uuid: &str) -> Vec<(String, u64)> {
         let st = self.state.read().await;
         session_ids
             .iter()
@@ -637,11 +830,19 @@ mod tests {
     #[tokio::test]
     async fn list_by_group_title_filter() {
         let repo = MemorySessionRepo::new();
-        repo.create("g1", sample_params(Some("Project Alpha"))).await.unwrap();
-        repo.create("g1", sample_params(Some("Project Beta"))).await.unwrap();
-        repo.create("g1", sample_params(Some("Other"))).await.unwrap();
+        repo.create("g1", sample_params(Some("Project Alpha")))
+            .await
+            .unwrap();
+        repo.create("g1", sample_params(Some("Project Beta")))
+            .await
+            .unwrap();
+        repo.create("g1", sample_params(Some("Other")))
+            .await
+            .unwrap();
 
-        let sessions = repo.list_by_group("g1", None, 0, 10, Some("alpha"), None).await;
+        let sessions = repo
+            .list_by_group("g1", None, 0, 10, Some("alpha"), None)
+            .await;
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_title.as_deref(), Some("Project Alpha"));
     }
@@ -687,10 +888,16 @@ mod tests {
     #[tokio::test]
     async fn list_by_group_title_filter_case_insensitive() {
         let repo = MemorySessionRepo::new();
-        repo.create("g1", sample_params(Some("PROJECT ALPHA"))).await.unwrap();
-        repo.create("g1", sample_params(Some("beta"))).await.unwrap();
+        repo.create("g1", sample_params(Some("PROJECT ALPHA")))
+            .await
+            .unwrap();
+        repo.create("g1", sample_params(Some("beta")))
+            .await
+            .unwrap();
 
-        let sessions = repo.list_by_group("g1", None, 0, 10, Some("alpha"), None).await;
+        let sessions = repo
+            .list_by_group("g1", None, 0, 10, Some("alpha"), None)
+            .await;
         assert_eq!(sessions.len(), 1);
     }
 
@@ -705,7 +912,9 @@ mod tests {
         params_b.participants = vec![bot_participant("bot_2", "Bob")];
         repo.create("g1", params_b).await.unwrap();
 
-        let sessions = repo.list_by_group("g1", None, 0, 10, None, Some("bot_1")).await;
+        let sessions = repo
+            .list_by_group("g1", None, 0, 10, None, Some("bot_1"))
+            .await;
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_title.as_deref(), Some("Sess A"));
     }
@@ -718,11 +927,15 @@ mod tests {
         repo.create("g1", params).await.unwrap();
 
         // Both filters match
-        let sessions = repo.list_by_group("g1", None, 0, 10, Some("review"), Some("human_1")).await;
+        let sessions = repo
+            .list_by_group("g1", None, 0, 10, Some("review"), Some("human_1"))
+            .await;
         assert_eq!(sessions.len(), 1);
 
         // participant matches but title doesn't
-        let sessions = repo.list_by_group("g1", None, 0, 10, Some("xyz"), Some("human_1")).await;
+        let sessions = repo
+            .list_by_group("g1", None, 0, 10, Some("xyz"), Some("human_1"))
+            .await;
         assert_eq!(sessions.len(), 0);
     }
 
@@ -745,7 +958,10 @@ mod tests {
         // Create 24 sessions without the target participant
         for i in 0..24 {
             let mut params = sample_params(Some(&format!("Session {}", i)));
-            params.participants = vec![Participant::bot("bot_a", bcs_service_api::ParticipantRole::Consultant)];
+            params.participants = vec![Participant::bot(
+                "bot_a",
+                bcs_service_api::ParticipantRole::Consultant,
+            )];
             repo.create("g1", params).await.unwrap();
         }
         // Create the 25th session WITH the target participant
@@ -761,7 +977,9 @@ mod tests {
         repo.create("g1", params).await.unwrap();
 
         // Query with LIMIT 5 — the target is at position 25 (well past the limit)
-        let sessions = repo.list_by_group("g1", None, 0, 5, None, Some(target)).await;
+        let sessions = repo
+            .list_by_group("g1", None, 0, 5, None, Some(target))
+            .await;
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_title.as_deref(), Some("Target Session"));
     }
@@ -775,7 +993,10 @@ mod tests {
                 gid,
                 NewSessionParams {
                     session_kind: SessionKind::Chat,
-                    participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
+                    participants: vec![Participant::bot(
+                        "bot1",
+                        bcs_service_api::ParticipantRole::Driver,
+                    )],
                     ..Default::default()
                 },
             )
@@ -783,20 +1004,28 @@ mod tests {
             .expect("create");
 
         // not collected yet
-        let listed = repo.list_collected_by_group(gid, "bot1", None, None, 0, 10).await;
+        let listed = repo
+            .list_collected_by_group(gid, "bot1", None, None, 0, 10)
+            .await;
         assert!(listed.is_empty());
 
         repo.collect(&sess.id, "bot1").await.expect("collect");
-        let listed = repo.list_collected_by_group(gid, "bot1", None, None, 0, 10).await;
+        let listed = repo
+            .list_collected_by_group(gid, "bot1", None, None, 0, 10)
+            .await;
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, sess.id);
 
         // other bot does not see bot1's collection
-        let other = repo.list_collected_by_group(gid, "bot2", None, None, 0, 10).await;
+        let other = repo
+            .list_collected_by_group(gid, "bot2", None, None, 0, 10)
+            .await;
         assert!(other.is_empty());
 
         repo.uncollect(&sess.id, "bot1").await.expect("uncollect");
-        let listed = repo.list_collected_by_group(gid, "bot1", None, None, 0, 10).await;
+        let listed = repo
+            .list_collected_by_group(gid, "bot1", None, None, 0, 10)
+            .await;
         assert!(listed.is_empty());
     }
 
@@ -814,16 +1043,27 @@ mod tests {
         let mk = |id: &str| NewSessionParams {
             id: Some(id.to_string()),
             session_kind: SessionKind::Chat,
-            participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
+            participants: vec![Participant::bot(
+                "bot1",
+                bcs_service_api::ParticipantRole::Driver,
+            )],
             ..Default::default()
         };
-        let s1 = repo.create(gid, mk(&format!("{}:00000001", gid))).await.expect("create s1");
-        let s2 = repo.create(gid, mk(&format!("{}:00000002", gid))).await.expect("create s2");
+        let s1 = repo
+            .create(gid, mk(&format!("{}:00000001", gid)))
+            .await
+            .expect("create s1");
+        let s2 = repo
+            .create(gid, mk(&format!("{}:00000002", gid)))
+            .await
+            .expect("create s2");
 
         repo.collect(&s1.id, "bot1").await.expect("collect s1");
         repo.collect(&s2.id, "bot1").await.expect("collect s2");
 
-        let listed = repo.list_collected_by_group(gid, "bot1", None, None, 0, 10).await;
+        let listed = repo
+            .list_collected_by_group(gid, "bot1", None, None, 0, 10)
+            .await;
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].id, s2.id);
         assert_eq!(listed[1].id, s1.id);
@@ -838,7 +1078,10 @@ mod tests {
                 gid,
                 NewSessionParams {
                     session_kind: SessionKind::Chat,
-                    participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
+                    participants: vec![Participant::bot(
+                        "bot1",
+                        bcs_service_api::ParticipantRole::Driver,
+                    )],
                     ..Default::default()
                 },
             )
@@ -857,16 +1100,23 @@ mod tests {
                 gid,
                 NewSessionParams {
                     session_kind: SessionKind::Chat,
-                    participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
+                    participants: vec![Participant::bot(
+                        "bot1",
+                        bcs_service_api::ParticipantRole::Driver,
+                    )],
                     ..Default::default()
                 },
             )
             .await
             .expect("create");
         // uncollect a never-collected, still-participant session -> Ok
-        repo.uncollect(&sess.id, "bot1").await.expect("uncollect not collected ok");
+        repo.uncollect(&sess.id, "bot1")
+            .await
+            .expect("uncollect not collected ok");
         // uncollect a non-participant -> Ok (idempotent)
-        repo.uncollect(&sess.id, "nobody").await.expect("uncollect non-participant ok");
+        repo.uncollect(&sess.id, "nobody")
+            .await
+            .expect("uncollect non-participant ok");
     }
 
     #[tokio::test]
@@ -874,36 +1124,54 @@ mod tests {
         let repo = MemorySessionRepo::new();
         let gid = "col-group4";
         let s_running = repo
-            .create(gid, NewSessionParams {
-                session_kind: SessionKind::Chat,
-                session_title: Some("Alpha Report".into()),
-                participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
-                ..Default::default()
-            })
+            .create(
+                gid,
+                NewSessionParams {
+                    session_kind: SessionKind::Chat,
+                    session_title: Some("Alpha Report".into()),
+                    participants: vec![Participant::bot(
+                        "bot1",
+                        bcs_service_api::ParticipantRole::Driver,
+                    )],
+                    ..Default::default()
+                },
+            )
             .await
             .expect("create");
         let s_to_complete = repo
-            .create(gid, NewSessionParams {
-                session_kind: SessionKind::Chat,
-                session_title: Some("Beta Note".into()),
-                participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
-                ..Default::default()
-            })
+            .create(
+                gid,
+                NewSessionParams {
+                    session_kind: SessionKind::Chat,
+                    session_title: Some("Beta Note".into()),
+                    participants: vec![Participant::bot(
+                        "bot1",
+                        bcs_service_api::ParticipantRole::Driver,
+                    )],
+                    ..Default::default()
+                },
+            )
             .await
             .expect("create");
-        repo.complete_if_running(&s_to_complete.id, None, None).await.expect("complete");
-        repo.collect(&s_running.id, "bot1").await.expect("collect running");
-        repo.collect(&s_to_complete.id, "bot1").await.expect("collect completed");
+        repo.complete_if_running(&s_to_complete.id, None, None)
+            .await
+            .expect("complete");
+        repo.collect(&s_running.id, "bot1")
+            .await
+            .expect("collect running");
+        repo.collect(&s_to_complete.id, "bot1")
+            .await
+            .expect("collect completed");
 
-        let only_running = repo.list_collected_by_group(
-            gid, "bot1", Some(SessionStatus::Running), None, 0, 10,
-        ).await;
+        let only_running = repo
+            .list_collected_by_group(gid, "bot1", Some(SessionStatus::Running), None, 0, 10)
+            .await;
         assert_eq!(only_running.len(), 1);
         assert_eq!(only_running[0].id, s_running.id);
 
-        let only_alpha = repo.list_collected_by_group(
-            gid, "bot1", None, Some("alpha"), 0, 10,
-        ).await;
+        let only_alpha = repo
+            .list_collected_by_group(gid, "bot1", None, Some("alpha"), 0, 10)
+            .await;
         assert_eq!(only_alpha.len(), 1);
         assert_eq!(only_alpha[0].id, s_running.id);
     }
@@ -913,24 +1181,35 @@ mod tests {
         let repo = MemorySessionRepo::new();
         let gid = "col-group5";
         let sess = repo
-            .create(gid, NewSessionParams {
-                session_kind: SessionKind::Chat,
-                participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
-                ..Default::default()
-            })
+            .create(
+                gid,
+                NewSessionParams {
+                    session_kind: SessionKind::Chat,
+                    participants: vec![Participant::bot(
+                        "bot1",
+                        bcs_service_api::ParticipantRole::Driver,
+                    )],
+                    ..Default::default()
+                },
+            )
             .await
             .expect("create");
         repo.collect(&sess.id, "bot1").await.expect("collect");
         assert_eq!(
-            repo.list_collected_by_group(gid, "bot1", None, None, 0, 10).await.len(),
+            repo.list_collected_by_group(gid, "bot1", None, None, 0, 10)
+                .await
+                .len(),
             1
         );
-        repo.remove_participant(&sess.id, "bot1").await.expect("remove");
-        // after leaving, collection mark is gone (memory set must be pruned)
-        assert!(repo
-            .list_collected_by_group(gid, "bot1", None, None, 0, 10)
+        repo.remove_participant(&sess.id, "bot1")
             .await
-            .is_empty());
+            .expect("remove");
+        // after leaving, collection mark is gone (memory set must be pruned)
+        assert!(
+            repo.list_collected_by_group(gid, "bot1", None, None, 0, 10)
+                .await
+                .is_empty()
+        );
     }
 
     /// `count_by_group` MUST mirror `list_by_group`'s filters and return the
@@ -939,7 +1218,9 @@ mod tests {
     async fn count_by_group_matches_list_filters_without_pagination() {
         let repo = MemorySessionRepo::new();
         // session in another group must be excluded from g1 counts
-        repo.create("other", sample_params(Some("Other"))).await.unwrap();
+        repo.create("other", sample_params(Some("Other")))
+            .await
+            .unwrap();
 
         // 5 sessions in "g1" with mixed status / title / participant
         let mut p1 = sample_params(Some("Alpha"));
@@ -988,13 +1269,17 @@ mod tests {
 
         // Title filter: "alpha" (case-insensitive) → s1, s2, s5 = 3
         assert_eq!(
-            repo.count_by_group("g1", None, Some("alpha"), None).await.unwrap(),
+            repo.count_by_group("g1", None, Some("alpha"), None)
+                .await
+                .unwrap(),
             3
         );
 
         // Participant filter: bot_1 → s1, s3, s5 = 3
         assert_eq!(
-            repo.count_by_group("g1", None, None, Some("bot_1")).await.unwrap(),
+            repo.count_by_group("g1", None, None, Some("bot_1"))
+                .await
+                .unwrap(),
             3
         );
 

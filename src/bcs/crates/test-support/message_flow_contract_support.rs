@@ -6,14 +6,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_protocol::BcsFrame;
 use bcs_service_api::{
-    ActorKind, ActorStatus, AgentCredentials, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
-    BotDeliveryResult, BotDeliveryTarget, BotCapabilities, BotDynamicStatus, BotRegistryCoreService,
-    CoordinationSurface,
-    FrontendDeliveryCommand, FrontendDeliveryPort, FrontendDeliveryResult, Group, GroupMessage,
-    GroupCoreService, GroupStatus, Participant, ParticipantMode, ParticipantRole, RegisteredBot,
-    RedactedToken, RouteAndSendResult, RoutingDecision,
-    RoutingCoreService, RoutingTarget, ServiceError, ServiceResult, StructuredRoutingError,
-    Workspace,
+    ActorKind, ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand, BotDeliveryKind,
+    BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
+    BotRegistryCoreService, CoordinationSurface, FrontendDeliveryCommand, FrontendDeliveryPort,
+    FrontendDeliveryResult, Group, GroupCoreService, GroupMessage, GroupStatus, Participant,
+    ParticipantMode, ParticipantRole, ProviderTransportPreference, RedactedToken, RegisteredBot,
+    RouteAndSendResult, RoutingCoreService, RoutingDecision, RoutingTarget, ServiceError,
+    ServiceResult, StructuredRoutingError, Workspace,
+    core::{GroupMutationCommand, GroupMutationKind},
 };
 use tokio::sync::RwLock;
 
@@ -99,6 +99,28 @@ impl FakeGroupCoreService {
 
 #[async_trait]
 impl GroupCoreService for FakeGroupCoreService {
+    async fn mutate(&self, command: GroupMutationCommand) -> ServiceResult<Group> {
+        let mut groups = self.groups.write().await;
+        let group = groups
+            .get_mut(&command.group_id)
+            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        match command.mutation {
+            GroupMutationKind::UpdateStatus { status, .. } => {
+                if group.status != status {
+                    group.status = status;
+                    group.version = group.version.saturating_add(1);
+                }
+            }
+            _ => {
+                return Err(ServiceError::InvalidOperation {
+                    message: "unsupported eventful mutation in message-flow test fake".to_string(),
+                    request_id: None,
+                });
+            }
+        }
+        Ok(group.clone())
+    }
+
     async fn upsert(&self, group: Group) -> ServiceResult<()> {
         self.groups.write().await.insert(group.id.clone(), group);
         Ok(())
@@ -710,6 +732,7 @@ pub struct RecordingBotDelivery {
     kinds: RwLock<Vec<BotDeliveryKind>>,
     frames: RwLock<Vec<BcsFrame>>,
     targets: RwLock<Vec<BotDeliveryTarget>>,
+    provider_transports: RwLock<Vec<ProviderTransportPreference>>,
     fail_for: RwLock<Vec<String>>,
     not_delivered_for: RwLock<Vec<String>>,
 }
@@ -725,6 +748,10 @@ impl RecordingBotDelivery {
 
     pub async fn targets(&self) -> Vec<BotDeliveryTarget> {
         self.targets.read().await.clone()
+    }
+
+    pub async fn provider_transports(&self) -> Vec<ProviderTransportPreference> {
+        self.provider_transports.read().await.clone()
     }
 
     pub async fn fail_for(&self, bot_id: &str) {
@@ -746,6 +773,10 @@ impl BotDeliveryPort for RecordingBotDelivery {
         let target_bot_id = cmd.target_bot_id().to_string();
         self.targets.write().await.push(cmd.target.clone());
         self.kinds.write().await.push(cmd.delivery_kind);
+        self.provider_transports
+            .write()
+            .await
+            .push(cmd.provider_transport);
         self.frames.write().await.push(cmd.frame);
         if self.fail_for.read().await.contains(&target_bot_id) {
             return Err(ServiceError::BotNotConnected(target_bot_id));

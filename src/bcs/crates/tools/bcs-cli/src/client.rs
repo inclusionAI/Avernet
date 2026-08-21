@@ -1536,6 +1536,7 @@ impl BcsClient {
             target_actor_id: None,
             routing_policy: None,
             context: options.context,
+            opening_message: None,
             topic: options.topic,
             group_kind: None,
             service_spec: None,
@@ -1545,6 +1546,7 @@ impl BcsClient {
             auto_start_on_service_invocation: Some(options.auto_start_on_service_invocation),
             start_initial_run: None,
             visibility: None,
+            event_subscriptions: Vec::new(),
         };
         let response = self
             .add_auth(self.http_client.post(&url).json(&payload))
@@ -1588,6 +1590,7 @@ impl BcsClient {
             label: None,
             routing_policy: None,
             context: None,
+            opening_message: None,
             topic: None,
             group_kind: None,
             service_spec: None,
@@ -1597,6 +1600,7 @@ impl BcsClient {
             auto_start_on_service_invocation: None,
             start_initial_run: None,
             visibility: None,
+            event_subscriptions: Vec::new(),
         };
 
         let response = self
@@ -1665,6 +1669,7 @@ impl BcsClient {
             label: None,
             routing_policy: None,
             context: context.map(|s| s.to_string()),
+            opening_message: None,
             topic: topic.map(|s| s.to_string()),
             group_kind: None,
             service_spec: None,
@@ -1674,6 +1679,7 @@ impl BcsClient {
             auto_start_on_service_invocation: None,
             start_initial_run: None,
             visibility: None,
+            event_subscriptions: Vec::new(),
         };
 
         let response = self
@@ -2637,6 +2643,40 @@ impl BcsClient {
             .json()
             .await
             .context("Invalid list channel bindings response")?;
+        Ok(result)
+    }
+
+    /// List channel conversation mappings for a BCS session.
+    /// `GET /channels/conversations/by-session`
+    pub async fn list_channel_conversations_by_session(
+        &self,
+        bcs_session_id: &str,
+        channel_type: &str,
+    ) -> Result<serde_json::Value> {
+        let url = format!("{}/channels/conversations/by-session", self.base_url);
+        let response = self
+            .add_auth(self.http_client.get(&url).query(&[
+                ("bcs_session_id", bcs_session_id),
+                ("channel_type", channel_type),
+            ]))
+            .send()
+            .await
+            .context("Failed to list channel conversations by session")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "List channel conversations by session failed ({}): {}",
+                status,
+                body
+            ));
+        }
+
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Invalid channel conversation list response")?;
         Ok(result)
     }
 
@@ -4025,6 +4065,34 @@ mod tests {
             .unwrap();
 
         assert!(request.headers().get(BCS_CHAT_VERSION_HEADER).is_none());
+    }
+
+    #[tokio::test]
+    async fn list_channel_conversations_by_session_encodes_query_parameters() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path, query_param},
+        };
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/channels/conversations/by-session"))
+            .and(query_param("bcs_session_id", "group 1:session/1"))
+            .and(query_param("channel_type", "dingtalk"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "items": [] })),
+            )
+            .mount(&server)
+            .await;
+
+        let client = BcsClient::with_token(server.uri(), "bot-token");
+        let response = client
+            .list_channel_conversations_by_session("group 1:session/1", "dingtalk")
+            .await
+            .expect("conversation lookup should succeed");
+
+        assert_eq!(response, serde_json::json!({ "items": [] }));
     }
 
 
