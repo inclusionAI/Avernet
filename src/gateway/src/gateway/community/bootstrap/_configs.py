@@ -20,10 +20,10 @@ class ConfigKey(StrEnum):
     PLUGIN_AUTH = "plugins.auth"
     PLUGIN_AUTHN_APP_TOKEN = "plugins.authn.app_token"
     PLUGIN_AUTHN_TENANT = "plugins.authn.tenant"
-    PLUGIN_DATABASE = "plugins.database.plugin_database"
-    DATABASE_URL = "plugins.database.database_url"
-    CREATE_SCHEMA = "plugins.database.create_schema"
-    SEED_DATA = "plugins.database.seed_data"
+    PLUGIN_DATABASE = "plugins.database"
+    DATABASE_URL = "database.database_url"
+    CREATE_SCHEMA = "database.create_schema"
+    SEED_DATA = "database.seed_data"
     WEB_PORT = "web_port"
 
 
@@ -43,10 +43,27 @@ class ConfigSchema(BaseSettings):
             _CONFIG_SCHEMAS[section] = cls
 
 
-class DatabasePluginConfig(BaseSettings):
-    model_config = _CFG
-    plugin_database: str = Field(default="sqlite")
+class CacheRedisConfig(ConfigSchema):
+    """Redis cache plugin configuration. Only used when ``cache`` is ``redis``."""
+
+    config_section = "cache_redis"
+    url: str = "redis://localhost:6379/0"
+    socket_timeout: float = Field(default=5.0, gt=0)
+    socket_connect_timeout: float = Field(default=5.0, gt=0)
+
+
+class DatabaseSectionConfig(ConfigSchema):
+    """Top-level ``database`` section — connection params for the selected plugin.
+
+    ``database_url`` is a full connection URL:
+    - ``sqlite``: ``sqlite:///:memory:`` or ``sqlite:////tmp/secbaas.db``
+    - ``mariadb``: ``mysql+aiomysql://user:pass@host:port/db?charset=utf8mb4``
+    """
+
+    config_section = "database"
     database_url: str = ""
+    create_schema: bool = Field(default=False)
+    seed_data: bool = Field(default=False)
 
 
 class AuthnPluginConfig(BaseSettings):
@@ -71,8 +88,7 @@ class PluginConfig(ConfigSchema):
     auth: str = Field(default="stub", min_length=1)
     secret: str = Field(default="community", min_length=1)
     authn: AuthnPluginConfig = Field(default_factory=AuthnPluginConfig)
-    database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
-    cache_redis: dict = Field(default_factory=dict)
+    database: str = Field(default="sqlite", min_length=1)
     secret_aliyun_kms: dict = Field(default_factory=dict)
 
 

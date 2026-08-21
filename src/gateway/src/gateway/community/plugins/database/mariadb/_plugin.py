@@ -1,8 +1,8 @@
 """MariaDB ORM plugin — SQLAlchemy with the MariaDB/MySQL dialect.
 
-Wire up as ``plugins.database.plugin_database: mariadb`` with the
-``database_url`` / ``create_schema`` / ``seed_data`` settings, where
-``database_url`` is a full ``mysql+aiomysql://...`` string.  Uses
+Wire up as ``plugins.database: mariadb`` with the sibling top-level
+``database.database_url`` / ``database.create_schema`` / ``database.seed_data``
+settings, where ``database_url`` is a full ``mysql+aiomysql://...`` string.  Uses
 ``mysql+aiomysql`` for the async path and ``mysql+mysqlconnector`` for the
 sync ORM path — MariaDB is wire-compatible with the MySQL protocol, so the
 same driver dialects used by the baas ``mariadb_orm.py`` apply.

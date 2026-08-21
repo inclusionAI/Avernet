@@ -36,20 +36,6 @@ class AuthnPluginConfig(BaseSettings):
     tenant: str = Field(default="stub")
 
 
-class DatabasePluginConfig(BaseSettings):
-    """Database plugin selection — ``sqlite`` by default (community-safe).
-
-    ``mariadb`` requires a ``database_url``. Credentials may be supplied via
-    the ``DATABASE_URL`` environment variable (expanded by the config loader).
-    """
-
-    model_config = SettingsConfigDict(extra="allow")
-    plugin_database: str = Field(default="sqlite")
-    database_url: str = ""
-    create_schema: bool = Field(default=False)
-    seed_data: bool = Field(default=False)
-
-
 class SecretConfig(BaseModel):
     """SecretResolver configuration (mirrors backend ``CommunitySecretConfig``).
 
@@ -209,8 +195,7 @@ class PluginConfig(BaseSettings):
     auth: str = Field(default="stub", min_length=1)
     secret: str = Field(default="community", min_length=1)
     authn: AuthnPluginConfig = Field(default_factory=AuthnPluginConfig)
-    database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
-    cache_redis: dict[str, Any] = Field(default_factory=dict)
+    database: str = Field(default="sqlite", min_length=1)
     secret_aliyun_kms: dict[str, Any] = Field(default_factory=dict)
 
 

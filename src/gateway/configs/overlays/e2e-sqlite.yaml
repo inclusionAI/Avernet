@@ -5,8 +5,8 @@
 # provisioned in-memory schema. Production configs keep these flags false.
 user_config:
   plugins:
-    database:
-      plugin_database: "sqlite"
-      database_url: ""
-      create_schema: true
-      seed_data: true
+    database: "sqlite"
+  database:
+    database_url: ""
+    create_schema: true
+    seed_data: true
