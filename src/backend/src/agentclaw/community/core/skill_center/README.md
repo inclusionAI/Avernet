@@ -96,11 +96,14 @@ internal_dependencies:
 
 Skill-set switching is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
 
-Local Skill compatibility materializes active state in
-`ac_bot_skill_installation`, whose identity is `(tenant, env, owner_id, bot_id,
-skill_id)`, and reads it through the Installation repository.
-HTTP and runtime adapters must not write that table or reconstruct Local active
-state from Default SkillSet exclusions.
+`ac_bot_skill_installation` materializes the current active Desired State with
+identity `(tenant, env, owner_id, bot_id, skill_id)`. During Phase 1 cutover,
+`SkillSetControlPlaneRepository.ensure_active_skillset_installations` lazily
+inserts missing rows for a Bot's ordinary active SkillSet members. It is
+invoked only before a complete runtime reconcile and before a new Service Bot
+Artifact build; it never
+deletes rows, reads historical Default exclusions, or runs in HTTP GET/list,
+Pool convergence, or file-snapshot paths.
 
 MCP Direct activation and ordinary SkillSet MCP membership share the same
 active-only desired-state and compensation boundary as Skills.  The MCP
@@ -123,23 +126,12 @@ release and a 600-second TTL. Runtime reconciliation must finish within that
 lease; a process pause beyond the TTL is recovered by the next full reconcile,
 not by treating the expired lease as an ownership proof.
 
-The P1-01 Local migration is a two-step operation: run the read-only
-`sql/2026_08_20_bot_skill_installation_backfill_dry_run.sql`, retain its
-complete result, then explicitly approve and run
-`sql/2026_08_20_bot_skill_installation_backfill_apply.sql` under the same
-Local-writer freeze. Its selector mirrors the legacy rule that *any* matching
-Default exclusion is inactive, including a stale former-default exclusion; it
-does not require a Default SkillSet membership. It only migrates a `local://`
-asset when its `(env, owner_id, bot_id)` resolves to a live, non-deleted Bot.
-Multiple live Bot rows for the same identity are a fail-closed exception. The
-dry-run reports the exception and the apply script records per-environment
-`legacy_active_local`, `live_exact_bot_candidates`, `ambiguous`, `inserted`,
-and `missing` counts in the run audit before an operator decides to commit.
-The apply script leaves its transaction open; source the paired
-`backfill_verify_commit.sql` in that same session and issue `COMMIT` only after
-its missing-installations count is zero (otherwise `ROLLBACK`).
-The audit run id supports exact rollback only while that writer freeze remains
-in effect; see `sql/2026_08_20_bot_skill_installation_backfill_rollback.sql`.
+Phase 1 does not run a global Local Installation backfill and does not treat
+historical Default exclusions as an active-state source. The small number of
+such historical residues is corrected through DB operations. Normal
+SkillSet/Direct commands continue to maintain Installation synchronously; the
+lazy materializer only fills the missing active ordinary SkillSet rows that
+pre-date the new command path.
 
 Local Skill replacement stages a complete package before switching the existing
 Skill metadata. Its old-package cleanup work is persisted before an Active

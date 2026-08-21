@@ -83,6 +83,128 @@ def test_list_sets_is_scoped_to_exact_owner_for_shared_default_bot_id():
     assert [item["name"] for item in items] == ["mine"]
 
 
+def test_ensure_active_skillset_installations_only_materializes_active_ordinary_members():
+    """Legacy active ordinary Sets gain missing active-only Installations once."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        active = SkillSet(
+            name="active",
+            bolt_id="bot",
+            user_id="owner",
+            is_active=True,
+            # Legacy ordinary sets may have no engine discriminator. They are
+            # effective for the bot's current runtime engine.
+            engine_type=None,
+            env=None,
+        )
+        inactive = SkillSet(
+            name="inactive", bolt_id="bot", user_id="owner", is_active=False, env="dev"
+        )
+        other_engine = SkillSet(
+            name="other-engine",
+            bolt_id="bot",
+            user_id="owner",
+            is_active=True,
+            engine_type="aicoding",
+            env="dev",
+        )
+        default = SkillSet(
+            name="default",
+            bolt_id="bot",
+            user_id="owner",
+            is_default=True,
+            is_active=True,
+            env="dev",
+        )
+        active_skill = Skill(name="active", git_path="git://active", env="dev")
+        inactive_skill = Skill(name="inactive", git_path="git://inactive", env="dev")
+        other_engine_skill = Skill(
+            name="other-engine", git_path="git://other-engine", env="dev"
+        )
+        default_skill = Skill(name="default", git_path="git://default", env="dev")
+        session.add_all(
+            [
+                active,
+                inactive,
+                other_engine,
+                default,
+                active_skill,
+                inactive_skill,
+                other_engine_skill,
+                default_skill,
+            ]
+        )
+        session.flush()
+        session.add_all(
+            [
+                SkillSetSkill(skill_set_id=active.id, skill_id=active_skill.id, env=None),
+                SkillSetSkill(
+                    skill_set_id=inactive.id, skill_id=inactive_skill.id, env="dev"
+                ),
+                SkillSetSkill(
+                    skill_set_id=other_engine.id,
+                    skill_id=other_engine_skill.id,
+                    env="dev",
+                ),
+                SkillSetSkill(
+                    skill_set_id=default.id, skill_id=default_skill.id, env="dev"
+                ),
+            ]
+        )
+
+    repository = SkillSetControlPlaneRepository(db)
+
+    assert (
+        repository.ensure_active_skillset_installations(
+            bot_id="bot", owner_id="owner", engine_type="openclaw"
+        )
+        == 1
+    )
+    # A repeat does not resurrect or modify an already materialized relation.
+    assert (
+        repository.ensure_active_skillset_installations(
+            bot_id="bot", owner_id="owner", engine_type="openclaw"
+        )
+        == 0
+    )
+
+    with db.orm_session() as session:
+        installed = {
+            row.skill_id for row in session.query(BotSkillInstallation).all()
+        }
+        assert installed == {1}
+
+
+def test_ensure_active_skillset_installations_does_not_resurrect_deactivated_set_member():
+    """A later projection cannot re-add a member after its Set is deactivated."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        skill_set = SkillSet(
+            name="active", bolt_id="bot", user_id="owner", is_active=True, env="dev"
+        )
+        skill = Skill(name="member", git_path="git://member", env="dev")
+        session.add_all([skill_set, skill])
+        session.flush()
+        session.add_all(
+            [
+                SkillSetSkill(skill_set_id=skill_set.id, skill_id=skill.id, env="dev"),
+                BotSkillInstallation(
+                    bot_id="bot", owner_id="owner", skill_id=skill.id, env="dev"
+                ),
+            ]
+        )
+
+    repository = SkillSetControlPlaneRepository(db)
+    repository.set_active(bot_id="bot", owner_id="owner", set_id="1", active=False)
+
+    assert (
+        repository.ensure_active_skillset_installations(bot_id="bot", owner_id="owner")
+        == 0
+    )
+    with db.orm_session() as session:
+        assert session.query(BotSkillInstallation).count() == 0
+
+
 def test_activation_rolls_back_all_membership_installations_when_nth_insert_fails():
     """No half-selected set can survive a storage failure at member N."""
     db = _Database()
