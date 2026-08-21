@@ -80,13 +80,6 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     _sub BCS_BOT_ID                BCS_BOT_ID
     _sub BCS_BOT_NAME              BCS_BOT_NAME
 
-    # If BCS_URL is UNSET, disable the BCS channel
-    if [ "${BCS_URL:-UNSET}" = "UNSET" ]; then
-        sed -i 's/"BCS_ENABLED"/false/g' "${CONFIG_FILE}"
-    else
-        sed -i 's/"BCS_ENABLED"/true/g' "${CONFIG_FILE}"
-    fi
-
     # If no gateway token, disable token auth
     if [ "${OPENCLAW_GATEWAY_TOKEN:-UNSET}" = "UNSET" ]; then
         sed -i '/"auth": {/{N;s/"mode": "token", "token": "UNSET"//' "${CONFIG_FILE}" 2>/dev/null || true

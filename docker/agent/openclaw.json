@@ -89,7 +89,7 @@
   },
   "channels": {
     "bcs": {
-      "enabled": "BCS_ENABLED",
+      "enabled": true,
       "bcsUrl": "BCS_URL",
       "botId": "BCS_BOT_ID",
       "botName": "BCS_BOT_NAME",
