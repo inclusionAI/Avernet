@@ -15,6 +15,7 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterMarketSearchError,
     SkillCenterMarketSearchRequest,
     SkillCenterMarketSearchResult,
+    SkillCenterPublishStatusError,
     SkillCenterTeamCreateError,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamCreateResult,
@@ -24,7 +25,9 @@ from agentclaw.community.plugin_api.skill_center_client import (
 )
 
 
-class SkillCenterUnsupportedError(SkillCenterMarketSearchError):
+class SkillCenterUnsupportedError(
+    SkillCenterMarketSearchError, SkillCenterPublishStatusError
+):
     """Raised when a Skill Center marketplace operation is invoked in the
     community build, which has no Skill Center."""
 

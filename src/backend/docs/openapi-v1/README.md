@@ -992,15 +992,16 @@ loadtest  local  logs  market  mcp  models  resources  routines  sessions  skill
 work-order-notifications  work-orders
 ```
 
-Nine of those twenty-two — `approvals`, `connection`, `engine`, `identity`,
-`models`, `resources`, `routines`, `sessions`, `skills` — are held **only by the
+Eight of those twenty-two — `approvals`, `connection`, `engine`, `identity`,
+`models`, `resources`, `routines`, and `sessions` — are held **only by the
 retiring addresses**. Bot-first addressing moved every bot-scoped component out
-of that segment, so once the deprecated addresses are removed the list is the
-twelve that remain:
+of that segment. The tenant-level Skill Workbench status route now keeps
+`skills` current at this level, so once the deprecated addresses are removed the
+list is the fourteen that remain:
 
 ```text
-all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  mcp  spaces
-work-order-notifications  work-orders
+all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  mcp  skills
+spaces  work-order-notifications  work-orders
 ```
 
 They are still reserved today, and the list above is the accurate one: a bot

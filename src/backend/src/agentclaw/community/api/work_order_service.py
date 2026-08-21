@@ -16,11 +16,34 @@ if TYPE_CHECKING:
         WorkOrderQueryType,
         WorkOrderRecord,
         WorkOrderReviewResult,
+        WorkOrderDecision,
     )
 
 
 @runtime_checkable
 class WorkOrderServiceProtocol(Protocol):
+    @abstractmethod
+    def create_work_order(
+        self,
+        *,
+        biz_type: str,
+        biz_id: str,
+        applicant_user_id: str,
+        apply_reason: str | None,
+        biz_data: str | None,
+        approver_user_ids: list[str],
+        notification_recipient_user_ids: list[str] | None = None,
+    ) -> WorkOrderRecord: ...
+
+    @abstractmethod
+    def process_approval(
+        self,
+        *,
+        work_order_id: int,
+        actor_id: str,
+        decision: WorkOrderDecision,
+        review_remark: str | None,
+    ) -> WorkOrderReviewResult: ...
     @abstractmethod
     def create_space_join_request(
         self, *, space_id: int, applicant_user_id: str, reason: str

@@ -14,6 +14,18 @@ class WorkOrderStatus(StrEnum):
     REJECTED = "REJECTED"
 
 
+class WorkOrderDecision(StrEnum):
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class WorkOrderApproverStatus(StrEnum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    CANCELLED = "CANCELLED"
+
+
 class WorkOrderBizType(StrEnum):
     SPACE_JOIN = "SPACE_JOIN"
 
@@ -42,6 +54,9 @@ class WorkOrderEventType(StrEnum):
     BOT_COLLABORATOR_APPLIED = "BOT_COLLABORATOR_APPLIED"
     BOT_COLLABORATOR_REVIEWED = "BOT_COLLABORATOR_REVIEWED"
     BOT_MEMBER_ADDED = "BOT_MEMBER_ADDED"
+    SKILL_COLLABORATOR_APPLIED = "SKILL_COLLABORATOR_APPLIED"
+    SKILL_COLLABORATOR_REVIEWED = "SKILL_COLLABORATOR_REVIEWED"
+    SKILL_MEMBER_ADDED = "SKILL_MEMBER_ADDED"
     HUMAN2BOT_FRIEND_APPLIED = "HUMAN2BOT_FRIEND_APPLIED"
     HUMAN2BOT_FRIEND_REVIEWED = "HUMAN2BOT_FRIEND_REVIEWED"
     BOT2BOT_FRIEND_APPLIED = "BOT2BOT_FRIEND_APPLIED"
@@ -59,6 +74,9 @@ EVENT_CATEGORIES: dict[WorkOrderEventType, NotificationCategory] = {
     WorkOrderEventType.BOT_COLLABORATOR_APPLIED: NotificationCategory.APPROVAL,
     WorkOrderEventType.BOT_COLLABORATOR_REVIEWED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT_MEMBER_ADDED: NotificationCategory.NOTICE,
+    WorkOrderEventType.SKILL_COLLABORATOR_APPLIED: NotificationCategory.APPROVAL,
+    WorkOrderEventType.SKILL_COLLABORATOR_REVIEWED: NotificationCategory.NOTICE,
+    WorkOrderEventType.SKILL_MEMBER_ADDED: NotificationCategory.NOTICE,
     WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED: NotificationCategory.APPROVAL,
     WorkOrderEventType.HUMAN2BOT_FRIEND_REVIEWED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT2BOT_FRIEND_APPLIED: NotificationCategory.APPROVAL,
@@ -68,6 +86,19 @@ EVENT_CATEGORIES: dict[WorkOrderEventType, NotificationCategory] = {
     WorkOrderEventType.BOT2BOT_PUBLIC_ORDER_CREATED: NotificationCategory.NOTICE,
     WorkOrderEventType.BOT2BOT_PUBLIC_ORDER_COMPLETED: NotificationCategory.NOTICE,
 }
+
+# Approval events are extracted from the single classification table so new
+# event values only need one category entry above.
+APPROVAL_EVENT_TYPES: frozenset[WorkOrderEventType] = frozenset(
+    event_type
+    for event_type, category in EVENT_CATEGORIES.items()
+    if category is NotificationCategory.APPROVAL
+)
+NOTICE_EVENT_TYPES: frozenset[WorkOrderEventType] = frozenset(
+    event_type
+    for event_type, category in EVENT_CATEGORIES.items()
+    if category is NotificationCategory.NOTICE
+)
 
 
 class WorkOrderMessageTitle(StrEnum):
@@ -88,10 +119,22 @@ class WorkOrderMessageContent(StrEnum):
     SPACE_MEMBER_ADDED = "你已被添加到空间「{space_name}」。"
 
 
+class WorkOrderApproverRecord(BaseModel):
+    id: int
+    work_order_id: int
+    approver_user_id: str
+    status: WorkOrderApproverStatus
+    review_remark: str | None
+    reviewed_at: datetime | None
+    env: str
+    gmt_created: datetime
+    gmt_modified: datetime
+
+
 class WorkOrderRecord(BaseModel):
     id: int
     work_order_no: str
-    biz_type: WorkOrderBizType
+    biz_type: str
     biz_id: str
     applicant_user_id: str
     apply_reason: str | None
@@ -102,6 +145,7 @@ class WorkOrderRecord(BaseModel):
     env: str
     gmt_created: datetime
     gmt_modified: datetime
+    biz_data: str | None = None
 
 
 class WorkOrderNotificationRecord(BaseModel):
@@ -109,8 +153,8 @@ class WorkOrderNotificationRecord(BaseModel):
     work_order_id: int | None
     recipient_user_id: str
     notification_category: NotificationCategory
-    event_type: WorkOrderEventType
-    biz_type: WorkOrderBizType
+    event_type: str
+    biz_type: str
     biz_id: str
     title: str
     content: str | None
@@ -124,8 +168,8 @@ class WorkOrderNotificationRecord(BaseModel):
 class WorkOrderNotificationDraft(BaseModel):
     recipient_user_id: str
     notification_category: NotificationCategory
-    event_type: WorkOrderEventType
-    biz_type: WorkOrderBizType
+    event_type: str
+    biz_type: str
     biz_id: str
     title: str
     content: str
@@ -152,7 +196,7 @@ class WorkOrderListItem(BaseModel):
 
 class WorkOrderDetail(BaseModel):
     work_order: WorkOrderRecord
-    event_type: WorkOrderEventType
+    event_type: str
     title: str
     space_id: int
     space_name: str
@@ -166,3 +210,4 @@ class WorkOrderReviewResult(BaseModel):
     reviewer_user_id: str
     review_remark: str | None
     reviewed_at: datetime
+    decision: WorkOrderDecision = WorkOrderDecision.APPROVED

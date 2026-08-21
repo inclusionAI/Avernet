@@ -42,3 +42,21 @@ CREATE TABLE IF NOT EXISTS ac_work_order_notification (
     KEY idx_work_order_notification_work_order (avernet_tenant, work_order_id, recipient_user_id, env),
     KEY idx_work_order_notification_biz (avernet_tenant, biz_type, biz_id, recipient_user_id, env)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Unified approval extension (existing environments may apply these statements separately).
+ALTER TABLE ac_work_order
+    ADD COLUMN biz_data LONGTEXT NULL COMMENT '业务扩展数据，JSON格式，由业务模块传入';
+
+CREATE TABLE IF NOT EXISTS ac_work_order_approver (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    work_order_id BIGINT UNSIGNED NOT NULL,
+    approver_user_id VARCHAR(256) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    review_remark VARCHAR(512) NULL,
+    reviewed_at DATETIME NULL,
+    env VARCHAR(20) NOT NULL,
+    gmt_created DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_work_order_approver (work_order_id, approver_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

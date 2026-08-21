@@ -78,3 +78,23 @@ for _path, _body in (
         input=_input({"page_num": "not-an-integer", "pageNum": "not-an-integer"}),
         expect=ExpectError(status=422),
     )(lambda: None)
+
+# Skill Center tags is wired through the community unsupported client in this
+# profile; the valid request still exercises the complete adapter path and
+# returns the stable upstream-unavailable response.
+endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/market/skill-center/tags",
+    scenario="happy",
+    seed=_enable_auth,
+    input=CaseInput(headers=_headers()),
+    expect=ExpectSuccess(status=200),
+)(lambda: None)
+endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/market/skill-center/tags",
+    scenario="error",
+    seed=_enable_auth,
+    input=CaseInput(headers={}),
+    expect=ExpectError(status=401),
+)(lambda: None)

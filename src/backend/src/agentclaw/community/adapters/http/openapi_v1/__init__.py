@@ -217,6 +217,7 @@ from .resources import router as resources_router
 from .render_screens import router as render_screens_router
 from .repository_catalog import router as repository_catalog_router
 from .routines import router as routines_router
+from .skills import publish_status_router as skill_publish_status_router
 from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
 from .service_publications import (
@@ -266,6 +267,11 @@ _MIXED_GROUPS = [
 # retiring addresses. See "Mount order" above. Splitting them across lists is
 # about which *response table* each gets; it does not change that they all
 # precede `bots`.
+_OPEN_SUBGROUPS = [
+    # Skill Workbench status is tenant-identical and app-admissible.
+    skill_publish_status_router,
+]
+
 _SUBGROUPS = [
     token_router,
     caller_identity_router,
@@ -429,6 +435,10 @@ def build_public_router() -> APIRouter:
         responses=SPACE_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
+    for router in _OPEN_SUBGROUPS:
+        public.include_router(
+            router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+        )
     # Tenant-identical marketplace queries. This literal group must be mounted
     # before the ``{bot_id}`` wildcard router below.
     public.include_router(

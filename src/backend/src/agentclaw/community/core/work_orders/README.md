@@ -13,7 +13,10 @@ provides:
   - WorkOrderNotificationService
   - WorkOrderModel
   - WorkOrderNotificationModel
+  - WorkOrderApproverModel
   - WorkOrderStatus
+  - WorkOrderDecision
+  - WorkOrderApproverStatus
   - WorkOrderBizType
   - WorkOrderEventType
   - NotificationCategory
@@ -41,8 +44,10 @@ internal_dependencies:
 
 Event values, statuses, titles, and content templates are persisted public
 semantics. Rename or wording changes require coordinated client and data
-compatibility review. Approval, membership creation, and result-notification
-creation are one transaction and must not be split across best-effort writes.
+compatibility review. Approval state and result-notification creation are one transaction and
+must not be split across best-effort writes. The unified Service API does not
+perform business-object mutation; the owning business module handles that
+step according to its own transaction boundary.
 
 ## Stable enum contract
 
@@ -53,21 +58,44 @@ and client compatibility plan.
 | Contract | Values |
 | --- | --- |
 | Work-order status | `PENDING`, `APPROVED`, `REJECTED` |
+| Approver status | `PENDING`, `APPROVED`, `REJECTED`, `CANCELLED` |
 | Persisted notification category | `APPROVAL`, `NOTICE` |
 | List category filter | `ALL`, `APPROVAL`, `NOTICE` |
 | List query type | `PENDING_FOR_ME`, `INITIATED_BY_ME`, `PROCESSED_BY_ME` |
-| Supported business type | `SPACE_JOIN` |
+| Supported business type | `SPACE_JOIN` for the currently implemented Space handler; the unified Service API accepts business-module-defined `biz_type` values. |
 
 `ALL` is a query-only filter and must never be persisted as a notification
-category. `WorkOrderEventType` is also a persisted whitelist. This phase
-implements only the `SPACE_JOIN` handler; the remaining event values reserve
-the names defined by the system design for later business handlers.
+category. `WorkOrderEventType` is also a persisted whitelist. Approval events are
+classified centrally in `APPROVAL_EVENT_TYPES` and currently include
+`SPACE_JOIN_APPLIED`, `BOT_COLLABORATOR_APPLIED`,
+`SKILL_COLLABORATOR_APPLIED`, `HUMAN2BOT_FRIEND_APPLIED`, and
+`BOT2BOT_FRIEND_APPLIED`; all reviewed/member-added/public-order events are
+classified as `NOTICE`. This phase implements only the `SPACE_JOIN` handler;
+the remaining event values reserve the names defined by the system design for
+later business handlers.
 
 ## Space-join message templates
 
-Titles and content are generated only from `WorkOrderMessageTitle` and
-`WorkOrderMessageContent`, then the final rendered text is stored on the
-notification row. Clients display the stored text directly.
+Titles and content for the currently implemented Space handler are
+maintained by `WorkOrderMessageTitle` and `WorkOrderMessageContent`. The
+rendered approval copy is also stored in the work order's `biz_data`, so the
+applicant's initiated-work-order list can display it even though no approval
+notification row is created for the applicant. The OpenAPI adapter reads the
+status-specific `display_title` and `display_content` values from `biz_data`;
+it does not maintain a shared business-type-to-copy enum. Each new business
+module owns its own wording and supplies the same display payload when it
+creates a work order.
+
+Example `biz_data` display payload:
+
+```json
+{
+  "display_title": {"PENDING": "...", "APPROVED": "...", "REJECTED": "..."},
+  "display_content": {"PENDING": "...", "APPROVED": "...", "REJECTED": "..."}
+}
+```
+
+Clients display the final stored text directly.
 
 | Scenario | Event | Category | Title | Content |
 | --- | --- | --- | --- | --- |
@@ -83,8 +111,8 @@ the associated work-order status selects the approved or rejected template.
 
 - `PENDING_FOR_ME` contains pending approval notifications and unread notices.
 - `PROCESSED_BY_ME` contains approved/rejected approval notifications and read notices.
-- `pending_approval_count` counts distinct pending Space-join work orders that
-  the recipient can still approve as an active Space administrator.
+- `pending_approval_count` counts distinct pending work orders for which the
+  recipient has a `PENDING` approver record.
 - `unread_notice_count` counts unread `NOTICE` notifications only.
 - `badge_count` is `pending_approval_count + unread_notice_count`; notification
   read state never removes a still-actionable approval from the badge.
