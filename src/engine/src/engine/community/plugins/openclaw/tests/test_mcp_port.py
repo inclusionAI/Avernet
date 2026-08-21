@@ -419,6 +419,44 @@ async def test_filter_servers_failed_subprocess_raises_runtime(impl, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_filter_servers_falls_back_when_mcporter_command_is_unsupported(
+    impl, cfg_path, monkeypatch, caplog,
+):
+    _seed(cfg_path, {
+        "a": {"url": "http://a", "enabled": False},
+        "b": {"url": "http://b", "enabled": True},
+        "c": {"url": "http://c", "enabled": True},
+    })
+    stderr = (
+        "[mcporter] Did you mean node_repl?\n"
+        "Unknown MCP server 'filter-servers'."
+    )
+
+    import subprocess as _sp  # noqa: PLC0415
+    monkeypatch.setattr(
+        _sp,
+        "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", stderr),
+    )
+
+    with caplog.at_level("WARNING", logger="openclaw-port"):
+        result = await impl.filter_servers(["a", "b"])
+
+    on_disk = json.loads(cfg_path.read_text(encoding="utf-8"))["mcpServers"]
+    assert on_disk["a"]["enabled"] is True
+    assert on_disk["b"]["enabled"] is True
+    assert on_disk["c"]["enabled"] is False
+    assert result == {
+        "server_codes": ["a", "b"],
+        "command": ["mcporter", "filter-servers", "a,b"],
+        "return_code": 0,
+        "stdout": "Applied server allow-list directly to mcporter.json",
+        "stderr": stderr,
+    }
+    assert "applied allow-list directly" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_filter_servers_missing_mcporter_raises_runtime(impl, monkeypatch):
     import subprocess as _sp  # noqa: PLC0415
 
