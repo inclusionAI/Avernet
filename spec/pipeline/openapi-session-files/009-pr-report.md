@@ -28,3 +28,9 @@ OpenAPI operation；generated Gateway schema 的文本 diff 包含稳定键排�
 
 - `014-minimal-openapi-binding-wiring.md`
 - `002-code-report.md`
+
+## PR
+
+- URL: https://github.com/inclusionAI/Avernet/pull/1320
+- Base: `dev_refactory_collaboration`
+- Initial implementation commit: `99a78e8b9`
