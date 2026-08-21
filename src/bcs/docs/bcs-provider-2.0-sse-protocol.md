@@ -752,10 +752,10 @@ stateDiagram-v2
   active 状态不直接按 TTL 删除。
 - 本期不写 `bcs_messages`，也不新增 interaction 数据库表。
 
-interaction 业务 payload（例如 command、questions、answers）不会写入普通 INFO/WARN
-或 `bcs_sse_detail` 日志；detail 日志只保留 runId、seq、ts、phase、interactionId、kind
-和字节数等关联元数据。resolve 接受、失败和失效日志记录 resolver actor 与状态，但不
-记录具体选择内容。
+为支持线上诊断，interaction 业务 payload（例如 command、questions、answers）会完整
+写入 Provider 请求体 INFO 日志或 `bcs_sse_detail` 日志；`interaction.resolve` 的 action、
+answers 和 Provider 扩展字段也会保留原文。认证 Token、Authorization Header 和临时附件
+URL 继续沿用独立的脱敏规则，不因 interaction 日志放开而输出。
 
 ## 10. 线上真实事件样例
 
