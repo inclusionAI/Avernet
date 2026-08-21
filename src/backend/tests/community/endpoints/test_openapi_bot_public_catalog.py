@@ -85,7 +85,7 @@ def _seed_search(world) -> None:
     bind_overrides(
         world,
         BotPublicServiceProtocol,
-        {"search_public_bots_by_keyword": _search},
+        {"search_catalog_public_bots_by_keyword": _search},
     )
 
 

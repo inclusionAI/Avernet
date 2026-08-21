@@ -20,6 +20,7 @@ sha2 = { workspace = true }
 tokio = { workspace = true }
 
 bcs-domain = { workspace = true }
+bcs-event-store = { workspace = true }
 bcs-service-api = { workspace = true }
 
 [dev-dependencies]

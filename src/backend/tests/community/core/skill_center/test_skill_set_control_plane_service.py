@@ -291,6 +291,21 @@ class _McpRepository(_Repository):
         return SkillSetMutation({}, True, SkillSetDesiredState(set(), {}, {}))
 
 
+class _ResourceRepository(_Repository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.list_set_calls: list[dict] = []
+
+    def list_sets(self, **kwargs) -> list[dict]:
+        self.list_set_calls.append(kwargs)
+        return []
+
+
+class _ResourceLegacyFactory:
+    def create(self, **_kwargs):
+        return _LegacySkillSetService()
+
+
 class _McpAuth:
     def __init__(self, allowed: bool) -> None:
         self.allowed = allowed
@@ -747,6 +762,34 @@ def test_skill_set_acl_denial_is_forbidden_not_not_found():
             owner_id="true-owner",
             user_id="collaborator",
         )
+
+
+def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
+    repository = _ResourceRepository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=_ResourceLegacyFactory(),
+        passport=object(),
+        authorization=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    assert service.resources(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner"
+    ) == []
+    assert repository.list_set_calls == [
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "engine_type": "openclaw",
+        }
+    ]
 
 
 @pytest.mark.asyncio

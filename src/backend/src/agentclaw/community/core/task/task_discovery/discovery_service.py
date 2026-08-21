@@ -90,10 +90,28 @@ class DiscoveryService:
         self._discoveries: dict[str, DiscoveryResult] = {}
 
     async def discover_all_bots(self) -> list[DiscoveryResult]:
-        """遍历所有 bot，为每个 bot 执行发现流程。
+        """遍历 db 中有待确认任务的 bot，为每个 bot 执行发现流程。
 
         由 scheduler 线程调用（通过 asyncio.run）。
+
+        bot 列表 = ``discovered_tasks.db`` pending 任务提取的 bot ∩ ``list_bots()``
+        返回的存活 bot —— db 里没数据不触发，bot 已删除也不瞎跑。
+
+        TODO: 未来在两个集合交集的基础上，通过 dream mode 接口进一步缩小范围
+        —— 只对开启了 dream mode 且任务发现 ready 的 bot 执行发现。
         """
+        # 1) 从 db 读取所有 pending 任务，提取唯一 (bot_id, owner_id)
+        pending = self._reader.read_pending_tasks()
+        if not pending:
+            logger.info("[task_discovery] no pending tasks in db, skipping discovery")
+            return []
+
+        db_bots: dict[str, tuple[str, str]] = {}  # bot_id → (bot_id, owner_id)
+        for task in pending:
+            if task.bot_id and task.owner_id and task.bot_id not in db_bots:
+                db_bots[task.bot_id] = (task.bot_id, task.owner_id)
+
+        # 2) 从 BotService 获取存活 bot 列表
         if self._bot_service is None:
             logger.warning("[task_discovery] no bot_service, cannot discover_all_bots")
             return []
@@ -104,23 +122,33 @@ class DiscoveryService:
             logger.error("[task_discovery] failed to list bots: %s", exc)
             return []
 
-        bots = result.get("items", []) if isinstance(result, dict) else []
-        if not bots:
-            logger.info("[task_discovery] no bots found, skipping discovery")
-            return []
+        live_bots = result.get("items", []) if isinstance(result, dict) else []
+        live_bot_ids = {b.get("bot_id", "") for b in live_bots}
+
+        # 3) 取交集：db 有 pending 任务 且 bot 存活
+        # TODO: 交集基础上通过 dream mode 接口进一步过滤
+        intersection = [
+            db_bots[bid] for bid in db_bots if bid in live_bot_ids
+        ]
+
+        # 4) 按 owner_id 聚合 — 同一个 owner 只取第一个 bot 执行发现，
+        #    避免同一用户多个 bot 重复发现
+        seen_owners: set[str] = set()
+        bots_to_discover: list[tuple[str, str]] = []
+        for bot_id, owner_id in intersection:
+            if owner_id not in seen_owners:
+                seen_owners.add(owner_id)
+                bots_to_discover.append((bot_id, owner_id))
 
         logger.info(
-            "[task_discovery] scheduled discovery triggered for %d bot(s)...",
-            len(bots),
+            "[task_discovery] scheduled discovery: db=%d bots, live=%d bots, "
+            "intersection=%d, after owner aggregation=%d bot(s) (from %d pending tasks)...",
+            len(db_bots), len(live_bots), len(intersection),
+            len(bots_to_discover), len(pending),
         )
 
         all_results: list[DiscoveryResult] = []
-        for bot in bots:
-            bot_id = bot.get("bot_id", "")
-            owner_id = bot.get("owner_id", "")
-            if not bot_id or not owner_id:
-                continue
-
+        for bot_id, owner_id in bots_to_discover:
             try:
                 results = await self.discover(
                     bot_id=bot_id,
@@ -137,7 +165,7 @@ class DiscoveryService:
         logger.info(
             "[task_discovery] discovery complete: %d task(s) discovered across %d bot(s)",
             sum(1 for r in all_results if r.success),
-            len(bots),
+            len(bots_to_discover),
         )
         return all_results
 
@@ -272,6 +300,13 @@ class DiscoveryService:
                 task.task_id,
             )
             return False
+
+    def get_discovery_result(self, task_id: str) -> DiscoveryResult | None:
+        """返回某个 task 的最近发现结果（含 session_id/session_url），供 status 接口查询。
+
+        从内存 ``self._discoveries`` 读取 — 后端重启后会丢，仅反映进程内最近的 discover 结果。
+        """
+        return self._discoveries.get(task_id)
 
 
 __all__ = [

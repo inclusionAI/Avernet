@@ -19,6 +19,7 @@ through the injector.
 """
 from __future__ import annotations
 
+from typing import Annotated
 
 from injector import Binder, Module, inject, provider, singleton
 
@@ -30,6 +31,12 @@ from agentclaw.community.core.bot_management.services.bot_service import BotServ
 from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.services.bot_discover_service import BotDiscoverService
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
+from agentclaw.community.core.bot_public.services.bot_catalog_metadata_service import (
+    BcsBotCatalogMetadataService,
+)
+from agentclaw.community.core.bot_public.catalog_metadata import (
+    BotCatalogMetadataServiceProtocol,
+)
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -41,6 +48,7 @@ from agentclaw.community.plugin_api.bot_publish_approval import BotPublishApprov
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.repository.implementations.bot.friend import BotFriendRepository as UnifiedBotFriendRepository
 from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+from agentclaw.community.plugin_api.http_client import QUALIFIER_BCN, HttpClient
 
 
 logger = get_logger()
@@ -63,6 +71,15 @@ class BotPublicModule(Module):
             to=UnifiedBotFriendRepository,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    @inject
+    def catalog_metadata_service(
+        self,
+        http_client: Annotated[HttpClient, QUALIFIER_BCN],
+    ) -> BotCatalogMetadataServiceProtocol:
+        return BcsBotCatalogMetadataService(http_client=http_client)
 
     @singleton
     @provider
@@ -96,6 +113,7 @@ class BotPublicModule(Module):
         skill_set_service_factory: SkillSetServiceFactory,
         device_context_resolver: DeviceContextResolver,
         device_sync_dispatcher: DeviceSyncDispatcher,
+        catalog_metadata_service: BotCatalogMetadataServiceProtocol,
     ) -> BotPublicService:
         # Explicit provider (not ``binder.bind``): BotPublicService types
         # ``skill_set_service_factory`` under TYPE_CHECKING to avoid a
@@ -112,6 +130,7 @@ class BotPublicModule(Module):
             skill_set_service_factory=skill_set_service_factory,
             device_context_resolver=device_context_resolver,
             device_sync_dispatcher=device_sync_dispatcher,
+            catalog_metadata_service=catalog_metadata_service,
         )
 
     @singleton

@@ -18,9 +18,6 @@ from __future__ import annotations
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
 )
-from agentclaw.community.core.service_bot.services.arca_image_pin import (
-    RUNTIME_KIND_TECLAW,
-)
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
@@ -183,10 +180,12 @@ class UpgradeResolutionMixin:
           rejects any new publish of a different type while it runs, so neither an
           UPGRADE nor a retire could land — the durable task retries until it
           settles to ``STOPPED``.
-        - ``FAILED`` / ``STOPPED`` → ``UPGRADE`` for ``baas``/ARCA (the UPDATE
-          destroys+recreates the device in place and recovers it), but
-          ``RETIRE_THEN_FIRST_RELEASE`` for teclaw (its UPDATE cannot rebuild a
-          gone container — it would just fail the publish and strand the record).
+        - ``FAILED`` / ``STOPPED`` → decided by the container's
+          ``ProviderBehavior.upgrade_recovers_not_live_bot``: ``UPGRADE`` for
+          ``baas``/ARCA (the UPDATE destroys+recreates the device in place and
+          recovers it), ``RETIRE_THEN_FIRST_RELEASE`` for teclaw (its UPDATE
+          cannot rebuild a gone container — it would just fail the publish and
+          strand the record).
         - anything else (``PENDING``/unknown) → ``UPGRADE`` (optimistic; the deploy
           atom / progress poll settles a still-provisioning bot).
 
@@ -232,19 +231,17 @@ class UpgradeResolutionMixin:
             )
 
         if status in _ONLINE_NOT_LIVE_BAAS_STATUSES:
-            is_teclaw = (
-                self.resolve_publish_runtime_kind(publish_record)
-                == RUNTIME_KIND_TECLAW
-            )
+            device_provider = self.device_provider(bot)
+            behavior = self._provider_behaviors.resolve(device_provider)
             decision = (
-                OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE
-                if is_teclaw
-                else OnlineDeployDecision.UPGRADE
+                OnlineDeployDecision.UPGRADE
+                if behavior.upgrade_recovers_not_live_bot
+                else OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE
             )
             logger.info(
                 f"[PublishFlowService._decide_online_deploy] "
                 f"candidate not live: bot_uuid={bot_uuid}, status={status}, "
-                f"is_teclaw={is_teclaw} -> {decision.value}"
+                f"provider={device_provider} -> {decision.value}"
             )
             return decision
 

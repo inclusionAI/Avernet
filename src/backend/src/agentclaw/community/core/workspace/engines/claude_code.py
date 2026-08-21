@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 
 from pathlib import Path, PurePosixPath
 
@@ -133,6 +134,7 @@ class ClaudeCodeSandboxProvider:
     def get_build_plan(
         self,
         build_rsync_excludes_append: list[str] | None = None,
+        bot: dict[str, Any] | None = None,
     ) -> EngineBuildPlan:
         # 合并模式：默认值 + 自定义项（去重）
         excludes = list(_CLAUDE_CODE_RSYNC_EXCLUDES)

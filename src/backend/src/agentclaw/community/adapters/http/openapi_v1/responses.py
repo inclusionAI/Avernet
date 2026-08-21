@@ -49,6 +49,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     CallerIdentityForbiddenError,
     CallerIdentityInvalidError,
     CallerIdentityOpenApiError,
+    DeptLookupError,
     ClusterMismatchError,
     GrantNotResolvableError,
     IamTokenUnavailableError,
@@ -222,6 +223,18 @@ from agentclaw.community.plugin_api.auth_relationship import (
     AuthRelationshipError,
 )
 from agentclaw.community.plugin_api.passport import PassportError
+from agentclaw.community.core.errors import (
+    CallbackAuthError,
+    CallbackCorrelationError,
+)
+from agentclaw.community.core.task.domain.errors import (
+    GraphAlreadyInitializedError,
+    GraphIntegrityError,
+    NodeNotFoundError,
+    TaskError,
+    TaskNotFoundError,
+    TaskStateError,
+)
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
     LockNotHeldError,
     LockReleaseDeniedError,
@@ -326,6 +339,12 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ),
     SkillCenterMarketSearchError: (502, "Skill Center marketplace unavailable"),
     SkillCenterPublishStatusError: (502, "Skill Center publish status unavailable"),
+    # Staff directory infra failure (master-data service unreachable/errored).
+    # 502, not 200-null: "directory down" must stay distinct from "no dept" so an
+    # operator can tell the two apart; the org/user + org/dept lookups raise this
+    # and ``@envelope_errors`` maps it. Fixed message — the cause is logged, never
+    # returned (mirrors MissingPrincipalError keeping its reason off the wire).
+    DeptLookupError: (502, "Department directory unavailable"),
     WorkOrderAccessDeniedError: (403, WorkOrderPublicErrorMessage.FORBIDDEN),
     WorkOrderNotFoundError: (404, WorkOrderPublicErrorMessage.NOT_FOUND),
     WorkOrderNotificationNotFoundError: (
@@ -502,19 +521,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     SkillManagedBySkillSetError: (409, "Skill is managed by a SkillSet"),
-    SkillRuntimeNameConflictError: (
-        409,
-        "Skill runtime name conflicts with an active Skill",
-    ),
-    SkillEngineNotSupportedError: (
-        409,
-        "Skill is not supported by this bot type and engine",
-    ),
+    SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with an active Skill"),
+    SkillEngineNotSupportedError: (409, "Skill is not supported by this bot type and engine"),
     RepositoryCatalogNotFoundError: (404, "Not found"),
-    RepositoryCatalogSyncInProgressError: (
-        409,
-        "Repository synchronization is already in progress",
-    ),
+    RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
@@ -638,6 +648,27 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # re-raise and the app's catch-all would answer with {"detail": ...}, which
     # is not an Envelope and breaks the public contract.
     BotServiceError: (500, "Internal error"),
+    # Task goal-driven execution framework: the task / callback endpoints raise
+    # these domain errors and let ``@envelope_errors`` map them, so the router
+    # stays a thin protocol layer (no hand-rolled ``HTTPException`` for domain
+    # failures). ``TaskError`` is not a ``DomainError`` — it has no app-level
+    # handler — so every task subclass that can reach a handler needs an entry
+    # here (concrete leaves first, ``TaskError`` base last as a 500 fallback) or
+    # it would escape the envelope as a bare 500. ``CallbackAuthError`` /
+    # ``CallbackCorrelationError`` ARE ``DomainError`` (already in the app's
+    # ``_DOMAIN_ERROR_STATUS_MAP``) but are mapped here too so the decorator owns
+    # them directly; only task code raises them. Discovery's unexpected-failure
+    # catch-all raises generic ``InternalError`` (also a ``DomainError``), which
+    # is NOT mapped here — it re-raises out of ``@envelope_errors`` to the app's
+    # ``DomainError`` handler, keeping this table task-specific.
+    TaskNotFoundError: (404, "Not found"),
+    NodeNotFoundError: (404, "Not found"),
+    GraphAlreadyInitializedError: (409, "Task graph already exists"),
+    GraphIntegrityError: (409, "Graph integrity violated"),
+    TaskStateError: (409, "Illegal state transition"),
+    CallbackAuthError: (401, "Unauthorized"),
+    CallbackCorrelationError: (400, "Bad request"),
+    TaskError: (500, "Internal error"),
 }
 
 # Most public categories retain the ordinary ``xxx000`` business code.  A
@@ -678,17 +709,11 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
 _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
     "RESOURCE_DIRECT_ACTIVE": (409201, "Resource is directly active"),
     "RESOURCE_MANAGED_BY_SKILL_SET": (409202, "Resource is managed by a SkillSet"),
-    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": (
-        409203,
-        "Resource belongs to another SkillSet",
-    ),
+    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": (409203, "Resource belongs to another SkillSet"),
     "SYSTEM_DEFAULT_IMMUTABLE": (409204, "System Default SkillSet is immutable"),
     "SKILL_SET_ACTIVE": (409205, "Active SkillSet cannot be deleted"),
     "SKILL_SET_NAME_CONFLICT": (409206, "SkillSet name already exists"),
-    "IDEMPOTENCY_KEY_REUSED": (
-        409207,
-        "Idempotency key was reused with a different request",
-    ),
+    "IDEMPOTENCY_KEY_REUSED": (409207, "Idempotency key was reused with a different request"),
     "BOT_MUTATION_BUSY": (409208, "Another SkillSet mutation is in progress"),
 }
 

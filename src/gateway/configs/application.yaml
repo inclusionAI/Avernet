@@ -101,6 +101,7 @@ user_config:
     bcs_server_url: http://127.0.0.1:21000
     engine_proxy_server_url: https://engineproxy.sample.com
     bcsfuse_server_url: http://127.0.0.1:8765
+    clawweb_server_url: https://clawweb.sample.com
 
   # Browser CORS allow-list for the gateway's own edge.
   #
@@ -205,12 +206,18 @@ user_config:
 
     # ── The refusals: operations that still require a human on the wire ──────
 
-    # The caller-identity read: its answer IS the end user, so a caller with no
+    # The user-identity read: its answer IS the end user, so a caller with no
     # human on the wire has nothing to ask. Explicit even though /** already
     # requires a user, for the same reason the spaces rules below are: when the
     # broader policy evolves, this route must remain fail-closed.
-    "/openapi/v1/caller":
+    "/openapi/v1/org/user":
       user: required
+    # Department directory search — a tenant-wide catalogue read, identical for
+    # every caller, so it admits an application acting alone (OPEN). Mirrors the
+    # mcp catalogue rules: explicit even though it could default.
+    "/openapi/v1/org/dept":
+      user: optional
+      app: optional
 
     # Space/member/favorite OpenAPI operations are user-only in the first
     # refactor phase. Keep this explicit even though /** also requires a user:
@@ -359,6 +366,19 @@ user_config:
     "/openapi/v1/bcsfuse/**":
       user: required
 
+# The harness operations sit beneath the addressed bot, so the wide
+    # "/openapi/v1/bots/**" rule above would otherwise admit them with no user
+    # on the wire. They diagnose and patch a bot's live config files — a human
+    # stays on the boundary, and the extra literal segment outranks the prefix.
+    "/openapi/v1/bots/{bot_id}/harness/**":
+      user: required
+
+    # HarnessFlow (task escort) — served by clawweb. Authz is delegated to
+    # clawweb; the gateway passes through both identities when present.
+    "/openapi/v1/harnessflow/**":
+      user: optional
+      app: optional
+
     # BCN verifies the short-lived session credential carried by this exact
     # WebSocket handshake. Keep every other collaboration operation, including
     # session-token issuance, on the required User Principal boundary above.
@@ -494,6 +514,12 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
+      dept:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
       repository-skills:
         match: /openapi/v1/bots/skills/**
         server: backend
@@ -519,6 +545,10 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
+      # The harness operations moved under /openapi/v1/bots/{bot_id}/harness/**:
+      # the bots domain routes them to the same backend verbatim, and a domain
+      # match cannot pin a path behind a path parameter, so no separate domain
+      # can claim them. Their published description rides in bots.openapi.json.
       collaboration:
         server: bcs
         protocols: [http, websocket]
@@ -562,6 +592,15 @@ user_config:
           source: file
           path: schemas/baas.openapi.json
           refresh_seconds: 300
+
+      # HarnessFlow (task escort) — served by clawweb.
+      harnessflow:
+        match: /openapi/v1/harnessflow/**
+        server: clawweb
+        protocols: [http]
+        rewrite:
+          from: /openapi/v1/harnessflow
+          to: /
 
       # The tenant bot socket. The backend's connection endpoint publishes
       # `wss://<gateway>/openapi/v1/bots/messages/ws/<target><engine-path>?x-proxypass-token=…`
@@ -646,3 +685,5 @@ user_config:
         base_url: "${bcsfuse_server_url}"
       engine_proxy:
         base_url: "${engine_proxy_server_url}"
+      clawweb:
+        base_url: "${clawweb_server_url}"

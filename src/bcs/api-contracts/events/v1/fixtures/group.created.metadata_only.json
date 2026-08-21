@@ -1,0 +1,33 @@
+{
+  "spec_version": "1.0",
+  "event_id": "evt-group-created-1",
+  "event_type": "group.created",
+  "schema_version": "1.0",
+  "source": "bcs",
+  "occurred_at": "2026-08-18T10:00:00.000Z",
+  "recorded_at": "2026-08-18T10:00:00.005Z",
+  "subject": {
+    "type": "group",
+    "id": "group-1"
+  },
+  "scope": {
+    "group_id": "group-1"
+  },
+  "stream": {
+    "key": "group:group-1",
+    "sequence": 1
+  },
+  "actor": {
+    "type": "human",
+    "id": "human-1",
+    "display_name": "Alice"
+  },
+  "correlation_id": "request-create-group-1",
+  "data": {
+    "group_kind": "manager_worker",
+    "strategy": "manager_worker",
+    "name": "Release review",
+    "status": "active",
+    "version": 1
+  }
+}

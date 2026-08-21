@@ -1,3 +1,14 @@
+pub const ERROR_EVENT_SUBSCRIPTION_NOT_FOUND: &str = "event_subscription_not_found";
+pub const ERROR_EVENT_DELIVERY_NOT_FOUND: &str = "event_delivery_not_found";
+pub const ERROR_INVALID_EVENT_FILTER: &str = "invalid_event_filter";
+pub const ERROR_INVALID_EVENT_SCOPE: &str = "invalid_event_scope";
+pub const ERROR_INVALID_WEBHOOK_URL: &str = "invalid_webhook_url";
+pub const ERROR_EVENT_SUBSCRIPTION_LIMIT_REACHED: &str = "event_subscription_limit_reached";
+pub const ERROR_EVENT_SUBSCRIPTION_REVISION_CONFLICT: &str = "event_subscription_revision_conflict";
+pub const ERROR_EVENT_SUBSCRIPTION_FORBIDDEN: &str = "event_subscription_forbidden";
+pub const ERROR_EVENT_DELIVERY_NOT_REPLAYABLE: &str = "event_delivery_not_replayable";
+pub const ERROR_EVENT_DELIVERY_LANE_BLOCKED: &str = "event_delivery_lane_blocked";
+
 /// Transport-independent error vocabulary for OpenAPI v1 use cases.
 #[derive(Debug, thiserror::Error)]
 pub enum ApplicationError {
@@ -83,6 +94,46 @@ impl ApplicationError {
 
     pub fn internal(message: impl Into<String>) -> Self {
         Self::Internal(message.into())
+    }
+
+    pub fn event_subscription_not_found(message: impl Into<String>) -> Self {
+        Self::not_found(ERROR_EVENT_SUBSCRIPTION_NOT_FOUND, message)
+    }
+
+    pub fn event_delivery_not_found(message: impl Into<String>) -> Self {
+        Self::not_found(ERROR_EVENT_DELIVERY_NOT_FOUND, message)
+    }
+
+    pub fn invalid_event_filter(message: impl Into<String>) -> Self {
+        Self::invalid(ERROR_INVALID_EVENT_FILTER, message)
+    }
+
+    pub fn invalid_event_scope(message: impl Into<String>) -> Self {
+        Self::invalid(ERROR_INVALID_EVENT_SCOPE, message)
+    }
+
+    pub fn invalid_webhook_url(message: impl Into<String>) -> Self {
+        Self::invalid(ERROR_INVALID_WEBHOOK_URL, message)
+    }
+
+    pub fn event_subscription_limit_reached(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_EVENT_SUBSCRIPTION_LIMIT_REACHED, message)
+    }
+
+    pub fn event_subscription_revision_conflict(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_EVENT_SUBSCRIPTION_REVISION_CONFLICT, message)
+    }
+
+    pub fn event_subscription_forbidden(message: impl Into<String>) -> Self {
+        Self::forbidden_code(ERROR_EVENT_SUBSCRIPTION_FORBIDDEN, message)
+    }
+
+    pub fn event_delivery_not_replayable(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_EVENT_DELIVERY_NOT_REPLAYABLE, message)
+    }
+
+    pub fn event_delivery_lane_blocked(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_EVENT_DELIVERY_LANE_BLOCKED, message)
     }
 
     pub fn code(&self) -> &str {

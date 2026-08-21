@@ -59,6 +59,7 @@ pub fn build_bot_runtime_token_resolver(
 
 pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppState {
     let config = state.config.clone();
+    let group_application = state.openapi_v1.group_service.clone();
     let session_file_application = state.openapi_v1.session_file_service.clone();
     let internal_bot_attributes_service = state.internal_bot_attributes_service.clone();
     let invite_token_secret = state.invite_token_secret.clone();
@@ -90,6 +91,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         .collect();
 
     HttpAppState::new(services_with_secret)
+        .with_group_application(group_application)
         .with_session_file_application(session_file_application)
         .with_bot_runtime_token_resolver(runtime_token_resolver)
         .with_health(Arc::new(BootstrapHealthPort {

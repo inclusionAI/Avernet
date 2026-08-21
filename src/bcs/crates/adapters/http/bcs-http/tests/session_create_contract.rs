@@ -11,26 +11,26 @@ use axum::{
     body::{Body, to_bytes},
     http::{HeaderMap, Request, StatusCode},
 };
-use bcs_bot::BotCore;
-use bcs_group::GroupStore;
 use bcs_auth_api::{AuthError, UserIdentityInfo};
+use bcs_bot::BotCore;
+use bcs_group::{GroupStore, MemoryGroupRepo};
 use bcs_http::{
     router::build_router,
     state::{HttpAppState, HttpUserIdentity, UserIdentityPort},
 };
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotCapabilities, BotRegistryCoreService,
-    CancelStateMachineRunCommand,
-    CollaborationDefinition, CollaborationRuntimeError,
+    CancelStateMachineRunCommand, CollaborationDefinition, CollaborationRuntimeError,
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
     CreateOrReactivateCommand, CreateOrReactivateOutcome, Group, GroupCoreService, GroupStrategy,
-    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, Participant,
-    ParticipantMode, ParticipantRole, Session, SessionKind, SessionManagementService,
-    SessionHistoryResult, SessionStatus, SessionUseCaseError, StartStateMachineRunCommand,
-    StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
-    StateMachineRunStatus, StateMachineRunView,
+    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, Participant, ParticipantMode,
+    ParticipantRole, Session, SessionHistoryResult, SessionKind, SessionManagementService,
+    SessionStatus, SessionUseCaseError, StartStateMachineRunCommand, StartStateMachineRunOutcome,
+    StateMachineDeliveryCorrelation, StateMachineRun, StateMachineRunStatus, StateMachineRunView,
 };
 use bcs_services_container::Services;
+use bcs_session::{SessionLaunchApplication, SessionManagementServiceImpl};
+use bcs_session_store::MemorySessionRepo;
 use serde_json::Value;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
@@ -72,9 +72,16 @@ async fn create_session_rejects_human_who_does_not_own_any_participant() {
     let sessions = Arc::new(MockSessions::default());
 
     let mut services = Services::noop();
-    services.registry = registry;
-    services.group = group_store;
+    services.registry = registry.clone();
+    services.group = group_store.clone();
     services.session_management = sessions.clone();
+    services.session_launch = Arc::new(SessionLaunchApplication::new(
+        registry,
+        group_store,
+        sessions.clone(),
+        services.collaboration_runtime.clone(),
+        services.system_message.clone(),
+    ));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some("mallory".to_string()),
@@ -135,9 +142,16 @@ async fn create_session_allows_human_who_owns_a_participant_bot() {
     let sessions = Arc::new(MockSessions::default());
 
     let mut services = Services::noop();
-    services.registry = registry;
-    services.group = group_store;
+    services.registry = registry.clone();
+    services.group = group_store.clone();
     services.session_management = sessions.clone();
+    services.session_launch = Arc::new(SessionLaunchApplication::new(
+        registry,
+        group_store,
+        sessions.clone(),
+        services.collaboration_runtime.clone(),
+        services.system_message.clone(),
+    ));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some("alice".to_string()),
@@ -156,6 +170,94 @@ async fn create_session_allows_human_who_owns_a_participant_bot() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn legacy_session_id_reactivates_through_the_shared_service() {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    registry
+        .register(
+            "driver-bot".to_string(),
+            BotCapabilities {
+                name: Some("Driver".to_string()),
+                visibility: "public".to_string(),
+                ..BotCapabilities::default()
+            },
+        )
+        .await
+        .unwrap();
+    registry
+        .save_created_by("driver-bot", "alice", true)
+        .await
+        .unwrap();
+
+    let group_store = Arc::new(GroupStore::new());
+    group_store
+        .upsert(Group::new(
+            "group-1",
+            "driver-bot",
+            vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+        ))
+        .await
+        .unwrap();
+
+    let sessions = Arc::new(MockSessions::default());
+    let mut services = Services::noop();
+    services.registry = registry.clone();
+    services.group = group_store.clone();
+    services.session_management = sessions.clone();
+    services.session_launch = Arc::new(SessionLaunchApplication::new(
+        registry,
+        group_store,
+        sessions.clone(),
+        services.collaboration_runtime.clone(),
+        services.system_message.clone(),
+    ));
+
+    let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
+        staff_no: Some("alice".to_string()),
+    });
+    let app = build_router(HttpAppState::new(services).with_user_identity(identity_port));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups/group-1/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "session_id": "existing-session",
+                        "session_title": "reactivated",
+                        "session_kind": "service_invocation",
+                        "input": "raw input",
+                        "meta": {"callback": {"url": "https://example.invalid/callback"}}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["id"], "existing-session");
+    assert_eq!(body["session_id"], "existing-session");
+
+    let calls = sessions.create_calls.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].session_id.as_deref(), Some("existing-session"));
+    assert_eq!(calls[0].params.session_kind, SessionKind::ServiceInvocation);
+    assert_eq!(calls[0].params.input, Some(Value::String("raw input".into())));
+    assert_eq!(
+        calls[0].params.meta,
+        Some(serde_json::json!({
+            "callback": {"url": "https://example.invalid/callback"}
+        }))
+    );
 }
 
 #[tokio::test]
@@ -193,17 +295,22 @@ async fn state_machine_group_session_creation_starts_run_with_created_session() 
     let collaboration = Arc::new(RecordingCollaborationRuntime::default());
 
     let mut services = Services::noop();
-    services.registry = registry;
-    services.group = group_store;
+    services.registry = registry.clone();
+    services.group = group_store.clone();
     services.session_management = sessions.clone();
     services.collaboration_runtime = collaboration.clone();
+    services.session_launch = Arc::new(SessionLaunchApplication::new(
+        registry,
+        group_store,
+        sessions.clone(),
+        collaboration.clone(),
+        services.system_message.clone(),
+    ));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some("alice".to_string()),
     });
-    let app = build_router(
-        HttpAppState::new(services).with_user_identity(identity_port),
-    );
+    let app = build_router(HttpAppState::new(services).with_user_identity(identity_port));
 
     let response = app
         .oneshot(
@@ -225,15 +332,20 @@ async fn state_machine_group_session_creation_starts_run_with_created_session() 
 
     assert_eq!(response.status(), StatusCode::CREATED);
     let body: Value =
-        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
-            .unwrap();
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(body["session_id"], "group-1:abcdef12");
     assert_eq!(body["state_machine_run_id"], "sm-http-test");
 
     let session_commands = sessions.create_calls.lock().await;
-    assert_eq!(session_commands[0].params.session_kind, SessionKind::ServiceInvocation);
+    assert_eq!(
+        session_commands[0].params.session_kind,
+        SessionKind::ServiceInvocation
+    );
     assert_eq!(session_commands[0].params.group_version, Some(7));
-    assert_eq!(session_commands[0].params.created_by.as_deref(), Some("driver-bot"));
+    assert_eq!(
+        session_commands[0].params.created_by.as_deref(),
+        Some("driver-bot")
+    );
     let human = session_commands[0]
         .params
         .participants
@@ -262,6 +374,144 @@ async fn state_machine_group_session_creation_starts_run_with_created_session() 
             display_name: Some("Test".to_string()),
         })
     );
+}
+
+#[tokio::test]
+async fn legacy_private_human_creator_membership_matches_the_pre_pr_contract() {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    registry
+        .register(
+            "driver-bot".to_string(),
+            BotCapabilities {
+                name: Some("Driver".to_string()),
+                visibility: "public".to_string(),
+                ..BotCapabilities::default()
+            },
+        )
+        .await
+        .unwrap();
+    registry
+        .save_created_by("driver-bot", "alice", true)
+        .await
+        .unwrap();
+
+    let group_store = Arc::new(GroupStore::new());
+    for group_id in ["group-explicit", "group-inferred"] {
+        group_store
+            .upsert(Group::new(
+                group_id,
+                "driver-bot",
+                vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+            ))
+            .await
+            .unwrap();
+    }
+
+    let session_repo = Arc::new(MemorySessionRepo::new());
+    let sessions = Arc::new(SessionManagementServiceImpl::new(
+        session_repo,
+        Arc::new(MemoryGroupRepo::new()),
+    ));
+
+    let mut services = Services::noop();
+    services.registry = registry.clone();
+    services.group = group_store.clone();
+    services.session_management = sessions.clone();
+    services.session_launch = Arc::new(SessionLaunchApplication::new(
+        registry,
+        group_store.clone(),
+        sessions.clone(),
+        services.collaboration_runtime.clone(),
+        services.system_message.clone(),
+    ));
+
+    let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
+        staff_no: Some("alice".to_string()),
+    });
+    let app = build_router(HttpAppState::new(services).with_user_identity(identity_port));
+
+    let explicit_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups/group-explicit/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"created_by": "human_alice"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(explicit_response.status(), StatusCode::CREATED);
+    let explicit_body: Value = serde_json::from_slice(
+        &to_bytes(explicit_response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(explicit_body["created_by"], "human_alice");
+    let explicit_human = explicit_body["participants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|participant| participant["bot_uuid"] == "human_alice")
+        .expect("explicit Human creator must be a Session participant");
+    assert_eq!(explicit_human["role"], "driver");
+    assert_eq!(explicit_human["actor_kind"], "human");
+    assert_eq!(explicit_human["mode"], "present");
+    assert_eq!(explicit_body["participant_join_seq"]["human_alice"], 0);
+
+    let explicit_session_id = explicit_body["session_id"].as_str().unwrap();
+    let stored_explicit = sessions
+        .get(explicit_session_id)
+        .await
+        .unwrap()
+        .expect("explicit Session must be persisted");
+    assert_eq!(
+        stored_explicit
+            .participant_join_seq
+            .as_ref()
+            .and_then(|join_seq| join_seq.get("human_alice")),
+        Some(&Value::from(0)),
+    );
+
+    let inferred_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups/group-inferred/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::json!({}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(inferred_response.status(), StatusCode::CREATED);
+    let inferred_body: Value = serde_json::from_slice(
+        &to_bytes(inferred_response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(inferred_body["created_by"], "human_alice");
+    assert!(
+        inferred_body["participants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|participant| participant["bot_uuid"] != "human_alice"),
+        "inferred Human creator must not become a private Session participant",
+    );
+    assert!(inferred_body["participant_join_seq"]["human_alice"].is_null());
+
+    for group_id in ["group-explicit", "group-inferred"] {
+        let group = group_store.get(group_id).await.unwrap();
+        assert_eq!(group.participants.len(), 1);
+        assert_eq!(group.participants[0].bot_uuid, "driver-bot");
+    }
 }
 
 // ----- helpers -----
@@ -329,8 +579,11 @@ impl SessionManagementService for MockSessions {
         &self,
         cmd: CreateOrReactivateCommand,
     ) -> Result<CreateOrReactivateOutcome, SessionUseCaseError> {
+        let supplied_session_id = cmd.session_id.clone();
         let session = Session {
-            id: format!("{}:abcdef12", cmd.group_id),
+            id: supplied_session_id
+                .clone()
+                .unwrap_or_else(|| format!("{}:abcdef12", cmd.group_id)),
             group_id: cmd.group_id.clone(),
             session_title: cmd.params.session_title.clone(),
             env: None,
@@ -357,7 +610,7 @@ impl SessionManagementService for MockSessions {
         self.create_calls.lock().await.push(cmd);
         Ok(CreateOrReactivateOutcome {
             session,
-            created: true,
+            created: supplied_session_id.is_none(),
         })
     }
 
@@ -367,10 +620,10 @@ impl SessionManagementService for MockSessions {
 
     async fn belongs_to_group(
         &self,
-        _session_id: &str,
-        _group_id: &str,
+        session_id: &str,
+        group_id: &str,
     ) -> Result<bool, SessionUseCaseError> {
-        Ok(false)
+        Ok(session_id == "existing-session" && group_id == "group-1")
     }
 
     async fn list_by_group(
@@ -453,7 +706,9 @@ impl SessionManagementService for MockSessions {
     ) -> Result<Vec<String>, SessionUseCaseError> {
         Ok(Vec::new())
     }
-    async fn delete(&self, _session_id: &str) -> Result<bool, SessionUseCaseError> { Ok(false) }
+    async fn delete(&self, _session_id: &str) -> Result<bool, SessionUseCaseError> {
+        Ok(false)
+    }
 }
 
 #[derive(Default)]
@@ -476,7 +731,9 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                     definition_version: 1,
                     group_id: cmd.group_id,
                     group_version: 1,
-                    session_id: cmd.session_id.unwrap_or_else(|| "group-1:abcdef12".to_string()),
+                    session_id: cmd
+                        .session_id
+                        .unwrap_or_else(|| "group-1:abcdef12".to_string()),
                     created_by: cmd.caller_id.clone(),
                     status: StateMachineRunStatus::Running,
                     input: cmd.input,
@@ -586,9 +843,16 @@ async fn public_group_session_includes_non_member_human_in_participants() {
     let sessions = Arc::new(MockSessions::default());
 
     let mut services = Services::noop();
-    services.registry = registry;
-    services.group = group_store;
+    services.registry = registry.clone();
+    services.group = group_store.clone();
     services.session_management = sessions.clone();
+    services.session_launch = Arc::new(SessionLaunchApplication::new(
+        registry,
+        group_store,
+        sessions.clone(),
+        services.collaboration_runtime.clone(),
+        services.system_message.clone(),
+    ));
 
     // Human "bob" is NOT a member of the group and does NOT own driver-bot
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
@@ -608,7 +872,11 @@ async fn public_group_session_includes_non_member_human_in_participants() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::CREATED, "non-member human should be able to create session on public group");
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "non-member human should be able to create session on public group"
+    );
 
     let body_bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
     let json: Value = serde_json::from_slice(&body_bytes).unwrap();
@@ -617,6 +885,9 @@ async fn public_group_session_includes_non_member_human_in_participants() {
     assert!(
         human_in_session,
         "human_bob must be in session participants, got: {:?}",
-        participants.iter().map(|p| p["bot_uuid"].as_str()).collect::<Vec<_>>()
+        participants
+            .iter()
+            .map(|p| p["bot_uuid"].as_str())
+            .collect::<Vec<_>>()
     );
 }

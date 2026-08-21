@@ -82,10 +82,17 @@ class SkillSetControlPlaneRepository(
             model.env == get_current_env(),
         )
 
-    def list_sets(self, *, bot_id: str, engine_type: str | None = None) -> list[dict]:
+    def list_sets(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None = None,
+    ) -> list[dict]:
         with self._db.orm_session() as session:
             query = self._scope(session.query(SkillSet), SkillSet).filter(
-                SkillSet.bolt_id == bot_id
+                SkillSet.bolt_id == bot_id,
+                SkillSet.user_id == owner_id,
             )
             if engine_type is not None:
                 query = query.filter(SkillSet.engine_type == engine_type)

@@ -321,7 +321,7 @@ class CronRelaySessionInitiator:
 
     def _build_discovery_prompt(self, tasks: list[DiscoveredTask]) -> str:
         """构造发现提示消息 — 作为 chat.send 的 message 发送给 bot。"""
-        lines = ["我为您发现了以下可能有意义的事情，请确认是否执行：\n"]
+        lines = ["/task 我为您发现了以下可能有意义的事情，请确认是否执行：\n"]
         for i, task in enumerate(tasks, 1):
             lines.append(f"{i}. 【{task.project_name}】")
             lines.append(f"   简介：{task.description}")

@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 from secbaas.community.api.bcn import BcnDownlinkService as BcnDownlinkServiceProtocol
+from secbaas.community.api.bot_interaction import BotInteractionService
 from secbaas.community.core.repository.api_gateway import APIKeyRepository
 from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.service.bcn import DefaultBcnDownlinkService
@@ -14,4 +15,5 @@ _bcn_downlink_service: BcnDownlinkServiceProtocol = DefaultBcnDownlinkService(
     bcn_api_key_prefix="test-prefix",
     uplink_client=MagicMock(spec=BcnUplinkClient),
     run_repository=MagicMock(spec=BotRunRepository),
+    interaction_service=MagicMock(spec=BotInteractionService),
 )

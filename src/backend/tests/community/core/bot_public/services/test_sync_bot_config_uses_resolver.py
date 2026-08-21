@@ -45,6 +45,7 @@ def _make_service(
         skill_set_service_factory=MagicMock(),
         device_context_resolver=resolver or MagicMock(),
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
+        catalog_metadata_service=MagicMock(),
     )
 
 

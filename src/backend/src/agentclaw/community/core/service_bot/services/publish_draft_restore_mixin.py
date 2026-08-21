@@ -13,10 +13,6 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
 from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
-from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
-    TECLAW_DEVICE_PROVIDER,
-    resolve_device_provider,
-)
 from agentclaw.community.core.service_bot.services.publish_exceptions import (
     BotPublishServiceError,
     PublishNotFoundError,
@@ -124,19 +120,13 @@ class PublishDraftRestoreMixin:
         if bot is None:
             return draft, target, f"Bot不存在: {draft.source_bot_id}"
 
-        target_ext = target.ext or {}
-        device_provider = resolve_device_provider(
-            bot.get("active_engine") if isinstance(bot, dict) else None
-        )
-        is_teclaw = device_provider == TECLAW_DEVICE_PROVIDER
-        if is_teclaw:
-            config_artifact = target_ext.get("config_artifact")
-            if not isinstance(config_artifact, dict):
-                return draft, target, "上一版本没有可用的 config_artifact 构造物"
-            if config_artifact.get("engine_type") != TECLAW_DEVICE_PROVIDER:
-                return draft, target, "上一版本的 config_artifact 不是 teclaw 构造物"
-        elif not target_ext.get("migration_path"):
-            return draft, target, "上一版本没有可用的 migration_path 构造物"
+        # Same artifact rule the executing restore applies, through the same
+        # provider seam — the preflight must never answer for a different
+        # provider than ``execute_restore_draft`` will actually use.
+        behavior = self._publish_flow_service_provider().provider_behavior(bot)
+        invalid_reason = behavior.validate_draft_restore_artifact(target.ext or {})
+        if invalid_reason:
+            return draft, target, invalid_reason
         return draft, target, "可以恢复草稿"
 
     def can_restore_draft(self, publish_id: int) -> tuple[bool, str, dict | None]:

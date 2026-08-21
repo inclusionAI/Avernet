@@ -1,0 +1,30 @@
+{
+  "id": "clawmind-teclaw",
+  "name": "clawmind-teclaw",
+  "description": "通用 YAML DAG 工作流引擎 — TeClaw 平台适配层",
+  "version": "0.1.0",
+  "platform": "teclaw",
+  "entry": "./dist/esm/platform/mcp-entry.js",
+  "contracts": {
+    "tools": [
+      "workflow_engine_dispatch",
+      "workflow_list",
+      "workflow_inspect",
+      "workflow_state",
+      "workflow_runs",
+      "workflow_recent_events",
+      "workflow_confirm",
+      "workflow_reject",
+      "workflow_retry",
+      "workflow_validate",
+      "workflow_help",
+      "workflow_submit_phase_result",
+      "workflow_debug_segment"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}

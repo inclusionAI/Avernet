@@ -199,8 +199,8 @@ class BotRepository(Protocol):
         self,
         public: Optional[str] = None,
         search: Optional[str] = None,
-        page: int = 1,
-        page_size: int = 20,
+        page: int | None = 1,
+        page_size: int | None = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
         """List bots with pagination and search."""
         ...

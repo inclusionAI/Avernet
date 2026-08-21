@@ -1,0 +1,36 @@
+{
+  "spec_version": "1.0",
+  "event_id": "evt-session-completed-1",
+  "event_type": "session.completed",
+  "schema_version": "1.0",
+  "source": "bcs",
+  "occurred_at": "2026-08-18T10:10:00.000Z",
+  "recorded_at": "2026-08-18T10:10:00.004Z",
+  "subject": {
+    "type": "session",
+    "id": "session-1"
+  },
+  "scope": {
+    "group_id": "group-1",
+    "session_id": "session-1"
+  },
+  "stream": {
+    "key": "session:session-1",
+    "sequence": 20
+  },
+  "actor": {
+    "type": "bot",
+    "id": "bot-manager"
+  },
+  "correlation_id": "collaboration-1",
+  "data": {
+    "completed_by": "bot-manager",
+    "reason": "manager_completed",
+    "summary": {
+      "included": false,
+      "content_type": "text/plain",
+      "size_bytes": 480,
+      "truncated": false
+    }
+  }
+}

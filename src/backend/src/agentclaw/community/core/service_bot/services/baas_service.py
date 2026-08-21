@@ -40,7 +40,7 @@ from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousErr
 
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
+from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     DEFAULT_DEVICE_PROVIDER,
     resolve_device_provider,
@@ -90,25 +90,6 @@ STARTUP_SCRIPT_LOG = "/home/admin/logs/startup_script.log"
 #: log redaction splits on so the platform half stays readable.
 _USER_STAGE_MARKER = "\n__OCB_RC=$?\n"
 
-#: Wall-clock cap on the user stage.
-#:
-#: Sized against the create budget on the other side of the callback: the
-#: backend's publish poller gives up at _CREATE_PUBLISH_TIMEOUT_SECONDS (600s,
-#: baas_publish_task_handlers.py) and the device only reports once this whole
-#: sequence exits. Half that budget leaves room for the platform steps and for
-#: the callback's own retries.
-STARTUP_SCRIPT_TIMEOUT_SECONDS = 300
-
-#: Grace period between ``timeout``'s TERM and its KILL.
-#:
-#: ``timeout N`` alone sends TERM and then *waits* — a script that traps or
-#: ignores TERM keeps the hook alive indefinitely, and nothing upstream would
-#: cut it short (see the ``after_create_hook_wait_seconds`` note in
-#: ``_build_create_bot_payload``: BaaS accepts that value and ignores it, and
-#: the wrapper is nohup'd). ``-k`` follows up with KILL, which cannot be
-#: caught, so the cap holds against a hostile or merely buggy script. The grace
-#: is short but non-zero so a well-behaved trap can still flush its own log.
-STARTUP_SCRIPT_KILL_GRACE_SECONDS = 10
 ENGINE_DIR_MOUNT_WHITELIST_PARAM_CODE = "engine_dir_mount_whitelist"
 
 
@@ -850,9 +831,11 @@ class BaasService:  # pragma: no cover
             # NOTE: this does not bound the hook. BaaS threads it into
             # dispatch_start_hook as ``hook_timeout`` and then ignores it
             # (``# noqa: ARG001 - kept for API compatibility``); the wrapper is
-            # nohup'd and runs unbounded. So it does not contradict
-            # STARTUP_SCRIPT_TIMEOUT_SECONDS, which is enforced by ``timeout``
-            # in the command itself — and it is why that one has to be.
+            # nohup'd and runs unbounded. The per-bot startup script stage is
+            # currently unbounded too (its ``timeout`` wrapper was removed), so
+            # nothing caps a start that runs a long script — the publish poller
+            # gives up at _CREATE_PUBLISH_TIMEOUT_SECONDS while the start keeps
+            # running.
             after_create_hook_wait_seconds=10,
             before_destroy_cmd_hook=destroy_cmd,
             before_destroy_hook_wait_seconds=10,
@@ -2437,13 +2420,16 @@ class BaasService:  # pragma: no cover
             entity_id=entity_id, bot_id=bot_id
         )
 
-    def _get_startup_script_segment(
-        self,
-        script: str,
-        timeout_seconds: int = STARTUP_SCRIPT_TIMEOUT_SECONDS,
-        kill_grace_seconds: int = STARTUP_SCRIPT_KILL_GRACE_SECONDS,
-    ) -> str:
-        """Emit the user stage: decode, run under a timeout, never fail the boot.
+    def _get_startup_script_segment(self, script: str) -> str:
+        """Emit the user stage: decode, run to completion, never fail the boot.
+
+        The stage is deliberately *unbounded* — the ``timeout -k`` wrapper it
+        used to run under was removed, so a script runs for as long as it takes.
+        A script that outlives the publish budget leaves the poller to give up
+        on its own (_CREATE_PUBLISH_TIMEOUT_SECONDS, baas_publish_task_handlers)
+        while the start keeps running; nothing else upstream bounds the hook
+        (BaaS ignores ``after_create_hook_wait_seconds`` and the wrapper is
+        nohup'd).
 
         The body is base64-encoded here rather than quoted. Two reasons, both
         load-bearing:
@@ -2457,7 +2443,11 @@ class BaasService:  # pragma: no cover
 
         Output goes to its own log so the script's chatter is separable from the
         platform's inside the container, even though the two share one exit
-        status upstream.
+        status upstream. The stage brackets the run with timestamped
+        ``started`` / ``finished`` marker lines in that same log — with no
+        deadline on the run, those markers are what tells a still-running script
+        apart from a finished one, and the ``finished`` line carries the
+        script's exit code.
         """
         encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
         # Runs as ``admin``, like every platform step (``_get_bootstrap_cmp``
@@ -2471,13 +2461,18 @@ class BaasService:  # pragma: no cover
         #
         # Single-quoting is safe here: everything interpolated is either a fixed
         # path or base64 (alphabet [A-Za-z0-9+/=]), so the body cannot contain a
-        # quote that closes this string. ``$f`` is expanded by the su'd shell at
-        # runtime, not by this f-string.
+        # quote that closes this string. ``$f``/``$rc`` and the ``$(date ...)``
+        # in the marker lines are expanded by the su'd shell at runtime, not by
+        # this f-string.
         inner = (
             "f=$(mktemp)"
             f' && echo {encoded} | base64 -d > "$f"'
-            f" && timeout -k {kill_grace_seconds} {timeout_seconds}"
-            f' bash "$f" >> {STARTUP_SCRIPT_LOG} 2>&1'
+            f' && echo "[startup_script] started at $(date +%Y-%m-%dT%H:%M:%S%z)"'
+            f" >> {STARTUP_SCRIPT_LOG}"
+            f' && bash "$f" >> {STARTUP_SCRIPT_LOG} 2>&1'
+            "; rc=$?"
+            f'; echo "[startup_script] finished at $(date +%Y-%m-%dT%H:%M:%S%z)'
+            f' rc=$rc" >> {STARTUP_SCRIPT_LOG}'
             '; rm -f "$f"'
         )
         return f"  su admin -c '{inner}' || true"
@@ -2600,7 +2595,7 @@ class BaasService:  # pragma: no cover
         engine: str = "",
     ) -> EngineSandboxProvider:
         """解析引擎对应的 sandbox provider。"""
-        engine_type = engine or resolve_engine_for_bot(bot_id, owner_id, bot_repo=self._bot_repo)
+        engine_type = engine or resolve_runtime_engine_for_bot(bot_id, owner_id, bot_repo=self._bot_repo)
         try:
             return self._sandbox_registry.resolve(engine_type)
         except Exception as e:

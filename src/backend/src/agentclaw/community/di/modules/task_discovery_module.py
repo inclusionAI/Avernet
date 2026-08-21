@@ -46,9 +46,9 @@ from agentclaw.community.core.task.task_discovery.task_reader import (
 )
 from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
 
-#: 默认 db 文件路径(9 级上溯到项目根)
+#: 默认 db 文件路径(8 级上溯到项目根)
 _PROJECT_ROOT = Path(__file__).resolve()
-for _ in range(9):
+for _ in range(8):
     _PROJECT_ROOT = _PROJECT_ROOT.parent
 _DEFAULT_DB = str(
     _PROJECT_ROOT / "scripts" / ".dependencies" / "data" / "discovered_tasks.db"

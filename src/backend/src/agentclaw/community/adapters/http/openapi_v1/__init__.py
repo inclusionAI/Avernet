@@ -177,7 +177,8 @@ from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
 from .bots.engine_config import router as engine_config_router
-from .caller import router as caller_router
+from .org import dept_router as org_dept_router
+from .org import router as org_router
 from .channels import router as channels_router
 from .containers import router as containers_router
 from .diagnostics import router as diagnostics_router
@@ -201,6 +202,7 @@ from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
 from .engine_runtime.nodes import router as engine_nodes_router
 from .engine_runtime.sessions import router as engine_sessions_router
+from .harness import harness_router
 from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
@@ -291,6 +293,11 @@ _SUBGROUPS = [
     # creation/authorization pair remains human-only. Dependencies are declared
     # per route in the local router.
     local_router,
+    # Harness public surface: every route is `{bot_id}`-first under
+    # `/bots/{bot_id}/harness/...` and performs its own owner/collaborator
+    # check via `HarnessBotAccessDep`, so it joins the plain subgroups with
+    # only `_PUBLIC_AUTH` + the user-scoped error table.
+    harness_router,
 ]
 
 # These groups may address a shared Bot. ``OwnerIdDep`` performs the same grant
@@ -403,7 +410,14 @@ def build_public_router() -> APIRouter:
     # table, not the user-scoped one. The caller is the sole top-level public
     # resource here because it describes the authenticated principal itself.
     public.include_router(
-        caller_router,
+        org_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Department directory search — a tenant-wide catalogue read (no ``user_id``),
+    # backed by the same StaffDeptPlugin as the whoami's dept fields.
+    public.include_router(
+        org_dept_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )

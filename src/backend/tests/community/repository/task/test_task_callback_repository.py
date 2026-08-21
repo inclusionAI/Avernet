@@ -1,0 +1,45 @@
+import pytest
+from sqlalchemy.exc import IntegrityError
+
+from agentclaw.community.core.task.repository.types import TaskCallbackRecord
+from agentclaw.community.core.repository.implementations.task.task_callback_repository import (
+    TaskCallbackRepository,
+)
+
+
+def _cb(run_id="R-1", node_id="N-1", session="S-1", **kw) -> TaskCallbackRecord:
+    base = dict(
+        id=0, invoker="bcs", run_id=run_id, node_id=node_id, main_session_id=session,
+        status="completed", orig_callback_data='{"raw": 1}', execution_graph=None,
+        result={"success": True}, result_success=True, exec_error=None, extend_props=None,
+    )
+    base.update(kw)
+    return TaskCallbackRecord(**base)
+
+
+def test_insert_get_roundtrip(db):
+    repo = TaskCallbackRepository(db)
+    stored = repo.insert(_cb())
+    assert stored.id > 0
+    assert repo.get("R-1", "N-1") == stored
+    assert stored.result == {"success": True}
+    assert stored.orig_callback_data == '{"raw": 1}'
+
+
+def test_duplicate_run_node_raises(db):
+    repo = TaskCallbackRepository(db)
+    repo.insert(_cb(run_id="R-1", node_id="N-1"))
+    with pytest.raises(IntegrityError):
+        repo.insert(_cb(run_id="R-1", node_id="N-1"))
+    # different node_id under same run_id is allowed.
+    repo.insert(_cb(run_id="R-1", node_id="N-2"))
+
+
+def test_list_by_session(db):
+    repo = TaskCallbackRepository(db)
+    repo.insert(_cb(run_id="R-1", node_id="N-1", session="S-1"))
+    repo.insert(_cb(run_id="R-2", node_id="N-2", session="S-1"))
+    repo.insert(_cb(run_id="R-3", node_id="N-3", session="S-2"))
+    rows = repo.list_by_session("S-1")
+    assert {r.run_id for r in rows} == {"R-1", "R-2"}
+    assert repo.list_by_session("missing") == []

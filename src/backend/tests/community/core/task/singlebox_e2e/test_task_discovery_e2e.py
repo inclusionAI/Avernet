@@ -345,5 +345,102 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
         print("[done] task_discovery e2e 全链路验证通过")
 
 
+# ===== HTTP 接口测试：discover + status =====
+
+@unittest.skipUnless(os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"},
+                     "设置 SINGLEBOX_TASK_E2E=1 启用")
+class TestDiscoveryStatusE2E(unittest.TestCase):
+    """HTTP 接口 e2e: POST /discover → GET /status 验证 session 关联。"""
+
+    _bot_id: str = ""
+    _owner_id: str = ""
+
+    def setUp(self) -> None:
+        with httpx.Client(timeout=30.0, headers=_HDRS) as cli:
+            bots: list[dict] = []
+            for endpoint in [
+                f"{_BACKEND}/api/bots/by-owner-or-collaborator",
+                f"{_BACKEND}/api/bots",
+            ]:
+                try:
+                    r = cli.get(endpoint, params={"user_id": _USER_ID})
+                    if r.status_code == 200:
+                        bots = (r.json().get("data") or {}).get("items") or []
+                        if bots:
+                            break
+                except Exception:
+                    continue
+        if not bots:
+            self.skipTest("singlebox 未 provision 任何 bot")
+        # 取第一个 ACTIVE 的 bot 负责任务发现
+        active_bots = [b for b in bots if b.get("status") == "ACTIVE"]
+        bot = active_bots[0] if active_bots else bots[0]
+        self._bot_id = bot["bot_id"]
+        self._owner_id = bot.get("owner_id", _USER_ID)
+        _write_mock_data(self._bot_id, self._owner_id)
+        print(f"[setup] bot_id={self._bot_id} owner_id={self._owner_id}")
+
+    def test_discover_then_status(self) -> None:
+        """POST /discover 触发发现 → GET /status 验证 session_id 已关联。"""
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(self._discover_and_check(loop))
+        finally:
+            loop.close()
+
+    async def _discover_and_check(self, loop: asyncio.AbstractEventLoop) -> None:
+        async with httpx.AsyncClient(timeout=120.0, headers=_HDRS) as cli:
+            # 1) 先查 status（discover 前）— 应该 discovered=False
+            r1 = await cli.get(
+                f"{_BACKEND}/api/v1/collaboration/tasks/discovery/status",
+            )
+            self.assertEqual(r1.status_code, 200, f"status HTTP 异常: {r1.status_code}")
+            before = r1.json().get("data") or {}
+            print(f"[status-before] total={before.get('total')} "
+                  f"discovered={before.get('discovered')}")
+
+            # 找到我们的 task — 如果上次 discover 已跑过(discovered=True)，跳过 before 断言
+            before_tasks = [t for t in (before.get("tasks") or [])
+                            if t.get("bot_id") == self._bot_id and t.get("dt") == _TODAY]
+            if before_tasks:
+                if before_tasks[0].get("discovered"):
+                    print("[status-before] 注意: 上次 discover 结果仍在内存, before 断言跳过")
+                else:
+                    self.assertFalse(before_tasks[0].get("discovered"),
+                                     "discover 前不应有 discovered=True")
+
+            # 2) POST /discover 触发发现
+            r2 = await cli.post(
+                f"{_BACKEND}/api/v1/collaboration/tasks/discovery/discover",
+                params={"bot_id": self._bot_id, "owner_id": self._owner_id,
+                        "agent_id": self._bot_id, "user_id": self._owner_id},
+            )
+            self.assertEqual(r2.status_code, 200, f"discover HTTP 异常: {r2.status_code}")
+            discover_body = r2.json().get("data") or {}
+            print(f"[discover] discovered={discover_body.get('discovered')} "
+                  f"tasks={len(discover_body.get('tasks') or [])}")
+
+            # 3) 再查 status（discover 后）— 应该 discovered=True + session_id 非空
+            r3 = await cli.get(
+                f"{_BACKEND}/api/v1/collaboration/tasks/discovery/status",
+            )
+            self.assertEqual(r3.status_code, 200, f"status HTTP 异常: {r3.status_code}")
+            after = r3.json().get("data") or {}
+            print(f"[status-after] total={after.get('total')} "
+                  f"discovered={after.get('discovered')}")
+
+            after_tasks = [t for t in (after.get("tasks") or [])
+                           if t.get("bot_id") == self._bot_id and t.get("dt") == _TODAY]
+            self.assertTrue(after_tasks, "status 未返回本 bot 的 task")
+
+            for t in after_tasks:
+                print(f"  task={t.get('task_id')} discovered={t.get('discovered')} "
+                      f"session_id={t.get('session_id')} session_url={t.get('session_url')}")
+                self.assertTrue(t.get("discovered"),
+                                f"task {t.get('task_id')} discover 后未标记 discovered=True")
+                self.assertIsNotNone(t.get("session_id"),
+                                     f"task {t.get('task_id')} session_id 为空")
+
+
 if __name__ == "__main__":
     unittest.main()

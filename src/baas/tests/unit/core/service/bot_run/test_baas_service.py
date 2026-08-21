@@ -165,8 +165,10 @@ class TestCreateSessionTenantValidation:
         mock_session_client.__aexit__ = AsyncMock(return_value=False)
 
         binding = _make_binding_info()
-        # resolve_user_id falls back to bot_id for service bot_type without context
-        consistency_key = f"agent:main:session:None:user:{BOT_UUID}"
+        # resolve_user_id falls back to bot_id for service bot_type without context;
+        # create_session strips the agent:main: prefix (line 271) before passing
+        # the consistency key to _resolve_ws_connection.
+        consistency_key = f"session:None:user:{BOT_UUID}"
 
         with (
             patch.object(
@@ -193,23 +195,22 @@ class TestCreateSessionTenantValidation:
 class TestSessionRoutingAffinityPrefix:
     """device_affinity 必须对 ``agent:main:`` 前缀不敏感。
 
-    同一会话经 DingTalk(裸 id)与 Open API(带前缀 id)两次投递必须哈希到同一实例,
-    因此 ``_create_session_consistency_key`` 对非 None session_id 剥离前导 ``agent:main:``。
+    同一会话经 DingTalk(裸 id)与 Open API(带前缀 id)两次投递必须哈希到同一实例。
+    前缀剥离职责在调用点(create_session 271 行 / _resolve_ws_connection_for_binding
+    842 行),_create_session_consistency_key 只负责构造亲和键,不做规范化。
     """
 
-    def test_prefixed_and_raw_collapse_to_same_affinity(self, service):
-        raw = "bcs-sess-123"
-        prefixed = f"agent:main:{raw}"
-        kwargs = dict(
-            engine_type="openclaw",
-            tc_bot_id=BOT_UUID,
-            user_id="u-1",
-            run_id="run-1",
-        )
+    def test_consistency_key_returns_session_id_as_is(self, service):
+        """_create_session_consistency_key 不再剥离前缀,原样返回 session_id。"""
         assert (
-            service._create_session_consistency_key(session_id=raw, **kwargs)
-            == service._create_session_consistency_key(session_id=prefixed, **kwargs)
-            == raw
+            service._create_session_consistency_key(
+                engine_type="openclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id="agent:main:bcs-sess-123",
+            )
+            == "agent:main:bcs-sess-123"
         )
 
     def test_non_prefix_id_unchanged(self, service):
@@ -237,31 +238,48 @@ class TestSessionRoutingAffinityPrefix:
             == "agent:main:session:run-1:user:u-1"
         )
 
-    def test_double_prefix_stripped_to_idempotent_form(self, service):
-        """重复 agent:main: 前缀应被完全剥离,亲和键对前缀次数幂等。"""
-        assert (
-            service._create_session_consistency_key(
-                engine_type="openclaw",
-                tc_bot_id=BOT_UUID,
-                user_id="u-1",
-                run_id="run-1",
-                session_id="agent:main:agent:main:X",
-            )
-            == "X"
+    @pytest.mark.asyncio
+    async def test_create_session_path_strips_prefix_before_resolve(
+        self, service, wss_resolver
+    ):
+        """create_session 路径(271 行)对带前缀的 session_id 剥离后再传给 resolver。"""
+        from secbaas.community.api.bot_runtime import BotChatContext
+
+        wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
+
+        mock_session_client = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.id = "agent:main:sess-strip"
+        mock_session_client.create_session = AsyncMock(return_value=mock_session)
+        mock_session_client.__aenter__ = AsyncMock(return_value=mock_session_client)
+        mock_session_client.__aexit__ = AsyncMock(return_value=False)
+
+        context = BotChatContext(
+            api_key_prefix=INVOKER,
+            tenant=TENANT,
+            app_id="test-app",
+            app_type="test-type",
         )
 
-    def test_empty_after_strip(self, service):
-        """仅含前缀的退化 id 剥离后为空串(不致崩溃,固定哈希到某设备)。"""
-        assert (
-            service._create_session_consistency_key(
-                engine_type="openclaw",
-                tc_bot_id=BOT_UUID,
-                user_id="u-1",
-                run_id="run-1",
-                session_id="agent:main:",
+        with (
+            patch.object(
+                service, "_create_session_client", return_value=mock_session_client
+            ),
+            patch.object(service, "_persist_session_create", return_value=None),
+        ):
+            await service.create_session(
+                bot_id=BOT_UUID,
+                session_id="agent:main:bcs-sess-456",
+                metadata={},
+                context=context,
+                binding_info=_make_binding_info(),
             )
-            == ""
-        )
+            assert (
+                wss_resolver.dispatch_bot_ws_conn_info.call_args.kwargs[
+                    "device_affinity"
+                ]
+                == "bcs-sess-456"
+            )
 
     @pytest.mark.asyncio
     async def test_send_path_routes_raw_and_prefixed_to_same_device(
@@ -1133,8 +1151,10 @@ class TestCreateSessionEngineType:
         mock_session_client.__aexit__ = AsyncMock(return_value=False)
 
         binding = _make_binding_info()
-        # resolve_user_id falls back to bot_id for service bot_type without context
-        consistency_key = f"agent:main:session:None:user:{BOT_UUID}"
+        # resolve_user_id falls back to bot_id for service bot_type without context;
+        # create_session strips the agent:main: prefix (line 271) before passing
+        # the consistency key to _resolve_ws_connection.
+        consistency_key = f"session:None:user:{BOT_UUID}"
 
         with (
             patch.object(
@@ -1252,8 +1272,10 @@ class TestCreateSessionInvokerInjection:
         mock_session_client.__aexit__ = AsyncMock(return_value=False)
 
         binding = _make_binding_info()
-        # resolve_user_id falls back to bot_id for service bot_type without context
-        consistency_key = f"agent:main:session:None:user:{BOT_UUID}"
+        # resolve_user_id falls back to bot_id for service bot_type without context;
+        # create_session strips the agent:main: prefix (line 271) before passing
+        # the consistency key to _resolve_ws_connection.
+        consistency_key = f"session:None:user:{BOT_UUID}"
 
         with (
             patch.object(

@@ -7,6 +7,13 @@ from agentclaw.community.core.bot_public.services.bot_public_service import (
     BotNotFoundError,
     BotPublicServiceError,
 )
+from agentclaw.community.core.bot_public.catalog_metadata import (
+    BotCatalogAddress,
+    BotCatalogCaller,
+    BotCatalogMetadata,
+    BotCatalogMetadataUnavailableError,
+    BotCatalogSearchUnavailableError,
+)
 from agentclaw.community.core.bot_public.repository.models import BotFriendStatus
 from agentclaw.community.core.operator_context import OperatorContext
 from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
@@ -30,6 +37,7 @@ def _make_service(
     skill_set_service_factory=None,
     device_context_resolver=None,
     device_sync_dispatcher=None,
+    catalog_metadata_service=None,
 ):
     return BotPublicService(
         bot_friend_repo=bot_friend_repo or MagicMock(),
@@ -42,6 +50,7 @@ def _make_service(
         skill_set_service_factory=skill_set_service_factory or MagicMock(),
         device_context_resolver=device_context_resolver or MagicMock(),
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
+        catalog_metadata_service=catalog_metadata_service or MagicMock(),
     )
 
 def _make_operator(staff_id="op_user", nick_name="Operator") -> OperatorContext:
@@ -63,6 +72,13 @@ def _make_bot(bot_id="bot1", owner_id="owner1", public="0", ext=None):
         "binding_id": 10,
         "entity_id": "entity1",
         "ext": ext or {},
+    }
+
+
+def _make_catalog_bot(bot_id: str, entity_id: str):
+    return {
+        **_make_bot(bot_id=bot_id, owner_id=entity_id),
+        "entity_id": entity_id,
     }
 
 
@@ -723,6 +739,165 @@ class TestCreateFriendRequestApproval:
 # ---------------------------------------------------------------------------
 
 class TestSearchPublicBotsByKeyword:
+    def test_legacy_search_does_not_depend_on_catalog_metadata(self):
+        bot_service = MagicMock()
+        bot_service.list_bots_by_search.return_value = {
+            "total": 1,
+            "items": [_make_bot()],
+        }
+        metadata = MagicMock()
+        svc = _make_service(bot_service=bot_service, catalog_metadata_service=metadata)
+
+        result = svc.search_public_bots_by_keyword(search="catalog")
+
+        assert result["total"] == 1
+        metadata.search_public_bot_metadata.assert_not_called()
+
+    def test_catalog_search_joins_only_the_current_bcs_page_and_reports_its_count(self):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.return_value = [
+            BotCatalogMetadata(BotCatalogAddress("bot-1", "entity-1"), "bot"),
+            BotCatalogMetadata(BotCatalogAddress("missing", "entity-2"), "bot"),
+        ]
+        repository = MagicMock()
+        repository.list_public_bots_by_owner_bot_pairs.return_value = [
+            _make_catalog_bot("bot-1", "entity-1"),
+        ]
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            search="agent",
+            page=3,
+            page_size=20,
+            caller=BotCatalogCaller("tenant-1", "user-1", 7),
+            request_id="trace-1",
+        )
+
+        assert result["total"] == 1
+        assert [bot["bot_id"] for bot in result["items"]] == ["bot-1"]
+        metadata.search_public_bot_metadata.assert_called_once_with(
+            search="agent",
+            page=3,
+            page_size=20,
+            caller=BotCatalogCaller("tenant-1", "user-1", 7),
+            request_id="trace-1",
+        )
+        repository.list_public_bots_by_owner_bot_pairs.assert_called_once_with(
+            [("bot-1", "entity-1"), ("missing", "entity-2")]
+        )
+
+    def test_catalog_search_restores_bcs_order_and_isolates_same_bot_id_by_entity(self):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.return_value = [
+            BotCatalogMetadata(BotCatalogAddress("shared", "entity-a"), "bot"),
+            BotCatalogMetadata(BotCatalogAddress("shared", "entity-b"), "bot"),
+        ]
+        repository = MagicMock()
+        repository.list_public_bots_by_owner_bot_pairs.return_value = [
+            _make_catalog_bot("shared", "entity-b"),
+            _make_catalog_bot("shared", "entity-other"),
+            _make_catalog_bot("shared", "entity-a"),
+        ]
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            caller=BotCatalogCaller("tenant-1", None, 7), request_id="trace-2"
+        )
+
+        assert result["total"] == 2
+        assert [bot["entity_id"] for bot in result["items"]] == [
+            "entity-a",
+            "entity-b",
+        ]
+
+    def test_catalog_search_translates_metadata_unavailable_without_details(self):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.side_effect = BotCatalogMetadataUnavailableError(
+            "internal detail"
+        )
+        repository = MagicMock()
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        with pytest.raises(BotCatalogSearchUnavailableError) as error:
+            svc.search_catalog_public_bots_by_keyword(
+                caller=BotCatalogCaller("tenant-1", "user-1", None),
+                request_id="trace-3",
+            )
+
+        assert str(error.value) == ""
+        repository.list_public_bots_by_owner_bot_pairs.assert_not_called()
+
+    def test_catalog_search_fails_closed_on_unexpected_metadata_error(self, caplog):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.side_effect = RuntimeError(
+            "private upstream detail"
+        )
+        svc = _make_service(catalog_metadata_service=metadata)
+
+        with caplog.at_level("WARNING"), pytest.raises(
+            BotCatalogSearchUnavailableError
+        ) as error:
+            svc.search_catalog_public_bots_by_keyword(
+                caller=BotCatalogCaller("tenant-1", "user-1", None),
+                request_id="trace-unexpected",
+            )
+
+        assert str(error.value) == ""
+        assert "request_id=trace-unexpected failure=invalid_metadata" in caplog.text
+        assert "private upstream detail" not in caplog.text
+
+    def test_catalog_search_redacts_sensitive_fields_and_malformed_ext(self):
+        malformed = _make_catalog_bot("malformed", "entity-malformed")
+        malformed.update({"device_id": "device-secret", "ext": "{not-json"})
+        sensitive = _make_catalog_bot("sensitive", "entity-sensitive")
+        sensitive.update(
+            {
+                "device_id": "device-secret",
+                "ext": (
+                    '{"passport":{"token":"passport-secret","status":"ISSUED"},'
+                    '"iam_token":"iam-secret","visible":"kept"}'
+                ),
+            }
+        )
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.return_value = [
+            BotCatalogMetadata(
+                BotCatalogAddress("malformed", "entity-malformed"), "bot"
+            ),
+            BotCatalogMetadata(
+                BotCatalogAddress("sensitive", "entity-sensitive"), "bot"
+            ),
+        ]
+        repository = MagicMock()
+        repository.list_public_bots_by_owner_bot_pairs.return_value = [
+            malformed,
+            sensitive,
+        ]
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-redaction",
+        )
+
+        by_id = {bot["bot_id"]: bot for bot in result["items"]}
+        assert by_id["malformed"]["device_id"] is None
+        assert by_id["malformed"]["ext"] == {}
+        assert by_id["sensitive"]["device_id"] is None
+        assert by_id["sensitive"]["ext"] == {
+            "passport": {"token": None, "status": "ISSUED"},
+            "iam_token": None,
+            "visible": "kept",
+        }
+
     def test_catalog_read_without_user_skips_friendship_lookup(self):
         bot_service = MagicMock()
         bot_service.list_bots_by_search.return_value = {
