@@ -556,8 +556,11 @@ Record structured events and counters for:
 - cleanup counts and active interaction counts by status.
 
 Logs include `bcs_run_id`, `interaction_id`, `bcs_session_id`, `group_id`,
-`bot_id`, and Provider ID. They must not log secret user answers or sensitive
-command contents beyond existing redaction rules.
+`bot_id`, and Provider ID. For diagnostics, Provider request-body and SSE-detail
+logs preserve interaction business payloads such as commands, questions,
+answers, actions, and Provider extensions. Authentication tokens, authorization
+headers, and temporary attachment URLs remain redacted by their independent
+security rules.
 
 The process-local implementation additionally enforces a 256 KiB requested
 payload limit, 32 active interactions per run, 256 active interactions per

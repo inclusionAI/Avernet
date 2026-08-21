@@ -141,11 +141,14 @@ with the approved scoped policy.
 Run:
 
 ```bash
-rg -n "interaction 业务 payload|secret user answers|sensitive command contents" src/bcs/docs
+rg -n "interaction 业务 payload|preserve interaction business payloads" \
+  src/bcs/docs/bcs-provider-2.0-sse-protocol.md \
+  src/bcs/docs/plans/2026-08-12-bcn-provider-sse-hitl-design.md
 git diff --check
 ```
 
-Expected: no stale prohibition remains; `git diff --check` exits 0.
+Expected: both documents state the approved payload-logging policy;
+`git diff --check` exits 0.
 
 **Step 4: Commit**
 
