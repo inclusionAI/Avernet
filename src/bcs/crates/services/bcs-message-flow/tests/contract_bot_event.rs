@@ -3394,6 +3394,89 @@ async fn manager_worker_task_final_delta_mode_flushes_only_open_worker_segment()
 }
 
 #[tokio::test]
+async fn manager_worker_sse_task_response_appends_raw_deltas_across_thinking_boundary() {
+    let (_support, repo, flow) = manager_worker_flow_with_repo().await;
+    register_manager_worker_task(
+        &flow,
+        "task-response-delta-thinking",
+        ChatResponseMode::AfterLastToolCall,
+    )
+    .await;
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: "task-response-delta-thinking".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({ "state": "delta", "delta_text": "A" }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: "task-response-delta-thinking".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "thinking",
+            "data": { "delta": "checking" },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+    for delta in ["B1", "B2"] {
+        flow.handle_bot_event(BotEventCommand {
+            bot_id: "bot-worker".to_string(),
+            run_id: "task-response-delta-thinking".to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "chat.event".to_string(),
+            event_payload: json!({ "state": "delta", "delta_text": delta }),
+            state: ChatEventState::Delta,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(
+        flow.task_store
+            .get("task-response-delta-thinking")
+            .await
+            .unwrap()
+            .response_content,
+        "AB1B2",
+        "TaskStore must append raw SSE deltas instead of synthesized segment snapshots"
+    );
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: "task-response-delta-thinking".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({ "state": "final" }),
+        state: ChatEventState::Final,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    let appended = repo.appended().await;
+    let manager_result = appended
+        .iter()
+        .find(|msg| {
+            msg.sender_id == "bot-worker"
+                && msg.message_type == "chat"
+                && msg.owner_bot_id.is_none()
+        })
+        .expect("manager result history");
+    assert_eq!(manager_result.content, json!("AB1B2"));
+}
+
+#[tokio::test]
 async fn manager_worker_task_result_defaults_to_text_after_last_tool_call() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     support.registry.insert_named_actor("bot-manager", "Manager").await;
