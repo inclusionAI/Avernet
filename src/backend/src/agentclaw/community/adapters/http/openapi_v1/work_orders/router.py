@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
@@ -68,6 +69,45 @@ def _require_user_delegation(caller: ActingCaller) -> str:
     return caller.user_id
 
 
+def _approval_display(work_order) -> tuple[str, str | None]:
+    """Return display copy for an approval item without a recipient notice.
+
+    A work order initiated by the current user has no notification row for
+    that user: approval notifications belong to the approvers.  Keep the
+    notification identifier/category nullable, but still provide the same
+    display copy that the frontend receives for notification items.
+
+    Business modules provide display copy in ``biz_data``.  The shared
+    adapter does not maintain a business-type-to-copy enum, so new business
+    types can define their own wording without changing this endpoint.
+    """
+    data: dict[str, object] = {}
+    if work_order.biz_data:
+        try:
+            parsed = json.loads(work_order.biz_data)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            data = parsed
+
+    status = work_order.status.value
+    display_title = data.get("display_title")
+    display_content = data.get("display_content")
+    if isinstance(display_title, dict):
+        display_title = display_title.get(status)
+    if isinstance(display_content, dict):
+        display_content = display_content.get(status)
+    if isinstance(display_title, str) and display_title:
+        return display_title, display_content if isinstance(
+            display_content, str
+        ) else None
+
+    # Compatibility fallback for work orders created before display copy was
+    # included in biz_data.  New business types must provide their own copy
+    # through biz_data rather than being added to this shared adapter.
+    return work_order.biz_type, work_order.apply_reason
+
+
 def _list_item(item: DomainListItem) -> WorkOrderListItem:
     work_order = item.work_order
     notification = item.notification
@@ -82,6 +122,10 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         if category is not None
         else WorkOrderItemType.APPROVAL
     )
+    title = notification.title if notification is not None else None
+    content = notification.content if notification is not None else None
+    if notification is None:
+        title, content = _approval_display(work_order)
     return WorkOrderListItem(
         item_id=(
             f"NOTIFICATION_{notification.id}"
@@ -104,8 +148,8 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
             notification.recipient_user_id if notification is not None else None
         ),
         event_type=notification.event_type if notification is not None else None,
-        title=notification.title if notification is not None else None,
-        content=notification.content if notification is not None else None,
+        title=title,
+        content=content,
         status=work_order.status,
         is_read=notification.is_read if notification is not None else None,
         read_at=notification.read_at if notification is not None else None,

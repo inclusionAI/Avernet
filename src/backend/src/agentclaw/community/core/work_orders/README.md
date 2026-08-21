@@ -71,9 +71,26 @@ the names defined by the system design for later business handlers.
 
 ## Space-join message templates
 
-Titles and content are generated only from `WorkOrderMessageTitle` and
-`WorkOrderMessageContent`, then the final rendered text is stored on the
-notification row. Clients display the stored text directly.
+Titles and content for the currently implemented Space handler are
+maintained by `WorkOrderMessageTitle` and `WorkOrderMessageContent`. The
+rendered approval copy is also stored in the work order's `biz_data`, so the
+applicant's initiated-work-order list can display it even though no approval
+notification row is created for the applicant. The OpenAPI adapter reads the
+status-specific `display_title` and `display_content` values from `biz_data`;
+it does not maintain a shared business-type-to-copy enum. Each new business
+module owns its own wording and supplies the same display payload when it
+creates a work order.
+
+Example `biz_data` display payload:
+
+```json
+{
+  "display_title": {"PENDING": "...", "APPROVED": "...", "REJECTED": "..."},
+  "display_content": {"PENDING": "...", "APPROVED": "...", "REJECTED": "..."}
+}
+```
+
+Clients display the final stored text directly.
 
 | Scenario | Event | Category | Title | Content |
 | --- | --- | --- | --- | --- |

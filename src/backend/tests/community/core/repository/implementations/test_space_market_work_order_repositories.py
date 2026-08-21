@@ -1,6 +1,7 @@
 """SQLite-backed unit tests for the new unified ORM repositories."""
 
 import asyncio
+import json
 from datetime import datetime
 
 import pytest
@@ -442,6 +443,12 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     )
     assert record.status is WorkOrderStatus.PENDING
     assert record.work_order_no.startswith("WO")
+    assert json.loads(record.biz_data) == {
+        "display_title": {"PENDING": "空间加入申请待审批"},
+        "display_content": {
+            "PENDING": "用户「Applicant」申请加入空间「Team」，请及时处理。"
+        },
+    }
     with pytest.raises(WorkOrderAlreadyPendingError):
         repository.create_space_join_request(
             space_id=space.id,

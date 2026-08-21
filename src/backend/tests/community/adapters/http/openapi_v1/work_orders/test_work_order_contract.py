@@ -1,5 +1,6 @@
 """Contract tests for work-order and notification OpenAPI handlers."""
 
+import json
 from datetime import datetime
 from unittest.mock import MagicMock
 
@@ -38,12 +39,16 @@ MODIFIED = datetime(2026, 8, 18, 2, 3, 4)
 NOTIFICATION_MODIFIED = datetime(2026, 8, 18, 3, 4, 5)
 
 
-def _work_order(status: WorkOrderStatus = WorkOrderStatus.PENDING) -> WorkOrderRecord:
+def _work_order(
+    status: WorkOrderStatus = WorkOrderStatus.PENDING,
+    biz_data: str | None = None,
+) -> WorkOrderRecord:
     return WorkOrderRecord(
         id=11,
         work_order_no="WO-11",
         biz_type=WorkOrderBizType.SPACE_JOIN,
         biz_id="7",
+        biz_data=biz_data,
         applicant_user_id="applicant-1",
         apply_reason="join",
         status=status,
@@ -122,12 +127,31 @@ def test_create_join_request_uses_principal_and_returns_created(
     )
 
 
+def _space_join_display_data() -> str:
+    return json.dumps(
+        {
+            "display_title": {
+                "PENDING": "空间加入申请待审批",
+                "APPROVED": "空间加入申请已通过",
+                "REJECTED": "空间加入申请未通过",
+            },
+            "display_content": {
+                "PENDING": "空间加入申请正在等待审批。",
+                "APPROVED": "空间加入申请已通过。",
+                "REJECTED": "空间加入申请未通过。",
+            },
+        }
+    )
+
+
 def test_list_work_orders_maps_plain_and_notification_items(client, work_order_service):
     work_order_service.list_items.return_value = (
         2,
         [
             WorkOrderListItem(
-                work_order=_work_order(), notification=None, can_approve=True
+                work_order=_work_order(biz_data=_space_join_display_data()),
+                notification=None,
+                can_approve=True,
             ),
             WorkOrderListItem(
                 work_order=_work_order(WorkOrderStatus.APPROVED),
@@ -152,6 +176,8 @@ def test_list_work_orders_maps_plain_and_notification_items(client, work_order_s
     assert items[0]["item_id"] == "WORK_ORDER_11"
     assert items[0]["item_type"] == "APPROVAL"
     assert items[0]["notification_id"] is None
+    assert items[0]["title"] == "空间加入申请待审批"
+    assert items[0]["content"] == "空间加入申请正在等待审批。"
     assert items[0]["gmt_modified"] == "2026-08-18T02:03:04Z"
     assert items[1]["item_id"] == "NOTIFICATION_21"
     assert items[1]["item_type"] == "NOTICE"
@@ -165,6 +191,77 @@ def test_list_work_orders_maps_plain_and_notification_items(client, work_order_s
         "page_no": 2,
         "page_size": 5,
     }
+
+
+@pytest.mark.parametrize(
+    ("status", "title", "content"),
+    [
+        (
+            WorkOrderStatus.PENDING,
+            "空间加入申请待审批",
+            "空间加入申请正在等待审批。",
+        ),
+        (
+            WorkOrderStatus.APPROVED,
+            "空间加入申请已通过",
+            "空间加入申请已通过。",
+        ),
+        (
+            WorkOrderStatus.REJECTED,
+            "空间加入申请未通过",
+            "空间加入申请未通过。",
+        ),
+    ],
+)
+def test_list_work_orders_provides_copy_for_approval_without_notification(
+    client, work_order_service, status, title, content
+):
+    work_order_service.list_items.return_value = (
+        1,
+        [
+            WorkOrderListItem(
+                work_order=_work_order(status, biz_data=_space_join_display_data()),
+                notification=None,
+                can_approve=False,
+            )
+        ],
+    )
+
+    response = client.get("/openapi/v1/bots/work-orders")
+
+    assert response.status_code == 200
+    item = response.json()["data"]["items"][0]
+    assert item["item_type"] == "APPROVAL"
+    assert item["notification_id"] is None
+    assert item["notification_category"] is None
+    assert item["title"] == title
+    assert item["content"] == content
+
+
+def test_list_work_orders_uses_business_copy_without_shared_biz_type_enum(
+    client, work_order_service
+):
+    order = _work_order(
+        biz_data=json.dumps(
+            {
+                "display_title": {"PENDING": "机器人协作申请"},
+                "display_content": {"PENDING": "请处理机器人协作申请。"},
+            }
+        )
+    )
+    order.biz_type = "BOT_COLLABORATOR"
+    work_order_service.list_items.return_value = (
+        1,
+        [WorkOrderListItem(work_order=order, notification=None, can_approve=False)],
+    )
+
+    response = client.get("/openapi/v1/bots/work-orders")
+
+    assert response.status_code == 200
+    item = response.json()["data"]["items"][0]
+    assert item["biz_type"] == "BOT_COLLABORATOR"
+    assert item["title"] == "机器人协作申请"
+    assert item["content"] == "请处理机器人协作申请。"
 
 
 def test_get_work_order_maps_nested_content(client, work_order_service):
