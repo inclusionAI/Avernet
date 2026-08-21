@@ -84,7 +84,7 @@
         unchanged.
 - **Depends on:** Tasks 1, 2
 
-## Task 4: The seam  `[ ]`
+## Task 4: The seam  `[x]`
 
 - **Goal:** One place that resolves the bot, adjudicates the level and writes
   the audit record — fail-closed on every check.
@@ -93,24 +93,27 @@
   `…/openapi_v1/errors.py`,
   `src/backend/src/agentclaw/community/adapters/http/app.py:659`
 - **Done when:**
-  - [ ] `require_check(rule)` returns a `yield` dependency reading `bot_id`
+  - [x] `require_check(rule)` returns a `yield` dependency reading `bot_id`
         from the path and `owner_id` from `OwnerIdDep`, and **nothing else** —
         check and action read the same values by construction.
-  - [ ] Level comes from `resolve_operable_permission_level`; an unresolvable
+  - [x] Level comes from `resolve_operable_permission_level`; an unresolvable
         bot, owner or level yields `NONE` and refuses. The interceptor's
         `permission_skipped` fail-open (`interceptor/collaborator.py:186`) is
         not ported, and a comment says so.
-  - [ ] Below-level raises `BotAccessRefusedError` → 404, byte-identical to an
+  - [x] Below-level raises `BotAccessRefusedError` → 404, byte-identical to an
         absent bot.
-  - [ ] A successful non-owner action on a non-read method writes one
+  - [x] A successful non-owner action on a non-read method writes one
         `ac_bot_collab_log` row; a read writes none; an owner's writes none.
-  - [ ] An audit write failure logs at error level with bot, owner, actor and
+  - [x] An audit write failure logs at error level with bot, owner, actor and
         route, and does not fail the request (`spec.md` *Decisions* 2).
-  - [ ] The module imports no lock service and calls none — asserted by
+  - [x] The module imports no lock service and calls none — asserted by
         `test_gate_never_touches_the_lock_service`.
-  - [ ] `BotAccessRefusedError` has an `app.py` handler, because a
+  - [x] `BotAccessRefusedError` has an `app.py` handler, because a
         dependency-raised error never reaches `@envelope_errors`
         (`errors.py:36`). No lock error type is added.
+- **Note:** the gate pins listed under Task 5 landed here, with the code
+  they pin, rather than a task later — untested enforcement is not worth
+  committing. Task 5 keeps the inventory and inertness sweeps.
 - **Depends on:** Task 2
 
 ## Task 5: Pin the contract  `[ ]`

@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    BotAccessRefusedError,
     GrantNotResolvableError,
     MissingPrincipalError,
     UserIdMismatchError,
@@ -82,6 +83,7 @@ def mount_public_error_handlers(app: FastAPI) -> FastAPI:
     builds the whole application.
     """
     from agentclaw.community.adapters.http.app import (
+        _bot_access_refused_handler,
         _grant_not_resolvable_handler,
         _principal_error_handler,
         _user_id_mismatch_handler,
@@ -91,6 +93,7 @@ def mount_public_error_handlers(app: FastAPI) -> FastAPI:
     app.add_exception_handler(MissingPrincipalError, _principal_error_handler)
     app.add_exception_handler(UserIdMismatchError, _user_id_mismatch_handler)
     app.add_exception_handler(GrantNotResolvableError, _grant_not_resolvable_handler)
+    app.add_exception_handler(BotAccessRefusedError, _bot_access_refused_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
     return app
 

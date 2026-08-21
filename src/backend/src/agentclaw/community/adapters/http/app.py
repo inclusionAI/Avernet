@@ -341,6 +341,7 @@ from agentclaw.community.adapters.http.error_logging import (  # noqa: E402
     params_suffix,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (  # noqa: E402
+    BotAccessRefusedError,
     GrantNotResolvableError,
     MissingPrincipalError,
     UserIdMismatchError,
@@ -673,6 +674,36 @@ async def _grant_not_resolvable_handler(
 
     ``403`` would be exactly wrong: on this surface it means "you are
     authenticated and this is not yours", which confirms the bot exists.
+    """
+    logger.warning(
+        "[Public 404] %s on %s %s: %s%s",
+        type(exc).__name__, request.method, request.url.path, exc,
+        params_suffix(request),
+    )
+    mapped = _public_mapped_error(request, exc)
+    if mapped is not None:
+        return mapped
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Not found"},
+        headers=_trace_headers(request),
+    )
+
+
+@app.exception_handler(BotAccessRefusedError)
+async def _bot_access_refused_handler(
+    request: Request, exc: BotAccessRefusedError,
+) -> JSONResponse:
+    """Answer a caller below an operation's collaborator level — 404.
+
+    Registered as a concrete type for the same reason as the handler above: it
+    is raised in a **dependency**, so ``@envelope_errors`` never sees it.
+
+    **The body must be byte-identical to a nonexistent bot's**, which is why
+    this goes through ``_public_mapped_error`` with the same status rather than
+    composing its own. A caller who could tell "not permitted" from "no such
+    bot" would have an enumeration oracle over every bot in the tenant — and
+    the check would leak precisely what it exists to protect.
     """
     logger.warning(
         "[Public 404] %s on %s %s: %s%s",
