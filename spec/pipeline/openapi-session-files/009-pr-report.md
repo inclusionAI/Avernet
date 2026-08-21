@@ -29,8 +29,8 @@
 
 | Job/指标 | 状态 | 证据 | 根因 | 修复/提交 | 验证 |
 |---|---|---|---|---|---|
-| Backend unit tests | FAIL → 本地修复待推送 | [失败 job](https://github.com/inclusionAI/Avernet/actions/runs/32466745528/job/96724902028) | HTTP adapter 文件名被 endpoint 规则扫描、`runtime_binding` 未登记 E3 豁免、sessions router 为 1002 行（上限 1000）。 | adapter 改为 router-local dependency 文件名；为只读 resolver 登记明确豁免；只删除新增 endpoint 内两处空行。 | 相关门禁与 Session File 回归 17 passed。 |
-| BCS E2E / Singlebox / BCS / Engine / BaaS / Gateway | SUCCESS | [#1321](https://github.com/inclusionAI/Avernet/pull/1321) | — | — | 当前 head 的其余六项远端 job 已成功。 |
+| Backend unit tests | IN_PROGRESS | [新 job](https://github.com/inclusionAI/Avernet/actions/runs/32468676887/job/96730662231) | 原失败：HTTP adapter 文件名被 endpoint 规则扫描、`runtime_binding` 未登记 E3 豁免、sessions router 为 1002 行（上限 1000）。 | `e7bf43aae`：adapter 改为 router-local dependency 文件名；为只读 resolver 登记明确豁免；只删除新增 endpoint 内两处空行。 | 相关门禁与 Session File 回归 17 passed；等待远端新 head。 |
+| BCS E2E / Singlebox / BCS / Engine / BaaS / Gateway | IN_PROGRESS | [#1321](https://github.com/inclusionAI/Avernet/pull/1321) | 新 head 触发完整 checks。 | — | 7 项远端 jobs 均已启动。 |
 | Backend 全量本地复现 | 仅本地缓存干扰 | `bash scripts/ci_test.sh --base HEAD^1` | 13,439 passed、22 skipped；唯一失败为未跟踪、无源码的旧 `core/session_files/__pycache__` 被 E3 目录扫描。 | 已移至系统临时目录（可恢复），未纳入 diff。 | 17 项失败门禁/受影响回归全绿；干净 CI checkout 不含该目录。 |
 | Backend 聚焦回归 | PASS | 本地执行 | — | `99a78e8b9` | 62 + 45 passed。 |
 | 架构/coverage | PASS | 本地执行 | — | `99a78e8b9` | 69 passed。 |
@@ -40,12 +40,12 @@
 
 | 轮次 | 作者 | 链接 | 决定 | 理由 | 修改/提交 | 验证 |
 |---|---|---|---|---|---|---|
-| 0 | totalfrank | [#1321](https://github.com/inclusionAI/Avernet/pull/1321) | APPROVED | `LGTM.` | — | 当前 head 已读取。 |
+| 0 | totalfrank | [#1321](https://github.com/inclusionAI/Avernet/pull/1321) | DISMISSED | `LGTM.` 对应旧 head `97a93795b`，GitHub 在 `e7bf43aae` 推送后自动撤销。 | — | 当前 head 已读取；没有新人工意见。 |
 
 ## 当前结论
 
 - PR: OPEN
 - 自动意见: CLEAR
-- ACI/CI: Backend unit tests 修复待推送；其余六项 SUCCESS
-- 人工意见: APPROVED
-- 下一步: 提交并推送最小 CI 修复，再等待新 head 的全部远端 checks。
+- ACI/CI: `e7bf43aae` 的 7 项 checks IN_PROGRESS
+- 人工意见: 旧 head 审批已 DISMISSED；当前没有新意见
+- 下一步: 等待当前 head 的全部远端 checks；仅在实际失败时继续最小修复。
