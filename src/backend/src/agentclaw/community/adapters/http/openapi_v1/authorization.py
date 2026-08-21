@@ -686,6 +686,18 @@ def assert_every_route_authorized(router: APIRouter) -> None:
             "these routes were not built with route_class=PublicAPIRoute, so "
             "their AUTHORIZATION row was never read: " + ", ".join(sorted(unguarded))
         )
+    # The reverse direction, which matters only for the socket plane. An HTTP
+    # route with no row cannot exist — ``PublicAPIRoute`` refused to build it —
+    # so this is guaranteed empty there. A WebSocket route never runs that
+    # ``__init__`` at all, so without this check one could be served with no
+    # declared authorization whatsoever, which is the single gap the route
+    # class cannot close on its own.
+    missing = seen - set(AUTHORIZATION) - UNMOUNTED_OPERATIONS
+    if missing:
+        raise PublicRouteNotAuthorized(
+            "these live operations have no row in AUTHORIZATION: "
+            + ", ".join(sorted(f"{method} {path}" for method, path in missing))
+        )
     orphans = set(AUTHORIZATION) - seen - UNMOUNTED_OPERATIONS
     if orphans:
         raise PublicRouteNotAuthorized(
@@ -711,8 +723,9 @@ def _is_websocket(route: Any) -> bool:
     """WebSocket routes are ``APIWebSocketRoute``, which takes no route class.
 
     FastAPI offers no per-router class for the socket plane, so a socket route
-    cannot carry :class:`PublicAPIRoute`. It is still covered: its row is
-    required by the orphan check above and by the inventory test, and the
-    socket operations on this surface are refused to app callers anyway.
+    cannot carry :class:`PublicAPIRoute` and ``_rule_for`` never runs for it.
+    It is covered by the *missing* check above rather than by this exemption —
+    which is the whole reason that check exists, since the orphan check looks
+    the other way and would let a row-less socket route through.
     """
     return not hasattr(route, "methods")

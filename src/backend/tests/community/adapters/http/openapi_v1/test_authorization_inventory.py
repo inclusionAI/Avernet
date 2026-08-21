@@ -379,3 +379,28 @@ def test_a_router_cannot_opt_out_of_the_route_class():
         assert "built-its-own-way" in str(refusal.value)
     finally:
         AUTHORIZATION.pop(("GET", "/openapi/v1/bots/{bot_id}/built-its-own-way"), None)
+
+
+def test_a_websocket_route_without_a_row_fails_assembly():
+    """The one operation kind the route class can never see.
+
+    ``APIWebSocketRoute`` is built directly by FastAPI, so ``_rule_for`` never
+    runs for it and the unguarded check exempts it. Without the reverse
+    direction in ``assert_every_route_authorized`` such a route would be served
+    with no declared authorization at all — the orphan check looks the other
+    way and finds nothing to complain about.
+    """
+    public = build_public_router()
+    sockets = APIRouter()
+
+    @sockets.websocket("/openapi/v1/bots/undeclared/ws")
+    async def undeclared(websocket) -> None:  # pragma: no cover - never served
+        ...
+
+    public.include_router(sockets)
+
+    with pytest.raises(PublicRouteNotAuthorized) as refusal:
+        assert_every_route_authorized(public)
+
+    assert "no row in AUTHORIZATION" in str(refusal.value)
+    assert "/openapi/v1/bots/undeclared/ws" in str(refusal.value)
