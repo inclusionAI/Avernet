@@ -119,7 +119,16 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
 
 # Bring over installed openclaw from builder.
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
-COPY --from=builder /usr/local/bin/openclaw /usr/local/bin/openclaw
+# Recreate npm bin symlink: COPY --from resolves symlinks to files,
+# which breaks the script's __dirname-based dist/ path resolution.
+RUN BIN_REL=$(node -e "\
+  const p = require('/usr/local/lib/node_modules/openclaw/package.json'); \
+  const b = p.bin || {}; \
+  const t = typeof b === 'string' ? b : (b.openclaw || Object.values(b)[0]); \
+  console.log(t)") \
+    && ln -sf "/usr/local/lib/node_modules/openclaw/${BIN_REL}" \
+              /usr/local/bin/openclaw \
+    && chmod +x /usr/local/bin/openclaw
 
 # Bring over the engine venv + source code.
 COPY --from=builder /opt/.venv /opt/.venv
