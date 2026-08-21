@@ -1536,6 +1536,7 @@ impl BcsClient {
             target_actor_id: None,
             routing_policy: None,
             context: options.context,
+            opening_message: None,
             topic: options.topic,
             group_kind: None,
             service_spec: None,
@@ -1545,6 +1546,7 @@ impl BcsClient {
             auto_start_on_service_invocation: Some(options.auto_start_on_service_invocation),
             start_initial_run: None,
             visibility: None,
+            event_subscriptions: Vec::new(),
         };
         let response = self
             .add_auth(self.http_client.post(&url).json(&payload))
@@ -1588,6 +1590,7 @@ impl BcsClient {
             label: None,
             routing_policy: None,
             context: None,
+            opening_message: None,
             topic: None,
             group_kind: None,
             service_spec: None,
@@ -1597,6 +1600,7 @@ impl BcsClient {
             auto_start_on_service_invocation: None,
             start_initial_run: None,
             visibility: None,
+            event_subscriptions: Vec::new(),
         };
 
         let response = self
@@ -1665,6 +1669,7 @@ impl BcsClient {
             label: None,
             routing_policy: None,
             context: context.map(|s| s.to_string()),
+            opening_message: None,
             topic: topic.map(|s| s.to_string()),
             group_kind: None,
             service_spec: None,
@@ -1674,6 +1679,7 @@ impl BcsClient {
             auto_start_on_service_invocation: None,
             start_initial_run: None,
             visibility: None,
+            event_subscriptions: Vec::new(),
         };
 
         let response = self

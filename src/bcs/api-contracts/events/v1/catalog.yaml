@@ -1,0 +1,148 @@
+spec_version: "1.0"
+
+# MVP supports one group-scoped subscription and events owned by that group.
+# A wildcard is valid only when its namespace is registered here.
+families:
+  - name: group
+    wildcard: group.*
+  - name: group_participant
+    wildcard: group.participant.*
+  - name: session
+    wildcard: session.*
+  - name: session_participant
+    wildcard: session.participant.*
+  - name: task
+    wildcard: task.*
+  - name: state_machine
+    wildcard: state_machine.*
+  - name: state_machine_run
+    wildcard: state_machine.run.*
+  - name: state_machine_node
+    wildcard: state_machine.node.*
+  - name: message
+    wildcard: message.*
+
+events:
+  - event_type: group.created
+    family: group.*
+    schema_version: "1.0"
+    subject_type: group
+    required_scope: [group_id]
+    stream: group
+    data_schema: "#/$defs/GroupCreatedData"
+  - event_type: group.participant.added
+    family: group.participant.*
+    schema_version: "1.0"
+    subject_type: participant
+    required_scope: [group_id]
+    stream: group
+    data_schema: "#/$defs/GroupParticipantAddedData"
+  - event_type: group.participant.removed
+    family: group.participant.*
+    schema_version: "1.0"
+    subject_type: participant
+    required_scope: [group_id]
+    stream: group
+    data_schema: "#/$defs/GroupParticipantRemovedData"
+
+  - event_type: session.created
+    family: session.*
+    schema_version: "1.0"
+    subject_type: session
+    required_scope: [group_id, session_id]
+    stream: session
+    data_schema: "#/$defs/SessionCreatedData"
+  - event_type: session.completed
+    family: session.*
+    schema_version: "1.0"
+    subject_type: session
+    required_scope: [group_id, session_id]
+    stream: session
+    content_fields: [summary]
+    data_schema: "#/$defs/SessionCompletedData"
+  - event_type: session.participant.added
+    family: session.participant.*
+    schema_version: "1.0"
+    subject_type: participant
+    required_scope: [group_id, session_id]
+    stream: session
+    data_schema: "#/$defs/SessionParticipantAddedData"
+  - event_type: session.participant.removed
+    family: session.participant.*
+    schema_version: "1.0"
+    subject_type: participant
+    required_scope: [group_id, session_id]
+    stream: session
+    data_schema: "#/$defs/SessionParticipantRemovedData"
+
+  - event_type: task.assigned
+    family: task.*
+    schema_version: "1.0"
+    subject_type: task
+    required_scope: [group_id, task_id]
+    stream: task
+    content_fields: [assignment]
+    data_schema: "#/$defs/TaskAssignedData"
+  - event_type: task.completed
+    family: task.*
+    schema_version: "1.0"
+    subject_type: task
+    required_scope: [group_id, task_id]
+    stream: task
+    content_fields: [result]
+    data_schema: "#/$defs/TaskCompletedData"
+
+  - event_type: state_machine.run.created
+    family: state_machine.run.*
+    schema_version: "1.0"
+    subject_type: state_machine.run
+    required_scope: [group_id, session_id, run_id]
+    stream: state_machine_run
+    data_schema: "#/$defs/StateMachineRunCreatedData"
+  - event_type: state_machine.run.started
+    family: state_machine.run.*
+    schema_version: "1.0"
+    subject_type: state_machine.run
+    required_scope: [group_id, session_id, run_id]
+    stream: state_machine_run
+    content_fields: [input]
+    data_schema: "#/$defs/StateMachineRunStartedData"
+  - event_type: state_machine.node.started
+    family: state_machine.node.*
+    schema_version: "1.0"
+    subject_type: state_machine.node
+    required_scope: [group_id, session_id, run_id]
+    stream: state_machine_run
+    data_schema: "#/$defs/StateMachineNodeStartedData"
+  - event_type: state_machine.node.completed
+    family: state_machine.node.*
+    schema_version: "1.0"
+    subject_type: state_machine.node
+    required_scope: [group_id, session_id, run_id]
+    stream: state_machine_run
+    content_fields: [output]
+    data_schema: "#/$defs/StateMachineNodeCompletedData"
+  - event_type: state_machine.node.retry_scheduled
+    family: state_machine.node.*
+    schema_version: "1.0"
+    subject_type: state_machine.node
+    required_scope: [group_id, session_id, run_id]
+    stream: state_machine_run
+    data_schema: "#/$defs/StateMachineNodeRetryScheduledData"
+  - event_type: state_machine.run.completed
+    family: state_machine.run.*
+    schema_version: "1.0"
+    subject_type: state_machine.run
+    required_scope: [group_id, session_id, run_id]
+    stream: state_machine_run
+    content_fields: [output]
+    data_schema: "#/$defs/StateMachineRunCompletedData"
+
+  - event_type: message.created
+    family: message.*
+    schema_version: "1.0"
+    subject_type: message
+    required_scope: [group_id, session_id]
+    stream: session
+    content_fields: [content]
+    data_schema: "#/$defs/MessageCreatedData"

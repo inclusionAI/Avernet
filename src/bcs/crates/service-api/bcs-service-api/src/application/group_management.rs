@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::{
     ActorKind, DefaultDelivery, GroupKind, GroupStatus, GroupStrategy, ParticipantKind,
-    ParticipantMode,
-    RoutingMode, RoutingPolicy, ServiceError, ServiceSpec, Workspace,
+    ParticipantMode, RoutingMode, RoutingPolicy, ServiceError, ServiceSpec, Workspace,
 };
 
 /// Request for creating a group collaboration session.
@@ -20,6 +19,7 @@ pub struct GroupCreateCommand {
     pub label: Option<String>,
     pub topic: Option<String>,
     pub context: Option<String>,
+    pub opening_message: Option<crate::types::OpeningMessage>,
     pub routing_policy: Option<RoutingPolicy>,
     pub participants: Vec<GroupCreateParticipantCommand>,
     /// Backward-compatible flat member list for callers that do not provide roles.
@@ -35,6 +35,8 @@ pub struct GroupCreateCommand {
     pub originator: Option<String>,
     /// Group visibility: "public" or "private". Defaults to "private".
     pub visibility: Option<String>,
+    /// Keep the row hidden until Event Subscription/Event finalization.
+    pub provisioning: bool,
 }
 
 /// Participant input for group creation.
@@ -54,6 +56,9 @@ pub struct DmCreateCommand {
     pub label: Option<String>,
     pub topic: Option<String>,
     pub context: Option<String>,
+    /// Keep a newly-created DM hidden until provisioning finalization. A
+    /// reused existing DM remains active and is reported with `created=false`.
+    pub provisioning: bool,
 }
 
 /// Request for updating a group's lifecycle status.
@@ -180,6 +185,8 @@ pub struct GroupDetailResult {
     pub status: GroupStatus,
     pub driver_bot_id: String,
     pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening_message: Option<crate::types::OpeningMessage>,
     pub participants: Vec<GroupParticipantView>,
     pub message_count: usize,
     pub workspace: Workspace,

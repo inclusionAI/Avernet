@@ -4,7 +4,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-
 use bcs_service_api::{
     ActorKind, AgentCredentials, BotCapabilities, BotDynamicStatus, BotRegistryCoreService,
     ChannelBindingCleanupPort,
@@ -23,6 +22,7 @@ use bcs_service_api::{
     SessionManagementService, SessionStatus, SessionUseCaseError, WorkbenchChatAuthorizationCommand,
     WorkbenchConnectCommand, WorkbenchSessionService, WorkbenchUseCaseError, Workspace,
 };
+use bcs_service_api::types::OpeningMessage;
 
 #[tokio::test]
 async fn interaction_resolve_uses_current_exact_session_relationships() {
@@ -311,6 +311,9 @@ async fn create_state_machine_group_auto_creates_service_invocation_session() {
     cmd.label = Some("BCN 宣传".to_string());
     cmd.topic = Some("BCN 宣传会话".to_string());
     cmd.context = Some("写一篇宣传 BCN 的文章".to_string());
+    cmd.opening_message = Some(OpeningMessage::Text(
+        "开始 {{bcs.run_id}}".to_string(),
+    ));
 
     let created = service.create_group(cmd).await.unwrap();
 
@@ -319,6 +322,17 @@ async fn create_state_machine_group_auto_creates_service_invocation_session() {
         Some("group-under-test:abcdef12")
     );
     assert_eq!(created.context_injected, 0);
+    assert_eq!(
+        fixture
+            .group
+            .get("group-under-test")
+            .await
+            .expect("created group")
+            .opening_message,
+        Some(OpeningMessage::Text(
+            "开始 {{bcs.run_id}}".to_string()
+        ))
+    );
     let commands = session_management.commands.lock().await;
     assert_eq!(commands.len(), 1);
     let params = &commands[0].params;
@@ -328,6 +342,24 @@ async fn create_state_machine_group_auto_creates_service_invocation_session() {
         Some(&serde_json::json!({ "query": "写一篇宣传 BCN 的文章" }))
     );
     assert_eq!(params.session_title.as_deref(), Some("新会话"));
+}
+
+#[tokio::test]
+async fn create_chat_group_rejects_opening_message() {
+    let fixture = Fixture::new().with_bot("driver", "Driver", "public", Some("alice"));
+    let service = fixture.service_with_limits(5, 10, 10);
+    let mut cmd = create_cmd(
+        Some("driver"),
+        "driver",
+        vec![participant("driver", Some("driver"))],
+    );
+    cmd.opening_message = Some(OpeningMessage::Text("hello".to_string()));
+
+    let error = service
+        .create_group(cmd)
+        .await
+        .expect_err("Chat Group must reject opening_message");
+    assert!(error.to_string().contains("invalid_opening_message"));
 }
 
 #[tokio::test]
@@ -1367,6 +1399,7 @@ async fn create_dm_creates_and_reuses_human_bot_pair() {
             label: None,
             topic: Some("help".to_string()),
             context: Some("dm context".to_string()),
+            provisioning: false,
         })
         .await
         .expect("owner human should create Human-Bot DM");
@@ -1408,6 +1441,7 @@ async fn create_dm_creates_and_reuses_human_bot_pair() {
             label: Some("new label should not overwrite".to_string()),
             topic: None,
             context: Some("new context should not overwrite".to_string()),
+            provisioning: false,
         })
         .await
         .expect("second create should reuse canonical pair");
@@ -1435,6 +1469,7 @@ async fn create_dm_without_explicit_id_uses_dm_namespace() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await
         .expect("owner human should create generated Human-Bot DM");
@@ -1458,6 +1493,7 @@ async fn create_dm_enforces_human_to_bot_reachability() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await
         .expect_err("unrelated human cannot reach protected bot");
@@ -1476,6 +1512,7 @@ async fn create_dm_enforces_human_to_bot_reachability() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await
         .expect_err("unrelated human sees private bot as unreachable");
@@ -1498,6 +1535,7 @@ async fn create_dm_enforces_human_to_bot_reachability() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await
         .expect("friendship allows private DM");
@@ -1521,6 +1559,7 @@ async fn create_dm_rejects_mismatched_driver_bot_for_human_caller() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await
         .expect_err("Human-Bot DM driver_bot is only legacy advisory for target bot");
@@ -1549,6 +1588,7 @@ async fn workbench_human_bot_dm_rejects_owner_bot_proxy_sender_by_default() {
             label: None,
             topic: None,
             context: None,
+            provisioning: false,
         })
         .await
         .unwrap();
@@ -1682,7 +1722,7 @@ async fn delete_group_cleans_up_channel_bindings() {
 }
 
 #[tokio::test]
-async fn delete_group_restores_group_when_channel_binding_cleanup_fails() {
+async fn delete_group_keeps_committed_deletion_when_channel_binding_cleanup_fails() {
     let fixture = Fixture::new().with_bot("driver", "Driver", "public", None);
     let cleanup = Arc::new(RecordingChannelBindingCleanup::failing());
     let service = fixture
@@ -1711,8 +1751,8 @@ async fn delete_group_restores_group_when_channel_binding_cleanup_fails() {
             if message == "channel binding cleanup failed"
     ));
     assert!(
-        fixture.group.get("group-under-test").await.is_some(),
-        "group must be restored when binding cleanup fails"
+        fixture.group.get("group-under-test").await.is_none(),
+        "terminal Group deletion cannot be rolled back after its Event is committed"
     );
 }
 
@@ -2447,6 +2487,7 @@ fn create_cmd(
         label: None,
         topic: Some("debug incident".to_string()),
         context: Some("prod checkout outage".to_string()),
+        opening_message: None,
         routing_policy: None,
         member_bot_ids: Vec::new(),
         participants,
@@ -2454,6 +2495,7 @@ fn create_cmd(
         service_spec: None,
         group_strategy: None,
         visibility: None,
+        provisioning: false,
     }
 }
 
@@ -3559,6 +3601,7 @@ async fn list_groups_filters_by_visibility() {
         label: Some("Translation".to_string()),
         topic: None,
         context: None,
+        opening_message: None,
         routing_policy: None,
         member_bot_ids: Vec::new(),
         participants: vec![participant("bot_b", Some("driver"))],
@@ -3566,6 +3609,7 @@ async fn list_groups_filters_by_visibility() {
         service_spec: None,
         group_strategy: None,
         visibility: Some("public".to_string()),
+        provisioning: false,
     };
     service.create_group(cmd2).await.unwrap();
 

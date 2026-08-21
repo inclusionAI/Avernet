@@ -6,14 +6,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_protocol::BcsFrame;
 use bcs_service_api::{
-    ActorKind, ActorStatus, AgentCredentials, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
-    BotDeliveryResult, BotDeliveryTarget, BotCapabilities, BotDynamicStatus, BotRegistryCoreService,
-    CoordinationSurface,
-    FrontendDeliveryCommand, FrontendDeliveryPort, FrontendDeliveryResult, Group, GroupMessage,
-    GroupCoreService, GroupStatus, Participant, ParticipantMode, ParticipantRole, RegisteredBot,
-    ProviderTransportPreference, RedactedToken, RouteAndSendResult, RoutingDecision,
-    RoutingCoreService, RoutingTarget, ServiceError, ServiceResult, StructuredRoutingError,
-    Workspace,
+    ActorKind, ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand, BotDeliveryKind,
+    BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
+    BotRegistryCoreService, CoordinationSurface, FrontendDeliveryCommand, FrontendDeliveryPort,
+    FrontendDeliveryResult, Group, GroupCoreService, GroupMessage, GroupStatus, Participant,
+    ParticipantMode, ParticipantRole, ProviderTransportPreference, RedactedToken, RegisteredBot,
+    RouteAndSendResult, RoutingCoreService, RoutingDecision, RoutingTarget, ServiceError,
+    ServiceResult, StructuredRoutingError, Workspace,
+    core::{GroupMutationCommand, GroupMutationKind},
 };
 use tokio::sync::RwLock;
 
@@ -99,6 +99,28 @@ impl FakeGroupCoreService {
 
 #[async_trait]
 impl GroupCoreService for FakeGroupCoreService {
+    async fn mutate(&self, command: GroupMutationCommand) -> ServiceResult<Group> {
+        let mut groups = self.groups.write().await;
+        let group = groups
+            .get_mut(&command.group_id)
+            .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
+        match command.mutation {
+            GroupMutationKind::UpdateStatus { status, .. } => {
+                if group.status != status {
+                    group.status = status;
+                    group.version = group.version.saturating_add(1);
+                }
+            }
+            _ => {
+                return Err(ServiceError::InvalidOperation {
+                    message: "unsupported eventful mutation in message-flow test fake".to_string(),
+                    request_id: None,
+                });
+            }
+        }
+        Ok(group.clone())
+    }
+
     async fn upsert(&self, group: Group) -> ServiceResult<()> {
         self.groups.write().await.insert(group.id.clone(), group);
         Ok(())

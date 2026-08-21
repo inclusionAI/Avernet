@@ -1,0 +1,36 @@
+{
+  "spec_version": "1.0",
+  "event_id": "evt-node-retry-1",
+  "event_type": "state_machine.node.retry_scheduled",
+  "schema_version": "1.0",
+  "source": "bcs",
+  "occurred_at": "2026-08-18T10:03:00.000Z",
+  "recorded_at": "2026-08-18T10:03:00.003Z",
+  "subject": {
+    "type": "state_machine.node",
+    "id": "review"
+  },
+  "scope": {
+    "group_id": "group-1",
+    "session_id": "session-1",
+    "run_id": "run-1"
+  },
+  "stream": {
+    "key": "state-machine-run:run-1",
+    "sequence": 7
+  },
+  "actor": {
+    "type": "system",
+    "id": "bcs-eventing"
+  },
+  "correlation_id": "run-1",
+  "data": {
+    "run_id": "run-1",
+    "node_id": "review",
+    "attempt": 1,
+    "next_attempt": 2,
+    "max_attempts": 3,
+    "retry_at": "2026-08-18T10:03:05.000Z",
+    "reason": "bot delivery timed out"
+  }
+}

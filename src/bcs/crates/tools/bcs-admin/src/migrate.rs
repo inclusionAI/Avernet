@@ -1320,7 +1320,10 @@ impl MigrationSelection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bcs_config_api::mysql::MysqlConnectionConfig;
+    use bcs_config_api::{MysqlDbConfig, StatementProtocol};
     use bcs_db_api::{DbPlugin, DbStatement, db_get_column};
+    use mysql_async::Opts;
 
     fn write_migration(
         dir: &Path,
@@ -1459,6 +1462,107 @@ mod tests {
 
         assert!(error.to_string().contains("too_wide.idx_name"));
         Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires BCS_TEST_MYSQL_URL; CI runs this test against its MySQL service"]
+    async fn eventing_mysql_migration_applies_to_real_mysql() -> Result<()> {
+        let mysql_url = std::env::var("BCS_TEST_MYSQL_URL")
+            .context("BCS_TEST_MYSQL_URL must be set for the ignored migration test")?;
+        let opts = Opts::from_url(&mysql_url)
+            .map_err(|error| anyhow!("BCS_TEST_MYSQL_URL is invalid: {error}"))?;
+        let database = opts
+            .db_name()
+            .ok_or_else(|| anyhow!("BCS_TEST_MYSQL_URL must include a database name"))?;
+        let mut config = MysqlDbConfig::new()
+            .with_database(database)
+            .with_connection(MysqlConnectionConfig {
+                connection_type: "direct".to_string(),
+                host: Some(opts.ip_or_hostname().to_string()),
+                port: Some(opts.tcp_port()),
+                user: opts.user().map(str::to_string),
+                password: opts.pass().map(str::to_string),
+                extra: BTreeMap::new(),
+            })
+            .with_statement_protocol(StatementProtocol::Text);
+        config.pool_size = 2;
+        config.min_pool_size = 1;
+
+        let manager = MysqlDbManager::new(config)
+            .await
+            .map_err(|error| anyhow!("open MySQL migration test datasource: {error}"))?;
+        let plugin = MysqlDbPlugin::new(manager.clone(), "bcs");
+        let result = async {
+            plugin
+                .execute(DbStatement::new(
+                    "CREATE TABLE IF NOT EXISTS bcs_schema_migrations (
+                        version int NOT NULL PRIMARY KEY,
+                        name varchar(255) NOT NULL,
+                        dialect varchar(32) NOT NULL,
+                        checksum varchar(64) NOT NULL,
+                        applied_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )",
+                ))
+                .await?;
+
+            let mut args = migrate_args(&bcs_root().join("migrations").join("mysql"));
+            args.only = vec![9];
+            let migrations = load_selected_migrations(&args)?;
+            let migration = migrations
+                .first()
+                .ok_or_else(|| anyhow!("migration 009 was not loaded"))?;
+            let plan = mysql_migration_plan(migration);
+            apply_mysql_migration(&plugin, migration, &plan).await?;
+            apply_mysql_migration(&plugin, migration, &plan).await?;
+
+            for table in [
+                "bcs_event_subscriptions",
+                "bcs_event_subscription_revisions",
+                "bcs_event_scope_epochs",
+                "bcs_event_streams",
+                "bcs_events",
+                "bcs_event_fanout_targets",
+                "bcs_event_deliveries",
+                "bcs_event_delivery_attempts",
+                "bcs_event_subscription_audits",
+            ] {
+                let rows = plugin
+                    .query(DbStatement::with_params(
+                        "SELECT COUNT(*) AS table_count FROM information_schema.tables \
+                         WHERE table_schema = DATABASE() AND table_name = ?",
+                        vec![DbValue::from(table)],
+                    ))
+                    .await?;
+                let count: i64 = db_get_column(
+                    rows.first()
+                        .ok_or_else(|| anyhow!("missing table count row for {table}"))?,
+                    "table_count",
+                )?;
+                if count != 1 {
+                    bail!("MySQL Eventing migration did not create {table}");
+                }
+            }
+
+            let primary_rows = plugin
+                .query(DbStatement::new(
+                    "SELECT column_name AS column_name FROM information_schema.statistics \
+                     WHERE table_schema = DATABASE() \
+                       AND table_name = 'bcs_event_scope_epochs' \
+                       AND index_name = 'PRIMARY' ORDER BY seq_in_index",
+                ))
+                .await?;
+            let primary_columns = primary_rows
+                .iter()
+                .map(|row| db_get_column::<String>(row, "column_name"))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            if primary_columns != ["env", "scope_type", "scope_id"] {
+                bail!("unexpected scope epoch primary key: {primary_columns:?}");
+            }
+            Ok(())
+        }
+        .await;
+        manager.close().await;
+        result
     }
 
     #[test]
