@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING, Any
 
 from secbaas.community.api.bot_runtime import BotBindingInfo
+from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import BotBindingData
 
 from ._bot_binding_resolver import _normalize_engine_type
@@ -10,6 +11,8 @@ from ._bot_binding_resolver import _normalize_engine_type
 if TYPE_CHECKING:
     from secbaas.community.api.bot_runtime import BotChatContext
     from secbaas.community.core.repository.bot_run import BotRunRecord
+
+logger = get_logger("core-bot-run")
 
 
 def resolve_user_id(
