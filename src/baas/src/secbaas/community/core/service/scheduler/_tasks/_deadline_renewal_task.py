@@ -202,30 +202,41 @@ class DeadlineRenewalScheduler:
         # passed to the repository as a bound parameter — the comparison
         # is then time-zone independent of the DB server clock (CR-01).
         due_now = naive_utc_now()
-        try:
-            device_rows, binding_rows = await asyncio.gather(
-                asyncio.to_thread(
-                    self._schedule_repo.list_due_for_renewal,
-                    self._config.env,
-                    "baas_device",
-                    self._config.batch_size,
-                    now=due_now,
-                ),
-                asyncio.to_thread(
-                    self._schedule_repo.list_due_for_renewal,
-                    self._config.env,
-                    "ac_entity_device_binding",
-                    self._config.batch_size,
-                    now=due_now,
-                ),
-            )
-        except Exception:
-            log.exception(
-                "[DeadlineRenewalScheduler] list_due_for_renewal query failed"
-            )
-            device_rows, binding_rows = [], []
+        # WR-05: per-side isolation — a failure on ONE source table must
+        # not discard the healthy side's due batch (return_exceptions +
+        # per-side handling empties only the failed side).
+        results = await asyncio.gather(
+            asyncio.to_thread(
+                self._schedule_repo.list_due_for_renewal,
+                self._config.env,
+                "baas_device",
+                self._config.batch_size,
+                now=due_now,
+            ),
+            asyncio.to_thread(
+                self._schedule_repo.list_due_for_renewal,
+                self._config.env,
+                "ac_entity_device_binding",
+                self._config.batch_size,
+                now=due_now,
+            ),
+            return_exceptions=True,
+        )
+        side_rows: list[list[dict]] = []
+        for side, result in zip(_DISCOVERY_SIDES, results):
+            if isinstance(result, BaseException):
+                log.exception(
+                    "[DeadlineRenewalScheduler] list_due_for_renewal failed "
+                    "side=%s — this side treated as empty, the healthy "
+                    "side still runs this round",
+                    side,
+                )
+                side_rows.append([])
+            else:
+                side_rows.append(result or [])
+        device_rows, binding_rows = side_rows
 
-        all_rows = (device_rows or []) + (binding_rows or [])
+        all_rows = device_rows + binding_rows
         all_rows.sort(key=lambda r: r["next_renew_at"])
         report.due_count = len(all_rows)
 

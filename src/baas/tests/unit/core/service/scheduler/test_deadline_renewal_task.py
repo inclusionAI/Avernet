@@ -435,6 +435,29 @@ class TestStep1ColdTableQuery:
         assert report.due_count == 1
         assert isinstance(report, RenewalRunReport)
 
+    @pytest.mark.asyncio
+    async def test_one_side_query_failure_keeps_healthy_side_rows(self):
+        """WR-05: when one due query raises, the healthy side's batch is
+        still processed this round — only the failed side is emptied."""
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 200
+        mock_repo.count_hot_arca_devices.return_value = 100
+        mock_repo.count_hot_arca_bindings.return_value = 100
+        mock_repo.find_unregistered.return_value = []
+        mock_repo.list_due_for_renewal.side_effect = [
+            Exception("device table down"),
+            [self._due_row("ac_entity_device_binding", 101, "sb-101", hot_id=101)],
+        ]
+        scheduler._renew_one = AsyncMock(return_value="success")
+
+        scheduler._round_count = 0
+        report = await scheduler._run_once()
+
+        assert mock_repo.list_due_for_renewal.call_count == 2
+        assert report.due_count == 1
+        assert report.success == 1
+        assert isinstance(report, RenewalRunReport)
+
 
 class TestEarlyReturnMetrics:
     """WR-02: metrics + summary must be emitted on EVERY round, including
