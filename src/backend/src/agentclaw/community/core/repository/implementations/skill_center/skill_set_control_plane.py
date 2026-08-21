@@ -114,42 +114,24 @@ class SkillSetControlPlaneRepository(
         desired state.
         """
         with self._db.transactional_orm_session() as session:
-            # Ordinary legacy SkillSets have no engine discriminator.  Keep
-            # their compatible selection aligned with the historical reader:
-            # current environment (or pre-tenant-cutover NULL), same Bot and
-            # owner, current runtime engine (or legacy NULL). Engine-specific
-            # selection belongs only to ordinary Sets here; System Default is
-            # excluded and stays a Resolver-owned platform input.
-            sets = session.query(SkillSet).filter(
-                SkillSet.avernet_tenant == get_current_avernet_tenant(),
-                or_(SkillSet.env == get_current_env(), SkillSet.env.is_(None)),
+            sets = self._scope(session.query(SkillSet), SkillSet).filter(
                 SkillSet.bolt_id == bot_id,
                 SkillSet.user_id == owner_id,
                 SkillSet.is_default.is_(False),
                 SkillSet.is_active.is_(True),
             )
             if engine_type is not None:
-                sets = sets.filter(
-                    or_(
-                        SkillSet.engine_type == engine_type,
-                        SkillSet.engine_type.is_(None),
-                    )
-                )
+                sets = sets.filter(SkillSet.engine_type == engine_type)
             active_set_ids = {int(row.id) for row in sets.all()}
             if not active_set_ids:
                 return 0
 
             member_ids = {
                 int(row.skill_id)
-                for row in session.query(SkillSetSkill)
-                .filter(
-                    SkillSetSkill.avernet_tenant == get_current_avernet_tenant(),
-                    or_(
-                        SkillSetSkill.env == get_current_env(),
-                        SkillSetSkill.env.is_(None),
-                    ),
-                    SkillSetSkill.skill_set_id.in_(active_set_ids),
+                for row in self._scope(
+                    session.query(SkillSetSkill), SkillSetSkill
                 )
+                .filter(SkillSetSkill.skill_set_id.in_(active_set_ids))
                 .all()
             }
             if not member_ids:

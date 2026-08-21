@@ -27,6 +27,7 @@ provides:
   - "RuntimeProjectionResolver"
   - "BotRuntimeProjectionReconciler"
   - "BotRuntimeProjectionReconcilerProtocol"
+  - "ActiveSkillSetInstallationMaterializer"
   - "LocalSkillCleanupWorkModel"
 consumes:
   - "BotRepository"
@@ -98,7 +99,7 @@ Skill-set switching is the highest-throughput flow in production. Changes here c
 
 `ac_bot_skill_installation` materializes the current active Desired State with
 identity `(tenant, env, owner_id, bot_id, skill_id)`. During Phase 1 cutover,
-`SkillSetControlPlaneRepository.ensure_active_skillset_installations` lazily
+`ActiveSkillSetInstallationMaterializer` lazily
 inserts missing rows for a Bot's ordinary active SkillSet members. It is
 invoked only before a complete runtime reconcile and before a new Service Bot
 Artifact build; it never
