@@ -23,7 +23,7 @@
 # ==================== Stage 1: Builder ====================
 FROM node:22-bookworm-slim AS builder
 
-ARG OPENCLAW_VERSION=2026.6.1
+ARG OPENCLAW_VERSION=2026.5.12
 ARG NPM_STRICT_SSL=true
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -159,13 +159,16 @@ RUN groupadd --gid 10001 admin 2>/dev/null || true \
 # Supervisor configuration: engine(autostart=false) + openclaw(autostart=false).
 COPY docker/agent/avernet-supervisord.conf /etc/supervisor/supervisord.conf
 
+# OpenClaw default config template (env-var placeholders substituted at runtime).
+COPY docker/agent/openclaw.json /opt/openclaw.json.template
+
 # Shared utility functions (logging, helpers).
 COPY docker/agent/util.sh /usr/local/bin/util.sh
 
 # Simplified pod startup script (starts engine, waits for health).
 COPY docker/agent/start_service.sh /usr/local/bin/start_service.sh
 
-# Entrypoint: pre-init, schedules start_service.sh, then execs supervisord.
+# Entrypoint: pre-init, config generation from template, then execs supervisord.
 COPY docker/agent/avernet-entrypoint.sh /usr/local/bin/avernet-entrypoint
 RUN chmod +x /usr/local/bin/avernet-entrypoint \
              /usr/local/bin/start_service.sh \

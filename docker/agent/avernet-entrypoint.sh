@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# docker/avernet-entrypoint.sh
+# docker/agent/avernet-entrypoint.sh
 #
 # Container entrypoint for Avernet Engine + OpenClaw image.
 #
@@ -10,7 +10,7 @@
 #
 # Flow:
 #   1. Create runtime directories
-#   2. Generate ~/.openclaw/openclaw.json from env vars (if not mounted)
+#   2. Generate ~/.openclaw/openclaw.json from template + env vars (if not mounted)
 #   3. exec supervisord (becomes PID 1)
 #
 # The platform invokes start_service.sh externally (docker exec) with
@@ -23,10 +23,9 @@ CONFIG_DIR="${HOME}/.openclaw"
 CONFIG_FILE="${CONFIG_DIR}/openclaw.json"
 WORKSPACE_DIR="${CONFIG_DIR}/workspace"
 LOG_DIR="${HOME}/logs"
+TEMPLATE_FILE="/opt/openclaw.json.template"
 
-SCRIPT_DIR="/usr/local/bin"
-
-# --- 1. Create runtime directories ——
+# --- 1. Create runtime directories
 
 mkdir -p "${CONFIG_DIR}/extensions" "${WORKSPACE_DIR}" "${LOG_DIR}"
 mkdir -p /var/run/agentclaw /var/log/supervisor /var/run
@@ -55,128 +54,47 @@ echo "     Engine:   /opt/engine (port 20003)"
 echo "     OpenClaw: ${CONFIG_DIR} (port ${OPENCLAW_PORT:-18789})"
 echo "     Logs:     ${LOG_DIR}"
 
-# --- 3. Generate default openclaw.json if none exists (user may mount their own).
+# --- 3. Generate openclaw.json from template if none mounted
 
 if [ ! -f "${CONFIG_FILE}" ]; then
-    echo "===> generating default ${CONFIG_FILE}"
-    node -e '
-    const fs = require("fs");
+    echo "===> generating ${CONFIG_FILE} from template"
+    cp "${TEMPLATE_FILE}" "${CONFIG_FILE}"
 
-    const port       = process.env.OPENCLAW_PORT || "18789";
-    const providerId = process.env.OPENCLAW_OPENAI_PROVIDER_ID || "openai-compatible";
-    const baseUrl    = process.env.OPENCLAW_OPENAI_BASE_URL || "";
-    const apiKey     = process.env.OPENCLAW_OPENAI_API_KEY || "";
-    const modelId    = process.env.OPENCLAW_OPENAI_MODEL_ID || "";
-    const modelName  = process.env.OPENCLAW_OPENAI_MODEL_NAME || modelId;
-    const modelApi   = process.env.OPENCLAW_OPENAI_MODEL_API || "openai-completions";
-    const gwToken    = process.env.OPENCLAW_GATEWAY_TOKEN || "";
-    const bcsUrl     = process.env.BCS_URL || "";
-    const workspace  = process.env.HOME + "/.openclaw/workspace";
-
-    const providers = {};
-    if (baseUrl || apiKey || modelId) {
-      providers[providerId] = {
-        baseUrl, apiKey,
-        auth: "api-key",
-        api: modelApi,
-        models: [{
-          id: modelId,
-          name: modelName,
-          api: modelApi,
-          reasoning: true,
-          input: ["text"],
-          contextWindow: 100000,
-          maxTokens: 65536
-        }]
-      };
+    # Substitute env-var placeholders in the JSON.
+    # Unset env vars become "UNSET" so the config is syntactically valid
+    # but clearly indicates the missing value.
+    _sub() {
+        local val
+        val="${!1:-UNSET}"
+        # Escape forward slashes for sed
+        val="${val//\//\\/}"
+        sed -i "s/${2}/${val}/g" "${CONFIG_FILE}"
     }
 
-    const agentDefaults = {
-      workspace,
-      compaction: { mode: "safeguard" },
-      maxConcurrent: 4,
-      subagents: { maxConcurrent: 8 }
-    };
-    if (modelId) {
-      agentDefaults.model = { primary: providerId + "/" + modelId };
-      agentDefaults.models = {};
-      agentDefaults.models[providerId + "/" + modelId] = { alias: modelName };
-    }
+    _sub OPENCLAW_OPENAI_BASE_URL  OPENCLAW_OPENAI_BASE_URL
+    _sub OPENCLAW_OPENAI_API_KEY   OPENCLAW_OPENAI_API_KEY
+    _sub OPENCLAW_OPENAI_MODEL_ID  OPENCLAW_OPENAI_MODEL_ID
+    _sub OPENCLAW_OPENAI_MODEL_NAME OPENCLAW_OPENAI_MODEL_NAME
+    _sub OPENCLAW_GATEWAY_TOKEN    OPENCLAW_GATEWAY_TOKEN
+    _sub BCS_URL                   BCS_URL
+    _sub BCS_ENABLED               BCS_ENABLED
+    _sub BCS_BOT_ID                BCS_BOT_ID
+    _sub BCS_BOT_NAME              BCS_BOT_NAME
 
-    const channels = {};
-    if (bcsUrl) {
-      const csv = (s) => s ? s.split(",").map(x => x.trim()).filter(Boolean) : [];
-      channels.bcs = {
-        enabled: true,
-        bcsUrl,
-        botId:     process.env.BCS_BOT_ID || "openclaw-bot",
-        botName:   process.env.BCS_BOT_NAME || process.env.BCS_BOT_ID || "openclaw-bot",
-        capabilities: {
-          summary: process.env.BCS_BOT_SUMMARY || "OpenClaw bot",
-          domains: csv(process.env.BCS_BOT_DOMAINS || "general"),
-          skills:  csv(process.env.BCS_BOT_SKILLS  || "general"),
-          scopes:  csv(process.env.BCS_BOT_SCOPES  || "production")
-        },
-        heartbeatIntervalMs: 60000,
-        reconnectIntervalMs: 5000,
-        connectionTimeoutMs: 30000
-      };
-    }
+    # If BCS_URL is UNSET, disable the BCS channel
+    if [ "${BCS_URL:-UNSET}" = "UNSET" ]; then
+        sed -i 's/"BCS_ENABLED"/false/g' "${CONFIG_FILE}"
+    else
+        sed -i 's/"BCS_ENABLED"/true/g' "${CONFIG_FILE}"
+    fi
 
-    const auth = gwToken
-      ? { mode: "token", token: gwToken }
-      : {};
+    # If no gateway token, disable token auth
+    if [ "${OPENCLAW_GATEWAY_TOKEN:-UNSET}" = "UNSET" ]; then
+        sed -i '/"auth": {/{N;s/"mode": "token", "token": "UNSET"//' "${CONFIG_FILE}" 2>/dev/null || true
+    fi
 
-    const config = {
-      meta: { lastTouchedVersion: "2026.6.1" },
-      models: {
-        mode: "merge",
-        providers
-      },
-      agents: {
-        defaults: agentDefaults,
-        list: [{ id: "main" }]
-      },
-      tools: { profile: "coding" },
-      messages: { ackReactionScope: "group-mentions" },
-      commands: {
-        native: "auto",
-        nativeSkills: "auto",
-        restart: true,
-        ownerDisplay: "raw"
-      },
-      session: { dmScope: "per-channel-peer" },
-      hooks: {
-        internal: {
-          enabled: true,
-          entries: { "boot-md": { enabled: true } }
-        }
-      },
-      gateway: {
-        port: parseInt(port, 10),
-        mode: "local",
-        bind: "0.0.0.0",
-        controlUi: { dangerouslyDisableDeviceAuth: true },
-        auth,
-        tailscale: { mode: "off", resetOnExit: false },
-        nodes: {
-          denyCommands: [
-            "camera.snap", "camera.clip", "screen.record",
-            "calendar.add", "contacts.add", "reminders.add"
-          ]
-        }
-      }
-    };
-
-    if (Object.keys(channels).length > 0) {
-      config.channels = channels;
-    }
-
-    fs.writeFileSync(process.env.HOME + "/.openclaw/openclaw.json",
-                     JSON.stringify(config, null, 2) + "\n");
-    console.log("    config written");
-    '
     chown admin:admin "${CONFIG_FILE}" 2>/dev/null || true
+    echo "    config written"
 else
     echo "===> using existing ${CONFIG_FILE} (mounted or pre-built)"
 fi
