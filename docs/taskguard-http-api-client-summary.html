@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HttpApiClient Implementation — Technical Summary</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e14;
+    --bg-card: #0f141c;
+    --bg-elevated: #141b26;
+    --bg-code: #0b0f16;
+    --border: #1c2433;
+    --border-bright: #2a3548;
+    --text: #c8d3e0;
+    --text-bright: #e8eef5;
+    --text-dim: #6b7689;
+    --text-faint: #3d4858;
+    --accent: #d4a55a;
+    --accent-glow: rgba(212, 165, 90, 0.15);
+    --accent2: #5b9dd9;
+    --accent2-glow: rgba(91, 157, 217, 0.12);
+    --success: #6abf8b;
+    --error: #e06c75;
+    --warn: #d4a55a;
+    --radius: 6px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Fraunces', Georgia, serif;
+    font-weight: 400;
+    line-height: 1.7;
+    font-size: 15px;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.5;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    top: -20%;
+    right: -10%;
+    width: 60vw;
+    height: 60vh;
+    background: radial-gradient(ellipse, var(--accent-glow) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .page { max-width: 960px; margin: 0 auto; padding: 0 32px; position: relative; z-index: 1; }
+  .hero { padding: 120px 0 80px; border-bottom: 1px solid var(--border); position: relative; }
+  .hero .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 28px; opacity: 0;
+    animation: fadeUp 0.8s 0.1s forwards;
+  }
+  .hero h1 {
+    font-family: 'Fraunces', serif; font-weight: 300;
+    font-size: clamp(36px, 6vw, 64px); line-height: 1.08;
+    letter-spacing: -0.02em; color: var(--text-bright);
+    margin-bottom: 24px; opacity: 0; animation: fadeUp 0.8s 0.2s forwards;
+  }
+  .hero h1 em { font-style: italic; font-weight: 600; color: var(--accent); }
+  .hero .lede {
+    font-size: 17px; color: var(--text-dim); max-width: 620px;
+    opacity: 0; animation: fadeUp 0.8s 0.3s forwards;
+  }
+  .hero .meta {
+    display: flex; gap: 40px; margin-top: 48px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.08em; color: var(--text-faint);
+    opacity: 0; animation: fadeUp 0.8s 0.4s forwards;
+  }
+  .hero .meta span strong {
+    display: block; color: var(--text-bright); font-size: 22px;
+    font-family: 'Fraunces', serif; font-weight: 600; margin-bottom: 2px;
+  }
+  section { padding: 72px 0; border-bottom: 1px solid var(--border); }
+  section:last-of-type { border-bottom: none; }
+  .section-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 40px; }
+  .section-num { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); letter-spacing: 0.1em; }
+  .section-head h2 { font-family: 'Fraunces', serif; font-weight: 600; font-size: 28px; color: var(--text-bright); letter-spacing: -0.01em; }
+  .prose p { margin-bottom: 16px; }
+  .prose strong { color: var(--text-bright); font-weight: 600; }
+  .prose code, code.inline {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.85em;
+    background: var(--bg-elevated); padding: 2px 6px; border-radius: 3px;
+    color: var(--accent2); border: 1px solid var(--border);
+  }
+  .card-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px; margin-top: 32px;
+  }
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px;
+    transition: border-color 0.3s, transform 0.3s;
+  }
+  .card:hover { border-color: var(--border-bright); transform: translateY(-2px); }
+  .card .card-icon {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.1em; color: var(--accent); margin-bottom: 12px;
+  }
+  .card h3 { font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px; color: var(--text-bright); margin-bottom: 8px; }
+  .card p { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+  .code-block {
+    background: var(--bg-code); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; margin: 24px 0;
+  }
+  .code-block .code-head {
+    background: var(--bg-elevated); padding: 8px 16px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text-faint); border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .code-block .code-head .lang { color: var(--accent); }
+  .code-block pre {
+    padding: 20px; overflow-x: auto;
+    font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    line-height: 1.6; color: var(--text);
+  }
+  .code-block pre .kw { color: #c678dd; }
+  .code-block pre .str { color: #98c379; }
+  .code-block pre .com { color: var(--text-faint); font-style: italic; }
+  .code-block pre .fn { color: var(--accent2); }
+  .code-block pre .type { color: #e5c07b; }
+  .code-block pre .num { color: #d19a66; }
+  .timeline { position: relative; padding-left: 28px; }
+  .timeline::before {
+    content: ''; position: absolute; left: 6px; top: 4px; bottom: 4px;
+    width: 1px; background: var(--border-bright);
+  }
+  .timeline-item { position: relative; margin-bottom: 28px; }
+  .timeline-item::before {
+    content: ''; position: absolute; left: -28px; top: 6px;
+    width: 13px; height: 13px; border-radius: 50%;
+    background: var(--bg); border: 2px solid var(--accent); z-index: 1;
+  }
+  .timeline-item.done::before { background: var(--success); border-color: var(--success); }
+  .timeline-item.pending::before { background: var(--bg); border-color: var(--text-faint); }
+  .timeline-item .t-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--text-faint); margin-bottom: 4px;
+  }
+  .timeline-item .t-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; color: var(--text-bright); margin-bottom: 6px; }
+  .timeline-item .t-desc { font-size: 13px; color: var(--text-dim); }
+  .table-wrap { overflow-x: auto; margin: 24px 0; border: 1px solid var(--border); border-radius: var(--radius); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table th {
+    background: var(--bg-elevated); font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 0.05em; color: var(--text-dim);
+    text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  table td { padding: 10px 16px; border-bottom: 1px solid var(--border); color: var(--text); }
+  table tr:last-child td { border-bottom: none; }
+  table tr:hover td { background: var(--bg-card); }
+  table .status { font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 2px 8px; border-radius: 3px; }
+  table .status.done { color: var(--success); background: rgba(106, 191, 139, 0.1); }
+  table .status.pending { color: var(--warn); background: var(--accent-glow); }
+  table .status.stub { color: var(--error); background: rgba(224, 108, 117, 0.1); }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--bg-card);
+    padding: 20px 24px; border-radius: 0 var(--radius) var(--radius) 0; margin: 24px 0;
+  }
+  .callout.warn { border-color: var(--error); }
+  .callout .callout-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 8px;
+  }
+  .callout.warn .callout-label { color: var(--error); }
+  .callout p { font-size: 14px; color: var(--text); margin-bottom: 8px; }
+  .callout p:last-child { margin-bottom: 0; }
+  .badge-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+  .badge {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    padding: 4px 12px; border-radius: 20px;
+    border: 1px solid var(--border-bright); color: var(--text-dim); background: var(--bg-card);
+  }
+  .badge.accent { color: var(--accent); border-color: var(--accent); }
+  .badge.success { color: var(--success); border-color: var(--success); }
+  .footer {
+    padding: 60px 0 80px; text-align: center; color: var(--text-faint);
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 0.1em;
+  }
+  .footer .footer-line { width: 40px; height: 1px; background: var(--border-bright); margin: 0 auto 24px; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .reveal { opacity: 0; transform: translateY(30px); transition: opacity 0.7s, transform 0.7s; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+  @media (max-width: 640px) {
+    .page { padding: 0 20px; }
+    .hero { padding: 80px 0 60px; }
+    .hero .meta { flex-direction: column; gap: 16px; }
+    .card-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+<!-- HERO -->
+<div class="hero">
+  <div class="tag">Technical Summary &nbsp;/&nbsp; 2026</div>
+  <h1>HttpApiClient<br><em>Implementation</em></h1>
+  <p class="lede">
+    将开源版 taskguard 从「API 存根模式」（所有方法返回 <code class="inline">{ ok: false }</code>）
+    升级为「真实 HTTP API 模式」（使用 Node 内置 <code class="inline">http/https</code> 模块发起真实请求），
+    实现与 evolvetrace 的完整双端通信。
+  </p>
+  <div class="meta">
+    <span><strong>6</strong>核心 API 仓库</span>
+    <span><strong>1</strong>服务端新端点</span>
+    <span><strong>6</strong>编译错误修复</span>
+    <span><strong>0</strong>当前编译错误</span>
+  </div>
+</div>
+
+<!-- 01 BACKGROUND -->
+<section class="reveal">
+  <div class="section-head">
+    <span class="section-num">01</span>
+    <h2>背景与问题</h2>
+  </div>
+  <div class="prose">
+    <p>
+      开源版 taskguard 的社区存根 <code class="inline">ApiClient</code> 对所有方法返回
+      <code class="inline">{ ok: false }</code>——它不实际发出任何 HTTP 请求。
+      这意味着在纯开源环境下，taskguard 无法与 evolvetrace 通信，所有 API 仓库的操作静默失败。
+    </p>
+    <p>
+      用户的真实需求：<strong>开源版 taskguard 也可以通过 API 请求到 evolvetrace，就像 clawmind 请求 clawweb 一样</strong>。
+    </p>
+  </div>
+  <div class="callout">
+    <div class="callout-label">设计约束</div>
+    <p>当 <code class="inline">privateKeyB64</code> 配置时使用 Ed25519 签名；为空时发送无签名请求。</p>
+    <p>服务端 <code class="inline">signatureMiddleware</code> 在 <code class="inline">publicKeyB64</code> 为空时是 no-op（接受所有请求）。</p>
+    <p>API 仓库采用「最佳努力写入」策略：catch 异常返回 false/空，不抛出，与 DB 仓库行为一致。</p>
+  </div>
+</section>
+
+<!-- 02 ARCHITECTURE -->
+<section class="reveal">
+  <div class="section-head">
+    <span class="section-num">02</span>
+    <h2>架构设计</h2>
+  </div>
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-icon">CLIENT</div>
+      <h3>HttpApiClient</h3>
+      <p>使用 Node 内置 <code class="inline">http/https</code> 模块的真实 HTTP 客户端，替代返回 <code class="inline">{ ok: false }</code> 的存根。</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">SIGN</div>
+      <h3>Ed25519 签名</h3>
+      <p>消息格式 <code class="inline">${timestamp}.${JSON.stringify(body)}</code>，通过 <code class="inline">crypto.sign()</code> 签名，服务端 <code class="inline">crypto.verify()</code> 验证。</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">EXT</div>
+      <h3>API 扩展点模式</h3>
+      <p><code class="inline">_extensions?.createApiClient</code> &rarr; corp 注入；或 <code class="inline">new ApiClient(config)</code> &rarr; 社区真实实现。</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">MAP</div>
+      <h3>响应信封映射</h3>
+      <p>服务端返回 <code class="inline">{ success, data, error }</code>，ApiClient 映射为 <code class="inline">{ ok, data, status, error }</code>。</p>
+    </div>
+  </div>
+  <div class="code-block">
+    <div class="code-head"><span>请求流程</span><span class="lang">ARCHITECTURE</span></div>
+    <pre>
+<span class="com">// taskguard (客户端)</span>
+ApiClient.request(method, path, body)
+  |  构建 JSON body
+  |  if (privateKeyB64)
+  |    |  timestamp = Date.now().toString()
+  |    |  message  = `${timestamp}.${JSON.stringify(body)}`
+  |    |  signature = ed25519.sign(message, privateKey)
+  |    +  headers["X-Signature"] = signature
+  |       headers["X-Timestamp"] = timestamp
+  |  http/https.request(url, { method, headers })
+  +  parse response -&gt; { ok, data, status, error }
+
+         v  HTTP
+
+<span class="com">// evolvetrace (服务端)</span>
+signatureMiddleware
+  |  if (!publicKeyB64) -&gt; next()  <span class="com">// no-op, accept all</span>
+  +  verify signature -&gt; next() / 401
+
+routeHandler
+  |  business logic
+  +  res.json({ success, data, error })
+    </pre>
+  </div>
+</section>
+
+<!-- 03 FILES CHANGED -->
+<section class="reveal">
+  <div class="section-head">
+    <span class="section-num">03</span>
+    <h2>文件变更清单</h2>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>文件</th><th>类型</th><th>说明</th><th>状态</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>taskguard/src/db/api-client.ts</td><td>核心</td><td>真实 HttpApiClient 实现</td><td><span class="status done">DONE</span></td></tr>
+        <tr><td>taskguard/.../flow-run-api-repository.ts</td><td>API 仓库</td><td>FlowRun 完整实现</td><td><span class="status done">DONE</span></td></tr>
+        <tr><td>taskguard/.../node-execution-api-repository.ts</td><td>API 仓库</td><td>NodeExecution 完整实现</td><td><span class="status done">DONE</span></td></tr>
+        <tr><td>taskguard/.../event-api-repository.ts</td><td>API 仓库</td><td>Event 完整实现</td><td><span class="status done">DONE</span></td></tr>
+        <tr><td>taskguard/.../facade-binding-api-repository.ts</td><td>API 仓库</td><td>FacadeBinding 完整实现</td><td><span class="status done">DONE</span></td></tr>
+        <tr><td>taskguard/.../bot-workflow-permission-api-repository.ts</td><td>API 仓库</td><td>BotWorkflowPermission 完整实现</td><td><span class="status done">DONE</span></td></tr>
+        <tr><td>taskguard/.../deploy-history-api-repository.ts</td><td>API 仓库</td><td>DeployHistory 完整实现</td><td><span class="status done">DONE</span></td></tr>
+        <tr><td>evolvetrace/.../internal/deploy-history.ts</td><td>服务端路由</td><td>新增 POST /api/internal/deploy-history</td><td><span class="status done">NEW</span></td></tr>
+        <tr><td>evolvetrace/.../internal/index.ts</td><td>服务端注册</td><td>注册 deploy-history 路由</td><td><span class="status done">DONE</span></td></tr>
+        <tr><td>evolvetrace/server/index.ts</td><td>服务端入口</td><td>传入 wfdhRepo</td><td><span class="status done">DONE</span></td></tr>
+        <tr><td>taskguard/src/platform/mcp-server-factory.ts</td><td>守卫</td><td>更新 ApiClient 创建 guard</td><td><span class="status done">DONE</span></td></tr>
+        <tr><td>taskguard/src/controller/version-commands.ts</td><td>守卫</td><td>更新 createDeployHistoryApiRepo guard</td><td><span class="status done">DONE</span></td></tr>
+        <tr><td>taskguard/src/index.ts</td><td>入口</td><td>修复 iamtokenProvider 异步类型</td><td><span class="status done">FIXED</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 04 DEPLOY HISTORY DETAIL -->
+<section class="reveal">
+  <div class="section-head">
+    <span class="section-num">04</span>
+    <h2>DeployHistory 实现细节</h2>
+  </div>
+  <div class="prose">
+    <p>
+      deploy_history 的写入逻辑是分离的：deploy 命令调用
+      <code class="inline">POST /api/workflows/save</code> 时设置
+      <code class="inline">skipDeployHistory: true</code>，然后自己通过
+      <code class="inline">POST /api/internal/deploy-history</code> 写入 deploy_history 记录
+      （自己计算 version 和 deploy_number）。
+    </p>
+  </div>
+  <div class="code-block">
+    <div class="code-head"><span>deploy-history-api-repository.ts</span><span class="lang">TypeScript</span></div>
+    <pre>
+<span class="kw">export class</span> <span class="type">DeployHistoryApiRepository</span> {
+  <span class="kw">constructor</span>(<span class="kw">private</span> api: <span class="type">ApiClient</span>) {}
+
+  <span class="com">// 写操作 -&gt; POST /api/internal/deploy-history (签名)</span>
+  <span class="kw">async</span> <span class="fn">insert</span>(input: <span class="type">DeployHistoryInsertBody</span>): <span class="type">Promise</span>&lt;<span class="type">boolean</span>&gt; {
+    <span class="kw">const</span> resp = <span class="kw">await</span> <span class="kw">this</span>.api.<span class="fn">post</span>(<span class="str">"/api/internal/deploy-history"</span>, input);
+    <span class="kw">if</span> (!resp.ok) {
+      <span class="kw">if</span> (resp.status === <span class="num">409</span>) <span class="kw">return</span> <span class="kw">true</span>; <span class="com">// 409 = version exists</span>
+      <span class="kw">throw</span> <span class="kw">new</span> <span class="type">Error</span>(<span class="str">`deploy-history insert failed: ${resp.error}`</span>);
+    }
+    <span class="kw">return</span> <span class="kw">true</span>;
+  }
+
+  <span class="com">// 读操作 -&gt; GET /api/workflows/:id/history (无签名)</span>
+  <span class="kw">async</span> <span class="fn">getLatestDeploy</span>(packId, workflowId) {
+    <span class="kw">const</span> resp = <span class="kw">await</span> <span class="kw">this</span>.api.<span class="fn">get</span>(
+      <span class="str">`/api/workflows/${workflowId}/history`</span>, { limit: <span class="str">"1"</span> }
+    );
+    <span class="kw">return</span> resp.data.history?.[<span class="num">0</span>] ?? <span class="kw">null</span>;
+  }
+}
+    </pre>
+  </div>
+  <div class="code-block">
+    <div class="code-head"><span>evolvetrace/server/routes/internal/deploy-history.ts</span><span class="lang">TypeScript</span></div>
+    <pre>
+router.<span class="fn">post</span>(<span class="str">"/"</span>, <span class="fn">asyncHandler</span>(<span class="kw">async</span> (req, res) =&gt; {
+  <span class="kw">if</span> (!wfdhRepo) { <span class="kw">return</span> res.<span class="fn">status</span>(<span class="num">503</span>).<span class="fn">json</span>({ error: <span class="str">"Service Unavailable"</span> }); }
+
+  <span class="kw">const</span> { packId, workflowId, deployNumber, version, action, specJson } = req.body;
+  <span class="kw">if</span> (!packId || !workflowId || deployNumber == <span class="kw">null</span> || !action || !specJson)
+    <span class="kw">return</span> res.<span class="fn">status</span>(<span class="num">400</span>).<span class="fn">json</span>({ error: <span class="str">"Bad Request"</span> });
+
+  <span class="kw">try</span> {
+    <span class="kw">const</span> row = <span class="kw">await</span> wfdhRepo.<span class="fn">insert</span>({ packId, workflowId, deployNumber, version, ... });
+    res.<span class="fn">status</span>(<span class="num">201</span>).<span class="fn">json</span>({ workflowId: row.workflow_id, deployNumber: row.deploy_number, ... });
+  } <span class="kw">catch</span> (error) {
+    <span class="kw">if</span> (msg.<span class="fn">includes</span>(<span class="str">"UNIQUE"</span>) || msg.<span class="fn">includes</span>(<span class="str">"duplicate"</span>))
+      <span class="kw">return</span> res.<span class="fn">status</span>(<span class="num">409</span>).<span class="fn">json</span>({ error: <span class="str">"Conflict"</span> });
+    res.<span class="fn">status</span>(<span class="num">500</span>).<span class="fn">json</span>({ error: <span class="str">"Internal Server Error"</span> });
+  }
+}));
+    </pre>
+  </div>
+</section>
+
+<!-- 05 ERROR FIXES -->
+<section class="reveal">
+  <div class="section-head">
+    <span class="section-num">05</span>
+    <h2>TypeScript 编译错误修复</h2>
+  </div>
+  <div class="timeline">
+    <div class="timeline-item done">
+      <div class="t-label">ERROR 1 — Type Mismatch</div>
+      <div class="t-title">facade-binding: Property 'deleted' does not exist</div>
+      <div class="t-desc">
+        泛型参数传了整个响应信封 <code class="inline">{ success, data }</code>，但
+        <code class="inline">parseResponse</code> 已解包 <code class="inline">data</code> 字段。
+        修复：泛型从 <code class="inline">{ success: boolean; data: { deleted: number } }</code> &rarr;
+        <code class="inline">{ deleted: number }</code>。
+      </div>
+    </div>
+    <div class="timeline-item done">
+      <div class="t-label">ERROR 2 — Type Mismatch</div>
+      <div class="t-title">node-execution: Property 'insertId' does not exist</div>
+      <div class="t-desc">同上原因，同样修复方式。</div>
+    </div>
+    <div class="timeline-item done">
+      <div class="t-label">ERROR 3 — Type Mismatch</div>
+      <div class="t-title">node-execution: Property 'reconciled' does not exist</div>
+      <div class="t-desc">同上原因，同样修复方式。</div>
+    </div>
+    <div class="timeline-item done">
+      <div class="t-label">ERROR 4 — Signature</div>
+      <div class="t-title">registry.ts: listAll expects 0 arguments but got 2</div>
+      <div class="t-desc">
+        <code class="inline">listAll(botId, botOwnerId)</code> 传了 2 个参数但方法签名不接受。
+        修复：增加 <code class="inline">botId?: string, botOwnerId?: string</code> 参数。
+      </div>
+    </div>
+    <div class="timeline-item done">
+      <div class="t-label">ERROR 5 — Async Type</div>
+      <div class="t-title">index.ts: iamtokenProvider type mismatch</div>
+      <div class="t-desc">
+        <code class="inline">() =&gt; string</code> 不兼容 <code class="inline">() =&gt; Promise&lt;string&gt;</code>。
+        修复：改为 <code class="inline">async () =&gt;</code>。
+      </div>
+    </div>
+    <div class="timeline-item done">
+      <div class="t-label">ERROR 6 — Missing Property</div>
+      <div class="t-title">facade-binding: Property 'bot_id' does not exist on FacadeBindingRow</div>
+      <div class="t-desc">
+        <code class="inline">FacadeBindingRow</code> 无 <code class="inline">bot_id</code>/<code class="inline">bot_owner_id</code> 字段
+        （facade binding 按 command 绑定，不按 bot）。修复：移除客户端过滤，参数改为
+        <code class="inline">_botId</code>/<code class="inline">_botOwnerId</code> 忽略。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 06 STUB ANALYSIS -->
+<section class="reveal">
+  <div class="section-head">
+    <span class="section-num">06</span>
+    <h2>17 个存根 API 仓库分析</h2>
+  </div>
+  <div class="prose">
+    <p>
+      除了已实现的 6 个核心仓库外，还有 17 个存根 API 仓库。分析结果：
+      <strong>14 个被实际实例化</strong>（在 API 模式下 <code class="inline">super(null as any)</code> 会在运行时崩溃），
+      <strong>1 个是死代码</strong>，<strong>2 个未被实例化</strong>。
+    </p>
+  </div>
+  <div class="callout warn">
+    <div class="callout-label">运行时风险</div>
+    <p>
+      存根的 <code class="inline">super(null as any)</code> 将 <code class="inline">db</code> 设为
+      <code class="inline">null</code>。当任何方法被调用时，会尝试访问
+      <code class="inline">this.db.xxx()</code>，导致
+      <code class="inline">Cannot read properties of null</code> 运行时崩溃。
+    </p>
+    <p>
+      其中 <strong>WorkflowSpecApiRepository</strong> 最关键——被 5 处引用，走
+      <code class="inline">GET /api/workflows/:id</code> 已有端点，实现成本最低。
+    </p>
+  </div>
+  <div class="badge-row">
+    <span class="badge accent">14 被实例化</span>
+    <span class="badge">1 死代码</span>
+    <span class="badge">2 未实例化</span>
+    <span class="badge success">WorkflowSpec 最优先</span>
+  </div>
+</section>
+
+<!-- 07 BUILD STATUS -->
+<section class="reveal">
+  <div class="section-head">
+    <span class="section-num">07</span>
+    <h2>编译状态</h2>
+  </div>
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-icon">TASKGUARD</div>
+      <h3>npm run build</h3>
+      <p>TypeScript 编译 <strong style="color: var(--success)">0 errors</strong>。所有泛型类型、异步签名、方法参数已修复。</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">EVOLVETRACE</div>
+      <h3>npm run build</h3>
+      <p>TypeScript 编译 <strong style="color: var(--success)">0 errors</strong>。新增 deploy-history 路由注册成功。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 08 NEXT STEPS -->
+<section class="reveal">
+  <div class="section-head">
+    <span class="section-num">08</span>
+    <h2>待办事项</h2>
+  </div>
+  <div class="timeline">
+    <div class="timeline-item pending">
+      <div class="t-label">PRIORITY 1</div>
+      <div class="t-title">实现 WorkflowSpecApiRepository</div>
+      <div class="t-desc">
+        被 5 处引用，走 <code class="inline">GET /api/workflows/:id</code> 已有端点。
+        实现成本最低，业务价值最高。
+      </div>
+    </div>
+    <div class="timeline-item pending">
+      <div class="t-label">PRIORITY 2</div>
+      <div class="t-title">实现其余 13 个被实例化的存根</div>
+      <div class="t-desc">
+        需要逐一确认服务端是否有对应的 <code class="inline">/api/internal/*</code> 端点，
+        或是否可以复用已有的 <code class="inline">/api/workflows/*</code> 端点。
+      </div>
+    </div>
+    <div class="timeline-item pending">
+      <div class="t-label">PRIORITY 3</div>
+      <div class="t-title">清理 1 个死代码 + 2 个未实例化存根</div>
+      <div class="t-desc">评估是否可以直接删除，或保留为 corp 版本的扩展点。</div>
+    </div>
+    <div class="timeline-item pending">
+      <div class="t-label">PRIORITY 4</div>
+      <div class="t-title">端到端集成测试</div>
+      <div class="t-desc">
+        在纯开源环境（无 corp 扩展）下验证 taskguard &rarr; evolvetrace 的完整通信链路，
+        包括签名验证、无签名模式、409 冲突处理等。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<div class="footer">
+  <div class="footer-line"></div>
+  <p>Avernet &nbsp;/&nbsp; HttpApiClient Implementation Summary</p>
+  <p style="margin-top: 8px; opacity: 0.5;">Generated by CodeFuse</p>
+</div>
+
+</div>
+
+<script>
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -60px 0px' });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

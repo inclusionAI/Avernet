@@ -6,6 +6,16 @@
  * swapping the persistence layer without changing business logic.
  */
 
+import type {
+  ScheduledTrigger,
+  CreateTriggerInput,
+  UpdateTriggerInput,
+} from "../../scheduler/types.js";
+import type {
+  WebhookTrigger,
+  WebhookEvent,
+} from "../../webhook/types.js";
+
 /** Terminal flow_runs statuses — once in these states, result_json must not
  *  be overwritten by node-level writes (see the flow_runs.result_json race fix). */
 const TERMINAL_FLOW_STATUSES = new Set(["succeeded", "failed", "cancelled", "completed"]);
@@ -763,7 +773,7 @@ export type RunLogRow = RunLogInsert & {
 };
 
 export interface IRunLogRepository {
-  /** Batch insert run log entries. Best-effort: DB failure is logged but doesn't throw. */
+  /** Insert run log entries. Best-effort: DB failure is logged but doesn't throw. */
   insertBatch(entries: RunLogInsert[]): Promise<number>;
   /** Query all run logs for a flow, sorted by seq ascending. */
   findByFlowId(flowId: string): Promise<RunLogRow[]>;
@@ -771,4 +781,123 @@ export interface IRunLogRepository {
   deleteByFlowId(flowId: string): Promise<number>;
   /** Delete run logs older than the given Unix timestamp (cleanup). Returns deleted count. */
   deleteOlderThan(olderThan: number): Promise<number>;
+}
+
+// ── Deploy History ──
+
+export type DeployHistoryInsertInput = {
+  packId: string;
+  workflowId: string;
+  deployNumber: number;
+  version: number;
+  tagName: string;
+  action: string;
+  fromDeployNumber?: number;
+  specJson: string;
+  note?: string;
+  botId?: string | null;
+  ownerId?: string | null;
+};
+
+export type DeployHistoryListRow = {
+  deployNumber: number;
+  version: number;
+  tagName: string;
+  action: string;
+  fromDeployNumber?: number | null;
+  note?: string | null;
+  botId?: string | null;
+  ownerId?: string | null;
+  gmtCreate: number;
+};
+
+export type DeployHistoryDetailRow = DeployHistoryListRow & {
+  specJson: string;
+};
+
+export type DeployHistoryLatestDeploy = {
+  packId: string;
+  workflowId: string;
+  deployNumber: number;
+  version: number;
+  tagName: string;
+  action: string;
+  fromDeployNumber?: number;
+};
+
+export interface IDeployHistoryRepository {
+  /** Insert a deploy history record. Returns true on success. */
+  insert(input: DeployHistoryInsertInput): Promise<boolean>;
+  /** Get the latest deploy record for a workflow. Returns null if no records. */
+  getLatestDeploy(packId: string, workflowId: string): Promise<DeployHistoryLatestDeploy | null>;
+  /** Get the latest version number from deploy history. Returns 0 if no records. */
+  getLatestVersion(packId: string, workflowId: string): Promise<number>;
+  /** Get the maximum deploy_number. Returns 0 if no records. */
+  getMaxDeployNumber(packId: string, workflowId: string): Promise<number>;
+  /** Find a deploy record by version (full snapshot incl. specJson for rollback). */
+  findByVersion(packId: string, workflowId: string, version: number): Promise<DeployHistoryDetailRow | null>;
+  /** Find a deploy record by deploy_number (full snapshot incl. specJson). */
+  findByDeployNumber(packId: string, workflowId: string, deployNumber: number): Promise<DeployHistoryDetailRow | null>;
+  /** List deploy history for a workflow, ordered by deploy_number DESC. */
+  listHistory(workflowId: string, limit?: number): Promise<DeployHistoryListRow[]>;
+}
+
+// ── Scheduled Trigger ──
+
+export interface IScheduledTriggerRepository {
+  create(input: CreateTriggerInput): Promise<ScheduledTrigger>;
+  getById(triggerId: string): Promise<ScheduledTrigger | null>;
+  listByWorkflow(workflowId: string): Promise<ScheduledTrigger[]>;
+  listEnabled(): Promise<ScheduledTrigger[]>;
+  findDueTriggers(now: number): Promise<ScheduledTrigger[]>;
+  update(triggerId: string, input: UpdateTriggerInput): Promise<ScheduledTrigger | null>;
+  updateFireTimes(triggerId: string, lastFireTime: number, nextFireTime: number): Promise<ScheduledTrigger | null>;
+  enable(triggerId: string): Promise<ScheduledTrigger | null>;
+  disable(triggerId: string): Promise<ScheduledTrigger | null>;
+  delete(triggerId: string): Promise<boolean>;
+  countRunningFlows(workflowId: string): Promise<number>;
+}
+
+// ── Webhook Event ──
+
+export type WebhookEventRecordInput = {
+  eventId: string;
+  triggerId: string;
+  flowId?: string | null;
+  status: string;
+  requestMethod: string;
+  requestHeaders?: Record<string, string> | null;
+  requestBodyHash?: string | null;
+  responseCode?: number | null;
+  errorMessage?: string | null;
+  ipAddress?: string | null;
+};
+
+export interface IWebhookEventRepository {
+  record(input: WebhookEventRecordInput): Promise<WebhookEvent | null>;
+  findDuplicate(eventId: string, windowHours: number): Promise<WebhookEvent | null>;
+  findByTriggerId(triggerId: string, options?: { limit?: number; offset?: number }): Promise<WebhookEvent[]>;
+  deleteOlderThan(retentionDays: number): Promise<number>;
+}
+
+// ── Webhook Trigger ──
+
+export type CreateWebhookTriggerInput = {
+  triggerId?: string;
+  workflowId: string;
+  packId?: string;
+  secret?: string;
+  payloadMapping?: Record<string, string> | null;
+  allowedIps?: string[] | null;
+  description?: string;
+  enabled?: boolean;
+};
+
+export interface IWebhookTriggerRepository {
+  create(input: CreateWebhookTriggerInput): Promise<WebhookTrigger>;
+  getByTriggerId(triggerId: string): Promise<WebhookTrigger | null>;
+  findByWorkflowId(workflowId: string): Promise<WebhookTrigger[]>;
+  findAll(): Promise<WebhookTrigger[]>;
+  update(triggerId: string, updates: Record<string, unknown>): Promise<WebhookTrigger | null>;
+  delete(triggerId: string): Promise<boolean>;
 }

@@ -3019,7 +3019,7 @@ function getWebhookCommandDeps(deps: ControllerDeps): WebhookCommandDeps {
 function createApiConfigWithProvider(config: ApiClientConfig): ApiClientConfig {
   return {
     ...config,
-    iamtokenProvider: () => {
+    iamtokenProvider: async () => {
       try {
         return loadConfig().app.api.iamtoken;
       } catch {
@@ -3149,7 +3149,7 @@ export function registerTaskguardPlugin(api: PluginApi, extensions?: TaskguardEx
         // API mode: create ApiClient and API-backed repositories
         const apiConfig = dbConfig.api!;
         if (!apiConfig.privateKeyB64) {
-          console.warn("[taskguard] API mode enabled but CLAWMIND_PRIVATE_KEY not set — API writes will fail");
+          console.warn("[taskguard] API mode enabled but CLAWMIND_PRIVATE_KEY not set — API requests will be sent without signing");
         }
         const apiClient = createApiClient(apiConfig);
         console.log(`[taskguard] API mode: using clawweb at ${apiConfig.baseUrl}`);

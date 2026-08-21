@@ -19,7 +19,7 @@ database:
     host: 127.0.0.1
     port: 3306
     user: evolvetrace
-    password: changeme
+    password: ""   # 社区版使用 SQLite 模式；MySQL 密码由企业部署时通过环境变量注入
     database: evolvetrace
 
 # Admin users (comma-separated user IDs). These users can manage workflows and view all logs.
