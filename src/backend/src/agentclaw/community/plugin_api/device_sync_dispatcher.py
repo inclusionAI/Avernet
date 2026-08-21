@@ -15,8 +15,8 @@ seam IS this ``Plugin`` Protocol and consumers inject it directly. Each profile
 binds its impl to this key; callers reach it via
 ``resolver.resolve_for_bot(...) -> ctx`` then ``dispatcher.dispatch(ctx)``.
 
-``DeviceContext`` and ``DeviceSync`` are referenced by string forward
-annotations so the Plugin API does not import concrete Core modules.
+``DeviceContext`` and ``DeviceSync`` use postponed annotations so the Plugin
+API does not import concrete Core modules at runtime.
 """
 from __future__ import annotations
 
@@ -24,9 +24,9 @@ from typing import Protocol, runtime_checkable
 
 from agentclaw.community.plugin_api.base import Plugin
 
-# ``DeviceContext`` (core) and ``DeviceSync`` (core) are referenced only as
-# string forward annotations below — ``plugin_api/`` must not import ``core/``
-# (layer rule), so no ``from agentclaw.community.core... import`` lives here.
+# ``DeviceContext`` (core) and ``DeviceSync`` (core) use postponed annotations
+# below — ``plugin_api/`` must not import ``core/`` (layer rule), so no
+# ``from agentclaw.community.core... import`` lives here.
 
 
 @runtime_checkable
@@ -39,7 +39,7 @@ class DeviceSyncDispatcher(Plugin, Protocol):
     deliberately does NOT inherit ``Plugin``.
     """
 
-    def dispatch(self, ctx: "DeviceContext") -> "DeviceSync":  # noqa: F821
+    def dispatch(self, ctx: DeviceContext) -> DeviceSync:  # noqa: F821
         """Return the Core :class:`DeviceSync` service for ``ctx``
         (selected by ``ctx.provider`` / ``ctx.bot_type``)."""
         ...

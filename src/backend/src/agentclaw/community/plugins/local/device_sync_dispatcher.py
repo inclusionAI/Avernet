@@ -41,5 +41,5 @@ class LocalDeviceSyncDispatcher(DeviceSyncDispatcher):
     ) -> None:
         self._device_sync_factory = device_sync_factory
 
-    def dispatch(self, ctx: "DeviceContext") -> DeviceSync:
+    def dispatch(self, ctx: DeviceContext) -> DeviceSync:
         return self._device_sync_factory()
