@@ -128,7 +128,9 @@ OWNER_SCOPED = _Scaffold("OWNER_SCOPED")
 SELF_CHECKED = _Scaffold("SELF_CHECKED")
 
 #: The modes that must be empty for the surface to have reached its final shape.
-SCAFFOLDING_MODES = (ServiceChecked, type(OWNER_SCOPED))
+#: ``_Scaffold`` covers both sentinels, so a fourth scaffolding sentinel added
+#: later is counted by :func:`scaffolding_row_count` without touching this.
+SCAFFOLDING_MODES = (ServiceChecked, _Scaffold)
 
 Authorization = Check | NoCheck | ServiceChecked | _Scaffold
 
