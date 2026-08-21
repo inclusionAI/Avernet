@@ -158,7 +158,7 @@ user_config:
   # 部署环境探测配置
   env:
     # 用于探测当前部署环境的环境变量名称
-    deploy_env_var: "ALI_YUN_ACK"
+    deploy_env_var: "DEPLOY_ENV"
 
   # 应用级动态调试/展示标记
   app:
