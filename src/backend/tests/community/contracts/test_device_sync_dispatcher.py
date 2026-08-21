@@ -30,7 +30,7 @@ def test_dispatch_returns_core_device_sync_service() -> None:
     (not a Plugin), and the six methods satisfy the community no-op contract."""
     service = CommunityDeviceSyncService()
     dispatcher: DeviceSyncDispatcher = CommunityDeviceSyncDispatcher(
-        community_device_sync_service=service
+        device_sync_factory=lambda: service
     )
 
     ctx = SimpleNamespace(bot_id="b1", provider="arca")
@@ -52,7 +52,7 @@ def test_dispatch_is_selection_only_any_ctx() -> None:
     no per-ctx construction, no provider branching."""
     service = CommunityDeviceSyncService()
     dispatcher = CommunityDeviceSyncDispatcher(
-        community_device_sync_service=service
+        device_sync_factory=lambda: service
     )
 
     a = dispatcher.dispatch(SimpleNamespace(bot_id="b1", provider="baas"))

@@ -182,7 +182,7 @@ def test_sandbox_health_unsupported():
 def test_device_sync_dispatcher_returns_noop_plugin():
     ctx = SimpleNamespace(bot_id="bot-1", provider="baas")
     dispatcher = CommunityDeviceSyncDispatcher(
-        community_device_sync_service=CommunityDeviceSyncService()
+        device_sync_factory=lambda: CommunityDeviceSyncService()
     )
     plugin = dispatcher.dispatch(ctx)
     assert isinstance(plugin, CommunityDeviceSyncService)

@@ -3,19 +3,16 @@
 Moved out of ``plugins/community/device_sync.py`` (CHG-5). A selection-only
 dispatcher that nominally inherits :class:`DeviceSyncDispatcher` and is
 decorated ``@plugin_impl``. It holds a DI-injected
-:class:`CommunityDeviceSyncService` (Core) and returns it for any ``ctx``,
-preserving the no-op log line. It depends on Core ``DeviceSync`` /
-``DeviceSyncDispatcher`` only and imports no concrete Core service outside DI.
+``Callable[[], DeviceSync]`` factory and returns its Core service for any
+``ctx``, preserving the no-op log line. Concrete service construction stays in
+the DI module.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from injector import inject
 
-from agentclaw.community.core.devices.services.community_device_sync import (
-    CommunityDeviceSyncService,
-)
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
@@ -34,13 +31,13 @@ logger = get_logger()
 class CommunityDeviceSyncDispatcher(DeviceSyncDispatcher):
     """No-op ``DeviceSyncDispatcher`` for community.
 
-    Returns the DI-injected :class:`CommunityDeviceSyncService` for any
-    ``ctx`` — community bots have no remote device to push to.
+    Returns the DI-factory-produced Core ``DeviceSync`` for any ``ctx`` —
+    community bots have no remote device to push to.
     """
 
     @inject
-    def __init__(self, community_device_sync_service: CommunityDeviceSyncService) -> None:
-        self._service = community_device_sync_service
+    def __init__(self, device_sync_factory: Callable[[], DeviceSync]) -> None:
+        self._device_sync_factory = device_sync_factory
 
     def dispatch(self, ctx: "DeviceContext") -> DeviceSync:
         logger.info(
@@ -48,4 +45,4 @@ class CommunityDeviceSyncDispatcher(DeviceSyncDispatcher):
             getattr(ctx, "bot_id", "?"),
             getattr(ctx, "provider", "?"),
         )
-        return self._service
+        return self._device_sync_factory()
