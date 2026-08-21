@@ -1006,6 +1006,21 @@ Two things stay outside on purpose: bot-*type* gating (`SUPPORTED_BOT_TYPES`,
 answered 501) is a capability question, and whether a *machine* caller is
 admitted is `admission.py`'s, with its own seam.
 
+### A router that exists but is not mounted
+
+`openapi_v1/task` declares three operations that `build_public_router` never
+mounts — collaboration answers under `/api/v1` today, and its `/openapi/v1`
+twin waits for the gateway to declare that domain. It still carries the route
+class, so it still needs rows, and `UNMOUNTED_OPERATIONS` names them so the
+orphan check does not read them as decisions left behind by a rename.
+
+Keeping the route class on an unmounted router is the point: **whoever mounts
+it later cannot do so unguarded** — they have to replace its placeholder rows
+with a real decision. Dropping the class would have been the smaller diff and
+would have let the surface grow an unchecked group the day someone wired it up.
+A test asserts none of those operations is live, so mounting one must delete
+its entry.
+
 ### Adopting it (the follow-up work)
 
 No row is `Check` yet — this change built the mechanism, and moving each group
