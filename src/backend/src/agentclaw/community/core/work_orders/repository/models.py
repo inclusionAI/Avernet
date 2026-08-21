@@ -8,8 +8,6 @@ from sqlalchemy.sql import func
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
-    WorkOrderBizType,
-    WorkOrderEventType,
     WorkOrderNotificationRecord,
     WorkOrderRecord,
     WorkOrderStatus,
@@ -26,6 +24,7 @@ class WorkOrderModel(Base):
     work_order_no = Column(String(64), nullable=False)
     biz_type = Column(String(64), nullable=False)
     biz_id = Column(String(128), nullable=False)
+    biz_data = Column(Text, nullable=True)
     applicant_user_id = Column(String(256), nullable=False)
     apply_reason = Column(String(512), nullable=True)
     status = Column(String(32), nullable=False)
@@ -71,8 +70,9 @@ class WorkOrderModel(Base):
         return WorkOrderRecord(
             id=self.id,
             work_order_no=self.work_order_no,
-            biz_type=WorkOrderBizType(self.biz_type),
+            biz_type=self.biz_type,
             biz_id=self.biz_id,
+            biz_data=self.biz_data,
             applicant_user_id=self.applicant_user_id,
             apply_reason=self.apply_reason,
             status=WorkOrderStatus(self.status),
@@ -138,8 +138,8 @@ class WorkOrderNotificationModel(Base):
             work_order_id=self.work_order_id,
             recipient_user_id=self.recipient_user_id,
             notification_category=NotificationCategory(self.notification_category),
-            event_type=WorkOrderEventType(self.event_type),
-            biz_type=WorkOrderBizType(self.biz_type),
+            event_type=self.event_type,
+            biz_type=self.biz_type,
             biz_id=self.biz_id,
             title=self.title,
             content=self.content,
@@ -149,6 +149,28 @@ class WorkOrderNotificationModel(Base):
             gmt_created=self.gmt_created,
             gmt_modified=self.gmt_modified,
         )
+
+
+class WorkOrderApproverModel(Base):
+    __tablename__ = "ac_work_order_approver"
+
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
+    work_order_id = Column(AutoIncrementBigInteger, nullable=False)
+    approver_user_id = Column(String(256), nullable=False)
+    status = Column(String(32), nullable=False, server_default="PENDING")
+    review_remark = Column(String(512), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    gmt_created = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "work_order_id", "approver_user_id", name="uk_work_order_approver"
+        ),
+    )
 
 
 register_avernet_tenant_guard(WorkOrderModel)

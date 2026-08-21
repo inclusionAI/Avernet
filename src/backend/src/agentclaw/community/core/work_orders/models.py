@@ -14,6 +14,18 @@ class WorkOrderStatus(StrEnum):
     REJECTED = "REJECTED"
 
 
+class WorkOrderDecision(StrEnum):
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class WorkOrderApproverStatus(StrEnum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    CANCELLED = "CANCELLED"
+
+
 class WorkOrderBizType(StrEnum):
     SPACE_JOIN = "SPACE_JOIN"
 
@@ -88,10 +100,22 @@ class WorkOrderMessageContent(StrEnum):
     SPACE_MEMBER_ADDED = "你已被添加到空间「{space_name}」。"
 
 
+class WorkOrderApproverRecord(BaseModel):
+    id: int
+    work_order_id: int
+    approver_user_id: str
+    status: WorkOrderApproverStatus
+    review_remark: str | None
+    reviewed_at: datetime | None
+    env: str
+    gmt_created: datetime
+    gmt_modified: datetime
+
+
 class WorkOrderRecord(BaseModel):
     id: int
     work_order_no: str
-    biz_type: WorkOrderBizType
+    biz_type: str
     biz_id: str
     applicant_user_id: str
     apply_reason: str | None
@@ -102,6 +126,7 @@ class WorkOrderRecord(BaseModel):
     env: str
     gmt_created: datetime
     gmt_modified: datetime
+    biz_data: str | None = None
 
 
 class WorkOrderNotificationRecord(BaseModel):
@@ -109,8 +134,8 @@ class WorkOrderNotificationRecord(BaseModel):
     work_order_id: int | None
     recipient_user_id: str
     notification_category: NotificationCategory
-    event_type: WorkOrderEventType
-    biz_type: WorkOrderBizType
+    event_type: str
+    biz_type: str
     biz_id: str
     title: str
     content: str | None
@@ -124,8 +149,8 @@ class WorkOrderNotificationRecord(BaseModel):
 class WorkOrderNotificationDraft(BaseModel):
     recipient_user_id: str
     notification_category: NotificationCategory
-    event_type: WorkOrderEventType
-    biz_type: WorkOrderBizType
+    event_type: str
+    biz_type: str
     biz_id: str
     title: str
     content: str
@@ -152,7 +177,7 @@ class WorkOrderListItem(BaseModel):
 
 class WorkOrderDetail(BaseModel):
     work_order: WorkOrderRecord
-    event_type: WorkOrderEventType
+    event_type: str
     title: str
     space_id: int
     space_name: str
@@ -166,3 +191,4 @@ class WorkOrderReviewResult(BaseModel):
     reviewer_user_id: str
     review_remark: str | None
     reviewed_at: datetime
+    decision: WorkOrderDecision = WorkOrderDecision.APPROVED

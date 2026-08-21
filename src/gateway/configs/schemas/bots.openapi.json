@@ -8350,6 +8350,48 @@
         "title": "Envelope[WorkOrderDetailResponse]",
         "type": "object"
       },
+      "Envelope_WorkOrderLegacyReviewResponse_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkOrderLegacyReviewResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[WorkOrderLegacyReviewResponse]",
+        "type": "object"
+      },
       "Envelope_WorkOrderReviewResponse_": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -11231,8 +11273,9 @@
             "type": "string"
           },
           "biz_type": {
-            "$ref": "#/components/schemas/WorkOrderBizType",
-            "description": "Business object type."
+            "description": "Business type supplied by the business module.",
+            "title": "Biz Type",
+            "type": "string"
           },
           "can_approve": {
             "description": "Whether the recipient may review the related work order.",
@@ -11252,8 +11295,9 @@
             "title": "Content"
           },
           "event_type": {
-            "$ref": "#/components/schemas/WorkOrderEventType",
-            "description": "Business event represented by the notification."
+            "description": "Legacy event represented by the notification.",
+            "title": "Event Type",
+            "type": "string"
           },
           "is_read": {
             "description": "Whether the recipient has read the notification.",
@@ -15741,21 +15785,51 @@
         "title": "UpdateSpaceMemberRoleRequest",
         "type": "object"
       },
-      "WorkOrderBizType": {
-        "description": "Business object represented by a work order.",
-        "enum": [
-          "SPACE_JOIN"
+      "WorkOrderApprovalRequest": {
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/WorkOrderDecision",
+            "description": "Approval decision."
+          },
+          "review_remark": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Approval comment; required for rejection.",
+            "title": "Review Remark"
+          }
+        },
+        "required": [
+          "decision"
         ],
-        "title": "WorkOrderBizType",
+        "title": "WorkOrderApprovalRequest",
+        "type": "object"
+      },
+      "WorkOrderDecision": {
+        "description": "Decision submitted for a pending work order.",
+        "enum": [
+          "APPROVED",
+          "REJECTED"
+        ],
+        "title": "WorkOrderDecision",
         "type": "string",
         "x-enum-descriptions": [
-          "A request to join a Space."
+          "Approve the work order.",
+          "Reject the work order."
         ],
         "x-enum-varnames": [
-          "SPACE_JOIN"
+          "APPROVED",
+          "REJECTED"
         ],
         "x-enumNames": [
-          "SPACE_JOIN"
+          "APPROVED",
+          "REJECTED"
         ]
       },
       "WorkOrderDetailContent": {
@@ -15807,14 +15881,34 @@
       "WorkOrderDetailResponse": {
         "description": "Detailed view of one work order.",
         "properties": {
+          "biz_data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Business detail JSON payload.",
+            "title": "Biz Data"
+          },
           "biz_id": {
-            "description": "Identifier of the related Space.",
-            "title": "Biz Id",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Identifier of the related business object.",
+            "title": "Biz Id"
           },
           "biz_type": {
-            "$ref": "#/components/schemas/WorkOrderBizType",
-            "description": "Business object type."
+            "description": "Business type supplied by the business module.",
+            "title": "Biz Type",
+            "type": "string"
           },
           "can_approve": {
             "description": "Whether the current user may approve or reject this work order.",
@@ -15822,12 +15916,32 @@
             "type": "boolean"
           },
           "content": {
-            "$ref": "#/components/schemas/WorkOrderDetailContent",
-            "description": "Space join request details."
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkOrderDetailContent"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Business detail payload.",
+            "title": "Content"
           },
           "event_type": {
-            "$ref": "#/components/schemas/WorkOrderEventType",
-            "description": "Event that created the work order."
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Legacy originating event, when available.",
+            "title": "Event Type"
           },
           "review_remark": {
             "anyOf": [
@@ -15890,9 +16004,7 @@
           "work_order_no",
           "biz_type",
           "biz_id",
-          "event_type",
           "title",
-          "content",
           "status",
           "reviewer_user_id",
           "review_remark",
@@ -15901,75 +16013,6 @@
         ],
         "title": "WorkOrderDetailResponse",
         "type": "object"
-      },
-      "WorkOrderEventType": {
-        "description": "Business event that created a work order or notification.",
-        "enum": [
-          "SPACE_JOIN_APPLIED",
-          "SPACE_JOIN_REVIEWED",
-          "SPACE_MEMBER_ADDED",
-          "BOT_COLLABORATOR_APPLIED",
-          "BOT_COLLABORATOR_REVIEWED",
-          "BOT_MEMBER_ADDED",
-          "HUMAN2BOT_FRIEND_APPLIED",
-          "HUMAN2BOT_FRIEND_REVIEWED",
-          "BOT2BOT_FRIEND_APPLIED",
-          "BOT2BOT_FRIEND_REVIEWED",
-          "HUMAN2BOT_PUBLIC_ORDER_CREATED",
-          "HUMAN2BOT_PUBLIC_ORDER_COMPLETED",
-          "BOT2BOT_PUBLIC_ORDER_CREATED",
-          "BOT2BOT_PUBLIC_ORDER_COMPLETED"
-        ],
-        "title": "WorkOrderEventType",
-        "type": "string",
-        "x-enum-descriptions": [
-          "A user submitted a request to join a Space.",
-          "A Space join request received a review decision.",
-          "A user was directly added to a Space.",
-          "A bot collaborator request was submitted.",
-          "A bot collaborator request was reviewed.",
-          "A member was directly added to a bot.",
-          "A user-to-bot friend request was submitted.",
-          "A user-to-bot friend request was reviewed.",
-          "A bot-to-bot friend request was submitted.",
-          "A bot-to-bot friend request was reviewed.",
-          "A user created a public order for a bot.",
-          "A user's public bot order completed.",
-          "A bot created a public order for another bot.",
-          "A bot-to-bot public order completed."
-        ],
-        "x-enum-varnames": [
-          "SPACE_JOIN_APPLIED",
-          "SPACE_JOIN_REVIEWED",
-          "SPACE_MEMBER_ADDED",
-          "BOT_COLLABORATOR_APPLIED",
-          "BOT_COLLABORATOR_REVIEWED",
-          "BOT_MEMBER_ADDED",
-          "HUMAN2BOT_FRIEND_APPLIED",
-          "HUMAN2BOT_FRIEND_REVIEWED",
-          "BOT2BOT_FRIEND_APPLIED",
-          "BOT2BOT_FRIEND_REVIEWED",
-          "HUMAN2BOT_PUBLIC_ORDER_CREATED",
-          "HUMAN2BOT_PUBLIC_ORDER_COMPLETED",
-          "BOT2BOT_PUBLIC_ORDER_CREATED",
-          "BOT2BOT_PUBLIC_ORDER_COMPLETED"
-        ],
-        "x-enumNames": [
-          "SPACE_JOIN_APPLIED",
-          "SPACE_JOIN_REVIEWED",
-          "SPACE_MEMBER_ADDED",
-          "BOT_COLLABORATOR_APPLIED",
-          "BOT_COLLABORATOR_REVIEWED",
-          "BOT_MEMBER_ADDED",
-          "HUMAN2BOT_FRIEND_APPLIED",
-          "HUMAN2BOT_FRIEND_REVIEWED",
-          "BOT2BOT_FRIEND_APPLIED",
-          "BOT2BOT_FRIEND_REVIEWED",
-          "HUMAN2BOT_PUBLIC_ORDER_CREATED",
-          "HUMAN2BOT_PUBLIC_ORDER_COMPLETED",
-          "BOT2BOT_PUBLIC_ORDER_CREATED",
-          "BOT2BOT_PUBLIC_ORDER_COMPLETED"
-        ]
       },
       "WorkOrderItemType": {
         "description": "Category of item included in a work-order list.",
@@ -15996,6 +16039,52 @@
           "NOTICE"
         ]
       },
+      "WorkOrderLegacyReviewResponse": {
+        "properties": {
+          "review_remark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Remark"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewer_user_id": {
+            "title": "Reviewer User Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkOrderStatus"
+          },
+          "work_order_id": {
+            "title": "Work Order Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "work_order_id",
+          "status",
+          "reviewer_user_id",
+          "review_remark",
+          "reviewed_at"
+        ],
+        "title": "WorkOrderLegacyReviewResponse",
+        "type": "object"
+      },
       "WorkOrderListItem": {
         "description": "Approval or notification item in a user's work-order inbox.",
         "properties": {
@@ -16017,13 +16106,21 @@
             "title": "Apply Reason"
           },
           "biz_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
             "description": "Identifier of the related business object.",
-            "title": "Biz Id",
-            "type": "string"
+            "title": "Biz Id"
           },
           "biz_type": {
-            "$ref": "#/components/schemas/WorkOrderBizType",
-            "description": "Business object type."
+            "description": "Business type supplied by the business module.",
+            "title": "Biz Type",
+            "type": "string"
           },
           "can_approve": {
             "description": "Whether the current user may approve or reject this item.",
@@ -16050,13 +16147,14 @@
           "event_type": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/WorkOrderEventType"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Originating event, or null when no notification is attached."
+            "description": "Originating event, or null when no notification is attached.",
+            "title": "Event Type"
           },
           "gmt_created": {
             "anyOf": [
@@ -16290,6 +16388,10 @@
       "WorkOrderReviewResponse": {
         "description": "Final state returned after reviewing a work order.",
         "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/WorkOrderDecision",
+            "description": "Decision recorded for the work order."
+          },
           "review_remark": {
             "anyOf": [
               {
@@ -16332,6 +16434,7 @@
         "required": [
           "work_order_id",
           "status",
+          "decision",
           "reviewer_user_id",
           "review_remark",
           "reviewed_at"
@@ -22295,20 +22398,6 @@
       "get": {
         "description": "List Skill Center tags for marketplace filter initialization.",
         "operationId": "list_skill_center_tags_openapi_v1_bots_market_skill_center_tags_get",
-        "parameters": [
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -22349,21 +22438,6 @@
               }
             },
             "description": "Missing or invalid credentials"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 403000,
-                  "message": "Forbidden",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -29615,7 +29689,7 @@
     },
     "/openapi/v1/bots/skills/{skill_code}/publish/status": {
       "get": {
-        "description": "Query a Skill's publish status from Skill Center.\n\nThis is the new Skill Workbench entry point. It deliberately does not\nconsult or mutate OCB's legacy local Skill state machine.",
+        "description": "Query a Skill's publish status from Skill Center.\n\nThis is the new Skill Workbench entry point. It deliberately does not\nconsult or mutate the legacy local Skill state machine.",
         "operationId": "get_skill_publish_status_openapi_v1_bots_skills__skill_code__publish_status_get",
         "parameters": [
           {
@@ -33835,6 +33909,183 @@
         ]
       }
     },
+    "/openapi/v1/bots/work-orders/{work_order_id}/approval": {
+      "post": {
+        "operationId": "process_work_order_approval_openapi_v1_bots_work_orders__work_order_id__approval_post",
+        "parameters": [
+          {
+            "description": "Positive numeric identifier.",
+            "in": "path",
+            "name": "work_order_id",
+            "required": true,
+            "schema": {
+              "description": "Positive numeric identifier.",
+              "minimum": 1,
+              "title": "Work Order Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkOrderApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_WorkOrderReviewResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Process Work Order Approval",
+        "tags": [
+          "work-orders"
+        ]
+      }
+    },
     "/openapi/v1/bots/work-orders/{work_order_id}/approve": {
       "post": {
         "operationId": "approve_work_order_openapi_v1_bots_work_orders__work_order_id__approve_post",
@@ -33879,7 +34130,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_WorkOrderReviewResponse_"
+                  "$ref": "#/components/schemas/Envelope_WorkOrderLegacyReviewResponse_"
                 }
               }
             },
@@ -34056,7 +34307,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_WorkOrderReviewResponse_"
+                  "$ref": "#/components/schemas/Envelope_WorkOrderLegacyReviewResponse_"
                 }
               }
             },

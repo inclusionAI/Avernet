@@ -31,6 +31,7 @@ from agentclaw.community.core.work_orders.errors import (
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderBizType,
+    WorkOrderDecision,
     WorkOrderEventType,
     WorkOrderItemType,
     WorkOrderNotificationDraft,
@@ -38,6 +39,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderStatus,
 )
 from agentclaw.community.core.work_orders.repository.models import (
+    WorkOrderApproverModel,
     WorkOrderNotificationModel,
 )
 from agentclaw.community.plugins.local.database import SqliteDB, reset_for_tests
@@ -72,6 +74,132 @@ def _review_notification(
         title=title,
         content=content,
     )
+
+
+def test_unified_work_order_create_and_approval_lifecycle(db) -> None:
+    repository = WorkOrderRepository(db)
+
+    record = repository.create_work_order(
+        biz_type="BOT_COLLABORATOR",
+        biz_id="bot-42",
+        applicant_user_id="applicant-42",
+        apply_reason="request collaboration",
+        biz_data='{"source": "test"}',
+        approver_user_ids=["approver-1", "approver-2", "approver-1"],
+        notification_recipient_user_ids=[],
+        env="dev",
+    )
+
+    assert record.biz_type == "BOT_COLLABORATOR"
+    assert record.biz_data == '{"source": "test"}'
+    with db.orm_session() as session:
+        approvers = (
+            session.query(WorkOrderApproverModel)
+            .filter(WorkOrderApproverModel.work_order_id == record.id)
+            .order_by(WorkOrderApproverModel.approver_user_id)
+            .all()
+        )
+        notifications = (
+            session.query(WorkOrderNotificationModel)
+            .filter(WorkOrderNotificationModel.work_order_id == record.id)
+            .all()
+        )
+        approver_ids = [item.approver_user_id for item in approvers]
+        notification_recipients = {item.recipient_user_id for item in notifications}
+        notification_categories = [item.notification_category for item in notifications]
+        approver_notification_id = notifications[0].id
+    assert approver_ids == ["approver-1", "approver-2"]
+    assert notification_recipients == {"approver-1", "approver-2"}
+    assert all(
+        category == NotificationCategory.APPROVAL.value
+        for category in notification_categories
+    )
+    notification_detail = repository.get_notification(
+        notification_id=approver_notification_id,
+        recipient_user_id="approver-1",
+        env="dev",
+        mark_read=False,
+    )
+    assert notification_detail is not None
+    assert notification_detail.can_approve is True
+
+    with pytest.raises(WorkOrderAccessDeniedError):
+        repository.process_approval(
+            work_order_id=record.id,
+            reviewer_user_id="not-an-approver",
+            decision=WorkOrderDecision.APPROVED,
+            review_remark=None,
+            env="dev",
+        )
+
+    result = repository.process_approval(
+        work_order_id=record.id,
+        reviewer_user_id="approver-1",
+        decision=WorkOrderDecision.APPROVED,
+        review_remark="approved",
+        env="dev",
+    )
+    assert result.status is WorkOrderStatus.APPROVED
+    assert result.decision is WorkOrderDecision.APPROVED
+
+    with db.orm_session() as session:
+        states = {
+            item.approver_user_id: item.status
+            for item in session.query(WorkOrderApproverModel)
+            .filter(WorkOrderApproverModel.work_order_id == record.id)
+            .all()
+        }
+        result_notifications = (
+            session.query(WorkOrderNotificationModel)
+            .filter(
+                WorkOrderNotificationModel.work_order_id == record.id,
+                WorkOrderNotificationModel.recipient_user_id == "applicant-42",
+            )
+            .all()
+        )
+    assert states == {"approver-1": "APPROVED", "approver-2": "CANCELLED"}
+    assert len(result_notifications) == 1
+
+    with pytest.raises(WorkOrderAlreadyProcessedError):
+        repository.process_approval(
+            work_order_id=record.id,
+            reviewer_user_id="approver-2",
+            decision=WorkOrderDecision.REJECTED,
+            review_remark="too late",
+            env="dev",
+        )
+
+
+def test_unified_notice_work_order_does_not_create_approvers(db) -> None:
+    repository = WorkOrderRepository(db)
+
+    record = repository.create_work_order(
+        biz_type="SPACE_MEMBER_ADDED",
+        biz_id="space-42",
+        applicant_user_id="system",
+        apply_reason="member added",
+        biz_data=None,
+        approver_user_ids=[],
+        notification_recipient_user_ids=["member-42"],
+        env="dev",
+    )
+
+    with db.orm_session() as session:
+        assert (
+            session.query(WorkOrderApproverModel)
+            .filter(WorkOrderApproverModel.work_order_id == record.id)
+            .count()
+            == 0
+        )
+        notification = (
+            session.query(WorkOrderNotificationModel)
+            .filter(WorkOrderNotificationModel.work_order_id == record.id)
+            .one()
+        )
+        recipient_user_id = notification.recipient_user_id
+        notification_category = notification.notification_category
+    assert recipient_user_id == "member-42"
+    assert notification_category == NotificationCategory.NOTICE.value
 
 
 def test_space_repository_full_member_lifecycle(db) -> None:

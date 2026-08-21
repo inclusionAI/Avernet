@@ -33,7 +33,10 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     WorkOrderListItem,
     WorkOrderQueryType,
     WorkOrderReviewRequest,
+    WorkOrderApprovalRequest,
+    WorkOrderDecision,
     WorkOrderReviewResponse,
+    WorkOrderLegacyReviewResponse,
 )
 from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
@@ -191,7 +194,9 @@ async def get_work_order(
             work_order_id=work_order.id,
             work_order_no=work_order.work_order_no,
             biz_type=work_order.biz_type,
-            biz_id=detail.space_id,
+            biz_id=detail.space_id
+            if work_order.biz_type == "SPACE_JOIN"
+            else work_order.biz_id,
             event_type=detail.event_type,
             title=detail.title,
             content=WorkOrderDetailContent(
@@ -205,6 +210,7 @@ async def get_work_order(
             reviewer_user_id=work_order.reviewer_user_id,
             review_remark=work_order.review_remark,
             reviewed_at=work_order.reviewed_at,
+            biz_data=work_order.biz_data,
             can_approve=detail.can_approve,
         ),
         request,
@@ -215,6 +221,17 @@ def _review_response(result) -> WorkOrderReviewResponse:
     return WorkOrderReviewResponse(
         work_order_id=result.work_order_id,
         status=result.status,
+        decision=result.decision,
+        reviewer_user_id=result.reviewer_user_id,
+        review_remark=result.review_remark,
+        reviewed_at=result.reviewed_at,
+    )
+
+
+def _legacy_review_response(result) -> WorkOrderLegacyReviewResponse:
+    return WorkOrderLegacyReviewResponse(
+        work_order_id=result.work_order_id,
+        status=result.status,
         reviewer_user_id=result.reviewer_user_id,
         review_remark=result.review_remark,
         reviewed_at=result.reviewed_at,
@@ -222,8 +239,30 @@ def _review_response(result) -> WorkOrderReviewResponse:
 
 
 @router.post(
-    "/openapi/v1/bots/work-orders/{work_order_id}/approve",
+    "/openapi/v1/bots/work-orders/{work_order_id}/approval",
     response_model=Envelope[WorkOrderReviewResponse],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def process_work_order_approval(
+    work_order_id: PositiveIdPath,
+    body: WorkOrderApprovalRequest,
+    request: Request,
+    user_id: UserIdDep,
+    service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
+) -> Envelope[WorkOrderReviewResponse]:
+    result = service.process_approval(
+        work_order_id=work_order_id,
+        actor_id=user_id,
+        decision=WorkOrderDecision(body.decision),
+        review_remark=body.review_remark,
+    )
+    return envelope(_review_response(result), request)
+
+
+@router.post(
+    "/openapi/v1/bots/work-orders/{work_order_id}/approve",
+    response_model=Envelope[WorkOrderLegacyReviewResponse],
     dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
@@ -235,16 +274,14 @@ async def approve_work_order(
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderReviewResponse]:
     result = service.approve(
-        work_order_id=work_order_id,
-        actor_id=user_id,
-        review_remark=body.review_remark,
+        work_order_id=work_order_id, actor_id=user_id, review_remark=body.review_remark
     )
-    return envelope(_review_response(result), request)
+    return envelope(_legacy_review_response(result), request)
 
 
 @router.post(
     "/openapi/v1/bots/work-orders/{work_order_id}/reject",
-    response_model=Envelope[WorkOrderReviewResponse],
+    response_model=Envelope[WorkOrderLegacyReviewResponse],
     dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
@@ -256,11 +293,9 @@ async def reject_work_order(
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderReviewResponse]:
     result = service.reject(
-        work_order_id=work_order_id,
-        actor_id=user_id,
-        review_remark=body.review_remark,
+        work_order_id=work_order_id, actor_id=user_id, review_remark=body.review_remark
     )
-    return envelope(_review_response(result), request)
+    return envelope(_legacy_review_response(result), request)
 
 
 @router.get(

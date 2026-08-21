@@ -21,6 +21,7 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderJoinNotAllowedError,
     WorkOrderNotificationNotFoundError,
     WorkOrderNotFoundError,
+    WorkOrderNoReviewerError,
 )
 from agentclaw.community.core.work_orders.models import (
     EVENT_CATEGORIES,
@@ -32,6 +33,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderNotificationDraft,
     WorkOrderQueryType,
     WorkOrderStatus,
+    WorkOrderDecision,
 )
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -56,6 +58,74 @@ class WorkOrderService:
         if not normalized or len(normalized) > limit:
             raise error(f"value must contain 1-{limit} characters")
         return normalized
+
+    def create_work_order(
+        self,
+        *,
+        biz_type: str,
+        biz_id: str,
+        applicant_user_id: str,
+        apply_reason: str | None,
+        biz_data: str | None,
+        approver_user_ids: list[str],
+        notification_recipient_user_ids: list[str] | None = None,
+    ):
+        biz_type = self._required_text(
+            biz_type, limit=64, error=WorkOrderInvalidReasonError
+        )
+        biz_id = self._required_text(
+            biz_id, limit=128, error=WorkOrderInvalidReasonError
+        )
+        applicant_user_id = self._required_text(
+            applicant_user_id, limit=256, error=WorkOrderInvalidReasonError
+        )
+        approvers = list(
+            dict.fromkeys(user.strip() for user in approver_user_ids if user.strip())
+        )
+        recipients = list(
+            dict.fromkeys(
+                user.strip()
+                for user in (notification_recipient_user_ids or [])
+                if user.strip()
+            )
+        )
+        if not approvers and not recipients:
+            raise WorkOrderNoReviewerError(
+                "at least one approver or notification recipient is required"
+            )
+        return self._repository.create_work_order(
+            biz_type=biz_type,
+            biz_id=biz_id,
+            applicant_user_id=applicant_user_id,
+            apply_reason=apply_reason,
+            biz_data=biz_data,
+            approver_user_ids=approvers,
+            notification_recipient_user_ids=recipients,
+            env=get_current_env(),
+        )
+
+    def process_approval(
+        self,
+        *,
+        work_order_id: int,
+        actor_id: str,
+        decision: WorkOrderDecision,
+        review_remark: str | None,
+    ):
+        normalized = (review_remark or "").strip() or None
+        if normalized is not None and len(normalized) > 512:
+            raise WorkOrderInvalidRemarkError(
+                "value must contain no more than 512 characters"
+            )
+        if decision is WorkOrderDecision.REJECTED and normalized is None:
+            raise WorkOrderInvalidRemarkError("review remark is required")
+        return self._repository.process_approval(
+            work_order_id=work_order_id,
+            reviewer_user_id=actor_id,
+            decision=decision,
+            review_remark=normalized,
+            env=get_current_env(),
+        )
 
     def create_space_join_request(
         self, *, space_id: int, applicant_user_id: str, reason: str

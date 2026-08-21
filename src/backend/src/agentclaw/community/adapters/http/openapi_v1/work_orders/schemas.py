@@ -9,6 +9,18 @@ from pydantic import BaseModel, Field, field_serializer
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 
 
+class WorkOrderDecision(_DocumentedEnum):
+    """Decision submitted for a pending work order."""
+
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+    __descriptions__ = {
+        "APPROVED": "Approve the work order.",
+        "REJECTED": "Reject the work order.",
+    }
+
+
 class WorkOrderStatus(_DocumentedEnum):
     """Current processing state of a work order."""
 
@@ -146,6 +158,15 @@ class SpaceJoinRequestCreated(BaseModel):
     status: WorkOrderStatus = Field(description="Initial work-order status.")
 
 
+class WorkOrderApprovalRequest(BaseModel):
+    decision: WorkOrderDecision = Field(description="Approval decision.")
+    review_remark: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Approval comment; required for rejection.",
+    )
+
+
 class WorkOrderReviewRequest(BaseModel):
     """Review comment supplied with an approval or rejection."""
 
@@ -163,6 +184,9 @@ class WorkOrderReviewResponse(_UtcResponseModel):
 
     work_order_id: int = Field(description="Identifier of the reviewed work order.")
     status: WorkOrderStatus = Field(description="Status after the review decision.")
+    decision: WorkOrderDecision = Field(
+        description="Decision recorded for the work order."
+    )
     reviewer_user_id: str = Field(description="Identifier of the reviewer.")
     review_remark: str | None = Field(
         description="Reviewer comment, or null for approval without a comment."
@@ -170,6 +194,14 @@ class WorkOrderReviewResponse(_UtcResponseModel):
     reviewed_at: datetime = Field(
         description="UTC time when the review decision was recorded."
     )
+
+
+class WorkOrderLegacyReviewResponse(_UtcResponseModel):
+    work_order_id: int
+    status: WorkOrderStatus
+    reviewer_user_id: str
+    review_remark: str | None
+    reviewed_at: datetime
 
 
 class WorkOrderListItem(_UtcResponseModel):
@@ -185,8 +217,8 @@ class WorkOrderListItem(_UtcResponseModel):
     notification_category: NotificationCategory | None = Field(
         description="Notification category, or null when no notification is attached."
     )
-    biz_type: WorkOrderBizType = Field(description="Business object type.")
-    biz_id: str = Field(description="Identifier of the related business object.")
+    biz_type: str = Field(description="Business type supplied by the business module.")
+    biz_id: int | str = Field(description="Identifier of the related business object.")
     applicant_user_id: str = Field(description="Identifier of the applicant.")
     apply_reason: str | None = Field(description="Application reason, when supplied.")
     reviewer_user_id: str | None = Field(
@@ -201,7 +233,7 @@ class WorkOrderListItem(_UtcResponseModel):
     recipient_user_id: str | None = Field(
         description="Notification recipient, or null when no notification is attached."
     )
-    event_type: WorkOrderEventType | None = Field(
+    event_type: str | None = Field(
         description="Originating event, or null when no notification is attached."
     )
     title: str | None = Field(description="Notification title, when available.")
@@ -240,13 +272,18 @@ class WorkOrderDetailResponse(_UtcResponseModel):
 
     work_order_id: int = Field(description="Identifier of the work order.")
     work_order_no: str = Field(description="Human-readable work-order number.")
-    biz_type: WorkOrderBizType = Field(description="Business object type.")
-    biz_id: int = Field(description="Identifier of the related Space.")
-    event_type: WorkOrderEventType = Field(
-        description="Event that created the work order."
+    biz_type: str = Field(description="Business type supplied by the business module.")
+    biz_id: int | str = Field(description="Identifier of the related business object.")
+    event_type: str | None = Field(
+        default=None, description="Legacy originating event, when available."
     )
     title: str = Field(description="Display title of the work order.")
-    content: WorkOrderDetailContent = Field(description="Space join request details.")
+    content: WorkOrderDetailContent | dict | None = Field(
+        default=None, description="Business detail payload."
+    )
+    biz_data: str | None = Field(
+        default=None, description="Business detail JSON payload."
+    )
     status: WorkOrderStatus = Field(description="Current work-order status.")
     reviewer_user_id: str | None = Field(
         description="Identifier of the reviewer after processing, otherwise null."
@@ -272,9 +309,7 @@ class NotificationDetailResponse(BaseModel):
     notification_category: NotificationCategory = Field(
         description="Presentation category of the notification."
     )
-    event_type: WorkOrderEventType = Field(
-        description="Business event represented by the notification."
-    )
+    event_type: str = Field(description="Legacy event represented by the notification.")
     title: str = Field(description="Display title of the notification.")
     content: str | None = Field(
         description="Notification message content, when present."
@@ -288,7 +323,7 @@ class NotificationDetailResponse(BaseModel):
     can_approve: bool = Field(
         description="Whether the recipient may review the related work order."
     )
-    biz_type: WorkOrderBizType = Field(description="Business object type.")
+    biz_type: str = Field(description="Business type supplied by the business module.")
     biz_id: str = Field(description="Identifier of the related business object.")
 
 

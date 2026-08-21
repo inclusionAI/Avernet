@@ -18,11 +18,36 @@ if TYPE_CHECKING:
         WorkOrderRecord,
         WorkOrderReviewResult,
         WorkOrderStatus,
+        WorkOrderDecision,
     )
 
 
 @runtime_checkable
 class WorkOrderRepositoryProtocol(Protocol):
+    @abstractmethod
+    def create_work_order(
+        self,
+        *,
+        biz_type: str,
+        biz_id: str,
+        applicant_user_id: str,
+        apply_reason: str | None,
+        biz_data: str | None,
+        approver_user_ids: list[str],
+        notification_recipient_user_ids: list[str],
+        env: str,
+    ) -> WorkOrderRecord: ...
+
+    @abstractmethod
+    def process_approval(
+        self,
+        *,
+        work_order_id: int,
+        reviewer_user_id: str,
+        decision: WorkOrderDecision,
+        review_remark: str | None,
+        env: str,
+    ) -> WorkOrderReviewResult: ...
     @abstractmethod
     def create_space_join_request(
         self,
