@@ -374,7 +374,7 @@ class LocalSkillUploadService:
                 locator=old_locator,
             )
         )
-has_old_package = await old_storage.exists()
+        has_old_package = await old_storage.exists()
         # A previous delete can leave a stale Local Skill row while its
         # canonical package directory is already gone.  That row still makes
         # this a same-name replacement, but it provides no bytes to back up.
@@ -396,7 +396,7 @@ has_old_package = await old_storage.exists()
             await staged.verify()
             if old_is_canonical:
                 backup_dir = f".{name}.rollback-{uuid4().hex}"
-_, backup = (
+                _, backup = (
                     self._skill_service_factory.local_skill_package_storage(
                         entity_id=str(bot["entity_id"]),
                         owner_id=owner_id,
@@ -416,7 +416,7 @@ _, backup = (
             # call so every such failure restores the old authority.
             canonical_published = True
             await staged.copy_to(canonical, replace=True)
-replaced = self._skill_repo.replace_bot_local_skill(
+            replaced = self._skill_repo.replace_bot_local_skill(
                 skill_id=str(skill["id"]),
                 owner_id=owner_id,
                 bot_id=bot_id,
@@ -495,7 +495,7 @@ replaced = self._skill_repo.replace_bot_local_skill(
                     canonical_locator=canonical_locator,
                     old_is_canonical=old_is_canonical,
                     backup=backup,
-canonical_published=canonical_published,
+                    canonical_published=canonical_published,
                     switched=switched,
                     runtime_sync_attempted=runtime_sync_attempted,
                 )
@@ -551,7 +551,7 @@ canonical_published=canonical_published,
             if restored is None:
                 raise LocalSkillStorageError()
             if runtime_sync_attempted and not self._sync_runtime(bot, owner_id, bot_id):
-raise LocalSkillRuntimeSyncError()
+                raise LocalSkillRuntimeSyncError()
         if backup is not None:
             await self._discard(backup)
         await self._discard(staged)

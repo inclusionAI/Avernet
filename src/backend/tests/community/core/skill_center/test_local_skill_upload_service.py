@@ -249,8 +249,9 @@ class _Storage:
     async def cleanup(self):
         return await self.filesystem.delete_tree(self.directory)
 
-async def exists(self):
+    async def exists(self):
         return await self.filesystem.exists(self.directory)
+
     async def verify(self):
         entries = await self.filesystem.list_dir(self.directory, recursive=True)
         if not entries:

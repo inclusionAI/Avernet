@@ -271,7 +271,7 @@ class BaasBotService(BotService):
                     run_id=run_id,
                     session_id=session_id,
                 )
-consistency_key = (
+            consistency_key = (
                 _strip_agent_main_prefix(session_consistency_key)
                 if session_consistency_key
                 else None
