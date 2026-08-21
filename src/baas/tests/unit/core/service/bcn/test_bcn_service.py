@@ -234,8 +234,7 @@ async def test_handle_ask_user_resolve_normalizes_all_values_as_ordinary(
 
     assert result.ok is True
     mock_interaction_service.resolve.assert_called_once_with(
-        session_key="session-1",
-        interaction_id="interaction-ask-1",
+        baas_interaction_id="interaction-ask-1",
         resolution=InteractionResolution(
             kind="ask_user",
             decision="submit",

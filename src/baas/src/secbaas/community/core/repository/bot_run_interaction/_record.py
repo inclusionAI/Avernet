@@ -122,6 +122,7 @@ class BotRunInteractionRecord:
     """``baas_bot_run_interaction`` row."""
 
     id: int
+    baas_interaction_id: str
     session_key: str
     interaction_id: str
     state: InteractionState
