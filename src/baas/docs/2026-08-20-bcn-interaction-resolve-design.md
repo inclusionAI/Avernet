@@ -76,9 +76,19 @@ The outer request is the existing BCS Provider webhook envelope:
 }
 ```
 
-The BaaS lookup key is the trusted outer `session_id` together with
-`params.interactionId`. The stored interaction remains authoritative; the
-Engine request uses the interaction ID returned by that state machine.
+`params.interactionId` is the BaaS-owned public interaction ID emitted on the
+requested SSE. It is the sole interaction lookup and transition key. The outer
+`session_id` remains part of the BCN envelope for protocol compatibility and
+other routing metadata, but BaaS does not compare it with an Engine session key
+or use it to resolve an interaction. After the public-ID lookup, the stored row
+supplies the original Engine `session_key` and `interaction_id` for owner-worker
+dispatch.
+
+For new interactions, the public ID is
+`BAAS-INTERACTION-<sha256-prefix>`, where the suffix is the first 32 lowercase
+hex characters of SHA-256 over the compact UTF-8 JSON array
+`[engine_session_key, engine_interaction_id]`. Existing rows retain the ID that
+was already exposed before migration so in-flight resolves remain compatible.
 
 ## Kind-specific normalization
 

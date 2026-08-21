@@ -31,6 +31,7 @@ class OrmBotRunInteractionRepository(OrmConnectionMixin):
     def create_requested(
         self,
         *,
+        baas_interaction_id: str,
         session_key: str,
         interaction_id: str,
         payload: BotRunInteractionPayload,
@@ -42,6 +43,7 @@ class OrmBotRunInteractionRepository(OrmConnectionMixin):
             return BotRunInteractionCreateResult(record=row.to_record(), created=False)
 
         row = BotRunInteractionModel(
+            baas_interaction_id=baas_interaction_id,
             session_key=session_key,
             interaction_id=interaction_id,
             state="requested",
@@ -66,6 +68,15 @@ class OrmBotRunInteractionRepository(OrmConnectionMixin):
         return row.to_record() if row is not None else None
 
     @with_orm_session
+    def get_by_baas_interaction_id(
+        self, *, baas_interaction_id: str
+    ) -> BotRunInteractionRecord | None:
+        row = self._get_row_by_baas_interaction_id(
+            baas_interaction_id=baas_interaction_id
+        )
+        return row.to_record() if row is not None else None
+
+    @with_orm_session
     def transition(
         self,
         *,
@@ -82,6 +93,39 @@ class OrmBotRunInteractionRepository(OrmConnectionMixin):
             to_state=to_state,
             patch=patch,
         )
+
+    @with_orm_session
+    def transition_by_baas_interaction_id(
+        self,
+        *,
+        baas_interaction_id: str,
+        from_states: frozenset[InteractionState],
+        to_state: InteractionState,
+        patch: BotRunInteractionPayloadPatch,
+    ) -> BotRunInteractionRecord | None:
+        row = self._get_row_by_baas_interaction_id(
+            baas_interaction_id=baas_interaction_id,
+            for_update=True,
+        )
+        if row is None or row.state not in from_states:
+            return None
+
+        current = row.to_record()
+        next_payload = current.payload.merge(patch)
+        count = (
+            self._session.query(BotRunInteractionModel)
+            .filter(
+                BotRunInteractionModel.baas_interaction_id == baas_interaction_id,
+                BotRunInteractionModel.state.in_(from_states),
+            )
+            .update(
+                {"state": to_state, "payload": _dump(next_payload)},
+                synchronize_session=False,
+            )
+        )
+        if count != 1:
+            return None
+        return replace(current, state=to_state, payload=next_payload)
 
     @with_orm_session
     def merge_payload(
@@ -158,6 +202,19 @@ class OrmBotRunInteractionRepository(OrmConnectionMixin):
         query = self._session.query(BotRunInteractionModel).filter(
             BotRunInteractionModel.session_key == session_key,
             BotRunInteractionModel.interaction_id == interaction_id,
+        )
+        if for_update:
+            query = query.with_for_update()
+        return query.one_or_none()
+
+    def _get_row_by_baas_interaction_id(
+        self,
+        *,
+        baas_interaction_id: str,
+        for_update: bool = False,
+    ) -> BotRunInteractionModel | None:
+        query = self._session.query(BotRunInteractionModel).filter(
+            BotRunInteractionModel.baas_interaction_id == baas_interaction_id
         )
         if for_update:
             query = query.with_for_update()
