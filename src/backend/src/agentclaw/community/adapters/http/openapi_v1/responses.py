@@ -45,10 +45,7 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
-    CallerIdentityConflictError,
-    CallerIdentityForbiddenError,
-    CallerIdentityInvalidError,
-    CallerIdentityOpenApiError,
+    DeptLookupError,
     ClusterMismatchError,
     GrantNotResolvableError,
     IamTokenUnavailableError,
@@ -301,10 +298,6 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # tell "exists but not yours/other tenant" from "does not exist".
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     IamTokenUnavailableError: (401, "IAM credential is unavailable"),
-    CallerIdentityInvalidError: (400, "Invalid Caller identity request"),
-    CallerIdentityForbiddenError: (403, "Forbidden"),
-    CallerIdentityConflictError: (409, "Caller identity target is ambiguous"),
-    CallerIdentityOpenApiError: (502, "Caller identity operation failed"),
     MissingPrincipalError: (401, "Unauthorized"),
     # Byte-identical to the line above, deliberately. "You sent no principal" and
     # "your principal did not verify" must be indistinguishable, or the response
@@ -336,6 +329,12 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
     ),
     SkillCenterMarketSearchError: (502, "Skill Center marketplace unavailable"),
+    # Staff directory infra failure (master-data service unreachable/errored).
+    # 502, not 200-null: "directory down" must stay distinct from "no dept" so an
+    # operator can tell the two apart; the org/user + org/dept lookups raise this
+    # and ``@envelope_errors`` maps it. Fixed message — the cause is logged, never
+    # returned (mirrors MissingPrincipalError keeping its reason off the wire).
+    DeptLookupError: (502, "Department directory unavailable"),
     WorkOrderAccessDeniedError: (403, WorkOrderPublicErrorMessage.FORBIDDEN),
     WorkOrderNotFoundError: (404, WorkOrderPublicErrorMessage.NOT_FOUND),
     WorkOrderNotificationNotFoundError: (

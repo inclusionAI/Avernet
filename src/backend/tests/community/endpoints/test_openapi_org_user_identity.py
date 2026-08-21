@@ -1,12 +1,12 @@
-"""Endpoint-framework coverage for the caller-identity read.
+"""Endpoint-framework coverage for the user-identity read.
 
 The framework owns invocation, so these two cases are what makes
-``GET /openapi/v1/caller`` *covered* rather than merely tested: the happy path
+``GET /openapi/v1/org/user`` *covered* rather than merely tested: the happy path
 — a verified user reads the identity the gateway signed — and the refusal the
 operation most needs pinned, because its whole answer is an identity: no
 signed principal, no answer.
 
-``test_caller_identity.py`` covers the same outcomes plus the app-only refusal
+``test_org_user_identity.py`` covers the same outcomes plus the app-only refusal
 and the tenant rules in the adapter's own suite. The duplication is the
 coverage gate's design: it reads this registry, not that file.
 """
@@ -28,7 +28,7 @@ from tests.community.framework import (
     endpoint_test,
 )
 
-_PATH = "/openapi/v1/caller"
+_PATH = "/openapi/v1/org/user"
 _CALLER = "caller-identity-user"
 _KEY = "caller-identity-framework-signing-key-32b"
 

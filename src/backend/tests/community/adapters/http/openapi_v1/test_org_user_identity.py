@@ -1,4 +1,4 @@
-"""``GET /openapi/v1/caller`` — the caller-identity read, by behaviour.
+"""``GET /openapi/v1/org/user`` — the user-identity read, by behaviour.
 
 The one operation whose answer *is* the end user, so the properties worth
 pinning are about where that answer comes from and who gets one at all:
@@ -103,9 +103,10 @@ def _token(
 def client():
     """The whole public surface, with no services bound.
 
-    Nothing needs binding: the caller-identity handler reads only the verified
-    principal. Mounting the full surface rather than the one group means the
-    route answers behind exactly the dependencies production mounts it behind.
+    No injector is attached, so the staff-dept reader resolves to ``None`` and
+    the dept fields stay null — the unwired/singlebox shape. Mounting the full
+    surface rather than the one group means the route answers behind exactly
+    the dependencies production mounts it behind.
     """
     from agentclaw.community.adapters.http.app import _unhandled_exception_handler
 
@@ -127,7 +128,7 @@ def test_a_user_reads_the_identity_the_gateway_signed(client):
         }
     )
 
-    response = client.get("/openapi/v1/caller", headers={PRINCIPAL_HEADER: token})
+    response = client.get("/openapi/v1/org/user", headers={PRINCIPAL_HEADER: token})
 
     assert response.status_code == 200, response.text
     data = response.json()["data"]
@@ -138,6 +139,12 @@ def test_a_user_reads_the_identity_the_gateway_signed(client):
         "full_name": "Alice Zhang",
         # A user-only set asserts no tenant and scopes to the internal default.
         "tenant": DEFAULT_AVERNET_TENANT,
+        # Department is not on the signed principal; the staff-dept reader is
+        # ``None`` here (no injector), so the fields answer null — the unwired
+        # shape. The wired case is covered in test_staff_dept.py.
+        "dept_no": None,
+        "dept_name": None,
+        "dept_path": None,
     }
 
 
@@ -145,7 +152,7 @@ def test_absent_profile_attributes_answer_null_not_invented(client):
     """The optional fields are the contract's absence, not a fabrication."""
     token = _token(user={"id": USER, "username": "alice@example.com"})
 
-    response = client.get("/openapi/v1/caller", headers={PRINCIPAL_HEADER: token})
+    response = client.get("/openapi/v1/org/user", headers={PRINCIPAL_HEADER: token})
 
     assert response.status_code == 200, response.text
     data = response.json()["data"]
@@ -160,7 +167,7 @@ def test_an_app_riding_along_does_not_change_whose_identity_it_is(client):
         user={"id": USER, "username": "alice@example.com"}, include_app=True
     )
 
-    response = client.get("/openapi/v1/caller", headers={PRINCIPAL_HEADER: token})
+    response = client.get("/openapi/v1/org/user", headers={PRINCIPAL_HEADER: token})
 
     assert response.status_code == 200, response.text
     data = response.json()["data"]
@@ -171,10 +178,10 @@ def test_an_app_riding_along_does_not_change_whose_identity_it_is(client):
 def test_an_app_alone_is_refused_like_an_unauthenticated_caller(client):
     """Byte for byte: no oracle for 'right credential, wrong identity type'."""
     refused = client.get(
-        "/openapi/v1/caller",
+        "/openapi/v1/org/user",
         headers={PRINCIPAL_HEADER: _token(user=None, include_app=True)},
     )
-    unauthenticated = client.get("/openapi/v1/caller")
+    unauthenticated = client.get("/openapi/v1/org/user")
 
     assert refused.status_code == 401, refused.text
     assert unauthenticated.status_code == 401, unauthenticated.text
@@ -191,7 +198,7 @@ def test_the_answer_ignores_a_user_id_smuggled_into_the_query(client):
     token = _token(user={"id": USER, "username": "alice@example.com"})
 
     response = client.get(
-        "/openapi/v1/caller",
+        "/openapi/v1/org/user",
         headers={PRINCIPAL_HEADER: token},
         params={"user_id": "someone-else"},
     )

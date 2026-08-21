@@ -19,6 +19,7 @@ through the injector.
 """
 from __future__ import annotations
 
+from typing import Annotated
 
 from injector import Binder, Module, inject, provider, singleton
 
@@ -31,7 +32,7 @@ from agentclaw.community.core.repository.protocols.bot import BotFriendRepositor
 from agentclaw.community.core.bot_public.services.bot_discover_service import BotDiscoverService
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
 from agentclaw.community.core.bot_public.services.bot_catalog_metadata_service import (
-    UnavailableBotCatalogMetadataService,
+    BcsBotCatalogMetadataService,
 )
 from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogMetadataServiceProtocol,
@@ -47,6 +48,7 @@ from agentclaw.community.plugin_api.bot_publish_approval import BotPublishApprov
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.repository.implementations.bot.friend import BotFriendRepository as UnifiedBotFriendRepository
 from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+from agentclaw.community.plugin_api.http_client import QUALIFIER_BCN, HttpClient
 
 
 logger = get_logger()
@@ -69,11 +71,15 @@ class BotPublicModule(Module):
             to=UnifiedBotFriendRepository,
             scope=singleton,
         )
-        binder.bind(
-            BotCatalogMetadataServiceProtocol,
-            to=UnavailableBotCatalogMetadataService,
-            scope=singleton,
-        )
+
+    @singleton
+    @provider
+    @inject
+    def catalog_metadata_service(
+        self,
+        http_client: Annotated[HttpClient, QUALIFIER_BCN],
+    ) -> BotCatalogMetadataServiceProtocol:
+        return BcsBotCatalogMetadataService(http_client=http_client)
 
     @singleton
     @provider

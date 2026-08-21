@@ -1,6 +1,6 @@
 # Bot Catalog OpenAPI（前端接入文档）
 
-> 版本：2026-08-20
+> 版本：2026-08-21
 >
 > 机器可读权威契约为 `src/gateway/configs/schemas/bots.openapi.json`。
 
@@ -21,10 +21,15 @@ GET /openapi/v1/bots/catalog/discover
 GET /openapi/v1/bots/catalog/search
 ```
 
-搜索先按当前租户的 Backend 候选生成有序去重的 `(bot_id, entity_id)` 地址，并通过受信任调用者
-上下文交给 BCS 元信息端口做成员资格内连接。Backend 是对外字段的唯一权威来源；当前各环境的
-端口尚未配置，因此此接口固定返回 `502000 / Catalog service unavailable`，不会回退为
-Backend-only 搜索。未来配置端口后，`total` 与分页仍将基于完整 join 后的候选集。
+Backend 将 `search`、`page` 和 `page_size` 映射到 BCS `/v2/bots/search` 的 `q`、`offset` 和
+`limit`，并固定传 `tc_bot=true`，只读取当前 BCS 页。该标识仅保留由 TeamClaw Backend onboard 的
+Bot。BCS 的 `bot_uuid` 按 `<bot_id>:<entity_id>` 解析后，Backend 在当前租户内以精确二元组查询公开
+Bot 并内连接；Backend 是全部对外字段的唯一权威来源。
+
+BCS 的排序和分页边界保持不变。`tc_bot=true` 使正常数据下 BCS 当前页数量与 Backend join 数量一致；
+这里的 `total` 是**当前页 join 后数量**，不是跨 BCS 页的总数。若迁移或数据同步暂时不一致，接口仍只
+返回实际 join 的记录。BCS 不可用或返回非法记录时固定返回 `502000 / Catalog service unavailable`，
+不会回退为 Backend-only 搜索。
 
 | 参数 | 必填 | 规则 |
 |---|---:|---|
@@ -98,6 +103,6 @@ type DiscoveredPublicBot = PublicBot & {
 | `401000` | User/App Principal 缺失或无效 |
 | `422000` | 参数缺失或范围错误 |
 | `500000` | 搜索服务内部错误 |
-| `502000` | Catalog Search 的 BCS 元信息端口未配置，或推荐服务暂不可用 |
+| `502000` | Catalog Search 的 BCS 请求失败或响应非法，或推荐服务暂不可用 |
 
 前端记录 `request_id` 用于排障，不记录认证信息、完整请求 URL 或搜索关键词。

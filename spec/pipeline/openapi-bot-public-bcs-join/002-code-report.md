@@ -7,10 +7,32 @@ iteration: 4
 
 # Bot Catalog BCS metadata port — coding report
 
-> This report describes the current port/fixed-502 implementation and the iteration-4 minimal-diff
-> audit against `origin/dev_refactory_collaboration`. It does not define or imply any BCS HTTP
-> route, base-URL configuration, credentials, timeout, or network call; see
-> [004-implementation-plan.md](004-implementation-plan.md).
+## 2026-08-21：BCS 当前页 Search 接入
+
+- 已按 [005-bcs-search-integration-spec.md](005-bcs-search-integration-spec.md) 将 Catalog Search 的
+  unavailable metadata binding 改为 BCS `/v2/bots/search` 适配器；请求仅传 `q`、`offset`、`limit` 和
+  固定 `tc_bot=true`，不透传 caller 或认证头。
+- BCS `bot_uuid` 解析为精确 `(bot_id, entity_id)` 后，Backend 复用 tenant-scoped ORM 二元组查询做
+  当前页 inner join，并恢复 BCS 顺序。`tc_bot=true` 令正常数据下当前 BCS 页与 join 数量对齐；`total`
+  始终是当前页实际 join 数量，不再聚合或二次分页。
+- 非 Bot、重复、非法 UUID、上游错误和非法 JSON 均 fail closed 为既有 `502000`；响应继续由 OpenAPI
+  allowlist 投影，BCS 原始字段不外泄。
+- 未修改 Discover、`bot_discover_service.py`、legacy Search、BCSFuse 或 `.superpowers/`。
+
+## 本次最终验证
+
+| Check | Result |
+|---|---|
+| Catalog BCS adapter + service pytest | `108 passed`, `0 failed` |
+| Catalog router/endpoint pytest (`-k catalog`) | `12 passed`, `0 failed` |
+| Community architecture pytest | `169 passed`, `0 failed` |
+| Ruff（本次变更的 adapter 测试）与 `git diff --check` | PASS |
+| 独立代码复审 | PASS；远端 ACI 仍须在提交并推送当前 head 后执行 |
+
+> The following sections record the earlier iteration-4 unavailable-port audit against
+> `origin/dev_refactory_collaboration`; the BCS integration above supersedes that temporary
+> implementation. The current adapter uses the existing BCN-qualified `HttpClient` and only the
+> constant relative path `/v2/bots/search`; it adds no URL, credential, or transport configuration.
 
 ## Worktree
 
