@@ -82,6 +82,14 @@ _BCS_APPROVAL_KEY_BY_SCOPE: dict[str, str] = {
     "agent": "public_public_approval",
 }
 
+# AGREE 回调时把 public_*_approval 子块里的 view_friend_deps 提到 friend_ext 顶层,
+# 也随 public_scope 联动 key: user → view_scope_user_friend_deps;
+# agent → view_scope_agent_friend_deps。
+_BCS_VIEW_SCOPE_DEPS_KEY_BY_SCOPE: dict[str, str] = {
+    "user": "view_scope_user_friend_deps",
+    "agent": "view_scope_agent_friend_deps",
+}
+
 
 class BotNotPublicError(Exception):
     """Exception raised when bot is not public."""
@@ -821,6 +829,12 @@ class BotPublicService:
                 else:  # agent: 由 BCS friend_check_in_strategy 决断
                     strategy = str(attrs.get("friend_check_in_strategy") or "").upper()
                     body[field] = "public" if strategy == "OPEN" else "protected"
+            # AGREE 还把 block.view_friend_deps 从 public_*_approval 子块提升到
+            # friend_ext 顶层(scope-联动 key: user→view_scope_user_friend_deps;
+            # agent→view_scope_agent_friend_deps)。
+            friend_ext[_BCS_VIEW_SCOPE_DEPS_KEY_BY_SCOPE[public_scope]] = (
+                block.get("view_friend_deps") or []
+            )
         self._bcn_service.patch_attributes(bot_uid=bot_uid, body=body)
         return {
             "success": True, "public": None,

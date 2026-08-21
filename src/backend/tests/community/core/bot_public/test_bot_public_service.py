@@ -508,6 +508,47 @@ class TestPublicBcsBot:
         )
         assert bcn.patch_attributes.call_args.kwargs["body"]["visibility"] == "protected"
 
+    def test_callback_agree_lifts_view_friend_deps_for_user(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {
+            "friend_ext": {
+                "public_user_approval": {
+                    "puid": "p1", "status": "PROCESSING", "visibility": "public",
+                    "view_friend_deps": [{"deptNo": "D1", "deptName": "Tech"}],
+                }
+            }
+        }
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="b", owner_id="u", puid="p1",
+            last_operate="AGREE", public_scope="user",
+        )
+        friend_ext = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]
+        # AGREE lifts block.view_friend_deps to top-level friend_ext key
+        assert friend_ext["view_scope_user_friend_deps"] == [{"deptNo": "D1", "deptName": "Tech"}]
+        # block's own view_friend_deps preserved (block merged back into friend_ext)
+        assert friend_ext["public_user_approval"]["view_friend_deps"] == [
+            {"deptNo": "D1", "deptName": "Tech"}
+        ]
+
+    def test_callback_agree_lifts_view_friend_deps_for_agent(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {
+            "friend_ext": {
+                "public_public_approval": {
+                    "puid": "p1", "status": "PROCESSING",
+                    "view_friend_deps": [{"deptNo": "D2", "deptName": "Sales"}],
+                }
+            }
+        }
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="b", owner_id="u", puid="p1",
+            last_operate="AGREE", public_scope="agent",
+        )
+        friend_ext = bcn.patch_attributes.call_args.kwargs["body"]["friend_ext"]
+        assert friend_ext["view_scope_agent_friend_deps"] == [{"deptNo": "D2", "deptName": "Sales"}]
+
     def test_callback_skips_when_bcs_creds_missing(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {"skipped": True}
