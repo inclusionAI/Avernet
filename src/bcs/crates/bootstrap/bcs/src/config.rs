@@ -617,6 +617,11 @@ pub struct BcsConfig {
     #[serde(default)]
     pub bcs_endpoint: Option<String>,
 
+    /// Backend work-order service base URL used for friend-connect notifications.
+    /// When unset, BCS keeps the legacy no-op notification port.
+    #[serde(default)]
+    pub friend_work_order_base_url: Option<String>,
+
     /// Botchat frontend URL (e.g. "https://botchat.example.com").
     /// Used to generate frontend URLs: onboard registration, chat pages, etc.
     #[serde(default)]
@@ -982,6 +987,27 @@ fn path_is_under_root(path: &str, root: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
+fn validate_http_base_url(value: &str, field_name: &str) -> Result<(), String> {
+    let raw = value.trim();
+    if raw.is_empty() {
+        return Err(format!("{field_name} must not be blank"));
+    }
+    let url = url::Url::parse(raw)
+        .map_err(|error| format!("{field_name} must be an absolute HTTP(S) URL: {error}"))?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(format!(
+            "{field_name} must be an absolute HTTP(S) URL"
+        ));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(format!("{field_name} must not contain userinfo"));
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(format!("{field_name} must not contain query or fragment"));
+    }
+    Ok(())
+}
+
 impl Default for BcsConfig {
     fn default() -> Self {
         Self {
@@ -1012,6 +1038,7 @@ impl Default for BcsConfig {
             max_group_messages: default_max_group_messages(),
             strict_container_validation: true,
             bcs_endpoint: None,
+            friend_work_order_base_url: None,
             botchat_url: None,
             register_path: default_register_path(),
             default_visibility: None,
@@ -1462,6 +1489,12 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    if let Some(base_url) = config.friend_work_order_base_url.as_deref() {
+        validate_http_base_url(base_url, "friend_work_order_base_url").map_err(|e| {
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+                as Box<dyn std::error::Error>
+        })?;
+    }
     config
         .openapi_v1
         .validated_public_collaboration_base_url()

@@ -22,6 +22,7 @@
 //! later; this file deliberately contains only the crate skeleton +
 //! `ConnectService`.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -34,6 +35,10 @@ use bcs_domain::edge_permission::{
 use bcs_service_api::application::admission::AdmissionService;
 use bcs_service_api::application::connect::{
     ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage,
+};
+use bcs_service_api::port::{
+    FriendConnectNotificationCommand, FriendConnectNotificationKind,
+    FriendConnectNotificationPort,
 };
 use bcs_service_api::port::repo::{
     BotActorConfigRepoPort, EdgeGrantRepoPort, PermissionProfileRepoPort,
@@ -53,6 +58,7 @@ pub struct DbConnectService {
     profiles: Arc<dyn PermissionProfileRepoPort>,
     requests: Arc<dyn PermissionRequestRepoPort>,
     bot_config: Arc<dyn BotActorConfigRepoPort>,
+    friend_connect_notification: Arc<dyn FriendConnectNotificationPort>,
     env: String,
 }
 
@@ -62,6 +68,7 @@ impl DbConnectService {
         profiles: Arc<dyn PermissionProfileRepoPort>,
         requests: Arc<dyn PermissionRequestRepoPort>,
         bot_config: Arc<dyn BotActorConfigRepoPort>,
+        friend_connect_notification: Arc<dyn FriendConnectNotificationPort>,
         env: String,
     ) -> Self {
         Self {
@@ -69,6 +76,7 @@ impl DbConnectService {
             profiles,
             requests,
             bot_config,
+            friend_connect_notification,
             env,
         }
     }
@@ -97,12 +105,35 @@ fn normalize_policy_value(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
-fn is_open_friend_strategy(strategy: &str) -> bool {
-    matches!(normalize_policy_value(strategy).as_str(), "open")
-}
-
 fn is_private_visibility(value: &str) -> bool {
     matches!(normalize_policy_value(value).as_str(), "private")
+}
+
+fn bot_friend_ext_department_code(friend_ext: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    friend_ext
+        .get("department_code")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn bot_friend_ext_no_check_scope_friend_deps(
+    friend_ext: &serde_json::Map<String, serde_json::Value>,
+) -> HashSet<String> {
+    friend_ext
+        .get("no_check_scope_friend_deps")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Fresh opaque id for a new edge grant. UUID v4 — collision-safe, unlike a
@@ -190,33 +221,27 @@ impl ConnectService for DbConnectService {
             )));
         }
 
-        let needs_approval = !is_open_friend_strategy(&cfg.friend_check_in_strategy);
-        match cfg.visibility.as_str() {
-            "public" => {
+        let friend_strategy = normalize_policy_value(&cfg.friend_check_in_strategy);
+        let dept_free_auto_approved = friend_strategy == "dept_free"
+            && self
+                .caller_department_matches_friend_allowlist(caller, &cfg)
+                .await;
+        let needs_approval = !(friend_strategy == "open" || dept_free_auto_approved);
+        match normalize_policy_value(&cfg.visibility).as_str() {
+            "public" | "protected" => {
                 if needs_approval {
                     let request_ids = self
-                        .insert_pending_connect(caller, to_bot, caller_kind, target_kind, message)
+                        .insert_pending_connect(caller, to_bot, caller_kind, target_kind, message.clone())
                         .await?;
-                    Ok(ConnectResult {
-                        request_ids,
-                        edge_ids: vec![],
-                        status: ConnectStatus::Pending,
-                        auto_accepted: false,
-                    })
-                } else {
-                    Ok(ConnectResult {
-                        request_ids: vec![],
-                        edge_ids: vec![],
-                        status: ConnectStatus::PublicNoEdge,
-                        auto_accepted: false,
-                    })
-                }
-            }
-            "protected" => {
-                if needs_approval {
-                    let request_ids = self
-                        .insert_pending_connect(caller, to_bot, caller_kind, target_kind, message)
-                        .await?;
+                    self.emit_friend_connect_notification(
+                        FriendConnectNotificationKind::ApprovalRequested,
+                        request_ids.clone(),
+                        caller,
+                        to_bot,
+                        self.target_notification_recipients(&cfg),
+                        message.as_deref(),
+                    )
+                    .await?;
                     Ok(ConnectResult {
                         request_ids,
                         edge_ids: vec![],
@@ -557,8 +582,8 @@ impl ConnectService for DbConnectService {
                 // so chaining inbox then sent preserves recency within each
                 // direction (a global re-sort would need a row timestamp the
                 // domain `PermissionRequest` no longer carries).
-                let mut seen: std::collections::HashSet<String> =
-                    std::collections::HashSet::new();
+                let mut seen: HashSet<String> =
+                    HashSet::new();
                 let mut combined: Vec<PermissionRequest> = Vec::with_capacity(
                     inbox.len() + sent.len(),
                 );
@@ -615,6 +640,67 @@ impl DbConnectService {
             },
             None => Err(ServiceError::BotNotFound(bot_id.to_string())),
         }
+    }
+
+    async fn resolve_actor_department_code(&self, actor_id: &str) -> Option<String> {
+        let cfg = match self.bot_config.get(actor_id, &self.env).await {
+            Some(cfg) => cfg,
+            None => return None,
+        };
+        if let Some(code) = bot_friend_ext_department_code(&cfg.friend_ext) {
+            return Some(code);
+        }
+        let owner_id = cfg.created_by.as_deref()?;
+        let owner_actor_id = format!("human_{owner_id}");
+        let owner_cfg = self.bot_config.get(&owner_actor_id, &self.env).await?;
+        bot_friend_ext_department_code(&owner_cfg.friend_ext)
+    }
+
+    async fn caller_department_matches_friend_allowlist(
+        &self,
+        caller: &str,
+        cfg: &bcs_domain::edge_permission::BotActorConfig,
+    ) -> bool {
+        let allowlist = bot_friend_ext_no_check_scope_friend_deps(&cfg.friend_ext);
+        if allowlist.is_empty() {
+            return false;
+        }
+        let Some(caller_department) = self.resolve_actor_department_code(caller).await else {
+            return false;
+        };
+        allowlist.contains(&caller_department)
+    }
+
+    fn target_notification_recipients(
+        &self,
+        cfg: &bcs_domain::edge_permission::BotActorConfig,
+    ) -> Vec<String> {
+        cfg.created_by.clone().into_iter().collect()
+    }
+
+    async fn emit_friend_connect_notification(
+        &self,
+        kind: FriendConnectNotificationKind,
+        request_ids: Vec<String>,
+        applicant_actor_id: &str,
+        target_bot_id: &str,
+        recipient_user_ids: Vec<String>,
+        message: Option<&str>,
+    ) -> ServiceResult<()> {
+        if recipient_user_ids.is_empty() {
+            return Ok(());
+        }
+        self.friend_connect_notification
+            .notify(FriendConnectNotificationCommand {
+                kind,
+                env: self.env.clone(),
+                request_ids,
+                applicant_actor_id: applicant_actor_id.to_string(),
+                target_bot_id: target_bot_id.to_string(),
+                recipient_user_ids,
+                message: message.map(ToOwned::to_owned),
+            })
+            .await
     }
 
     /// Find pending `Connect` requests from `from` → `to` in this env.
@@ -1248,6 +1334,37 @@ mod tests {
             profiles.clone(),
             requests.clone(),
             bot_config.clone(),
+            Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
+            "dev".to_string(),
+        )
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingFriendConnectNotificationPort {
+        events: Arc<tokio::sync::Mutex<Vec<FriendConnectNotificationCommand>>>,
+    }
+
+    #[async_trait]
+    impl FriendConnectNotificationPort for RecordingFriendConnectNotificationPort {
+        async fn notify(&self, command: FriendConnectNotificationCommand) -> ServiceResult<()> {
+            self.events.lock().await.push(command);
+            Ok(())
+        }
+    }
+
+    fn service_with_notification(
+        edge_grants: &Arc<dyn EdgeGrantRepoPort>,
+        profiles: &Arc<dyn PermissionProfileRepoPort>,
+        requests: &Arc<dyn PermissionRequestRepoPort>,
+        bot_config: &Arc<dyn BotActorConfigRepoPort>,
+        notification: Arc<dyn FriendConnectNotificationPort>,
+    ) -> DbConnectService {
+        DbConnectService::new(
+            edge_grants.clone(),
+            profiles.clone(),
+            requests.clone(),
+            bot_config.clone(),
+            notification,
             "dev".to_string(),
         )
     }
@@ -1261,9 +1378,33 @@ mod tests {
         status: &str,
         created_by: Option<&str>,
     ) {
+        seed_bot_with_friend_ext(
+            db,
+            bot_uuid,
+            visibility,
+            user_visibility,
+            friend_check_in_strategy,
+            status,
+            created_by,
+            serde_json::Map::new(),
+        )
+        .await;
+    }
+
+    async fn seed_bot_with_friend_ext(
+        db: &Arc<LocalSqliteDbPlugin>,
+        bot_uuid: &str,
+        visibility: &str,
+        user_visibility: &str,
+        friend_check_in_strategy: &str,
+        status: &str,
+        created_by: Option<&str>,
+        friend_ext: serde_json::Map<String, serde_json::Value>,
+    ) {
         let bot_info = serde_json::json!({
             "user_visibility": user_visibility,
             "friend_check_in_strategy": friend_check_in_strategy,
+            "friend_ext": friend_ext,
         });
         db.execute(DbStatement::with_params(
             "INSERT INTO bcs_bots \
@@ -1387,27 +1528,163 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn public_auto_bot_returns_public_no_edge() {
+    async fn public_auto_bot_returns_approved_edge() {
         let (eg, pp, rq, bc, db) = assemble().await;
         seed_bot(&db, "x:pub", "public", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let res = svc
             .create_connect("human_1", "x:pub", None)
             .await
-            .expect("public+auto → PublicNoEdge");
-        assert_eq!(res.status, ConnectStatus::PublicNoEdge);
-        assert!(res.edge_ids.is_empty());
-        assert!(res.request_ids.is_empty());
-        assert!(!res.auto_accepted);
-        // No edge, no request were created: PublicNoEdge builds nothing (admission
-        // uses runtime public_default instead). has_friend_edge is therefore
-        // false, and no edge row exists.
-        assert!(
-            !eg.has_friend_edge("human_1", "x:pub", "dev").await,
-            "PublicNoEdge must not create a friend edge"
-        );
+            .expect("public+auto → Approved");
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+        assert_eq!(res.edge_ids.len(), 1);
+        assert_eq!(res.request_ids.len(), 1);
+        assert!(eg.has_friend_edge("human_1", "x:pub", "dev").await);
         let active = eg.list_active_grants("human_1", "x:pub", "dev").await;
-        assert!(active.is_empty(), "PublicNoEdge must not create an edge");
+        assert_eq!(active.len(), 1, "public auto should create a durable edge");
+        let r = rq.get(&res.request_ids[0], "dev").await.expect("approved req");
+        assert_eq!(r.status, RequestStatus::Approved);
+        assert_eq!(r.edge_id.as_deref(), Some(res.edge_ids[0].as_str()));
+    }
+
+
+    #[tokio::test]
+    async fn dept_free_allowlist_auto_approves_when_human_department_matches() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        let mut human_friend_ext = serde_json::Map::new();
+        human_friend_ext.insert(
+            "department_code".to_string(),
+            serde_json::Value::String("TECH".to_string()),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("85020"),
+            human_friend_ext,
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "no_check_scope_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String("TECH".to_string())]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:dept",
+            "protected",
+            "protected",
+            "DEPT_FREE",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let svc = service(&eg, &pp, &rq, &bc);
+        let res = svc
+            .create_connect("human_1", "x:dept", None)
+            .await
+            .expect("dept_free hit → Approved");
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+        assert_eq!(res.edge_ids.len(), 1);
+        assert_eq!(res.request_ids.len(), 1);
+        let req = rq.get(&res.request_ids[0], "dev").await.expect("approved req");
+        assert_eq!(req.status, RequestStatus::Approved);
+    }
+
+    #[tokio::test]
+    async fn dept_free_allowlist_miss_keeps_pending() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        let mut human_friend_ext = serde_json::Map::new();
+        human_friend_ext.insert(
+            "department_code".to_string(),
+            serde_json::Value::String("SALES".to_string()),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("85020"),
+            human_friend_ext,
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "no_check_scope_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String("TECH".to_string())]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:dept_miss",
+            "protected",
+            "protected",
+            "DEPT_FREE",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let svc = service(&eg, &pp, &rq, &bc);
+        let res = svc
+            .create_connect("human_1", "x:dept_miss", None)
+            .await
+            .expect("dept_free miss → Pending");
+        assert_eq!(res.status, ConnectStatus::Pending);
+        assert!(res.edge_ids.is_empty());
+        assert_eq!(res.request_ids.len(), 1);
+        let req = rq.get(&res.request_ids[0], "dev").await.expect("pending req");
+        assert_eq!(req.status, RequestStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn pending_friend_request_emits_notification_to_target_owner() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:pending_notify", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        let res = svc
+            .create_connect("human_1", "x:pending_notify", Some("hi".into()))
+            .await
+            .expect("manual pending");
+        assert_eq!(res.status, ConnectStatus::Pending);
+        let events = events.lock().await;
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.kind, FriendConnectNotificationKind::ApprovalRequested);
+        assert_eq!(event.env, "dev");
+        assert_eq!(event.request_ids, res.request_ids);
+        assert_eq!(event.applicant_actor_id, "human_1");
+        assert_eq!(event.target_bot_id, "x:pending_notify");
+        assert_eq!(event.recipient_user_ids, vec!["85020".to_string()]);
+        assert_eq!(event.message.as_deref(), Some("hi"));
+    }
+
+    #[tokio::test]
+    async fn pending_notification_is_not_duplicated_on_idempotent_create() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:pending_idem", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        let first = svc
+            .create_connect("human_1", "x:pending_idem", None)
+            .await
+            .expect("first pending");
+        let second = svc
+            .create_connect("human_1", "x:pending_idem", None)
+            .await
+            .expect("idempotent pending");
+        assert_eq!(first.request_ids, second.request_ids);
+        assert_eq!(events.lock().await.len(), 1);
     }
 
     #[tokio::test]

@@ -31,6 +31,7 @@ use crate::config::{
     LlmConfig, LlmProviderType,
 };
 use crate::lifecycle::LifecycleOrchestrator;
+use crate::friend_connect_notification::HttpFriendConnectNotificationPort;
 use crate::plugins::{
     DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
     build_registered_channel_provider, build_registered_leader_election,
@@ -4102,12 +4103,21 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
         // See docs/superpowers/plans/2026-08-19-v2-friends-parallel-interface.md.
         let friend_svc: Arc<dyn bcs_service_api::FriendCoreService> =
             legacy_friend_core.clone();
+        let friend_connect_notification: Arc<dyn bcs_service_api::FriendConnectNotificationPort> =
+            match config.friend_work_order_base_url.as_deref() {
+                Some(base_url) => Arc::new(
+                    HttpFriendConnectNotificationPort::new(base_url)
+                        .expect("friend_work_order_base_url must be a valid HTTP(S) URL"),
+                ),
+                None => Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
+            };
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
             Arc::new(bcs_edge_permission::DbConnectService::new(
                 edge_grant_store.clone(),
                 profile_store.clone(),
                 request_store.clone(),
                 bot_config_store.clone(),
+                friend_connect_notification,
                 edge_permission_env,
             ));
         let admission_service: Arc<dyn bcs_service_api::application::AdmissionService> =
