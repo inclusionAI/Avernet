@@ -96,7 +96,6 @@ from agentclaw.community.api.skill_set_control_plane import (
     SkillSetControlPlaneServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_engine_for_bot,
     resolve_runtime_engine_for_bot,
@@ -108,6 +107,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillReferencedBySkillSetError,
     SkillSetManagedResourceError,
 )
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditGuard,
     SkillsPoolEditLockUnavailableError,
