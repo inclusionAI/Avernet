@@ -269,6 +269,56 @@ def test_discover_uses_online_filter_by_default(
     assert item["recommendation"]["score"] == 0.92
 
 
+def test_discover_preserves_allowlisted_legacy_json_values(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    services[1].result["items"][0].update(
+        {
+            "bot_type": {"legacy": "service"},
+            "owner_name": {"display": "Owner"},
+            "recommend": {
+                "score": 0.92,
+                "reasons": ["matches capability", {"legacy": "reason"}],
+                "short_profile": {"summary": "Short public profile"},
+                "profile_key": "private-profile-key",
+            },
+        }
+    )
+
+    response = client.get(_DISCOVER_PATH, params={"keyword": "automation"})
+
+    assert response.status_code == 200, response.text
+    item = response.json()["data"]["items"][0]
+    assert item["bot_type"] == {"legacy": "service"}
+    assert item["owner_name"] == {"display": "Owner"}
+    assert item["recommendation"] == {
+        "score": 0.92,
+        "reasons": ["matches capability", {"legacy": "reason"}],
+        "short_profile": {"summary": "Short public profile"},
+    }
+    rendered = str(item)
+    for forbidden in (
+        "binding_id",
+        "device_id",
+        "iam_token",
+        "instance_selector",
+        "profile_key",
+    ):
+        assert forbidden not in rendered
+
+
+def test_discover_openapi_allows_legacy_json_values(app: FastAPI) -> None:
+    schemas = app.openapi()["components"]["schemas"]
+    public_bot = schemas["PublicBot"]["properties"]
+    recommendation = schemas["Recommendation"]["properties"]
+
+    assert "enum" not in public_bot["bot_type"]
+    assert "type" not in public_bot["bot_type"]
+    assert "type" not in public_bot["owner_name"]
+    assert "type" not in recommendation["reasons"]
+    assert "type" not in recommendation["short_profile"]
+
+
 
 @pytest.mark.parametrize("path", [_SEARCH_PATH, f"{_DISCOVER_PATH}?keyword=automation"])
 def test_catalog_allows_a_pure_application_principal(

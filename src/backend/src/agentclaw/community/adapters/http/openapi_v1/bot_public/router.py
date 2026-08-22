@@ -171,7 +171,7 @@ async def discover_public_bots(
                     **_public_bot(record).model_dump(),
                     recommendation={
                         "score": recommendation.get("score", 0),
-                        "reasons": recommendation.get("reasons") or [],
+                        "reasons": recommendation.get("reasons", []),
                         "short_profile": recommendation.get("short_profile"),
                     },
                 )
