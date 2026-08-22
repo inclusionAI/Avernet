@@ -130,52 +130,6 @@ class SkillSetControlPlaneService:
         )
         return item
 
-    def create_legacy_set(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        name: str,
-        description: str | None,
-    ) -> dict:
-        """Preserve only the released virtual-Default compatibility case.
-
-        Canonical and addressed Legacy requests still require a real Bot.  The
-        historical no-``bot_id`` wire, however, names the environment's
-        virtual ``default`` Bot and shipped before ``ac_bots`` was mandatory.
-        Keep that one owner-scoped case without restoring arbitrary orphan
-        SkillSet creation for caller-supplied Bot ids.
-        """
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is not None:
-            return self.create_set(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                user_id=actor_id,
-                name=name,
-                description=description,
-            )
-        if bot_id != "default":
-            raise SkillSetControlPlaneNotFoundError()
-        if actor_id != owner_id:
-            raise SkillSetAccessDeniedError()
-
-        item = self._repository.create_set(
-            bot_id="default",
-            owner_id=owner_id,
-            name=name,
-            description=description,
-            engine_type="openclaw",
-        )
-        self._audit(
-            bot_id="default",
-            owner_id=owner_id,
-            actor_id=actor_id,
-            action="skill_set_create_legacy_default",
-        )
-        return item
-
     def get_set(self, *, bot_id: str, owner_id: str, user_id: str, set_id: str) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.get_set(
@@ -183,32 +137,6 @@ class SkillSetControlPlaneService:
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
-
-    def get_legacy_set(
-        self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
-    ) -> dict:
-        """Read a pre-Bot-record legacy set; canonical reads remain strict."""
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is not None:
-            return self.get_set(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                user_id=actor_id,
-                set_id=set_id,
-            )
-        if bot_id != "default":
-            raise SkillSetControlPlaneNotFoundError()
-        item = self._repository.get_set(
-            bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type="openclaw"
-        )
-        # The released no-Bot compatibility wire is owner-scoped.  ``default``
-        # is a shared sentinel rather than a globally readable Bot identity.
-        if (
-            not item.get("is_default")
-            and str(item.get("user_id") or "") != owner_id
-        ) or actor_id != owner_id:
-            raise SkillSetAccessDeniedError()
-        return item
 
     def update_set(
         self,

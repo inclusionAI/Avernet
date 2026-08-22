@@ -23,22 +23,8 @@ class SkillSetControlPlaneServiceProtocol(Protocol):
         description: str | None,
     ) -> dict[str, Any]: ...
 
-    def create_legacy_set(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        name: str,
-        description: str | None,
-    ) -> dict[str, Any]: ...
-
     def get_set(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
-    ) -> dict[str, Any]: ...
-
-    def get_legacy_set(
-        self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
     ) -> dict[str, Any]: ...
 
     def resolve_legacy_skill_id(

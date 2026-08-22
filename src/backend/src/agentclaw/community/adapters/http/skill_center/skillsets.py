@@ -300,10 +300,10 @@ async def create_skill_set(
         bot_repo=bot_repo,
     )
 
-    skill_set = control_plane.create_legacy_set(
+    skill_set = control_plane.create_set(
         bot_id=effective_bot_id,
         owner_id=effective_entity_id,
-        actor_id=_legacy_actor(ctx, request.user_id),
+        user_id=_legacy_actor(ctx, request.user_id),
         name=request.name,
         description=request.description,
     )
@@ -476,10 +476,10 @@ async def get_skill_set(
     return SkillSetDetailResponse(
         success=True,
         data=_legacy_skill_set(
-            control_plane.get_legacy_set(
+            control_plane.get_set(
                 bot_id=effective_bot_id,
                 owner_id=effective_entity_id,
-                actor_id=_legacy_actor(ctx, user_id or entity_id),
+                user_id=_legacy_actor(ctx, user_id or entity_id),
                 set_id=skill_set_id,
             )
         ),
@@ -1726,10 +1726,10 @@ async def get_skill_set_mcps(
         ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
     )
 
-    legacy_set = control_plane.get_legacy_set(
+    legacy_set = control_plane.get_set(
         bot_id=effective_bot_id,
         owner_id=effective_entity_id,
-        actor_id=_legacy_actor(ctx, entity_id),
+        user_id=_legacy_actor(ctx, entity_id),
         set_id=skill_set_id,
     )
     if legacy_set.get("is_default"):
