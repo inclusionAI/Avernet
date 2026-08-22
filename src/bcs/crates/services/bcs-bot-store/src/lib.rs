@@ -76,6 +76,14 @@ fn bot_info_json_set(
     ))
 }
 
+fn serialized_string_value<T: Serialize>(value: &T) -> ServiceResult<String> {
+    serde_json::to_value(value)
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| ServiceError::InternalError("expected a serialized string value".to_string()))
+}
+
 fn is_legacy_namespace(bot_uuid: &str, staff_no: &str) -> bool {
     let suffix = format!(":{}", staff_no);
     if !bot_uuid.ends_with(&suffix) {
@@ -119,12 +127,6 @@ pub struct BotInfo {
     /// AI安全网关授权token
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_token: Option<String>,
-    #[serde(default)]
-    pub user_visibility: bcs_service_api::UserVisibility,
-    #[serde(default)]
-    pub friend_ext: serde_json::Map<String, serde_json::Value>,
-    #[serde(default)]
-    pub friend_check_in_strategy: bcs_service_api::FriendCheckInStrategy,
 }
 
 /// A bot streaming connection marker (process-local, not serializable).
@@ -2649,6 +2651,48 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
     let agent_code = db_get_column_opt::<String>(row, "agent_code")
         .map_err(|error| ServiceError::InternalError(error.to_string()))?
         .or(bot_info.agent_code);
+    let user_visibility = db_get_column_opt::<String>(row, "user_visibility")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .map(|value| {
+            serde_json::from_value(serde_json::Value::String(value)).map_err(|error| {
+                warn!(
+                    bot_id,
+                    column = "user_visibility",
+                    "Invalid persisted Bot attribute"
+                );
+                ServiceError::InternalError(error.to_string())
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let friend_ext = db_get_column_opt::<String>(row, "friend_ext")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .map(|value| {
+            serde_json::from_str(&value).map_err(|error| {
+                warn!(
+                    bot_id,
+                    column = "friend_ext",
+                    "Invalid persisted Bot attribute"
+                );
+                ServiceError::InternalError(error.to_string())
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let friend_check_in_strategy = db_get_column_opt::<String>(row, "friend_check_in_strategy")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .map(|value| {
+            serde_json::from_value(serde_json::Value::String(value)).map_err(|error| {
+                warn!(
+                    bot_id,
+                    column = "friend_check_in_strategy",
+                    "Invalid persisted Bot attribute"
+                );
+                ServiceError::InternalError(error.to_string())
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
     let task_claim_mode = db_get_column_opt::<i64>(row, "task_claim_mode")
         .map_err(|error| ServiceError::InternalError(error.to_string()))?
         .map(|value| value != 0)
@@ -2683,9 +2727,9 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
         task_dream_mode,
         created_at,
         updated_at,
-        user_visibility: bot_info.user_visibility,
-        friend_ext: bot_info.friend_ext,
-        friend_check_in_strategy: bot_info.friend_check_in_strategy,
+        user_visibility,
+        friend_ext,
+        friend_check_in_strategy,
     })
 }
 
@@ -2698,7 +2742,8 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
     ) -> ServiceResult<Option<BotControlPlaneRecord>> {
         let sql = format!(
             "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, \
-                    created_by, agent_code, task_claim_mode, task_dream_mode, ({}) * 1000 AS gmt_create_ms, \
+                    created_by, agent_code, task_claim_mode, task_dream_mode, user_visibility, \
+                    friend_ext, friend_check_in_strategy, ({}) * 1000 AS gmt_create_ms, \
                     ({}) * 1000 AS gmt_modified_ms \
              FROM bcs_bots \
              WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 \
@@ -2752,7 +2797,8 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             "{common}\
              SELECT b.bot_uuid, b.name, b.bot_info, b.visibility, b.status, \
                     b.actor_kind, b.env, b.created_by, b.agent_code, \
-                    b.task_claim_mode, b.task_dream_mode, \
+                    b.task_claim_mode, b.task_dream_mode, b.user_visibility, b.friend_ext, \
+                    b.friend_check_in_strategy, \
                     ({} ) * 1000 AS gmt_create_ms, \
                     ({} ) * 1000 AS gmt_modified_ms, \
                     CASE WHEN f.bot_uuid IS NULL THEN 0 ELSE 1 END AS is_friend \
@@ -2824,7 +2870,8 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
     ) -> ServiceResult<Vec<BotControlPlaneRecord>> {
         let mut sql = format!(
             "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, \
-                    created_by, agent_code, task_claim_mode, task_dream_mode, ({}) * 1000 AS gmt_create_ms, \
+                    created_by, agent_code, task_claim_mode, task_dream_mode, user_visibility, \
+                    friend_ext, friend_check_in_strategy, ({}) * 1000 AS gmt_create_ms, \
                     ({}) * 1000 AS gmt_modified_ms \
              FROM bcs_bots \
              WHERE created_by = ? AND env = ? AND COALESCE(is_deleted, 0) = 0",
@@ -2872,7 +2919,8 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
     ) -> ServiceResult<Vec<BotControlPlaneRecord>> {
         let mut sql = format!(
             "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, \
-                    created_by, agent_code, task_claim_mode, task_dream_mode, \
+                    created_by, agent_code, task_claim_mode, task_dream_mode, user_visibility, \
+                    friend_ext, friend_check_in_strategy, \
                     ({}) * 1000 AS gmt_create_ms, ({}) * 1000 AS gmt_modified_ms \
              FROM bcs_bots \
              WHERE env = ? AND COALESCE(is_deleted, 0) = 0 \
@@ -2958,11 +3006,21 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             assignments.push("task_dream_mode = ?".to_string());
             params.push(Value::from(if task_dream_mode { 1 } else { 0 }));
         }
-        if patch.descriptor.is_some()
-            || patch.user_visibility.is_some()
-            || patch.friend_ext.is_some()
-            || patch.friend_check_in_strategy.is_some()
-        {
+        if let Some(user_visibility) = patch.user_visibility {
+            assignments.push("user_visibility = ?".to_string());
+            params.push(Value::from(serialized_string_value(&user_visibility)?));
+        }
+        if let Some(friend_ext) = patch.friend_ext.as_ref() {
+            assignments.push("friend_ext = json_extract(?, '$')".to_string());
+            params.push(Value::from(serde_json::to_string(friend_ext)?));
+        }
+        if let Some(friend_check_in_strategy) = patch.friend_check_in_strategy {
+            assignments.push("friend_check_in_strategy = ?".to_string());
+            params.push(Value::from(serialized_string_value(
+                &friend_check_in_strategy,
+            )?));
+        }
+        if patch.descriptor.is_some() {
             let mut json_updates = Vec::new();
             if let Some(descriptor) = patch.descriptor.as_ref() {
                 if let Some(summary) = descriptor.summary.as_ref() {
@@ -2977,21 +3035,6 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
                 if let Some(scopes) = descriptor.scopes.as_ref() {
                     json_updates.push(("$.scopes", serde_json::to_value(scopes)?));
                 }
-            }
-            if let Some(user_visibility) = patch.user_visibility {
-                json_updates.push((
-                    "$.user_visibility",
-                    serde_json::to_value(user_visibility)?,
-                ));
-            }
-            if let Some(friend_ext) = patch.friend_ext.as_ref() {
-                json_updates.push(("$.friend_ext", serde_json::to_value(friend_ext)?));
-            }
-            if let Some(friend_check_in_strategy) = patch.friend_check_in_strategy {
-                json_updates.push((
-                    "$.friend_check_in_strategy",
-                    serde_json::to_value(friend_check_in_strategy)?,
-                ));
             }
             if !json_updates.is_empty() {
                 let (assignment, json_params) = bot_info_json_set(json_updates)?;

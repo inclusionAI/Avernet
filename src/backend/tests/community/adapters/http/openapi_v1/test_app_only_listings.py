@@ -722,6 +722,20 @@ _UNGRANTED_APP_CASES = {
         "request": lambda client: client.get("/openapi/v1/bots/work-orders/1"),
         "assert_starved": lambda response: response.status_code == 404,
     },
+    ("POST", "/openapi/v1/bots/work-orders/events"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/work-orders/events",
+            json={
+                "event_category": "NOTICE",
+                "biz_type": "TEST",
+                "biz_id": "1",
+                "event_type": "SPACE_JOIN_REVIEWED",
+                "recipient_user_ids": ["u-2"],
+                "title": "notice",
+            },
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/approval"): {
         "request": lambda client: client.post(
             "/openapi/v1/bots/work-orders/1/approval",

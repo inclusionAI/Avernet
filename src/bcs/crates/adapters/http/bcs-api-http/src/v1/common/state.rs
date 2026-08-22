@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bcs_service_api::application::v1::{
-    BotService, CollaborationTemplateService, EventSubscriptionService, FriendshipService, GroupService, InvitationService,
+    BotService, CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService, FriendshipService, GroupService, InvitationService,
     SessionFileApplicationService, SessionMessageService, SessionService,
 };
 use bcs_service_api::application::channel::ChannelService;
@@ -27,6 +27,7 @@ pub struct ApiState {
     pub session_file_service: Option<Arc<dyn SessionFileApplicationService>>,
     pub session_file_url_projector: Option<SessionFileUrlProjector>,
     pub collaboration_template_service: Option<Arc<dyn CollaborationTemplateService>>,
+    pub collaboration_definition_service: Option<Arc<dyn CollaborationDefinitionService>>,
     pub principal_verifier: Arc<dyn PrincipalVerifier>,
 }
 
@@ -51,6 +52,7 @@ impl ApiState {
             session_file_service: None,
             session_file_url_projector: None,
             collaboration_template_service: None,
+            collaboration_definition_service: None,
             principal_verifier,
         }
     }
@@ -99,6 +101,18 @@ impl ApiState {
         service: Arc<dyn CollaborationTemplateService>,
     ) -> Self {
         self.collaboration_template_service = Some(service);
+        self
+    }
+
+    /// Add the V1 collaboration-definition validation facade. Validation is a
+    /// read-only compile/validate operation, not scoped to a Bot or Session;
+    /// permission stays on the protected boundary. Fail-closed (handler returns
+    /// `internal` if None) until bootstrap mounts it.
+    pub fn with_collaboration_definition_service(
+        mut self,
+        service: Arc<dyn CollaborationDefinitionService>,
+    ) -> Self {
+        self.collaboration_definition_service = Some(service);
         self
     }
 }

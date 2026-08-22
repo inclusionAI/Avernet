@@ -59,6 +59,78 @@ class NotificationCategory(_DocumentedEnum):
     }
 
 
+class WorkOrderEventStatus(_DocumentedEnum):
+    """Persistence state returned after a unified event is accepted."""
+
+    PENDING = "PENDING"
+    CREATED = "CREATED"
+
+    __descriptions__ = {
+        "PENDING": "An approval work order is waiting for review.",
+        "CREATED": "A notice notification was created.",
+    }
+
+
+class CreateWorkOrderEventRequest(BaseModel):
+    """Generic request for creating an approval work order or notice."""
+
+    event_category: NotificationCategory = Field(
+        description="Whether the event requires approval or is informational."
+    )
+    biz_type: str = Field(
+        min_length=1, max_length=64, description="Business type represented by the event."
+    )
+    biz_id: str = Field(
+        min_length=1, max_length=128, description="Identifier of the related business object."
+    )
+    event_type: str = Field(
+        min_length=1, max_length=64, description="Business event that triggered the work-order event."
+    )
+    applicant_user_id: str | None = Field(
+        default=None, max_length=256, description="Applicant user identifier, when applicable."
+    )
+    approver_user_ids: list[str] = Field(
+        default_factory=list, description="User identifiers who may approve the event."
+    )
+    recipient_user_ids: list[str] = Field(
+        default_factory=list, description="User identifiers who receive the event notice."
+    )
+    title: str = Field(
+        min_length=1, max_length=256, description="Display title of the event."
+    )
+    content: str | None = Field(
+        default=None, description="Display content of the event, when supplied."
+    )
+    apply_reason: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Reason supplied for an approval event, when applicable.",
+    )
+    biz_data: dict[str, object] | None = Field(
+        default=None, description="Business-specific event data, when supplied."
+    )
+
+
+class WorkOrderEventCreated(BaseModel):
+    """Identifiers and state created by the unified event endpoint."""
+
+    event_category: NotificationCategory = Field(
+        description="Whether the created item requires approval or is informational."
+    )
+    work_order_id: int | None = Field(
+        description="Created work-order identifier, when an approval item was created."
+    )
+    work_order_no: str | None = Field(
+        description="Human-readable work-order number, when one exists."
+    )
+    notification_ids: list[int] = Field(
+        description="Identifiers of notifications created for recipients."
+    )
+    status: WorkOrderEventStatus = Field(
+        description="Resulting state of the accepted event."
+    )
+
+
 class WorkOrderQueryType(_DocumentedEnum):
     """Relationship between the current user and listed work orders."""
 
@@ -155,8 +227,10 @@ class _UtcResponseModel(BaseModel):
 class CreateSpaceJoinRequest(BaseModel):
     """Request for joining a Space."""
 
-    reason: str = Field(
-        min_length=1, max_length=512, description="Reason for requesting membership."
+    reason: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Optional reason for requesting membership.",
     )
 
 
@@ -164,7 +238,7 @@ class SpaceJoinRequestCreated(BaseModel):
     """Work-order identity returned for a new Space join request."""
 
     work_order_id: int = Field(description="Identifier of the created work order.")
-    work_order_no: str = Field(description="Human-readable work-order number.")
+    work_order_no: str | None = Field(description="Human-readable work-order number, when one exists.")
     status: WorkOrderStatus = Field(description="Initial work-order status.")
 
 
@@ -243,7 +317,7 @@ class WorkOrderListItem(_UtcResponseModel):
 
     item_id: str = Field(description="Stable identifier of this combined list item.")
     item_type: WorkOrderItemType = Field(description="Category of the list item.")
-    work_order_id: int = Field(description="Identifier of the related work order.")
+    work_order_id: int | None = Field(description="Related work-order identifier, when one exists.")
     work_order_no: str = Field(description="Human-readable work-order number.")
     notification_id: int | None = Field(
         description="Related notification identifier, or null for approval-only items."
@@ -253,7 +327,7 @@ class WorkOrderListItem(_UtcResponseModel):
     )
     biz_type: str = Field(description="Business type supplied by the business module.")
     biz_id: int | str = Field(description="Identifier of the related business object.")
-    applicant_user_id: str = Field(description="Identifier of the applicant.")
+    applicant_user_id: str | None = Field(description="Identifier of the applicant, when one exists.")
     apply_reason: str | None = Field(description="Application reason, when supplied.")
     reviewer_user_id: str | None = Field(
         description="Identifier of the reviewer after processing, otherwise null."
@@ -272,7 +346,7 @@ class WorkOrderListItem(_UtcResponseModel):
     )
     title: str | None = Field(description="Notification title, when available.")
     content: str | None = Field(description="Notification content, when available.")
-    status: WorkOrderStatus = Field(description="Current work-order status.")
+    status: WorkOrderStatus | None = Field(description="Related work-order status, when one exists.")
     is_read: bool | None = Field(
         description="Notification read state, or null when no notification is attached."
     )

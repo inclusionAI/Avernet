@@ -17,11 +17,31 @@ if TYPE_CHECKING:
         WorkOrderRecord,
         WorkOrderReviewResult,
         WorkOrderDecision,
+        WorkOrderEventCreatedResult,
+        NotificationCategory,
     )
 
 
 @runtime_checkable
 class WorkOrderServiceProtocol(Protocol):
+    @abstractmethod
+    def create_work_order_event(
+        self,
+        *,
+        event_category: NotificationCategory,
+        biz_type: str,
+        biz_id: str,
+        event_type: str,
+        applicant_user_id: str | None,
+        approver_user_ids: list[str],
+        recipient_user_ids: list[str],
+        title: str,
+        content: str | None,
+        apply_reason: str | None,
+        biz_data: dict[str, object] | None,
+        actor_id: str,
+    ) -> WorkOrderEventCreatedResult: ...
+
     @abstractmethod
     def create_work_order(
         self,
@@ -46,7 +66,7 @@ class WorkOrderServiceProtocol(Protocol):
     ) -> WorkOrderReviewResult: ...
     @abstractmethod
     def create_space_join_request(
-        self, *, space_id: int, applicant_user_id: str, reason: str
+        self, *, space_id: int, applicant_user_id: str, reason: str | None
     ) -> WorkOrderRecord: ...
 
     @abstractmethod

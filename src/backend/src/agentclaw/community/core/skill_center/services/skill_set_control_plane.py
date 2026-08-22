@@ -32,11 +32,6 @@ from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
     LegacySkillSetCompatibilityFactoryProtocol,
 )
-from agentclaw.community.core.skill_center.runtime_policy import (
-    BotSkillRuntimeCommand,
-    BotSkillRuntimeMutationMode,
-    require_bot_skill_runtime_command,
-)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectionReconcilerProtocol,
 )
@@ -117,7 +112,6 @@ class SkillSetControlPlaneService:
         description: str | None,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        self._require_mutable_bot(bot)
         # Creating an inactive SkillSet is metadata-only: it neither changes
         # the effective capability projection nor has a compensating runtime
         # action, so it does not enter the Pool edit boundary.
@@ -155,7 +149,6 @@ class SkillSetControlPlaneService:
         description: str | None,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        self._require_mutable_bot(bot)
         item = self._repository.update_set(
             bot_id=bot_id,
             owner_id=str(bot["owner_id"]),
@@ -177,17 +170,6 @@ class SkillSetControlPlaneService:
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> None:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        item = self._repository.get_set(
-            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
-            engine_type=self._engine(bot),
-            default_engine_types=self._default_engine_types(bot),
-        )
-        command = (
-            BotSkillRuntimeCommand.CLEANUP
-            if not item.get("is_active")
-            else BotSkillRuntimeCommand.WRITE
-        )
-        self._require_mutable_bot(bot, command)
         self._repository.delete_set(
             bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
             engine_type=self._engine(bot),
@@ -257,11 +239,15 @@ class SkillSetControlPlaneService:
         skill_id: str,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
+        runtime_required = self._set_is_active(
+            bot=bot, bot_id=bot_id, set_id=set_id
+        )
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_add_skill",
+            runtime_required=runtime_required,
             mutation=lambda: self._repository.add_skill(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -282,12 +268,15 @@ class SkillSetControlPlaneService:
         skill_id: str,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
+        runtime_required = self._set_is_active(
+            bot=bot, bot_id=bot_id, set_id=set_id
+        )
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_remove_skill",
-            command=BotSkillRuntimeCommand.CLEANUP,
+            runtime_required=runtime_required,
             mutation=lambda: self._repository.remove_skill(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -367,11 +356,15 @@ class SkillSetControlPlaneService:
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         self._require_mcp_permission(actor_id=user_id, server_code=server_code)
+        runtime_required = self._set_is_active(
+            bot=bot, bot_id=bot_id, set_id=set_id
+        )
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_add_mcp",
+            runtime_required=runtime_required,
             mutation=lambda: self._repository.add_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -392,12 +385,15 @@ class SkillSetControlPlaneService:
         server_code: str,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
+        runtime_required = self._set_is_active(
+            bot=bot, bot_id=bot_id, set_id=set_id
+        )
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_remove_mcp",
-            command=BotSkillRuntimeCommand.CLEANUP,
+            runtime_required=runtime_required,
             mutation=lambda: self._repository.remove_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -435,7 +431,6 @@ class SkillSetControlPlaneService:
             bot_id=bot_id,
             actor_id=user_id,
             action="mcp_direct_deactivate",
-            command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.deactivate_mcp_direct(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -491,7 +486,6 @@ class SkillSetControlPlaneService:
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_deactivate",
-            command=BotSkillRuntimeCommand.CLEANUP,
             mutation=lambda: self._repository.set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -611,12 +605,13 @@ class SkillSetControlPlaneService:
         actor_id: str,
         action: str,
         mutation,
-        command: BotSkillRuntimeCommand = BotSkillRuntimeCommand.WRITE,
+        runtime_required: bool = True,
     ) -> dict:
         """Apply one desired-state mutation and synchronously reconcile runtime."""
-        mode = self._require_mutable_bot(bot, command)
+        if runtime_required:
+            self._require_mutable_bot(bot)
         previous_mappings: Sequence[PoolSkillMapping] = ()
-        if mode is not BotSkillRuntimeMutationMode.CLEANUP_ONLY:
+        if runtime_required:
             previous_mappings = await self._runtime.snapshot_skill_mappings(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -626,12 +621,7 @@ class SkillSetControlPlaneService:
         # to apply.  Reconcile only becomes a required side effect
         # when that membership is active (or for all lifecycle/sync
         # commands), preserving the legacy inactive draft contract.
-        if action in {
-            "skill_set_add_skill",
-            "skill_set_remove_skill",
-            "skill_set_add_mcp",
-            "skill_set_remove_mcp",
-        } and not mutation_result.item.get("is_active"):
+        if not runtime_required:
             result = {
                 **mutation_result.item,
                 "changed": mutation_result.changed,
@@ -643,8 +633,6 @@ class SkillSetControlPlaneService:
                 bot_id=bot_id,
                 actor_id=actor_id,
                 mutation=mutation_result,
-                command=command,
-                mode=mode,
                 previous_mappings=previous_mappings,
             )
         self._audit(
@@ -662,21 +650,16 @@ class SkillSetControlPlaneService:
         bot_id: str,
         actor_id: str,
         mutation: SkillSetMutation,
-        command: BotSkillRuntimeCommand,
-        mode: BotSkillRuntimeMutationMode,
         previous_mappings: Sequence[PoolSkillMapping],
     ) -> dict:
         owner_id = str(bot["owner_id"])
         current_mappings: Sequence[PoolSkillMapping] = ()
         try:
-            if mode is not BotSkillRuntimeMutationMode.CLEANUP_ONLY:
-                current_mappings = await self._runtime.snapshot_skill_mappings(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                )
+            current_mappings = await self._runtime.snapshot_skill_mappings(
+                bot_id=bot_id,
+                owner_id=owner_id,
+            )
             await self._reconcile_runtime(
-                command=command,
-                mode=mode,
                 bot_id=bot_id,
                 owner_id=owner_id,
                 retired_mappings=retired_logical_skill_mappings(
@@ -693,8 +676,6 @@ class SkillSetControlPlaneService:
             )
             try:
                 await self._reconcile_runtime(
-                    command=command,
-                    mode=mode,
                     bot_id=bot_id,
                     owner_id=owner_id,
                     retired_mappings=retired_logical_skill_mappings(
@@ -753,26 +734,29 @@ class SkillSetControlPlaneService:
             dict.fromkeys((runtime_layout_engine_for_bot(bot), cls._engine(bot)))
         )
 
+    def _set_is_active(self, *, bot: dict, bot_id: str, set_id: str) -> bool:
+        """Whether a membership edit must synchronously reconcile runtime."""
+        item = self._repository.get_set(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            set_id=set_id,
+            engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
+        )
+        return bool(item.get("is_active"))
+
     @staticmethod
-    def _require_mutable_bot(
-        bot: dict, command: BotSkillRuntimeCommand = BotSkillRuntimeCommand.WRITE
-    ) -> BotSkillRuntimeMutationMode:
+    def _require_mutable_bot(bot: dict) -> None:
         if not is_bot_ready(bot):
             raise LocalSkillNotReadyError()
-        return require_bot_skill_runtime_command(bot, command)
 
     async def _reconcile_runtime(
         self,
         *,
-        command: BotSkillRuntimeCommand,
-        mode: BotSkillRuntimeMutationMode,
         bot_id: str,
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
-        if mode is BotSkillRuntimeMutationMode.CLEANUP_ONLY:
-            await self._runtime.reconcile_cleanup(bot_id=bot_id, owner_id=owner_id)
-            return
         await self._runtime.reconcile(
             bot_id=bot_id,
             owner_id=owner_id,

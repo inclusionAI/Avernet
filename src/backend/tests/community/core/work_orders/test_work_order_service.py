@@ -14,6 +14,7 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderApplicantAlreadyMemberError,
     WorkOrderInvalidReasonError,
     WorkOrderInvalidRemarkError,
+    WorkOrderInvalidEventError,
     WorkOrderJoinNotAllowedError,
     WorkOrderNotificationNotFoundError,
     WorkOrderNotFoundError,
@@ -26,6 +27,8 @@ from agentclaw.community.core.work_orders.models import (
     APPROVAL_EVENT_TYPES,
     EVENT_CATEGORIES,
     WorkOrderEventType,
+    WorkOrderEventStatus,
+    WorkOrderEventCreatedResult,
     WorkOrderItemType,
     WorkOrderNotificationDetail,
     WorkOrderNotificationDraft,
@@ -293,16 +296,36 @@ def test_unified_approval_dispatches_bot_editor_side_effect() -> None:
     )
 
 
-@pytest.mark.parametrize("value", ["", "   ", "x" * 513])
+@pytest.mark.parametrize("value", ["x" * 513])
 def test_create_rejects_invalid_reason(value: str) -> None:
     service, repository, _, _, _ = _service()
 
-    with pytest.raises(WorkOrderInvalidReasonError, match="1-512"):
+    with pytest.raises(WorkOrderInvalidReasonError, match="512"):
         service.create_space_join_request(
             space_id=7, applicant_user_id="applicant-1", reason=value
         )
 
     repository.create_space_join_request.assert_not_called()
+
+
+@pytest.mark.parametrize("reason", [None, "", "   "])
+def test_create_space_join_request_allows_blank_reason_as_null(reason: str | None) -> None:
+    service, repository, spaces, access, _ = _service()
+    access.require_space.return_value = _space()
+    spaces.get_member.return_value = None
+    repository.create_space_join_request.return_value = _work_order()
+
+    service.create_space_join_request(
+        space_id=7, applicant_user_id="applicant-1", reason=reason
+    )
+
+    repository.create_space_join_request.assert_called_once_with(
+        space_id=7,
+        applicant_user_id="applicant-1",
+        applicant_name="applicant-1",
+        apply_reason=None,
+        env="dev",
+    )
 
 
 def test_create_space_join_request_normalizes_and_delegates() -> None:
@@ -612,3 +635,107 @@ def test_event_categories_include_all_application_events():
         EVENT_CATEGORIES[event_type] is NotificationCategory.APPROVAL
         for event_type in APPROVAL_EVENT_TYPES
     )
+
+
+@pytest.mark.parametrize(
+    ("category", "event_type", "applicant", "approvers", "recipients"),
+    [
+        (
+            NotificationCategory.APPROVAL,
+            "SPACE_JOIN_APPLIED",
+            "actor-1",
+            ["approver-1", "approver-1"],
+            [],
+        ),
+        (
+            NotificationCategory.NOTICE,
+            "SPACE_JOIN_REVIEWED",
+            None,
+            [],
+            ["recipient-1", "recipient-1"],
+        ),
+    ],
+)
+def test_create_work_order_event_normalizes_and_delegates(
+    category: NotificationCategory,
+    event_type: str,
+    applicant: str | None,
+    approvers: list[str],
+    recipients: list[str],
+) -> None:
+    service, repository, _, _, _ = _service()
+    expected = WorkOrderEventCreatedResult(
+        event_category=category,
+        work_order_id=11 if category is NotificationCategory.APPROVAL else None,
+        work_order_no="WO-11" if category is NotificationCategory.APPROVAL else None,
+        notification_ids=[21],
+        status=WorkOrderEventStatus.CREATED,
+    )
+    repository.create_work_order_event.return_value = expected
+
+    result = service.create_work_order_event(
+        event_category=category,
+        biz_type="  SPACE_JOIN  ",
+        biz_id=" 7 ",
+        event_type=event_type,
+        applicant_user_id=applicant,
+        approver_user_ids=approvers,
+        recipient_user_ids=recipients,
+        title="  title  ",
+        content="content",
+        apply_reason="  reason  ",
+        biz_data={"space_id": 7},
+        actor_id="actor-1",
+    )
+
+    assert result == expected
+    repository.create_work_order_event.assert_called_once_with(
+        event_category=category,
+        biz_type="SPACE_JOIN",
+        biz_id="7",
+        event_type=event_type,
+        applicant_user_id="actor-1" if category is NotificationCategory.APPROVAL else None,
+        approver_user_ids=approvers[:1] if category is NotificationCategory.APPROVAL else [],
+        recipient_user_ids=recipients[:1] if category is NotificationCategory.NOTICE else [],
+        title="title",
+        content="content",
+        apply_reason="reason",
+        biz_data='{"space_id": 7}',
+        env="dev",
+    )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"event_type": "UNKNOWN"}, "not registered"),
+        ({"event_category": NotificationCategory.APPROVAL, "event_type": "SPACE_JOIN_REVIEWED"}, "does not match"),
+        ({"event_category": NotificationCategory.APPROVAL, "approver_user_ids": [], "recipient_user_ids": ["recipient-1"]}, "require approvers"),
+        ({"applicant_user_id": "other-user"}, "applicant must be"),
+        ({"apply_reason": "x" * 513}, "no more than 512"),
+    ],
+)
+def test_create_work_order_event_rejects_invalid_input(
+    overrides: dict[str, object], message: str
+) -> None:
+    service, repository, _, _, _ = _service()
+    payload: dict[str, object] = {
+        "event_category": NotificationCategory.APPROVAL,
+        "biz_type": "SPACE_JOIN",
+        "biz_id": "7",
+        "event_type": "SPACE_JOIN_APPLIED",
+        "applicant_user_id": "actor-1",
+        "approver_user_ids": ["approver-1"],
+        "recipient_user_ids": [],
+        "title": "title",
+        "content": None,
+        "apply_reason": "reason",
+        "biz_data": None,
+        "actor_id": "actor-1",
+    }
+    payload.update(overrides)
+
+    with pytest.raises((WorkOrderInvalidEventError, WorkOrderAccessDeniedError), match=message):
+        service.create_work_order_event(**payload)  # type: ignore[arg-type]
+
+    repository.create_work_order_event.assert_not_called()

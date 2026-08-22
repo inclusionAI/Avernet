@@ -127,6 +127,32 @@ def test_create_join_request_uses_principal_and_returns_created(
     )
 
 
+@pytest.mark.parametrize("payload", [{}, {"reason": None}, {"reason": ""}, {"reason": "   "}])
+def test_create_join_request_accepts_optional_reason(
+    client, work_order_service, payload
+):
+    work_order_service.create_space_join_request.return_value = _work_order()
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/join-requests", json=payload
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"]["status"] == "PENDING"
+    work_order_service.create_space_join_request.assert_called_once_with(
+        space_id=7, applicant_user_id="owner-1", reason=payload.get("reason")
+    )
+
+
+def test_create_join_request_rejects_reason_over_512_characters(client):
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/join-requests",
+        json={"reason": "x" * 513},
+    )
+
+    assert response.status_code == 422
+
+
 def test_create_bot_editor_request_uses_principal_and_named_owner(
     client, work_order_service
 ):
@@ -506,7 +532,7 @@ def test_domain_error_is_mapped_to_public_work_order_contract(
     ("path", "method", "payload"),
     [
         ("/openapi/v1/bots/spaces/0/join-requests", "post", {"reason": "join"}),
-        ("/openapi/v1/bots/spaces/7/join-requests", "post", {"reason": ""}),
+        ("/openapi/v1/bots/spaces/7/join-requests", "post", {"reason": "x" * 513}),
         ("/openapi/v1/bots/work-orders?page_no=0", "get", None),
         ("/openapi/v1/bots/work-orders/0", "get", None),
     ],

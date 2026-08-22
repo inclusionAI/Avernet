@@ -39,6 +39,7 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderNotificationNotFoundError,
     WorkOrderNotFoundError,
     WorkOrderNoReviewerError,
+    WorkOrderInvalidEventError,
 )
 from agentclaw.community.core.work_orders.models import (
     EVENT_CATEGORIES,
@@ -53,6 +54,8 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderQueryType,
     WorkOrderStatus,
     WorkOrderDecision,
+    NotificationCategory,
+    WorkOrderEventCreatedResult,
 )
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -85,6 +88,86 @@ class WorkOrderService:
         if not normalized or len(normalized) > limit:
             raise error(f"value must contain 1-{limit} characters")
         return normalized
+
+    def create_work_order_event(
+        self,
+        *,
+        event_category: NotificationCategory,
+        biz_type: str,
+        biz_id: str,
+        event_type: str,
+        applicant_user_id: str | None,
+        approver_user_ids: list[str],
+        recipient_user_ids: list[str],
+        title: str,
+        content: str | None,
+        apply_reason: str | None,
+        biz_data: dict[str, object] | None,
+        actor_id: str,
+    ) -> WorkOrderEventCreatedResult:
+        biz_type = self._required_text(
+            biz_type, limit=64, error=WorkOrderInvalidEventError
+        )
+        biz_id = self._required_text(
+            biz_id, limit=128, error=WorkOrderInvalidEventError
+        )
+        event_type = self._required_text(
+            event_type, limit=64, error=WorkOrderInvalidEventError
+        )
+        title = self._required_text(
+            title, limit=256, error=WorkOrderInvalidEventError
+        )
+        actor_id = self._required_text(
+            actor_id, limit=256, error=WorkOrderAccessDeniedError
+        )
+        applicant = (applicant_user_id or actor_id).strip()
+        if not applicant or applicant != actor_id:
+            raise WorkOrderAccessDeniedError("applicant must be the current user")
+        approvers = list(
+            dict.fromkeys(user.strip() for user in approver_user_ids if user.strip())
+        )
+        recipients = list(
+            dict.fromkeys(user.strip() for user in recipient_user_ids if user.strip())
+        )
+        try:
+            registered_category = EVENT_CATEGORIES[WorkOrderEventType(event_type)]
+        except (KeyError, ValueError) as exc:
+            raise WorkOrderInvalidEventError("event_type is not registered") from exc
+        if registered_category is not event_category:
+            raise WorkOrderInvalidEventError(
+                "event_type category does not match event_category"
+            )
+        if event_category is NotificationCategory.APPROVAL:
+            if not approvers or recipients:
+                raise WorkOrderInvalidEventError(
+                    "approval events require approvers and no recipients"
+                )
+        elif event_category is NotificationCategory.NOTICE:
+            if not recipients or approvers or applicant_user_id is not None:
+                raise WorkOrderInvalidEventError(
+                    "notice events require recipients and no applicant or approvers"
+                )
+            applicant = ""
+        else:
+            raise WorkOrderInvalidEventError("unsupported event category")
+        reason = (apply_reason or "").strip() or None
+        if reason is not None and len(reason) > 512:
+            raise WorkOrderInvalidEventError("apply_reason must contain no more than 512 characters")
+        serialized_data = (
+            json.dumps(biz_data, ensure_ascii=False) if biz_data is not None else None
+        )
+        result = self._repository.create_work_order_event(
+            event_category=event_category, biz_type=biz_type, biz_id=biz_id,
+            event_type=event_type, applicant_user_id=applicant or None,
+            approver_user_ids=approvers,
+            recipient_user_ids=recipients,
+            title=title,
+            content=content,
+            apply_reason=reason,
+            biz_data=serialized_data,
+            env=get_current_env(),
+        )
+        return result
 
     def create_work_order(
         self,
@@ -230,11 +313,13 @@ class WorkOrderService:
         )
 
     def create_space_join_request(
-        self, *, space_id: int, applicant_user_id: str, reason: str
+        self, *, space_id: int, applicant_user_id: str, reason: str | None
     ):
-        reason = self._required_text(
-            reason, limit=512, error=WorkOrderInvalidReasonError
-        )
+        reason = (reason or "").strip() or None
+        if reason is not None and len(reason) > 512:
+            raise WorkOrderInvalidReasonError(
+                "value must contain no more than 512 characters"
+            )
         space = self._access.require_space(space_id=space_id)
         if space.space_type is not SpaceType.TEAM:
             raise WorkOrderJoinNotAllowedError(

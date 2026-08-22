@@ -2391,16 +2391,19 @@
         "description": "Request for joining a Space.",
         "properties": {
           "reason": {
-            "description": "Reason for requesting membership.",
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional reason for requesting membership.",
+            "title": "Reason"
           }
         },
-        "required": [
-          "reason"
-        ],
         "title": "CreateSpaceJoinRequest",
         "type": "object"
       },
@@ -2419,6 +2422,119 @@
           "space_name"
         ],
         "title": "CreateSpaceRequest",
+        "type": "object"
+      },
+      "CreateWorkOrderEventRequest": {
+        "description": "Generic request for creating an approval work order or notice.",
+        "properties": {
+          "applicant_user_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Applicant user identifier, when applicable.",
+            "title": "Applicant User Id"
+          },
+          "apply_reason": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reason supplied for an approval event, when applicable.",
+            "title": "Apply Reason"
+          },
+          "approver_user_ids": {
+            "description": "User identifiers who may approve the event.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Approver User Ids",
+            "type": "array"
+          },
+          "biz_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Business-specific event data, when supplied.",
+            "title": "Biz Data"
+          },
+          "biz_id": {
+            "description": "Identifier of the related business object.",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Biz Id",
+            "type": "string"
+          },
+          "biz_type": {
+            "description": "Business type represented by the event.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Biz Type",
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Display content of the event, when supplied.",
+            "title": "Content"
+          },
+          "event_category": {
+            "$ref": "#/components/schemas/NotificationCategory",
+            "description": "Whether the event requires approval or is informational."
+          },
+          "event_type": {
+            "description": "Business event that triggered the work-order event.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Event Type",
+            "type": "string"
+          },
+          "recipient_user_ids": {
+            "description": "User identifiers who receive the event notice.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Recipient User Ids",
+            "type": "array"
+          },
+          "title": {
+            "description": "Display title of the event.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_category",
+          "biz_type",
+          "biz_id",
+          "event_type",
+          "title"
+        ],
+        "title": "CreateWorkOrderEventRequest",
         "type": "object"
       },
       "DataInitResult": {
@@ -8622,6 +8738,48 @@
         "title": "Envelope[WorkOrderDetailResponse]",
         "type": "object"
       },
+      "Envelope_WorkOrderEventCreated_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkOrderEventCreated"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[WorkOrderEventCreated]",
+        "type": "object"
+      },
       "Envelope_WorkOrderLegacyReviewResponse_": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -12746,13 +12904,7 @@
           },
           "bot_type": {
             "description": "Published kind of Bot.",
-            "enum": [
-              "personal",
-              "service",
-              "desktop"
-            ],
-            "title": "Bot Type",
-            "type": "string"
+            "title": "Bot Type"
           },
           "description": {
             "description": "Public Bot description.",
@@ -12775,14 +12927,6 @@
             "type": "string"
           },
           "owner_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Optional public owner name.",
             "title": "Owner Name"
           },
@@ -12809,11 +12953,7 @@
         "properties": {
           "reasons": {
             "description": "Public reasons for the recommendation.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Reasons",
-            "type": "array"
+            "title": "Reasons"
           },
           "score": {
             "description": "Recommendation relevance score.",
@@ -12821,14 +12961,6 @@
             "type": "number"
           },
           "short_profile": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Optional short public recommendation profile.",
             "title": "Short Profile"
           }
@@ -15570,6 +15702,11 @@
       "SpaceItem": {
         "description": "Summary of a Space visible to the current user.",
         "properties": {
+          "creator_user_id": {
+            "description": "Identifier of the user who created the Space.",
+            "title": "Creator User Id",
+            "type": "string"
+          },
           "current_user_role": {
             "anyOf": [
               {
@@ -15626,6 +15763,7 @@
           "space_code",
           "space_name",
           "space_type",
+          "creator_user_id",
           "current_user_role",
           "join_status",
           "member_count",
@@ -15648,9 +15786,16 @@
             "type": "integer"
           },
           "work_order_no": {
-            "description": "Human-readable work-order number.",
-            "title": "Work Order No",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable work-order number, when one exists.",
+            "title": "Work Order No"
           }
         },
         "required": [
@@ -15799,22 +15944,30 @@
       "SpaceRole": {
         "description": "Role held by a user in a Space.",
         "enum": [
+          "ADMIN",
+          "MEMBER",
           "OWNER",
-          "MEMBER"
+          "ADMINISTRATOR"
         ],
         "title": "SpaceRole",
         "type": "string",
         "x-enum-descriptions": [
           "May manage the Space and its membership.",
-          "May use the Space without managing its membership."
+          "May use the Space without managing its membership.",
+          "Legacy alias for ADMIN.",
+          "Legacy alias for ADMIN."
         ],
         "x-enum-varnames": [
+          "ADMIN",
+          "MEMBER",
           "OWNER",
-          "MEMBER"
+          "ADMINISTRATOR"
         ],
         "x-enumNames": [
+          "ADMIN",
+          "MEMBER",
           "OWNER",
-          "MEMBER"
+          "ADMINISTRATOR"
         ]
       },
       "SpaceSkillItem": {
@@ -16333,6 +16486,81 @@
         "title": "WorkOrderDetailResponse",
         "type": "object"
       },
+      "WorkOrderEventCreated": {
+        "description": "Identifiers and state created by the unified event endpoint.",
+        "properties": {
+          "event_category": {
+            "$ref": "#/components/schemas/NotificationCategory",
+            "description": "Whether the created item requires approval or is informational."
+          },
+          "notification_ids": {
+            "description": "Identifiers of notifications created for recipients.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Notification Ids",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkOrderEventStatus",
+            "description": "Resulting state of the accepted event."
+          },
+          "work_order_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Created work-order identifier, when an approval item was created.",
+            "title": "Work Order Id"
+          },
+          "work_order_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable work-order number, when one exists.",
+            "title": "Work Order No"
+          }
+        },
+        "required": [
+          "event_category",
+          "work_order_id",
+          "work_order_no",
+          "notification_ids",
+          "status"
+        ],
+        "title": "WorkOrderEventCreated",
+        "type": "object"
+      },
+      "WorkOrderEventStatus": {
+        "description": "Persistence state returned after a unified event is accepted.",
+        "enum": [
+          "PENDING",
+          "CREATED"
+        ],
+        "title": "WorkOrderEventStatus",
+        "type": "string",
+        "x-enum-descriptions": [
+          "An approval work order is waiting for review.",
+          "A notice notification was created."
+        ],
+        "x-enum-varnames": [
+          "PENDING",
+          "CREATED"
+        ],
+        "x-enumNames": [
+          "PENDING",
+          "CREATED"
+        ]
+      },
       "WorkOrderItemType": {
         "description": "Category of item included in a work-order list.",
         "enum": [
@@ -16414,9 +16642,16 @@
         "description": "Approval or notification item in a user's work-order inbox.",
         "properties": {
           "applicant_user_id": {
-            "description": "Identifier of the applicant.",
-            "title": "Applicant User Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Identifier of the applicant, when one exists.",
+            "title": "Applicant User Id"
           },
           "apply_reason": {
             "anyOf": [
@@ -16610,8 +16845,15 @@
             "title": "Reviewer User Id"
           },
           "status": {
-            "$ref": "#/components/schemas/WorkOrderStatus",
-            "description": "Current work-order status."
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkOrderStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Related work-order status, when one exists."
           },
           "title": {
             "anyOf": [
@@ -16626,9 +16868,16 @@
             "title": "Title"
           },
           "work_order_id": {
-            "description": "Identifier of the related work order.",
-            "title": "Work Order Id",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Related work-order identifier, when one exists.",
+            "title": "Work Order Id"
           },
           "work_order_no": {
             "description": "Human-readable work-order number.",
@@ -34255,6 +34504,171 @@
           }
         },
         "summary": "List Work Orders",
+        "tags": [
+          "work-orders"
+        ]
+      }
+    },
+    "/openapi/v1/bots/work-orders/events": {
+      "post": {
+        "operationId": "create_work_order_event_openapi_v1_bots_work_orders_events_post",
+        "parameters": [
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkOrderEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_WorkOrderEventCreated_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Create Work Order Event",
         "tags": [
           "work-orders"
         ]

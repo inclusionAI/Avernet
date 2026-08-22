@@ -60,11 +60,25 @@ class SpaceAccessService:
             raise SpaceAccessDeniedError("space membership required")
         return space, member
 
-    def require_space_owner(self, *, space_id: int, user_id: str):
-        space, member = self.require_space_member(space_id=space_id, user_id=user_id)
-        if member.role is not SpaceRole.OWNER:
+    def require_space_admin(self, *, space_id: int, user_id: str):
+        space = self.require_space(space_id=space_id)
+        if space.created_by == user_id:
+            member = self._repository.get_member(
+                space_id=space_id, user_id=user_id, env=get_current_env()
+            )
+            return space, member
+        member = self._repository.get_member(
+            space_id=space_id, user_id=user_id, env=get_current_env()
+        )
+        if member is None or member.role not in (
+            SpaceRole.ADMIN, SpaceRole.OWNER, SpaceRole.ADMINISTRATOR
+        ):
             raise SpaceAccessDeniedError("space owner role required")
         return space, member
+
+    def require_space_owner(self, *, space_id: int, user_id: str):
+        """Compatibility wrapper; membership administration now requires ADMIN."""
+        return self.require_space_admin(space_id=space_id, user_id=user_id)
 
     def require_space_creator(self, *, space_id: int, user_id: str):
         space = self.require_space(space_id=space_id)

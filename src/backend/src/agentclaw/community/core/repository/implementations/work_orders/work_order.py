@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from injector import inject
 from sqlalchemy import and_, func, or_
@@ -12,6 +10,9 @@ from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.repository.implementations.work_orders.bot_editor import (
     _BotEditorWorkOrderRepository,
+)
+from agentclaw.community.core.repository.implementations.work_orders.creation import (
+    _WorkOrderCreationRepository,
 )
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
@@ -22,22 +23,17 @@ from agentclaw.community.core.spaces.repository.models import (
     SpaceModel,
 )
 from agentclaw.community.core.work_orders.errors import (
-    WorkOrderAlreadyPendingError,
     WorkOrderAccessDeniedError,
     WorkOrderAlreadyProcessedError,
     WorkOrderApplicantAlreadyMemberError,
-    WorkOrderNoReviewerError,
     WorkOrderNotFoundError,
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderBizType,
     WorkOrderDetail,
-    WorkOrderEventType,
     WorkOrderItemType,
     WorkOrderListItem,
-    WorkOrderMessageContent,
-    WorkOrderMessageTitle,
     WorkOrderNotificationDetail,
     WorkOrderNotificationBadgeSummary,
     WorkOrderNotificationDraft,
@@ -46,6 +42,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderStatus,
     WorkOrderDecision,
     WorkOrderApproverStatus,
+    WorkOrderEventCreatedResult,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
@@ -55,7 +52,7 @@ from agentclaw.community.core.work_orders.repository.models import (
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
-_ADMINISTRATOR_ROLE = "ADMINISTRATOR"
+_ADMINISTRATOR_ROLES = ("ADMIN", "ADMINISTRATOR")
 
 
 class WorkOrderRepository(WorkOrderRepositoryProtocol):
@@ -68,11 +65,42 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         self._Space = SpaceModel
         self._Member = SpaceMemberModel
         self._bot_editor = _BotEditorWorkOrderRepository(db)
+        self._creation = _WorkOrderCreationRepository(db)
 
     @staticmethod
     def _new_no() -> str:
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        return f"WO{stamp}{uuid4().hex[:10].upper()}"
+        return _WorkOrderCreationRepository._new_no()
+
+    def create_work_order_event(
+        self,
+        *,
+        event_category: NotificationCategory,
+        biz_type: str,
+        biz_id: str,
+        event_type: str,
+        applicant_user_id: str | None,
+        approver_user_ids: list[str],
+        recipient_user_ids: list[str],
+        title: str,
+        content: str | None,
+        apply_reason: str | None,
+        biz_data: str | None,
+        env: str,
+    ) -> WorkOrderEventCreatedResult:
+        return self._creation.create_work_order_event(
+            event_category=event_category,
+            biz_type=biz_type,
+            biz_id=biz_id,
+            event_type=event_type,
+            applicant_user_id=applicant_user_id,
+            approver_user_ids=approver_user_ids,
+            recipient_user_ids=recipient_user_ids,
+            title=title,
+            content=content,
+            apply_reason=apply_reason,
+            biz_data=biz_data,
+            env=env,
+        )
 
     def create_work_order(
         self,
@@ -86,57 +114,16 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         notification_recipient_user_ids: list[str],
         env: str,
     ):
-        approver_user_ids = list(dict.fromkeys(approver_user_ids))
-        notification_recipient_user_ids = list(
-            dict.fromkeys(notification_recipient_user_ids)
+        return self._creation.create_work_order(
+            biz_type=biz_type,
+            biz_id=biz_id,
+            applicant_user_id=applicant_user_id,
+            apply_reason=apply_reason,
+            biz_data=biz_data,
+            approver_user_ids=approver_user_ids,
+            notification_recipient_user_ids=notification_recipient_user_ids,
+            env=env,
         )
-        with self._db.transactional_orm_session() as db:
-            row = self._WorkOrder(
-                work_order_no=self._new_no(),
-                biz_type=biz_type,
-                biz_id=biz_id,
-                biz_data=biz_data,
-                applicant_user_id=applicant_user_id,
-                apply_reason=apply_reason,
-                status=WorkOrderStatus.PENDING.value,
-                env=env,
-            )
-            db.add(row)
-            db.flush()
-            category = (
-                NotificationCategory.APPROVAL
-                if approver_user_ids
-                else NotificationCategory.NOTICE
-            )
-            recipients = approver_user_ids or notification_recipient_user_ids
-            if not recipients:
-                raise WorkOrderNoReviewerError("no work-order recipient")
-            for user_id in recipients:
-                if approver_user_ids:
-                    db.add(
-                        self._Approver(
-                            work_order_id=row.id,
-                            approver_user_id=user_id,
-                            status=WorkOrderApproverStatus.PENDING.value,
-                            env=env,
-                        )
-                    )
-                db.add(
-                    self._Notification(
-                        work_order_id=row.id,
-                        recipient_user_id=user_id,
-                        notification_category=category.value,
-                        event_type=biz_type,
-                        biz_type=biz_type,
-                        biz_id=biz_id,
-                        title=biz_type,
-                        content=apply_reason,
-                        env=env,
-                    )
-                )
-            db.flush()
-            db.refresh(row)
-            return row.to_record()
 
     def process_approval(
         self,
@@ -206,6 +193,60 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 },
                 synchronize_session=False,
             )
+
+            # A unified SPACE_JOIN approval has a domain side effect in
+            # addition to the generic work-order state transition: the
+            # applicant becomes an active Space member.  Keep this write on
+            # the current ORM session so the work order, approver state,
+            # membership and result notice commit or roll back together.
+            if (
+                decision is WorkOrderDecision.APPROVED
+                and order.biz_type == WorkOrderBizType.SPACE_JOIN.value
+            ):
+                try:
+                    space_id = int(order.biz_id)
+                except (TypeError, ValueError) as exc:
+                    raise WorkOrderNotFoundError(
+                        "invalid Space id in work order"
+                    ) from exc
+
+                space = (
+                    db.query(self._Space)
+                    .filter(self._Space.id == space_id, self._Space.env == env)
+                    .one_or_none()
+                )
+                if space is None:
+                    raise WorkOrderNotFoundError(
+                        "work-order business object not found"
+                    )
+
+                member = (
+                    db.query(self._Member)
+                    .filter(
+                        self._Member.space_id == space_id,
+                        self._Member.user_id == order.applicant_user_id,
+                        self._Member.env == env,
+                    )
+                    .one_or_none()
+                )
+                if member is not None:
+                    # Membership rows are physically deleted when a user
+                    # leaves a Space, so any existing row means the applicant
+                    # is already an active member and must not be duplicated.
+                    raise WorkOrderApplicantAlreadyMemberError(
+                        "applicant is already a member"
+                    )
+                db.add(
+                    self._Member(
+                        space_id=space_id,
+                        user_id=order.applicant_user_id,
+                        role=SpaceRole.MEMBER.value,
+                        status="ACTIVE",
+                        env=env,
+                        created_by=reviewer_user_id,
+                    )
+                )
+
             db.query(self._Approver).filter(
                 self._Approver.work_order_id == work_order_id,
                 self._Approver.status == WorkOrderApproverStatus.PENDING.value,
@@ -246,101 +287,16 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         space_id: int,
         applicant_user_id: str,
         applicant_name: str,
-        apply_reason: str,
+        apply_reason: str | None,
         env: str,
     ):
-        with self._db.transactional_orm_session() as db:
-            # The DDL cannot express a partial unique key for status=PENDING.
-            # Locking the Space serializes competing applications for it.
-            space = (
-                db.query(self._Space)
-                .filter(self._Space.id == space_id, self._Space.env == env)
-                .with_for_update()
-                .one_or_none()
-            )
-            if space is None:
-                raise WorkOrderNotFoundError("space not found during request creation")
-
-            pending = (
-                db.query(self._WorkOrder.id)
-                .filter(
-                    self._WorkOrder.biz_id == str(space_id),
-                    self._WorkOrder.applicant_user_id == applicant_user_id,
-                    self._WorkOrder.status == WorkOrderStatus.PENDING.value,
-                    self._WorkOrder.env == env,
-                )
-                .first()
-            )
-            if pending is not None:
-                raise WorkOrderAlreadyPendingError("pending request already exists")
-
-            owners = (
-                db.query(self._Member.user_id)
-                .filter(
-                    self._Member.space_id == space_id,
-                    self._Member.role == _ADMINISTRATOR_ROLE,
-                    self._Member.env == env,
-                    self._Member.status == "ACTIVE",
-                )
-                .all()
-            )
-            if not owners:
-                raise WorkOrderNoReviewerError("space has no owner")
-
-            row = self._WorkOrder(
-                work_order_no=self._new_no(),
-                biz_type=WorkOrderBizType.SPACE_JOIN.value,
-                biz_id=str(space_id),
-                biz_data=json.dumps(
-                    {
-                        "display_title": {
-                            WorkOrderStatus.PENDING.value: WorkOrderMessageTitle.SPACE_JOIN_PENDING.value,
-                        },
-                        "display_content": {
-                            WorkOrderStatus.PENDING.value: WorkOrderMessageContent.SPACE_JOIN_PENDING.value.format(
-                                applicant_name=applicant_name,
-                                space_name=space.name,
-                            ),
-                        },
-                    },
-                    ensure_ascii=False,
-                ),
-                applicant_user_id=applicant_user_id,
-                apply_reason=apply_reason,
-                status=WorkOrderStatus.PENDING.value,
-                env=env,
-            )
-            db.add(row)
-            db.flush()
-            title = WorkOrderMessageTitle.SPACE_JOIN_PENDING.value
-            content = WorkOrderMessageContent.SPACE_JOIN_PENDING.value.format(
-                applicant_name=applicant_name, space_name=space.name
-            )
-            for (owner_id,) in owners:
-                db.add(
-                    self._Approver(
-                        work_order_id=row.id,
-                        approver_user_id=owner_id,
-                        status=WorkOrderApproverStatus.PENDING.value,
-                        env=env,
-                    )
-                )
-                db.add(
-                    self._Notification(
-                        work_order_id=row.id,
-                        recipient_user_id=owner_id,
-                        notification_category=NotificationCategory.APPROVAL.value,
-                        event_type=WorkOrderEventType.SPACE_JOIN_APPLIED.value,
-                        biz_type=WorkOrderBizType.SPACE_JOIN.value,
-                        biz_id=str(space_id),
-                        title=title,
-                        content=content,
-                        env=env,
-                    )
-                )
-            db.flush()
-            db.refresh(row)
-            return row.to_record()
+        return self._creation.create_space_join_request(
+            space_id=space_id,
+            applicant_user_id=applicant_user_id,
+            applicant_name=applicant_name,
+            apply_reason=apply_reason,
+            env=env,
+        )
 
     def create_bot_editor_request(
         self,
@@ -394,13 +350,18 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                     self._WorkOrder.env == env,
                 )
             else:
-                query = query.join(
-                    self._Notification,
-                    self._Notification.work_order_id == self._WorkOrder.id,
-                ).filter(
-                    self._Notification.recipient_user_id == actor_id,
-                    self._Notification.env == env,
-                    self._WorkOrder.env == env,
+                query = (
+                    db.query(self._WorkOrder, self._Notification)
+                    .select_from(self._Notification)
+                    .outerjoin(
+                        self._WorkOrder,
+                        self._Notification.work_order_id == self._WorkOrder.id,
+                    )
+                    .filter(
+                        self._Notification.recipient_user_id == actor_id,
+                        self._Notification.env == env,
+                        or_(self._WorkOrder.env == env, self._WorkOrder.id.is_(None)),
+                    )
                 )
                 if query_type is WorkOrderQueryType.PENDING_FOR_ME:
                     query = query.filter(
@@ -479,7 +440,8 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             items = []
             for work_order, notification in rows:
                 is_approver = (
-                    db.query(self._Approver.id)
+                    work_order is not None
+                    and db.query(self._Approver.id)
                     .filter(
                         self._Approver.work_order_id == work_order.id,
                         self._Approver.approver_user_id == actor_id,
@@ -491,12 +453,13 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 )
                 items.append(
                     WorkOrderListItem(
-                        work_order=work_order.to_record(),
+                        work_order=work_order.to_record() if work_order is not None else None,
                         notification=notification.to_record()
                         if notification is not None
                         else None,
                         can_approve=(
                             query_type is not WorkOrderQueryType.INITIATED_BY_ME
+                            and work_order is not None
                             and work_order.status == WorkOrderStatus.PENDING.value
                             and notification is not None
                             and notification.notification_category
@@ -607,7 +570,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 .filter(
                     self._Member.space_id == int(work_order.biz_id),
                     self._Member.user_id == reviewer_user_id,
-                    self._Member.role == _ADMINISTRATOR_ROLE,
+                    self._Member.role.in_(_ADMINISTRATOR_ROLES),
                     self._Member.env == env,
                     self._Member.status == "ACTIVE",
                 )
@@ -837,7 +800,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                                 .filter(
                                     self._Member.space_id == int(work_order.biz_id),
                                     self._Member.user_id == recipient_user_id,
-                                    self._Member.role == _ADMINISTRATOR_ROLE,
+                                    self._Member.role.in_(_ADMINISTRATOR_ROLES),
                                     self._Member.env == env,
                                     self._Member.status == "ACTIVE",
                                 )

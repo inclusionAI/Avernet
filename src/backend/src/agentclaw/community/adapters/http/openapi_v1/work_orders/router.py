@@ -23,6 +23,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     CreateSpaceJoinRequest,
+    CreateWorkOrderEventRequest,
+    WorkOrderEventCreated,
+    WorkOrderEventStatus,
     CreateBotEditorRequest,
     BotEditorRequestCreated,
     BotEditorWorkOrderDetailContent,
@@ -51,6 +54,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderItemType as DomainWorkOrderItemType,
     WorkOrderListItem as DomainListItem,
     WorkOrderQueryType as DomainWorkOrderQueryType,
+    NotificationCategory as DomainNotificationCategory,
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
@@ -129,11 +133,35 @@ def _biz_data(raw: str | None) -> dict[str, object]:
 def _list_item(item: DomainListItem) -> WorkOrderListItem:
     work_order = item.work_order
     notification = item.notification
-    modified = (
-        notification.gmt_modified
-        if notification is not None
-        else work_order.gmt_modified
-    )
+    if work_order is None:
+        assert notification is not None
+        return WorkOrderListItem(
+            item_id=f"NOTIFICATION_{notification.id}",
+            item_type=WorkOrderItemType.NOTICE,
+            work_order_id=None,
+            work_order_no=None,
+            notification_id=notification.id,
+            notification_category=notification.notification_category,
+            biz_type=notification.biz_type,
+            biz_id=notification.biz_id,
+            applicant_user_id=None,
+            apply_reason=None,
+            reviewer_user_id=None,
+            review_remark=None,
+            reviewed_at=None,
+            recipient_user_id=notification.recipient_user_id,
+            event_type=notification.event_type,
+            title=notification.title,
+            content=notification.content,
+            status=None,
+            is_read=notification.is_read,
+            read_at=notification.read_at,
+            env=notification.env,
+            can_approve=False,
+            gmt_created=notification.gmt_created,
+            gmt_modified=notification.gmt_modified,
+        )
+    modified = notification.gmt_modified if notification is not None else work_order.gmt_modified
     category = notification.notification_category if notification is not None else None
     item_type = (
         WorkOrderItemType(category.value)
@@ -162,9 +190,7 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         reviewer_user_id=work_order.reviewer_user_id,
         review_remark=work_order.review_remark,
         reviewed_at=work_order.reviewed_at,
-        recipient_user_id=(
-            notification.recipient_user_id if notification is not None else None
-        ),
+        recipient_user_id=notification.recipient_user_id if notification is not None else None,
         event_type=notification.event_type if notification is not None else None,
         title=title,
         content=content,
@@ -239,6 +265,45 @@ async def create_space_join_request(
             work_order_id=record.id,
             work_order_no=record.work_order_no,
             status=record.status,
+        ),
+        request,
+    )
+
+
+@router.post(
+    "/openapi/v1/bots/work-orders/events",
+    status_code=201,
+    response_model=Envelope[WorkOrderEventCreated],
+)
+@envelope_errors
+async def create_work_order_event(
+    body: CreateWorkOrderEventRequest,
+    request: Request,
+    caller: ActingCallerDep,
+    service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
+) -> Envelope[WorkOrderEventCreated]:
+    actor_id = _require_user_delegation(caller)
+    result = service.create_work_order_event(
+        event_category=DomainNotificationCategory(body.event_category),
+        biz_type=body.biz_type,
+        biz_id=body.biz_id,
+        event_type=body.event_type,
+        applicant_user_id=body.applicant_user_id,
+        approver_user_ids=body.approver_user_ids,
+        recipient_user_ids=body.recipient_user_ids,
+        title=body.title,
+        content=body.content,
+        apply_reason=body.apply_reason,
+        biz_data=body.biz_data,
+        actor_id=actor_id,
+    )
+    return created(
+        WorkOrderEventCreated(
+            event_category=result.event_category,
+            work_order_id=result.work_order_id,
+            work_order_no=result.work_order_no,
+            notification_ids=result.notification_ids,
+            status=WorkOrderEventStatus(result.status),
         ),
         request,
     )

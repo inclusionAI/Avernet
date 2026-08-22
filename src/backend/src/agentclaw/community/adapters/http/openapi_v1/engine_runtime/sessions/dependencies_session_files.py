@@ -77,7 +77,7 @@ class OpenApiSessionFileAdapter:
         return self._session_resources.list_resources(ready_only=True, **kwargs)
 
     async def open_content(self, **kwargs: Any) -> Any:
-        return await self._session_resources.open_content(**kwargs)
+        return await self._session_resources.open_session_file_content(**kwargs)
 
     def delete(self, **kwargs: Any) -> Any:
         return self._session_resources.delete(**kwargs)

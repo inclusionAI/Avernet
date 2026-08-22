@@ -43,7 +43,10 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         is_deleted INTEGER NOT NULL DEFAULT 0,
         agent_code TEXT DEFAULT NULL,
         task_claim_mode INTEGER NOT NULL DEFAULT 0,
-        task_dream_mode INTEGER NOT NULL DEFAULT 0
+        task_dream_mode INTEGER NOT NULL DEFAULT 0,
+        user_visibility TEXT NOT NULL DEFAULT 'protected',
+        friend_ext TEXT DEFAULT NULL,
+        friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL'
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_session_token ON bcs_bots(session_token)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_bot_env ON bcs_bots(bot_uuid, env)",
@@ -934,6 +937,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 13,
         name: "edge_permission",
     },
+    SqliteMigration {
+        version: 14,
+        name: "add_bot_internal_attributes",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1036,6 +1043,7 @@ pub async fn run_sqlite_bootstrap_tables(db: &dyn DbPlugin) -> DbResult<()> {
     ensure_sqlite_session_collected_column(db).await?;
     ensure_bcs_session_files(db).await?;
     ensure_sqlite_bot_task_modes(db).await?;
+    ensure_sqlite_bot_internal_attributes(db).await?;
     Ok(())
 }
 
@@ -1106,6 +1114,35 @@ async fn ensure_sqlite_bot_task_modes(db: &dyn DbPlugin) -> DbResult<()> {
     if !has_dream {
         db.execute(DbStatement::new(
             "ALTER TABLE bcs_bots ADD COLUMN task_dream_mode INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await?;
+    }
+    Ok(())
+}
+
+async fn ensure_sqlite_bot_internal_attributes(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_bots").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_bots").await?;
+    if !columns.iter().any(|column| column == "user_visibility") {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN user_visibility TEXT NOT NULL DEFAULT 'protected'",
+        ))
+        .await?;
+    }
+    if !columns.iter().any(|column| column == "friend_ext") {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN friend_ext TEXT DEFAULT NULL",
+        ))
+        .await?;
+    }
+    if !columns
+        .iter()
+        .any(|column| column == "friend_check_in_strategy")
+    {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL'",
         ))
         .await?;
     }
@@ -1261,12 +1298,16 @@ async fn apply_sqlite_migration_body(
         // without discarding any persisted Subscription configuration.
         10 => migrate_sqlite_eventing_plaintext_endpoint(db).await,
         11 => ensure_sqlite_group_opening_message_column(db).await,
-// task_claim_mode / task_dream_mode columns are added by
+        // task_claim_mode / task_dream_mode columns are added by
         // ensure_sqlite_bot_task_modes in run_sqlite_bootstrap_tables;
         // version 12 only records progress.
         12 => Ok(()),
         // Edge-permission tables (friend unification) + bcs_bots config columns.
         13 => add_sqlite_edge_permission_schema(db).await,
+        // Internal Bot attribute columns are added by
+        // ensure_sqlite_bot_internal_attributes in run_sqlite_bootstrap_tables;
+        // version 14 only records progress.
+        14 => Ok(()),
         _ => Ok(()),
     }
 }
@@ -1598,6 +1639,13 @@ mod tests {
         assert!(columns.iter().any(|column| column == "agent_code"));
         assert!(columns.iter().any(|column| column == "task_claim_mode"));
         assert!(columns.iter().any(|column| column == "task_dream_mode"));
+        assert!(columns.iter().any(|column| column == "user_visibility"));
+        assert!(columns.iter().any(|column| column == "friend_ext"));
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == "friend_check_in_strategy")
+        );
         let node_columns = column_names(&db, "bcs_state_machine_node_runs").await?;
         assert!(node_columns.iter().any(|column| column == "outcome"));
         assert!(node_columns.iter().any(|column| column == "responded_by"));
@@ -1664,6 +1712,11 @@ mod tests {
                     13,
                     "edge_permission".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    14,
+                    "add_bot_internal_attributes".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1676,7 +1729,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 13);
+        assert_eq!(report.pending_versions.len(), 14);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1717,6 +1770,11 @@ assert_eq!(report.pending_versions[10].version, 11);
         assert_eq!(report.pending_versions[11].name, "add_bot_task_modes");
         assert_eq!(report.pending_versions[12].version, 13);
         assert_eq!(report.pending_versions[12].name, "edge_permission");
+        assert_eq!(report.pending_versions[13].version, 14);
+        assert_eq!(
+            report.pending_versions[13].name,
+            "add_bot_internal_attributes"
+        );
         Ok(())
     }
 
@@ -1778,6 +1836,11 @@ assert_eq!(report.pending_versions[10].version, 11);
                     13,
                     "edge_permission".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    14,
+                    "add_bot_internal_attributes".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1798,11 +1861,10 @@ assert_eq!(report.pending_versions[10].version, 11);
         .await?;
 
         let before = check_sqlite_migrations(&db).await?;
-        // Deleting only the v11 (group_opening_message) record leaves v12
-        // (add_bot_task_modes) and v13 (edge_permission) applied, so the max
-        // applied version stays 13 (the edge_permission tail) even though v11 is
-        // the sole pending re-apply.
-        assert_eq!(before.current_version, Some(13));
+        // Deleting only the v11 (group_opening_message) record leaves later
+        // migrations applied, so the max applied version stays 14 even though
+        // v11 is the sole pending re-apply.
+        assert_eq!(before.current_version, Some(14));
         assert_eq!(
             before
                 .pending_versions
@@ -1933,6 +1995,45 @@ assert_eq!(report.pending_versions[10].version, 11);
             .expect_err("checksum mismatch should fail startup");
 
         assert!(err.to_string().contains("checksum mismatch"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_bootstrap_adds_internal_attributes_to_legacy_bots() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_bots (bot_uuid TEXT NOT NULL, env TEXT NOT NULL, PRIMARY KEY (bot_uuid, env))",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "INSERT INTO bcs_bots (bot_uuid, env) VALUES ('legacy-bot', 'dev')",
+        ))
+        .await?;
+
+        ensure_sqlite_bot_internal_attributes(&db).await?;
+
+        let columns = column_names(&db, "bcs_bots").await?;
+        assert!(columns.iter().any(|column| column == "user_visibility"));
+        assert!(columns.iter().any(|column| column == "friend_ext"));
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == "friend_check_in_strategy")
+        );
+        let rows = db
+            .query(DbStatement::new(
+                "SELECT user_visibility, friend_check_in_strategy FROM bcs_bots WHERE bot_uuid = 'legacy-bot'",
+            ))
+            .await?;
+        let row = rows.first().expect("legacy Bot row");
+        assert_eq!(
+            db_get_column::<String>(row, "user_visibility")?,
+            "protected"
+        );
+        assert_eq!(
+            db_get_column::<String>(row, "friend_check_in_strategy")?,
+            "APPROVAL"
+        );
         Ok(())
     }
 
