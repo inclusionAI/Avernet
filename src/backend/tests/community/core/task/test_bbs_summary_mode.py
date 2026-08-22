@@ -1,7 +1,7 @@
 """TaskSummary.bbs_mode 直出测试(Task 1)。
 
 校验 BBS-relay 升级后,``TaskSummary`` 透出 ``bbs_mode`` 标志(``extend_props["bbs_mode"]``
-投影),供 BBS-relay bot 经 ``GET /api/task/list`` 发现被升级的任务。纯加字段,不动状态机。
+投影),供 BBS-relay bot 经 ``GET /openapi/v1/collaboration/tasks/list`` 发现被升级的任务。纯加字段,不动状态机。
 """
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,

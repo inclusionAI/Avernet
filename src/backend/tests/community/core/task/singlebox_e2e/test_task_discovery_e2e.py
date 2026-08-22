@@ -8,9 +8,9 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地起后端 singlebox 时设置:
 完整流程覆盖:
   1) 准备 mock 数据: 将内联测试数据写入 scripts/.dependencies/data/discovered_tasks.db
   2) provisioning: 建一个 test agent bot(获取真实 agent_id)
-  3) POST /api/public/task-discovery/discover   → 读取 mock 任务 + 创建 engine session + 投递通知
-  4) 验证响应: success / discovered count / task_id / session_id / notification_sent
-  5) GET /api/public/task-discovery/status      → 验证任务状态可查询
+  3) POST /openapi/v1/collaboration/tasks/discovery/discover   → 读取 mock 任务 + 创建 engine session + 投递通知
+  4) 验证响应: code=200000 / discovered count / task_id / session_id / notification_sent
+  5) GET /openapi/v1/collaboration/tasks/discovery/status      → 验证任务状态可查询
   6) 验证 engine session 实际存在(GET /api/sessions/{id} 可达)
   7) WebSocket 连接 engine,将发现的任务内容发送给大模型,验证回复
 
@@ -115,10 +115,10 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
 
     async def _run(self, loop: asyncio.AbstractEventLoop, bot_id: str, owner_id: str) -> None:
         async with httpx.AsyncClient(timeout=60.0, headers=_HDRS) as cli:
-            # POST /api/public/task-discovery/discover
+            # POST /openapi/v1/collaboration/tasks/discovery/discover
             #    传 bot_id + owner_id: 定位到 per-bot engine 直连创建 session
             r = await cli.post(
-                f"{_BACKEND}/api/public/task-discovery/discover",
+                f"{_BACKEND}/openapi/v1/collaboration/tasks/discovery/discover",
                 params={
                     "user_id": _USER_ID,
                     "agent_id": bot_id,
@@ -128,16 +128,17 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
             )
             r.raise_for_status()
             body = r.json()
-            print(f"[discover] success={body.get('success')} "
-                  f"discovered={body.get('discovered')}")
+            data = body.get("data") or {}
+            print(f"[discover] code={body.get('code')} "
+                  f"discovered={data.get('discovered')}")
 
-            self.assertTrue(body.get("success"), f"discover 未成功: {body}")
+            self.assertEqual(body.get("code"), 200000, f"discover 未成功: {body}")
             self.assertEqual(
-                body.get("discovered"), _EXPECTED_TASK_COUNT,
-                f"discovered 数量 != {_EXPECTED_TASK_COUNT}: {body.get('discovered')}",
+                data.get("discovered"), _EXPECTED_TASK_COUNT,
+                f"discovered 数量 != {_EXPECTED_TASK_COUNT}: {data.get('discovered')}",
             )
 
-            tasks = body.get("tasks", [])
+            tasks = data.get("tasks", [])
             self.assertEqual(len(tasks), _EXPECTED_TASK_COUNT, "tasks 列表长度不匹配")
 
             # 4) 逐任务验证: task_id / session_id / notification_sent
@@ -170,20 +171,21 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
                 f"发现 task_id 集合不匹配: {discovered_ids} vs {_EXPECTED_TASK_IDS}",
             )
 
-            # 5) GET /api/public/task-discovery/status → 验证任务状态可查
-            r = await cli.get(f"{_BACKEND}/api/public/task-discovery/status")
+            # 5) GET /openapi/v1/collaboration/tasks/discovery/status → 验证任务状态可查
+            r = await cli.get(f"{_BACKEND}/openapi/v1/collaboration/tasks/discovery/status")
             r.raise_for_status()
             status_body = r.json()
-            print(f"[status] success={status_body.get('success')} "
-                  f"total={status_body.get('total')}")
+            status_data = status_body.get("data") or {}
+            print(f"[status] code={status_body.get('code')} "
+                  f"total={status_data.get('total')}")
 
-            self.assertTrue(status_body.get("success"), f"status 查询未成功: {status_body}")
+            self.assertEqual(status_body.get("code"), 200000, f"status 查询未成功: {status_body}")
             self.assertEqual(
-                status_body.get("total"), _EXPECTED_TASK_COUNT,
+                status_data.get("total"), _EXPECTED_TASK_COUNT,
                 f"status total != {_EXPECTED_TASK_COUNT}",
             )
 
-            status_tasks = status_body.get("tasks", [])
+            status_tasks = status_data.get("tasks", [])
             status_ids = {t.get("task_id") for t in status_tasks}
             self.assertEqual(
                 status_ids, _EXPECTED_TASK_IDS,

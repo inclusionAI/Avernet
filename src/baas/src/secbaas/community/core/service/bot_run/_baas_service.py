@@ -268,7 +268,11 @@ class BaasBotService(BotService):
                     run_id=run_id,
                     session_id=session_id,
                 )
-            consistency_key = _strip_agent_main_prefix(session_consistency_key) if session_consistency_key else None
+            consistency_key = (
+                _strip_agent_main_prefix(session_consistency_key)
+                if session_consistency_key
+                else None
+            )
             conn_info = await self._resolve_ws_connection(
                 bot_id, tenant, engine_type, consistency_key
             )

@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::application::session::{SessionManagementService, SessionUseCaseError};
+use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, Page, Principal,
     message::{ListSessionMessages, SessionMessageService},
@@ -40,7 +41,8 @@ use bcs_service_api::{
     HumanActor, Participant, ParticipantMode, ParticipantRole, RegisteredBot, RelationCoreService,
     RequestedSessionRole, ServiceError, Session, SessionHistoryCommand, SessionKind,
     SessionLaunchError, SessionLaunchRequest, SessionLaunchService,
-    SessionStatus as DomainSessionStatus, StateMachineRunView, backfill_participant_names,
+    SessionStatus as DomainSessionStatus, StateMachineRunView, SystemMessageEvent,
+    backfill_participant_names,
 };
 
 #[derive(Debug, Clone)]
@@ -66,6 +68,7 @@ pub struct SessionServiceImpl {
     session_repo: Arc<dyn SessionRepoPort>,
     history: Arc<dyn GroupMessageHistoryService>,
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
+    system_message: Arc<dyn SystemMessageService>,
     config: SessionServiceConfig,
 }
 
@@ -81,6 +84,7 @@ impl SessionServiceImpl {
         session_repo: Arc<dyn SessionRepoPort>,
         history: Arc<dyn GroupMessageHistoryService>,
         collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
+        system_message: Arc<dyn SystemMessageService>,
         config: SessionServiceConfig,
     ) -> Self {
         Self {
@@ -93,6 +97,7 @@ impl SessionServiceImpl {
             session_repo,
             history,
             collaboration_runtime,
+            system_message,
             config,
         }
     }
@@ -291,32 +296,38 @@ impl SessionServiceImpl {
         Ok(session)
     }
 
-    async fn load_owned_participant_bot(
+    async fn load_session_for_collection(
         &self,
         caller: &AuthenticatedCaller,
         session_id: &str,
         participant: &str,
     ) -> Result<Session, ApplicationError> {
         let user = require_authenticated_user(caller)?;
+        // The participant must be owned by the authenticated Human: one of the
+        // Human's own bots, OR the Human's own actor entry. `ensure_human_actor`
+        // registers the latter as `human_{staff_no}` with `created_by` =
+        // `staff_no` and `actor_kind = Human`. The legacy
+        // `resolve_collector_bot` admits both via `list_bots_by_creator`, which
+        // does not filter by actor kind — so a Human can collect a Session as
+        // itself, not only through an owned bot. Match that contract by keying
+        // ownership on `created_by` alone.
         let owned = self
             .registry
             .try_get(participant)
             .await
             .map_err(map_service_error)?
-            .is_some_and(|bot| {
-                bot.actor_kind == ActorKind::Bot
-                    && bot.created_by.as_deref() == Some(user.id.as_str())
-            });
+            .is_some_and(|bot| bot.created_by.as_deref() == Some(user.id.as_str()));
         if !owned {
             return Err(ApplicationError::forbidden(
-                "The target Bot is not owned by the authenticated Human",
+                "The target participant is not owned by the authenticated Human",
             ));
         }
 
         let session = self.load_session(session_id).await?;
-        let present = session.participants.iter().any(|entry| {
-            entry.actor_kind == ActorKind::Bot && entry.bot_uuid == participant
-        });
+        let present = session
+            .participants
+            .iter()
+            .any(|entry| entry.bot_uuid == participant);
         if !present {
             return Err(ApplicationError::not_found(
                 "session_not_found",
@@ -805,7 +816,7 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: CollectSession,
     ) -> Result<SessionCollectionResult, ApplicationError> {
-        self.load_owned_participant_bot(
+        self.load_session_for_collection(
             &command.caller,
             &command.session_id,
             &command.participant,
@@ -826,7 +837,7 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: UncollectSession,
     ) -> Result<SessionCollectionResult, ApplicationError> {
-        self.load_owned_participant_bot(
+        self.load_session_for_collection(
             &command.caller,
             &command.session_id,
             &command.participant,
@@ -901,6 +912,41 @@ impl SessionService for SessionServiceImpl {
             .add_participant(&command.session_id, participant)
             .await
             .map_err(map_session_error)?;
+        // Emit a `BotJoined` system message so the newly added participant (and
+        // the rest of the session) receives the join notification — mirroring
+        // the legacy `bcs_http::routes::sessions::add_session_participant` path,
+        // which the OpenAPI route previously lacked. Best-effort: a dispatch
+        // failure is logged and never surfaces to the caller.
+        if let Some(actor) = updated
+            .participants
+            .iter()
+            .find(|p| p.bot_uuid == command.bot_uuid)
+            .cloned()
+        {
+            let event = SystemMessageEvent::BotJoined {
+                group_id: updated.group_id.clone(),
+                actor,
+                session_id: command.session_id.clone(),
+                session_input: updated.input.clone(),
+            };
+            if let Err(error) = self
+                .system_message
+                .notify(
+                    &updated.group_id,
+                    event,
+                    &command.session_id,
+                    &updated.participants,
+                )
+                .await
+            {
+                tracing::warn!(
+                    session_id = %command.session_id,
+                    bot_uuid = %command.bot_uuid,
+                    error = %error,
+                    "notify bot joined failed"
+                );
+            }
+        }
         self.backfill_and_project_participant(&mut updated.participants, &command.bot_uuid)
             .await
     }
@@ -912,6 +958,34 @@ impl SessionService for SessionServiceImpl {
         let principal = require_human(&command.caller)?;
         let session = self.load_session(&command.session_id).await?;
         let group = self.load_group(&session.group_id).await?;
+        // Capture the participant's pre-update identity so a
+        // `ParticipantModeChanged` system message can be emitted when the
+        // mode actually changes — mirroring the legacy
+        // `bcs_http::routes::sessions::update_session_participant_mode` path
+        // (the OpenAPI route previously had no such notification).
+        let existing = session
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == command.bot_uuid)
+            .cloned();
+        let old_mode = existing.as_ref().and_then(|p| p.mode);
+        let actor_kind = existing
+            .as_ref()
+            .map(|p| p.actor_kind)
+            .unwrap_or_else(|| {
+                if command.bot_uuid.starts_with("human_") {
+                    ActorKind::Human
+                } else {
+                    ActorKind::Bot
+                }
+            });
+        let actor_name = self
+            .registry
+            .try_get(&command.bot_uuid)
+            .await
+            .map_err(map_service_error)?
+            .and_then(|bot| bot.capabilities.name)
+            .unwrap_or_else(|| command.bot_uuid.clone());
         if let Some(actor_kind) = session
             .participants
             .iter()
@@ -978,6 +1052,36 @@ impl SessionService for SessionServiceImpl {
             .update_participant_mode(&command.session_id, &command.bot_uuid, command.mode)
             .await
             .map_err(map_session_error)?;
+        // Emit the participant-mode-changed system message only when the mode
+        // actually changed (same gating as the legacy endpoint). Best-effort:
+        // a dispatch failure is logged and never surfaces to the caller.
+        if old_mode != Some(command.mode) {
+            let event = SystemMessageEvent::ParticipantModeChanged {
+                group_id: updated.group_id.clone(),
+                actor_id: command.bot_uuid.clone(),
+                actor_name: actor_name.clone(),
+                actor_kind,
+                from: old_mode,
+                to: command.mode,
+            };
+            if let Err(error) = self
+                .system_message
+                .notify(
+                    &updated.group_id,
+                    event,
+                    &command.session_id,
+                    &updated.participants,
+                )
+                .await
+            {
+                tracing::warn!(
+                    session_id = %command.session_id,
+                    bot_uuid = %command.bot_uuid,
+                    error = %error,
+                    "notify participant mode changed failed"
+                );
+            }
+        }
         match self
             .backfill_and_project_participant(&mut updated.participants, &command.bot_uuid)
             .await
@@ -1002,20 +1106,52 @@ impl SessionService for SessionServiceImpl {
         let (session, _) = self
             .load_session_for_manage(&principal, &command.session_id)
             .await?;
+        // Capture the participant being removed (its real role/mode/actor_kind)
+        // before the mutation so the `BotLeft` event carries accurate identity
+        // — the legacy `remove_session_participant` hardcodes `Observer`/`None`.
+        let removed = session
+            .participants
+            .iter()
+            .find(|p| p.bot_uuid == command.bot_uuid)
+            .cloned();
         // Idempotent: if the target is not a current participant, return
         // `deleted: false` without invoking the legacy removal (which would
         // surface a `SessionInvalidParams` "not in session" error otherwise).
-        let present = session
-            .participants
-            .iter()
-            .any(|p| p.bot_uuid == command.bot_uuid);
-        if !present {
+        if removed.is_none() {
             return Ok(DeleteResult { deleted: false });
         }
-        self.sessions
+        let updated = self
+            .sessions
             .remove_participant(&command.session_id, &command.bot_uuid)
             .await
             .map_err(map_session_error)?;
+        // Emit a `BotLeft` system message so the remaining participants receive
+        // the leave notification — mirroring the legacy
+        // `remove_session_participant` path, which the OpenAPI route lacked.
+        // Best-effort: a dispatch failure is logged and never surfaces.
+        if let Some(actor) = removed {
+            let event = SystemMessageEvent::BotLeft {
+                group_id: updated.group_id.clone(),
+                actor,
+            };
+            if let Err(error) = self
+                .system_message
+                .notify(
+                    &updated.group_id,
+                    event,
+                    &command.session_id,
+                    &updated.participants,
+                )
+                .await
+            {
+                tracing::warn!(
+                    session_id = %command.session_id,
+                    bot_uuid = %command.bot_uuid,
+                    error = %error,
+                    "notify bot left failed"
+                );
+            }
+        }
         Ok(DeleteResult { deleted: true })
     }
 }

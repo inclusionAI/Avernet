@@ -375,9 +375,14 @@ impl SessionManagementService for SessionManagementServiceImpl {
             .ok_or_else(|| SessionUseCaseError::NotFound(session_id.to_string()))?;
 
         if let Some(group) = self.group_repo.get(&session.group_id).await {
-            if bot_uuid == group.driver_bot || Some(bot_uuid.to_string()) == group.originator {
+            // The group driver (and, for ManagerWorker, the Manager) is
+            // structurally required and cannot be removed from a session. The
+            // group originator/coordinator, however, may leave a session —
+            // session membership is session-scoped and does not affect the
+            // group's coordination structure.
+            if bot_uuid == group.driver_bot {
                 return Err(SessionUseCaseError::InvalidParams(
-                    "Cannot remove the group driver/coordinator from a session".to_string(),
+                    "Cannot remove the group driver from a session".to_string(),
                 ));
             }
 

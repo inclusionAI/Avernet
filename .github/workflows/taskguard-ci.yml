@@ -1,0 +1,131 @@
+name: TaskGuard CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - fudp_open
+    paths:
+      - 'src/evolverun/taskguard/**'
+      - '.github/workflows/taskguard-ci.yml'
+  push:
+    branches:
+      - main
+      - fudp_open
+    paths:
+      - 'src/evolverun/taskguard/**'
+      - '.github/workflows/taskguard-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: taskguard-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/evolverun/taskguard
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: src/evolverun/taskguard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint (boundary enforcement)
+        run: npx eslint src/ --ext .ts || true
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify exports wildcards
+        run: |
+          # Ensure fix-exports-wildcards ran correctly
+          node -e "
+            const pkg = JSON.parse(require('fs').readFileSync('package.json','utf8'));
+            const w = pkg.exports['./*']?.import?.default;
+            if (w === './dist/esm/*.js') {
+              console.error('FAIL: exports wildcard still has .js suffix');
+              process.exit(1);
+            }
+            if (w !== './dist/esm/*') {
+              console.error('FAIL: exports wildcard default is', w);
+              process.exit(1);
+            }
+            console.log('OK: exports wildcards correct');
+          "
+
+      - name: Run tests
+        run: npm test
+
+  boundary-check:
+    name: Community Boundary Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/evolverun/taskguard
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify no corp imports in community code
+        run: |
+          # Check that community source has no import statements of corp/internal packages
+          set -e
+          echo "Checking for forbidden imports in community code..."
+
+          # Forbidden patterns in community source (only in import/from statements)
+          FORBIDDEN_PATTERNS=(
+            "@ocb/"
+            "@alipay/"
+            "@clawmind/"
+            "mysql2"
+            "dingtalk-enterprise"
+            "zdas-database"
+            "yuque-adapter"
+            "agentmind-adapter"
+            "approval-card-web-poller"
+            "dev-workflow-callback"
+            "baas"
+            "baas-call"
+          )
+
+          FOUND=0
+          for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+            matches=$(grep -rn "^\s*import.*${pattern}\|^\s*from.*${pattern}" src/ --include="*.ts" | grep -v node_modules | grep -v "\.test\." || true)
+            if [ -n "$matches" ]; then
+              echo "ERROR: Found forbidden import: $pattern"
+              echo "$matches"
+              FOUND=1
+            fi
+          done
+
+          if [ $FOUND -eq 1 ]; then
+            echo "Boundary check FAILED: community code contains corp imports"
+            exit 1
+          fi
+
+          echo "Boundary check PASSED: no corp imports in community code"

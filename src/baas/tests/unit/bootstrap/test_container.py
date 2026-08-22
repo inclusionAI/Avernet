@@ -360,6 +360,24 @@ class TestSandboxDeviceRouterFullChain:
         assert callable(getattr(router, "renew_ttl", None))
 
 
+class TestSelectRenewalTask:
+    """Coverage for _select_renewal_task — engine-based cron task selection."""
+
+    def test_select_legacy_returns_legacy_task(self) -> None:
+        from secbaas.community.bootstrap._container import _select_renewal_task
+
+        legacy = object()
+        deadline = object()
+        assert _select_renewal_task("legacy", legacy, deadline) is legacy
+
+    def test_select_deadline_returns_deadline_task(self) -> None:
+        from secbaas.community.bootstrap._container import _select_renewal_task
+
+        legacy = object()
+        deadline = object()
+        assert _select_renewal_task("deadline", legacy, deadline) is deadline
+
+
 class TestInjectEnterprisePluginsImportError:
     def test_import_error_is_silently_caught(self) -> None:
         import sys

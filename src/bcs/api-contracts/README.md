@@ -23,6 +23,12 @@ Bot candidate search moved to the internal contract:
 
 - `GET /api/v1/collaboration/bots/{bot_id}/candidates/search`
 
+Gateway treats User, App, and Bot Principals as optional inputs for this
+internal route. That metadata controls Gateway admission only: BCS still
+requires a usable Human identity and verifies that the selected physical Bot
+is managed by that Human, or that the Human Actor perspective represents the
+same Human. App and Bot identities do not replace the Human requirement.
+
 The candidates operation accepts either a physical Bot managed by the current
 Human or that Human's own `human_{subject.id}` record (including Human Actor).
 Both perspectives use the same discovery and collaboration filters, and the
