@@ -3012,10 +3012,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         }
         if let Some(friend_ext) = patch.friend_ext.as_ref() {
             assignments.push("friend_ext = json_extract(?, '$')".to_string());
-            params
-                .push(Value::from(serde_json::to_string(friend_ext).map_err(
-                    |error| ServiceError::InternalError(error.to_string()),
-                )?));
+            params.push(Value::from(serde_json::to_string(friend_ext)?));
         }
         if let Some(friend_check_in_strategy) = patch.friend_check_in_strategy {
             assignments.push("friend_check_in_strategy = ?".to_string());
