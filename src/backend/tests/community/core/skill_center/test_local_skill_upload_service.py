@@ -1476,6 +1476,56 @@ def test_directory_package_uses_the_same_wrapper_normalization_as_zip_upload():
     ]
 
 
+@pytest.mark.asyncio
+async def test_directory_upload_reuses_the_raw_zip_upload_lifecycle():
+    class _CapturingUploadService(LocalSkillUploadService):
+        def __init__(self) -> None:
+            self.call: dict[str, object] | None = None
+
+        async def upload_local_skill(
+            self,
+            *,
+            bot_id: str,
+            owner_id: str,
+            actor_id: str,
+            package: bytes,
+        ) -> dict[str, object]:
+            self.call = {
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "actor_id": actor_id,
+                "package": package,
+            }
+            return {"operation": "created"}
+
+    service = _CapturingUploadService()
+    result = await service.upload_local_skill_files(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="collaborator",
+        files=[
+            ("weather/SKILL.md", _skill_md(name="weather")),
+            ("weather/scripts/fetch.py", b"print('weather')"),
+        ],
+    )
+
+    assert result == {"operation": "created"}
+    assert service.call is not None
+    assert service.call.keys() == {"bot_id", "owner_id", "actor_id", "package"}
+    assert service.call["bot_id"] == "bot"
+    assert service.call["owner_id"] == "owner"
+    assert service.call["actor_id"] == "collaborator"
+    name, description, files = LocalSkillUploadService._unpack(
+        service.call["package"]  # type: ignore[arg-type]
+    )
+    assert name == "weather"
+    assert description == "useful"
+    assert files == [
+        ("SKILL.md", _skill_md(name="weather")),
+        ("scripts/fetch.py", b"print('weather')"),
+    ]
+
+
 def test_directory_package_rejects_path_traversal_before_it_can_be_archived():
     with pytest.raises(LocalSkillInvalidPackageError):
         LocalSkillUploadService._pack_directory(

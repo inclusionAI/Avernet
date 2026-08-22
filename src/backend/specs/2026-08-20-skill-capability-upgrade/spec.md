@@ -262,7 +262,7 @@ skills-local / skills-repo / skill-center / MCP projection
 | --- | --- | --- | --- |
 | GET | `/openapi/v1/bots/{bot_id}/skills` | Local Skill 列表 | 不传 `type` 时严格保持 Local-only |
 | POST | `/openapi/v1/bots/{bot_id}/skills` | raw ZIP 上传或同名替换 Local | 新建 inactive；替换保留 `skill_id` 和 active |
-| POST | `/openapi/v1/bots/{bot_id}/skills/upload-folder` | multipart 文件夹上传 | additive；复用旧 `/api/skills/upload` 的 `files + file_paths` 相对路径语义，结果与 raw ZIP 相同 |
+| POST | `/openapi/v1/bots/{bot_id}/skills/upload-folder` | multipart 文件夹上传 | additive；沿用旧 `/api/skills/upload` 的 `files + file_paths` wire 语义，并与新 raw ZIP OpenAPI 共用 `LocalSkillUploadService` |
 | GET | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Local 详情 | 旧 wire 不变 |
 | DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 删除 inactive Local 资产 | Repo/Space 不能复用为资产删除 |
 | POST | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate` | 激活 Skill | 旧 Local 不变；additive 支持 Repo/Space |
@@ -305,6 +305,8 @@ deactivate
 ```
 
 对 Repo/Space，Direct activate 即 runtime install，deactivate 即 runtime uninstall。Local deactivate 只删除 Installation，Local 资产保留。
+
+旧 `/api/skills/upload` 的实现本期原样冻结，等待产品链路下线；不将其纳入新上传模块改造。新 OpenAPI 的 raw ZIP 与 multipart 文件夹入口必须在 HTTP 解码后汇入同一个 `LocalSkillUploadService.upload_local_skill()` 生命周期，共用包校验、同名替换、存储、DB 更新和失败补偿。
 
 #### 5.3 Skill 添加来源与 Skill Center 懒物化
 
