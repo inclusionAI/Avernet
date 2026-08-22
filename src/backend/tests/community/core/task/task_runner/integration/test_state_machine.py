@@ -125,7 +125,10 @@ def test_state_machine_binding_keys_are_roles_and_values_are_bcs_uuids():
     assert set(req.participant_bindings) == {"manager", "researcher"}
     assert req.participant_bindings["manager"]["bot_ids"] == ["mgr:double-owner"]
     assert req.participant_bindings["researcher"]["bot_ids"] == ["worker:double-owner"]
-    assert [p["role"] for p in req.participants] == ["driver", "consultant"]
+    # state_machine 群 participants 不带 role(BCS 按 bot_uuid vs driver_bot 自行推断;带 role 会被 BCS 400);
+    # 逻辑角色经 participant_bindings 绑定。
+    assert all(set(p) == {"bot_uuid"} for p in req.participants), "state_machine participants 不得带 role"
+    assert [p["bot_uuid"] for p in req.participants] == ["mgr:double-owner", "worker:double-owner"]
 
 
 class _Graph:
@@ -156,3 +159,28 @@ def test_dispatch_state_machine_persists_group_run_ids_to_node_extend_props():
     assert patch.task_id == "t1" and patch.node_id == "n1"
     assert patch.extend_props_patch.get("group_id") == "g1"
     assert patch.extend_props_patch.get("run_id") == "run_9"
+
+
+class _LatestSessionBcs:
+    """fake BcsClientPort for get_group_session:get_group 返 latest_running_session_id;
+    create_session 被调即失败(断言不再新建 session)。"""
+
+    def __init__(self, latest):
+        self.latest = latest
+        self.create_called = False
+
+    async def get_group(self, group_id):
+        return {"latest_running_session_id": self.latest}
+
+    async def create_session(self, group_id, *, bootstrap_prompt=None, idempotency_key=None):
+        self.create_called = True
+        raise AssertionError("get_group_session 不得再 create_session 新建 session")
+
+
+def test_get_group_session_reads_latest_running_session_id_not_create():
+    """get_group_session 经 GET /groups/{id} 的 latest_running_session_id 取最近 session,不再 create_session。"""
+    bcs = _LatestSessionBcs("sess-latest")
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=None, context=None, sink=None, poller=None)
+    sid = _run(exe.get_group_session("grp-1"))
+    assert sid == "sess-latest"
+    assert not bcs.create_called

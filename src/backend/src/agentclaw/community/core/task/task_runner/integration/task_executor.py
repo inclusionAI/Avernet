@@ -175,9 +175,11 @@ class TaskExecutor:
             participant: dict[str, Any] = {"bot_uuid": bcs_uuid(product_bot_id)}
             requested_role = member_roles.get(product_bot_id, "")
             if mode == "state_machine":
-                # workflow 逻辑 binding 与 BCS ParticipantRole 是两套概念；researcher 等 binding
-                # 只进 participant_bindings，群成员角色保持 BCS 合法 driver/consultant。
-                participant["role"] = "driver" if index == 0 else "consultant"
+                # state_machine 群的 participants.role 由 BCS 自行推断(按 bot_uuid vs driver_bot),
+                # 请求不得带 role —— 否则 BCS 400 "participants.role is inferred by BCS and must
+                # not be provided"(groups.rs:group_create_participants)。故只放 bot_uuid;
+                # 逻辑角色(writer/editor 等)经 participant_bindings 绑定。
+                pass
             elif requested_role in _BCS_PARTICIPANT_ROLES:
                 participant["role"] = requested_role
             else:
@@ -248,11 +250,14 @@ class TaskExecutor:
         return sent
 
     async def get_group_session(self, group_id: str) -> str | None:
-        """Fetch the initial session_id for a coop group; create one if absent."""
+        """取群的最近一个 session:建群响应若已带 session_id 则用之;否则经
+        ``GET /groups/{group_id}`` 响应的 ``latest_running_session_id`` 取最近 running session。
+        不再 ``create_session`` 新建(避免给群重复建 session)。"""
         meta = self._group_meta.get(group_id)
         sid = (meta or {}).get("session_id")
         if sid is None and self._bcs is not None:
-            sid = await self._bcs.create_session(group_id)
+            detail = await self._bcs.get_group(group_id)
+            sid = (detail or {}).get("latest_running_session_id")
         return sid
 
     @staticmethod
