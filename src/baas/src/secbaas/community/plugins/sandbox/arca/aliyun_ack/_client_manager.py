@@ -7,21 +7,23 @@ managed cluster, using bearer token authentication against the API server.
 from __future__ import annotations
 
 import threading
-from typing import Protocol
+import warnings
 
 from kubernetes.client import ApiClient, Configuration
 
 from secbaas.community.logger import get_logger
 
+warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 logger = get_logger("plugin-sandbox")
 
 
-class AliyunAckClusterConfigLike(Protocol):
-    """Cluster connection surface required to build an ACK ApiClient."""
+class AliyunAckClusterConfig:
+    """Cluster connection config for building an ACK ApiClient."""
 
-    api_server: str
-    token: str
-    namespace: str
+    def __init__(self, api_server: str = "", token: str = "", namespace: str = "default") -> None:
+        self.api_server = api_server
+        self.token = token
+        self.namespace = namespace
 
 
 class AliyunAckClientManager:
@@ -31,7 +33,7 @@ class AliyunAckClientManager:
     it across operations. Construction fails fast when required fields are missing.
     """
 
-    def __init__(self, cluster: AliyunAckClusterConfigLike | None = None) -> None:
+    def __init__(self, cluster: AliyunAckClusterConfig | None = None) -> None:
         self._cluster = cluster
         self._lock = threading.Lock()
         self._client: ApiClient | None = None
@@ -56,8 +58,8 @@ class AliyunAckClientManager:
         configuration = Configuration(
             host=self._cluster.api_server,
             api_key={"authorization": f"Bearer {self._cluster.token}"},
-            verify_ssl=False,
         )
+        configuration.verify_ssl = False
         return ApiClient(configuration)
 
     def get_client(self) -> ApiClient:

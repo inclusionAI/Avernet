@@ -26,22 +26,13 @@ from secbaas.community.logger import get_logger
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
 
-from ._client_manager import AliyunAckClientManager
+from ._client_manager import AliyunAckClientManager, AliyunAckClusterConfig
 from ._sandbox import AliyunAckSandbox
 
 logger = get_logger("plugin-sandbox")
 
 _BOLT_PORT = 20003
 _TEMPLATE_DIR = Path(__file__).parent / "template"
-
-
-class _ClusterConfig:
-    """Minimal cluster config for AliyunAckClientManager."""
-
-    def __init__(self, api_server: str, token: str, namespace: str) -> None:
-        self.api_server = api_server
-        self.token = token
-        self.namespace = namespace
 
 
 def _sanitize_pod_name(name: str) -> str:
@@ -88,16 +79,18 @@ def _render_template(template_id: str, variables: dict[str, str]) -> str:
 def _build_template_vars(
     uid: str,
     namespace: str,
-    image: str,
+    images: dict[str, str] | None,
     storage: Storage | None = None,
     resource_spec: ResourceSpecification | None = None,
 ) -> dict[str, str]:
     """Build runtime variables for template rendering.
 
-    Static config (storage class, LLM endpoint) lives directly in the YAML
-    template file. Runtime values (uid, image, resources, storage) are
-    substituted from config and call parameters.
+    ``images`` is a mapping of container name → image address (e.g.
+    ``{"openclaw": "...", "api-key-proxy": "...", "init": "..."}``).
+    Each is exposed as ``${OPENCLAW_IMAGE}``, ``${API_KEY_PROXY_IMAGE}``,
+    ``${INIT_IMAGE}`` respectively.
     """
+    images = images or {}
     storage_id = (
         _sanitize_pod_name(storage.storage_id)
         if storage and storage.storage_id
@@ -110,7 +103,9 @@ def _build_template_vars(
     return {
         "UID": uid,
         "NAMESPACE": namespace,
-        "IMAGE": image,
+        "OPENCLAW_IMAGE": images.get("openclaw", "openclaw:latest"),
+        "API_KEY_PROXY_IMAGE": images.get("api-key-proxy", "nginx:alpine"),
+        "INIT_IMAGE": images.get("init", "busybox:latest"),
         "STORAGE_ID": storage_id,
         "STORAGE_SIZE": storage_size,
         "MOUNT_PATH": mount_path,
@@ -157,7 +152,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
     def _client(self) -> Any:
         if self._client_manager is None:
             self._client_manager = AliyunAckClientManager(
-                _ClusterConfig(self._api_server, self._token, self._namespace)
+                AliyunAckClusterConfig(self._api_server, self._token, self._namespace)
             )
             self._client_manager.validate()
         return self._client_manager.get_client()
@@ -175,11 +170,11 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         Returns ``(deployment_name, container_name)`` extracted from the
         rendered template so callers need not hard-code them.
         """
-        image = self._default_images.get(template_id, "openclaw:latest")
+        images = self._default_images.get(template_id, {})
         variables = _build_template_vars(
             uid,
             namespace,
-            image,
+            images,
             storage=storage,
             resource_spec=resource_spec,
         )
@@ -378,3 +373,33 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
                 return True
             logger.warning("[aliyun_ack] delete_storage failed (%s)", e.status)
             return False
+
+
+def aliyun_ack_plugin_factory(
+    _credentials=None,
+    *,
+    api_server: str = "",
+    token: str = "",
+    namespace: str = "default",
+    default_images: dict[str, str] | None = None,
+    arca_utils: ArcaUtils | None = None,
+):
+    """Return a callable that builds AliyunAckSandboxPlugin with config baked in.
+
+    The leading ``_credentials`` arg absorbs any positional argument that
+    dependency_injector may pass when the provider is called with args.
+    In normal flow, Singleton calls this with keyword args only, returning
+    the inner ``_build`` function.
+    """
+
+    def _build(credentials=None):
+        return AliyunAckSandboxPlugin(
+            config=credentials,
+            api_server=api_server,
+            token=token,
+            namespace=namespace,
+            default_images=default_images,
+            arca_utils=arca_utils,
+        )
+
+    return _build
