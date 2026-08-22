@@ -27,15 +27,20 @@ from agentclaw.community.core.skill_center.services.skill_activation_sync_task i
     SKILL_ACTIVATION_SYNC_TASK,
     SkillActivationSyncAction,
     SkillActivationSyncScope,
+    SkillActivationSyncTaskHandler,
     build_skill_activation_sync_idempotency_key,
     build_skill_activation_sync_payload,
     enqueue_skill_activation_sync,
     parse_skill_activation_sync_payload,
 )
+from agentclaw.community.core.task_queue.services.registry import (
+    HandlerRegistry,
+    TaskHandler,
+)
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
-from agentclaw.community.core.task_queue.types import TaskStatus
+from agentclaw.community.core.task_queue.types import Fail, TaskStatus
 
 ENV = "dev"
 ACTION = SkillActivationSyncAction.PLACEHOLDER
@@ -247,6 +252,49 @@ def test_enqueue_returns_the_queue_result_unchanged():
         enqueue_skill_activation_sync(service, scope=_scope(), action=ACTION)
         is sentinel
     )
+
+
+# ── handler skeleton ────────────────────────────────────────────────────────
+
+
+def test_handler_serves_the_task_type():
+    assert SkillActivationSyncTaskHandler().task_type == SKILL_ACTIVATION_SYNC_TASK
+
+
+def test_handler_satisfies_the_task_handler_protocol():
+    assert isinstance(SkillActivationSyncTaskHandler(), TaskHandler)
+
+
+def test_handler_is_registrable():
+    """The registry rejects padded or case-colliding types; this one passes."""
+    registry = HandlerRegistry()
+    handler = SkillActivationSyncTaskHandler()
+
+    registry.register(handler)
+
+    assert registry.get(SKILL_ACTIVATION_SYNC_TASK) is handler
+
+
+def test_handler_fails_a_malformed_payload_rather_than_retrying():
+    """Retry would pin the Bot's dedup key until the deadline for nothing."""
+    payload = build_skill_activation_sync_payload(scope=_scope(), action=ACTION)
+    del payload["scope"]
+
+    outcome = SkillActivationSyncTaskHandler().handle(payload)
+
+    assert isinstance(outcome, Fail)
+    assert "invalid skill activation sync payload" in outcome.error
+
+
+def test_handler_reports_the_unimplemented_body_as_a_terminal_failure():
+    """The body lands later; until then it must not spin on the queue."""
+    payload = build_skill_activation_sync_payload(scope=_scope(), action=ACTION)
+
+    outcome = SkillActivationSyncTaskHandler().handle(payload)
+
+    assert isinstance(outcome, Fail)
+    assert "no implementation yet" in outcome.error
+    assert ACTION.value in outcome.error
 
 
 # ── dedup against a real queue ──────────────────────────────────────────────

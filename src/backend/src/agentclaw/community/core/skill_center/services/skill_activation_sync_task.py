@@ -11,12 +11,14 @@ task-queue design"): the operation is persisted as a task *first*, so a crash
 resumes it instead of stranding the Bot with desired state its runtime never
 received.
 
-**Only the enqueue side lives here.** There is deliberately no
-:class:`~agentclaw.community.core.task_queue.services.registry.TaskHandler` and
-no registration yet; the handler that consumes these rows is a follow-up. Until
-it lands, nothing calls :func:`enqueue_skill_activation_sync`, so no row of this
-type can exist — and if one somehow did, the worker fails it loudly with "no
-handler registered" rather than silently dropping it.
+**The handler here is a skeleton.** :class:`SkillActivationSyncTaskHandler`
+declares the task type, parses and validates the payload, and then hands off to
+:meth:`SkillActivationSyncTaskHandler._run` — the single seam the follow-up
+fills in. ``_run`` currently reports :class:`~agentclaw.community.core.task_queue.types.Fail`,
+and it is not registered into a :class:`~agentclaw.community.core.task_queue.services.registry.HandlerRegistry`;
+registration lands with the body, alongside the first operation that enqueues.
+Until then nothing calls :func:`enqueue_skill_activation_sync`, so no row of this
+type exists to run.
 
 Two properties of the contract are worth reading before adopting it.
 
@@ -50,7 +52,11 @@ from enum import StrEnum
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
-from agentclaw.community.core.task_queue.types import EnqueueResult
+from agentclaw.community.core.task_queue.types import (
+    EnqueueResult,
+    Fail,
+    TaskOutcome,
+)
 
 #: Registry key for this task. ``<module>.<name>``, matching the convention used
 #: by ``skills_pool.reconcile`` and ``session_resource.materialize``.
@@ -292,11 +298,68 @@ def enqueue_skill_activation_sync(
     )
 
 
+class SkillActivationSyncTaskHandler:
+    """Runs one Bot-level skill activation synchronization.
+
+    A plain object, as the :class:`~agentclaw.community.core.task_queue.services.registry.TaskHandler`
+    protocol expects — no base class, just ``task_type`` and ``handle``.
+
+    **The work itself is not implemented.** What is settled here is the shape
+    the implementation plugs into: the registry key, the payload validation
+    every attempt must pass, and the outcome the queue sees when the work
+    cannot proceed. :meth:`_run` is the seam.
+    """
+
+    @property
+    def task_type(self) -> str:
+        return SKILL_ACTIVATION_SYNC_TASK
+
+    def handle(self, payload: dict) -> TaskOutcome:
+        """Validate the payload, then run the operation it describes.
+
+        Takes ``dict`` rather than the protocol's ``Optional[dict]``:
+        ``TaskRecord.payload`` is non-optional and the worker only ever passes
+        a persisted row's deserialized payload. The protocol is structural, so
+        the narrower annotation still satisfies it.
+        """
+        try:
+            work = parse_skill_activation_sync_payload(payload)
+        except ValueError as error:
+            # Fail, not Retry. A payload that cannot be parsed will not parse
+            # on the next attempt either, and retrying would pin the Bot's
+            # dedup key until the deadline — blocking every later activation
+            # behind a row that can never run.
+            return Fail(f"invalid skill activation sync payload: {error}")
+        return self._run(work)
+
+    def _run(self, work: SkillActivationSyncWork) -> TaskOutcome:
+        """Execute one synchronization. **Not implemented yet.**
+
+        The follow-up fills this in: branch on ``work.action`` to identify the
+        operation, then converge ``work.scope``'s runtime projection against
+        the desired state held in the database — not against
+        ``work.action_args``, for the joined-task reason in the module
+        docstring.
+
+        Returning :class:`~agentclaw.community.core.task_queue.types.Fail` is
+        deliberate, rather than raising ``NotImplementedError``: the worker
+        treats a raise as an implicit ``Retry`` with backoff, which would hold
+        the Bot's dedup key for the full deadline and suppress the activations
+        queued behind it. ``Fail`` is terminal, so the key is released at once
+        and the error is recorded on the row.
+        """
+        return Fail(
+            "skill_center.activation_sync has no implementation yet "
+            f"(action_type={work.action.value}, bot_id={work.scope.bot_id})"
+        )
+
+
 __all__ = [
     "SKILL_ACTIVATION_SYNC_DEADLINE_SECONDS",
     "SKILL_ACTIVATION_SYNC_TASK",
     "SkillActivationSyncAction",
     "SkillActivationSyncScope",
+    "SkillActivationSyncTaskHandler",
     "SkillActivationSyncWork",
     "build_skill_activation_sync_idempotency_key",
     "build_skill_activation_sync_payload",

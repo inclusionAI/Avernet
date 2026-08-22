@@ -30,6 +30,7 @@ provides:
   - "LocalSkillCleanupWorkModel"
   - "SkillActivationSyncAction"
   - "SkillActivationSyncScope"
+  - "SkillActivationSyncTaskHandler"
   - "SkillActivationSyncWork"
   - "enqueue_skill_activation_sync"
   - "build_skill_activation_sync_payload"
@@ -143,7 +144,9 @@ synchronization per Bot is ever live. A second operation arriving mid-sync
 joins the live task and gets `created=False`; that is only correct while the
 handler reconciles against desired state read from the database, so the
 handler that consumes these rows must not replay `action_args` as its
-desired-state write. No handler is registered yet and no call site enqueues,
+desired-state write. `SkillActivationSyncTaskHandler` is a skeleton: it owns
+the registry key and the payload validation, and its `_run` seam reports
+`Fail` until the body lands. It is not registered, and no call site enqueues,
 so the control plane's inline mutate-then-reconcile path is unchanged.
 
 Phase 1 does not run a global Local Installation backfill and does not treat
