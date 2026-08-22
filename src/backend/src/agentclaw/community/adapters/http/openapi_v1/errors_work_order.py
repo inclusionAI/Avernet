@@ -14,6 +14,8 @@ class WorkOrderErrorCode(IntEnum):
     APPLICANT_ALREADY_MEMBER = 409203
     NO_REVIEWER = 409204
     JOIN_NOT_ALLOWED = 409205
+    APPLICANT_ALREADY_EDITOR = 409206
+    BOT_EDITOR_REQUEST_NOT_ALLOWED = 409207
 
 
 class WorkOrderPublicErrorMessage(StrEnum):
@@ -26,3 +28,5 @@ class WorkOrderPublicErrorMessage(StrEnum):
     APPLICANT_ALREADY_MEMBER = "Applicant is already a space member"
     NO_REVIEWER = "The space has no available approver"
     JOIN_NOT_ALLOWED = "The space does not accept join requests"
+    APPLICANT_ALREADY_EDITOR = "Applicant already has Bot editor access"
+    BOT_EDITOR_REQUEST_NOT_ALLOWED = "The Bot does not accept editor requests"

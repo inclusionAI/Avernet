@@ -23,6 +23,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     CreateSpaceJoinRequest,
+    CreateBotEditorRequest,
+    BotEditorRequestCreated,
+    BotEditorWorkOrderDetailContent,
     NotificationDetailResponse,
     NotificationReadResponse,
     NotificationsReadAllResponse,
@@ -31,6 +34,7 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     WorkOrderDetailContent,
     WorkOrderDetailResponse,
     WorkOrderItemType,
+    WorkOrderBizType,
     WorkOrderListItem,
     WorkOrderQueryType,
     WorkOrderReviewRequest,
@@ -54,6 +58,9 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPI
 
 router = APIRouter(tags=["work-orders"], route_class=PublicAPIRoute)
 PositiveIdPath = Annotated[int, Path(ge=1, description="Positive numeric identifier.")]
+BotIdPath = Annotated[
+    str, Path(min_length=1, max_length=64, description="Identifier of the Bot.")
+]
 PageNoQuery = Annotated[int, Query(ge=1, description="One-based page number.")]
 PageSizeQuery = Annotated[
     int, Query(ge=1, le=100, description="Maximum items returned per page.")
@@ -109,6 +116,16 @@ def _approval_display(work_order) -> tuple[str, str | None]:
     return work_order.biz_type, work_order.apply_reason
 
 
+def _biz_data(raw: str | None) -> dict[str, object]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _list_item(item: DomainListItem) -> WorkOrderListItem:
     work_order = item.work_order
     notification = item.notification
@@ -162,6 +179,43 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
 
 
 @router.post(
+    "/openapi/v1/bots/{bot_id}/editor-requests",
+    status_code=201,
+    response_model=Envelope[BotEditorRequestCreated],
+)
+@envelope_errors
+async def create_bot_editor_request(
+    bot_id: BotIdPath,
+    body: CreateBotEditorRequest,
+    request: Request,
+    caller: ActingCallerDep,
+    owner_id: Annotated[
+        str | None,
+        Query(
+            max_length=256,
+            description="Owner of the Bot. Defaults to the current user.",
+        ),
+    ] = None,
+    service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
+) -> Envelope[BotEditorRequestCreated]:
+    actor_id = _require_user_delegation(caller)
+    record = service.create_bot_editor_request(
+        bot_id=bot_id,
+        owner_id=owner_id or actor_id,
+        applicant_user_id=actor_id,
+        reason=body.reason,
+    )
+    return created(
+        BotEditorRequestCreated(
+            work_order_id=record.id,
+            work_order_no=record.work_order_no,
+            status=record.status,
+        ),
+        request,
+    )
+
+
+@router.post(
     "/openapi/v1/bots/spaces/{space_id}/join-requests",
     status_code=201,
     response_model=Envelope[SpaceJoinRequestCreated],
@@ -205,6 +259,17 @@ async def list_work_orders(
     item_type: Annotated[
         WorkOrderItemType, Query(description="Category of inbox item to return.")
     ] = WorkOrderItemType.ALL,
+    biz_type: Annotated[
+        str | None,
+        Query(
+            max_length=64,
+            description="Business type to return, or all business types.",
+        ),
+    ] = None,
+    biz_id: Annotated[
+        str | None,
+        Query(max_length=128, description="Business identifier to return."),
+    ] = None,
     page_no: PageNoQuery = 1,
     page_size: PageSizeQuery = 20,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
@@ -214,6 +279,8 @@ async def list_work_orders(
         actor_id=actor_id,
         query_type=DomainWorkOrderQueryType(query_type),
         item_type=DomainWorkOrderItemType(item_type),
+        biz_type=biz_type,
+        biz_id=biz_id,
         page_no=page_no,
         page_size=page_size,
     )
@@ -234,6 +301,28 @@ async def get_work_order(
     actor_id = _require_user_delegation(caller)
     detail = service.get_detail(work_order_id=work_order_id, actor_id=actor_id)
     work_order = detail.work_order
+    if work_order.biz_type == WorkOrderBizType.BOT_COLLABORATOR.value:
+        data = _biz_data(work_order.biz_data)
+        content = BotEditorWorkOrderDetailContent(
+            bot_id=str(data.get("bot_id") or work_order.biz_id),
+            bot_name=str(data.get("bot_name") or work_order.biz_id),
+            owner_id=str(data.get("owner_id") or ""),
+            space_id=int(data.get("space_id") or 0),
+            applicant_user_id=work_order.applicant_user_id,
+            applicant_name=str(
+                data.get("applicant_name") or work_order.applicant_user_id
+            ),
+            requested_role=str(data.get("requested_role") or "member"),
+            reason=work_order.apply_reason,
+        )
+    else:
+        content = WorkOrderDetailContent(
+            space_id=detail.space_id,
+            space_name=detail.space_name,
+            applicant_user_id=work_order.applicant_user_id,
+            applicant_name=detail.applicant_name,
+            reason=work_order.apply_reason,
+        )
     return envelope(
         WorkOrderDetailResponse(
             work_order_id=work_order.id,
@@ -244,13 +333,7 @@ async def get_work_order(
             else work_order.biz_id,
             event_type=detail.event_type,
             title=detail.title,
-            content=WorkOrderDetailContent(
-                space_id=detail.space_id,
-                space_name=detail.space_name,
-                applicant_user_id=work_order.applicant_user_id,
-                applicant_name=detail.applicant_name,
-                reason=work_order.apply_reason,
-            ),
+            content=content,
             status=work_order.status,
             reviewer_user_id=work_order.reviewer_user_id,
             review_remark=work_order.review_remark,

@@ -39,8 +39,12 @@ class WorkOrderBizType(_DocumentedEnum):
     """Business object represented by a work order."""
 
     SPACE_JOIN = "SPACE_JOIN"
+    BOT_COLLABORATOR = "BOT_COLLABORATOR"
 
-    __descriptions__ = {"SPACE_JOIN": "A request to join a Space."}
+    __descriptions__ = {
+        "SPACE_JOIN": "A request to join a Space.",
+        "BOT_COLLABORATOR": "A request to jointly edit a Bot.",
+    }
 
 
 class NotificationCategory(_DocumentedEnum):
@@ -164,6 +168,22 @@ class SpaceJoinRequestCreated(BaseModel):
     status: WorkOrderStatus = Field(description="Initial work-order status.")
 
 
+class CreateBotEditorRequest(BaseModel):
+    """Request for jointly editing a Team Space Bot."""
+
+    reason: str = Field(
+        min_length=1, max_length=512, description="Reason for requesting edit access."
+    )
+
+
+class BotEditorRequestCreated(BaseModel):
+    """Work-order identity returned for a Bot editor request."""
+
+    work_order_id: int = Field(description="Identifier of the created work order.")
+    work_order_no: str = Field(description="Human-readable work-order number.")
+    status: WorkOrderStatus = Field(description="Initial work-order status.")
+
+
 class WorkOrderApprovalRequest(BaseModel):
     """Decision submitted to the unified work-order approval endpoint."""
 
@@ -281,6 +301,19 @@ class WorkOrderDetailContent(BaseModel):
     reason: str | None = Field(description="Applicant's reason, when supplied.")
 
 
+class BotEditorWorkOrderDetailContent(BaseModel):
+    """Business details for a Bot joint-editor work order."""
+
+    bot_id: str = Field(description="Identifier of the requested Bot.")
+    bot_name: str = Field(description="Display name of the requested Bot.")
+    owner_id: str = Field(description="Owner who reviews the application.")
+    space_id: int = Field(description="Team Space containing the Bot.")
+    applicant_user_id: str = Field(description="Identifier of the applicant.")
+    applicant_name: str = Field(description="Display name of the applicant.")
+    requested_role: str = Field(description="Editor role granted after approval.")
+    reason: str | None = Field(description="Applicant's reason, when supplied.")
+
+
 class WorkOrderDetailResponse(_UtcResponseModel):
     """Detailed view of one work order."""
 
@@ -292,8 +325,8 @@ class WorkOrderDetailResponse(_UtcResponseModel):
         default=None, description="Legacy originating event, when available."
     )
     title: str = Field(description="Display title of the work order.")
-    content: WorkOrderDetailContent | dict | None = Field(
-        default=None, description="Business detail payload."
+    content: WorkOrderDetailContent | BotEditorWorkOrderDetailContent | dict | None = (
+        Field(default=None, description="Business detail payload.")
     )
     biz_data: str | None = Field(
         default=None, description="Business detail JSON payload."

@@ -478,6 +478,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("Space membership, adjudicated by the Space service"),
     ("POST", "/openapi/v1/bots/spaces/{space_id}/join-requests"):
         NoCheck("Space membership, adjudicated by the Space service"),
+    ("POST", "/openapi/v1/bots/{bot_id}/editor-requests"):
+        NoCheck("Team Space membership and Bot eligibility, adjudicated by the work-order service"),
     ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites"):
         NoCheck("Space membership, adjudicated by the Space service"),
     ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites/cancel"):
