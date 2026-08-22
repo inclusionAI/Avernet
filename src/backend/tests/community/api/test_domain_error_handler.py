@@ -282,20 +282,21 @@ def _public_http_exception_client():
 
 
 @pytest.mark.parametrize(
-    "status,level,wants_traceback",
+    "status,level",
     [
         # Handler-raised: the raise site is the diagnosis. Both of these are live
         # on the public surface (routines 500, resources upload 502) and neither
         # is in ENVELOPE_ERRORS, so they land in this handler.
-        (502, "error", True),
-        (500, "error", True),
+        (502, "error"),
+        (500, "error"),
         # 4xx too: the stack is framework internals for Starlette's own routing
         # failures, but it is the raise site for one thrown inside a handler,
-        # and the two are indistinguishable from here.
-        (404, "warning", True),
+        # and the two are indistinguishable from here. Level still splits on
+        # status even though the traceback no longer does.
+        (404, "warning"),
     ],
 )
-def test_public_http_exception_logging(monkeypatch, status, level, wants_traceback):
+def test_public_http_exception_logging(monkeypatch, status, level):
     from agentclaw.community.adapters.http import app as app_mod
     from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
 
@@ -309,9 +310,8 @@ def test_public_http_exception_logging(monkeypatch, status, level, wants_traceba
     assert calls, f"expected a {level} log for {status}"
     args, kwargs = calls[-1]
     assert f"boom-{status}" in args, "the raised detail must survive in the log"
-    assert wants_traceback, "every status through this handler carries a traceback"
     assert kwargs.get("exc_info") is not None, \
-        "an HTTPException must carry its raise site"
+        "an HTTPException must carry its raise site, whatever its status"
 
 
 def _internal_http_exception_client():

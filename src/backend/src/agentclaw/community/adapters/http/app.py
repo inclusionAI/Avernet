@@ -536,11 +536,12 @@ async def _http_exception_handler(
         # public handler: ``@envelope_errors`` does not map that type, so it
         # arrives here with the handler's arguments already stashed.
         #
-        # 5xx carries the traceback like every other 5xx path here, because a
-        # handler-raised one ("Upload storage failed", "cron service returned no
-        # data") is diagnosed by its raise site. 4xx does not: the common case is
-        # Starlette's own routing 404/405, raised before any handler, whose stack
-        # is framework internals rather than anything we would read.
+        # Every status carries the traceback. For a handler-raised one ("Upload
+        # storage failed", "cron service returned no data") the raise site is
+        # the diagnosis. For Starlette's own routing 404/405, raised before any
+        # handler, the stack is framework internals and adds little — but the
+        # two are indistinguishable from here, and a handler-raised 4xx is the
+        # one worth keeping, so this does not try to tell them apart.
         is_server_error = exc.status_code >= 500
         log = logger.error if is_server_error else logger.warning
         log(
@@ -664,14 +665,21 @@ async def _principal_error_handler(request: Request, exc: Exception) -> JSONResp
     and then unconditionally re-raises ("We always continue to raise the
     exception", ``starlette/middleware/errors.py``) so the server can log a
     crash. The result was a correct 401 on the wire followed by a hundred-odd
-    lines of ASGI traceback per request — precisely what the catch-all's
-    warning-without-a-traceback was written to avoid, and ruinous on this path
-    because an auth misconfiguration makes *every* request take it.
+    lines of ASGI traceback per request, ruinous on this path because an auth
+    misconfiguration makes *every* request take it.
 
     Registering the concrete types instead puts them in the inner
     ``ExceptionMiddleware``, which answers and does not re-raise. The status
     and body still come from ``ENVELOPE_ERRORS`` via ``_public_mapped_error``,
     so this adds a route out of the stack, not a second opinion on the answer.
+
+    The log line below does now carry ``exc_info``, so a misconfiguration still
+    puts a traceback behind every request — a deliberate trade, and a much
+    smaller one than what this handler was written to stop: the framework's
+    re-raise dumped the whole ASGI stack twice per request, while this is one
+    formatted chain for the exception itself. If the volume ever does bite, the
+    fix is to drop ``exc_info`` here specifically rather than to unregister
+    these types, which would bring the re-raise back.
     """
     # ``exc`` carries the operator-facing diagnosis on the verification path —
     # the token's ``alg``/``kid`` and the fingerprint of the key we judged it
