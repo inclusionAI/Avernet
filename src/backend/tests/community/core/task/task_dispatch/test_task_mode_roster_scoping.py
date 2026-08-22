@@ -106,8 +106,8 @@ def _task_info() -> TaskInfo:
             context=Context(background="研究"),
             goal=Goal(objective="分析", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
-        source_channel_type="bot",
-        source_channel_id="owner_bot",
+        source_type="bot",
+        owner_bot_id="owner_bot",
     )
 
 

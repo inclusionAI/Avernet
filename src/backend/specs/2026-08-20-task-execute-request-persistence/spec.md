@@ -25,7 +25,7 @@ a later scope.
 |---|---|---|
 | D1 | `task_id` source | **Server-generated `uuid4`** (the request carries no `task_id`). Used as the `task_info` PK, the root `node_id`, and returned in `TaskOpResult`. **Breaking:** clients no longer send `task_id`; they read it from the response. |
 | D2 | Persisted `task_spec` JSON shape | **Domain shape** — serialize via a new `TaskSpec.to_dict()` (`metadata{task_id,title,instruction}`, `goal.acceptances[{id,description}]`). Consistent with the in-memory graph; a future load-from-DB maps cleanly. |
-| D3 | Internal `TaskInfo.source_channel_id` mapping | **`owner_bot_id`** (the owning bot). `source_channel_type = source_type`. `TaskInfo` is otherwise unchanged; coop_group's group assignment happens later at the node-run level, not on `task_info`. |
+| D3 | Internal `TaskInfo.owner_bot_id` mapping | **`owner_bot_id`** (the owning bot). `source_type = request.source_type`. `TaskInfo` is otherwise unchanged; coop_group's group assignment happens later at the node-run level, not on `task_info`. |
 | D4 | Insert failure behavior | **Return `TaskOpResult(success=False, error=...)`** and skip `initialize_graph`. Consistent with `execute`'s existing return contract. |
 
 **Assumed (object unless raised):**
@@ -67,10 +67,10 @@ interface TaskRequest {
 Field-mapping notes (request → domain/persistence):
 - `acceptances[].acceptance` → domain `AcceptanceCriteria.description`.
 - Request `metadata` has **no `task_id`** → generated server-side (D1).
-- `source_type` → `task_info.source_type` (column) and `TaskInfo.source_channel_type`.
+- `source_type` → `task_info.source_type` (column) and `TaskInfo.source_type`.
 - `owner_user_id` / `owner_bot_id` → `task_info.owner_user_id` / `owner_bot_id`
-  (net-new vs the old single `source_channel_id`); `owner_bot_id` →
-  `TaskInfo.source_channel_id` (D3).
+  (net-new vs the old single `owner_bot_id`); `owner_bot_id` →
+  `TaskInfo.owner_bot_id` (D3).
 - `execution_config` (incl. `task_type`, `yaml`, `workflow_id`) → stored as the
   `task_info.execution_config` JSON dict; `TaskType` validates `task_type`.
 
@@ -85,7 +85,7 @@ core/task/domain/
 │                                                  AcceptanceCriteria/TaskSpec
 └── requests.py                       (new)  TaskInfoRequest + nested request dataclasses
                                                   + TaskInfoRequest.to_task_info() (uuid4, maps
-                                                  acceptance→description, source_channel_id=owner_bot_id)
+                                                  acceptance→description, owner_bot_id=owner_bot_id)
 
 core/task/task_center/task_service.py (edit)  execute(request: TaskInfoRequest); inject
                                               TaskInfoRepositoryProtocol; persist-first; run_execute helper
@@ -120,8 +120,8 @@ are `StrEnum` and live in `core/task/domain/models.py` beside the existing
 - `Context(background, extend_props or {})`
 - `Goal(objective, [AcceptanceCriteria(id, description=acceptance) for ...])`
 - `TaskSpec(metadata, context, goal)`
-- `TaskInfo(task_spec, source_channel_type=source_type.value,
-  source_channel_id=owner_bot_id, execution_config=execution_config)`
+- `TaskInfo(task_spec, source_type=source_type.value,
+  owner_bot_id=owner_bot_id, execution_config=execution_config)`
 - returns the `TaskInfo` (used by both the persist step and `initialize_graph`).
 
 `to_task_info()` is pure domain logic (uuid is stdlib); no framework deps,

@@ -8,7 +8,7 @@ tags: [task, planning, decompose]
 
 # task-planning-arch
 
-任务目标驱动的**任务规划** skill,运行在 **owner bot**(source_channel_id)。框架投递 planning prompt
+任务目标驱动的**任务规划** skill,运行在 **owner bot**(owner_bot_id)。框架投递 planning prompt
 (prompt 含 `{goal, context, target_node, graph_snapshot, gaps}` + 返回格式约定;详见框架
 `GapBasedPlanningStrategy._compose_planning_prompt`),本 skill 读 prompt 中的目标节点 `node_id`,
 按 **arch 场景确定式剧本**产出下一批子任务——参照 `task-planning` 的 storage 特例:**按根目标的验收交付物集合

@@ -42,8 +42,8 @@ def _task_info(task_id: str = "t1") -> TaskInfo:
             context=Context(background="bg"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
-        source_channel_type="bot",
-        source_channel_id="b1",
+        source_type="bot",
+        owner_bot_id="b1",
     )
 
 

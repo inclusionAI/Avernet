@@ -22,7 +22,7 @@
 按最新设计**从零实现**一个目标驱动的任务动态规划执行框架:
 
 1. **领域模型 = 最新 classDiagram**:
-   - 规格面:`TaskInfo`(入口,带 `source_channel_type/id` + `execution_config`)→ `TaskSpec`(metadata/context/goal,**无 SLA**)→ `Metadata`(**含 `task_id`**/title/instruction)、`Context`(background/**`extend_props`**)、`Goal`(objective/`acceptances: list[AcceptanceCriteria]`)、`AcceptanceCriteria`(id/description)。
+   - 规格面:`TaskInfo`(入口,带 `source_type/id` + `execution_config`)→ `TaskSpec`(metadata/context/goal,**无 SLA**)→ `Metadata`(**含 `task_id`**/title/instruction)、`Context`(background/**`extend_props`**)、`Goal`(objective/`acceptances: list[AcceptanceCriteria]`)、`AcceptanceCriteria`(id/description)。
    - 运行态:`TaskExecutionGraph`(**`run_id`**/loop_round/status/output/**`tasks`**/**`relations: list[Relation]`**/extend_props;loop_round=图级升 BBS 轮次达 MAX_LOOP→HUNG;节点级重规划次数由 extend_props.plan_round 记达 MAX_PLAN_ROUND→HUNG)、`TaskNode`(node_id/**`task_id`**/status/task_spec/run_info/**`node_run_graph`**)、`Relation`({src_id,dst_id,**`type: RelationType`**,extend_props})、`RuntimeInfo`(**`run_mode: str`**/assignee/start_time/end_time/output/acceptance_result/extend_props,**无 collab_mode**;start_time/end_time 为**毫秒整数 int**)、`AcceptanceResult`(verdict/`acceptances_metric`/gaps,**无 verifier**)。
    - 枚举:`Status` **6 态**(PENDING/**PLANNING**/RUNNING/DONE/FAILED/HUNG)、`AcceptanceVerdict`(PASS/FAIL)、`RelationType`(DEPENDENCY)。
    - **分解树统一承载结构归属**:`Relation{type=DEPENDENCY}` 在 `TaskExecutionGraph.relations` 表分解树(单入:每非根节点恰好 1 条入边=结构父,`src_id`=父,`dst_id`=子)。`TaskNode` 不持 `decomposed_by`/`depends_on` 字段——结构归属、验收、传播一律从 `relations` 派生。无跨兄弟直接数据边;数据流由步进式批规划顺序 + 执行时结构父聚合上下文承载。就绪=被 `add_task_nodes` 加入即就绪,无 `dependencies_satisfied` 闸门。

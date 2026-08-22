@@ -30,8 +30,8 @@ _TASK_SPEC = {
 }
 _EXECUTE_BODY = {
     "task_spec": _TASK_SPEC,
-    "source_channel_type": "bot",
-    "source_channel_id": "bot-endpoint-1",
+    "source_type": "bot",
+    "owner_bot_id": "bot-endpoint-1",
 }
 _CALLBACK_BODY = {
     "task_id": "task-endpoint-1",

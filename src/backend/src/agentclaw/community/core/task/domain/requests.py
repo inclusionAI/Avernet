@@ -66,7 +66,7 @@ class TaskInfoRequest:
         """Map the request onto the internal ``TaskInfo`` (server-supplied ``task_id``).
 
         ``acceptance`` → domain ``AcceptanceCriteria.description``;
-        ``source_channel_type`` = ``source_type.value``; ``source_channel_id`` = ``owner_bot_id`` (D3).
+        ``source_type`` = ``source_type.value``; ``owner_bot_id`` = ``owner_bot_id`` (D3).
         """
         return TaskInfo(
             task_spec=TaskSpec(
@@ -79,7 +79,7 @@ class TaskInfoRequest:
                           acceptances=[AcceptanceCriteria(id=a.id, description=a.acceptance)
                                        for a in self.task_spec.goal.acceptances]),
             ),
-            source_channel_type=self.source_type.value,
-            source_channel_id=self.owner_bot_id,
+            source_type=self.source_type.value,
+            owner_bot_id=self.owner_bot_id,
             execution_config=dict(self.execution_config),
         )

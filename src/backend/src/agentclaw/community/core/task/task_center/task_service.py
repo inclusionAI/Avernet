@@ -125,7 +125,7 @@ class TaskService:
                 return TaskOpResult(task_id=task_id, success=False, error=f"persist failed: {exc}")
         graph = self._graph.initialize_graph(task_info)
         logger.info("[execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute(后台推进)",
-                    task_id, task_info.source_channel_id,
+                    task_id, task_info.owner_bot_id,
                     task_info.task_spec.metadata.title, graph.run_id)
         task_type = request.execution_config.get("task_type")
         if task_type == TaskType.WORKFLOW:

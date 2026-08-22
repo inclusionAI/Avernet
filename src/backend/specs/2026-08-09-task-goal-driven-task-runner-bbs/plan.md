@@ -72,7 +72,7 @@ def _task_info(task_id="t1"):
     return TaskInfo(task_spec=TaskSpec(metadata=Metadata(task_id=task_id, title="t", instruction="i"),
                     context=Context(background="", extend_props={}),
                     goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")])),
-                    source_channel_type="bot", source_channel_id="b1", execution_config={})
+                    source_type="bot", owner_bot_id="b1", execution_config={})
 
 def test_summary_exposes_bbs_mode_flag():
     svc = TaskGraphService()
@@ -154,7 +154,7 @@ def _ti(tid="c1"):
     return TaskInfo(task_spec=TaskSpec(metadata=Metadata(task_id=tid, title="t", instruction="i"),
                     context=Context(background="", extend_props={}),
                     goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")])),
-                    source_channel_type="bot", source_channel_id="b1", execution_config={})
+                    source_type="bot", owner_bot_id="b1", execution_config={})
 
 def test_bbs_max_depth_default():
     svc = TaskGraphService()
@@ -226,7 +226,7 @@ def _ti(tid="p1"):
     return TaskInfo(task_spec=TaskSpec(metadata=Metadata(task_id=tid, title="t", instruction="i"),
                     context=Context(background="", extend_props={}),
                     goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")])),
-                    source_channel_type="bot", source_channel_id="b1", execution_config={})
+                    source_type="bot", owner_bot_id="b1", execution_config={})
 
 def _bbs_task(svc, tid):
     svc.initialize_graph(_ti(tid))
@@ -342,7 +342,7 @@ def _bbs_task(task_graph_service, task_service_protocol):
     ti = TaskInfo(task_spec=TaskSpec(metadata=Metadata(task_id="r1", title="t", instruction="i"),
                   context=Context(background="", extend_props={}),
                   goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")])),
-                  source_channel_type="bot", source_channel_id="b1", execution_config={})
+                  source_type="bot", owner_bot_id="b1", execution_config={})
     task_graph_service.initialize_graph(ti)
     task_graph_service.update_task_graph_info("r1", TaskGraphPatch(extend_props_patch={"bbs_mode": True}))
 
@@ -426,7 +426,7 @@ def _ti(tid):
     return TaskInfo(task_spec=TaskSpec(metadata=Metadata(task_id=tid, title="t", instruction="i"),
                     context=Context(background="", extend_props={}),
                     goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")])),
-                    source_channel_type="bot", source_channel_id="b1", execution_config={})
+                    source_type="bot", owner_bot_id="b1", execution_config={})
 
 def _scoped_spec():
     return TaskSpec(metadata=Metadata(task_id=f"bbs-{uuid.uuid4().hex[:6]}", title="bbs-scoped", instruction="do part"),

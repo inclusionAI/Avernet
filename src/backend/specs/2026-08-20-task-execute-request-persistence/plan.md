@@ -14,7 +14,7 @@
 
 - **`task_id` server-generated `uuid4`** in production via `TaskService.task_id_provider` (default `lambda: str(uuid.uuid4())`); tests inject a deterministic provider. Used as `task_info` PK + root `node_id` + returned. **Breaking:** clients no longer send `task_id`.
 - **Persisted `task_spec` = domain shape** via a new `TaskSpec.to_dict()` (`metadata{task_id,title,instruction}`, `goal.acceptances[{id,description}]`).
-- **`source_channel_id = owner_bot_id`**; `source_channel_type = source_type`. `TaskInfo` shape is otherwise unchanged.
+- **`TaskInfo.owner_bot_id = request.owner_bot_id`**; `source_type = request.source_type`. `TaskInfo` shape is otherwise unchanged.
 - **Insert failure → `TaskOpResult(success=False, error=...)`**, skip `initialize_graph`.
 - **Domain is zero-transport-dep** (`core/task/domain/`): dataclasses/`StrEnum`/stdlib only. `TaskInfoRequest` + enums live there because `core/` may not import `api/`. `api/` and `adapters/http/` import from there.
 - **`core/` may not import `api/`.** `TaskServiceProtocol` (in `api/`) imports `TaskInfoRequest` from `core.task.domain.requests` at runtime (the existing protocol already imports domain types at runtime — mirroring that).
@@ -102,8 +102,8 @@ def test_to_task_info_maps_fields_and_acceptance_to_description():
     assert ti.task_spec.goal.objective == "o"
     assert ti.task_spec.goal.acceptances[0].id == "ac1"
     assert ti.task_spec.goal.acceptances[0].description == "acc-text"  # acceptance → description
-    assert ti.source_channel_type == "coop_group"          # source_type.value
-    assert ti.source_channel_id == "B1"                    # owner_bot_id (D3)
+    assert ti.source_type == "coop_group"          # source_type.value
+    assert ti.owner_bot_id == "B1"                    # owner_bot_id (D3)
     assert ti.execution_config["workflow_id"] == "wf-1"
 
 
@@ -248,7 +248,7 @@ class TaskInfoRequest:
         """Map the request onto the internal ``TaskInfo`` (server-supplied ``task_id``).
 
         ``acceptance`` → domain ``AcceptanceCriteria.description``;
-        ``source_channel_type`` = ``source_type``; ``source_channel_id`` = ``owner_bot_id`` (D3).
+        ``source_type`` = ``source_type``; ``owner_bot_id`` = ``owner_bot_id`` (D3).
         """
         from agentclaw.community.core.task.domain.models import TaskSourceType  # noqa: F811
 
@@ -263,8 +263,8 @@ class TaskInfoRequest:
                           acceptances=[AcceptanceCriteria(id=a.id, description=a.acceptance)
                                        for a in self.task_spec.goal.acceptances]),
             ),
-            source_channel_type=self.source_type.value,
-            source_channel_id=self.owner_bot_id,
+            source_type=self.source_type.value,
+            owner_bot_id=self.owner_bot_id,
             execution_config=dict(self.execution_config),
         )
 ```
@@ -491,7 +491,7 @@ Replace `execute` (persist-first):
                 return TaskOpResult(task_id=task_id, success=False, error=f"persist failed: {exc}")
         graph = self._graph.initialize_graph(task_info)
         logger.info("[execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute(后台推进)",
-                    task_id, task_info.source_channel_id,
+                    task_id, task_info.owner_bot_id,
                     task_info.task_spec.metadata.title, graph.run_id)
         if self._harness is not None:
             self._harness.register(task_id)
@@ -928,7 +928,7 @@ Expected: no violations (antflake rules: single-line `def` OK; `class`/`if`/`;` 
 **1. Spec coverage:**
 - D1 server-generated task_id (uuid4) → `task_id_provider` default + `execute` uses it; returned in `TaskOpResult`. ✓ (Task 2 Step 3)
 - D2 persisted task_spec = domain shape → `TaskSpec.to_dict()` (Task 1) used in `execute`. ✓
-- D3 `source_channel_id = owner_bot_id`, `source_channel_type = source_type` → `to_task_info`. ✓ (Task 1)
+- D3 `TaskInfo.owner_bot_id = request.owner_bot_id`, `source_type = request.source_type` → `to_task_info`. ✓ (Task 1)
 - D4 insert failure → `TaskOpResult(success=False, error=...)`, skip init → `execute` try/except `IntegrityError`. ✓ (Task 2 Step 3, tested Step 1 `test_execute_persist_failure_returns_failure`)
 - Spec §3 field mappings (acceptance→description, no task_id in request, source_type/owner_user_id/owner_bot_id, execution_config.task_type) → `to_task_info` + DTO. ✓
 - Spec §4 file layout → matches. ✓

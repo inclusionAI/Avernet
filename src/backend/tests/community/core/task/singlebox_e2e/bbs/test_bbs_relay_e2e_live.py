@@ -107,8 +107,8 @@ def _task_info(owner_id: str) -> TaskInfo:
                 ],
             ),
         ),
-        source_channel_type="bot",
-        source_channel_id=owner_id,
+        source_type="bot",
+        owner_bot_id=owner_id,
         execution_config={"MAX_DEPTH": 2, "BBS_MAX_DEPTH": len(SUB_DOMAINS) + 2},
     )
 

@@ -93,8 +93,8 @@ def _execute_body(owner_id: str) -> dict:
                 ],
             },
         },
-        "source_channel_type": "bot",
-        "source_channel_id": owner_id,
+        "source_type": "bot",
+        "owner_bot_id": owner_id,
         # MAX_DEPTH=1:N_field_interview MISS 即在 <root 子> 下 @depth=1 → miss_depth_exhausted 触发升 BBS。
         # BBS_MAX_DEPTH=3 留 relay 接力预算。
         "execution_config": {"MAX_DEPTH": 1, "BBS_MAX_DEPTH": 3},

@@ -148,7 +148,7 @@ class TestTaskCallbackReport:
         graph_svc.initialize_graph(TaskInfo(
             task_spec=TaskSpec(Metadata("t_http", "T", "i"), Context("bg"),
                                Goal("o", [AcceptanceCriteria("a1", "d1")])),
-            source_channel_type="bot", source_channel_id="owner_bot", execution_config={}))
+            source_type="bot", owner_bot_id="owner_bot", execution_config={}))
         # 手动建一个 RUNNING 子节点(backdoor:直接调 graph_svc),模拟引擎已派发
         from agentclaw.community.core.task.domain.models import TaskNode, RuntimeInfo
         child = TaskNode(

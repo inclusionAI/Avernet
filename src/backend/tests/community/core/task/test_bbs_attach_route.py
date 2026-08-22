@@ -83,8 +83,8 @@ def _bbs_task_planning(injector: Injector, task_id: str) -> None:
             context=Context(background="", extend_props={}),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
-        source_channel_type="bot",
-        source_channel_id="b1",
+        source_type="bot",
+        owner_bot_id="b1",
         execution_config={},
     ))
     graph_svc.update_task_graph_info(task_id, TaskGraphPatch(extend_props_patch={"bbs_mode": True}))

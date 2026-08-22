@@ -90,7 +90,7 @@ class SearchBasedDispatchStrategy:
     → ② 投 owner bot search skill 在候选里决出 who+how → 4 态 SearchResult。端口(bot/discover)由 DI 注入;
     省略端口 = stub 路径(纯内核单测)恒 MISS。搜推 skill 不自取 BCSFuse,候选集由框架预查喂入 prompt。
 
-    owner bot = ``graph.extend_props["source_channel_id"]``(框架派生取,零 case 知识)。
+    owner bot = ``graph.extend_props["owner_bot_id"]``(框架派生取,零 case 知识)。
     """
 
     rule_id = "search"
@@ -116,7 +116,7 @@ class SearchBasedDispatchStrategy:
     async def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
         if self._bot is None or self._discover is None:
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_port_stub")
-        owner = str(graph.extend_props.get("source_channel_id") or "")
+        owner = str(graph.extend_props.get("owner_bot_id") or "")
         if not owner:
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
         candidates = await _prefetch_candidates(self._discover, node, graph)
@@ -192,10 +192,10 @@ async def _prefetch_candidates(discover, node: TaskNode, graph: TaskExecutionGra
     """框架候选预查:对 node 的 title/objective/background 各 jieba 分词,每 token 调 search_by_keyword
     (命中 0→空,不 fallback 全量),合并去重按 recommend.score 降序。discover.search_by_keyword 是同步
     requests,经 asyncio.to_thread 包;多 token 用 asyncio.gather 并发。user_id 取 graph 派生
-    source_channel_id;filters={"runtime_state":["online"]},top_k=10,min_score=0.01。"""
+    owner_bot_id;filters={"runtime_state":["online"]},top_k=10,min_score=0.01。"""
     import asyncio
     texts = _query_text(node)
-    user_id = str(graph.extend_props.get("source_channel_id") or "")
+    user_id = str(graph.extend_props.get("owner_bot_id") or "")
     # 三字段分词 → tokens 去重保序
     tokens: list[str] = []
     seen_tok: set[str] = set()

@@ -47,8 +47,8 @@ def _task_info(task_id: str = "t_case", *, max_depth: int = 3) -> TaskInfo:
                 acceptances=[AcceptanceCriteria(id=f"ac{i}", description=f"d{i}") for i in range(1, 6)],
             ),
         ),
-        source_channel_type="bot",
-        source_channel_id="owner_bot",
+        source_type="bot",
+        owner_bot_id="owner_bot",
         execution_config={"MAX_DEPTH": max_depth},
     )
 

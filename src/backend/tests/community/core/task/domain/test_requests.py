@@ -29,8 +29,8 @@ def test_to_task_info_maps_fields_and_acceptance_to_description():
     assert ti.task_spec.goal.objective == "o"
     assert ti.task_spec.goal.acceptances[0].id == "ac1"
     assert ti.task_spec.goal.acceptances[0].description == "acc-text"  # acceptance → description
-    assert ti.source_channel_type == "coop_group"          # source_type.value
-    assert ti.source_channel_id == "B1"                    # owner_bot_id (D3)
+    assert ti.source_type == "coop_group"          # source_type.value
+    assert ti.owner_bot_id == "B1"                    # owner_bot_id (D3)
     assert ti.execution_config["workflow_id"] == "wf-1"
 
 

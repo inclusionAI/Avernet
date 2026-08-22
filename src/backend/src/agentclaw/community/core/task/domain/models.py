@@ -121,8 +121,8 @@ class TaskInfo:
     """对外 ``execute`` 入参。"""
 
     task_spec: TaskSpec
-    source_channel_type: str       # "bot" | "coop_group"
-    source_channel_id: str         # bot_id / 协作群 id
+    source_type: str       # "bot" | "coop_group"
+    owner_bot_id: str         # owning bot id
     execution_config: dict[str, Any] = field(default_factory=dict)  # 指定 bot/workflow yaml/MAX_DEPTH 等
 
 
