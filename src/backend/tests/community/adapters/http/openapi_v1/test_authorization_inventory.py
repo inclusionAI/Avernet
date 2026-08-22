@@ -508,3 +508,69 @@ def test_a_check_handler_taking_owner_id_dep_is_accepted():
         assert_every_route_authorized(public)
     finally:
         AUTHORIZATION.pop(key, None)
+
+
+def test_a_check_row_without_bot_id_on_the_path_fails_assembly():
+    """The seam's permanent limit, enforced rather than documented.
+
+    ``require_check`` builds a gate declaring ``BotIdPath``, and FastAPI fills a
+    path parameter only when the route's template names it. A route whose
+    template carries no ``{bot_id}`` therefore hands the gate nothing, and the
+    row would adjudicate a bot the handler never saw.
+
+    Two real sets of operations sit here and are excluded by this rather than by
+    convention: harness, whose handlers act on a bot from the request *body*,
+    and the retiring skills addresses, where the skill id resolves its own bot
+    inside the handler — after this check would have had to answer. Both keep
+    the checks they already have; what is refused is the table claiming the seam
+    covers them.
+    """
+    public = build_public_router()
+    pathless = APIRouter(route_class=PublicAPIRoute)
+    key = ("GET", "/openapi/v1/bots/pathless-thing")
+    AUTHORIZATION[key] = Check(PermissionLevel.MEMBER)
+    try:
+
+        @pathless.get(key[1])
+        @envelope_errors
+        async def handler(caller: UserIdDep, owner_id: OwnerIdDep) -> dict:
+            return {}  # pragma: no cover - never served
+
+        public.include_router(pathless)
+
+        with pytest.raises(PublicRouteNotAuthorized) as refusal:
+            assert_every_route_authorized(public)
+        message = str(refusal.value)
+        assert "{bot_id}" in message
+        assert key[1] in message
+    finally:
+        AUTHORIZATION.pop(key, None)
+
+
+def test_bot_id_anywhere_on_the_path_is_accepted():
+    """Position on the path is not the requirement — presence is.
+
+    This is not hypothetical tidiness: the fifteen retiring ``deprecated/``
+    addresses this feature adjudicates carry ``{bot_id}`` at a *different*
+    position than their replacements — ``/bots/sessions/{bot_id}`` against
+    ``/bots/{bot_id}/sessions`` — because the bot moved within the path rather
+    than out of it. A refusal keyed on position would reject every one of them.
+    """
+    public = build_public_router()
+    relocated = APIRouter(route_class=PublicAPIRoute)
+    key = ("GET", "/openapi/v1/bots/relocated/{bot_id}/thing")
+    AUTHORIZATION[key] = Check(PermissionLevel.MEMBER)
+    try:
+
+        @relocated.get(key[1])
+        @envelope_errors
+        async def handler(
+            bot_id: BotIdPath, caller: UserIdDep, owner_id: OwnerIdDep
+        ) -> dict:
+            return {}  # pragma: no cover - never served
+
+        public.include_router(relocated)
+
+        assert_every_route_authorized(public)
+    finally:
+        AUTHORIZATION.pop(key, None)

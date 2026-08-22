@@ -766,9 +766,23 @@ def _assert_check_rows_are_enforceable(
 
     A row that declares enforcement the mechanism cannot deliver is worse than
     no row: the table reads as covered, and the inventory agrees, while the
-    operation is served unguarded. Two shapes of that, both currently
-    unreachable — no row is ``Check`` — and both waiting for the first
-    migration to become reachable.
+    operation is served unguarded. Three shapes of that.
+
+    The third is the seam's permanent limit rather than a gap to close. The gate
+    runs *before* the handler, so the only bot it can adjudicate is one the
+    request itself carries on the path — that is what ``BotIdPath`` reads. An
+    operation whose bot arrives any other way cannot be keyed on the same value
+    the handler acts on, and a ``Check`` row for it would adjudicate something
+    the handler never saw. Two sets of operations are in exactly that position,
+    and are excluded by this rather than by convention:
+
+    - **harness**, whose handlers act on a bot named in the request *body*;
+    - the **retiring skills addresses**, where two carry the bot in the query
+      string and four name no bot at all — the skill id resolves its own bot,
+      inside the handler, after this check would have had to answer.
+
+    Both keep the checks they already have. What this refuses is the table
+    claiming otherwise.
     """
     socket_checks = sorted(
         f"{method} {path}"
@@ -797,6 +811,25 @@ def _assert_check_rows_are_enforceable(
             "OwnerIdDep, so the gate would adjudicate the addressed owner while "
             "the handler acted on a different one (see bot_access's contract): "
             + ", ".join(divergent)
+        )
+
+    # Read off the route's own path template rather than its resolved
+    # parameters: ``BotIdPath`` is what the gate declares, and FastAPI fills a
+    # path parameter only when the template names it. A route whose template
+    # has no ``{bot_id}`` cannot supply one whatever its handler does.
+    unkeyable = sorted(
+        f"{method} {path}"
+        for (method, path), _endpoint in checked_handlers
+        if "{bot_id}" not in path
+    )
+    if unkeyable:
+        raise PublicRouteNotAuthorized(
+            "these operations declare Check but do not carry {bot_id} on their "
+            "path, so the gate has no bot to adjudicate and would decide on a "
+            "value the handler never saw. The gate runs before the handler, so "
+            "this is a permanent limit rather than a gap: an operation that "
+            "addresses its bot any other way keeps whatever check it already "
+            "has and must not claim Check. Offending rows: " + ", ".join(unkeyable)
         )
 
 

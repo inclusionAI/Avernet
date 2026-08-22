@@ -27,10 +27,10 @@ deletion is known to change no caller's answer.
 - **Goal:** Make the seam's structural limit enforced instead of documented — the gate decides before the handler runs, so it can only adjudicate an operation whose bot is on the path.
 - **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization.py`
 - **Done when:**
-  - [ ] `_assert_check_rows_are_enforceable` gains a third refusal: a `Check` row on a route that does not declare `{bot_id}` on its path fails assembly, naming the route.
-  - [ ] The docstring says why — the gate reads `BotIdPath`, so such a row would adjudicate a value the handler never saw — and names the two sets this excludes: harness (bot in the request body) and the retiring skills addresses (bot in the query, or resolved from the skill record).
-  - [ ] A fixture-router test covers it in both directions.
-  - [ ] No row changes mode; the seam itself is untouched.
+  - [x] `_assert_check_rows_are_enforceable` gains a third refusal: a `Check` row on a route that does not declare `{bot_id}` on its path fails assembly, naming the route.
+  - [x] The docstring says why — the gate reads `BotIdPath`, so such a row would adjudicate a value the handler never saw — and names the two sets this excludes: harness (bot in the request body) and the retiring skills addresses (bot in the query, or resolved from the skill record).
+  - [x] A fixture-router test covers it in both directions.
+  - [x] No row changes mode; the seam itself is untouched.
 - **Depends on:** —
 
 ## Task 2: Retire the no-adopter assertion
