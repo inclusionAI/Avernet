@@ -9,8 +9,8 @@ created: 2026-08-22T21:15:00+08:00
 ## 范围
 
 - Worktree / repo: `/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/openapi-bot-public-catalog` / `inclusionAI/Avernet`
-- Head / base: `fix/openapi-bot-catalog-relax-discover-search` / `dev_refactory_collaboration`
-- PR: NOT_CREATED
+- Head / base: `fix/openapi-bot-catalog-relax-discover-search@a233f015c` / `dev_refactory_collaboration@a4f2e09ef`
+- PR: [#1368](https://github.com/inclusionAI/Avernet/pull/1368) (OPEN, non-draft)
 - PR title: `fix(backend): relax catalog discovery and visibility filters`
 - PR description sections: Problem / Solution / Validation / Compatibility and risk / Spec
 - 人工意见模式: auto
@@ -19,8 +19,8 @@ created: 2026-08-22T21:15:00+08:00
 
 | 结果 | 证据 | 说明 |
 |---|---|---|
-| Base 已核验 | `origin/dev_refactory_collaboration@a4f2e09ef` | 当前分支从该基线创建，HEAD 尚未提交。 |
-| 无匹配开放 PR | GitHub head/base 查询 | 可安全创建新 PR。 |
+| Base 已核验 | `origin/dev_refactory_collaboration@a4f2e09ef` | 当前分支从该基线创建。 |
+| PR 已创建 | #1368 | head/base、英文标题和五个说明段落已核验。 |
 | 本地验证通过 | Backend 148、architecture 15、Ruff、diff-check | 仅本任务定向验证；远端 ACI 尚未创建。 |
 
 ## 自动意见
@@ -33,7 +33,8 @@ created: 2026-08-22T21:15:00+08:00
 
 | Job/指标 | 状态 | 证据 | 根因 | 修复/提交 | 验证 |
 |---|---|---|---|---|---|
-| 远端 ACI/CI | PENDING | PR 尚未创建 | 无当前 head 的远端 job | — | 本地定向验证通过 |
+| BCS e2e (coverage gated) | PASS | GitHub check | 当前 head 已完成成功 | — | 远端 job SUCCESS |
+| Singlebox / BCS / Backend / Engine / BaaS / Gateway tests | PENDING | GitHub checks 运行中 | 当前 head 尚未完成 | — | 本地定向验证通过 |
 
 ## 人工意见
 
@@ -43,8 +44,8 @@ created: 2026-08-22T21:15:00+08:00
 
 ## 当前结论
 
-- PR: NOT_CREATED
+- PR: OPEN (#1368)
 - 自动意见: CLEAR
 - ACI/CI: PENDING
 - 人工意见: CLEAR
-- 下一步: 仅暂存本任务文件、创建提交、推送分支并创建以 `dev_refactory_collaboration` 为 base 的 PR。
+- 下一步: 等待当前 head 的远端 checks；收到自动或人工意见时按 PR 流程核验和处理。
