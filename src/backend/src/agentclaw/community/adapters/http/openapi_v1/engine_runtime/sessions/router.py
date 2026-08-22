@@ -8,6 +8,7 @@ see ``engine_runtime/gating.py`` and ``core/engine_runtime/gate.py``.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -37,6 +38,16 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     SessionPage,
     SessionUpdate,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schemas_helpers import (
+    _as_list,
+    _history_page,
+    _history_window,
+    _map_message,
+    _map_session,
+    _page,
+    _require_within_depth,
+    _window,
+)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import OpenApiSessionFileAdapter
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
@@ -52,17 +63,25 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.human_bot_friendship_service import (
+    HumanBotFriendshipServiceProtocol,
+)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import resolve_operable_bot
 from agentclaw.community.core.engine_runtime.errors import (
-    EngineHistoryDepthExceededError,
+    EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
+)
+from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
+from agentclaw.community.core.expert_chat.errors import (
+    BotNotFoundError as ExpertBotNotFoundError,
+    ConnectionError as ExpertConnectionError,
+)
+from agentclaw.community.core.bot_chat.bcn_friendship import (
+    FriendshipSourceUnavailableError,
 )
 from agentclaw.community.core.session_resources.types import SessionResourceRecord
 from agentclaw.community.di import Injected
-from agentclaw.community.log import get_logger
-
-logger = get_logger()
-
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/sessions",
     tags=["sessions"],
@@ -96,217 +115,71 @@ _LOOKAHEAD = 1
 _MAX_HISTORY_DEPTH = 5000
 
 
-def _map_session(data: dict[str, Any]) -> Session:
-    """Engine session dict → public :class:`Session`.
-
-    Source: ``_session_to_dict`` in ``src/engine/.../api/session/router.py``.
-    ``user_id`` is dropped (it is the caller) and ``ext_info`` is dropped
-    (engine-specific opaque payload with no public contract).
-    """
-    return Session(
-        session_id=str(data.get("id", "")),
-        title=str(data.get("title") or ""),
-        agent_id=str(data.get("agent_id") or ""),
-        model=str(data.get("model") or ""),
-        permission_mode=str(data.get("permission_mode") or ""),
-        cwd=str(data.get("cwd") or ""),
-        runtime=str(data.get("runtime") or ""),
-        message_count=int(data.get("message_count") or 0),
-        gmt_create=str(data.get("gmt_created") or ""),
-        gmt_modified=str(data.get("gmt_modified") or ""),
-    )
-
-
-def _map_message(data: dict[str, Any], session_id: str) -> Message:
-    """Engine message dict → public :class:`Message`.
-
-    ``metadata`` is dropped: a free-form engine bag with no public contract,
-    and therefore a leak risk on a surface whose messages are otherwise fixed.
-    An unrecognised ``role`` falls back to ``system`` rather than raising —
-    ``MessageRole`` mirrors a Literal in the engine's model, but a stub or a
-    newer engine returning something else must not 500 a read.
-    """
-    raw_role = str(data.get("role") or "")
-    try:
-        role = Message.model_fields["role"].annotation(raw_role)  # type: ignore[misc]
-    except ValueError:
-        logger.warning("[engine_runtime] unknown message role %r", raw_role)
-        from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
-            MessageRole,
-        )
-
-        role = MessageRole.SYSTEM
-    return Message(
-        message_id=str(data.get("id", "")),
-        session_id=str(data.get("session_id") or session_id),
-        role=role,
-        content=str(data.get("content") or ""),
-        gmt_create=str(data.get("gmt_created") or ""),
-    )
-
-
-def _as_list(data: Any) -> list[dict[str, Any]]:
-    """Engine list payloads are bare lists; tolerate a wrapped ``items`` too."""
-    if isinstance(data, list):
-        raw = data
-    elif isinstance(data, dict):
-        raw = data.get("items") or []
-    else:
-        raw = []
-    return [d for d in raw if isinstance(d, dict)]
-
-
-def _window(page_params: Any) -> dict[str, int]:
-    """The engine query for exactly the requested page, plus one lookahead item.
-
-    Asking the engine for the caller's window — rather than always fetching from
-    offset 0 and slicing locally — is what makes pages past the first few
-    hundred work at all. Fetching a fixed prefix left every later page empty and
-    capped the reported total at the prefix length.
-
-    This is the **session list**'s window, and it is the straightforward one: the
-    engine paginates a fully-materialised list
-    (``plugins/openclaw/_session.py``: ``raw_sessions[offset : offset+limit]``),
-    so ``offset``/``limit`` mean what they say. Message history does not — see
-    :func:`_history_window`.
-    """
+def _friend_auth_headers(request: Request) -> dict[str, str]:
+    """Forward only identity/trace headers needed by BCN's trusted boundary."""
     return {
-        "offset": (page_params.page - 1) * page_params.page_size,
-        "limit": page_params.page_size + _LOOKAHEAD,
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() in {"authorization", "cookie", "x-request-id", "x-trace-id"}
     }
 
 
-def _history_window(page_params: Any) -> dict[str, int]:
-    """The engine query for a page of message history.
+async def _resolve_session_backend(
+    *,
+    relay: EngineRuntimeRelayProtocol,
+    friendships: HumanBotFriendshipServiceProtocol,
+    expert: ExpertChatServiceProtocol,
+    request: Request,
+    bot_id: str,
+    user_id: str,
+    owner_id: str,
+    stage: RuntimeStage,
+):
+    """Return Bot facts for the unchanged owner path, or ``None`` for friend.
 
-    The history route does not paginate — it **tail-limits**. ``limit`` selects
-    the *newest* N messages, both in the bundled providers
-    (``local/openclaw/plugin_impl.py``, ``local/claude_code/plugin_impl.py``:
-    ``items[-limit:]``) and in the ``chat.history`` RPC they mirror, whose only
-    windowing parameter is ``limit``. The adapter then applies ``offset`` *to
-    that tail* (``messages[offset : offset+limit]``).
-
-    Those two compose badly. Growing ``limit`` to cover the offset moves the
-    tail's start back by exactly the offset, and skipping the offset walks
-    forward to the same place: with 100 messages and ``page_size=20``, page 1
-    and page 2 both return messages 79–98. Sending a page-sized limit instead
-    just makes every page past the first empty.
-
-    So the offset is not sent at all. We ask for the newest
-    ``offset + page_size + 1`` messages and cut the page out of that tail
-    ourselves in :func:`_history_page`, which is the one shape the engine's
-    "newest N" contract can serve exactly.
-
-    That request grows with the page number, and ``page`` has no upper bound —
-    ``page_size`` is capped at 100 but the page index is only ``ge=1``. Since
-    both bundled adapters forward ``limit`` upstream *before* slicing, an
-    unclamped window would let ``page=1000000`` ask a tenant's device for a
-    hundred million messages to answer with at most a hundred. The window is
-    therefore clamped to :data:`_MAX_HISTORY_DEPTH`, which is also the depth
-    the endpoint documents itself as serving.
+    A friend is considered only after the existing owner/collaborator gate has
+    returned its masked not-found answer. BCN failures fail closed; they never
+    fall back to Backend's legacy friend tables.
     """
-    offset = (page_params.page - 1) * page_params.page_size
-    want = offset + page_params.page_size + _LOOKAHEAD
-    return {"offset": 0, "limit": min(want, _MAX_HISTORY_DEPTH + _LOOKAHEAD)}
-
-
-def _require_within_depth(page_params: Any) -> None:
-    """Refuse a page that would reach past the served history depth.
-
-    The derived total is a lower bound while full pages keep coming and exact
-    once a short page arrives — that is the contract ``MessagePage.total``
-    publishes, and it is what makes the bound usable. A page clipped by
-    :data:`_MAX_HISTORY_DEPTH` breaks it: the window stops at the cap rather
-    than at the oldest message, so the page comes back short while more history
-    exists, and the caller reads the cap as an exact count. With 50 000
-    messages and ``page_size=100``, page 51 returned nothing and reported
-    ``total=5001``.
-
-    Serving those pages honestly is not possible here. "Truncated" cannot be
-    expressed in a required ``int``, and neither engine route exposes a count to
-    put there instead. Refusing is the one answer that is true: the request is
-    outside what this endpoint serves, which is a property of the endpoint
-    rather than of the data, so it is rejected before the device is touched and
-    the same page is rejected whatever the history holds.
-
-    The bound is the window's *end*, not its start. Rejecting only
-    ``offset >= depth`` would still admit a page straddling the cap —
-    ``page_size=3``, page 1667 starts at 4998 and returns two messages of three,
-    short, and therefore exact-looking for the same reason.
-
-    422 matches the surface: ``page_size=101`` is already a 422 from FastAPI's
-    own parameter validation, and this is the same class of out-of-range page
-    argument.
-    """
-    offset = (page_params.page - 1) * page_params.page_size
-    if offset + page_params.page_size > _MAX_HISTORY_DEPTH:
-        raise EngineHistoryDepthExceededError(
-            f"page window ends at {offset + page_params.page_size}, past the "
-            f"{_MAX_HISTORY_DEPTH}-message depth served"
+    try:
+        return await resolve_operable_bot(
+            relay,
+            bot_id,
+            caller_id=user_id,
+            owner_id=owner_id,
+            stage=stage.value,
+            surface="sessions",
         )
+    except BotNotFoundError as owner_error:
+        if stage is not RuntimeStage.DRAFT:
+            raise owner_error
+        try:
+            allowed = await asyncio.to_thread(
+                friendships.is_friend,
+                human_id=user_id,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                request_headers=_friend_auth_headers(request),
+            )
+        except FriendshipSourceUnavailableError as error:
+            raise EngineDeviceNotReadyError(
+                "friendship authorization is temporarily unavailable"
+            ) from error
+        if not allowed:
+            raise owner_error
+        # Preserve ExpertChat's existing ownership/runtime implementation. The
+        # row is an interaction-list projection, not friendship authority;
+        # BCN was checked immediately above on every OpenAPI request.
+        await asyncio.to_thread(expert.add_chat_bot, user_id, bot_id, owner_id)
+        return None
 
 
-def _page(
-    items: list[Any], page_params: Any, *, reported: int | None
-) -> tuple[int, list[Any]]:
-    """The requested page, plus the best total the engine allows.
-
-    ``reported`` is the engine's own count where it supplies one. Both bundled
-    engines return ``total=None`` for message history and the session list has
-    no total field at all, so in practice this is the derived branch — but a
-    corp engine that fills it is preferred over anything computed here.
-
-    Derived: exact once the caller reaches the end (a short page proves it), and
-    a lower bound while full pages keep coming. Neither engine route exposes a
-    count, and the only way to compute one would be to fetch every record —
-    which for sessions fans out a ``chat.history`` RPC per session. A bound that
-    is honest about being a bound beats advertising pages that return nothing;
-    the endpoints document it on the field.
-    """
-    offset = (page_params.page - 1) * page_params.page_size
-    has_more = len(items) > page_params.page_size
-    visible = items[: page_params.page_size]
-    if reported is not None:
-        return reported, visible
-    return offset + len(visible) + (1 if has_more else 0), visible
-
-
-def _history_page(
-    items: list[Any], page_params: Any, *, reported: int | None
-) -> tuple[int, list[Any]]:
-    """The requested page cut out of a "newest N" tail. See :func:`_history_window`.
-
-    ``items`` is the newest ``offset + page_size + 1`` messages in chronological
-    order, so the page is measured from the *end*: page 1 is the most recent
-    ``page_size`` messages, page 2 the ``page_size`` before those. Paging a chat
-    history backwards is the only direction a tail-limited fetch can serve —
-    reaching the oldest page directly would mean fetching the whole history,
-    which has no count to size the request from.
-
-    Messages stay in chronological order *within* a page; it is the pages that
-    run newest-first.
-
-    The total falls out of the same window and is stronger than the session
-    list's: when the tail comes back short, it is the whole history, so the
-    count is exact. While it comes back full, it is a lower bound — the same
-    contract ``MessagePage.total`` documents. That equivalence only holds for
-    pages within the depth cap, which is why :func:`_require_within_depth`
-    rejects the rest rather than letting a clipped page look like the end.
-    """
-    size = page_params.page_size
-    skip = (page_params.page - 1) * size
-    n = len(items)
-    end = n - skip
-    # The lookahead item exists to prove more history remains; it must never be
-    # served as content. _require_within_depth keeps every served page a whole
-    # page below the cap, so this floor no longer has a page to trim — it stays
-    # as the invariant's backstop, and still binds if a device ever returns more
-    # than the limit asked for.
-    floor = max(0, n - _MAX_HISTORY_DEPTH)
-    visible = items[max(floor, end - size) : end] if end > floor else []
-    if reported is not None:
-        return reported, visible
-    return n, visible
+def _raise_expert_error(error: Exception) -> None:
+    if isinstance(error, ExpertBotNotFoundError):
+        raise EngineResourceNotFoundError("friend session not found") from error
+    if isinstance(error, ExpertConnectionError):
+        raise EngineDeviceNotReadyError("friend bot runtime is not ready") from error
+    raise error
 
 
 @router.get("", response_model=Envelope[SessionPage])
@@ -329,15 +202,13 @@ async def list_sessions(
         ),
     ] = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[SessionPage]:
     """List the bot's sessions."""
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
+    facts = await _resolve_session_backend(
+        relay=relay, friendships=friendships, expert=expert, request=request,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
     )
     params: dict[str, Any] = _window(page)
     if agent_id:
@@ -347,6 +218,19 @@ async def list_sessions(
     # came back, or the page boundaries would not line up with the filter.
     if session_key:
         params["session_key"] = session_key
+    if facts is None:
+        try:
+            friend_result = await expert.list_chat_sessions(
+                user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+                session_key=session_key, limit=params["limit"],
+                offset=params["offset"],
+                iam_token=request.cookies.get("IAM_TOKEN") or None,
+            )
+        except Exception as error:
+            _raise_expert_error(error)
+        mapped = [_map_session(d) for d in _as_list(friend_result)]
+        total, items = _page(mapped, page, reported=friend_result.get("total"))
+        return page_envelope(total, items, request)
     result = await relay.call(
         bot_id=bot_id,
         owner_id=owner_id,
@@ -372,16 +256,41 @@ async def create_session(
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[Session]:
     """Create a session."""
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
+    facts = await _resolve_session_backend(
+        relay=relay, friendships=friendships, expert=expert, request=request,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
     )
+    if facts is None:
+        try:
+            created_result = await expert.create_chat_session(
+                user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+                iam_token=request.cookies.get("IAM_TOKEN") or None,
+            )
+            session_key = created_result.get("session_key")
+            if not session_key:
+                raise EngineDeviceNotReadyError("friend bot runtime is not ready")
+            requested = {
+                key: value
+                for key, value in body.model_dump().items()
+                if value is not None
+            }
+            if requested:
+                item = await expert.update_owned_chat_session(
+                    user_id, bot_id, owner_id, session_key, requested,
+                    request.cookies.get("IAM_TOKEN") or None,
+                )
+            else:
+                item = await expert.get_owned_chat_session(
+                    user_id, bot_id, owner_id, session_key,
+                    request.cookies.get("IAM_TOKEN") or None,
+                )
+        except Exception as error:
+            _raise_expert_error(error)
+        return created(_map_session(item), request)
     result = await relay.call(
         bot_id=bot_id,
         owner_id=owner_id,
@@ -415,16 +324,27 @@ async def list_session_favorites(
         str | None, Query(description="Only favorites belonging to this agent.")
     ] = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[SessionPage]:
     """List sessions the acting user has favorited on this bot runtime."""
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
+    facts = await _resolve_session_backend(
+        relay=relay, friendships=friendships, expert=expert, request=request,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
     )
+    if facts is None:
+        window = _window(page)
+        try:
+            friend_result = await expert.list_chat_sessions(
+                user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+                favorite_only=True, limit=window["limit"], offset=window["offset"],
+                iam_token=request.cookies.get("IAM_TOKEN") or None,
+            )
+        except Exception as error:
+            _raise_expert_error(error)
+        mapped = [_map_session(d) for d in _as_list(friend_result)]
+        total, items = _page(mapped, page, reported=friend_result.get("total"))
+        return page_envelope(total, items, request)
     params: dict[str, Any] = {**_window(page), "user_id": user_id}
     if agent_id:
         params["agent_id"] = agent_id
@@ -452,6 +372,8 @@ async def get_session(
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[Session]:
     """Get one session.
 
@@ -460,14 +382,19 @@ async def get_session(
     """
     # A colon is legal in a path segment (RFC 3986), so ids route as-is. An id
     # containing "/" would not be addressable, but no engine id format has one.
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
+    facts = await _resolve_session_backend(
+        relay=relay, friendships=friendships, expert=expert, request=request,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
     )
+    if facts is None:
+        try:
+            item = await expert.get_owned_chat_session(
+                user_id, bot_id, owner_id, session_id,
+                request.cookies.get("IAM_TOKEN") or None,
+            )
+        except Exception as error:
+            _raise_expert_error(error)
+        return envelope(_map_session(item), request)
     result = await relay.call(
         bot_id=bot_id,
         owner_id=owner_id,
@@ -490,15 +417,23 @@ async def _set_session_favorite(
     stage: RuntimeStage,
     favorited: bool,
     relay: EngineRuntimeRelayProtocol,
+    friendships: HumanBotFriendshipServiceProtocol,
+    expert: ExpertChatServiceProtocol,
+    request: Request,
 ) -> SessionFavorite:
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
+    facts = await _resolve_session_backend(
+        relay=relay, friendships=friendships, expert=expert, request=request,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
     )
+    if facts is None:
+        try:
+            await expert.set_owned_chat_session_favorite(
+                user_id, bot_id, owner_id, session_id, favorited,
+                request.cookies.get("IAM_TOKEN") or None,
+            )
+        except Exception as error:
+            _raise_expert_error(error)
+        return SessionFavorite(session_id=session_id, favorited=favorited)
     encoded_session_id = quote(session_id, safe="")
     await relay.call(
         bot_id=bot_id,
@@ -522,6 +457,8 @@ async def add_session_favorite(
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[SessionFavorite]:
     """Idempotently favorite one session for the acting user."""
     result = await _set_session_favorite(
@@ -532,6 +469,9 @@ async def add_session_favorite(
         stage=stage,
         favorited=True,
         relay=relay,
+        friendships=friendships,
+        expert=expert,
+        request=request,
     )
     return envelope(result, request)
 
@@ -546,6 +486,8 @@ async def remove_session_favorite(
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[SessionFavorite]:
     """Idempotently remove the acting user's favorite marker."""
     result = await _set_session_favorite(
@@ -556,6 +498,9 @@ async def remove_session_favorite(
         stage=stage,
         favorited=False,
         relay=relay,
+        friendships=friendships,
+        expert=expert,
+        request=request,
     )
     return envelope(result, request)
 
@@ -571,19 +516,26 @@ async def update_session(
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[Session]:
     """Update a session. Omitted fields are left unchanged."""
     # Publicly a PATCH on the resource; the engine models the same operation as
     # a POST to an /update sub-path.
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
+    facts = await _resolve_session_backend(
+        relay=relay, friendships=friendships, expert=expert, request=request,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
     )
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
+    if facts is None:
+        try:
+            item = await expert.update_owned_chat_session(
+                user_id, bot_id, owner_id, session_id, payload,
+                request.cookies.get("IAM_TOKEN") or None,
+            )
+        except Exception as error:
+            _raise_expert_error(error)
+        return envelope(_map_session(item), request)
     result = await relay.call(
         bot_id=bot_id,
         owner_id=owner_id,
@@ -613,16 +565,22 @@ async def delete_session(
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[Deleted]:
     """Delete a session."""
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
+    facts = await _resolve_session_backend(
+        relay=relay, friendships=friendships, expert=expert, request=request,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
     )
+    if facts is None:
+        try:
+            await expert.delete_owned_chat_session(
+                user_id, bot_id, owner_id, session_id
+            )
+        except Exception as error:
+            _raise_expert_error(error)
+        return deleted(request)
     await relay.call(
         bot_id=bot_id,
         owner_id=owner_id,
@@ -930,6 +888,8 @@ async def list_session_messages(
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[MessagePage]:
     """Read a session's message history, newest page first.
 
@@ -940,15 +900,26 @@ async def list_session_messages(
     depth is rejected with 422 rather than returned empty, so an end of history
     is never confused with the limit of what this endpoint serves.
     """
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
+    facts = await _resolve_session_backend(
+        relay=relay, friendships=friendships, expert=expert, request=request,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
     )
     _require_within_depth(page)
+    if facts is None:
+        window = _history_window(page)
+        try:
+            friend_result = await expert.list_owned_chat_session_messages(
+                user_id, bot_id, owner_id, session_id,
+                limit=window["limit"], offset=0,
+                iam_token=request.cookies.get("IAM_TOKEN") or None,
+            )
+        except Exception as error:
+            _raise_expert_error(error)
+        mapped = [_map_message(d, session_id) for d in _as_list(friend_result)]
+        total, items = _history_page(
+            mapped, page, reported=friend_result.get("total")
+        )
+        return page_envelope(total, items, request)
     result = await relay.call(
         bot_id=bot_id,
         owner_id=owner_id,
@@ -978,16 +949,23 @@ async def clear_session_messages(
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[Deleted]:
     """Clear a session's message history, keeping the session."""
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
+    facts = await _resolve_session_backend(
+        relay=relay, friendships=friendships, expert=expert, request=request,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
     )
+    if facts is None:
+        try:
+            await expert.clear_owned_chat_session_messages(
+                user_id, bot_id, owner_id, session_id,
+                request.cookies.get("IAM_TOKEN") or None,
+            )
+        except Exception as error:
+            _raise_expert_error(error)
+        return deleted(request)
     await relay.call(
         bot_id=bot_id,
         owner_id=owner_id,

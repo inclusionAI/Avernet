@@ -62,3 +62,28 @@ class ExpertChatServiceProtocol(Protocol):
         owner_id: str,
         session_key: str,
     ) -> bool: ...
+
+    async def get_owned_chat_session(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str,
+        iam_token: Optional[str] = None,
+    ) -> Dict[str, Any]: ...
+
+    async def list_owned_chat_session_messages(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str,
+        limit: int, offset: int = 0, iam_token: Optional[str] = None,
+    ) -> Dict[str, Any]: ...
+
+    async def update_owned_chat_session(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str,
+        fields: Dict[str, Any], iam_token: Optional[str] = None,
+    ) -> Dict[str, Any]: ...
+
+    async def clear_owned_chat_session_messages(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str,
+        iam_token: Optional[str] = None,
+    ) -> bool: ...
+
+    async def set_owned_chat_session_favorite(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str,
+        favorited: bool, iam_token: Optional[str] = None,
+    ) -> bool: ...

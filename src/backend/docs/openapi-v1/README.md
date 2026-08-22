@@ -790,6 +790,17 @@ messages channel; operating it stays with its team. Anyone else is answered
 lookup refuses (fail closed). Both ids are logged at the refusal; the
 response carries neither.
 
+The **sessions** group additionally serves a human who has an accepted BCN
+friendship with the addressed Bot. This is a conversation path, not an
+operator grant: it is draft-only, exposes only that human's Backend-owned
+Expert Chat sessions, and continues to use Expert Chat's existing session,
+message, connection, and runtime adapters. BCN is consulted on every request
+as the friendship authority; its failure is fail-closed, and Backend's legacy
+chat-list row is only a compatibility projection. All non-session
+engine-runtime groups keep the owner/collaborator rule above. Friend callers
+must name `owner_id` until BCN provides an exact Bot lookup that resolves the
+qualified `{bot_id}:{owner_id}` identity.
+
 Two optional query parameters name the target, following the same placement
 rule as `user_id` (query string, never a body field or a path segment):
 

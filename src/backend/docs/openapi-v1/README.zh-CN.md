@@ -589,6 +589,13 @@ Bot 的**拥有者**，或 **member 级及以上的协作者** —— 与内部�
 `user_id` 不匹配的唯一含义。协作者查询失败时拒绝（fail closed）。拒绝点会把两个 id
 写入日志；响应不携带任何一个。
 
+**sessions** 组额外允许与目标 Bot 在 BCN 中存在已接受好友关系的人类调用者访问。这是
+聊天通道，不授予运维权限：仅支持 draft，只能看到该用户在 Backend Expert Chat 中拥有
+的会话，并继续复用 Expert Chat 现有的 Session、消息、连接和 Runtime 适配器。每次请求
+都以 BCN 为好友关系权威来源；BCN 查询失败时关闭访问，Backend 旧聊天列表记录仅作为兼容
+投影。其他 engine-runtime 分组仍只允许拥有者/协作者。由于 BCN 尚无按 Bot 精确查询并
+解析 `{bot_id}:{owner_id}` 的接口，好友调用者目前必须显式传 `owner_id`。
+
 两个可选的 query 参数指定目标，遵循与 `user_id` 相同的放置规则（query string，从不
 放在 body 或路径段）：
 

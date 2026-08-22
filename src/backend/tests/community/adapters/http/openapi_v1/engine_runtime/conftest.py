@@ -22,6 +22,10 @@ from tests.community.adapters.http.openapi_v1.conftest import (
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.human_bot_friendship_service import (
+    HumanBotFriendshipServiceProtocol,
+)
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
 
@@ -130,8 +134,44 @@ def relay() -> FakeRelay:
     return FakeRelay()
 
 
+class FakeFriendships:
+    def __init__(self) -> None:
+        self.allowed = False
+        self.calls: list[dict[str, Any]] = []
+
+    def is_friend(self, **kwargs) -> bool:
+        self.calls.append(kwargs)
+        return self.allowed
+
+
+class FakeExpertChat:
+    """Small recording fake for the friend-backed OpenAPI branch."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.sessions: dict[str, Any] = {"items": [], "total": 0}
+
+    def add_chat_bot(self, *args, **kwargs):
+        self.calls.append(("add_chat_bot", args, kwargs))
+        return {}
+
+    async def list_chat_sessions(self, *args, **kwargs):
+        self.calls.append(("list_chat_sessions", args, kwargs))
+        return self.sessions
+
+
 @pytest.fixture
-def make_client(relay):
+def friendships() -> FakeFriendships:
+    return FakeFriendships()
+
+
+@pytest.fixture
+def expert() -> FakeExpertChat:
+    return FakeExpertChat()
+
+
+@pytest.fixture
+def make_client(relay, friendships, expert):
     """Build a TestClient hosting ``router`` with the fake relay bound.
 
     ``caller`` is who the request authenticates and names as its ``user_id``
@@ -148,6 +188,8 @@ def make_client(relay):
         class _M(Module):
             def configure(self, binder):
                 binder.bind(EngineRuntimeRelayProtocol, to=relay)
+                binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
+                binder.bind(ExpertChatServiceProtocol, to=expert)
 
         app = FastAPI()
         app.include_router(router)
