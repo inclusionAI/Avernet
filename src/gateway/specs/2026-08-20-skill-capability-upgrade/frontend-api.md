@@ -93,7 +93,7 @@ Backend 真实路由自动生成并经过向前兼容检查，前端可据此查
 - `files`：重复字段，包含选中文件夹中的全部文件。
 - `file_paths`：可选 JSON 字符串数组，与 `files` 一一对应，保存相对目录结构；不传时退回每个文件名。
 - 与 raw ZIP 共用同一包校验、唯一 `SKILL.md`、同名替换、新建 inactive、大小/文件数限制和响应 Envelope。
-- 旧 `/api/skills/upload` 继续作为兼容 Adapter；其 `files + file_paths` 语义不得漂移。
+- 旧 `/api/skills/upload` 原样保留，本期不修改其实现；新接口沿用其 `files + file_paths` wire 语义。新 OpenAPI 的文件夹与 raw ZIP 入口在请求解码后共用同一个 `LocalSkillUploadService` 生命周期。
 
 ### 4.3 Item 与内容
 
