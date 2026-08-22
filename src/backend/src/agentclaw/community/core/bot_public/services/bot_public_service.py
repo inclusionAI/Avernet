@@ -1452,8 +1452,10 @@ class BotPublicService:
                 request_id,
             )
             raise BotCatalogSearchUnavailableError() from exc
-        backend_bots = self._bot_repository.list_public_bots_by_owner_bot_pairs(
-            [(address.bot_id, address.entity_id) for address in addresses]
+        _, backend_bots = self._bot_repository.list_bots_by_owner_bot_pairs(
+            [(address.bot_id, address.entity_id) for address in addresses],
+            page=1,
+            page_size=max(len(addresses), 1),
         )
         bots_by_address = {
             address: bot

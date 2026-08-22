@@ -113,6 +113,30 @@ def test_list_public_bots_empty_pairs(repo):
     assert repo.list_public_bots_by_owner_bot_pairs([]) == []
 
 
+def test_list_live_bots_by_owner_bot_pairs_keeps_non_public_and_scopes_live_rows(
+    repo, monkeypatch
+):
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    with avernet_tenant_scope("tenant-a"):
+        repo.insert(_data(bot_id="visible", owner_id="o", public="0"))
+        repo.insert(_data(bot_id="deleted", owner_id="o", is_delete=1))
+    with avernet_tenant_scope("tenant-b"):
+        repo.insert(_data(bot_id="visible", owner_id="o", public="0"))
+
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    with avernet_tenant_scope("tenant-a"):
+        repo.insert(_data(bot_id="visible", owner_id="o", public="0"))
+
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    with avernet_tenant_scope("tenant-a"):
+        total, got = repo.list_bots_by_owner_bot_pairs(
+            [("visible", "o"), ("deleted", "o")], page=1, page_size=2
+        )
+
+    assert total == 1
+    assert [bot["bot_id"] for bot in got] == ["visible"]
+
+
 # ── Comment 1: the real caller (_batch_get_public_bots) end-to-end ──
 
 def _discover_service(repo):
