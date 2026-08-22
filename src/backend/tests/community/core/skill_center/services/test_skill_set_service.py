@@ -1041,8 +1041,8 @@ class TestAddSkillsToSetOwnerIdResolution:
         return svc
 
     @pytest.mark.asyncio
-    async def test_auto_activate_uses_bot_owner_id(self):
-        """When bot has owner_id, it should be used for activate_skill."""
+    async def test_auto_activate_uses_entity_owner_id(self):
+        """The Skill BFF's entity_id is the addressed Bot owner."""
         bot_repo = MagicMock()
         bot_repo.get_by_id_and_owner.return_value = {"id": "bot-1", "owner_id": "owner_abc"}
 
@@ -1061,20 +1061,16 @@ class TestAddSkillsToSetOwnerIdResolution:
 
         svc = self._make_svc(bot_repo=bot_repo, skill_repo=skill_repo, skill_service=skill_service)
         svc.skill_set_repo = mock_set_repo
+        svc.entity_id = "owner_abc"
 
         with patch("agentclaw.community.core.skill_center.services.skill_set_service.SkillSetMetadataWriter"):
             result = await svc.add_skills_to_set("1", ["10"], user_id="user1")
 
         assert result["success"] == [{"skill_id": "10", "name": "skill-a"}]
-        # activate_skill should be called with owner_id from bot
+        # Runtime receives the owner-scoped entity_id supplied by the BFF.
         skill_service.activate_skill.assert_called_once_with(
             "git://biz/skill-a", user_id="owner_abc", bolt_id="bot-1"
         )
-        assert bot_repo.get_by_id_and_owner.call_args_list[-1].args == (
-            "bot-1",
-            "staff_entity1",
-        )
-        bot_repo.get_by_id.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_auto_activate_false_is_reported_and_not_synced(self):
@@ -1251,8 +1247,8 @@ class TestSwitchToSkillSetOwnerIdResolution:
         switcher._do_device_sync = MagicMock(return_value={"success": True})
 
     @pytest.mark.asyncio
-    async def test_switch_uses_bot_owner_id(self):
-        """When bot has owner_id, switch_to_skill_set should use it for activate_skill."""
+    async def test_switch_uses_entity_owner_id(self):
+        """The Skill BFF's entity_id is the addressed Bot owner."""
         bot_repo = MagicMock()
         bot_repo.get_by_id_and_owner.return_value = {"id": "bot-1", "owner_id": "owner_xyz"}
 
@@ -1267,6 +1263,7 @@ class TestSwitchToSkillSetOwnerIdResolution:
         switcher, svc = self._make_switcher(
             bot_repo=bot_repo, skill_service=skill_service, skill_set_repo=skill_set_repo,
         )
+        svc.entity_id = "owner_xyz"
         svc.get_set_skills = MagicMock(return_value=[
             {"id": "10", "git_path": "git://biz/skill-a"},
         ])
@@ -1281,11 +1278,6 @@ class TestSwitchToSkillSetOwnerIdResolution:
         skill_service.activate_skill.assert_called_once_with(
             "git://biz/skill-a", user_id="owner_xyz", bolt_id="bot-1"
         )
-        assert bot_repo.get_by_id_and_owner.call_args_list[-1].args == (
-            "bot-1",
-            "staff_entity1",
-        )
-        bot_repo.get_by_id.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_switch_fallback_to_entity_id_when_no_owner(self):
@@ -1405,8 +1397,8 @@ class TestSyncSkillSetToActiveOwnerIdResolution:
         return switcher, svc
 
     @pytest.mark.asyncio
-    async def test_sync_uses_bot_owner_id(self):
-        """When bot has owner_id, sync_skill_set_to_active should use it for activate_skill."""
+    async def test_sync_uses_entity_owner_id(self):
+        """The Skill BFF's entity_id is the addressed Bot owner."""
         bot_repo = MagicMock()
         bot_repo.get_by_id_and_owner.return_value = {"id": "bot-1", "owner_id": "owner_sync"}
 
@@ -1423,6 +1415,7 @@ class TestSyncSkillSetToActiveOwnerIdResolution:
         switcher, svc = self._make_switcher(
             bot_repo=bot_repo, skill_service=skill_service, skill_set_repo=skill_set_repo,
         )
+        svc.entity_id = "owner_sync"
         svc.get_set_skills = MagicMock(return_value=[
             {"id": "10", "git_path": "git://biz/skill-a"},
         ])
