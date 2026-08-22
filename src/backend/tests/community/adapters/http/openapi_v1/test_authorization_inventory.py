@@ -332,8 +332,10 @@ def test_scaffolding_burn_down_is_reported():
 _DEFERRED_OPERATIONS = frozenset(
     {
         # Not a structural limit: these routes do carry {bot_id} on the path.
-        # They pass entity_id=body.entity_id to the service beside it, so a gate
-        # would adjudicate one thing while the operation acted on another; and
+        # Each also carries an entity_id the gate would not adjudicate — from
+        # the body for apply/diagnose/preview/rollback, from the query string
+        # for dim-history and dim-report — so a gate would adjudicate one thing
+        # while the operation acted on another; and
         # require_harness_bot_access resolves ownership with a repository method
         # documented as performing no owner check, skipping the check entirely
         # for bot_id == "default". #1323 filed all three as a defect for that
@@ -640,8 +642,53 @@ def test_bot_id_anywhere_on_the_path_is_accepted():
         AUTHORIZATION.pop(key, None)
 
 
+#: Retiring addresses that keep a check of their own, so their replacement may
+#: migrate without them.
+#:
+#: Every entry here must *also* be one the seam could not adjudicate anyway —
+#: asserted below, so this cannot become a place to park a twin that simply was
+#: not migrated. These four reach ``_bot_behind``, which calls
+#: ``local_skill_query_service.get_local_skill`` and therefore
+#: ``_require_view_access`` — a MEMBER check on the bot the skill record names.
+#: This feature does not touch that module; deferring the three current skills
+#: rows that share it is precisely what keeps it in place.
+_TWINS_CHECKED_INDEPENDENTLY = frozenset(
+    {
+        ("GET", "/openapi/v1/bots/skills/{skill_id}"),
+        ("DELETE", "/openapi/v1/bots/skills/{skill_id}"),
+        ("POST", "/openapi/v1/bots/skills/{skill_id}/activate"),
+        ("POST", "/openapi/v1/bots/skills/{skill_id}/deactivate"),
+    }
+)
+
+
+def _replacement_rule(method: str, legacy_path: str, replacement_path: str):
+    """The rule governing the address that replaced this one, or raise.
+
+    Usually the same method at a new path. One pair (auth-status) kept its path
+    and changed method, so resolve by path while excluding the legacy row
+    itself. Anything that resolves to neither is raised rather than skipped: a
+    silent ``None`` here would quietly excuse the very twin this exists to
+    catch.
+    """
+    candidates = {
+        key: rule
+        for key, rule in AUTHORIZATION.items()
+        if key[1] == replacement_path and key != (method, legacy_path)
+    }
+    if (method, replacement_path) in candidates:
+        return candidates[(method, replacement_path)]
+    if len(candidates) == 1:
+        return next(iter(candidates.values()))
+    raise AssertionError(
+        f"cannot tell which rule replaced {method} {legacy_path}: "
+        f"{replacement_path} carries {sorted(candidates)}. Resolve it here "
+        "rather than letting the twin check skip this address."
+    )
+
+
 def test_a_retiring_twin_migrates_with_its_replacement():
-    """A twin left ``INHERITED`` after its replacement gains ``Check`` is a hole.
+    """A twin left behind when its replacement gains ``Check`` is a hole.
 
     The retiring addresses under ``deprecated/`` re-register the *replacement's*
     endpoint under their own key. That is why they are checked at all today: the
@@ -650,13 +697,13 @@ def test_a_retiring_twin_migrates_with_its_replacement():
     attaches the gate per route, and a twin whose row says ``INHERITED`` gets
     nothing.
 
-    So the moment a group flips its rows to ``Check`` and deletes the service
-    call the twin was relying on, that twin serves unguarded unless its own row
-    moved too. Nothing else in this file would notice: the burn-down counts
+    So when a group flips its rows to ``Check`` and deletes the service call the
+    twin was relying on, that twin serves unguarded unless something else covers
+    it. Nothing else in this file would notice: the burn-down counts
     ``ServiceChecked`` rows, and an abandoned twin is ``INHERITED``.
 
-    This is not a hypothetical failure mode for this package. ``_collection_shim``
-    in ``deprecated/skills.py`` records that the legacy skills addresses shipped
+    Not hypothetical for this package. ``_collection_shim`` in
+    ``deprecated/skills.py`` records that the legacy skills addresses shipped
     without their grant check for exactly one commit, for exactly this reason —
     ``legacy_route`` registers an endpoint, not a route, so route-level
     dependencies do not carry across. ``admission.py`` answered it by deriving
@@ -664,24 +711,23 @@ def test_a_retiring_twin_migrates_with_its_replacement():
     deliberately does not derive, so this asserts what derivation would have
     guaranteed.
 
-    Vacuous until the first group migrates, and load-bearing from then on.
+    Two remedies, and the second is not a loophole: a twin either carries
+    ``Check`` itself, or keeps a check of its own and is recorded above. The
+    second exists because the first is *impossible* for some twins — a legacy
+    address with no ``{bot_id}`` on its path cannot carry ``Check`` at all, since
+    ``_assert_check_rows_are_enforceable`` refuses exactly that. Without it the
+    two guards would deadlock the moment Task 9 migrates the skills
+    ``{skill_id}`` operations: this test would demand ``Check`` on their twins
+    and assembly would refuse it.
     """
     from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
 
     abandoned = []
     for (method, legacy_path), replacement_path in LEGACY_ROUTES.items():
-        # The replacement usually answers the same method at a new path. One
-        # pair (auth-status) kept its path and changed method, so resolve by
-        # path while excluding the legacy row itself.
-        candidates = {
-            key: rule
-            for key, rule in AUTHORIZATION.items()
-            if key[1] == replacement_path and key != (method, legacy_path)
-        }
-        replacement = candidates.get((method, replacement_path))
-        if replacement is None and len(candidates) == 1:
-            replacement = next(iter(candidates.values()))
+        replacement = _replacement_rule(method, legacy_path, replacement_path)
         if not isinstance(replacement, Check):
+            continue
+        if (method, legacy_path) in _TWINS_CHECKED_INDEPENDENTLY:
             continue
         if not isinstance(AUTHORIZATION.get((method, legacy_path)), Check):
             abandoned.append(f"{method} {legacy_path} -> {replacement_path}")
@@ -691,4 +737,26 @@ def test_a_retiring_twin_migrates_with_its_replacement():
         "carries Check, but did not migrate with it — the gate attaches per "
         "route, so they are served with whatever the deleted service call used "
         "to provide, which is nothing: " + ", ".join(sorted(abandoned))
+    )
+
+
+def test_independently_checked_twins_could_not_have_migrated_anyway():
+    """The exemption above must be forced, never chosen.
+
+    A twin that *could* carry ``Check`` and simply was not migrated is the exact
+    hole the sibling test exists to catch, so exempting one would defeat it. Each
+    entry must therefore be an address the seam cannot adjudicate at all: no
+    ``{bot_id}`` on its path, which ``_assert_check_rows_are_enforceable``
+    refuses outright.
+    """
+    avoidable = sorted(
+        f"{method} {path}"
+        for method, path in _TWINS_CHECKED_INDEPENDENTLY
+        if "{bot_id}" in path
+    )
+
+    assert not avoidable, (
+        "these twins carry {bot_id} on their path, so they could migrate with "
+        "their replacement and must not be exempted from doing so: "
+        + ", ".join(avoidable)
     )
