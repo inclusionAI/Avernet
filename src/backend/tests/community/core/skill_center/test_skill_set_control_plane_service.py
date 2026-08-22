@@ -11,6 +11,7 @@ from agentclaw.community.core.repository.implementations.skill_center.skill_set_
     SkillSetMutation,
 )
 from agentclaw.community.core.skill_center.errors import (
+    LocalSkillNotReadyError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
@@ -74,6 +75,58 @@ class _CreateRepository(_Repository):
             "is_default": False,
             "is_active": False,
         }
+
+
+class _InactiveMembershipRepository(_Repository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.membership_calls: list[tuple[str, dict]] = []
+
+    @staticmethod
+    def _mutation() -> SkillSetMutation:
+        return SkillSetMutation(
+            item={
+                "id": "set-1",
+                "name": "draft",
+                "is_default": False,
+                "is_active": False,
+            },
+            changed=True,
+            previous_state=SkillSetDesiredState(set(), {}, {}),
+        )
+
+    def get_set(self, **_kwargs):
+        return {"id": "set-1", "is_default": False, "is_active": False}
+
+    def add_skill(self, **kwargs) -> SkillSetMutation:
+        self.membership_calls.append(("add_skill", kwargs))
+        return self._mutation()
+
+    def remove_skill(self, **kwargs) -> SkillSetMutation:
+        self.membership_calls.append(("remove_skill", kwargs))
+        return self._mutation()
+
+    def add_mcp(self, **kwargs) -> SkillSetMutation:
+        self.membership_calls.append(("add_mcp", kwargs))
+        return self._mutation()
+
+    def remove_mcp(self, **kwargs) -> SkillSetMutation:
+        self.membership_calls.append(("remove_mcp", kwargs))
+        return self._mutation()
+
+
+class _ActiveMembershipRepository(_InactiveMembershipRepository):
+    @staticmethod
+    def _mutation() -> SkillSetMutation:
+        mutation = _InactiveMembershipRepository._mutation()
+        return SkillSetMutation(
+            item={**mutation.item, "is_active": True},
+            changed=mutation.changed,
+            previous_state=mutation.previous_state,
+        )
+
+    def get_set(self, **_kwargs):
+        return {"id": "set-1", "is_default": False, "is_active": True}
 
 
 class _Bots:
@@ -154,6 +207,16 @@ class _AicodingImageBots(_Bots):
             **super().get_unique_by_id(bot_id),
             "active_engine": "claude_code",
             "template_type": "personalCoding",
+        }
+
+
+class _NotReadyApplicationCodingBots(_Bots):
+    def get_unique_by_id(self, bot_id: str) -> dict:
+        return {
+            **super().get_unique_by_id(bot_id),
+            "status": "PENDING",
+            "active_engine": "claude_code",
+            "template_type": "applicationCoding",
         }
 
 
@@ -768,6 +831,133 @@ def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
             "engine_type": "openclaw",
         }
     ]
+
+
+def test_create_inactive_set_does_not_require_runtime_readiness() -> None:
+    repository = _CreateRepository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_NotReadyApplicationCodingBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    result = service.create_set(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        name="draft",
+        description=None,
+    )
+
+    assert result["is_active"] is False
+    assert repository.create_calls[0]["engine_type"] == "claude_code"
+
+
+def test_inactive_set_metadata_updates_do_not_require_runtime_readiness() -> None:
+    repository = _Repository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_NotReadyApplicationCodingBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    updated = service.update_set(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        name="renamed draft",
+        description=None,
+    )
+    service.delete_set(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+    )
+
+    assert updated["id"] == "set-1"
+    assert repository.update_calls[0]["engine_type"] == "claude_code"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method_name", "resource_kwargs"),
+    [
+        ("add_skill", {"skill_id": "skill-1"}),
+        ("remove_skill", {"skill_id": "skill-1"}),
+        ("add_mcp", {"server_code": "mcp.weather"}),
+        ("remove_mcp", {"server_code": "mcp.weather"}),
+    ],
+)
+async def test_inactive_set_membership_does_not_require_runtime_readiness(
+    method_name: str, resource_kwargs: dict[str, str]
+) -> None:
+    repository = _InactiveMembershipRepository()
+    runtime = _Runtime(fail_first=False)
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_NotReadyApplicationCodingBots(),
+        runtime=runtime,
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    result = await getattr(service, method_name)(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        **resource_kwargs,
+    )
+
+    assert result["is_active"] is False
+    assert repository.membership_calls[0][0] == method_name
+    assert runtime.snapshot_calls == []
+    assert runtime.reconcile_calls == []
+
+
+@pytest.mark.asyncio
+async def test_active_set_membership_still_requires_runtime_readiness() -> None:
+    repository = _ActiveMembershipRepository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_NotReadyApplicationCodingBots(),
+        runtime=_Runtime(fail_first=False),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    with pytest.raises(LocalSkillNotReadyError):
+        await service.add_skill(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="true-owner",
+            set_id="set-1",
+            skill_id="skill-1",
+        )
+
+    assert repository.membership_calls == []
 
 
 def test_default_read_rejects_missing_bot():
