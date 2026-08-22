@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import json
 import os
+
+import httpx
 from pathlib import Path
 from typing import Any
 
@@ -446,6 +448,22 @@ async def _dispatch(
         _tc = translate_bcn(_raw_obj)
         if _tc is None:
             return envelope({"ok": True}, request, message="bcn event not handled")
+        # 从 CloudEvent 取 scope.run_id → 经 BCS GET /state-machine-runs/{run_id} 查 run 明细
+        # → 把明细覆盖 _raw_callback_body,落 task_callback.orig_callback_data(而非原始 CloudEvent)。
+        _run_id = ((_raw_obj.get("scope") or {}).get("run_id")) if isinstance(_raw_obj, dict) else None
+        if _run_id:
+            try:
+                _bcs_base = os.environ.get("BCS_API_BASE_URL", "http://127.0.0.1:21000").rstrip("/")
+                async with httpx.AsyncClient(timeout=10.0) as _cli:
+                    _resp = await _cli.get(f"{_bcs_base}/state-machine-runs/{_run_id}")
+                if _resp.status_code == 200:
+                    _tc.data.data["_raw_callback_body"] = _resp.json()
+                    logger.info("[callback] BCN run 明细已取回 run_id=%s → 作为 orig_callback_data 落库", _run_id)
+                else:
+                    logger.warning("[callback] BCS run 明细非 200 run_id=%s status=%s body=%s",
+                                   _run_id, _resp.status_code, _resp.text[:200])
+            except Exception as exc:  # noqa: BLE001 查明细失败不阻断落库(fallback 存原始 CloudEvent)
+                logger.warning("[callback] 查 BCS run 明细失败 run_id=%s: %s", _run_id, exc)
         await svc.callback.ingest(_tc.data)
         return envelope({"ok": True}, request)
     # 羽雀/框架节点级回投:先按 schema_cls(TaskCallbackRequest 富 schema)校验 → translate → report_result/start_run;
