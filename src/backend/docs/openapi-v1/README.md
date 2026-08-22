@@ -973,7 +973,7 @@ anything runs.
 | `NoCheck(reason)` | nobody, deliberately | no |
 | `ServiceChecked(level, where)` | a service, elsewhere — *scaffolding* | no |
 | `OWNER_SCOPED` | nobody yet; resolves `(bot_id, caller)` — *scaffolding* | no |
-| `SELF_CHECKED` | a retiring `deprecated/` address — *scaffolding* | no |
+| `INHERITED` | the address that replaced it — *scaffolding* | no |
 
 `Check`'s level is a parameter rather than five more modes because the bars
 really do differ per operation — MEMBER to drive a bot's sessions, ADMIN to
@@ -983,6 +983,13 @@ operation with no bot dimension at all, and one that is bot-scoped and
 *intentionally* unguarded (render-screen reads serve share viewers who hold no
 Editor relation). Without a written reason a reviewer cannot tell the second
 from an oversight.
+
+`INHERITED` carries nothing because there is nothing of its own to carry: a
+`deprecated/` address is the replacement's *own endpoint function* re-registered
+at the old path, so the row that governs it is the replacement's row. It was
+called `SELF_CHECKED` until 2026-08-22, a name that claimed a check no legacy
+route performs and collided with `deprecated`'s unrelated `SELF_CHECKED_ROUTES`
+— which really does mean a router that checks the grant itself.
 
 The other three are scaffolding and are deleted when their last row leaves
 them. `scaffolding_row_count()` publishes how many remain, and a test fails if
@@ -1768,6 +1775,15 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 ---
 
 ## Changelog (append a dated line whenever you move the board)
+
+- **2026-08-22** — **`SELF_CHECKED` renamed to `INHERITED`.** Naming only; no
+  row changed mode, no route changed behaviour, and the count in each mode is
+  what it was. The old name asserted a property no `deprecated/` route has —
+  none of them checks itself, because each is the replacement's own endpoint
+  function re-registered at the path it used to have, so what governs it is the
+  replacement's row. It also collided with `deprecated`'s `SELF_CHECKED_ROUTES`,
+  an unrelated admission concept that *does* mean "this router checks the grant
+  itself"; that one keeps its name. See **The five modes** above.
 
 - **2026-08-21** — **One authorization seam, inert on arrival.** Every public
   operation now declares what governs it in `openapi_v1/authorization.py`, and
