@@ -577,12 +577,15 @@ def test_a_check_row_without_bot_id_on_the_path_fails_assembly():
     template carries no ``{bot_id}`` therefore hands the gate nothing, and the
     row would adjudicate a bot the handler never saw.
 
-    Two real sets of operations sit here and are excluded by this rather than by
-    convention: harness, whose handlers act on a bot from the request *body*,
-    and the retiring skills addresses, where the skill id resolves its own bot
-    inside the handler — after this check would have had to answer. Both keep
-    the checks they already have; what is refused is the table claiming the seam
-    covers them.
+    The retiring skills addresses are the real set this excludes: two carry the
+    bot in the query string, four name no bot at all — the skill id resolves its
+    own bot inside the handler, after this check would have had to answer. They
+    keep the checks they already have; what is refused is the table claiming the
+    seam covers them.
+
+    Not harness, despite the temptation to assume so: those routes are mounted
+    under ``/openapi/v1/bots/{bot_id}/harness`` and pass this refusal. See
+    ``_assert_check_rows_are_enforceable`` for what actually stops them.
     """
     public = build_public_router()
     pathless = APIRouter(route_class=PublicAPIRoute)
@@ -609,11 +612,13 @@ def test_a_check_row_without_bot_id_on_the_path_fails_assembly():
 def test_bot_id_anywhere_on_the_path_is_accepted():
     """Position on the path is not the requirement — presence is.
 
-    This is not hypothetical tidiness: the fifteen retiring ``deprecated/``
-    addresses this feature adjudicates carry ``{bot_id}`` at a *different*
-    position than their replacements — ``/bots/sessions/{bot_id}`` against
-    ``/bots/{bot_id}/sessions`` — because the bot moved within the path rather
-    than out of it. A refusal keyed on position would reject every one of them.
+    Not hypothetical tidiness, though the case is still ahead: the fifteen
+    retiring ``deprecated/`` addresses this feature adjudicates carry
+    ``{bot_id}`` at a *different* position than their replacements —
+    ``/bots/sessions/{bot_id}`` against ``/bots/{bot_id}/sessions`` — because the
+    bot moved within the path rather than out of it. They are ``INHERITED``
+    today, so they do not reach this refusal yet; the moment Task 11 flips them
+    to ``Check`` they do, and a refusal keyed on position would reject every one.
     """
     public = build_public_router()
     relocated = APIRouter(route_class=PublicAPIRoute)
@@ -633,3 +638,57 @@ def test_bot_id_anywhere_on_the_path_is_accepted():
         assert_every_route_authorized(public)
     finally:
         AUTHORIZATION.pop(key, None)
+
+
+def test_a_retiring_twin_migrates_with_its_replacement():
+    """A twin left ``INHERITED`` after its replacement gains ``Check`` is a hole.
+
+    The retiring addresses under ``deprecated/`` re-register the *replacement's*
+    endpoint under their own key. That is why they are checked at all today: the
+    service-level permission call sits inside the shared handler, so both
+    addresses reach it. The seam does not work that way — ``PublicAPIRoute``
+    attaches the gate per route, and a twin whose row says ``INHERITED`` gets
+    nothing.
+
+    So the moment a group flips its rows to ``Check`` and deletes the service
+    call the twin was relying on, that twin serves unguarded unless its own row
+    moved too. Nothing else in this file would notice: the burn-down counts
+    ``ServiceChecked`` rows, and an abandoned twin is ``INHERITED``.
+
+    This is not a hypothetical failure mode for this package. ``_collection_shim``
+    in ``deprecated/skills.py`` records that the legacy skills addresses shipped
+    without their grant check for exactly one commit, for exactly this reason —
+    ``legacy_route`` registers an endpoint, not a route, so route-level
+    dependencies do not carry across. ``admission.py`` answered it by deriving
+    each legacy address's mode from its replacement; ``authorization.py``
+    deliberately does not derive, so this asserts what derivation would have
+    guaranteed.
+
+    Vacuous until the first group migrates, and load-bearing from then on.
+    """
+    from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
+
+    abandoned = []
+    for (method, legacy_path), replacement_path in LEGACY_ROUTES.items():
+        # The replacement usually answers the same method at a new path. One
+        # pair (auth-status) kept its path and changed method, so resolve by
+        # path while excluding the legacy row itself.
+        candidates = {
+            key: rule
+            for key, rule in AUTHORIZATION.items()
+            if key[1] == replacement_path and key != (method, legacy_path)
+        }
+        replacement = candidates.get((method, replacement_path))
+        if replacement is None and len(candidates) == 1:
+            replacement = next(iter(candidates.values()))
+        if not isinstance(replacement, Check):
+            continue
+        if not isinstance(AUTHORIZATION.get((method, legacy_path)), Check):
+            abandoned.append(f"{method} {legacy_path} -> {replacement_path}")
+
+    assert not abandoned, (
+        "these retiring addresses share a handler with a replacement that now "
+        "carries Check, but did not migrate with it — the gate attaches per "
+        "route, so they are served with whatever the deleted service call used "
+        "to provide, which is nothing: " + ", ".join(sorted(abandoned))
+    )
