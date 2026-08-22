@@ -1245,7 +1245,16 @@ fn validate_webhook_url(
     let http_loopback_allowed = url.scheme() == "http"
         && policy.allow_http_loopback
         && is_loopback_host(&url);
-    if (url.scheme() != "https" && !http_loopback_allowed)
+    let http_private_endpoint_allowed = url.scheme() == "http"
+        && url.host_str().is_some_and(|host| {
+            url.port_or_known_default().is_some_and(|port| {
+                policy
+                    .private_endpoint_allowlist
+                    .iter()
+                    .any(|entry| entry.matches_host_and_port(host, port))
+            })
+        });
+    if (url.scheme() != "https" && !http_loopback_allowed && !http_private_endpoint_allowed)
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
