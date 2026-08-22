@@ -95,6 +95,21 @@ class WorkOrderRepositoryProtocol(Protocol):
     ) -> WorkOrderRecord: ...
 
     @abstractmethod
+    def create_bot_editor_request(
+        self,
+        *,
+        bot_pk: int,
+        bot_id: str,
+        bot_name: str,
+        owner_id: str,
+        space_id: int,
+        applicant_user_id: str,
+        applicant_name: str,
+        apply_reason: str,
+        env: str,
+    ) -> WorkOrderRecord: ...
+
+    @abstractmethod
     def list_items(
         self,
         *,

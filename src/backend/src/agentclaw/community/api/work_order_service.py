@@ -80,6 +80,16 @@ class WorkOrderServiceProtocol(Protocol):
     ) -> WorkOrderRecord: ...
 
     @abstractmethod
+    def create_bot_editor_request(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        applicant_user_id: str,
+        reason: str,
+    ) -> WorkOrderRecord: ...
+
+    @abstractmethod
     def list_items(
         self,
         *,
