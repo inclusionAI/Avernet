@@ -40,9 +40,10 @@ each is deleted when its last row leaves it:
 - :data:`OWNER_SCOPED` — no collaborator dimension has been decided; the
   operation resolves the bot as ``(bot_id, caller)``, so only the owner reaches
   it. → becomes ``Check(level)`` when #906 / #907 decide the bar.
-- :data:`SELF_CHECKED` — a retiring address under ``deprecated/``. Not
-  adjudicated here; those routers carry whatever check they have.
-  → disappears with that package.
+- :data:`INHERITED` — a retiring address under ``deprecated/``, which is the
+  replacement's own endpoint function re-registered at the path it used to
+  have. It holds no decision: whatever governs the address that replaced it
+  governs this one. → disappears with that package.
 
 :func:`scaffolding_row_count` reports how many rows are still in them, so the
 migration's remaining distance is a number rather than an impression.
@@ -144,10 +145,17 @@ class _Scaffold:
 #: not a mechanical migration: collaborators start getting through.
 OWNER_SCOPED = _Scaffold("OWNER_SCOPED")
 
-#: Scaffolding: a retiring address under ``deprecated/``. Those routers check
-#: themselves or inherit their replacement's mount; either way the seam does not
-#: adjudicate them, and the whole set disappears when the package is deleted.
-SELF_CHECKED = _Scaffold("SELF_CHECKED")
+#: Scaffolding: a retiring address under ``deprecated/``. ``_relocate`` and
+#: ``_requery`` re-register the *replacement's own endpoint function* at the old
+#: path, so there is no second handler here and no second decision to record:
+#: the row that governs one of these is the replacement's row. The whole set
+#: disappears when the package is deleted.
+#:
+#: Named ``SELF_CHECKED`` until it was pointed out that nothing here checks
+#: itself — the name asserted a property no legacy route has, and collided with
+#: ``deprecated``'s unrelated ``SELF_CHECKED_ROUTES``, which really does mean a
+#: router that performs its own grant check.
+INHERITED = _Scaffold("INHERITED")
 
 #: The modes that must be empty for the surface to have reached its final shape.
 #: ``_Scaffold`` covers both sentinels, so a fourth scaffolding sentinel added
@@ -521,49 +529,49 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("a task, not a bot; the surface is not mounted"),
 
     # ── Retiring addresses in ``deprecated/`` ─────────────────────────────
-    ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): SELF_CHECKED,
-    ("PUT", "/openapi/v1/bots/approvals/{bot_id}/mode"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/approvals/{bot_id}/modes"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/connection/{bot_id}"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/engine/{bot_id}/available"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/engine/{bot_id}/capabilities"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/engine/{bot_id}/status"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/identity/{bot_id}"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): SELF_CHECKED,
-    ("PUT", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/models/{bot_id}"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/models/{bot_id}/{model_id:path}"): SELF_CHECKED,
-    ("DELETE", "/openapi/v1/bots/resources"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/resources"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/resources/download"): SELF_CHECKED,
-    ("POST", "/openapi/v1/bots/resources/mkdir"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/resources/preview"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/resources/stat"): SELF_CHECKED,
-    ("POST", "/openapi/v1/bots/resources/upload"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/routines"): SELF_CHECKED,
-    ("POST", "/openapi/v1/bots/routines"): SELF_CHECKED,
-    ("DELETE", "/openapi/v1/bots/routines/{routine_id}"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/routines/{routine_id}"): SELF_CHECKED,
-    ("PATCH", "/openapi/v1/bots/routines/{routine_id}"): SELF_CHECKED,
-    ("POST", "/openapi/v1/bots/routines/{routine_id}/run"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/routines/{routine_id}/runs"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/sessions/{bot_id}"): SELF_CHECKED,
-    ("POST", "/openapi/v1/bots/sessions/{bot_id}"): SELF_CHECKED,
-    ("DELETE", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): SELF_CHECKED,
-    ("PATCH", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): SELF_CHECKED,
+    ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): INHERITED,
+    ("PUT", "/openapi/v1/bots/approvals/{bot_id}/mode"): INHERITED,
+    ("GET", "/openapi/v1/bots/approvals/{bot_id}/modes"): INHERITED,
+    ("GET", "/openapi/v1/bots/connection/{bot_id}"): INHERITED,
+    ("GET", "/openapi/v1/bots/engine/{bot_id}/available"): INHERITED,
+    ("GET", "/openapi/v1/bots/engine/{bot_id}/capabilities"): INHERITED,
+    ("GET", "/openapi/v1/bots/engine/{bot_id}/status"): INHERITED,
+    ("GET", "/openapi/v1/bots/identity/{bot_id}"): INHERITED,
+    ("GET", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): INHERITED,
+    ("PUT", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): INHERITED,
+    ("GET", "/openapi/v1/bots/models/{bot_id}"): INHERITED,
+    ("GET", "/openapi/v1/bots/models/{bot_id}/{model_id:path}"): INHERITED,
+    ("DELETE", "/openapi/v1/bots/resources"): INHERITED,
+    ("GET", "/openapi/v1/bots/resources"): INHERITED,
+    ("GET", "/openapi/v1/bots/resources/download"): INHERITED,
+    ("POST", "/openapi/v1/bots/resources/mkdir"): INHERITED,
+    ("GET", "/openapi/v1/bots/resources/preview"): INHERITED,
+    ("GET", "/openapi/v1/bots/resources/stat"): INHERITED,
+    ("POST", "/openapi/v1/bots/resources/upload"): INHERITED,
+    ("GET", "/openapi/v1/bots/routines"): INHERITED,
+    ("POST", "/openapi/v1/bots/routines"): INHERITED,
+    ("DELETE", "/openapi/v1/bots/routines/{routine_id}"): INHERITED,
+    ("GET", "/openapi/v1/bots/routines/{routine_id}"): INHERITED,
+    ("PATCH", "/openapi/v1/bots/routines/{routine_id}"): INHERITED,
+    ("POST", "/openapi/v1/bots/routines/{routine_id}/run"): INHERITED,
+    ("GET", "/openapi/v1/bots/routines/{routine_id}/runs"): INHERITED,
+    ("GET", "/openapi/v1/bots/sessions/{bot_id}"): INHERITED,
+    ("POST", "/openapi/v1/bots/sessions/{bot_id}"): INHERITED,
+    ("DELETE", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): INHERITED,
+    ("GET", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): INHERITED,
+    ("PATCH", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): INHERITED,
     ("DELETE", "/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages"):
-        SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/skills"): SELF_CHECKED,
-    ("POST", "/openapi/v1/bots/skills/upload"): SELF_CHECKED,
-    ("DELETE", "/openapi/v1/bots/skills/{skill_id}"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/skills/{skill_id}"): SELF_CHECKED,
-    ("POST", "/openapi/v1/bots/skills/{skill_id}/activate"): SELF_CHECKED,
-    ("POST", "/openapi/v1/bots/skills/{skill_id}/deactivate"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/{bot_id}/auth-status"): SELF_CHECKED,
-    ("GET", "/openapi/v1/bots/{bot_id}/engine-config"): SELF_CHECKED,
-    ("PUT", "/openapi/v1/bots/{bot_id}/engine-config"): SELF_CHECKED,}
+        INHERITED,
+    ("GET", "/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages"): INHERITED,
+    ("GET", "/openapi/v1/bots/skills"): INHERITED,
+    ("POST", "/openapi/v1/bots/skills/upload"): INHERITED,
+    ("DELETE", "/openapi/v1/bots/skills/{skill_id}"): INHERITED,
+    ("GET", "/openapi/v1/bots/skills/{skill_id}"): INHERITED,
+    ("POST", "/openapi/v1/bots/skills/{skill_id}/activate"): INHERITED,
+    ("POST", "/openapi/v1/bots/skills/{skill_id}/deactivate"): INHERITED,
+    ("GET", "/openapi/v1/bots/{bot_id}/auth-status"): INHERITED,
+    ("GET", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,
+    ("PUT", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,}
 
 
 #: Operations whose router exists but which ``build_public_router`` does not
@@ -608,10 +616,10 @@ __all__ = [
     "AUTHORIZATION",
     "Authorization",
     "Check",
+    "INHERITED",
     "NoCheck",
     "OWNER_SCOPED",
     "SCAFFOLDING_MODES",
-    "SELF_CHECKED",
     "UNMOUNTED_OPERATIONS",
     "ServiceChecked",
     "scaffolding_row_count",
