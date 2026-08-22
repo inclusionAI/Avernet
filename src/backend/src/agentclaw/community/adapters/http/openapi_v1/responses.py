@@ -516,9 +516,16 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         409,
         "SkillSet state conflicts with this operation",
     ),
+    # 409, not 503. Two of this error's three raise sites are a lease this
+    # request held being lost mid-mutation, and the third is the fence refusing
+    # to be taken — in every one of them the service is up and answering, and
+    # the command simply lost a race for one Bot's fence. A 503 would tell
+    # proxies and client retry layers the whole surface is out of rotation over
+    # a per-Bot conflict. The internal /api/skillsets mapping in
+    # ``adapters.http.app`` answers 409 for the same reason.
     SkillSetControlPlaneLockUnavailableError: (
-        503,
-        "SkillSet mutation service is temporarily unavailable",
+        409,
+        "Another SkillSet mutation holds this Bot's fence",
     ),
     SkillSetRuntimeReconcileError: (502, "Skill runtime synchronization failed"),
     SkillSetManagedResourceError: (409, "Skill is managed by a SkillSet"),
@@ -719,7 +726,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     RepositoryCatalogSyncInProgressError: 409108,
     RepositoryCatalogSyncFailedError: 502103,
     SkillSetManagedResourceError: 409202,
-    SkillSetControlPlaneLockUnavailableError: 503201,
+    SkillSetControlPlaneLockUnavailableError: 409209,
     SkillSetAccessDeniedError: 403201,
     McpPermissionDeniedError: 403202,
 }

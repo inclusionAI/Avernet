@@ -361,6 +361,13 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerMcpNotFoundError,
     CallerMcpSyncError,
 )
+from agentclaw.community.core.skill_center.errors import (  # noqa: E402
+    SkillSetAccessDeniedError,
+    SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneLockUnavailableError,
+    SkillSetControlPlaneNotFoundError,
+    SkillSetRuntimeReconcileError,
+)
 
 _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     ValidationError:       400,
@@ -381,6 +388,25 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     CallerMcpNotFoundError: 404,
     CallerMcpSyncError: 500,
     CallerCallTypeInvalidError: 500,
+    # ── SkillSet control plane ────────────────────────────────────────────
+    # The legacy /api/skillsets routes used to translate these themselves, in a
+    # router-level helper that returned a hand-built HTTPException. That put the
+    # status decision inside the route and replaced the raised exception with a
+    # fresh one, so the ``__cause__`` chain never reached a log. Mapping them
+    # here instead means the route raises the situation and this layer alone
+    # decides the wire, exactly as every other domain error already works.
+    SkillSetControlPlaneNotFoundError: 404,
+    SkillSetAccessDeniedError: 403,
+    # 400, not 409: the published wire echoes the reason code as a rejected
+    # request and clients already parse it that way. Kept as-is deliberately.
+    SkillSetControlPlaneConflictError: 400,
+    # 409, not 503. The mutation fence could not be taken, so the command never
+    # ran and the caller may retry — but the service itself is up and serving,
+    # which is the only thing a 503 is allowed to mean. Answering 503 also tells
+    # proxies and clients to back off the whole endpoint over what is a
+    # per-Bot lock conflict.
+    SkillSetControlPlaneLockUnavailableError: 409,
+    SkillSetRuntimeReconcileError: 500,
 }
 
 _DATA_PROXY_ERROR_STATUS_MAP: dict[type[DataProxyError], int] = {

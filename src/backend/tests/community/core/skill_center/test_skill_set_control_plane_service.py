@@ -12,7 +12,6 @@ from agentclaw.community.core.repository.implementations.skill_center.skill_set_
     SkillSetMutation,
 )
 from agentclaw.community.core.skill_center.errors import (
-    LocalSkillNotFoundError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
@@ -701,7 +700,10 @@ def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    with pytest.raises(LocalSkillNotFoundError):
+    # The control plane speaks one error vocabulary: an invisible Bot scope is
+    # a SkillSet not-found, so the HTTP adapter maps a single family rather
+    # than also having to know about the Local Skill errors.
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
         service.create_legacy_set(
             bot_id="missing",
             actor_id="actor",

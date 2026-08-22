@@ -18,7 +18,6 @@ from agentclaw.community.core.repository.skill_set_control_plane_types import (
     SkillSetMutation,
 )
 from agentclaw.community.core.skill_center.errors import (
-    LocalSkillNotFoundError,
     LocalSkillNotReadyError,
     McpPermissionDeniedError,
     SkillSetControlPlaneConflictError,
@@ -91,7 +90,10 @@ class SkillSetControlPlaneService:
         """Resolve the exact addressed Bot before applying caller policy."""
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
-            raise LocalSkillNotFoundError()
+            # The SkillSet control plane speaks one error vocabulary so the HTTP
+            # adapter maps a single family: an invisible Bot scope is a SkillSet
+            # not-found, not a Local Skill one.
+            raise SkillSetControlPlaneNotFoundError()
         if not self._authorization.can_manage_bot(
             bot_id=bot_id,
             owner_id=owner_id,
@@ -104,7 +106,7 @@ class SkillSetControlPlaneService:
         """Resolve the owner only for a released wire that cannot name one."""
         bot = self._bot_repo.get_unique_by_id(bot_id)
         if bot is None:
-            raise LocalSkillNotFoundError()
+            raise SkillSetControlPlaneNotFoundError()
         return self._bot(
             bot_id=bot_id,
             owner_id=str(bot["owner_id"]),
@@ -216,7 +218,7 @@ class SkillSetControlPlaneService:
                 set_id=set_id,
             )
         if bot_id != "default":
-            raise LocalSkillNotFoundError()
+            raise SkillSetControlPlaneNotFoundError()
         item = self._repository.get_set(
             bot_id=bot_id, owner_id=actor_id, set_id=set_id, engine_type="openclaw"
         )
