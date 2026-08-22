@@ -23935,7 +23935,7 @@
     },
     "/openapi/v1/bots/metadata/queries": {
       "post": {
-        "description": "Resolve display metadata for caller-supplied Bot and owner pairs.\n\nThe identifiers may originate from BCN, search, recommendations, persisted\nclient state, or another source. ``user_id`` names the authenticated user\nperforming this tenant-wide metadata lookup; each ``owner_id`` in the body\nis part of a target Bot identity, not the caller identity. The response is\nintentionally limited to display fields and the owner id the request already\nnamed; it never exposes device bindings, runtime configuration, credentials,\nor extension payloads.\n\nUnknown identifiers are omitted. Filtering happens in the repository before\npagination, so total is the number of matching Bot records.",
+        "description": "Resolve display metadata for caller-supplied Bot and owner pairs.\n\nThe identifiers may originate from BCN, search, recommendations, persisted\nclient state, or another source. The user_id parameter names the authenticated\nuser performing this tenant-wide metadata lookup; each owner_id in the body\nis part of a target Bot identity, not the caller identity. The response is\nintentionally limited to display fields and the owner id the request already\nnamed; it never exposes device bindings, runtime configuration, credentials,\nor extension payloads.\n\nUnknown identifiers are omitted. Filtering happens in the repository before\npagination, so total is the number of matching Bot records.",
         "operationId": "query_bot_metadata_openapi_v1_bots_metadata_queries_post",
         "parameters": [
           {

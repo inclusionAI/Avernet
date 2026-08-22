@@ -517,8 +517,8 @@ async def query_bot_metadata(
     """Resolve display metadata for caller-supplied Bot and owner pairs.
 
     The identifiers may originate from BCN, search, recommendations, persisted
-    client state, or another source. ``user_id`` names the authenticated user
-    performing this tenant-wide metadata lookup; each ``owner_id`` in the body
+    client state, or another source. The user_id parameter names the authenticated
+    user performing this tenant-wide metadata lookup; each owner_id in the body
     is part of a target Bot identity, not the caller identity. The response is
     intentionally limited to display fields and the owner id the request already
     named; it never exposes device bindings, runtime configuration, credentials,
