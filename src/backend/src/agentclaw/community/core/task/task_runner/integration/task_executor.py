@@ -217,8 +217,14 @@ class TaskExecutor:
                 import json as _json
                 req_kwargs["opening_message"] = {
                     "type": "panel",
-                    "component": "task-loop",
+                    "component": "partnerPanel.CollaborationRunView",
                     "params": _json.dumps({
+                        "groupId": "{{bcs.group_id}}",
+                        "sessionId": "{{bcs.session_id}}",
+                        "runId": "{{bcs.run_id}}",
+                        "groupName": "{{bcs.group_name}}",
+                        "sessionName": "{{bcs.session_name}}",
+                        "businessScene": "release_review",
                         "taskId": _task_id,
                         "apiBaseUrl": gf.extend_props.get("api_base_url") or "",
                     }),
