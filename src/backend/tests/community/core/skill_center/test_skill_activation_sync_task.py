@@ -8,7 +8,6 @@ rather than a mock, because "the second enqueue joins the first" is a property
 of the unique index, not of the helper.
 """
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -63,7 +62,6 @@ def test_payload_carries_scope_and_action_type():
     assert payload["action_type"] == "placeholder"
     assert payload["action_args"] == {"set_id": "s-1"}
     assert payload["request_id"]
-    assert payload["requested_at"]
 
 
 def test_payload_defaults_are_generated_per_call():
@@ -85,43 +83,36 @@ def test_payload_copies_action_args():
     assert payload["action_args"] == {"set_id": "s-1"}
 
 
+def test_payload_does_not_leak_into_the_shared_empty_default():
+    """``action_args`` defaults to a shared ``{}``; the copy is what keeps it safe."""
+    first = build_skill_activation_sync_payload(scope=_scope(), action=ACTION)
+    first["action_args"]["set_id"] = "s-1"
+
+    second = build_skill_activation_sync_payload(scope=_scope(), action=ACTION)
+
+    assert second["action_args"] == {}
+
+
 def test_parse_round_trips_a_built_payload():
-    requested_at = datetime(2026, 8, 22, 10, 30, tzinfo=UTC)
-    work = parse_skill_activation_sync_payload(
-        build_skill_activation_sync_payload(
-            scope=_scope(),
-            action=ACTION,
-            action_args={"set_id": "s-1"},
-            request_id="req-1",
-            requested_at=requested_at,
-        )
+    payload = build_skill_activation_sync_payload(
+        scope=_scope(), action=ACTION, action_args={"set_id": "s-1"}
     )
+
+    work = parse_skill_activation_sync_payload(payload)
 
     assert work.scope == _scope()
     assert work.action is ACTION
     assert work.action_args == {"set_id": "s-1"}
-    assert work.request_id == "req-1"
-    assert work.requested_at == requested_at
+    assert work.request_id == payload["request_id"]
 
 
-def test_parse_normalizes_requested_at_to_utc():
-    tokyo = timezone(timedelta(hours=9))
-    work = parse_skill_activation_sync_payload(
-        build_skill_activation_sync_payload(
-            scope=_scope(),
-            action=ACTION,
-            requested_at=datetime(2026, 8, 22, 19, 0, tzinfo=tokyo),
-        )
-    )
-
-    assert work.requested_at == datetime(2026, 8, 22, 10, 0, tzinfo=UTC)
-
-
-def test_parse_defaults_absent_action_args_to_empty():
+def test_parse_rejects_an_absent_action_args():
+    """The builder always writes the key, so a payload missing it is malformed."""
     payload = build_skill_activation_sync_payload(scope=_scope(), action=ACTION)
     del payload["action_args"]
 
-    assert parse_skill_activation_sync_payload(payload).action_args == {}
+    with pytest.raises(ValueError, match="action_args"):
+        parse_skill_activation_sync_payload(payload)
 
 
 @pytest.mark.parametrize(
@@ -134,14 +125,9 @@ def test_parse_defaults_absent_action_args_to_empty():
         (lambda p: p.update(action_type="switch"), "unknown action_type"),
         (lambda p: p.update(action_type=""), "action_type"),
         (lambda p: p.update(action_args=["set_id"]), "action_args"),
+        (lambda p: p.update(action_args=None), "action_args"),
         (lambda p: p.update(request_id=" "), "request_id"),
-        (lambda p: p.update(requested_at="not-a-time"), "requested_at"),
-        (lambda p: p.update(requested_at=None), "requested_at"),
-        # A naive timestamp cannot be compared with anything the queue records.
-        (
-            lambda p: p.update(requested_at="2026-08-22T10:30:00"),
-            "requested_at must include a timezone",
-        ),
+        (lambda p: p.pop("request_id"), "request_id"),
     ],
 )
 def test_parse_rejects_malformed_payloads(mutate, expected):
@@ -150,11 +136,6 @@ def test_parse_rejects_malformed_payloads(mutate, expected):
 
     with pytest.raises(ValueError, match=expected):
         parse_skill_activation_sync_payload(payload)
-
-
-def test_parse_rejects_a_non_object_payload():
-    with pytest.raises(ValueError, match="payload must be an object"):
-        parse_skill_activation_sync_payload(None)
 
 
 def test_parse_rejects_an_unknown_action_type_rather_than_ignoring_it():
