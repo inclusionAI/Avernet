@@ -320,28 +320,37 @@ def test_scaffolding_burn_down_is_reported():
 # ── burn-down ────────────────────────────────────────────────────────────────
 
 
-#: The modules a ``ServiceChecked`` row may still cite once this feature lands.
+#: The exact operations that may still be ``ServiceChecked`` once this feature
+#: lands — ten of them, deferred for three reasons recorded in ``spec.md``'s
+#: *Out of Scope*.
 #:
-#: Four operations are deferred, each for a reason recorded in ``spec.md``'s
-#: *Out of Scope*, and nothing else may join them.
-#:
-#: **Two of these strings are forward references.** The table does not cite
-#: ``local_skill_query_service`` or ``local_skill_upload_service`` yet — Task 9
-#: writes them when it corrects the three skills rows that today cite
-#: ``bot_skill_asset_service`` and are not checked there. Task 9 must use these
-#: spellings exactly; a different one leaves this set unsatisfiable and is
-#: caught when Task 15 removes the ``xfail``. Harness cannot be adjudicated
-#: as it stands — its handlers act on a bot from the request body. The three
-#: skills rows share their checks with six retiring addresses the seam cannot
-#: reach, so migrating them would uncover those. Connection guards what may be
-#: *composed* rather than how it is served, which is a trade-off this feature
-#: does not settle.
-_DEFERRED_CITATIONS = frozenset(
+#: Keyed on the **operation**, not on the module its row cites. Citing a module
+#: is not a commitment: Task 9 rewrites three of these rows to name a different
+#: module, and a set of module names could not tell that correction apart from a
+#: row dodging migration by re-citing itself to something already deferred. The
+#: operation cannot be renamed to escape.
+_DEFERRED_OPERATIONS = frozenset(
     {
-        "…openapi_v1.harness.router",
-        "…core.skill_center.services.local_skill_query_service",
-        "…core.skill_center.services.local_skill_upload_service",
-        "…core.engine_runtime.connection",
+        # Its handlers act on a bot named in the request body, so the gate —
+        # which decides before the handler runs — cannot key on the same value.
+        ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"),
+        ("POST", "/openapi/v1/bots/{bot_id}/harness/diagnose"),
+        ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-history"),
+        ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-report"),
+        ("POST", "/openapi/v1/bots/{bot_id}/harness/preview"),
+        ("POST", "/openapi/v1/bots/{bot_id}/harness/rollback"),
+        # Checked in local_skill_query_service / local_skill_upload_service,
+        # which also keep six retiring skills addresses checked — four of them
+        # unreachable by the seam, since the skill id resolves its own bot
+        # inside the handler. Migrating these three would uncover those six.
+        ("GET", "/openapi/v1/bots/{bot_id}/skills"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skills"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skills/upload-folder"),
+        # Its check guards what may be *composed* — a credential granting
+        # operator.admin over every session on the device — rather than how the
+        # route is served. Whether a route-level gate replaces that is not a
+        # question this feature settles.
+        ("GET", "/openapi/v1/bots/{bot_id}/connection"),
     }
 )
 
@@ -360,22 +369,24 @@ def test_only_the_deferred_operations_remain_service_checked():
 
     Replaces ``test_no_live_operation_carries_the_gate``, which encoded "the
     seam has no adopter" — true when #1323 shipped the mechanism and adopted it
-    nowhere, and false from this feature's first migrating group onward. What
-    matters now is not that the gate is unused but that everything still
-    claiming a service check is one of the four deliberate exceptions.
+    nowhere, and false from this feature's first migrating group onward. Deleted
+    rather than weakened: a test asserting "no adopter" cannot be made to mean
+    "the right adopters" by loosening it.
 
-    Deleted rather than weakened: a test asserting "no adopter" cannot be made
-    to mean "the right adopters" by loosening it.
+    Equality, not containment. A subset check would pass while rows that should
+    have migrated sat waiting, which is the failure this is here to catch.
     """
-    cited = {
-        rule.where
-        for rule in AUTHORIZATION.values()
+    remaining = {
+        key
+        for key, rule in AUTHORIZATION.items()
         if isinstance(rule, ServiceChecked)
     }
 
-    assert cited <= _DEFERRED_CITATIONS, (
-        "these modules still hold a ServiceChecked row and are not among the "
-        f"deferred four: {sorted(cited - _DEFERRED_CITATIONS)}"
+    assert remaining == _DEFERRED_OPERATIONS, (
+        "still ServiceChecked but not deferred: "
+        f"{sorted(remaining - _DEFERRED_OPERATIONS)}; "
+        "deferred but no longer ServiceChecked: "
+        f"{sorted(_DEFERRED_OPERATIONS - remaining)}"
     )
 
 

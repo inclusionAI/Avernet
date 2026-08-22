@@ -711,10 +711,11 @@ def assert_every_route_authorized(router: APIRouter) -> None:
     2. a row matching no operation, left behind by a rename;
     3. a WebSocket operation with no row — it never runs the route class
        either, so nothing else would notice;
-    4. a WebSocket operation *with* a ``Check`` row, and a ``Check`` route
-       whose handler does not consume the owner the gate adjudicates. Both are
-       declarations the seam cannot honour, and admitting them would leave the
-       table promising enforcement that never happens.
+    4. a ``Check`` row the seam could not honour, in any of three shapes — a
+       WebSocket operation, a route whose handler does not consume the owner the
+       gate adjudicates, and a route carrying no ``{bot_id}`` on its path for
+       the gate to read. Each would leave the table promising enforcement that
+       never happens; see ``_assert_check_rows_are_enforceable``.
     """
     seen: set[tuple[str, str]] = set()
     sockets: set[tuple[str, str]] = set()
