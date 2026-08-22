@@ -834,11 +834,14 @@ def _assert_check_rows_are_enforceable(
     if unkeyable:
         raise PublicRouteNotAuthorized(
             "these operations declare Check but do not carry {bot_id} on their "
-            "path, so the gate has no bot to adjudicate and would decide on a "
-            "value the handler never saw. The gate runs before the handler, so "
-            "this is a permanent limit rather than a gap: an operation that "
-            "addresses its bot any other way keeps whatever check it already "
-            "has and must not claim Check. Offending rows: " + ", ".join(unkeyable)
+            "path, so the gate has no bot to resolve and the row cannot be "
+            "enforced as written. Refused here rather than left to fail per "
+            "request: a table that claims enforcement the seam cannot deliver "
+            "is the thing this module exists to prevent. The gate runs before "
+            "the handler, so this is a permanent limit rather than a gap — an "
+            "operation addressing its bot any other way keeps whatever check it "
+            "already has and must not claim Check. Offending rows: "
+            + ", ".join(unkeyable)
         )
 
 

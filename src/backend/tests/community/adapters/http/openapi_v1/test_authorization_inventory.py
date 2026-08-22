@@ -748,20 +748,35 @@ def test_a_retiring_twin_migrates_with_its_replacement():
     from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
 
     abandoned = []
+    mismatched = []
     for (method, legacy_path), replacement_path in LEGACY_ROUTES.items():
         replacement = _replacement_rule(method, legacy_path, replacement_path)
         if not isinstance(replacement, Check):
             continue
         if (method, legacy_path) in _TWINS_CHECKED_INDEPENDENTLY:
             continue
-        if not isinstance(AUTHORIZATION.get((method, legacy_path)), Check):
+        twin = AUTHORIZATION.get((method, legacy_path))
+        if not isinstance(twin, Check):
             abandoned.append(f"{method} {legacy_path} -> {replacement_path}")
+        elif twin.level is not replacement.level:
+            # Matching bars, not merely both being Check. Tasks 12 and 13 bring
+            # ADMIN and OWNER rows, and a MEMBER twin of an ADMIN replacement is
+            # a way around the bar rather than a copy of it.
+            mismatched.append(
+                f"{method} {legacy_path} at {twin.level.name} "
+                f"but {replacement_path} at {replacement.level.name}"
+            )
 
     assert not abandoned, (
         "these retiring addresses share a handler with a replacement that now "
         "carries Check, but did not migrate with it — the gate attaches per "
         "route, so they are served with whatever the deleted service call used "
         "to provide, which is nothing: " + ", ".join(sorted(abandoned))
+    )
+    assert not mismatched, (
+        "these retiring addresses migrated with their replacement but at a "
+        "different bar, so the old address is a way around the new one: "
+        + ", ".join(sorted(mismatched))
     )
 
 
@@ -812,6 +827,13 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
         "they no longer reach the check they are exempted on account of"
     )
 
+    get_source = inspect.getsource(query_service.LocalSkillQueryService.get_local_skill)
+    assert "_require_view_access" in get_source, (
+        "get_local_skill no longer calls _require_view_access, so _bot_behind "
+        "reaches no collaborator check and the four exempted legacy skills "
+        "twins are unguarded — the ends of the chain being intact is not enough"
+    )
+
     source = inspect.getsource(query_service.LocalSkillQueryService._require_view_access)
     assert "check_collaborator_permission" in source, (
         "_require_view_access no longer performs a collaborator check, so the "
@@ -822,3 +844,32 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
         "_require_view_access no longer checks at MEMBER; the exemption records "
         "that bar, so re-derive it before changing this"
     )
+
+
+def test_the_twin_guard_catches_an_abandoned_twin():
+    """The guard above is vacuous until a row migrates; prove it can still fire.
+
+    A guard that only ever runs over zero candidates is indistinguishable from
+    one that is broken, and this one stays vacuous until Group F. So drive it:
+    migrate a replacement without its twin and confirm it names the address,
+    then migrate at a different bar and confirm it names that too.
+    """
+    replacement = ("GET", "/openapi/v1/bots/{bot_id}/sessions")
+    twin = ("GET", "/openapi/v1/bots/sessions/{bot_id}")
+    saved = (AUTHORIZATION[replacement], AUTHORIZATION[twin])
+    try:
+        AUTHORIZATION[replacement] = Check(PermissionLevel.MEMBER)
+
+        with pytest.raises(AssertionError) as abandoned:
+            test_a_retiring_twin_migrates_with_its_replacement()
+        assert twin[1] in str(abandoned.value)
+
+        AUTHORIZATION[twin] = Check(PermissionLevel.ADMIN)
+        with pytest.raises(AssertionError) as mismatched:
+            test_a_retiring_twin_migrates_with_its_replacement()
+        assert "different bar" in str(mismatched.value)
+
+        AUTHORIZATION[twin] = Check(PermissionLevel.MEMBER)
+        test_a_retiring_twin_migrates_with_its_replacement()
+    finally:
+        AUTHORIZATION[replacement], AUTHORIZATION[twin] = saved

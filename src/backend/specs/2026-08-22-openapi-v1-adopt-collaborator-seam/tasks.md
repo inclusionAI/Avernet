@@ -169,7 +169,7 @@ deletion is known to change no caller's answer.
 - **Goal:** Ensure the feature meets every spec acceptance criterion.
 - **Files:** `tests/community/adapters/http/openapi_v1/`, `src/backend/docs/openapi-v1/README.md`
 - **Done when:**
-  - [ ] Task 4's inverse assertion is un-`xfail`ed and passes: the only remaining `ServiceChecked` rows are the 6 harness rows.
+  - [ ] Task 2's burn-down is un-`xfail`ed and passes as a strict equality: the rows still `ServiceChecked` are exactly the ten in `_DEFERRED_OPERATIONS` (6 harness, 3 skills, 1 connection), and every one cites the module that really checks it.
   - [ ] `scaffolding_row_count()` has fallen from 181 to **77** — 89 `ServiceChecked` rows leave (87 to `Check`, 2 to `NoCheck`) and 15 `INHERITED` twins become `Check`, so 104 in total. The end state is 10 `ServiceChecked` (6 harness, 3 skills, 1 connection), 67 `NoCheck`, 40 `OWNER_SCOPED`, 27 `INHERITED`, 102 `Check`, summing to the table's 246. The numbers are asserted, not described.
   - [ ] Every `Check` row's handler declares `OwnerIdDep` and its route declares `{bot_id}` on the path — both enforced at assembly by Task 1, now also asserted over the live surface.
   - [ ] No operation outside the migrated set changed which callers it admits or refuses.
