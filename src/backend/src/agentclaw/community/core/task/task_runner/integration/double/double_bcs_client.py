@@ -58,7 +58,12 @@ class _DoubleBcsClient:
     async def validate_definition(self, definition_yaml: str) -> None:
         return None
 
-    async def list_bots_by_task_modes(self, *, provider_id: str, claim: bool | None = None,
+    @property
+    def provider_id(self) -> str:
+        # double 不配真实 BCS provider → 圈定关闭(沿用全部候选),保留 BotTaskModeRoster 回放仅作 canned 响应。
+        return ""
+
+    async def list_bots_by_task_modes(self, *, claim: bool | None = None,
                                       dream: bool | None = None, match: str = "any") -> list[BotTaskModeRoster]:
         # canned:直接回放注入的 roster(忽略过滤参数),供 singlebox/test 复用。
         return list(self._task_mode_roster)

@@ -33,15 +33,16 @@ def _roster(*bot_ids: str) -> list[BotTaskModeRoster]:
 
 
 class _Bcs:
-    """fake BcsClientPort.list_bots_by_task_modes:记录调用 + 可注入 roster / 抛错。"""
+    """fake BcsClientPort.list_bots_by_task_modes:记录调用 + 可注入 roster / 抛错 / provider_id。"""
 
-    def __init__(self, roster=None, raise_=False):
+    def __init__(self, roster=None, raise_=False, provider_id="p"):
         self._roster = list(roster or [])
         self._raise = raise_
+        self.provider_id = provider_id
         self.calls: list[dict] = []
 
-    async def list_bots_by_task_modes(self, *, provider_id, claim=None, dream=None, match="any"):
-        self.calls.append({"provider_id": provider_id, "claim": claim, "dream": dream, "match": match})
+    async def list_bots_by_task_modes(self, *, claim=None, dream=None, match="any"):
+        self.calls.append({"claim": claim, "dream": dream, "match": match})
         if self._raise:
             raise RuntimeError("bcs down")
         return list(self._roster)
@@ -49,29 +50,29 @@ class _Bcs:
 
 class TestScopeByTaskModeRoster:
     def test_provider_id_empty_keeps_candidates(self):
-        bcs = _Bcs(_roster("A"))
-        out = _run(_scope_by_task_mode_roster(bcs, "", _cands("A", "B")))
+        bcs = _Bcs(_roster("A"), provider_id="")
+        out = _run(_scope_by_task_mode_roster(bcs, _cands("A", "B")))
         assert [c["bot_id"] for c in out] == ["A", "B"]
         assert bcs.calls == []  # provider_id 空 → 不调 bcs
 
     def test_bcs_none_keeps_candidates(self):
-        out = _run(_scope_by_task_mode_roster(None, "p", _cands("A", "B")))
+        out = _run(_scope_by_task_mode_roster(None, _cands("A", "B")))
         assert [c["bot_id"] for c in out] == ["A", "B"]
 
     def test_intersect_keeps_only_roster_bots(self):
         bcs = _Bcs(_roster("A", "C"))
-        out = _run(_scope_by_task_mode_roster(bcs, "p", _cands("A", "B", "C")))
+        out = _run(_scope_by_task_mode_roster(bcs, _cands("A", "B", "C")))
         assert [c["bot_id"] for c in out] == ["A", "C"]  # 保候选序,取交
-        assert bcs.calls == [{"provider_id": "p", "claim": True, "dream": None, "match": "any"}]
+        assert bcs.calls == [{"claim": True, "dream": None, "match": "any"}]
 
     def test_empty_roster_clears_candidates(self):
         bcs = _Bcs(_roster())
-        out = _run(_scope_by_task_mode_roster(bcs, "p", _cands("A", "B")))
+        out = _run(_scope_by_task_mode_roster(bcs, _cands("A", "B")))
         assert out == []
 
     def test_bcs_error_fail_open_keeps_candidates(self):
         bcs = _Bcs(raise_=True)
-        out = _run(_scope_by_task_mode_roster(bcs, "p", _cands("A", "B")))
+        out = _run(_scope_by_task_mode_roster(bcs, _cands("A", "B")))
         assert [c["bot_id"] for c in out] == ["A", "B"]  # 异常 fail-open 沿用候选
 
 
@@ -120,17 +121,17 @@ def _graph():
 class TestStrategyAppliesRosterScoping:
     def test_scoping_on_keeps_only_roster_bot_in_prompt(self):
         bot, discover, bcs = _Bot(pick="A"), _Discover(_cands("A", "B", "C")), _Bcs(_roster("A"))
-        strat = SearchBasedDispatchStrategy(bot, discover, bcs=bcs, provider_id="p")
+        strat = SearchBasedDispatchStrategy(bot, discover, bcs=bcs)
         result = _run(strat.apply(_any_node(), _graph()))
         assert result.bot_id == "A"
         prompt = bot.captured[0]
         assert '"bot_id": "A"' in prompt or '"bot_id":"A"' in prompt
         assert '"B"' not in prompt and '"C"' not in prompt  # B/C 被 roster 圈定裁掉
-        assert bcs.calls == [{"provider_id": "p", "claim": True, "dream": None, "match": "any"}]
+        assert bcs.calls == [{"claim": True, "dream": None, "match": "any"}]
 
     def test_scoping_off_when_provider_id_empty_bcs_not_called(self):
-        bot, discover, bcs = _Bot(pick="C"), _Discover(_cands("A", "B", "C")), _Bcs(_roster("A"))
-        strat = SearchBasedDispatchStrategy(bot, discover, bcs=bcs, provider_id="")
+        bot, discover, bcs = _Bot(pick="C"), _Discover(_cands("A", "B", "C")), _Bcs(_roster("A"), provider_id="")
+        strat = SearchBasedDispatchStrategy(bot, discover, bcs=bcs)
         _run(strat.apply(_any_node(), _graph()))
         prompt = bot.captured[0]
         assert '"A"' in prompt and '"B"' in prompt and '"C"' in prompt  # 未裁剪
@@ -138,7 +139,7 @@ class TestStrategyAppliesRosterScoping:
 
     def test_scoping_fail_open_on_bcs_error(self):
         bot, discover, bcs = _Bot(pick="B"), _Discover(_cands("A", "B", "C")), _Bcs(raise_=True)
-        strat = SearchBasedDispatchStrategy(bot, discover, bcs=bcs, provider_id="p")
+        strat = SearchBasedDispatchStrategy(bot, discover, bcs=bcs)
         _run(strat.apply(_any_node(), _graph()))
         prompt = bot.captured[0]
         assert '"A"' in prompt and '"B"' in prompt and '"C"' in prompt  # fail-open 沿用候选

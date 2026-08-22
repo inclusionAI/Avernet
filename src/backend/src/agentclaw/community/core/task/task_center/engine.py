@@ -54,20 +54,18 @@ class ExecutionEngine:
     跨 task 并行。投递/拉群 IO 锁外 await,gather+Semaphore 并发。loop_round 仅升 BBS 时 ++。
     测试可经 facade/engine 子类覆写 ``_build_*`` 注入 stub 策略/投递(测试 seam)。"""
 
-    def __init__(self, graph, *, bot=None, bcs=None, discover=None, bcs_identity=None,
-                 task_provider_id: str = "") -> None:
+    def __init__(self, graph, *, bot=None, bcs=None, discover=None, bcs_identity=None) -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
         端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
         ``_build_*`` 注入 stub 策略/投递时可省略(走 super 路径默认 berth)。
 
-        ``task_provider_id``:任务模式 roster 圈定的 provider(空=圈定关闭,旧行为;非空=仅 task_claim_mode=true
-        的 provider bot 进派发候选)。由组合根从配置注入(singlebox: SINGLEBOX_BCS_PROVIDER_ID;corp overlay 覆写)。"""
+        任务模式 roster 圈定的 provider 取自 ``bcs.provider_id``(端口自带凭据,组合根注入;空=圈定关闭,
+        旧行为)。引擎不再透传 task_provider_id。"""
         self._graph = graph
         self._bot = bot
         self._bcs = bcs
         self._discover = discover
         self._bcs_identity = bcs_identity
-        self._task_provider_id = task_provider_id
         self._locks: dict[str, threading.RLock] = {}
         self._locks_guard = threading.RLock()
         from agentclaw.community.core.task.task_runner.callback_adapter import CallbackAdapter
@@ -120,7 +118,7 @@ class ExecutionEngine:
         pool = [DirectDispatchStrategy()]
         if self._bot is not None and self._discover is not None:
             pool.append(SearchBasedDispatchStrategy(
-                self._bot, self._discover, bcs=self._bcs, provider_id=self._task_provider_id))
+                self._bot, self._discover, bcs=self._bcs))
         else:
             pool.append(SearchBasedDispatchStrategy())
         return TaskDispatcher(self._graph, pool=pool)

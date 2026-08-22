@@ -88,6 +88,12 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         self._t = token
         self._client = http_client or httpx.AsyncClient(base_url=token.base_url)
 
+    @property
+    def provider_id(self) -> str:
+        # 复用点:provider_id 取自构造期注入的 token(singlebox=SINGLEBOX_BCS_PROVIDER_ID;corp overlay=
+        # BcnConfig)。空=该 BCS client 未配任务模式 roster 圈定 → 调用方按"圈定关闭"处理(沿用全部候选)。
+        return self._t.provider_id
+
     def _sign(self, method: str, path: str, ts: str) -> dict[str, str]:
         sig = hmac.new(self._t.secret.encode(), f"{ts}{method}{path}".encode(), hashlib.sha256).hexdigest()
         return {"X-ECB-Token": self._t.token, "X-ECB-Timestamp": ts, "X-ECB-Signature": sig}
@@ -174,14 +180,18 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
     async def validate_definition(self, definition_yaml: str) -> None:
         await self._req("POST", "/collaboration/definitions/validate", json={"yaml": definition_yaml})
 
-    async def list_bots_by_task_modes(self, *, provider_id: str, claim: bool | None = None,
+    async def list_bots_by_task_modes(self, *, claim: bool | None = None,
                                       dream: bool | None = None, match: str = "any") -> list[BotTaskModeRoster]:
         """查询满足任务模式开关的 provider bot roster(BCS 内部 provider 路由,Bearer provider_admin_token)。
 
+        ``provider_id`` 复用本 client 构造期注入的 token(``self.provider_id``),不作为入参暴露。
         ``claim``/``dream`` 为 ``None`` 表示该开关不过滤(有意哨兵);``match`` 为 any|all。路径照搬
         ``get_session_messages``:HMAC 签 path 不含 query,query 走 httpx ``params``(provider 路由只读
         Bearer,忽略 X-ECB,故 HMAC 签串约定无关)。
         """
+        provider_id = self.provider_id
+        if not provider_id:
+            raise BcsClientError("task-mode roster provider_id not configured on this BCS client")
         path = f"/providers/{provider_id}/bots/by-task-modes"
         ts = str(int(time.time()))
         headers = self._sign("GET", path, ts)

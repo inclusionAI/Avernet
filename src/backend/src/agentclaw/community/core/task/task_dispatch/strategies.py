@@ -96,19 +96,18 @@ class SearchBasedDispatchStrategy:
     rule_id = "search"
     priority = 99
 
-    def __init__(self, bot=None, discover=None, *, bcs=None, provider_id: str = "") -> None:
+    def __init__(self, bot=None, discover=None, *, bcs=None) -> None:
         """bot: OpenApiBotPort(round-trip 投 search skill);discover: BotDiscoverServiceProtocol(语义预查候选)。
         None=stub 路径(恒 MISS)。
 
-        bcs+provider_id:可选,按任务模式开关圈定派发候选(BCS provider 路由 roster)。``provider_id`` 为空
-        → 圈定关闭(沿用全部 discover 候选,旧行为不变,零回归);非空 → 仅 ``task_claim_mode=true`` 的 provider bot
-        进候选(roster 不可用 fail-open 沿用候选;roster 健康但空 → 候选清空交 MISS)。门槛默认 claim,如需 dream/
-        both 在 _scope_by_task_mode_roster 内调 roster 查询参数。
+        bcs:可选,按任务模式开关圈定派发候选(BCS provider 路由 roster)。圈定 on/off 与 provider 取自
+        ``bcs.provider_id``(端口自带凭据,复用点)——空=圈定关闭(沿用全部 discover 候选,旧行为不变,零回归);
+        非空 → 仅 ``task_claim_mode=true`` 的 provider bot 进候选(roster 不可用 fail-open 沿用候选;roster 健康
+        但空 → 候选清空交 MISS)。门槛默认 claim,如需 dream/both 在 _scope_by_task_mode_roster 内调 roster 查询参数。
         """
         self._bot = bot
         self._discover = discover
         self._bcs = bcs
-        self._provider_id = provider_id
 
     async def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
         return True  # 兜底
@@ -120,7 +119,7 @@ class SearchBasedDispatchStrategy:
         if not owner:
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
         candidates = await _prefetch_candidates(self._discover, node, graph)
-        candidates = await _scope_by_task_mode_roster(self._bcs, self._provider_id, candidates)
+        candidates = await _scope_by_task_mode_roster(self._bcs, candidates)
         prompt = _compose_search_prompt(node, candidates)
         logger.info("[search] owner=%s node=%s 候选=%s", owner, node.node_id,
                     [c.get("bot_id") for c in candidates])
@@ -155,19 +154,21 @@ def _tokenize(text: str) -> list[str]:
     return [w for w in jieba.cut(text) if len(w.strip()) >= 2]
 
 
-async def _scope_by_task_mode_roster(bcs, provider_id: str, candidates: list[dict]) -> list[dict]:
+async def _scope_by_task_mode_roster(bcs, candidates: list[dict]) -> list[dict]:
     """按任务模式 roster 圈定派发候选(BCS provider 路由 ``list_bots_by_task_modes``)。
 
-    - ``provider_id`` 为空 / ``bcs`` 缺省 → 圈定关闭,原样返回候选(旧行为,零回归)。
+    - ``bcs`` 缺省 / ``bcs.provider_id`` 为空 → 圈定关闭,原样返回候选(旧行为,零回归)。provider_id 由
+      ``bcs`` 端口自带凭据提供(复用点),不外部透传。
     - roster 调用异常(BCS 不可用 / 401 / 超时)→ fail-open 沿用候选(可用性优先,不阻断派发),仅 warn。
     - roster 健康但空(无 opted-in bot)→ 候选清空(交后续 MISS;即"无 bot opted-in 接任务"的预期裁剪)。
     - 否则候选 ∩ roster 保持(仅 ``task_claim_mode=true`` 的 provider bot 留下)。
     门槛默认 ``claim=true, match=any``(task claim opt-in flag);如需 dream/both 改下方 roster 查询参数。
     """
+    provider_id = bcs.provider_id if bcs is not None else ""
     if not provider_id or bcs is None:
         return candidates
     try:
-        roster = await bcs.list_bots_by_task_modes(provider_id=provider_id, claim=True, match="any")
+        roster = await bcs.list_bots_by_task_modes(claim=True, match="any")
     except Exception as ex:  # noqa: BLE001  roster 不可用 → fail-open 沿用候选,不阻断派发
         logger.warning("[search] roster 不可用,fail-open 沿用候选(provider=%s): %s", provider_id, ex)
         return candidates

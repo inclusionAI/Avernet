@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
-    BcsClientRequestError, BcsCreateGroupRequest, BcsHttpAdapter, BcsServerError,
+    BcsClientError, BcsClientRequestError, BcsCreateGroupRequest, BcsHttpAdapter, BcsServerError,
     BotTaskModeRoster,
 )
 
@@ -123,7 +123,7 @@ def test_list_bots_by_task_modes_sends_bearer_and_maps_items():
             {"bot_id": "b2", "name": "n2", "env": "dev", "task_claim_mode": True, "task_dream_mode": True},
         ]})
 
-    roster = _run(_adapter(h).list_bots_by_task_modes(provider_id="prov-1", claim=True, dream=True, match="all"))
+    roster = _run(_adapter(h).list_bots_by_task_modes(claim=True, dream=True, match="all"))
     assert seen["path"] == "/providers/prov-1/bots/by-task-modes"
     assert seen["auth"] == "Bearer adm-tok"
     assert seen["claim"] == "true"
@@ -144,7 +144,7 @@ def test_list_bots_by_task_modes_omits_unset_toggles():
         seen["match"] = req.url.params.get("match")
         return httpx.Response(200, json={"items": []})
 
-    roster = _run(_adapter(h).list_bots_by_task_modes(provider_id="prov-1"))
+    roster = _run(_adapter(h).list_bots_by_task_modes())
     assert seen["claim"] is None          # claim=None → 该开关不过滤,不发 query 参数
     assert seen["dream"] is None
     assert seen["match"] == "any"         # 默认 any
@@ -157,4 +157,13 @@ def test_list_bots_by_task_modes_401_raises():
         return httpx.Response(401, json={"error": "unauthorized", "status": 401})
 
     with pytest.raises(BcsClientRequestError):
-        _run(_adapter(h).list_bots_by_task_modes(provider_id="prov-1", claim=True))
+        _run(_adapter(h).list_bots_by_task_modes(claim=True))
+
+
+def test_list_bots_by_task_modes_unconfigured_raises():
+    # provider_id 由 token 自带(复用点);未配置(空)时不应发请求——直接报错,而非空 roster 误清候选。
+    class _NoProvTok(_Tok):
+        provider_id = ""
+
+    with pytest.raises(BcsClientError):
+        _run(BcsHttpAdapter(_NoProvTok()).list_bots_by_task_modes(claim=True))
