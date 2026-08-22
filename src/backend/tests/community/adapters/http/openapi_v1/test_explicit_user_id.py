@@ -370,7 +370,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: The two IAM operations then merged into one Bot-addressed operation: the
 #: existing Caller path was renamed while the account-level IAM read went away,
 #: so ``path`` stays unchanged and ``none`` decreases by one.
-_BOT_ID_PLACEMENT = {"path": 139, "query": 1, "none": 58}
+#: The target branch adds one Bot-addressed operation; the unified work-order
+#: event endpoint adds one account-level operation.
+_BOT_ID_PLACEMENT = {"path": 140, "query": 1, "none": 58}
 
 
 def _schema() -> dict:
@@ -466,7 +468,7 @@ def test_the_pinned_number_of_operations_take_it():
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
     # MCP adds eight operations, the Harness surface adds six Bot-addressed
     # operations, and Session File adds six more.
-    assert len(taking) == 178
+    assert len(taking) == 179
 
 
 def test_the_exempt_operations_take_none():

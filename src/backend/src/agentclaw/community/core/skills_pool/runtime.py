@@ -173,7 +173,27 @@ class SkillsPoolRuntime:
                 bot_id,
             )
             return False
-        return response.get("success") is True
+        success = response.get("success") is True
+        if not success:
+            logger.warning(
+                "[skills_pool.runtime] mapping publish returned non-success "
+                "bot_id=%s user_id=%s contract=%s success=%s response=%s",
+                bot_id,
+                user_id,
+                mapping_contract_version,
+                response.get("success"),
+                response,
+            )
+        else:
+            logger.info(
+                "[skills_pool.runtime] mapping publish succeeded bot_id=%s "
+                "user_id=%s contract=%s response_keys=%s",
+                bot_id,
+                user_id,
+                mapping_contract_version,
+                sorted(response.keys()),
+            )
+        return success
 
     async def rollback_to_legacy(
         self,
@@ -319,11 +339,32 @@ class SkillsPoolRuntime:
             )
             return False
         data = response.get("data")
-        return (
+        verified = (
             response.get("success") is True
             and isinstance(data, dict)
             and data.get("valid") is True
         )
+        if not verified:
+            logger.warning(
+                "[skills_pool.runtime] mapping verify returned non-verified "
+                "bot_id=%s user_id=%s contract=%s success=%s valid=%s response=%s",
+                bot_id,
+                user_id,
+                mapping_contract_version,
+                response.get("success"),
+                data.get("valid") if isinstance(data, dict) else None,
+                response,
+            )
+        else:
+            logger.info(
+                "[skills_pool.runtime] mapping verify succeeded bot_id=%s "
+                "user_id=%s contract=%s response_keys=%s",
+                bot_id,
+                user_id,
+                mapping_contract_version,
+                sorted(response.keys()),
+            )
+        return verified
 
     async def _ensure_center_mappings(
         self,

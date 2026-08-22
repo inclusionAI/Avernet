@@ -12,6 +12,15 @@ from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 class BotRuntimeProjectionReconcilerProtocol(Protocol):
     """Apply database desired state through the selected runtime authority."""
 
+    async def snapshot_skill_mappings(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+    ) -> tuple[PoolSkillMapping, ...]:
+        """Return the current desired Skill mappings without publishing them."""
+        ...
+
     async def reconcile(
         self,
         *,

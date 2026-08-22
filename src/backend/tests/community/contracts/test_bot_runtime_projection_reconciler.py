@@ -21,6 +21,12 @@ class _RecordingReconciler:
         self.error = error
         self.calls: list[dict] = []
 
+    async def snapshot_skill_mappings(self, **kwargs):
+        self.calls.append({"operation": "snapshot", **kwargs})
+        if self.error is not None:
+            raise self.error
+        return ()
+
     async def reconcile(self, **kwargs) -> None:
         self.calls.append({"operation": "full", **kwargs})
         if self.error is not None:
@@ -44,6 +50,9 @@ class _Consumer:
 
     async def refresh(self) -> None:
         await self._runtime.reconcile(bot_id="bot-1", owner_id="owner-1")
+
+    async def snapshot_skill_mappings(self) -> None:
+        await self._runtime.snapshot_skill_mappings(bot_id="bot-1", owner_id="owner-1")
 
     async def refresh_non_skill(self) -> None:
         await self._runtime.reconcile_non_skill_projection(
@@ -81,6 +90,18 @@ async def test_reconcile_service_api_success_reaches_the_bound_implementation(
 
     assert runtime.calls == [
         {"operation": "full", "bot_id": "bot-1", "owner_id": "owner-1"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_service_api_reads_without_reconciliation(world) -> None:
+    runtime = _RecordingReconciler()
+    consumer = _consumer(world, runtime)
+
+    await consumer.snapshot_skill_mappings()
+
+    assert runtime.calls == [
+        {"operation": "snapshot", "bot_id": "bot-1", "owner_id": "owner-1"}
     ]
 
 

@@ -23,7 +23,10 @@ from agentclaw.community.core.skill_center.services.skill_set_control_plane impo
 from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
     BotRuntimeProjectionReconciler,
 )
-from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+from agentclaw.community.core.skills_pool.models import (
+    PoolSkillMapping,
+    RegisteredSkillAsset,
+)
 
 
 class _Repository:
@@ -155,13 +158,40 @@ class _AicodingImageBots(_Bots):
 
 
 class _Runtime:
-    def __init__(self) -> None:
+    def __init__(self, *, snapshots=(), fail_first: bool = True) -> None:
         self.owners = []
+        self.reconcile_calls: list[dict] = []
+        self.snapshot_calls: list[dict] = []
+        self._fail_first = fail_first
+        self._snapshots = list(snapshots) or [(), self._skill_mappings()]
 
-    async def reconcile(self, *, bot_id: str, owner_id: str) -> None:
+    @staticmethod
+    def _skill_mappings():
+        return (
+            PoolSkillMapping(corpus="local", relative_path="qa", link_name="qa"),
+            PoolSkillMapping(
+                corpus="repo", relative_path="business/eva", link_name="eva"
+            ),
+        )
+
+    async def snapshot_skill_mappings(self, *, bot_id: str, owner_id: str):
+        assert bot_id == "bot-1"
+        self.snapshot_calls.append({"bot_id": bot_id, "owner_id": owner_id})
+        return self._snapshots[len(self.snapshot_calls) - 1]
+
+    async def reconcile(
+        self, *, bot_id: str, owner_id: str, retired_mappings=()
+    ) -> None:
         assert bot_id == "bot-1"
         self.owners.append(owner_id)
-        if len(self.owners) == 1:
+        self.reconcile_calls.append(
+            {
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "retired_mappings": tuple(retired_mappings),
+            }
+        )
+        if self._fail_first and len(self.owners) == 1:
             raise RuntimeError("runtime failed")
 
     async def reconcile_cleanup(self, *, bot_id: str, owner_id: str) -> None:
@@ -174,6 +204,9 @@ class _Audit:
 
 
 class _SuccessfulRuntime:
+    async def snapshot_skill_mappings(self, **_kwargs):
+        return ()
+
     async def reconcile(self, **_kwargs) -> None:
         return None
 
@@ -419,6 +452,9 @@ class _FailingMaterializationRepository(_McpInstallations):
 
 
 class _RuntimeSkills:
+    def __init__(self, assets=()) -> None:
+        self._assets = list(assets)
+
     def list_bot_active_assets(self, **kwargs):
         assert kwargs == {
             "env": "pre",
@@ -426,7 +462,7 @@ class _RuntimeSkills:
             "owner_id": "true-owner",
             "engine": "openclaw",
         }
-        return []
+        return self._assets
 
 
 class _HistoricalAicodingRuntimeSkills(_RuntimeSkills):
@@ -562,7 +598,60 @@ async def test_collaborator_command_restores_desired_state_and_uses_true_owner()
         }
     ]
     assert runtime.owners == ["true-owner", "true-owner"]
+    assert runtime.snapshot_calls == [
+        {"bot_id": "bot-1", "owner_id": "true-owner"},
+        {"bot_id": "bot-1", "owner_id": "true-owner"},
+    ]
+    assert runtime.reconcile_calls == [
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "retired_mappings": (),
+        },
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "retired_mappings": (
+                PoolSkillMapping(corpus="local", relative_path="qa", link_name="qa"),
+                PoolSkillMapping(
+                    corpus="repo", relative_path="business/eva", link_name="eva"
+                ),
+            ),
+        },
+    ]
     assert len(repository.restore_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_deactivate_retires_mappings_removed_from_the_runtime_projection():
+    repository = _Repository()
+    runtime = _Runtime(snapshots=[_Runtime._skill_mappings(), ()], fail_first=False)
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=runtime,
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    await service.deactivate(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="collaborator",
+        set_id="set-1",
+    )
+
+    assert runtime.reconcile_calls == [
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "retired_mappings": _Runtime._skill_mappings(),
+        }
+    ]
 
 
 def test_create_rejects_missing_bot_instead_of_creating_orphan_set():
@@ -912,8 +1001,6 @@ def test_resources_keeps_ordinary_mcp_membership_on_canonical_repository_path():
         legacy_factory=legacy,
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1147,6 +1234,48 @@ async def test_mcp_direct_activation_denies_before_writing_desired_state():
             server_code="mcp.weather",
         )
     assert repository.direct_calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_mapping_snapshot_has_no_runtime_side_effects():
+    repository = _McpInstallations()
+    pool = _RuntimePool()
+    runtime = BotRuntimeProjectionReconciler(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=repository,
+        pool_skills=_RuntimeSkills(
+            [
+                RegisteredSkillAsset(
+                    skill_id=1,
+                    name="qa",
+                    git_path="local://qa",
+                ),
+                RegisteredSkillAsset(
+                    skill_id=2,
+                    name="eva",
+                    git_path="git://business/eva",
+                ),
+            ]
+        ),
+        pool_runtime=pool,
+        pool_layouts=_RuntimeLayouts(),
+        passport=_RuntimePassport(),
+    )
+
+    snapshot = await runtime.snapshot_skill_mappings(
+        bot_id="bot-1", owner_id="true-owner"
+    )
+
+    assert snapshot == (
+        PoolSkillMapping(corpus="local", relative_path="qa", link_name="qa"),
+        PoolSkillMapping(
+            corpus="repo", relative_path="business/eva", link_name="eva"
+        ),
+    )
+    assert repository.materialize_calls == []
+    assert pool.publish_calls == []
+    assert pool.verify_calls == []
 
 
 @pytest.mark.asyncio

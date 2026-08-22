@@ -32,7 +32,10 @@ from agentclaw.community.core.skill_center.runtime_policy import (
     require_supported_bot_skill_runtime,
     runtime_layout_engine_for_bot,
 )
-from agentclaw.community.core.skills_pool.mapping_intent import mapping_contract_for
+from agentclaw.community.core.skills_pool.mapping_intent import (
+    build_logical_skill_mappings,
+    mapping_contract_for,
+)
 from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
     SkillMappingSourceLayout,
@@ -71,6 +74,36 @@ class BotRuntimeProjectionReconciler:
         self._pool_runtime = pool_runtime
         self._pool_layouts = pool_layouts
         self._passport = passport
+
+    async def snapshot_skill_mappings(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+    ) -> tuple[PoolSkillMapping, ...]:
+        """Resolve the current desired Skills without changing runtime state.
+
+        Callers use this before a mutating reconcile so a later desired-state
+        rollback can retire mappings that were already published.
+        """
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if bot is None:
+            raise LocalSkillNotFoundError()
+        require_supported_bot_skill_runtime(bot)
+        engine = str(bot.get("active_engine") or "openclaw")
+        skill_assets = list(
+            self._pool_skills.list_bot_active_assets(
+                env=str(bot["env"]),
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine=engine,
+            )
+        )
+        if engine == "teclaw" and any(
+            asset.git_path.startswith("center://") for asset in skill_assets
+        ):
+            raise SkillSetRuntimeReconcileError()
+        return tuple(build_logical_skill_mappings(skill_assets))
 
     async def reconcile(
         self,

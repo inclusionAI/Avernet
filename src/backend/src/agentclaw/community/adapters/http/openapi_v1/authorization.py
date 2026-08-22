@@ -385,6 +385,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
+    ("POST", "/openapi/v1/bots/{bot_id}/skills/upload-folder"):
+        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
     ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"):
