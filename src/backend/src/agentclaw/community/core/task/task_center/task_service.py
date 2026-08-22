@@ -170,7 +170,17 @@ class TaskService:
             bot_ids=[request.owner_bot_id, *ec.get("participant_bot_ids", [])],
             collab_mode="state_machine" if has_yaml else "manager_worker",
             group_name=ec.get("group_name", f"task-{task_id}"),
-            members_info=[], extend_props={"definition_yaml": ec.get("yaml"), "task_id": task_id, "api_base_url": self._api_base_url},
+            members_info=[],
+            extend_props={
+                "definition_yaml": ec.get("yaml"),
+                "task_id": task_id,
+                "api_base_url": self._api_base_url,
+                # 逻辑角色→产品 bot 绑定与群 master_bot 均为创建 bcn 协作群接口的入参(非 yaml 模板内字段):
+                # 经 execution_config 透传 → TaskExecutor.form_coop_group 注入 BCS create_group
+                # (state_machine participant_bindings + 顶层 master_bot)。
+                "participant_bindings": ec.get("participant_bindings"),
+                "master_bot": ec.get("master_bot"),
+            },
         )
         try:
             start = await self._engine.start_coop_group(gf)
