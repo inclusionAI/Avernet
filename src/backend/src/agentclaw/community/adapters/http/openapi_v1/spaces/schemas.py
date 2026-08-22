@@ -118,6 +118,9 @@ class SpaceItem(_UtcResponseModel):
     space_code: str = Field(description="Stable external code of the Space.")
     space_name: str = Field(description="Display name of the Space.")
     space_type: SpaceType = Field(description="Ownership model of the Space.")
+    creator_user_id: str = Field(
+        description="Identifier of the user who created the Space."
+    )
     current_user_role: SpaceRole | None = Field(
         description="Current user's role, or null when the user has not joined."
     )

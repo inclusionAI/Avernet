@@ -21,11 +21,12 @@ from agentclaw.community.core.repository.implementations.work_orders.work_order 
 )
 from agentclaw.community.core.spaces.errors import SpaceMemberAlreadyExistsError
 from agentclaw.community.core.spaces.models import SpaceJoinStatus, SpaceRole, SpaceType
-from agentclaw.community.core.spaces.repository.models import SpaceModel
+from agentclaw.community.core.spaces.repository.models import SpaceMemberModel, SpaceModel
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
     WorkOrderAlreadyPendingError,
     WorkOrderAlreadyProcessedError,
+    WorkOrderApplicantAlreadyMemberError,
     WorkOrderNoReviewerError,
     WorkOrderNotFoundError,
 )
@@ -33,6 +34,7 @@ from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderBizType,
     WorkOrderDecision,
+    WorkOrderApproverStatus,
     WorkOrderEventType,
     WorkOrderItemType,
     WorkOrderNotificationDraft,
@@ -42,6 +44,7 @@ from agentclaw.community.core.work_orders.models import (
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
     WorkOrderNotificationModel,
+    WorkOrderModel,
 )
 from agentclaw.community.plugins.local.database import SqliteDB, reset_for_tests
 
@@ -169,6 +172,212 @@ def test_unified_work_order_create_and_approval_lifecycle(db) -> None:
             review_remark="too late",
             env="dev",
         )
+
+
+def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None:
+    spaces = SpaceRepository(db)
+    repository = WorkOrderRepository(db)
+    team = _team(spaces, name="Unified Join Team", creator="owner-unified")
+
+    record = repository.create_space_join_request(
+        space_id=team.id,
+        applicant_user_id="applicant-unified",
+        applicant_name="Applicant",
+        apply_reason=None,
+        env="dev",
+    )
+
+    result = repository.process_approval(
+        work_order_id=record.id,
+        reviewer_user_id="owner-unified",
+        decision=WorkOrderDecision.APPROVED,
+        review_remark=None,
+        env="dev",
+    )
+
+    assert result.status is WorkOrderStatus.APPROVED
+    with db.orm_session() as session:
+        order_status = (
+            session.query(WorkOrderModel.status)
+            .filter(WorkOrderModel.id == record.id)
+            .scalar()
+        )
+        member_role, member_status, member_created_by = (
+            session.query(
+                SpaceMemberModel.role,
+                SpaceMemberModel.status,
+                SpaceMemberModel.created_by,
+            )
+            .filter(
+                SpaceMemberModel.space_id == team.id,
+                SpaceMemberModel.user_id == "applicant-unified",
+            )
+            .one()
+        )
+        notice_category = (
+            session.query(WorkOrderNotificationModel.notification_category)
+            .filter(
+                WorkOrderNotificationModel.work_order_id == record.id,
+                WorkOrderNotificationModel.recipient_user_id == "applicant-unified",
+            )
+            .scalar()
+        )
+    assert order_status == WorkOrderStatus.APPROVED.value
+    assert member_role == SpaceRole.MEMBER.value
+    assert member_status == "ACTIVE"
+    assert member_created_by == "owner-unified"
+    assert notice_category == NotificationCategory.NOTICE.value
+
+    _, items = spaces.list_spaces(
+        user_id="applicant-unified",
+        env="dev",
+        keyword=None,
+        space_type=SpaceType.TEAM.value,
+        offset=0,
+        limit=20,
+    )
+    joined = next(item for item in items if item.space.id == team.id)
+    assert joined.join_status is SpaceJoinStatus.JOINED
+    assert joined.current_user_role is SpaceRole.MEMBER
+
+
+def test_unified_space_join_rejection_does_not_add_member(db) -> None:
+    spaces = SpaceRepository(db)
+    repository = WorkOrderRepository(db)
+    team = _team(spaces, name="Unified Reject Team", creator="owner-reject")
+    record = repository.create_space_join_request(
+        space_id=team.id,
+        applicant_user_id="applicant-reject",
+        applicant_name="Applicant",
+        apply_reason="join",
+        env="dev",
+    )
+
+    result = repository.process_approval(
+        work_order_id=record.id,
+        reviewer_user_id="owner-reject",
+        decision=WorkOrderDecision.REJECTED,
+        review_remark="not now",
+        env="dev",
+    )
+
+    assert result.status is WorkOrderStatus.REJECTED
+    assert spaces.get_member(
+        space_id=team.id, user_id="applicant-reject", env="dev"
+    ) is None
+    with db.orm_session() as session:
+        notice_category = (
+            session.query(WorkOrderNotificationModel.notification_category)
+            .filter(
+                WorkOrderNotificationModel.work_order_id == record.id,
+                WorkOrderNotificationModel.recipient_user_id == "applicant-reject",
+            )
+            .scalar()
+        )
+    assert notice_category == NotificationCategory.NOTICE.value
+
+
+def test_unified_space_join_approval_rolls_back_when_member_already_exists(db) -> None:
+    spaces = SpaceRepository(db)
+    repository = WorkOrderRepository(db)
+    team = _team(spaces, name="Unified Rollback Team", creator="owner-rollback")
+    record = repository.create_space_join_request(
+        space_id=team.id,
+        applicant_user_id="applicant-rollback",
+        applicant_name="Applicant",
+        apply_reason="join",
+        env="dev",
+    )
+    spaces.add_member(
+        space_id=team.id,
+        user_id="applicant-rollback",
+        role=SpaceRole.MEMBER,
+        creator_id="seed",
+        env="dev",
+    )
+
+    with pytest.raises(WorkOrderApplicantAlreadyMemberError):
+        repository.process_approval(
+            work_order_id=record.id,
+            reviewer_user_id="owner-rollback",
+            decision=WorkOrderDecision.APPROVED,
+            review_remark="approve",
+            env="dev",
+        )
+
+    with db.orm_session() as session:
+        order_status = (
+            session.query(WorkOrderModel.status)
+            .filter(WorkOrderModel.id == record.id)
+            .scalar()
+        )
+        approver_status = (
+            session.query(WorkOrderApproverModel.status)
+            .filter(WorkOrderApproverModel.work_order_id == record.id)
+            .scalar()
+        )
+        notice_count = (
+            session.query(WorkOrderNotificationModel.id)
+            .filter(WorkOrderNotificationModel.work_order_id == record.id)
+            .count()
+        )
+    assert order_status == WorkOrderStatus.PENDING.value
+    assert approver_status == "PENDING"
+    assert notice_count == 1
+
+
+def test_unified_space_join_approval_rejects_missing_space_and_rolls_back(db) -> None:
+    repository = WorkOrderRepository(db)
+    with db.transactional_orm_session() as session:
+        order = WorkOrderModel(
+            work_order_no=repository._new_no(),
+            biz_type=WorkOrderBizType.SPACE_JOIN.value,
+            biz_id="999999",
+            applicant_user_id="applicant-missing-space",
+            apply_reason=None,
+            status=WorkOrderStatus.PENDING.value,
+            env="dev",
+        )
+        session.add(order)
+        session.flush()
+        session.add(
+            WorkOrderApproverModel(
+                work_order_id=order.id,
+                approver_user_id="reviewer-missing-space",
+                status=WorkOrderApproverStatus.PENDING.value,
+                env="dev",
+            )
+        )
+        work_order_id = order.id
+
+    with pytest.raises(WorkOrderNotFoundError, match="business object not found"):
+        repository.process_approval(
+            work_order_id=work_order_id,
+            reviewer_user_id="reviewer-missing-space",
+            decision=WorkOrderDecision.APPROVED,
+            review_remark=None,
+            env="dev",
+        )
+
+    with db.orm_session() as session:
+        order_status = (
+            session.query(WorkOrderModel.status)
+            .filter(WorkOrderModel.id == work_order_id)
+            .scalar()
+        )
+        approver_status = (
+            session.query(WorkOrderApproverModel.status)
+            .filter(WorkOrderApproverModel.work_order_id == work_order_id)
+            .scalar()
+        )
+        notice_count = (
+            session.query(WorkOrderNotificationModel.id)
+            .filter(WorkOrderNotificationModel.work_order_id == work_order_id)
+            .count()
+        )
+    assert order_status == WorkOrderStatus.PENDING.value
+    assert approver_status == WorkOrderApproverStatus.PENDING.value
+    assert notice_count == 0
 
 
 def test_unified_notice_work_order_does_not_create_approvers(db) -> None:

@@ -75,7 +75,7 @@ class WorkOrderRepositoryProtocol(Protocol):
         space_id: int,
         applicant_user_id: str,
         applicant_name: str,
-        apply_reason: str,
+        apply_reason: str | None,
         env: str,
     ) -> WorkOrderRecord: ...
 

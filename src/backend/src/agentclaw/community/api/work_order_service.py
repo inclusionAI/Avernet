@@ -66,7 +66,7 @@ class WorkOrderServiceProtocol(Protocol):
     ) -> WorkOrderReviewResult: ...
     @abstractmethod
     def create_space_join_request(
-        self, *, space_id: int, applicant_user_id: str, reason: str
+        self, *, space_id: int, applicant_user_id: str, reason: str | None
     ) -> WorkOrderRecord: ...
 
     @abstractmethod

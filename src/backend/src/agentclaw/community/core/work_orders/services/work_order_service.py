@@ -213,11 +213,13 @@ class WorkOrderService:
         )
 
     def create_space_join_request(
-        self, *, space_id: int, applicant_user_id: str, reason: str
+        self, *, space_id: int, applicant_user_id: str, reason: str | None
     ):
-        reason = self._required_text(
-            reason, limit=512, error=WorkOrderInvalidReasonError
-        )
+        reason = (reason or "").strip() or None
+        if reason is not None and len(reason) > 512:
+            raise WorkOrderInvalidReasonError(
+                "value must contain no more than 512 characters"
+            )
         space = self._access.require_space(space_id=space_id)
         if space.space_type is not SpaceType.TEAM:
             raise WorkOrderJoinNotAllowedError(

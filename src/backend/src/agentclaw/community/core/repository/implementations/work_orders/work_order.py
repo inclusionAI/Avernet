@@ -284,6 +284,60 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 },
                 synchronize_session=False,
             )
+
+            # A unified SPACE_JOIN approval has a domain side effect in
+            # addition to the generic work-order state transition: the
+            # applicant becomes an active Space member.  Keep this write on
+            # the current ORM session so the work order, approver state,
+            # membership and result notice commit or roll back together.
+            if (
+                decision is WorkOrderDecision.APPROVED
+                and order.biz_type == WorkOrderBizType.SPACE_JOIN.value
+            ):
+                try:
+                    space_id = int(order.biz_id)
+                except (TypeError, ValueError) as exc:
+                    raise WorkOrderNotFoundError(
+                        "invalid Space id in work order"
+                    ) from exc
+
+                space = (
+                    db.query(self._Space)
+                    .filter(self._Space.id == space_id, self._Space.env == env)
+                    .one_or_none()
+                )
+                if space is None:
+                    raise WorkOrderNotFoundError(
+                        "work-order business object not found"
+                    )
+
+                member = (
+                    db.query(self._Member)
+                    .filter(
+                        self._Member.space_id == space_id,
+                        self._Member.user_id == order.applicant_user_id,
+                        self._Member.env == env,
+                    )
+                    .one_or_none()
+                )
+                if member is not None:
+                    # Membership rows are physically deleted when a user
+                    # leaves a Space, so any existing row means the applicant
+                    # is already an active member and must not be duplicated.
+                    raise WorkOrderApplicantAlreadyMemberError(
+                        "applicant is already a member"
+                    )
+                db.add(
+                    self._Member(
+                        space_id=space_id,
+                        user_id=order.applicant_user_id,
+                        role=SpaceRole.MEMBER.value,
+                        status="ACTIVE",
+                        env=env,
+                        created_by=reviewer_user_id,
+                    )
+                )
+
             db.query(self._Approver).filter(
                 self._Approver.work_order_id == work_order_id,
                 self._Approver.status == WorkOrderApproverStatus.PENDING.value,
@@ -324,7 +378,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         space_id: int,
         applicant_user_id: str,
         applicant_name: str,
-        apply_reason: str,
+        apply_reason: str | None,
         env: str,
     ):
         with self._db.transactional_orm_session() as db:

@@ -2361,16 +2361,19 @@
         "description": "Request for joining a Space.",
         "properties": {
           "reason": {
-            "description": "Reason for requesting membership.",
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional reason for requesting membership.",
+            "title": "Reason"
           }
         },
-        "required": [
-          "reason"
-        ],
         "title": "CreateSpaceJoinRequest",
         "type": "object"
       },
@@ -15695,6 +15698,11 @@
       "SpaceItem": {
         "description": "Summary of a Space visible to the current user.",
         "properties": {
+          "creator_user_id": {
+            "description": "Identifier of the user who created the Space.",
+            "title": "Creator User Id",
+            "type": "string"
+          },
           "current_user_role": {
             "anyOf": [
               {
@@ -15751,6 +15759,7 @@
           "space_code",
           "space_name",
           "space_type",
+          "creator_user_id",
           "current_user_role",
           "join_status",
           "member_count",

@@ -223,8 +223,10 @@ class _UtcResponseModel(BaseModel):
 class CreateSpaceJoinRequest(BaseModel):
     """Request for joining a Space."""
 
-    reason: str = Field(
-        min_length=1, max_length=512, description="Reason for requesting membership."
+    reason: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Optional reason for requesting membership.",
     )
 
 

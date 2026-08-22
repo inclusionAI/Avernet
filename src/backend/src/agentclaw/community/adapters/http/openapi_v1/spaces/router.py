@@ -98,6 +98,7 @@ def _space_item(record: SpaceSummaryRecord) -> SpaceItem:
         space_code=record.space.space_code,
         space_name=record.space.name,
         space_type=record.space.space_type,
+        creator_user_id=record.space.created_by,
         current_user_role=record.current_user_role,
         join_status=record.join_status,
         member_count=record.member_count,

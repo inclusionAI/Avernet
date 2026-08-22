@@ -122,16 +122,36 @@ def _service():
     )
 
 
-@pytest.mark.parametrize("value", ["", "   ", "x" * 513])
+@pytest.mark.parametrize("value", ["x" * 513])
 def test_create_rejects_invalid_reason(value: str) -> None:
     service, repository, _, _, _ = _service()
 
-    with pytest.raises(WorkOrderInvalidReasonError, match="1-512"):
+    with pytest.raises(WorkOrderInvalidReasonError, match="512"):
         service.create_space_join_request(
             space_id=7, applicant_user_id="applicant-1", reason=value
         )
 
     repository.create_space_join_request.assert_not_called()
+
+
+@pytest.mark.parametrize("reason", [None, "", "   "])
+def test_create_space_join_request_allows_blank_reason_as_null(reason: str | None) -> None:
+    service, repository, spaces, access, _ = _service()
+    access.require_space.return_value = _space()
+    spaces.get_member.return_value = None
+    repository.create_space_join_request.return_value = _work_order()
+
+    service.create_space_join_request(
+        space_id=7, applicant_user_id="applicant-1", reason=reason
+    )
+
+    repository.create_space_join_request.assert_called_once_with(
+        space_id=7,
+        applicant_user_id="applicant-1",
+        applicant_name="applicant-1",
+        apply_reason=None,
+        env="dev",
+    )
 
 
 def test_create_space_join_request_normalizes_and_delegates() -> None:

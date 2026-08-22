@@ -127,7 +127,9 @@ def test_endpoint_serializes_persisted_datetime_with_utc_marker(client, space_se
     response = client.get("/openapi/v1/bots/spaces")
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"][0]["gmt_modified"] == "2026-08-17T07:50:45Z"
+    item = response.json()["data"]["items"][0]
+    assert item["creator_user_id"] == "owner-1"
+    assert item["gmt_modified"] == "2026-08-17T07:50:45Z"
 
 
 def test_naive_persisted_datetime_is_serialized_as_explicit_utc():
