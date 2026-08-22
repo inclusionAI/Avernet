@@ -432,10 +432,12 @@ class SkillSetService:
     ) -> str | None:
         """Best-effort template_type lookup for default-capability bucket routing."""
         target_bot_id = bot_id or self.bot_id
-        if not target_bot_id:
+        if not target_bot_id or not self.entity_id:
             return None
         try:
-            bot = self._bot_repo.get_by_id(str(target_bot_id))
+            bot = self._bot_repo.get_by_id_and_owner(
+                str(target_bot_id), str(self.entity_id)
+            )
             if isinstance(bot, dict):
                 template_type = bot.get("template_type")
                 if isinstance(template_type, str):
@@ -936,11 +938,8 @@ class SkillSetService:
             if git_paths:
                 # 修复: 传递 user_id 和 bolt_id 到 activate_skill，确保设备操作正确路由
                 # 获取 Bot 的 owner_id（用于设备绑定查询）
-                bot = self._bot_repo.get_by_id(self.bot_id)
-                owner_id = bot.get("owner_id") if bot else None
-                # fallback: 如果获取不到 owner_id，使用 entity_id 或 user_id
-                if not owner_id:
-                    owner_id = self.entity_id or user_id
+
+                owner_id = self.entity_id or user_id
 
                 # Activate all concurrently with proper device routing
                 activation_results = await asyncio.gather(
@@ -2799,10 +2798,8 @@ class SkillSetSwitcher(_DeviceSyncMixin):
         # Step 3: Activate all skills in new set concurrently
         # 修复: 传递 user_id 和 bolt_id 到 activate_skill，确保设备操作正确路由
         # 获取 Bot 的 owner_id（用于设备绑定查询）
-        bot = self.skill_set_service._bot_repo.get_by_id(self.skill_set_service.bot_id)
-        owner_id = bot.get("owner_id") if bot else None
-        if not owner_id:
-            owner_id = self.skill_set_service.entity_id or user_id
+
+        owner_id = self.skill_set_service.entity_id or user_id
 
         skill_infos = [(skill.get('id'), skill.get('git_path')) for skill in new_skills]
         if skill_infos:
@@ -2999,10 +2996,8 @@ class SkillSetSwitcher(_DeviceSyncMixin):
 
         # 修复: 传递 user_id 和 bolt_id 到 activate_skill，确保设备操作正确路由
         # 获取 Bot 的 owner_id（用于设备绑定查询）
-        bot = self.skill_set_service._bot_repo.get_by_id(self.skill_set_service.bot_id)
-        owner_id = bot.get("owner_id") if bot else None
-        if not owner_id:
-            owner_id = self.skill_set_service.entity_id or user_id
+
+        owner_id = self.skill_set_service.entity_id or user_id
 
         # Activate all concurrently
         if tasks:

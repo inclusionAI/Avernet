@@ -27,13 +27,9 @@ from agentclaw.community.core.repository.protocols.skill_set_control_plane impor
     SkillSetControlPlaneRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
-    BotCapabilityMutationGuard,
-)
 from agentclaw.community.core.skill_center.services.skill_set_control_plane import (
     SkillSetControlPlaneService,
 )
-from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
@@ -159,8 +155,6 @@ def _seed(world, *, member: bool = False) -> None:
         legacy_factory=world.get(SkillSetServiceFactory),
         passport=world.get(PassportPlugin),
         authorization=world.get(BotCapabilityAuthorizationHookProtocol),
-        mutation_guard=world.get(BotCapabilityMutationGuard),
-        edit_guard=world.get(SkillsPoolEditGuard),
         audit_log_repo=world.get(BotCollabLogRepositoryProtocol),
         mcp_center=world.get(MCPCenterPlugin),
         mcp_auth=world.get(MCPAuthPlugin),

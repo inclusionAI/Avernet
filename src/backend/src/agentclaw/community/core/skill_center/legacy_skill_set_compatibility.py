@@ -6,11 +6,19 @@ from typing import Any, Protocol, runtime_checkable
 
 
 class LegacySkillSetCompatibilityProtocol(Protocol):
-    """Resolve or materialize a historical market reference as an ``ac_skill.id``."""
+    """Read Default projections and resolve historical market references."""
 
     def resolve_or_create_legacy_market_skill(
         self, *, identifier: str, owner_id: str, bot_id: str
     ) -> str: ...
+
+    def get_set_mcp_servers(
+        self,
+        skill_set_id: str,
+        user_id: str | None = None,
+        bot_id: str | None = None,
+        engine_type: str | None = None,
+    ) -> list[dict[str, Any]]: ...
 
 
 @runtime_checkable

@@ -52,6 +52,13 @@ def _build_app() -> FastAPI:
     async def raise_unhandled():
         raise RuntimeError("kaboom-runtime")
 
+    @app.get("/raise-caused/{which}")
+    async def raise_caused(which: str):
+        try:
+            raise RuntimeError("cache backend unreachable")
+        except RuntimeError as exc:
+            raise _ROUTE_MAP[which](f"boom-{which}") from exc
+
     return app
 
 
@@ -151,9 +158,10 @@ def test_5xx_domain_error_logs_traceback_but_4xx_does_not(client, monkeypatch):
     assert sum(1 for s in fmt_strings if "DomainError 5xx" in s) == 1
 
 
-def test_4xx_domain_error_logs_one_compact_warning(client, monkeypatch):
-    """A refused request used to leave no trace at all. It now logs one line —
-    without a traceback, so a per-401 stack does not bury the real 5xx ones."""
+def test_4xx_domain_error_logs_a_warning_with_its_traceback(client, monkeypatch):
+    """A refused request used to leave no trace at all, then one line without a
+    stack. It now carries the traceback too: the status is what the caller is
+    told, and says nothing about what an operator needs to reconstruct it."""
     from agentclaw.community.adapters.http import app as app_mod
 
     calls: list[tuple] = []
@@ -164,14 +172,59 @@ def test_4xx_domain_error_logs_one_compact_warning(client, monkeypatch):
     client.get("/raise/notfound")
     assert any("[DomainError %s]" in str(a[0]) for a, _ in calls), \
         f"expected a 4xx DomainError warning, got: {calls}"
-    assert all("exc_info" not in k for _, k in calls), \
-        "4xx must not carry a traceback"
+    assert all(k.get("exc_info") is not None for _, k in calls), \
+        "a 4xx must carry its raise site"
 
-    # 3xx stays silent: LoginRedirectRequired is a step in the login flow, not
-    # a failure anyone debugs.
-    calls.clear()
+
+def test_3xx_domain_error_logs_at_info_not_warning(client, monkeypatch):
+    """``LoginRedirectRequired`` is a step in the login flow, not a fault.
+
+    It is logged so that "every error carries a stack" holds without exception,
+    but at info — a redirect must not read as a failure to anything watching
+    warnings, and this fires on ordinary unauthenticated traffic.
+    """
+    from agentclaw.community.adapters.http import app as app_mod
+
+    warnings: list[tuple] = []
+    infos: list[tuple] = []
+    monkeypatch.setattr(
+        app_mod.logger, "warning", lambda *a, **k: warnings.append((a, k)),
+    )
+    monkeypatch.setattr(
+        app_mod.logger, "info", lambda *a, **k: infos.append((a, k)),
+    )
     client.get("/raise/redirect")
-    assert calls == [], f"302 must not log, got: {calls}"
+
+    assert warnings == [], f"302 must not log at warning, got: {warnings}"
+    assert infos, "302 must still be recorded"
+    assert all(k.get("exc_info") is not None for _, k in infos)
+
+
+def test_4xx_raised_from_a_cause_logs_that_cause(client, monkeypatch):
+    """The status a caller sees and the detail an operator needs are different
+    questions.
+
+    ``SkillSetControlPlaneLockUnavailableError`` answers 409 — the mutation
+    fence could not be taken, which is a conflict, not an outage. But it is
+    raised ``from`` the cache failure underneath, and keying the traceback off
+    the status alone dropped that cause on the floor: the log said the fence
+    was unavailable and never said why. A 4xx that wraps a cause now carries
+    it.
+    """
+    from agentclaw.community.adapters.http import app as app_mod
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        app_mod.logger, "warning",
+        lambda *a, **k: calls.append((a, k)),
+    )
+    client.get("/raise-caused/conflict")
+
+    logged = [k["exc_info"] for _, k in calls if k.get("exc_info") is not None]
+    assert logged, f"a caused 4xx must log its cause, got: {calls}"
+    cause = logged[0].__cause__
+    assert isinstance(cause, RuntimeError)
+    assert str(cause) == "cache backend unreachable"
 
 
 def test_handler_logs_the_params_stashed_by_the_public_decorator(monkeypatch):
@@ -229,19 +282,21 @@ def _public_http_exception_client():
 
 
 @pytest.mark.parametrize(
-    "status,level,wants_traceback",
+    "status,level",
     [
         # Handler-raised: the raise site is the diagnosis. Both of these are live
         # on the public surface (routines 500, resources upload 502) and neither
         # is in ENVELOPE_ERRORS, so they land in this handler.
-        (502, "error", True),
-        (500, "error", True),
-        # Starlette's own routing failures dominate 4xx here; their stack is
-        # framework internals, so the message alone is the useful part.
-        (404, "warning", False),
+        (502, "error"),
+        (500, "error"),
+        # 4xx too: the stack is framework internals for Starlette's own routing
+        # failures, but it is the raise site for one thrown inside a handler,
+        # and the two are indistinguishable from here. Level still splits on
+        # status even though the traceback no longer does.
+        (404, "warning"),
     ],
 )
-def test_public_http_exception_logging(monkeypatch, status, level, wants_traceback):
+def test_public_http_exception_logging(monkeypatch, status, level):
     from agentclaw.community.adapters.http import app as app_mod
     from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
 
@@ -255,11 +310,83 @@ def test_public_http_exception_logging(monkeypatch, status, level, wants_traceba
     assert calls, f"expected a {level} log for {status}"
     args, kwargs = calls[-1]
     assert f"boom-{status}" in args, "the raised detail must survive in the log"
-    if wants_traceback:
-        assert kwargs.get("exc_info") is not None, \
-            "a 5xx HTTPException must carry its raise site"
-    else:
-        assert kwargs.get("exc_info") is None
+    assert kwargs.get("exc_info") is not None, \
+        "an HTTPException must carry its raise site, whatever its status"
+
+
+def _internal_http_exception_client():
+    """The same handler on an internal ``/api`` route, which delegates its
+    response to FastAPI but must still log."""
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from agentclaw.community.adapters.http import app as app_mod
+
+    app = FastAPI()
+    app.add_exception_handler(
+        StarletteHTTPException, app_mod._http_exception_handler
+    )
+
+    @app.get("/api/boom/{status}")
+    async def boom(status: int):
+        raise StarletteHTTPException(status_code=status, detail=f"boom-{status}")
+
+    return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.mark.parametrize("status,level", [(404, "warning"), (500, "error")])
+def test_internal_http_exception_is_logged_at_all(monkeypatch, status, level):
+    """Internal routes delegate the *response* to FastAPI, whose default handler
+    logs nothing — so an ``HTTPException`` raised inside a route left no record
+    whatsoever. ``skill_center`` still raises these by hand in a dozen places.
+
+    The response shape is FastAPI's, unchanged; only the log is new.
+    """
+    from agentclaw.community.adapters.http import app as app_mod
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        app_mod.logger, level, lambda *a, **k: calls.append((a, k)),
+    )
+    resp = _internal_http_exception_client().get(f"/api/boom/{status}")
+
+    assert resp.status_code == status
+    assert resp.json() == {"detail": f"boom-{status}"}, "wire shape must not change"
+    assert calls, f"an internal {status} must not vanish from the log"
+    args, kwargs = calls[-1]
+    assert f"boom-{status}" in args
+    assert kwargs.get("exc_info") is not None
+
+
+def test_non_5xx_data_proxy_error_is_logged_at_all(monkeypatch):
+    """``_data_proxy_error_handler`` logged only 5xx; anything mapped below that
+    returned a response with no record it had happened."""
+    from agentclaw.community.adapters.http import app as app_mod
+    from agentclaw.community.core.aicoding.services.data_proxy_service import (
+        DataProxyError,
+    )
+
+    class _Downstream(DataProxyError):
+        pass
+
+    monkeypatch.setitem(app_mod._DATA_PROXY_ERROR_STATUS_MAP, _Downstream, 400)
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        app_mod.logger, "warning", lambda *a, **k: calls.append((a, k)),
+    )
+
+    app = FastAPI()
+    app.add_exception_handler(DataProxyError, app_mod._data_proxy_error_handler)
+
+    @app.get("/api/proxy-boom")
+    async def proxy_boom():
+        raise _Downstream("upstream refused", op="read")
+
+    resp = TestClient(app, raise_server_exceptions=False).get("/api/proxy-boom")
+
+    assert resp.status_code == 400
+    assert calls, "a non-5xx DataProxyError must not vanish from the log"
+    assert calls[-1][1].get("exc_info") is not None
 
 
 # ============================================================

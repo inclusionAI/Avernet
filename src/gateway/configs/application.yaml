@@ -239,13 +239,10 @@ user_config:
     "GET /openapi/v1/bots/{bot_id}/local/auth-status":
       user: required
 
-    # The IAM token is a first-party browser credential and Caller preparation
-    # consumes that same user's HttpOnly cookie.  Do not declare `app` here:
-    # the auth runner resolves only identities named by the matched rule, so an
-    # application credential cannot reach either operation as a principal.
-    "GET /openapi/v1/org/user/iam-token":
-      user: required
-    "POST /openapi/v1/bots/{bot_id}/caller-identity":
+    # This operation returns the first-party browser credential and prepares
+    # Caller identity when the addressed Bot requires it. Do not declare `app`:
+    # an application credential cannot stand in for the chatting human.
+    "POST /openapi/v1/bots/{bot_id}/iam-token":
       user: required
 
     # Creating a bot. No bot exists yet for a grant to cover, and creation

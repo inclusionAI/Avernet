@@ -91,13 +91,11 @@ def test_shipped_config_routes_org_user_verbatim_to_backend() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
 
-    org = dm.http_domain_for("/openapi/v1/org/user/iam-token")
+    org = dm.http_domain_for("/openapi/v1/org/user")
 
     assert org is not None
     assert org.server.name == "backend"
-    assert org.upstream_path("/openapi/v1/org/user/iam-token") == (
-        "/openapi/v1/org/user/iam-token"
-    )
+    assert org.upstream_path("/openapi/v1/org/user") == "/openapi/v1/org/user"
     assert org.schema.location == "schemas/bots.openapi.json"
 
 

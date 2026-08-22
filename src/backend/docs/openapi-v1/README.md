@@ -790,6 +790,17 @@ messages channel; operating it stays with its team. Anyone else is answered
 lookup refuses (fail closed). Both ids are logged at the refusal; the
 response carries neither.
 
+The **sessions** group additionally serves a human who has an accepted BCN
+friendship with the addressed Bot. This is a conversation path, not an
+operator grant: it is draft-only, exposes only that human's Backend-owned
+Expert Chat sessions, and continues to use Expert Chat's existing session,
+message, connection, and runtime adapters. BCN is consulted on every request
+as the friendship authority; its failure is fail-closed, and Backend's legacy
+chat-list row is only a compatibility projection. All non-session
+engine-runtime groups keep the owner/collaborator rule above. Friend callers
+must name `owner_id` until BCN provides an exact Bot lookup that resolves the
+qualified `{bot_id}:{owner_id}` identity.
+
 Two optional query parameters name the target, following the same placement
 rule as `user_id` (query string, never a body field or a path segment):
 
@@ -1113,19 +1124,19 @@ literals the routes actually publish:
 <!-- reserved-component-names -->
 ```text
 all  approvals  authorized  catalog  ceiling  check-name  connection  engine  identity
-loadtest  local  logs  market  mcp  models  resources  routines  sessions  skills  spaces
+loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
 work-order-notifications  work-orders
 ```
 
-Eight of those twenty-two — `approvals`, `connection`, `engine`, `identity`,
+Eight of those twenty-three — `approvals`, `connection`, `engine`, `identity`,
 `models`, `resources`, `routines`, and `sessions` — are held **only by the
 retiring addresses**. Bot-first addressing moved every bot-scoped component out
 of that segment. The tenant-level Skill Workbench status route now keeps
 `skills` current at this level, so once the deprecated addresses are removed the
-list is the fourteen that remain:
+list is the fifteen that remain:
 
 ```text
-all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  mcp  skills
+all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  metadata  mcp  skills
 spaces  work-order-notifications  work-orders
 ```
 
@@ -1833,14 +1844,14 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   existed to retire. Regenerated Gateway `bots.openapi.json` is the release
   artifact for this surface and must be copied unchanged to the OCB Gateway.
 
-- **2026-08-18** — Split and migrated both legacy `/api/v1/token/iam`
-  capabilities: `GET /openapi/v1/org/user/iam-token` returns the first-party chat IAM
-  token, while `POST /openapi/v1/bots/{bot_id}/caller-identity` prepares Caller
-  identity for a Bot. Both require a Gateway user principal, re-check
-  `user_id` in Backend, refuse app-only callers, use the standard Envelope, and
-  disable response caching through shared middleware. Avernet Gateway now has the org forwarding domain
-  and exact user-only security rules; the OCB Gateway SOFA config still needs
-  the corresponding deployment-side update.
+- **2026-08-18** — Migrated the legacy `/api/v1/token/iam` IAM-token return and
+  optional Caller preparation as one Bot-scoped operation:
+  `POST /openapi/v1/bots/{bot_id}/iam-token`. The client supplies only Bot and
+  runtime context; Backend decides whether Caller exchange is required. The
+  operation requires a Gateway user principal, re-checks `user_id`, refuses
+  app-only callers, uses the standard Envelope, and disables response caching
+  through shared middleware. The OCB Gateway SOFA config still needs the
+  corresponding deployment-side update.
 
 - **2026-08-15** — **Bot-first addressing.** Every bot-scoped operation moved
   to `/openapi/v1/bots/{bot_id}/<component>/…`, reversing the component-first

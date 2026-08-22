@@ -284,6 +284,8 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
+    # Known-ID resolution is tenant-wide and returns display-only Bot metadata.
+    ("post", f"{PUBLIC_API_PREFIX}/bots/metadata/search"),
     # Tenant-identical marketplace searches expose no user-scoped state.
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
@@ -347,8 +349,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: placement. Together with the user-identity read, the combined contract is
 #: 83/1/45. Channels adds six Bot-addressed operations, and the Bot Space
 #: reassignment endpoint adds one more, yielding 90/1/45. Session Favorites then
-#: adds three Bot-addressed operations, Caller preparation adds one more, and the
-#: account-level IAM-token read adds one operation with no ``bot_id``. The Space
+#: adds three Bot-addressed operations. IAM-token retrieval and optional Caller
+#: preparation share one Bot-addressed operation. The Space
 #: Skill list adds one more account-level operation. Editors and render screens
 #: add another nine Bot-addressed operations, while the Bot catalog contributes
 #: two account-level reads, and the read-only Node inventory adds one more
@@ -365,7 +367,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: ``path`` then moved 132 → 133 with the BCS publish-to-users operation
 #: (``POST /openapi/v1/bots/{bot_id}/public-bcs``): it addresses a bot and acts
 #: for the operator, so it is bot-path-addressed like the rest of the surface.
-_BOT_ID_PLACEMENT = {"path": 139, "query": 1, "none": 57}
+_BOT_ID_PLACEMENT = {"path": 140, "query": 1, "none": 57}
 
 
 def _schema() -> dict:
@@ -455,7 +457,7 @@ def test_the_pinned_number_of_operations_take_it():
     # further net 32 user-scoped operations (27 bot-addressed and five
     # account-level operations), then +6 for Bot-scoped Channels CRUD/status,
     # then +1 for Bot Space reassignment, +3 for Session Favorites, +2 for
-    # IAM-token retrieval and Caller preparation, +1 for Space Skill list, then
+    # the merged IAM-token/Caller preparation operation, +1 for Space Skill list, then
     # +5 for Editors and +4 for render screens. The read-only Node inventory adds
     # the final operation. Skill Installation adds three further Bot-addressed
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and

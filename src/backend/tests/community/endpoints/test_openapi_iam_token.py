@@ -93,11 +93,13 @@ def _assert_no_store(response, _world) -> None:
 
 
 @endpoint_test(
-    method="GET",
-    path="/openapi/v1/org/user/iam-token",
-    scenario="returns_the_http_only_cookie_value",
-    input=CaseInput(query_params=_QUERY, headers=_HEADERS),
-    seed=_boot_verifier,
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/iam-token",
+    scenario="returns_the_cookie_and_skips_caller_for_a_personal_bot",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS
+    ),
+    seed=_seed_non_caller_bot,
     expect=ExpectSuccess(
         status=200,
         json_contains={
@@ -108,55 +110,13 @@ def _assert_no_store(response, _world) -> None:
     ),
     extra_assertions=(_assert_no_store,),
 )
-def get_openapi_iam_token_ok():
-    """The framework owns invocation."""
-
-
-@endpoint_test(
-    method="GET",
-    path="/openapi/v1/org/user/iam-token",
-    scenario="missing_iam_cookie",
-    input=CaseInput(query_params=_QUERY, headers={PRINCIPAL_HEADER: _principal()}),
-    seed=_boot_verifier,
-    expect=ExpectError(
-        status=401,
-        json_contains={
-            "code": 401000,
-            "message": "IAM credential is unavailable",
-            "data": None,
-        },
-    ),
-    extra_assertions=(_assert_no_store,),
-)
-def get_openapi_iam_token_missing_cookie():
+def get_bot_iam_token_ok():
     """The framework owns invocation."""
 
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/bots/{bot_id}/caller-identity",
-    scenario="prepares_the_caller_identity",
-    input=CaseInput(
-        path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS
-    ),
-    seed=_seed_non_caller_bot,
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={
-            "code": 200000,
-            "message": "OK",
-            "data": {"bot_id": _BOT_ID, "stage": "draft", "ready": True},
-        },
-    ),
-    extra_assertions=(_assert_no_store,),
-)
-def prepare_openapi_caller_identity_ok():
-    """The framework owns invocation."""
-
-
-@endpoint_test(
-    method="POST",
-    path="/openapi/v1/bots/{bot_id}/caller-identity",
+    path="/openapi/v1/bots/{bot_id}/iam-token",
     scenario="missing_iam_cookie",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
@@ -174,5 +134,5 @@ def prepare_openapi_caller_identity_ok():
     ),
     extra_assertions=(_assert_no_store,),
 )
-def prepare_openapi_caller_identity_missing_cookie():
+def get_bot_iam_token_missing_cookie():
     """The framework owns invocation."""

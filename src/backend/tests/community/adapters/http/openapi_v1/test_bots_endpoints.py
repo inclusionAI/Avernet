@@ -239,6 +239,43 @@ def test_list_bots_filters_reach_service(client, svc):
     assert kw["page"] == 2 and kw["page_size"] == 5
 
 
+def test_search_bot_metadata_returns_only_display_fields(client, svc):
+    response = client.post(
+        "/openapi/v1/bots/metadata/search?page=2&page_size=5",
+        json={"bot_ids": ["b1", "b1", "b2"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "total": 1,
+        "items": [
+            {
+                "bot_id": "b1",
+                "bot_name": "N",
+                "bot_desc": "D",
+                "engine": "teclaw",
+                "bot_type": "personal",
+                "status": "ACTIVE",
+            }
+        ],
+    }
+    assert svc.list_bots_by_conditions.call_args.kwargs == {
+        "page": 2,
+        "page_size": 5,
+        "bot_ids": ["b1", "b2"],
+    }
+
+
+@pytest.mark.parametrize("bot_ids", [[], [f"b{i}" for i in range(101)]])
+def test_search_bot_metadata_rejects_invalid_batch_size(client, bot_ids):
+    response = client.post(
+        "/openapi/v1/bots/metadata/search",
+        json={"bot_ids": bot_ids},
+    )
+
+    assert response.status_code == 422
+
+
 def test_check_name_needs_no_user_id(client):
     """The one bots operation with no user dimension answers without one.
 

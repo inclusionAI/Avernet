@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from contextlib import contextmanager
 
@@ -15,36 +16,39 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.adapters.http.middleware import AvernetTenantMiddleware
-from tests.community.adapters.http.openapi_v1.conftest import (
-    user_scoped_client,
-)
 from agentclaw.community.adapters.http.openapi_v1.contracts import EXAMPLE_TRACE_ID
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     PRINCIPAL_HEADER,
     require_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.skills.router import router
-from agentclaw.community.api.local_skill_query_service import (
-    LocalSkillQueryServiceProtocol,
-)
-from agentclaw.community.api.local_skill_upload_service import (
-    LocalSkillUploadServiceProtocol,
-)
-from agentclaw.community.api.local_skill_state_service import (
-    LocalSkillStateServiceProtocol,
+from agentclaw.community.api.bot_skill_asset_service import (
+    BotSkillAssetServiceProtocol,
 )
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.bot_skill_asset_service import (
-    BotSkillAssetServiceProtocol,
+from agentclaw.community.api.local_skill_query_service import (
+    LocalSkillQueryServiceProtocol,
+)
+from agentclaw.community.api.local_skill_state_service import (
+    LocalSkillStateServiceProtocol,
+)
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
 )
 from agentclaw.community.core.models.skill import BotSkillInstallation, Skill
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
+from agentclaw.community.core.repository.implementations.skill_center.skill import (
+    SkillRepository,
+    SkillSetRepository,
+)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillActiveError,
     LocalSkillNotFoundError,
     LocalSkillOwnerAmbiguousError,
 )
+from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 from agentclaw.community.core.skill_center.services.local_skill_query_service import (
     LocalSkillQueryService,
 )
@@ -53,16 +57,13 @@ from agentclaw.community.core.skill_center.services.local_skill_state_service im
 )
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
-from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
-from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
-from agentclaw.community.core.repository.implementations.skill_center.skill import (
-    SkillRepository,
-    SkillSetRepository,
-)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
     reset_principal_verifier_config_cache,
+)
+from tests.community.adapters.http.openapi_v1.conftest import (
+    user_scoped_client,
 )
 
 
@@ -114,6 +115,10 @@ class _Upload:
                 "gmt_modified": "2026-08-04T00:00:00",
             },
         }
+
+    async def upload_local_skill_files(self, **kwargs):
+        self.folder_args = kwargs
+        return await self.upload_local_skill(**kwargs)
 
 
 class _State:
@@ -259,6 +264,76 @@ def test_upload_rejects_multipart_and_other_content_types_before_service_call():
         )
         assert response.status_code == 400
         assert response.json()["code"] == 400101
+
+
+def test_upload_folder_preserves_legacy_file_paths_and_returns_created_skill():
+    query = _Query()
+    upload = _Upload()
+
+    class Bindings(Module):
+        def configure(self, binder):
+            binder.bind(LocalSkillQueryServiceProtocol, to=query)
+            binder.bind(LocalSkillUploadServiceProtocol, to=upload)
+            binder.bind(LocalSkillStateServiceProtocol, to=_State())
+            binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
+            binder.bind(BotSkillAssetServiceProtocol, to=_Asset())
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "actor"}
+    attach_injector(app, Injector([Bindings()]))
+    client = user_scoped_client(app, "actor")
+
+    response = client.post(
+        "/openapi/v1/bots/bot-1/skills/upload-folder",
+        data={"file_paths": json.dumps(["folder/SKILL.md", "folder/scripts/check.py"])},
+        files=[
+            ("files", ("SKILL.md", b"---\nname: folder\n---", "text/markdown")),
+            ("files", ("check.py", b"print('ok')", "text/plain")),
+        ],
+    )
+
+    assert response.status_code == 201
+    assert upload.folder_args == {
+        "bot_id": "bot-1",
+        "owner_id": "actor",
+        "actor_id": "actor",
+        "files": [
+            ("folder/SKILL.md", b"---\nname: folder\n---"),
+            ("folder/scripts/check.py", b"print('ok')"),
+        ],
+    }
+
+
+def test_upload_folder_rejects_misaligned_paths_before_service_call():
+    query = _Query()
+    upload = _Upload()
+
+    class Bindings(Module):
+        def configure(self, binder):
+            binder.bind(LocalSkillQueryServiceProtocol, to=query)
+            binder.bind(LocalSkillUploadServiceProtocol, to=upload)
+            binder.bind(LocalSkillStateServiceProtocol, to=_State())
+            binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
+            binder.bind(BotSkillAssetServiceProtocol, to=_Asset())
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "actor"}
+    attach_injector(app, Injector([Bindings()]))
+    client = user_scoped_client(app, "actor")
+
+    response = client.post(
+        "/openapi/v1/bots/bot-1/skills/upload-folder",
+        data={"file_paths": json.dumps(["folder/SKILL.md"])},
+        files=[
+            ("files", ("SKILL.md", b"manifest", "text/markdown")),
+            ("files", ("check.py", b"print('ok')", "text/plain")),
+        ],
+    )
+
+    assert response.status_code == 400
+    assert not hasattr(upload, "folder_args")
 
 
 def test_activate_and_deactivate_derive_scope_from_id_and_return_desired_state():
@@ -427,6 +502,7 @@ def test_openapi_declares_local_compatibility_and_skill_asset_operations():
     }
     assert {path: set(operations) for path, operations in skill_paths.items()} == {
         "/openapi/v1/bots/{bot_id}/skills": {"get", "post"},
+        "/openapi/v1/bots/{bot_id}/skills/upload-folder": {"post"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}": {"get", "delete"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate": {"post"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate": {"post"},
@@ -452,6 +528,11 @@ def test_openapi_declares_local_compatibility_and_skill_asset_operations():
     upload = schema["paths"]["/openapi/v1/bots/{bot_id}/skills"]["post"]
     assert {"200", "201", "413"} <= set(upload["responses"])
     assert set(upload["requestBody"]["content"]) == {"application/zip"}
+    folder_upload = schema["paths"]["/openapi/v1/bots/{bot_id}/skills/upload-folder"][
+        "post"
+    ]
+    assert {"200", "201", "413"} <= set(folder_upload["responses"])
+    assert set(folder_upload["requestBody"]["content"]) == {"multipart/form-data"}
     error_example = upload["responses"]["413"]["content"]["application/json"]["example"]
     # request_id carries the surface-wide illustrative trace id, so rendered
     # samples show a realistic value instead of an empty placeholder.
@@ -470,7 +551,14 @@ def test_openapi_declares_local_compatibility_and_skill_asset_operations():
     }
     for path, methods in skill_paths.items():
         for method, operation in methods.items():
-            if path != "/openapi/v1/bots/{bot_id}/skills" or method != "post":
+            if (
+                path
+                not in {
+                    "/openapi/v1/bots/{bot_id}/skills",
+                    "/openapi/v1/bots/{bot_id}/skills/upload-folder",
+                }
+                or method != "post"
+            ):
                 assert "413" not in operation.get("responses", {})
     for status in ("200", "201"):
         assert upload["responses"][status]["content"]["application/json"]["schema"][
@@ -734,23 +822,6 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
         def create(self, **_kwargs):
             return self.runtime
 
-    class _Guard:
-        def acquire_for_edit(self, **_kwargs):
-            return object()
-
-        def release(self, _lease):
-            return True
-
-    class _MutationGuard:
-        def acquire(self, **_kwargs):
-            return object()
-
-        def release(self, _lease):
-            return True
-
-        def ensure_valid(self, _lease) -> None:
-            return None
-
     factory = _Factory()
     service = LocalSkillStateService(
         skills,
@@ -758,8 +829,6 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
         bots,
         object(),
         factory,
-        _MutationGuard(),
-        _Guard(),
         object(),
         object(),
         object(),

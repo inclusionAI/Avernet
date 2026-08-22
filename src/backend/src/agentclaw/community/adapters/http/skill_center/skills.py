@@ -96,7 +96,6 @@ from agentclaw.community.api.skill_set_control_plane import (
     SkillSetControlPlaneServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_engine_for_bot,
     resolve_runtime_engine_for_bot,
@@ -108,6 +107,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillReferencedBySkillSetError,
     SkillSetManagedResourceError,
 )
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditGuard,
     SkillsPoolEditLockUnavailableError,
@@ -1118,6 +1118,7 @@ async def switch_skill_set(
 
     result = await control_plane.switch(
         bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
         actor_id=ctx.user_id,
         set_id=request.skill_set_id,
     )
@@ -1165,6 +1166,7 @@ async def sync_skill_set(
 
     result = await control_plane.sync(
         bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
         actor_id=ctx.user_id,
         set_id=request.skill_set_id,
     )
