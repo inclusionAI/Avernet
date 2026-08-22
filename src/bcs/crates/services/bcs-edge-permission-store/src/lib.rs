@@ -15,9 +15,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_db_api::{DbError, DbExecuteResult, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
 use bcs_domain::edge_permission::{
-    EdgeGrant, EdgeStatus, GrantKind, OriginatorPolicyType, PermissionProfile, ProfileStatus,
-    PermissionRequest, RequestKind, RequestStatus,
-    BotActorConfig,
+    BotActorConfig, EdgeGrant, EdgeStatus, GrantKind, OriginatorPolicyType, PermissionProfile,
+    ProfileStatus, PermissionRequest, RequestKind, RequestStatus,
 };
 pub use bcs_service_api::port::repo::EdgeGrantRepoPort;
 pub use bcs_service_api::port::repo::PermissionProfileRepoPort;
@@ -1080,6 +1079,11 @@ fn row_to_bot_actor_config(row: &DbRow) -> ServiceResult<BotActorConfig> {
         .and_then(|value| value.as_str())
         .unwrap_or("APPROVAL")
         .to_string();
+    let friend_ext = bot_info
+        .get("friend_ext")
+        .and_then(|value| value.as_object())
+        .cloned()
+        .unwrap_or_default();
     Ok(BotActorConfig {
         bot_id: required_string(row, "bot_uuid")?,
         env: required_string(row, "env")?,
@@ -1088,6 +1092,7 @@ fn row_to_bot_actor_config(row: &DbRow) -> ServiceResult<BotActorConfig> {
         created_by: optional_string(row, "created_by")?,
         user_visibility,
         friend_check_in_strategy,
+        friend_ext,
     })
 }
 
@@ -1710,9 +1715,35 @@ mod tests {
         status: &str,
         created_by: Option<&str>,
     ) {
+        seed_bot_with_friend_ext(
+            store,
+            bot_uuid,
+            env,
+            visibility,
+            user_visibility,
+            friend_check_in_strategy,
+            status,
+            created_by,
+            serde_json::Map::new(),
+        )
+        .await;
+    }
+
+    async fn seed_bot_with_friend_ext(
+        store: &DbBotActorConfigStore,
+        bot_uuid: &str,
+        env: &str,
+        visibility: &str,
+        user_visibility: &str,
+        friend_check_in_strategy: &str,
+        status: &str,
+        created_by: Option<&str>,
+        friend_ext: serde_json::Map<String, serde_json::Value>,
+    ) {
         let bot_info = serde_json::json!({
             "user_visibility": user_visibility,
             "friend_check_in_strategy": friend_check_in_strategy,
+            "friend_ext": friend_ext,
         });
         store
             .execute(
@@ -1762,6 +1793,7 @@ mod tests {
         assert_eq!(cfg.visibility, "public");
         assert_eq!(cfg.user_visibility, "protected");
         assert_eq!(cfg.friend_check_in_strategy, "APPROVAL");
+        assert!(cfg.friend_ext.is_empty());
         assert_eq!(cfg.status, "online");
         assert_eq!(cfg.created_by.as_deref(), Some("85020"));
     }
@@ -1778,6 +1810,7 @@ mod tests {
         let cfg = store.get("bot_b", "prod").await.expect("bot exists in prod");
         assert_eq!(cfg.user_visibility, "private");
         assert_eq!(cfg.friend_check_in_strategy, "DEPT_FREE");
+        assert!(cfg.friend_ext.is_empty());
         assert_eq!(cfg.status, "hidden");
         assert!(cfg.created_by.is_none(), "legacy bot has no created_by");
     }
