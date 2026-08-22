@@ -5497,6 +5497,77 @@ async fn bot_error_terminal_flushes_buffered_chat_segment() {
     );
 }
 
+#[tokio::test]
+async fn direct_chat_segment_boundaries_do_not_persist_group_history() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let repo = Arc::new(RecordingMessageRepo::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_message_repo(repo.clone());
+    let session_id = "bcs-cli:caller-bot:abcdef12";
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "direct-run".to_string(),
+        group_id: String::new(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({ "state": "delta", "delta_text": "临时直聊回复" }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some(session_id.to_string()),
+    })
+    .await
+    .unwrap();
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "direct-run".to_string(),
+        group_id: String::new(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "thinking",
+            "data": { "stream": "thinking", "delta": "思考中" },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some(session_id.to_string()),
+    })
+    .await
+    .unwrap();
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "direct-run".to_string(),
+        group_id: String::new(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "final",
+            "message": {
+                "role": "assistant",
+                "content": [{ "type": "text", "text": "直聊完成" }],
+            },
+        }),
+        state: ChatEventState::Final,
+        bcs_session_id: Some(session_id.to_string()),
+    })
+    .await
+    .unwrap();
+
+    assert!(
+        repo.appended().await.is_empty(),
+        "Direct A2A events must never be written to Group message history"
+    );
+    let frontend_commands = support.frontend_delivery.commands().await;
+    assert_eq!(frontend_commands.len(), 3);
+    assert!(frontend_commands.iter().all(|command| {
+        command.target
+            == FrontendDeliveryTarget::Session {
+                session_id: session_id.to_string(),
+            }
+    }));
+}
+
 /// Regression: a TASK run (its run_id resolves to a dispatched task) that streams
 /// buffered chat deltas and then terminates with `error` must still flush the
 /// buffered segment to history. The terminal flush/cleanup runs BEFORE the task

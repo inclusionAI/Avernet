@@ -127,6 +127,32 @@ pub struct BotDispatchState {
     pub agent_credential_backfill: Option<Arc<dyn super::AgentCredentialBackfillPort>>,
 }
 
+async fn resolve_bot_event_scope(
+    state: &BotDispatchState,
+    bot_id: &str,
+    run_id: &str,
+    wire_group_id: &str,
+    explicit_session_id: Option<&str>,
+) -> (String, Option<String>) {
+    let wire_scope = unwrap_outbound_group_id(wire_group_id, explicit_session_id);
+    let Some(context) = state.bot_run_context.get_context(run_id).await else {
+        return wire_scope;
+    };
+    if !context.group_id.is_empty() || context.bot_id != bot_id {
+        return wire_scope;
+    }
+
+    let session_id = context.bcs_session_id.or(wire_scope.1);
+    info!(
+        bot_id = %bot_id,
+        run_id = %run_id,
+        wire_group_id = %wire_group_id,
+        bcs_session_id = ?session_id,
+        "Direct A2A Bot event scope restored from run context"
+    );
+    (String::new(), session_id)
+}
+
 /// Dispatch an incoming frame to the appropriate handler.
 ///
 /// Returns an error if the frame is invalid or processing fails.
@@ -825,8 +851,14 @@ async fn handle_event_frame(
     let explicit_session_id = event_payload
         .get("bcs_session_id")
         .and_then(|v| v.as_str());
-    let (real_group_id, mut bcs_session_id) =
-        unwrap_outbound_group_id(&bcs_group_id, explicit_session_id);
+    let (real_group_id, mut bcs_session_id) = resolve_bot_event_scope(
+        state,
+        &bot_id,
+        &run_id,
+        &bcs_group_id,
+        explicit_session_id,
+    )
+    .await;
     if bcs_session_id.is_none() {
         if let Some(mapped_session_id) = state.run_channels.session_for_run(&run_id).await {
             let restored_session_id = if mapped_session_id.contains(':') {
@@ -1223,6 +1255,14 @@ async fn handle_accepted_run_id_response(
                 }
                 TaskRunAliasRegistration::Rejected => false,
             };
+            let direct_run_context_alias_registered = run_channel_alias_registered
+                && alias_direct_run_context(
+                    state,
+                    run_id,
+                    sub_run_id,
+                    registered_bot_id.as_deref(),
+                )
+                .await;
             let trace_context_linked = run_channel_alias_registered
                 && state.run_channels.trace_parent(sub_run_id).await.is_some();
             info!(
@@ -1231,6 +1271,7 @@ async fn handle_accepted_run_id_response(
                 task_alias_registration = ?task_alias_registration,
                 channel_source_message_rebound = channel_source_message_rebound,
                 run_channel_alias_registered = run_channel_alias_registered,
+                direct_run_context_alias_registered = direct_run_context_alias_registered,
                 trace_context_linked = trace_context_linked,
                 "master_slave: registered sub bot run_id alias"
             );
@@ -1245,6 +1286,24 @@ async fn handle_accepted_run_id_response(
             .await;
         }
     }
+}
+
+async fn alias_direct_run_context(
+    state: &BotDispatchState,
+    source_run_id: &str,
+    alias_run_id: &str,
+    registered_bot_id: Option<&str>,
+) -> bool {
+    let Some(mut context) = state.bot_run_context.get_context(source_run_id).await else {
+        return false;
+    };
+    if !context.group_id.is_empty() || registered_bot_id != Some(context.bot_id.as_str()) {
+        return false;
+    }
+
+    context.run_id = alias_run_id.to_string();
+    state.bot_run_context.put_context(context).await;
+    true
 }
 
 async fn log_master_slave_bot_accept(
