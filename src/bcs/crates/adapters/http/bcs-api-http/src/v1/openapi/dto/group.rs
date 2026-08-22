@@ -1,8 +1,9 @@
 use bcs_service_api::application::v1::{
-    BotFinalDelivery, ChatConfiguration, CollaborationConfiguration, CreateCollaborationGroup,
-    CreateDirectMessageGroup, CreateGroupSpec, CreateParticipant, GroupDeliveryPolicy,
-    GroupKindFilter, GroupPatch, GroupStrategy, GroupVisibility, ManagerWorkerConfiguration,
-    MembershipFilter, ParticipantRole, StateMachineConfiguration, StateMachineDefinition,
+    ApplicationError, BotFinalDelivery, ChatConfiguration, CollaborationConfiguration,
+    CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroupSpec, CreateParticipant,
+    GroupDeliveryPolicy, GroupKindFilter, GroupPatch, GroupStrategy, GroupVisibility,
+    InlineGroupEventSubscriptionRequest, ManagerWorkerConfiguration, MembershipFilter,
+    OpeningMessage, ParticipantRole, StateMachineConfiguration, StateMachineDefinition,
     StateMachineDefinitionContent, StateMachineParticipantBinding,
 };
 use serde::{Deserialize, Deserializer, de::Error as _};
@@ -55,7 +56,6 @@ pub struct ListGroupsQuery {
     pub strategy: Option<GroupStrategy>,
 }
 
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeleteGroupQuery {
@@ -85,6 +85,8 @@ impl ListGroupsQuery {
 pub struct ParticipantRequest {
     pub actor_id: String,
     pub role: ParticipantRole,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,7 +94,6 @@ pub struct ParticipantRequest {
 pub struct AddParticipantRequest {
     pub actor_id: String,
 }
-
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -106,7 +107,9 @@ pub struct DefinitionContentRequest {
     pub content_yaml: String,
 }
 
-pub(crate) fn deserialize_present_non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+pub(crate) fn deserialize_present_non_null<'de, D, T>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
@@ -186,53 +189,83 @@ pub enum CreateGroupRequest {
     Normal {
         name: Option<String>,
         context: Option<String>,
+        #[serde(default)]
+        opening_message: Option<OpeningMessage>,
         driver_bot_uuid: String,
         participants: Vec<ParticipantRequest>,
         collaboration: CollaborationRequest,
         originator: Option<String>,
+        #[serde(default)]
+        event_subscriptions: Vec<InlineGroupEventSubscriptionRequest>,
     },
     Dm {
         target_actor_id: String,
         name: Option<String>,
         context: Option<String>,
+        #[serde(default)]
+        opening_message: Option<OpeningMessage>,
+        #[serde(default)]
+        event_subscriptions: Vec<InlineGroupEventSubscriptionRequest>,
     },
 }
 
-impl From<CreateGroupRequest> for CreateGroupSpec {
-    fn from(value: CreateGroupRequest) -> Self {
-        match value {
+impl CreateGroupRequest {
+    pub fn into_parts(
+        self,
+    ) -> Result<(CreateGroupSpec, Vec<InlineGroupEventSubscriptionRequest>), ApplicationError> {
+        Ok(match self {
             CreateGroupRequest::Normal {
                 name,
                 context,
+                opening_message,
                 driver_bot_uuid,
                 participants,
                 collaboration,
                 originator,
-            } => Self::Collaboration(CreateCollaborationGroup {
-                name,
-                context,
-                driver_bot_uuid,
-                visibility: GroupVisibility::Private,
-                participants: participants
-                    .into_iter()
-                    .map(|participant| CreateParticipant {
-                        actor_id: participant.actor_id,
-                        role: participant.role,
-                    })
-                    .collect(),
-                collaboration: collaboration.into(),
-                originator,
-            }),
+                event_subscriptions,
+            } => (
+                CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                    name,
+                    context,
+                    opening_message,
+                    driver_bot_uuid,
+                    visibility: GroupVisibility::Private,
+                    participants: participants
+                        .into_iter()
+                        .map(|participant| CreateParticipant {
+                            actor_id: participant.actor_id,
+                            role: participant.role,
+                            tags: participant.tags,
+                        })
+                        .collect(),
+                    collaboration: collaboration.into(),
+                    originator,
+                }),
+                event_subscriptions,
+            ),
             CreateGroupRequest::Dm {
                 target_actor_id,
                 name,
                 context,
-            } => Self::DirectMessage(CreateDirectMessageGroup {
-                name,
-                context,
-                target_actor_id,
-            }),
-        }
+                opening_message,
+                event_subscriptions,
+            } => {
+                if opening_message.is_some() {
+                    return Err(ApplicationError::invalid(
+                        "invalid_opening_message",
+                        "opening_message is not supported for DM Groups",
+                    ));
+                }
+                (
+                    CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+                        name,
+                        context,
+                        target_actor_id,
+                    }),
+                    event_subscriptions,
+                )
+            }
+        })
     }
 }
 
@@ -241,10 +274,20 @@ impl From<CreateGroupRequest> for CreateGroupSpec {
 pub struct UpdateGroupRequest {
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_nullable")]
+    pub opening_message: Option<Option<OpeningMessage>>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub visibility: Option<GroupVisibility>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub delivery_policy: Option<DeliveryPolicyRequest>,
+}
+
+fn deserialize_present_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 impl From<UpdateGroupRequest> for GroupPatch {
@@ -252,10 +295,36 @@ impl From<UpdateGroupRequest> for GroupPatch {
         Self {
             name: value.name,
             context: None,
+            opening_message: value.opening_message,
             visibility: value.visibility,
             delivery_policy: value.delivery_policy.map(|policy| GroupDeliveryPolicy {
                 bot_final_delivery: policy.bot_final_delivery,
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opening_message_patch_preserves_omitted_null_and_value() {
+        let omitted: UpdateGroupRequest =
+            serde_json::from_value(serde_json::json!({ "name": "renamed" })).expect("omitted");
+        assert_eq!(omitted.opening_message, None);
+
+        let cleared: UpdateGroupRequest =
+            serde_json::from_value(serde_json::json!({ "opening_message": null })).expect("null");
+        assert_eq!(cleared.opening_message, Some(None));
+
+        let configured: UpdateGroupRequest = serde_json::from_value(serde_json::json!({
+            "opening_message": "Run {{bcs.run_id}}"
+        }))
+        .expect("value");
+        assert_eq!(
+            configured.opening_message,
+            Some(Some(OpeningMessage::Text("Run {{bcs.run_id}}".to_string())))
+        );
     }
 }

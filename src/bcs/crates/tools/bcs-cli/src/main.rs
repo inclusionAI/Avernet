@@ -2828,6 +2828,7 @@ pub async fn run() -> Result<()> {
                             "worker".to_string()
                         }
                     }),
+                    tags: Vec::new(),
                 })
                 .collect();
             if group_strategy.is_some()
@@ -2840,6 +2841,7 @@ pub async fn run() -> Result<()> {
                     bcs_protocol::ParticipantInfo {
                         bot_uuid: driver.clone(),
                         role: Some("manager".to_string()),
+                        tags: Vec::new(),
                     },
                 );
             }

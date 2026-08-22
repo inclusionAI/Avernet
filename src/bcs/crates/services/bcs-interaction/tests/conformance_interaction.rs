@@ -70,7 +70,6 @@ fn requested() -> ProviderInteractionRequestedCommand {
             "phase": "requested",
             "interactionId": "contract-interaction",
             "kind": "exec",
-            "command": "contract command",
             "options": [{"decision": "allow_once", "label": "Allow once"}]
         }),
         received_at_ms: 100,

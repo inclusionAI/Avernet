@@ -104,7 +104,14 @@ impl InteractionService for InteractionManagement {
                 request_id: Some(command.bcs_run_id.clone()),
             });
         }
-        validate_requested_payload(command.kind, &command.payload).map_err(|message| {
+        let mut payload = command.payload;
+        normalize_requested_payload(
+            command.kind,
+            &mut payload,
+            &command.bcs_run_id,
+            &command.interaction_id,
+        );
+        validate_requested_payload(command.kind, &payload).map_err(|message| {
             ServiceError::InvalidOperation {
                 message,
                 request_id: Some(command.bcs_run_id.clone()),
@@ -124,7 +131,7 @@ impl InteractionService for InteractionManagement {
             run_deadline_ms: command.run_deadline_ms,
             provider_target: command.provider_target,
             provider_bypass_headers: command.provider_bypass_headers,
-            requested_payload: command.payload,
+            requested_payload: payload,
             status: InteractionStatus::Pending,
             in_flight: false,
             accepted_idempotency_key: None,
@@ -535,13 +542,46 @@ fn validate_requested_payload(
 ) -> Result<(), String> {
     match kind {
         bcs_service_api::InteractionKind::Exec => {
-            require_non_empty_string(payload, "command")?;
+            if payload.get("command").is_some() {
+                require_non_empty_string(payload, "command")?;
+            }
             validate_decision_options(payload.get("options"), true)
         }
         bcs_service_api::InteractionKind::ModeSwitch => {
             validate_decision_options(payload.get("options"), true)
         }
         bcs_service_api::InteractionKind::AskUser => validate_questions(payload),
+    }
+}
+
+fn normalize_requested_payload(
+    kind: bcs_service_api::InteractionKind,
+    payload: &mut Value,
+    bcs_run_id: &str,
+    interaction_id: &str,
+) {
+    if kind != bcs_service_api::InteractionKind::AskUser {
+        return;
+    }
+    let Some(questions) = payload.get_mut("questions").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for (question_index, question) in questions.iter_mut().enumerate() {
+        let Some(question) = question.as_object_mut() else {
+            continue;
+        };
+        if question
+            .get("allowOther")
+            .is_some_and(|allow_other| !allow_other.is_boolean())
+        {
+            question.remove("allowOther");
+            warn!(
+                %bcs_run_id,
+                %interaction_id,
+                question_index,
+                "ask_user allowOther is not boolean; treating it as omitted"
+            );
+        }
     }
 }
 
@@ -693,53 +733,29 @@ fn validate_ask_user_resolution(
             .get("values")
             .and_then(Value::as_array)
             .ok_or_else(|| format!("ask_user answer {question_id} requires values"))?;
-        if values.is_empty()
-            || values
-                .iter()
-                .any(|value| value.as_str().is_none_or(str::is_empty))
-        {
+        if values.iter().any(|value| !value.is_string()) {
             return Err(format!(
-                "ask_user answer {question_id} values must be non-empty strings"
+                "ask_user answer {question_id} values must be strings"
             ));
         }
         let multi_select = question
             .get("multiSelect")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        if !multi_select && values.len() != 1 {
-            return Err(format!("ask_user answer {question_id} accepts one value"));
-        }
-        if let Some(options) = question.get("options").and_then(Value::as_array) {
-            let allow_other = question
-                .get("allowOther")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            if !allow_other {
-                let offered = options
-                    .iter()
-                    .filter_map(|option| option.get("value").and_then(Value::as_str))
-                    .collect::<HashSet<_>>();
-                if values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .any(|value| !offered.contains(value))
-                {
-                    return Err(format!(
-                        "ask_user answer {question_id} contains a value not offered by Provider"
-                    ));
-                }
-            }
-        } else if values.len() != 1 {
-            return Err(format!("free-text answer {question_id} accepts one value"));
+        if !multi_select && values.len() > 1 {
+            return Err(format!(
+                "ask_user answer {question_id} accepts at most one value"
+            ));
         }
     }
     Ok(())
 }
 
 /// AskUser submit 时，按 questionId（answers 对象的键）把 requested 阶段存储的
-/// 原始 question 文本补进每个 answer 对象，字段名 `question`，与 `values` 平级。
-/// 前端 resolve 只发 `values`，question 始终由 BCS 用权威存储文本补齐并覆盖前端
-/// 可能回传的同名字段。cancel / exec / mode_switch 原样返回。
+/// 原始 question 和可选 header 补进每个 answer 对象，与 `values` 平级。
+/// 前端 resolve 只发 `values`；question/header 始终由 BCS 用权威存储值覆盖，存储
+/// header 缺失时保持缺失，不从 questionId 或前端输入合成。canonical resolution
+/// 同时用于 fingerprint 与 Provider 转发。cancel / exec / mode_switch 原样返回。
 fn augment_ask_user_resolution(record: &InteractionRecord, mut resolution: Value) -> Value {
     if record.kind != bcs_service_api::InteractionKind::AskUser {
         return resolution;
@@ -768,10 +784,19 @@ fn augment_ask_user_resolution(record: &InteractionRecord, mut resolution: Value
             continue;
         };
         if let Some(answer) = answers.get_mut(question_id).and_then(Value::as_object_mut) {
+            answer.remove("question");
+            answer.remove("header");
             answer.insert(
                 "question".to_string(),
                 Value::String(question_text.to_string()),
             );
+            if let Some(header) = question
+                .get("header")
+                .and_then(Value::as_str)
+                .filter(|header| !header.trim().is_empty())
+            {
+                answer.insert("header".to_string(), Value::String(header.to_string()));
+            }
         }
     }
     resolution
@@ -1081,6 +1106,34 @@ mod tests {
         let replay = service.list_pending("session-1").await.unwrap();
         assert_eq!(replay.len(), 1);
         assert_eq!(replay[0].payload["interactionId"], "interaction-1");
+    }
+
+    #[tokio::test]
+    async fn exec_requested_without_command_is_stored_published_and_replayable() {
+        let (service, store, _provider, frontend) = service(true);
+        let mut request = requested("interaction-without-command");
+        request.payload.as_object_mut().unwrap().remove("command");
+
+        service.on_provider_requested(request).await.unwrap();
+
+        let stored = store
+            .get(&InteractionKey {
+                bcs_run_id: "bcs-run-1".to_string(),
+                interaction_id: "interaction-without-command".to_string(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(stored.requested_payload.get("command").is_none());
+
+        let calls = frontend.calls.lock().await;
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].payload.get("command").is_none());
+        drop(calls);
+
+        let replay = service.list_pending("session-1").await.unwrap();
+        assert_eq!(replay.len(), 1);
+        assert!(replay[0].payload.get("command").is_none());
     }
 
     #[tokio::test]
@@ -1512,6 +1565,20 @@ mod tests {
     #[tokio::test]
     async fn rejects_invalid_requested_shape_and_unoffered_exec_decision() {
         let (service, _store, provider, _frontend) = service(true);
+        for (index, command) in [json!(null), json!(""), json!("   "), json!(42)]
+            .into_iter()
+            .enumerate()
+        {
+            let mut invalid_command = requested(&format!("invalid-command-{index}"));
+            invalid_command.payload["command"] = command;
+            assert!(
+                service
+                    .on_provider_requested(invalid_command)
+                    .await
+                    .is_err()
+            );
+        }
+
         let mut invalid = requested("invalid");
         invalid.payload = json!({
             "phase":"requested",
@@ -1570,6 +1637,172 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ask_user_accepts_custom_values_regardless_of_allow_other() {
+        let (service, _store, provider, _frontend) = service(true);
+        let mut ask = requested("ask-custom");
+        ask.kind = InteractionKind::AskUser;
+        ask.payload = json!({
+            "runId":"provider-run-1",
+            "phase":"requested",
+            "interactionId":"ask-custom",
+            "kind":"ask_user",
+            "questions":[
+                {
+                    "questionId":"missing_hint",
+                    "question":"Choose or customize",
+                    "options":[{"value":"offered","label":"Offered"}]
+                },
+                {
+                    "questionId":"false_hint",
+                    "question":"Choose or customize anyway",
+                    "allowOther":false,
+                    "options":[{"value":"offered","label":"Offered"}]
+                }
+            ]
+        });
+        service.on_provider_requested(ask).await.unwrap();
+
+        let mut command = resolve("ask-custom", "idem-custom");
+        command.resolution = json!({
+            "action":"submit",
+            "answers":{
+                "missing_hint":{"values":["custom without hint"]},
+                "false_hint":{"values":["custom despite false"]}
+            }
+        });
+
+        let result = service.resolve(command).await.unwrap();
+
+        assert!(result.accepted);
+        let calls = provider.calls.lock().await;
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].resolution["answers"]["missing_hint"]["values"],
+            json!(["custom without hint"])
+        );
+        assert_eq!(
+            calls[0].resolution["answers"]["false_hint"]["values"],
+            json!(["custom despite false"])
+        );
+    }
+
+    #[tokio::test]
+    async fn ask_user_accepts_skipped_values_and_forwards_them_unchanged() {
+        let (service, _store, provider, _frontend) = service(true);
+        let mut ask = requested("ask-skip");
+        ask.kind = InteractionKind::AskUser;
+        ask.payload = json!({
+            "runId":"provider-run-1",
+            "phase":"requested",
+            "interactionId":"ask-skip",
+            "kind":"ask_user",
+            "questions":[
+                {
+                    "questionId":"empty_array",
+                    "question":"Skip with an empty array?",
+                    "options":[{"value":"offered","label":"Offered"}]
+                },
+                {
+                    "questionId":"empty_string",
+                    "question":"Skip with an empty string?",
+                    "options":[{"value":"offered","label":"Offered"}]
+                },
+                {
+                    "questionId":"whitespace",
+                    "question":"Skip with whitespace?"
+                }
+            ]
+        });
+        service.on_provider_requested(ask).await.unwrap();
+
+        let mut command = resolve("ask-skip", "idem-skip");
+        command.resolution = json!({
+            "action":"submit",
+            "answers":{
+                "empty_array":{"values":[]},
+                "empty_string":{"values":[""]},
+                "whitespace":{"values":["   "]}
+            }
+        });
+
+        let result = service.resolve(command).await.unwrap();
+
+        assert!(result.accepted);
+        let calls = provider.calls.lock().await;
+        assert_eq!(calls.len(), 1);
+        let answers = &calls[0].resolution["answers"];
+        assert_eq!(answers["empty_array"]["values"], json!([]));
+        assert_eq!(answers["empty_string"]["values"], json!([""]));
+        assert_eq!(answers["whitespace"]["values"], json!(["   "]));
+    }
+
+    #[tokio::test]
+    async fn ask_user_still_rejects_non_string_values() {
+        let (service, _store, provider, _frontend) = service(true);
+        let mut ask = requested("ask-non-string");
+        ask.kind = InteractionKind::AskUser;
+        ask.payload = json!({
+            "runId":"provider-run-1",
+            "phase":"requested",
+            "interactionId":"ask-non-string",
+            "kind":"ask_user",
+            "questions":[{
+                "questionId":"target",
+                "question":"Choose or skip",
+                "options":[{"value":"offered","label":"Offered"}]
+            }]
+        });
+        service.on_provider_requested(ask).await.unwrap();
+
+        let mut command = resolve("ask-non-string", "idem-non-string");
+        command.resolution = json!({
+            "action":"submit",
+            "answers":{"target":{"values":[null]}}
+        });
+
+        assert!(matches!(
+            service.resolve(command).await,
+            Err(InteractionServiceError::InvalidRequest(_))
+        ));
+        assert!(provider.calls.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ask_user_treats_non_boolean_allow_other_as_omitted() {
+        let (service, store, _provider, frontend) = service(true);
+        let mut ask = requested("ask-invalid-hint");
+        ask.kind = InteractionKind::AskUser;
+        ask.payload = json!({
+            "runId":"provider-run-1",
+            "phase":"requested",
+            "interactionId":"ask-invalid-hint",
+            "kind":"ask_user",
+            "questions":[{
+                "questionId":"target",
+                "question":"Choose or customize",
+                "allowOther":"yes",
+                "options":[{"value":"offered","label":"Offered"}]
+            }]
+        });
+
+        service.on_provider_requested(ask).await.unwrap();
+
+        let stored = store
+            .get(&InteractionKey {
+                bcs_run_id: "bcs-run-1".to_string(),
+                interaction_id: "ask-invalid-hint".to_string(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(stored.requested_payload["questions"][0]
+            .get("allowOther")
+            .is_none());
+        let calls = frontend.calls.lock().await;
+        assert!(calls[0].payload["questions"][0].get("allowOther").is_none());
+    }
+
+    #[tokio::test]
     async fn ask_user_submit_augments_answers_with_origin_question() {
         let (service, _store, provider, _frontend) = service(true);
         let mut ask = requested("ask-1");
@@ -1580,11 +1813,11 @@ mod tests {
             "interactionId":"ask-1",
             "kind":"ask_user",
             "questions":[
-                {"questionId":"target","question":"Where should this be deployed?","options":[
+                {"questionId":"target","header":"Deployment environment","question":"Where should this be deployed?","options":[
                     {"value":"staging","label":"Staging"},
                     {"value":"prod","label":"Production"}
                 ]},
-                {"questionId":"components","question":"Which components?","multiSelect":true,"options":[
+                {"questionId":"components","header":"Components","question":"Which components?","multiSelect":true,"options":[
                     {"value":"web","label":"Web"},
                     {"value":"worker","label":"Worker"}
                 ]}
@@ -1596,7 +1829,11 @@ mod tests {
         command.resolution = json!({
             "action":"submit",
             "answers":{
-                "target":{"values":["staging"]},
+                "target":{
+                    "values":["staging"],
+                    "question":"frontend question",
+                    "header":"frontend header"
+                },
                 "components":{"values":["web","worker"]}
             }
         });
@@ -1615,6 +1852,10 @@ mod tests {
             "Where should this be deployed?"
         );
         assert_eq!(
+            resolution["answers"]["target"]["header"],
+            "Deployment environment"
+        );
+        assert_eq!(
             resolution["answers"]["components"]["values"],
             json!(["web", "worker"])
         );
@@ -1622,6 +1863,45 @@ mod tests {
             resolution["answers"]["components"]["question"],
             "Which components?"
         );
+        assert_eq!(resolution["answers"]["components"]["header"], "Components");
+    }
+
+    #[tokio::test]
+    async fn ask_user_submit_omits_header_when_requested_header_is_absent() {
+        let (service, _store, provider, _frontend) = service(true);
+        let mut ask = requested("ask-1");
+        ask.kind = InteractionKind::AskUser;
+        ask.payload = json!({
+            "runId":"provider-run-1",
+            "phase":"requested",
+            "interactionId":"ask-1",
+            "kind":"ask_user",
+            "questions":[{
+                "questionId":"target",
+                "question":"Where?",
+                "options":[{"value":"staging","label":"Staging"}]
+            }]
+        });
+        service.on_provider_requested(ask).await.unwrap();
+
+        let mut command = resolve("ask-1", "idem-ask");
+        command.resolution = json!({
+            "action":"submit",
+            "answers":{
+                "target":{
+                    "values":["staging"],
+                    "question":"frontend question",
+                    "header":"untrusted"
+                }
+            }
+        });
+        let result = service.resolve(command).await.unwrap();
+        assert!(result.accepted);
+
+        let calls = provider.calls.lock().await;
+        let answer = &calls[0].resolution["answers"]["target"];
+        assert_eq!(answer["question"], "Where?");
+        assert!(answer.get("header").is_none());
     }
 
     #[tokio::test]

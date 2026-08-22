@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use bcs_service_api::application::v1::{
-    BotService, CollaborationTemplateService, FriendshipService, GroupService, InvitationService,
-    SessionMessageService, SessionFileApplicationService, SessionService,
+    BotService, CollaborationTemplateService, EventSubscriptionService, FriendshipService, GroupService, InvitationService,
+    SessionFileApplicationService, SessionMessageService, SessionService,
 };
 use bcs_service_api::application::channel::ChannelService;
 
@@ -17,6 +17,7 @@ pub trait PrincipalVerificationState: Clone + Send + Sync + 'static {
 #[derive(Clone)]
 pub struct ApiState {
     pub bot_service: Option<Arc<dyn BotService>>,
+    pub event_subscription_service: Option<Arc<dyn EventSubscriptionService>>,
     pub group_service: Arc<dyn GroupService>,
     pub session_service: Arc<dyn SessionService>,
     pub message_service: Arc<dyn SessionMessageService>,
@@ -40,6 +41,7 @@ impl ApiState {
     ) -> Self {
         Self {
             bot_service: None,
+            event_subscription_service: None,
             group_service,
             session_service,
             message_service,
@@ -67,6 +69,14 @@ impl ApiState {
     /// Fail-closed (handler returns `internal` if None) until bootstrap mounts it.
     pub fn with_channel_service(mut self, service: Arc<dyn ChannelService>) -> Self {
         self.channel_service = Some(service);
+        self
+    }
+
+    pub fn with_event_subscription_service(
+        mut self,
+        service: Arc<dyn EventSubscriptionService>,
+    ) -> Self {
+        self.event_subscription_service = Some(service);
         self
     }
 

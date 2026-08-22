@@ -1,6 +1,8 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use serde::{Deserialize, Serialize};
+
+use bcs_domain::OpeningMessage;
 
 /// Context for a proposal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +50,8 @@ pub struct ConfirmProposalResponse {
 pub struct ParticipantInfo {
     pub bot_uuid: String,
     pub role: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// Participant slot binding for state-machine group creation.
@@ -57,6 +61,55 @@ pub struct ParticipantBindingInfo {
     pub source: String,
     #[serde(default)]
     pub bot_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InlineEventPayloadMode {
+    #[default]
+    MetadataOnly,
+    Full,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InlineEventPayloadInfo {
+    #[serde(default)]
+    pub mode: InlineEventPayloadMode,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum InlineEventSinkInfo {
+    Webhook {
+        url: String,
+        #[serde(default)]
+        request_timeout_ms: Option<u64>,
+    },
+}
+
+impl fmt::Debug for InlineEventSinkInfo {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Webhook {
+                request_timeout_ms, ..
+            } => formatter
+                .debug_struct("Webhook")
+                .field("url", &"[REDACTED]")
+                .field("request_timeout_ms", request_timeout_ms)
+                .finish(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InlineGroupEventSubscriptionInfo {
+    pub name: String,
+    pub event_filters: Vec<String>,
+    #[serde(default)]
+    pub payload: InlineEventPayloadInfo,
+    pub sink: InlineEventSinkInfo,
 }
 
 /// Request to create a group.
@@ -84,6 +137,9 @@ pub struct CreateGroupRequest {
     /// User-provided group context (optional description of collaboration goal/background).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    /// Optional StateMachine Run opening-message template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening_message: Option<OpeningMessage>,
     /// Group topic (sets the group label as "Group: {topic}").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub topic: Option<String>,
@@ -123,6 +179,9 @@ pub struct CreateGroupRequest {
     /// any actor to create sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visibility: Option<String>,
+    /// Event Subscriptions provisioned atomically with this Group.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub event_subscriptions: Vec<InlineGroupEventSubscriptionInfo>,
 }
 
 /// Response from group creation.
@@ -171,6 +230,30 @@ mod tests {
         assert_eq!(req.driver_bot, None);
         assert_eq!(req.target_actor_id.as_deref(), Some("bot_1"));
         assert_eq!(req.group_kind.as_deref(), Some("dm"));
+    }
+
+    #[test]
+    fn create_group_request_accepts_inline_event_subscriptions_without_exposing_url_in_debug() {
+        let req: CreateGroupRequest = serde_json::from_value(serde_json::json!({
+            "driver_bot": "bot_1",
+            "participants": [{"bot_uuid": "bot_1", "role": "driver"}],
+            "event_subscriptions": [{
+                "name": "group-webhook",
+                "event_filters": ["group.*", "session.*"],
+                "payload": {"mode": "metadata_only"},
+                "sink": {
+                    "type": "webhook",
+                    "url": "http://127.0.0.1:28082/events",
+                    "request_timeout_ms": 2000
+                }
+            }]
+        }))
+        .expect("legacy create request should accept inline subscriptions");
+
+        assert_eq!(req.event_subscriptions.len(), 1);
+        let debug = format!("{req:?}");
+        assert!(!debug.contains("127.0.0.1"));
+        assert!(debug.contains("[REDACTED]"));
     }
 
     #[test]

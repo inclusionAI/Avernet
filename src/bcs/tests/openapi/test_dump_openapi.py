@@ -22,6 +22,7 @@ COLLABORATION_TAGS = [
     "Collaboration / Sessions",
     "Collaboration / Invitations",
     "Collaboration / Channels",
+    "Collaboration / Event Subscriptions",
 ]
 
 
@@ -62,7 +63,7 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 39)
+        self.assertEqual(len(operations), 49)
         collection = contract["paths"][
             "/openapi/v1/collaboration/sessions/{session_id}/collect"
         ]

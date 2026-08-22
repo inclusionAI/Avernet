@@ -922,6 +922,7 @@ mod tests {
             role: ParticipantRole::default(),
             actor_kind: DomainActorKind::Bot,
             mode: None,
+            tags: Vec::new(),
         }
     }
 
@@ -978,6 +979,7 @@ mod tests {
             originator: Some("bot-a".into()),
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants: vec![group_participant("bot-a"), group_participant("bot-b")],
             messages: Vec::new(),
             workspace: Workspace::default(),

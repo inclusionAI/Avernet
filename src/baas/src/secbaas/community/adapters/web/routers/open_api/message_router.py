@@ -18,6 +18,12 @@ from secbaas.community.adapters.web.routers.open_api.dependencies import (
 )
 from secbaas.community.adapters.web.routers.open_api.model import (
     ExtraInfo,
+    InteractionResolveAcceptedPayload,
+    InteractionResolveEnvelope,
+    InteractionResolveError,
+    InteractionResolveErrorEnvelope,
+    InteractionResolveResponse,
+    InteractionResolveSuccessEnvelope,
     MessageRequest,
     MessageResponse,
     MessageResponseData,
@@ -27,6 +33,11 @@ from secbaas.community.adapters.web.routers.open_api.model import (
     StreamMessageRequest,
 )
 from secbaas.community.api.api_gateway import APIKeyRecord
+from secbaas.community.api.bot_interaction import (
+    BotInteractionService,
+    InteractionResolution,
+    InteractionServiceError,
+)
 from secbaas.community.api.bot_runtime import (
     BotChatContext,
     BotNotAvailableError,
@@ -311,6 +322,63 @@ async def deliver_message_stream(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.post(
+    "/messages/interactions/resolve",
+    summary="Resolve an interaction requested on a message stream",
+    response_model=InteractionResolveResponse,
+    responses={
+        200: {
+            "description": "Resolve request accepted or rejected as RPC res envelope"
+        },
+        401: {"description": "Authentication failed"},
+        403: {"description": "Forbidden"},
+    },
+)
+@inject
+async def resolve_message_interaction(
+    request: InteractionResolveEnvelope,
+    api_key_record: APIKeyRecord = Depends(validate_api_key),
+    interaction_service: BotInteractionService = Depends(
+        Provide[ApplicationContainer.services.bot_interaction_service]
+    ),
+) -> InteractionResolveResponse:
+    """HTTP uplink for SSE stream interactions.
+
+    The HTTP response is the protocol ``res`` envelope. ``ok=true`` means the
+    answer was persisted and queued for the owner worker; final application is
+    later pushed on the same SSE stream as ``interaction.resolved``.
+    """
+    if api_key_record.app_type not in ("system", "app"):
+        logger.warning(
+            "resolve_message_interaction forbidden: app_type=%s",
+            api_key_record.app_type,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": OpenAPICode.FORBIDDEN,
+                "message": get_code_message(OpenAPICode.FORBIDDEN),
+            },
+        )
+
+    envelope = request.model_dump(by_alias=True)
+    try:
+        result = interaction_service.resolve(
+            baas_interaction_id=request.params.interaction_id,
+            resolution=InteractionResolution(decision=request.params.decision),
+            request_envelope=envelope,
+        )
+    except InteractionServiceError as exc:
+        return InteractionResolveErrorEnvelope(
+            id=request.id,
+            error=InteractionResolveError(code=exc.code, message=str(exc)),
+        )
+    return InteractionResolveSuccessEnvelope(
+        id=request.id,
+        payload=InteractionResolveAcceptedPayload(interaction_id=result.interaction_id),
     )
 
 

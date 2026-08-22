@@ -52,6 +52,16 @@ EXPECTED_OPERATIONS = {
     ("get", "/openapi/v1/collaboration/bots/{bot_uuid}/friend-requests"),
     ("post", "/openapi/v1/collaboration/friend-requests/{request_id}/accept"),
     ("post", "/openapi/v1/collaboration/friend-requests/{request_id}/reject"),
+    ("post", "/openapi/v1/collaboration/event-subscriptions"),
+    ("get", "/openapi/v1/collaboration/event-subscriptions"),
+    ("get", "/openapi/v1/collaboration/event-subscriptions/{subscription_id}"),
+    ("patch", "/openapi/v1/collaboration/event-subscriptions/{subscription_id}"),
+    ("delete", "/openapi/v1/collaboration/event-subscriptions/{subscription_id}"),
+    ("post", "/openapi/v1/collaboration/event-subscriptions/{subscription_id}:test"),
+    ("get", "/openapi/v1/collaboration/event-subscriptions/{subscription_id}/deliveries"),
+    ("get", "/openapi/v1/collaboration/event-deliveries/{delivery_id}"),
+    ("post", "/openapi/v1/collaboration/event-deliveries/{delivery_id}:replay"),
+    ("post", "/openapi/v1/collaboration/event-deliveries/{delivery_id}:skip"),
 }
 
 
@@ -65,7 +75,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_34_approved_operations() -> None:
+def test_contract_contains_exactly_the_44_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 

@@ -975,6 +975,70 @@ async fn set_visibility_route_updates_registry_and_triggers_sync_port() {
 }
 
 #[tokio::test]
+async fn set_visibility_route_returns_before_visibility_sync_finishes() {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    registry
+        .register(
+            "bot-visible".to_string(),
+            BotCapabilities {
+                visibility: "private".to_string(),
+                ..BotCapabilities::default()
+            },
+        )
+        .await
+        .unwrap();
+    registry
+        .store_token_mapping("visible-token".to_string(), "bot-visible".to_string())
+        .await;
+    let sync = Arc::new(SlowVisibilitySyncPort::new(
+        std::time::Duration::from_millis(250),
+    ));
+    let services = services_builder_with_bot_use_cases(registry).build_for_test();
+    let app = build_router(HttpAppState::new(services).with_visibility_sync(sync.clone()));
+
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        app.oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/bots/bot-visible/visibility")
+                .header("authorization", "Bearer visible-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "visibility": "protected"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        ),
+    )
+    .await
+    .expect("visibility route should not wait for visibility sync")
+    .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let sync_request = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let notified = sync.notify.notified();
+            {
+                let requests = sync.requests.lock().await;
+                if let Some(request) = requests.first().cloned() {
+                    return request;
+                }
+            }
+            notified.await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(sync_request.bot_uuid, "bot-visible");
+    assert_eq!(sync_request.visibility, "protected");
+}
+
+#[tokio::test]
 async fn query_bots_route_filters_to_onboarded_and_returns_status_fields() {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));

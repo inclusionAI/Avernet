@@ -243,6 +243,7 @@ impl InviteService for InviteServiceImpl {
             role: ParticipantRole::Consultant,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
+            tags: Vec::new(),
         };
         self.group.add_participant(group_id, participant).await?;
 
@@ -296,6 +297,7 @@ impl InviteService for InviteServiceImpl {
             role: ParticipantRole::Consultant,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
+            tags: Vec::new(),
         };
         let updated_session = self.session
             .add_participant(session_id, participant.clone())

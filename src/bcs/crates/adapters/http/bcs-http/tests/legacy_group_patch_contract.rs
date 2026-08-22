@@ -88,6 +88,7 @@ fn group_detail() -> GroupDetail {
         status: GroupStatus::Active,
         visibility: GroupVisibility::Public,
         context: None,
+        opening_message: None,
         originator_actor_id: "driver-bot".into(),
         participants: vec![Participant {
             actor_id: "driver-bot".into(),
@@ -95,6 +96,7 @@ fn group_detail() -> GroupDetail {
             name: Some("Driver".into()),
             role: ParticipantRole::Driver,
             mode: ParticipantMode::Auto,
+            tags: Vec::new(),
         }],
         driver_bot_uuid: "driver-bot".into(),
         collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
@@ -156,6 +158,7 @@ async fn legacy_patch_group_delegates_to_v1_group_application() {
                     json!({
                         "name": "Renamed",
                         "context": "测试1",
+                        "opening_message": null,
                         "visibility": "public",
                         "delivery_policy": {
                             "bot_final_delivery": "inject_observers"
@@ -188,6 +191,7 @@ async fn legacy_patch_group_delegates_to_v1_group_application() {
     assert_eq!(user.display_name.as_deref(), Some("Ray"));
     assert_eq!(command.patch.name.as_deref(), Some("Renamed"));
     assert_eq!(command.patch.context.as_deref(), Some("测试1"));
+    assert_eq!(command.patch.opening_message, Some(None));
     assert_eq!(command.patch.visibility, Some(GroupVisibility::Public));
     assert_eq!(
         command

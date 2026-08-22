@@ -295,6 +295,8 @@ dependencies = [
  "bcs-db-local",
  "bcs-db-mysql",
  "bcs-domain",
+ "bcs-event-store",
+ "bcs-eventing",
  "bcs-friend",
  "bcs-friend-store",
  "bcs-fuse-client",
@@ -339,6 +341,7 @@ dependencies = [
  "bcs-test-support",
  "bcs-user-directory-api",
  "bcs-user-identity",
+ "bcs-webhook-client",
  "bcs-ws",
  "chrono",
  "clap",
@@ -390,12 +393,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bcs",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
  "bcs-db-mysql",
  "bcs-domain",
  "clap",
  "hex",
+ "mysql_async",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -472,8 +477,10 @@ dependencies = [
  "bcs-session",
  "bcs-session-store",
  "bcs-test-support",
+ "secrecy",
  "serde_json",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -833,6 +840,7 @@ dependencies = [
  "bcs-session",
  "bcs-session-store",
  "bcs-test-support",
+ "chrono",
  "serde_json",
  "serde_yaml",
  "tokio",
@@ -849,6 +857,7 @@ dependencies = [
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
+ "bcs-event-store",
  "bcs-service-api",
  "hex",
  "serde_json",
@@ -887,6 +896,7 @@ dependencies = [
 name = "bcs-config-api"
 version = "0.1.0"
 dependencies = [
+ "ipnet",
  "secrecy",
  "serde",
  "serde_json",
@@ -921,6 +931,7 @@ dependencies = [
  "async-trait",
  "bcs-config-api",
  "bcs-db-api",
+ "bcs-test-support",
  "mysql_async",
  "tokio",
  "tracing",
@@ -939,6 +950,50 @@ dependencies = [
  "sha2",
  "thiserror 2.0.19",
  "ulid",
+ "uuid",
+]
+
+[[package]]
+name = "bcs-event-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-config-api",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-db-mysql",
+ "bcs-service-api",
+ "bcs-test-support",
+ "chrono",
+ "hex",
+ "mysql_async",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "bcs-eventing"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-config-api",
+ "bcs-event-store",
+ "bcs-group",
+ "bcs-service-api",
+ "bcs-test-support",
+ "chrono",
+ "futures",
+ "rand 0.8.7",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-util",
+ "url",
  "uuid",
 ]
 
@@ -1015,6 +1070,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bcs-bot",
+ "bcs-event-store",
  "bcs-friend",
  "bcs-group-store",
  "bcs-relation",
@@ -1041,9 +1097,13 @@ dependencies = [
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
+ "bcs-event-store",
  "bcs-service-api",
  "bcs-test-support",
+ "chrono",
+ "hex",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-test",
@@ -1233,6 +1293,7 @@ dependencies = [
  "bcs-protocol",
  "bcs-service-api",
  "bcs-test-support",
+ "chrono",
  "futures",
  "regex",
  "serde",
@@ -1250,6 +1311,7 @@ dependencies = [
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
+ "bcs-event-store",
  "bcs-service-api",
  "bcs-test-support",
  "hex",
@@ -1384,6 +1446,8 @@ dependencies = [
 name = "bcs-route-security"
 version = "0.1.0"
 dependencies = [
+ "bcs-config-api",
+ "ipnet",
  "thiserror 2.0.19",
  "tokio",
  "url",
@@ -1521,10 +1585,12 @@ dependencies = [
  "bcs-service-api",
  "bcs-session-store",
  "bcs-test-support",
+ "chrono",
  "serde_json",
  "tokio",
  "tokio-test",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1572,6 +1638,7 @@ dependencies = [
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
+ "bcs-event-store",
  "bcs-service-api",
  "bcs-test-support",
  "fastrand",
@@ -1674,6 +1741,7 @@ dependencies = [
  "bcs-session",
  "bcs-session-file",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 
@@ -1697,6 +1765,22 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "bcs-webhook-client"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-config-api",
+ "bcs-route-security",
+ "bcs-service-api",
+ "bcs-test-support",
+ "futures",
+ "httpdate",
+ "reqwest",
+ "tokio",
+ "url",
 ]
 
 [[package]]

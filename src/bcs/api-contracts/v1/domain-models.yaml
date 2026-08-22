@@ -464,6 +464,10 @@ Participant:
         - manager
         - worker
         - observer
+    tags:
+      type: array
+      items:
+        type: string
     mode:
       type: string
       enum:
@@ -471,6 +475,11 @@ Participant:
         - muted
         - present
         - absent
+    tags:
+      type: array
+      items:
+        type: string
+      description: Provider routing tags scoped to this Group or Session membership.
 
 DeliveryPolicy:
   type: object
@@ -555,7 +564,6 @@ NormalGroupSummary:
     updated_at:
       type: integer
       minimum: 0
-
 DirectMessageGroupSummary:
   type: object
   additionalProperties: false
@@ -597,7 +605,6 @@ DirectMessageGroupSummary:
     updated_at:
       type: integer
       minimum: 0
-
 GroupSummary:
   oneOf:
     - $ref: "#/NormalGroupSummary"
@@ -686,6 +693,48 @@ CollaborationConfiguration:
       manager_worker: "#/ManagerWorkerConfiguration"
       state_machine: "#/StateMachineConfiguration"
 
+AixUiOpeningMessageTab:
+  type: object
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+    title:
+      type: string
+    closable:
+      type: boolean
+
+AixUiOpeningMessage:
+  type: object
+  additionalProperties: false
+  required:
+    - type
+    - component
+  properties:
+    type:
+      type: string
+      enum: [card, panel]
+    component:
+      type: string
+      minLength: 1
+      maxLength: 256
+    params:
+      type: object
+      additionalProperties: true
+    tab:
+      $ref: "#/AixUiOpeningMessageTab"
+
+OpeningMessage:
+  description: >-
+    StateMachine Run opening-message template. Supported placeholders are
+    {{bcs.group_id}}, {{bcs.session_id}}, {{bcs.run_id}},
+    {{bcs.group_name}}, and {{bcs.session_name}}.
+  oneOf:
+    - type: string
+      minLength: 1
+      maxLength: 65536
+    - $ref: "#/AixUiOpeningMessage"
+
 CollaborationGroupDetail:
   type: object
   additionalProperties: false
@@ -716,6 +765,8 @@ CollaborationGroupDetail:
       $ref: "#/GroupVisibility"
     context:
       type: string
+    opening_message:
+      $ref: "#/OpeningMessage"
     originator_actor_id:
       type: string
     participants:
@@ -733,6 +784,13 @@ CollaborationGroupDetail:
     updated_at:
       type: integer
       minimum: 0
+    event_subscriptions:
+      type: array
+      description: >-
+        Present only on a successful Group create request that provisioned
+        inline Event Subscriptions. Endpoint URLs are redacted.
+      items:
+        $ref: ./openapi/event-subscriptions.yaml#/EventSubscription
 
 DirectMessageGroupDetail:
   type: object
@@ -776,6 +834,13 @@ DirectMessageGroupDetail:
     updated_at:
       type: integer
       minimum: 0
+    event_subscriptions:
+      type: array
+      description: >-
+        Present only on a successful Group create request that provisioned
+        inline Event Subscriptions. Endpoint URLs are redacted.
+      items:
+        $ref: ./openapi/event-subscriptions.yaml#/EventSubscription
 
 GroupDetail:
   oneOf:

@@ -145,6 +145,9 @@ pub struct Participant {
     /// Requirement 3.10#2 / 3.18#6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<ParticipantMode>,
+    /// Provider routing tags scoped to this Group/Session membership.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 impl Participant {
@@ -157,6 +160,7 @@ impl Participant {
             role,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+            tags: Vec::new(),
         }
     }
 
@@ -176,6 +180,7 @@ impl Participant {
             role,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::default_for(ActorKind::Human)),
+            tags: Vec::new(),
         }
     }
 
@@ -333,6 +338,9 @@ pub struct Group {
     /// User-provided group context (optional description of collaboration goal/background).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    /// Optional StateMachine Run opening-message template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening_message: Option<crate::opening_message::OpeningMessage>,
     /// All participants.
     pub participants: Vec<Participant>,
     /// Message history (only stored if store_messages is enabled in config).
@@ -462,6 +470,7 @@ impl Group {
             originator: None, // Will be set to driver_bot by default
             routing_policy: None,
             context: None,
+            opening_message: None,
             participants,
             messages: Vec::new(),
             workspace: Workspace::default(),

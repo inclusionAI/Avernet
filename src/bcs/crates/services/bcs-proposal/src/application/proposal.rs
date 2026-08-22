@@ -293,6 +293,7 @@ impl GroupProposalService for GroupProposalUseCases {
                 role,
                 actor_kind: bot.actor_kind,
                 mode: Some(ParticipantMode::default_for(bot.actor_kind)),
+                tags: Vec::new(),
             });
         }
 

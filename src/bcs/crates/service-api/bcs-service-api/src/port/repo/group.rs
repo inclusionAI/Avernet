@@ -1,9 +1,54 @@
 use async_trait::async_trait;
 
 use crate::types::{
-    Group, GroupKind, GroupMessage, GroupMutableFieldsPatch, GroupStatus, Participant,
-    ParticipantMode, ServiceResult, ServiceSpec, Workspace,
+    EventActor, Group, GroupKind, GroupMessage, GroupMutableFieldsPatch, GroupStatus, Participant,
+    ParticipantMode, RoutingPolicy, ServiceResult, ServiceSpec, Workspace,
 };
+
+use super::AppendEventRecord;
+
+#[derive(Debug, Clone)]
+pub struct FinalizeGroupProvisioning {
+    pub group_id: String,
+    pub env: String,
+    pub subscription_ids: Vec<String>,
+    /// Ordered Event records. `group.created` must precede any initial
+    /// `session.created` record that references it as causation.
+    pub events: Vec<AppendEventRecord>,
+    pub actor: EventActor,
+    pub finalized_at_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+pub enum GroupEventfulMutation {
+    PatchMutableFields(GroupMutableFieldsPatch),
+    UpdateStatus(GroupStatus),
+    AddParticipant {
+        participant: Participant,
+        actor_is_public: bool,
+    },
+    RemoveParticipant {
+        actor_id: String,
+    },
+    UpdateParticipantMode {
+        actor_id: String,
+        mode: ParticipantMode,
+    },
+    UpdateRoutingPolicy(RoutingPolicy),
+    UpdateServiceSpec(Option<ServiceSpec>),
+    Delete,
+}
+
+#[derive(Debug, Clone)]
+pub struct CommitGroupEventfulMutation {
+    pub group_id: String,
+    pub expected_version: i32,
+    pub mutated_at_ms: u64,
+    pub mutation: GroupEventfulMutation,
+    /// `None` only when Eventing is disabled. When present, the Event must be
+    /// committed in the same transaction as the business mutation.
+    pub event: Option<AppendEventRecord>,
+}
 
 /// Repository contract for group persistence implementations.
 ///
@@ -13,6 +58,28 @@ use crate::types::{
 #[async_trait]
 pub trait GroupRepoPort: Send + Sync {
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
+    /// Atomically make a provisioning Group available, activate its pending
+    /// inline subscriptions, and append the ordered creation Events.
+    async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {
+        let _ = command;
+        Err(crate::types::ServiceError::InvalidOperation {
+            message: "Group provisioning finalization is not configured".to_string(),
+            request_id: None,
+        })
+    }
+    /// Apply one already-authorized Group mutation with optimistic versioning.
+    /// The returned Group is the committed post-mutation state; for Delete it
+    /// is the terminal snapshot that was removed from normal reads.
+    async fn commit_eventful_mutation(
+        &self,
+        command: CommitGroupEventfulMutation,
+    ) -> ServiceResult<Group> {
+        let _ = command;
+        Err(crate::types::ServiceError::InvalidOperation {
+            message: "Eventful Group mutation is not configured".to_string(),
+            request_id: None,
+        })
+    }
     async fn patch_mutable_fields(
         &self,
         id: &str,

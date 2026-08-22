@@ -11,6 +11,7 @@ use bcs_service_api::{
     ServiceResult, Session, SessionHistoryCommand, SessionKind, SessionManagementService,
     SessionStatus, SessionUseCaseError,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
+    port::{EventRecordFactoryPort, NewEvent},
 };
 use serde_json::json;
 use std::{collections::HashMap, sync::Arc};
@@ -36,11 +37,16 @@ impl MessageInterceptor for BlockingInterceptor {
 #[derive(Default)]
 struct RecordingMessageRepo {
     appended: RwLock<Vec<bcs_domain::NewMessage>>,
+    events: RwLock<Vec<bcs_service_api::port::repo::AppendEventRecord>>,
 }
 
 impl RecordingMessageRepo {
     async fn appended(&self) -> Vec<bcs_domain::NewMessage> {
         self.appended.read().await.clone()
+    }
+
+    async fn events(&self) -> Vec<bcs_service_api::port::repo::AppendEventRecord> {
+        self.events.read().await.clone()
     }
 }
 
@@ -70,6 +76,14 @@ impl bcs_service_api::port::repo::MessageRepoPort for RecordingMessageRepo {
         Ok(persisted)
     }
 
+    async fn append_message_with_event(
+        &self,
+        command: bcs_service_api::port::repo::AppendMessageWithEvent,
+    ) -> Result<bcs_domain::PersistedMessage, bcs_service_api::port::repo::MessageRepoError> {
+        self.events.write().await.push(command.event);
+        self.append_message(command.message).await
+    }
+
     async fn query_messages(
         &self,
         _query: bcs_domain::MessageQuery,
@@ -95,6 +109,25 @@ impl bcs_service_api::port::repo::MessageRepoPort for RecordingMessageRepo {
         _session_id: &str,
     ) -> Result<i64, bcs_service_api::port::repo::MessageRepoError> {
         Ok(self.appended.read().await.len() as i64)
+    }
+}
+
+struct EnabledEventFactory;
+
+impl EventRecordFactoryPort for EnabledEventFactory {
+    fn prepare(
+        &self,
+        event: NewEvent,
+    ) -> Result<
+        Option<bcs_service_api::port::repo::AppendEventRecord>,
+        bcs_service_api::port::EventRecordError,
+    > {
+        Ok(Some(bcs_service_api::port::repo::AppendEventRecord {
+            event,
+            recorded_at: "2026-08-20T00:00:00.000Z".to_string(),
+            retention_until_ms: u64::MAX,
+            env: "test".to_string(),
+        }))
     }
 }
 
@@ -189,6 +222,7 @@ async fn make_human_bot_dm(support: &support::FlowTestSupport) {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
+            tags: Vec::new(),
         },
         Participant {
             bot_uuid: "bot-driver".to_string(),
@@ -197,6 +231,7 @@ async fn make_human_bot_dm(support: &support::FlowTestSupport) {
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
+            tags: Vec::new(),
         },
     ];
     support.group.upsert(group).await.unwrap();
@@ -235,14 +270,18 @@ impl SessionManagementService for StaticSessionManagement {
 
     async fn list_by_group(
         &self,
-        _group_id: &str,
-        _status: Option<SessionStatus>,
+        group_id: &str,
+        status: Option<SessionStatus>,
         _offset: u64,
         _limit: u64,
         _title_contains: Option<&str>,
         _participant_id: Option<&str>,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
+        Ok((self.session.group_id == group_id
+            && status.is_none_or(|status| self.session.status == status))
+        .then(|| self.session.clone())
+        .into_iter()
+        .collect())
     }
 
     async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
@@ -1030,6 +1069,7 @@ async fn history_requests_provider_target_without_ws_connection() {
                 role: ParticipantRole::Observer,
                 actor_kind: ActorKind::Human,
                 mode: Some(ParticipantMode::Present),
+                tags: Vec::new(),
             },
         ],
     );
@@ -1408,6 +1448,7 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
                 role: ParticipantRole::Observer,
                 actor_kind: ActorKind::Human,
                 mode: Some(ParticipantMode::Present),
+                tags: Vec::new(),
             },
         ],
     );
@@ -1668,6 +1709,7 @@ async fn install_provider_driver_group(
                     role: ParticipantRole::Observer,
                     actor_kind: ActorKind::Human,
                     mode: Some(ParticipantMode::Present),
+                    tags: Vec::new(),
                 },
             ],
         ))
@@ -1689,6 +1731,7 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             role: ParticipantRole::Manager,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
+            tags: Vec::new(),
         },
         Participant {
             bot_uuid: "bot-observer".to_string(),
@@ -1697,6 +1740,7 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             role: ParticipantRole::Worker,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
+            tags: Vec::new(),
         },
         Participant {
             bot_uuid: "human_1".to_string(),
@@ -1705,6 +1749,7 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
+            tags: Vec::new(),
         },
     ];
     support.group.upsert(group).await.unwrap();
@@ -2144,6 +2189,14 @@ async fn web_send_with_session_id_routes_v3_with_explicit_bcs_session_id() {
 async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let session_id = "group-1:abcdef12";
+    let mut group = support.group.get("group-1").await.expect("group exists");
+    group
+        .participants
+        .iter_mut()
+        .find(|participant| participant.bot_uuid == "bot-driver")
+        .expect("driver participant")
+        .tags = vec!["group-tag".to_string()];
+    support.group.upsert(group).await.expect("update group tags");
     support
         .registry
         .set_delivery_target(
@@ -2151,11 +2204,13 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
             support::FakeRegistryService::provider_target("bot-driver"),
         )
         .await;
+    let mut provider = Participant::bot("bot-driver", ParticipantRole::Driver);
+    provider.tags = vec!["session-tag".to_string(), "tenant-a".to_string()];
     let session = test_session(
         session_id,
         "group-1",
         vec![
-            Participant::bot("bot-driver", ParticipantRole::Driver),
+            provider,
             {
                 let mut human = Participant::human("human_1", ParticipantRole::Observer);
                 human.mode = Some(ParticipantMode::Present);
@@ -2203,6 +2258,7 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
     assert_eq!(params["bcs_group_id"], "group-1");
     assert_eq!(params["bcs_session_id"], session_id);
     assert_eq!(params["session_key"], "group:group-1");
+    assert_eq!(params["tags"], json!(["session-tag", "tenant-a"]));
 }
 
 #[tokio::test]
@@ -2840,6 +2896,61 @@ async fn persistent_group_send_routes_stores_and_returns_legacy_fields() {
 }
 
 #[tokio::test]
+async fn persistent_group_send_resolves_running_session_and_persists_message_event() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let participants = support
+        .group
+        .get("group-1")
+        .await
+        .expect("group")
+        .participants;
+    let repo = Arc::new(RecordingMessageRepo::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_message_repo(repo.clone())
+    .with_session_management(Arc::new(StaticSessionManagement::new(test_session(
+        "session-event",
+        "group-1",
+        participants,
+    ))))
+    .with_event_record_factory(Arc::new(EnabledEventFactory));
+
+    flow.handle_persistent_group_send(PersistentGroupSendCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        sender: "human_1".to_string(),
+        content: "persist and publish".to_string(),
+        message_type: GroupMessageType::Bot,
+        role: MessageRole::User,
+        max_group_messages: 10,
+        store_messages: true,
+    })
+    .await
+    .expect("persistent send");
+
+    let appended = repo.appended().await;
+    assert_eq!(appended.len(), 1);
+    assert_eq!(appended[0].session_id, "session-event");
+
+    let events = repo.events().await;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event.event_type, "message.created");
+    assert_eq!(
+        events[0].event.scope.session_id.as_deref(),
+        Some("session-event")
+    );
+    assert_eq!(events[0].event.stream_key, "session:session-event");
+}
+
+#[tokio::test]
 async fn persistent_group_send_delivers_to_registered_provider_target_without_ws_connection() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     support
@@ -2867,6 +2978,7 @@ async fn persistent_group_send_delivers_to_registered_provider_target_without_ws
                 role: ParticipantRole::Observer,
                 actor_kind: ActorKind::Human,
                 mode: Some(ParticipantMode::Present),
+                tags: Vec::new(),
             },
         ],
     );
@@ -3131,9 +3243,44 @@ async fn group_callback_command_routes_and_publishes_frontend_through_message_fl
 }
 
 #[tokio::test]
-async fn group_callback_continues_when_persistence_and_frontend_publish_fail() {
+async fn group_callback_stops_before_delivery_when_persistence_fails() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     support.group.fail_add_message().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    let error = flow
+        .handle_group_callback(GroupCallbackCommand {
+            group_id: "group-1".to_string(),
+            message: "persistence must succeed".to_string(),
+            mentions: vec!["bot-driver".to_string()],
+            metadata: Some(json!({"source": "contract"})),
+            store_message: true,
+        })
+        .await
+        .expect_err("persistence failure must be returned");
+
+    assert!(error.to_string().contains("add_message failed"));
+    assert!(support.bot_delivery.frames().await.is_empty());
+    assert!(
+        support
+            .group
+            .get("group-1")
+            .await
+            .unwrap()
+            .messages
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn group_callback_continues_when_frontend_publish_fails() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     support.frontend_delivery.fail_publish().await;
     let flow = BcsMessageFlow::new(
         support.group.clone(),
@@ -3146,25 +3293,20 @@ async fn group_callback_continues_when_persistence_and_frontend_publish_fail() {
     let outcome = flow
         .handle_group_callback(GroupCallbackCommand {
             group_id: "group-1".to_string(),
-            message: "side effects can fail".to_string(),
+            message: "frontend is best effort".to_string(),
             mentions: vec!["bot-driver".to_string()],
             metadata: Some(json!({"source": "contract"})),
             store_message: true,
         })
         .await
-        .unwrap();
+        .expect("frontend publication does not change committed callback delivery");
 
     assert_eq!(outcome.delivered_count, 2);
     assert_eq!(outcome.failed_count, 0);
     assert!(outcome.frontend_deliveries.is_empty());
-    assert!(
-        support
-            .group
-            .get("group-1")
-            .await
-            .unwrap()
-            .messages
-            .is_empty()
+    assert_eq!(
+        support.group.get("group-1").await.unwrap().messages.len(),
+        1
     );
 }
 

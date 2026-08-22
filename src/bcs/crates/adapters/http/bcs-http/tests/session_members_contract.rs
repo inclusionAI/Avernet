@@ -142,6 +142,7 @@ async fn test_app(
                 },
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+                tags: Vec::new(),
             },
             Participant {
                 bot_uuid: "worker-bot".to_string(),
@@ -153,6 +154,7 @@ async fn test_app(
                 },
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+                tags: Vec::new(),
             },
         ],
     );
@@ -439,6 +441,7 @@ async fn owner_app(staff: &str, owned_bot: &str) -> (axum::Router, Arc<Recording
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+                tags: Vec::new(),
             },
             Participant {
                 bot_uuid: "worker-bot".to_string(),
@@ -447,6 +450,7 @@ async fn owner_app(staff: &str, owned_bot: &str) -> (axum::Router, Arc<Recording
                 role: ParticipantRole::Consultant,
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+                tags: Vec::new(),
             },
         ],
     );

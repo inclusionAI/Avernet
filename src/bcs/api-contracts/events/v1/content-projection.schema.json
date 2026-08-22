@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tag:inclusionai.com,2026:bcs:content-projection:v1",
+  "title": "BCS Content Projection V1",
+  "description": "Policy-filtered projection used for externally visible content fields.",
+  "oneOf": [
+    {
+      "title": "Metadata-only content projection",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "included",
+        "content_type",
+        "size_bytes",
+        "truncated"
+      ],
+      "properties": {
+        "included": {
+          "const": false
+        },
+        "content_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    {
+      "title": "Full content projection",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "included",
+        "content_type",
+        "size_bytes",
+        "delivered_bytes",
+        "sha256",
+        "truncated"
+      ],
+      "properties": {
+        "included": {
+          "const": true
+        },
+        "content_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "delivered_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "json": true,
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["text"],
+          "not": {
+            "required": ["json"]
+          }
+        },
+        {
+          "required": ["json"],
+          "not": {
+            "required": ["text"]
+          }
+        }
+      ]
+    }
+  ]
+}

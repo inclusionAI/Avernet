@@ -119,9 +119,15 @@ class TestSkillSetServiceEngineTypeThreading:
         ]
 
 
-    async def test_get_symlink_mappings_rejects_unknown_runtime_engine(
+    async def test_get_symlink_mappings_unknown_engine_falls_back_to_default(
         self, skill_set_service
     ):
+        """未知引擎不报错，回落到 openclaw 默认技能目录（保留原 default 兜底语义）。
+
+        曾误加 ``not in ... raise`` check 拦住了 teclaw 等未在 ENGINE_SKILLS_DIR_MAP
+        里的引擎(它们不走容器软链，本就不该被此处拦下)。现恢复 ``.get(engine, 默认)``
+        兜底，未知引擎产出指向默认目录的软链配置、不抛错。
+        """
         skill_set_service.runtime_engine_type = "unknown_engine"
         skill_set_service.get_active_skills = MagicMock(
             return_value=[
@@ -129,8 +135,13 @@ class TestSkillSetServiceEngineTypeThreading:
             ]
         )
 
-        with pytest.raises(ValueError, match="engine Skill layout not implemented"):
-            skill_set_service.get_symlink_mappings()
+        mappings = skill_set_service.get_symlink_mappings()
+
+        assert len(mappings) == 1
+        m = mappings[0].to_dict()
+        # git:// business/reviewer → source skills-repo/business/reviewer, target reviewer
+        assert m["target"].endswith("/skills/reviewer")
+        assert m["source"].endswith("/skills/skills-repo/business/reviewer")
 
     def test_get_all_skill_sets_with_skills_passes_engine_type(self, skill_set_service, mock_skill_set_repo):
         """get_all_skill_sets_with_skills should pass engine_type to repo.list_all."""
