@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{BindingChannels, Skill, deserialize_skills};
 
-// ── Bot Search ─────────────────────────────────────────────────────────────
+// ── Bot Search (v2) ─────────────────────────────────────────────────────────────
 
-/// Query parameters for `GET /bots/search`.
+/// Query parameters for `GET /v2/bots/search`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BotSearchQuery {
     /// Name/summary fuzzy search (contains, case-insensitive).

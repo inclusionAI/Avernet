@@ -12,8 +12,7 @@ use crate::core::error::ServiceResult;
 pub enum ConnectStatus {
     Pending,
     Approved,
-    /// Historical runtime admission result for public discoverability;
-    /// explicit friend-add auto-approval should still create durable edges.
+    /// Target is fully public — no edge needed (§6.2 runtime public_default).
     PublicNoEdge,
 }
 

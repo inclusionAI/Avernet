@@ -6,7 +6,7 @@
 
 ## 前置条件
 
-1. Phase 1 Build 已部署：五表 DDL（`014_edge_permission.sql`）已 apply + ensure 端点已上线。
+1. Phase 1 Build 已部署：五表 DDL（`011_edge_permission.sql`）已 apply + ensure 端点已上线。
 2. Phase 0 补录完成：所有 `ac_bots` 中的 bot 都已在 BCS 注册（`scripts/phase0_backfill_missing_bots.py`）。
 3. 备份：对 `ac_bot_friend`、`bcs_friendships`、`bcs_friend_requests`、`bcs_actor_relations` 做快照。
 

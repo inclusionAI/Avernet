@@ -34,7 +34,7 @@ async fn edge_grant_repo_contract_sqlite() {
 }
 
 /// Fresh LocalSqliteDbPlugin with `edge_grants` + `permission_profiles`
-/// tables (mirrors `migrations/mysql/014_edge_permission.sql` for SQLite;
+/// tables (mirrors `migrations/mysql/011_edge_permission.sql` for SQLite;
 /// matches the inline `sqlite_store()` helper in `src/lib.rs::tests`).
 async fn sqlite_with_schema() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("local sqlite"));

@@ -6,7 +6,6 @@
 //! See `docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 
 use crate::actor::ActorKind;
 
@@ -65,13 +64,13 @@ pub struct EdgeGrant {
     pub grant_ref_id: String,
     /// Inline rules; `None` unless `GrantKind::Rules`.
     #[serde(default)]
-    pub rules: Option<Value>,
+    pub rules: Option<serde_json::Value>,
     #[serde(default)]
     pub status: EdgeStatus,
     #[serde(default)]
     pub originator_policy_type: OriginatorPolicyType,
     #[serde(default)]
-    pub originator_policy_data: Option<Value>,
+    pub originator_policy_data: Option<serde_json::Value>,
 }
 
 /// Status of a permission profile.
@@ -115,11 +114,11 @@ pub struct Capability {
     #[serde(default)]
     pub operation: Option<String>,
     #[serde(default)]
-    pub specifier_schema: Option<Value>,
+    pub specifier_schema: Option<serde_json::Value>,
     pub source: CapabilitySource,
     pub status: CapabilityStatus,
     #[serde(default)]
-    pub raw_metadata: Option<Value>,
+    pub raw_metadata: Option<serde_json::Value>,
 }
 
 /// Effect of a single rule.
@@ -155,7 +154,7 @@ pub struct PermissionProfile {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
-    pub rules_template: Value,
+    pub rules_template: serde_json::Value,
     #[serde(default)]
     pub revision: u64,
     pub digest: String,
@@ -206,7 +205,7 @@ pub struct PermissionRequest {
     #[serde(default)]
     pub requested_ref_id: Option<String>,
     #[serde(default)]
-    pub requested_rules: Option<Value>,
+    pub requested_rules: Option<serde_json::Value>,
     #[serde(default)]
     pub message: Option<String>,
     pub status: RequestStatus,
@@ -251,7 +250,7 @@ pub struct AuthzContext {
     pub to_id: String,
     pub env: String,
     pub originator: String,
-    pub context: Value,
+    pub context: serde_json::Value,
     pub grants: Vec<AuthzGrantRef>,
     #[serde(default)]
     pub signature: Option<Vec<u8>>,
@@ -264,8 +263,8 @@ pub struct AuthzContext {
 /// `visibility` and `status` are the existing decision fields; `created_by`
 /// is included so T13's ownership check can read it here without a second
 /// query (NULL for legacy bots — auto-claim per the ownership rules).
-/// `user_visibility`, `friend_check_in_strategy`, and `friend_ext` are read
-/// from the bot's internal attributes payload and reused for friend-add gating.
+/// `user_visibility` and `friend_check_in_strategy` are read from the bot's
+/// internal attributes payload and reused for friend-add gating.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BotActorConfig {
     pub bot_id: String,
@@ -283,9 +282,6 @@ pub struct BotActorConfig {
     /// `OPEN` | `APPROVAL` | `DEPT_FREE` from bot internal attributes.
     #[serde(default = "default_friend_check_in_strategy")]
     pub friend_check_in_strategy: String,
-    /// Free-form friend gating metadata from bot internal attributes.
-    #[serde(default)]
-    pub friend_ext: Map<String, Value>,
 }
 
 fn default_user_visibility() -> String {

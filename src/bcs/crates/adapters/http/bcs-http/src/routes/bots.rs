@@ -449,7 +449,7 @@ fn bot_visibility_to_json(result: BotVisibilityQueryResult) -> Value {
     })
 }
 
-/// `GET /bots/search` — bot search with name fuzzy + keyword filtering + is_friend.
+/// `GET /v2/bots/search` — bot search with name fuzzy + keyword filtering + is_friend.
 /// Spec: docs/superpowers/specs/2026-08-20-bot-search-endpoint-design.md
 pub async fn search_bots(
     State(state): State<HttpAppState>,
