@@ -2373,6 +2373,7 @@
                 "type": "null"
               }
             ],
+            "description": "Applicant user identifier, when applicable.",
             "title": "Applicant User Id"
           },
           "apply_reason": {
@@ -2385,9 +2386,11 @@
                 "type": "null"
               }
             ],
+            "description": "Reason supplied for an approval event, when applicable.",
             "title": "Apply Reason"
           },
           "approver_user_ids": {
+            "description": "User identifiers who may approve the event.",
             "items": {
               "type": "string"
             },
@@ -2404,15 +2407,18 @@
                 "type": "null"
               }
             ],
+            "description": "Business-specific event data, when supplied.",
             "title": "Biz Data"
           },
           "biz_id": {
+            "description": "Identifier of the related business object.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Biz Id",
             "type": "string"
           },
           "biz_type": {
+            "description": "Business type represented by the event.",
             "maxLength": 64,
             "minLength": 1,
             "title": "Biz Type",
@@ -2427,6 +2433,7 @@
                 "type": "null"
               }
             ],
+            "description": "Display content of the event, when supplied.",
             "title": "Content"
           },
           "event_category": {
@@ -2434,12 +2441,14 @@
             "description": "Whether the event requires approval or is informational."
           },
           "event_type": {
+            "description": "Business event that triggered the work-order event.",
             "maxLength": 64,
             "minLength": 1,
             "title": "Event Type",
             "type": "string"
           },
           "recipient_user_ids": {
+            "description": "User identifiers who receive the event notice.",
             "items": {
               "type": "string"
             },
@@ -2447,6 +2456,7 @@
             "type": "array"
           },
           "title": {
+            "description": "Display title of the event.",
             "maxLength": 256,
             "minLength": 1,
             "title": "Title",
@@ -16436,9 +16446,11 @@
         "description": "Identifiers and state created by the unified event endpoint.",
         "properties": {
           "event_category": {
-            "$ref": "#/components/schemas/NotificationCategory"
+            "$ref": "#/components/schemas/NotificationCategory",
+            "description": "Whether the created item requires approval or is informational."
           },
           "notification_ids": {
+            "description": "Identifiers of notifications created for recipients.",
             "items": {
               "type": "integer"
             },
@@ -16446,7 +16458,8 @@
             "type": "array"
           },
           "status": {
-            "$ref": "#/components/schemas/WorkOrderEventStatus"
+            "$ref": "#/components/schemas/WorkOrderEventStatus",
+            "description": "Resulting state of the accepted event."
           },
           "work_order_id": {
             "anyOf": [
@@ -16457,6 +16470,7 @@
                 "type": "null"
               }
             ],
+            "description": "Created work-order identifier, when an approval item was created.",
             "title": "Work Order Id"
           },
           "work_order_no": {
@@ -16468,6 +16482,7 @@
                 "type": "null"
               }
             ],
+            "description": "Human-readable work-order number, when one exists.",
             "title": "Work Order No"
           }
         },

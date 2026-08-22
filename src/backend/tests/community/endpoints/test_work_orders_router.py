@@ -106,6 +106,60 @@ def _mismatched_user(path_params: dict | None = None, json_body: dict | None = N
     )
 
 
+# ── POST /openapi/v1/bots/work-orders/events ─────────────────────────────────────
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/work-orders/events",
+    scenario="happy",
+    seed=_enable_public_auth,
+    input=CaseInput(
+        query_params={"user_id": _USER_ID},
+        json_body={
+            "event_category": "NOTICE",
+            "biz_type": "SPACE",
+            "biz_id": "space-1",
+            "event_type": "SPACE_MEMBER_ADDED",
+            "recipient_user_ids": [_USER_ID],
+            "title": "Member added",
+            "content": "A member was added to the Space.",
+        },
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=201,
+        json_contains={
+            "code": 201000,
+            "data": {"event_category": "NOTICE", "status": "CREATED"},
+        },
+    ),
+)
+def create_work_order_event_happy():
+    """The unified event endpoint creates a recipient notice."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/work-orders/events",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        json_body={
+            "event_category": "NOTICE",
+            "biz_type": "SPACE",
+            "biz_id": "space-1",
+            "event_type": "SPACE_MEMBER_ADDED",
+            "recipient_user_ids": [_USER_ID],
+            "title": "Member added",
+        }
+    ),
+    expect=ExpectError(status=403),
+)
+def create_work_order_event_wrong_user():
+    """The unified event endpoint rejects a mismatched acting user."""
+
+
 # ── POST /openapi/v1/bots/spaces/{space_id}/join-requests ─────────────────────────
 
 

@@ -73,26 +73,58 @@ class CreateWorkOrderEventRequest(BaseModel):
     event_category: NotificationCategory = Field(
         description="Whether the event requires approval or is informational."
     )
-    biz_type: str = Field(min_length=1, max_length=64)
-    biz_id: str = Field(min_length=1, max_length=128)
-    event_type: str = Field(min_length=1, max_length=64)
-    applicant_user_id: str | None = Field(default=None, max_length=256)
-    approver_user_ids: list[str] = Field(default_factory=list)
-    recipient_user_ids: list[str] = Field(default_factory=list)
-    title: str = Field(min_length=1, max_length=256)
-    content: str | None = None
-    apply_reason: str | None = Field(default=None, max_length=512)
-    biz_data: dict[str, object] | None = None
+    biz_type: str = Field(
+        min_length=1, max_length=64, description="Business type represented by the event."
+    )
+    biz_id: str = Field(
+        min_length=1, max_length=128, description="Identifier of the related business object."
+    )
+    event_type: str = Field(
+        min_length=1, max_length=64, description="Business event that triggered the work-order event."
+    )
+    applicant_user_id: str | None = Field(
+        default=None, max_length=256, description="Applicant user identifier, when applicable."
+    )
+    approver_user_ids: list[str] = Field(
+        default_factory=list, description="User identifiers who may approve the event."
+    )
+    recipient_user_ids: list[str] = Field(
+        default_factory=list, description="User identifiers who receive the event notice."
+    )
+    title: str = Field(
+        min_length=1, max_length=256, description="Display title of the event."
+    )
+    content: str | None = Field(
+        default=None, description="Display content of the event, when supplied."
+    )
+    apply_reason: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Reason supplied for an approval event, when applicable.",
+    )
+    biz_data: dict[str, object] | None = Field(
+        default=None, description="Business-specific event data, when supplied."
+    )
 
 
 class WorkOrderEventCreated(BaseModel):
     """Identifiers and state created by the unified event endpoint."""
 
-    event_category: NotificationCategory
-    work_order_id: int | None
-    work_order_no: str | None
-    notification_ids: list[int]
-    status: WorkOrderEventStatus
+    event_category: NotificationCategory = Field(
+        description="Whether the created item requires approval or is informational."
+    )
+    work_order_id: int | None = Field(
+        description="Created work-order identifier, when an approval item was created."
+    )
+    work_order_no: str | None = Field(
+        description="Human-readable work-order number, when one exists."
+    )
+    notification_ids: list[int] = Field(
+        description="Identifiers of notifications created for recipients."
+    )
+    status: WorkOrderEventStatus = Field(
+        description="Resulting state of the accepted event."
+    )
 
 
 class WorkOrderQueryType(_DocumentedEnum):
