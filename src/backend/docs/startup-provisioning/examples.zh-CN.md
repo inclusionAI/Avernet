@@ -193,6 +193,25 @@ rename 整树替换——归档里删掉的文件随之消失，手工塞进该�
 清（目录级声明获胜，schema §3.2）。teclaw 侧 compose 时逐文件展开为
 `ResourceRef`，契约零改动。
 
+**git 形态（内容托管在公司 git 服务、tag 管版本时优先）**：免打包——
+目录枚举由仓库服务完成，`ref` 即版本、解析出的 commit SHA 即 digest
+（schema §2.2）：
+
+```yaml
+resources:
+  - path: data/kb/
+    source:
+      git: https://code.example-corp.com/team/content.git
+      ref: v1.2.0                # 发新版内容 = 打新 tag、改这里
+      path: kb/
+    auth: corp-git-content       # git 型凭证：含 allowed_repos 仓库白名单
+                                 # （单 origin 托管全司仓库，防凭证被改
+                                 #  source 套取，schema §2.1）
+```
+
+落地后的语义（目录级 managed、原子替换等）与 zip 形态完全一致，git 只是
+传输形态。
+
 **注意**：`type: link` 类资源（仅记录、无文件的链接资源，现有 API 支持）
 可作为 v1.x 扩展条目类型，本期先不进 schema。
 

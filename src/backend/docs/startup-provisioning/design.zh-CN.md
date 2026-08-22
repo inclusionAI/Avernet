@@ -177,6 +177,11 @@ fetcher、统一的 SSRF 防护、统一的新鲜度语义，换一条明确的�
 源上的最新版」。需要严格可复现（同一 manifest 永远同一状态）的用户，可在
 条目上加 `digest`（sha256）钉住；digest 不匹配按 fetch 失败处理。
 
+git 源（schema §2.2）的对应物是 `ref`：写 branch 追最新、写 tag/SHA 钉版；
+收敛以每个 apply 点解析出的 commit SHA 为准，`ref` 与 SHA 双双记入 apply
+report。tag 被重打即声明含义变化，下次 apply 收敛到新内容——与「声明获胜」
+一致；要绝对不可变直接写 SHA。
+
 ### 4.3 失败策略
 
 条目级 `on_fetch_failure`，三个值：
@@ -233,6 +238,12 @@ fetch 是平台发出的普通 HTTPS GET，所以私有源鉴权的问题是「�
 5. **引擎面为零**：fetch 全在平台侧完成，凭证不下发容器、不进 artifact
    （`StoreRef` 契约本就是 "location only — never credentials"）。MCP
    凭证的 compose 时内联是既有契约、与本机制无关，照现状不变。
+
+**git 源的凭证要更紧一档**：git 托管服务是单 origin 托管全公司仓库，仅按
+origin 放行不足以反套取——git 型凭证强制声明 `allowed_repos`（仓库白名单，
+平台侧校验、不依赖托管服务能力），token 选型按「仓库级只读 token → 机器人
+账号 token → 不用个人 PAT」的次序收窄。细则见 manifest-schema §2.1，托管
+服务能力确认见 O11。
 
 无鉴权基线仍然成立：公开源、网络 ACL 自保护的源、签名 URL（有过期问题，
 只适合一次性场景）都不需要凭证引用。v1 注入方式仅支持请求头；query 参数
@@ -314,9 +325,9 @@ planning 决定；模块边界按 `context-boundary-format.md` 出 README。
 
 | 期 | 内容 |
 | --- | --- |
-| **v1** | manifest 五类（mcp / resources / skills / engine_config / identity；resources 含**目录条目**——归档 + `strip_components` 展开，schema §3.2）+ script 归编到置备文档；平台侧 apply + guarded fetcher；租户级凭证引用（§4.5，仅请求头注入）；能力表；apply report；teclaw 经 artifact 组装生效 |
+| **v1** | manifest 五类（mcp / resources / skills / engine_config / identity；resources 含**目录条目**——归档 + `strip_components` 展开，schema §3.2）+ script 归编到置备文档；source 支持 URL 与 **git 引用**两种形态（tag/branch/SHA 版本化，schema §2.2；git 型凭证强制 `allowed_repos`）；平台侧 apply + guarded fetcher；租户级凭证引用（§4.5，仅请求头注入）；能力表；apply report；teclaw 经 artifact 组装生效 |
 | **cli_tools（schema 已定稿，排期后置）** | 给模型调用的命令行工具（schema §3.7）：静态二进制/压缩包、digest 强制、平台工具目录 + PATH 注入；ARCA 系先行（A2），teclaw 待确认（T4）。按业务优先级排期 |
-| **v2 候选** | 条目级结果上报（teclaw 唯一可能的契约增量）；strict 就绪门控；`apply_once`；skill-center 引用源（`center://uuid@version`）；目录源的更多传输形态（git 子树 / 索引文件 / 对象存储前缀——「文件夹语义」需要带目录枚举能力的协议，归档只是最普适的一种）；engine plugin 类目（**注册表引用**模式，照 MCP 模子而非任意 URL——插件在引擎进程内自动执行，供应链敏感度最高；前置确认见 O10）；容器内 op CLI（服务 script 用户体验：`install-skill` 等意图层命令，ARCA 系实现）；凭证注入的扩展形态（query 参数 / mTLS，O8）；模板级 manifest（一份声明应用于多个 bot） |
+| **v2 候选** | 条目级结果上报（teclaw 唯一可能的契约增量）；strict 就绪门控；`apply_once`；skill-center 引用源（`center://uuid@version`）；目录源的更多传输形态（索引文件 / 对象存储前缀——「文件夹语义」需要带目录枚举能力的协议；git 与归档已进 v1）；engine plugin 类目（**注册表引用**模式，照 MCP 模子而非任意 URL——插件在引擎进程内自动执行，供应链敏感度最高；前置确认见 O10）；容器内 op CLI（服务 script 用户体验：`install-skill` 等意图层命令，ARCA 系实现）；凭证注入的扩展形态（query 参数 / mTLS，O8）；模板级 manifest（一份声明应用于多个 bot） |
 
 ## 10. 实现注意（backend 内部，不涉及引擎侧改动）
 
@@ -332,3 +343,7 @@ planning 决定；模块边界按 `context-boundary-format.md` 出 README。
    把源站抖动放大为 compose 失败（`keep_last` 默认值是这道保险）。
 4. **`_get_start_cmd` 不变式**：无 script 的 bot 启动命令必须与 #935 之前
    byte-identical（既有测试断言保留）；manifest 不进启动命令。
+5. **git 源的实现口径**：优先走托管服务的 HTTP API（refs 解析 + 按
+   ref/子目录取归档），把 git 源编译为「一次 HTTPS 归档拉取 + 解包」，
+   复用 guarded fetcher 与归档管线；不在后端进程内跑 `git clone`。API
+   能力（O11）不满足时再评估 clone 方案。

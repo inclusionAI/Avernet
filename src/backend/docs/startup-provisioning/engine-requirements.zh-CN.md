@@ -117,6 +117,7 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 | O8 | 凭证注入方式是否需要请求头之外的形态（query 参数 token / mTLS） | v1 仅请求头；有真实业务源依赖再评估 | backend + 业务 |
 | O9 | `cli_tools` 的目标架构：容器架构是否统一（x86_64），是否需要多架构源（per-arch URL / `${OCB_ARCH}` 变量） | 先确认容器架构现状；v1 单 URL | backend + 业务 |
 | O10 | engine plugin 类目（openclaw extensions / claude_code plugins）如何声明化 | v2；方向定为**注册表引用**（照 MCP 模子，不走任意 URL——插件在引擎进程内自动执行，供应链敏感度最高）。两项引擎侧前置确认：openclaw extensions 目录作为落点是否成立；claude_code 的同步规则**刻意排除 `plugins/`** 的原因 | backend + 两引擎 + 业务 |
+| O11 | 公司 git 托管服务（业务内容源）的能力确认：① 有无仓库级只读 token（Project/Deploy Token 类；无则机器人账号方案是否合规）；② 归档 API 能否按 ref + 子目录取 tar/zip，配额如何；③ refs 解析 API 形态、tag 有无不可变保护；④ 鉴权头形态（`PRIVATE-TOKEN` / `Authorization`）；⑤ 平台侧网络可达性 | 走 API 编译为归档拉取（design §10.5）；①②不成立再评估 clone / 退回 zip | backend + git 托管方 + 业务 |
 
 ## 6. 业务方前提确认清单
 
@@ -137,12 +138,11 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
    网络 ACL / 签名 URL）不受影响。
 6. **更新频率与体量**：源内容多大、多久变一次？用于校准限额（O4）与
    fetch 预算。
-7. **目录资源的打包**：目录型资源以归档（zip/tar.gz）为传输形态
-   （schema §3.2——HTTP 无目录语义，归档是把树运过来的约定）。你们的
-   内容源能否产出归档（CI 一条 zip 命令）？打包习惯是打目录还是打内容
-   （决定 `strip_components` 用不用）？若强依赖「免打包的文件夹同步」，
-   请说明源的实际存放形态（git 仓库 / OSS bucket / 其他），对应 v2 的
-   git 子树 / 对象存储前缀方案。
+7. **目录资源的传输形态**：内容托管在公司 git 服务上时优先 **git 源**
+   （schema §2.2——免打包、tag 即版本）：请确认仓库归属与 tag 发布流程，
+   并配合 O11 的托管服务能力确认；凭证按 git 型注册（`allowed_repos`
+   仓库白名单，token 不用个人 PAT——schema §2.1）。非 git 源仍可用归档
+   （zip/tar.gz，schema §3.2；打包习惯决定 `strip_components` 用不用）。
 8. **CLI 工具的形态**：想装的工具具体是什么——静态二进制/压缩包（v1 范围
    内），还是 npm/pip 包（属命令式，走 script，且 teclaw 不可用）？目标
    容器架构是否单一（对应 O9）？

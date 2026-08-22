@@ -32,11 +32,11 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 
 ## 2. 条目通用字段
 
-内容型条目（resources / skills / identity）的来源三选一：
+内容型条目（resources / skills / identity / cli_tools）的来源三选一：
 
 | 字段 | 说明 |
 | --- | --- |
-| `source` | HTTPS URL，平台在 apply 点经 guarded fetcher 拉取（design §4）。支持变量替换（§4） |
+| `source` | 两种形态：**HTTPS URL**（字符串），或**git 引用**（结构化对象，§2.2）。均由平台在 apply 点经 guarded fetcher 拉取（design §4），均支持变量替换（§4） |
 | `content` | 内联 UTF-8 文本，适合小的 md/配置。与 `source` 互斥 |
 | （注册项引用） | 仅特定类别：MCP 的 `server_code`；v2 的 `center://` skill 引用 |
 
@@ -44,7 +44,7 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `digest` | 无 | `sha256:…`。校验 fetch 内容，不匹配按 fetch 失败处理（钉扎可复现） |
+| `digest` | 无 | `sha256:…`。校验 fetch 内容，不匹配按 fetch 失败处理（钉扎可复现）。**仅适用于 URL 源**——git 源以 commit SHA 为天然 digest，写了报错 |
 | `auth` | 无 | 租户级命名凭证的引用（§2.1）；仅对 `source` 条目有效。fetch 时注入为请求头 |
 | `on_fetch_failure` | `keep_last` | `keep_last` / `skip` / `fail`（design §4.3） |
 | `apply_once` | —— | **v1 保留字，拒绝写入**；v2 语义见 design §3.2 |
@@ -88,6 +88,74 @@ resources:
 - apply report 只记凭证名，永不记值。
 
 v1 仅支持请求头注入；query 参数型、mTLS 见开放问题 O8。
+
+**git 型凭证**（用于 §2.2 的 git 源）在上述之外**强制**声明仓库白名单：
+
+```text
+PUT /openapi/v1/provisioning/credentials/corp-git-content
+{
+  "type": "git",
+  "header_name": "PRIVATE-TOKEN",        # 或 Authorization，按托管服务定（O11）
+  "secret": "…",
+  "allowed_origins": ["https://code.example-corp.com"],
+  "allowed_repos": ["team/content", "team/skills-release"]
+}
+```
+
+动机：git 托管服务是**单 origin 托管全公司仓库**，仅按 origin 放行时，
+manifest 编辑者把 `source.git` 改指同 origin 下任意其他仓库即可套用凭证
+（若 token 权限宽，即横向越权）。`allowed_repos` 把反套取属性从 origin
+粒度恢复到**仓库粒度**：声明的仓库不在名单内 → 条目 `failed`。此校验由
+平台执行，**不依赖托管服务具备任何能力**。
+
+token 选型（防越权的另外两层，与 `allowed_repos` 叠加）：**首选仓库级
+只读 token**（类 GitLab 的 Project/Deploy Token，天生单仓库有效）；托管
+服务不支持时，**用机器人账号的 token**（账号只授予内容仓库的只读成员
+权限，以成员关系收权）；**不使用个人 PAT**——权限面是个人全量可见仓库，
+且生命周期绑定个人（转岗/离职即断）。托管服务的具体能力见 O11。
+
+### 2.2 git 源
+
+业务内容托管在公司 git 服务（类 GitLab）上、以 tag 管理版本时，`source`
+写结构化 git 引用，**对所有带 source 的类目统一可用**：
+
+```yaml
+resources:
+  - path: data/kb/                     # 目录条目：git 侧枚举，免打包
+    source:
+      git: https://code.example-corp.com/team/content.git
+      ref: v1.2.0                      # tag / branch / commit SHA
+      path: kb/                        # 仓库内子目录或文件，缺省 = 仓库根
+    auth: corp-git-content             # git 型凭证（§2.1）
+
+identity:
+  - type: SOUL.md
+    source:
+      git: https://code.example-corp.com/team/content.git
+      ref: v1.2.0
+      path: bots/${OCB_BOT_ID}/soul.md # 变量替换照常可用
+    auth: corp-git-content
+```
+
+语义：
+
+- **收敛单位 = `ref` 解析出的 commit SHA**，即 git 源的天然 digest（条目
+  `digest` 字段不适用）。apply report 同时记声明的 `ref` 与解析出的 SHA，
+  审计线上版本。
+- **`ref` 每个 apply 点重新解析**：tag 被重打 → 下次 apply 收敛到新内容
+  （动 tag 即改声明的含义，声明获胜语义的自然延伸）；要绝对不可变，
+  `ref` 直接写 SHA；追最新则写 branch。
+- **目录条目免打包**——枚举由仓库服务完成，这是「文件夹语义」的原生
+  形态；zip/HTTP 形态保留给非 git 源。
+- 同一 `{git, ref}` 被多个条目引用时，单次 apply 只拉取一次（按解析后
+  SHA 缓存）。
+- 落地后的全部语义（目录级 managed、原子替换、嵌套禁止、权限拍平、
+  teclaw 逐文件展开）与 §3.2 完全一致——git 只是传输形态。
+
+实现口径（backend 内部，见 design §10.5）：优先走托管服务的 HTTP API
+（ref 解析 + 按 ref/子目录取归档），把 git 源编译为「一次 HTTPS 归档
+拉取 + 解包」，复用 guarded fetcher 与归档管线；不在后端进程里跑
+`git clone`。API 能力确认见 O11。
 
 ## 3. 类别定义
 
@@ -155,8 +223,8 @@ resources:
 - **teclaw**：物化后逐文件展开为 `ResourceRef`，artifact 契约零改动；
   `ResourceRef` 直接引用目录子树（`SkillRef` 已有目录先例）为可选优化，
   见确认项 T5。
-- 目录源的其他传输形态（git 子树、索引文件、对象存储前缀）列 v2 候选
-  （design §9）。
+- 目录条目的另一传输形态是 **git 源**（§2.2，免打包，业务内容在 git 上
+  时优先）；索引文件、对象存储前缀列 v2 候选（design §9）。
 
 ### 3.3 `skills` — local skills
 
