@@ -67,6 +67,18 @@ def _build_app() -> FastAPI:
     async def raise_unexpected():
         raise RuntimeError("database unavailable")
 
+    @app.get("/api/skillsets/raise-lock-chained")
+    async def raise_lock_chained():
+        # The shape SkillSetControlPlaneService produces: the guard's error
+        # wraps the cache failure, and the control plane wraps the guard's.
+        try:
+            try:
+                raise RuntimeError("cache lock backend unreachable")
+            except RuntimeError as cache_exc:
+                raise RuntimeError("mutation fence unavailable") from cache_exc
+        except RuntimeError as guard_exc:
+            raise SkillSetControlPlaneLockUnavailableError() from guard_exc
+
     return app
 
 
@@ -165,3 +177,22 @@ def test_status_map_covers_every_control_plane_error() -> None:
         if cls not in _DOMAIN_ERROR_STATUS_MAP
     )
     assert missing == []
+
+
+def test_lock_unavailable_logs_why_the_fence_was_unavailable(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """409 is right for the caller and wrong as a traceback rule.
+
+    Production logged exactly one line for this — "SkillSetControlPlaneLockUnavailableError
+    on POST /api/skillsets/{id}/skills: Skill set mutation unavailable" — and
+    nothing about the cache failure underneath, because the handler emitted a
+    traceback only for 5xx and this error had just moved to 409. Both links of
+    the chain must reach the log.
+    """
+    with caplog.at_level(logging.WARNING):
+        response = client.get("/api/skillsets/raise-lock-chained")
+
+    assert response.status_code == 409
+    assert "mutation fence unavailable" in caplog.text
+    assert "cache lock backend unreachable" in caplog.text
