@@ -9,14 +9,13 @@ check that bar came from — leaving type gates, edit locks and audit writes
 untouched. The prerequisite goes first because two groups cannot flip without
 it.
 
-**The seam is not modified.** Everything adjudicated here is adjudicable by it
-as it stands: the bot on the path, the owner from `OwnerIdDep`. Two sets of
-operations cannot be — harness, whose bot comes from the request body, and the
-six retiring skills addresses, where two carry the bot in the query and four
-resolve it from the skill record inside the handler. Both are excluded rather
-than accommodated, and the legacy six keep their check by moving it into the
-`deprecated/` package, where the same file already does exactly this for the
-grant.
+**The seam is not modified, and no new authorization code is written.**
+Everything adjudicated here is adjudicable by the seam as it stands: the bot on
+the path, the owner from `OwnerIdDep`. Whatever is not, is excluded rather than
+accommodated — harness (bot in the request body) and three skills operations
+whose checks live in the two modules that also keep six retiring addresses
+checked. Deferring those three whole is what lets the retiring addresses keep
+exactly the checks they have.
 
 ## Affected Components
 
@@ -25,7 +24,8 @@ grant.
 - `.../openapi_v1/engine_runtime/gating.py` + `core/engine_runtime/relay.py` + `core/engine_runtime/gate.py` — 26 rows; the check is `require_bot_operator` inside `relay.resolve_bot`.
 - `core/engine_runtime/connection.py:205` — 1 row; the same check, placed to guard *credential composition*.
 - `core/skill_center/authorization_hook.py` — 19 rows; a clean `can_manage_bot` boolean.
-- `core/skill_center/services/bot_skill_asset_service.py` — 10 rows; several resolvers each calling `check_collaborator_permission(..., MEMBER)`.
+- `core/skill_center/services/bot_skill_asset_service.py` — **7** rows (the `{skill_id}` operations); several resolvers each calling `check_collaborator_permission(..., MEMBER)`.
+- `core/skill_center/services/local_skill_query_service.py` and `local_skill_upload_service.py` — **not modified.** They check the 3 deferred skills rows *and* all 6 retiring skills addresses; the table cites neither.
 - `core/service_bot/services/service_publication_facade.py` — 16 rows; `_resolve_bot` returns a `level` used downstream.
 - `.../openapi_v1/channels/router.py` — 6 rows; `_require_admin` beside `_require_edit_lock`.
 - `core/bot_collaborator/services/collaborator_service.py` — 5 rows; the editors endpoints, checked by the service they manage.
@@ -44,7 +44,7 @@ No route, request or response shape changes. Two caller-visible behaviour
 changes, both intended:
 
 ```jsonc
-// The 22 retiring deprecated/ addresses whose replacement is in scope.
+// The 16 retiring deprecated/ addresses whose replacement is in scope and
 // Before: checked incidentally, because the check sat inside the shared handler.
 // After:  checked by the seam, same bar as the replacement. Same masked 404.
 ```
@@ -75,61 +75,6 @@ that nothing *refuses* a `Check` row on an operation that does not qualify.
 +#      harness and legacy-skills exclusions structural rather than
 +#      documented — neither can acquire a Check row by accident.
 ```
-
-### Prerequisite — keep the legacy skills addresses checked
-
-Today these six are checked by accident: they call the same handlers as their
-replacements, and those handlers go through `bot_skill_asset_service`, which
-does the collaborator check. Task 9 deletes it from the service. So the check
-has to be somewhere the legacy addresses still reach, or six bot-scoped
-addresses go from checked to unchecked.
-
-The seam cannot be that somewhere. It is a **route-level dependency** — FastAPI
-runs it before the handler, holding only the raw request. Four of the six name
-no bot in the request at all; the bot is in the database, found by looking the
-skill up. The other two carry `bot_id` in the query, which the gate does not
-read.
-
-`deprecated/skills.py` can, because its code runs **inside** the request, after
-the lookup, already holding the bot and the owner. There are **two** insertion
-points, because the two shapes take different routes through the file:
-
-```diff
-# deprecated/skills.py:226 — _bot_behind, used by the four {skill_id} routes
-     record = query_service.get_local_skill(skill_id=skill_id, actor_id=user_id)
-     _require_skills_grant(caller, record)
-+    _require_skills_collaborator(
-+        collaborators, bot_id=record["bolt_id"], owner_id=record["user_id"],
-+        user_id=user_id,
-+    )
-     return str(record["bolt_id"]), str(record["user_id"])
-```
-
-```diff
-# deprecated/skills.py:109 — _check_collection_grant, used by the collection
-# and upload shims, which never touch _bot_behind
- def _check_collection_grant(caller, *, bot_id, owner_id, user_id) -> None:
--    if not caller.is_application:
--        return
--    caller.require_bot(bot_id, owner_id=owner_id or user_id)
-+    if caller.is_application:
-+        caller.require_bot(bot_id, owner_id=owner_id or user_id)
-+    _require_skills_collaborator(
-+        collaborators, bot_id=bot_id, owner_id=owner_id or user_id,
-+        user_id=user_id,
-+    )
-# The existing check is a *grant* check and returns immediately for a human
-# caller, so it covers none of the collaborator dimension on its own.
-```
-
-**This file has already been bitten by exactly this.** `_collection_shim`'s
-docstring records it: the replacements get their check from
-`dependencies=_GRANT_CHECKED` on their own routes, but `legacy_route` registers
-an *endpoint*, not a route, and route-level dependencies are not carried across
-— "*without `_check_collection_grant` an application holding no grant at all
-would read and write skills through them. That is not hypothetical: it is
-exactly what this file did for one commit, caught in review.*" Moving the skills
-group onto the seam is the same move that caused it, one dimension over.
 
 ### Per group — the shape of one migration
 
@@ -241,13 +186,15 @@ None. No manifest change.
   query-addressed legacy skills routes could be adjudicated. Rejected once the
   count was checked: it would have served 2 rows, not the 6 first assumed, and
   the other 4 name no bot at all so they need a non-seam answer regardless.
-  Carrying the check in `deprecated/skills.py` covers all 6 by one mechanism,
-  needs no seam change, and dies with the package.
+  Deferring the three current rows that share their modules covers all 6 by
+  touching nothing at all.
+- **Carrying a collaborator check into `deprecated/skills.py`** so all 10 skills
+  rows could migrate. Planned, then dropped: it means writing new authorization
+  code inside the package scheduled for deletion, at two separate insertion
+  points, to protect six addresses that already have working checks. Deferring
+  three current rows achieves the same coverage by touching nothing.
 - **Deleting the 6 legacy skills addresses** instead. Rejected: same reason as
   the rest of the package — it retires addresses ahead of their schedule.
-- **Leaving `bot_skill_asset_service`'s check in place** to cover them.
-  Rejected: it double-checks every current caller for the sake of six retiring
-  ones.
 
 ## Rollout
 
@@ -261,9 +208,10 @@ No flag, no migration. Order is a dependency order, not a preference:
 # 4. render_screens(3 → Check)        same shape, one bar
 # 5. authorized_apps(3 → Check)       needs OwnerIdDep on 3 handlers first
 # 6. skill_center hook (19 → Check)   + delete skill_set_control_plane's audit
-# 7. legacy skills                    move the collaborator check into
-#                                     deprecated/skills.py, before 8 removes it
-# 8. bot_skill_assets  (10 → Check)   + delete local_skill_upload_service's audit
+# 7. bot_skill_assets  (7 → Check)    the {skill_id} operations only; the
+#                                     collection/upload rows are deferred, so
+#                                     nothing they share with the retiring
+#                                     addresses is touched
 # 9. engine_runtime    (26 → Check)   keep the type gate
 # 10. engine twins     (16 → Check)   path-addressed, no seam change needed
 # 11. connection        (1 → Check)   the argued exception; see Risks
