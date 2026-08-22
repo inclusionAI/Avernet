@@ -1,17 +1,34 @@
 #!/usr/bin/env python3
 """任务执行图谱可视化 — 赛博霓虹风, 自带 API 代理(规避 CORS), 每 10s 轮询。
 
-    python3 src/backend/tests/community/core/task/singlebox_e2e/test_task_dashboard_viz.py
+    python3 src/backend/tests/community/core/task/singlebox_e2e/task_dashboard_viz.py
     浏览器打开 http://localhost:8899/  (默认展示最新 task;可下拉按标题切换)
 """
 import http.server
-import urllib.request
-import urllib.parse
 import json
+import os
+import urllib.parse
+import urllib.request
 
-BACKEND = "http://localhost:8888"
-USER_ID = "35983"
-PORT = 8899
+BACKEND = os.environ.get("TASK_DASHBOARD_BACKEND", "http://localhost:8888").rstrip("/")
+USER_ID = os.environ.get("TASK_DASHBOARD_USER_ID", "146836")
+PORT = int(os.environ.get("TASK_DASHBOARD_PORT", "8899"))
+
+
+def _envelope_data(payload):
+    """Accept both the legacy success envelope and the current code envelope."""
+    if not isinstance(payload, dict):
+        raise ValueError("后端响应不是 JSON 对象")
+    if payload.get("success") is False:
+        raise ValueError(str(payload.get("message") or "请求失败"))
+    code = payload.get("code")
+    if code is not None and code != 200000:
+        raise ValueError(str(payload.get("message") or f"请求失败(code={code})"))
+    if "data" in payload:
+        return payload["data"]
+    if payload.get("success") is True:
+        return payload.get("data")
+    raise ValueError("后端响应缺少 data 字段")
 
 HTML = r'''<!DOCTYPE html>
 <html lang="zh">
@@ -161,8 +178,17 @@ function inferParent(n,all){
 const TN=document.getElementById('taskid');
 const TS=document.getElementById('tasksel');
 let CURRENT_TITLE='';
+function unwrapEnvelope(j){
+  if(!j||typeof j!=='object')throw new Error('后端响应不是有效 JSON');
+  if(j.success===false)throw new Error(j.message||'请求失败');
+  if(j.code!==undefined&&j.code!==200000)throw new Error(j.message||('请求失败(code='+j.code+')'));
+  if(Object.prototype.hasOwnProperty.call(j,'data'))return j.data;
+  if(j.success===true)return j.data;
+  throw new Error('后端响应缺少 data 字段');
+}
 function loadLists(){return fetch('/proxy-list').then(r=>r.json()).then(j=>{
-  const items=(j&&j.success&&j.data)||[];
+  const raw=unwrapEnvelope(j);
+  const items=Array.isArray(raw)?raw:((raw&&Array.isArray(raw.items))?raw.items:[]);
   // 默认选最新(run_id 降序第一;list 接口已按 run_id desc)
   if(!TN.value && items.length){TN.value=items[0].task_id;}
   // 重建下拉(标题展示 + 状态色点)
@@ -176,8 +202,11 @@ function loadLists(){return fetch('/proxy-list').then(r=>r.json()).then(j=>{
   if(hit)CURRENT_TITLE=hit.title||hit.task_id;else CURRENT_TITLE=cur;
   return items;
 });}
-function load(){return fetch('/proxy?'+new URLSearchParams({task_id:TN.value})).then(r=>r.json()).then(j=>{
-  if(!j||!j.success)throw new Error((j&&j.message)||'请求失败');return j.data;});}
+function load(){
+  if(!TN.value)throw new Error('暂无可展示的任务');
+  return fetch('/proxy?'+new URLSearchParams({task_id:TN.value}))
+    .then(r=>r.json()).then(unwrapEnvelope);
+}
 function truncate(s,n){s=String(s);return s.length>n?s.slice(0,n)+'…':s;}
 const R=14,CIRC=2*Math.PI*R;const cdprog=document.getElementById('cdprog');cdprog.setAttribute('stroke-dasharray',CIRC);
 function setCD(sec){cdprog.setAttribute('stroke-dashoffset',CIRC*(1-sec/10));document.getElementById('cdnum').textContent=sec;}
@@ -254,8 +283,9 @@ function render(d){
     st.text(t.status);if(t.status==='RUNNING')st.append('animate').attr('attributeName','opacity').attr('values','1;.35;1').attr('dur','1.4s').attr('repeatCount','indefinite');
   });
 }
-function detail(t){const m=t.task_spec,ri=t.run_info||{};const ac=ri.acceptance_result;
-  const ep=(t.context&&t.context.extend_props)||{};const miss=ep.miss_events||[];const grp=ep.pending_group_formation;
+function detail(t){const m=t.task_spec||{},ri=t.run_info||{};const ac=ri.acceptance_result;
+  const ep=(ri.extend_props)||{};const specEp=(m.context&&m.context.extend_props)||{};
+  const miss=ep.miss_events||specEp.miss_events||[];const grp=ep.pending_group_formation||specEp.pending_group_formation;
   let h=`<h3 style="color:${C[t.status]}">${esc(m.metadata.title)}</h3>`;
   h+=`<div class="k">task / node</div><div class="v mono">${esc(t.task_id)} :: ${t.node_id}</div>`;
   h+=`<div class="k">状态 / 运行模式 / 执行者</div><div class="v"><b style="color:${C[t.status]}">${t.status}</b> · ${modeLabel(ri,t)} · ${ri.assignee||'—'}</div>`;
@@ -263,6 +293,7 @@ function detail(t){const m=t.task_spec,ri=t.run_info||{};const ac=ri.acceptance_
   h+=`<div class="k">指令 Instruction</div><div class="v">${esc(m.metadata.instruction)}</div>`;
   const acs=m.goal.acceptances||[];if(acs.length){h+=`<div class="k">验收标准</div><div class="v">${acs.map(a=>'• '+esc(a.description)).join('<br>')}</div>`;}
   if(ac){h+=`<div class="k">验收结果</div><div class="v acc" style="color:${ac.verdict==='PASS'?'#3fe07a':'#ff5c6c'}">${ac.verdict}${ac.gaps&&ac.gaps.length?'<br>gaps: '+esc(ac.gaps.join('; ')):''}</div>`;}
+  if(ri.extend_props&&ri.extend_props.dispatch_error){h+=`<div class="k">派发错误</div><div class="v miss">${esc(ri.extend_props.dispatch_error)}</div>`;}
   if(miss.length){h+=`<div class="k">MISS 事件</div><div class="v miss">${miss.map(x=>'• '+esc(x)).join('<br>')}</div>`;}
   if(grp){h+=`<div class="k">协作群(待建)</div><div class="v grp">${esc(grp.group_name||'')} · 模式:${esc(grp.collab_mode||'')}<br>成员: ${(grp.members_info||[]).map(x=>esc(x.bot_id)).join(', ')}</div>`;}
   if(ri.output&&ri.output.data){h+=`<div class="k">执行产出</div><div class="mono">${esc(ri.output.data)}</div>`;}
@@ -323,7 +354,7 @@ class H(http.server.BaseHTTPRequestHandler):
             tid = (qs.get('task_id') or ['t_case'])[0]
             try:
                 req = urllib.request.Request(
-                    f"{BACKEND}/api/v1/collaboration/tasks/dashboard?task_id={urllib.parse.quote(tid)}",
+                    f"{BACKEND}/api/v1/collaboration/tasks/dashboard?task_id={urllib.parse.quote(tid)}&include_action_log=true",
                     headers={'x-user-id': USER_ID})
                 with urllib.request.urlopen(req, timeout=15) as r:
                     body = r.read()
@@ -336,7 +367,17 @@ class H(http.server.BaseHTTPRequestHandler):
         else:
             self._send_html()
 
+class VizServer(http.server.ThreadingHTTPServer):
+    allow_reuse_address = True
+
+
 if __name__ == '__main__':
     print(f"◈ 可视化: http://localhost:{PORT}/  (默认最新 task;下拉按标题切换)")
     print(f"◈ 代理 → {BACKEND}  (user {USER_ID})  GET /api/v1/collaboration/tasks/list + /api/v1/collaboration/tasks/dashboard")
-    http.server.HTTPServer(('127.0.0.1',PORT),H).serve_forever()
+    try:
+        VizServer(('127.0.0.1', PORT), H).serve_forever()
+    except OSError as ex:
+        raise SystemExit(
+            f"无法监听 127.0.0.1:{PORT}: {ex}; "
+            f"请换端口，例如 TASK_DASHBOARD_PORT=8900 python3 {__file__}"
+        ) from ex
