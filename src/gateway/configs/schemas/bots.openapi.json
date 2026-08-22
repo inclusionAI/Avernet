@@ -2520,9 +2520,7 @@
           "biz_data": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2549,9 +2547,7 @@
           "content": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -10579,7 +10575,6 @@
         "title": "IdentityFileWrite",
         "type": "object"
       },
-      "JsonValue": {},
       "LifecycleAdvanceRequest": {
         "additionalProperties": false,
         "description": "Target stage for advancing the current service-Bot publication.",
@@ -11805,9 +11800,7 @@
           "content": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -16403,9 +16396,7 @@
           "biz_data": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -16440,9 +16431,7 @@
           "content": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -16739,9 +16728,7 @@
           "content": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
+                "additionalProperties": true,
                 "type": "object"
               },
               {

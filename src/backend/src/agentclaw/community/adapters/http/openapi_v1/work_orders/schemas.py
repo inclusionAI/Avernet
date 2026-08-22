@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
-from pydantic import BaseModel, Field, JsonValue, field_serializer
+from pydantic import BaseModel, Field, field_serializer
 
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 
@@ -107,7 +108,7 @@ class CreateWorkOrderEventRequest(BaseModel):
     title: str = Field(
         min_length=1, max_length=256, description="Display title of the event."
     )
-    content: dict[str, JsonValue] | None = Field(
+    content: dict[str, Any] | None = Field(
         default=None,
         description="JSON object stored as notification content without business reshaping.",
     )
@@ -116,7 +117,7 @@ class CreateWorkOrderEventRequest(BaseModel):
         max_length=512,
         description="Reason supplied for an approval event, when applicable.",
     )
-    biz_data: dict[str, JsonValue] | None = Field(
+    biz_data: dict[str, Any] | None = Field(
         default=None,
         description="JSON object stored as work-order business data without business reshaping.",
     )
@@ -362,7 +363,7 @@ class WorkOrderListItem(_UtcResponseModel):
         description="Originating event, or null when no notification is attached."
     )
     title: str | None = Field(description="Notification title, when available.")
-    content: dict[str, JsonValue] | None = Field(
+    content: dict[str, Any] | None = Field(
         description="Notification JSON object, or null when unavailable."
     )
     status: WorkOrderStatus | None = Field(
@@ -397,10 +398,10 @@ class WorkOrderDetailResponse(_UtcResponseModel):
         default=None, description="Legacy originating event, when available."
     )
     title: str = Field(description="Display title of the work order.")
-    content: dict[str, JsonValue] | None = Field(
+    content: dict[str, Any] | None = Field(
         default=None, description="Notification JSON object, when available."
     )
-    biz_data: dict[str, JsonValue] | None = Field(
+    biz_data: dict[str, Any] | None = Field(
         default=None, description="Work-order business JSON object, when available."
     )
     status: WorkOrderStatus = Field(description="Current work-order status.")
@@ -430,7 +431,7 @@ class NotificationDetailResponse(BaseModel):
     )
     event_type: str = Field(description="Legacy event represented by the notification.")
     title: str = Field(description="Display title of the notification.")
-    content: dict[str, JsonValue] | None = Field(
+    content: dict[str, Any] | None = Field(
         description="Notification JSON object, when present."
     )
     is_read: bool = Field(

@@ -10,7 +10,7 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
-from agentclaw.community.adapters.http.openapi_v1.work_orders.presentation import (
+from agentclaw.community.adapters.http.openapi_v1.work_orders.converter import (
     display_title,
     json_object,
 )

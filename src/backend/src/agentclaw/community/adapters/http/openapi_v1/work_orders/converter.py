@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-
-from pydantic import JsonValue
+from typing import Any
 
 from agentclaw.community.core.work_orders.models import (
     WorkOrderBizType,
@@ -13,7 +12,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderTitleKey,
 )
 
-JsonObject = dict[str, JsonValue]
+JsonObject = dict[str, Any]
 
 _TITLE_KEY_BY_STORED_VALUE = {
     WorkOrderTitleKey.SPACE_JOIN_PENDING.value: WorkOrderTitleKey.SPACE_JOIN_PENDING,
@@ -66,7 +65,7 @@ def json_object(raw: str | None) -> JsonObject | None:
     if raw is None:
         return None
     try:
-        parsed: JsonValue = json.loads(raw)
+        parsed: Any = json.loads(raw)
     except (TypeError, ValueError):
         return {"legacy_value": raw}
     return parsed if isinstance(parsed, dict) else {"legacy_value": parsed}
