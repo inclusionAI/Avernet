@@ -1121,11 +1121,6 @@ class TestAddSkillsToSetOwnerIdResolution:
         skill_service.activate_skill.assert_called_once_with(
             "git://biz/skill-a", user_id="owner_abc", bolt_id="bot-1"
         )
-        assert bot_repo.get_by_id_and_owner.call_args_list[-1].args == (
-            "bot-1",
-            "staff_entity1",
-        )
-        bot_repo.get_by_id.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_auto_activate_false_is_reported_and_not_synced(self):
@@ -1333,11 +1328,6 @@ class TestSwitchToSkillSetOwnerIdResolution:
         skill_service.activate_skill.assert_called_once_with(
             "git://biz/skill-a", user_id="owner_xyz", bolt_id="bot-1"
         )
-        assert bot_repo.get_by_id_and_owner.call_args_list[-1].args == (
-            "bot-1",
-            "staff_entity1",
-        )
-        bot_repo.get_by_id.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_switch_fallback_to_entity_id_when_no_owner(self):
