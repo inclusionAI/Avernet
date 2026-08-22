@@ -467,7 +467,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_set_service_factory: SkillSetServiceFactory,
-        edit_guard: SkillsPoolEditGuard,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
         runtime_reconciler: CoreBotRuntimeProjectionReconcilerProtocol,
     ) -> LocalSkillStateServiceProtocol:
@@ -477,7 +476,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             bot_repo,
             collaborator_service,
             skill_set_service_factory,
-            edit_guard,
             pool_skills,
             skill_set_repo,
             runtime_reconciler,
