@@ -76,10 +76,15 @@ rather than the deprecation schedule's.
 - [ ] Each of the 22 retiring `deprecated/` twins of an in-scope operation
       refuses and admits the same callers as its replacement, and this is
       asserted by test rather than by inspection.
-- [ ] The seam resolves the addressed bot from the same place the operation's own
-      handler resolves it, for every adjudicated operation — so no arrangement of
-      request parameters can aim the check at one bot while the handler acts on
-      another.
+- [ ] For every adjudicated operation, the bar is decided from the same two wire
+      values the handler acts on: the bot the request addresses, read from the
+      same part of the request the handler declares it in, and the same resolved
+      owner. No arrangement of request parameters can aim the check at one bot
+      while the handler acts on another.
+- [ ] An operation whose handler takes its bot from anywhere else — a body
+      field, say — **cannot** be adjudicated and must be refused an enforced row
+      rather than given one that does not match. This is a structural limit of
+      deciding the bar before the handler runs, not a gap to close later.
 - [ ] Every edit lock enforced today is still enforced afterwards, on the same
       operations, refusing the same callers.
 - [ ] No in-scope operation ends up unaudited, and none ends up audited twice for
@@ -109,11 +114,14 @@ rather than the deprecation schedule's.
 
 ## Out of Scope
 
-- **The 6 harness operations.** They carry a live check-versus-act defect filed
-  in #1323 — the handlers act on an owner taken from the request body while the
-  bar would adjudicate the one on the path, ownership is resolved by a method
-  documented as performing no owner check, and one bot id skips the check
-  entirely. Fixing that is a bug fix with its own blast radius, not a migration.
+- **The 6 harness operations**, and not only because of the defect filed in
+  #1323 — the deeper reason is that they are the one group the seam *cannot*
+  adjudicate as they stand. Their handlers act on a bot named in the request
+  **body** while the bar would be decided from the one on the path, so the check
+  and the action are keyed on different things by construction. Adjudicating
+  them means first changing what they address, which is a bug fix with its own
+  blast radius (ownership also resolves through a method documented as
+  performing no owner check, and one bot id skips the check entirely).
   **`ServiceChecked` therefore does not reach zero in this feature**; it reaches
   6.
 - **The 40 `OWNER_SCOPED` operations.** Blocked on #906 / #907, and a policy

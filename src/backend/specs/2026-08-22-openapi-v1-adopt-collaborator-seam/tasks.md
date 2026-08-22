@@ -38,7 +38,8 @@ the table.
 - **Files:** `.../openapi_v1/authorization.py`
 - **Done when:**
   - [ ] `_assert_check_rows_are_enforceable` gains a third refusal: for every `Check` route, the place the route actually declares `bot_id` matches `rule.bot_from`; a mismatch fails assembly with both values named.
-  - [ ] The refusal is covered by a fixture-router test in `test_authorization_inventory.py`, in both directions.
+  - [ ] The same refusal covers a route that declares `bot_id` in **neither** location — a handler taking its bot from the request body cannot be adjudicated, because the gate decides before the handler runs. It must be refused an enforced row rather than given one that silently checks something else. This is what makes the harness exclusion structural rather than a matter of sequencing.
+  - [ ] The refusal is covered by fixture-router tests in `test_authorization_inventory.py`: path row on a query route, query row on a path route, and a `Check` row on a body-addressed route.
 - **Depends on:** Task 1
 
 ## Task 4: Retire the no-adopter assertion

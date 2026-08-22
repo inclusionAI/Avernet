@@ -9,10 +9,13 @@ check that bar came from — leaving type gates, edit locks and audit writes
 untouched. The prerequisite goes first because two groups cannot flip without
 it.
 
-The seam gains one capability: it resolves the addressed bot from **wherever
-that route's own handler resolves it** (path or query), which is what makes the
-22 retiring twins adjudicable rather than silently unguarded once their shared
-service check is deleted.
+The seam gains one capability, and a narrow one: it can read the addressed bot
+from the **query string** as well as the path, because that is the only way the
+six retiring skills addresses declare it. The gate stays deterministic — two
+wire values, `bot_id` and `owner_id` — and the row says which of two locations
+`bot_id` comes from. It does not mirror handler logic and cannot: an operation
+whose bot comes from the request body is not adjudicable at all, which is the
+structural reason harness is out of scope.
 
 ## Affected Components
 
