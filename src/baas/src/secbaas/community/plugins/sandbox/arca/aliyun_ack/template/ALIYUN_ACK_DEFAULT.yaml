@@ -1,16 +1,4 @@
 apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: ${STORAGE_ID}
-  namespace: ${NAMESPACE}
-spec:
-  accessModes: ["ReadWriteMany"]
-  storageClassName: alicloud-nas-subpath
-  resources:
-    requests:
-      storage: ${STORAGE_SIZE}
----
-apiVersion: v1
 kind: ConfigMap
 metadata:
   name: api-key-proxy-config-${UID}
@@ -48,9 +36,16 @@ spec:
         app: openclaw
         biz-id: "${UID}"
     spec:
+      initContainers:
+      - name: init-dir
+        image: ${INIT_IMAGE}
+        command: ["sh", "-c", "mkdir -p /mnt/data/${STORAGE_ID}"]
+        volumeMounts:
+        - name: data
+          mountPath: /mnt/data
       containers:
       - name: openclaw
-        image: ${IMAGE}
+        image: ${OPENCLAW_IMAGE}
         ports:
         - containerPort: 20003
         env:
@@ -59,6 +54,7 @@ spec:
         volumeMounts:
         - name: data
           mountPath: ${MOUNT_PATH}
+          subPath: ${STORAGE_ID}
         resources:
           requests:
             cpu: "${CPU_REQUEST}"
@@ -67,7 +63,7 @@ spec:
             cpu: "${CPU_LIMIT}"
             memory: "${MEMORY_LIMIT}"
       - name: api-key-proxy
-        image: nginx:alpine
+        image: ${API_KEY_PROXY_IMAGE}
         ports:
         - containerPort: 8080
         volumeMounts:
@@ -82,8 +78,9 @@ spec:
             memory: "128Mi"
       volumes:
       - name: data
-        persistentVolumeClaim:
-          claimName: ${STORAGE_ID}
+        nfs:
+          server: 011yhkvtf9l5avlm4ty-gks56.cn-beijing.nas.aliyuncs.com
+          path: /
       - name: proxy-config
         configMap:
           name: api-key-proxy-config-${UID}

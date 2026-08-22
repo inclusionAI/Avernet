@@ -241,11 +241,11 @@ class TestClientManager:
             AliyunAckClientManager(cluster=None).validate()
 
     def test_get_client_lazy_builds(self) -> None:
-        from secbaas.community.plugins.sandbox.arca.aliyun_ack._sandbox_plugin import (
-            _ClusterConfig,
+        from secbaas.community.plugins.sandbox.arca.aliyun_ack._client_manager import (
+            AliyunAckClusterConfig,
         )
 
-        cfg = _ClusterConfig("https://ack.example.com", "dummy-token", "default")
+        cfg = AliyunAckClusterConfig("https://ack.example.com", "dummy-token", "default")
         mgr = AliyunAckClientManager(cfg)
         fake = MagicMock()
         mgr.build_client = MagicMock(return_value=fake)
@@ -253,11 +253,11 @@ class TestClientManager:
         mgr.build_client.assert_called_once()
 
     def test_close_noop(self) -> None:
-        from secbaas.community.plugins.sandbox.arca.aliyun_ack._sandbox_plugin import (
-            _ClusterConfig,
+        from secbaas.community.plugins.sandbox.arca.aliyun_ack._client_manager import (
+            AliyunAckClusterConfig,
         )
 
-        cfg = _ClusterConfig("https://ack.example.com", "dummy-token", "default")
+        cfg = AliyunAckClusterConfig("https://ack.example.com", "dummy-token", "default")
         AliyunAckClientManager(cfg).close()
 
 

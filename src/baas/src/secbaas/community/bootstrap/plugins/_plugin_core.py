@@ -35,6 +35,9 @@ from secbaas.community.plugins.sandbox.arca import (
     AliyunAckSandboxPlugin,
     StubArcaSandboxPlugin,
 )
+from secbaas.community.plugins.sandbox.arca.aliyun_ack import (
+    aliyun_ack_plugin_factory,
+)
 from secbaas.community.plugins.sandbox.arca.local_proc import (
     LocalProcessArcaSandboxPlugin,
 )
@@ -110,12 +113,12 @@ class PluginContainer(containers.DeclarativeContainer):
         config.plugins.sandbox.arca,
         stub=providers.Object(StubArcaSandboxPlugin),
         local_proc=providers.Object(LocalProcessArcaSandboxPlugin),
-        aliyun_ack=providers.Factory(
-            AliyunAckSandboxPlugin,
+        aliyun_ack=providers.Singleton(
+            aliyun_ack_plugin_factory,
             api_server=config.aliyun_ack_cluster.api_server,
             token=config.aliyun_ack_cluster.token,
             namespace=config.aliyun_ack_cluster.namespace,
-            default_images=config.aliyun_ack_cluster.default_images,
+            default_images=config.sandbox_images,
             arca_utils=arca_utils,
         ),
     )

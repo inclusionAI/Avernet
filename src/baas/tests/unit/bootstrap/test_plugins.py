@@ -72,6 +72,13 @@ class TestAliyunAckSelector:
                 "token": "dummy-token",
                 "namespace": "default",
             }
+            cfg["sandbox_images"] = {
+                "ALIYUN_ACK_DEFAULT": {
+                    "openclaw": "openclaw:latest",
+                    "api-key-proxy": "nginx:alpine",
+                    "init": "busybox:latest",
+                }
+            }
         container.config.from_dict(cfg)
         return container
 
@@ -88,8 +95,10 @@ class TestAliyunAckSelector:
             api_key="k",
             arca_template_id="ALIYUN_ACK_DEFAULT",
         )
-        plugin = self._container().arca_sandbox_plugin_factory(creds)
+        plugin_factory = self._container().arca_sandbox_plugin_factory()
+        plugin = plugin_factory(creds)
         assert isinstance(plugin, AliyunAckSandboxPlugin)
+        assert plugin._config is creds
 
     def test_aliyun_ack_default_selector(self):
         from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin

@@ -37,13 +37,17 @@ user_config:
     seed_data: true
 
   # Aliyun ACK 集群连接配置（用于 plugins.sandbox.arca = "aliyun_ack"）
-  # 启用该后端时填充 api_server 和 token 真实值。
   aliyun_ack_cluster:
     api_server: "https://k8s.example.com"
     token: ""
     namespace: "default"
-    default_images:
-      ALIYUN_ACK_DEFAULT: "openclaw:latest"
+
+  # 沙箱镜像配置（按引擎 template_id → 容器名 → 镜像地址）
+  sandbox_images:
+    ALIYUN_ACK_DEFAULT:
+      openclaw: "openclaw:latest"
+      api-key-proxy: "nginx:alpine"
+      init: "busybox:latest"
 
   bot_service:
     proxy_base_url: "https://proxy.example.com"
