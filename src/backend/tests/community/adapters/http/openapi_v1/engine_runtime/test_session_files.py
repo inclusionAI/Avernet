@@ -38,20 +38,28 @@ def test_session_file_endpoints_are_declared_in_the_existing_session_router():
 
 
 class _Body:
-    def __init__(self) -> None:
+    def __init__(self, content: bytes = b"file-bytes") -> None:
         self.closed = False
+        self.content = content
 
     def __aiter__(self):
         return self._chunks()
 
     async def _chunks(self):
-        yield b"file-bytes"
+        yield self.content
 
 
 class _Upstream:
-    def __init__(self) -> None:
-        self.body = _Body()
-        self.headers = {
+    def __init__(
+        self,
+        *,
+        status_code: int = 200,
+        content: bytes = b"file-bytes",
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self.body = _Body(content)
+        self.headers = headers or {
             "content-type": "text/plain",
             "content-length": "10",
             "x-internal": "not-forwarded",
@@ -117,8 +125,10 @@ class _Resources:
         self.calls.append(("list", kwargs))
         return self.ready_records
 
-    async def open_content(self, **kwargs):
-        self.calls.append(("content", kwargs))
+    async def open_session_file_content(self, **kwargs):
+        self.calls.append(("session_file_content", kwargs))
+        if failure := self.failures.get("content"):
+            raise failure
         return self._record(status=SessionResourceStatus.READY), self.upstream
 
     def delete(self, **kwargs):
@@ -221,7 +231,99 @@ def test_content_filters_headers_and_closes_the_upstream(client, resources):
     assert "x-internal" not in response.headers
     assert "X: y" not in response.headers.get("content-disposition", "")
     assert resources.upstream.closed is True
-    assert resources.calls[-1][0] == "content"
+    assert resources.calls[-1][0] == "session_file_content"
+
+
+def test_content_preserves_engine_download_preparation_response(client, resources):
+    resources.upstream = _Upstream(
+        status_code=202,
+        content=b'{"status":"preparing_download","retry_after_seconds":2}',
+        headers={
+            "content-type": "application/json",
+            "retry-after": "2",
+            "cache-control": "no-store",
+            "x-internal": "not-forwarded",
+        },
+    )
+
+    response = client.get(_base() + "/sr_1/content?disposition=attachment")
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "status": "preparing_download",
+        "retry_after_seconds": 2,
+    }
+    assert response.headers["retry-after"] == "2"
+    assert response.headers["cache-control"] == "no-store"
+    assert "content-disposition" not in response.headers
+    assert "x-internal" not in response.headers
+
+
+def test_content_rejects_unsafe_export_control_headers(client, resources):
+    resources.upstream = _Upstream(
+        status_code=202,
+        content=b'{"status":"preparing_download","retry_after_seconds":2}',
+        headers={
+            "content-type": "application/json",
+            "retry-after": "soon",
+            "cache-control": "public, max-age=3600",
+        },
+    )
+
+    response = client.get(_base() + "/sr_1/content?disposition=attachment")
+
+    assert response.status_code == 202
+    assert "retry-after" not in response.headers
+    assert "cache-control" not in response.headers
+
+
+def test_content_preserves_engine_external_download_response(client, resources):
+    resources.upstream = _Upstream(
+        content=(
+            b'{"status":"ready","delivery":"external_url",'
+            b'"download_url":"https://download.example.test/file",'
+            b'"expires_at":"2026-08-22T12:00:00Z",'
+            b'"filename":"report.txt","size_bytes":52428800}'
+        ),
+        headers={
+            "content-type": "application/json; charset=utf-8",
+            "cache-control": "no-store",
+        },
+    )
+
+    response = client.get(_base() + "/sr_1/content?disposition=attachment")
+
+    assert response.status_code == 200
+    assert response.json()["delivery"] == "external_url"
+    assert response.headers["cache-control"] == "no-store"
+    assert "content-disposition" not in response.headers
+
+
+def test_content_maps_engine_preview_limit_to_openapi_413(client, resources):
+    resources.failures["content"] = ValueError("resource_preview_too_large")
+
+    response = client.get(_base() + "/sr_1/content")
+
+    assert response.status_code == 413
+    assert response.json()["message"] == "File too large for preview"
+
+
+def test_content_maps_unavailable_engine_to_openapi_502(client, resources):
+    resources.failures["content"] = ValueError("engine_content_unavailable")
+
+    response = client.get(_base() + "/sr_1/content")
+
+    assert response.status_code == 502
+    assert response.json()["message"] == "Engine service error"
+
+
+def test_content_masks_missing_engine_resource_as_openapi_404(client, resources):
+    resources.failures["content"] = ValueError("resource_missing")
+
+    response = client.get(_base() + "/sr_1/content")
+
+    assert response.status_code == 404
+    assert response.json()["message"] == "Not found"
 
 
 def test_complete_and_status_return_public_resources(client, resources):

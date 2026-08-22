@@ -185,8 +185,16 @@ class _Queue:
 
 
 class _Transport:
-    def __init__(self, status_code: int = 200) -> None:
+    def __init__(
+        self,
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.status_code = status_code
+        self.headers = headers or {
+            "content-type": "text/plain",
+            "x-internal": "hidden",
+        }
         self.calls = []
         self.closed = False
 
@@ -201,7 +209,7 @@ class _Transport:
 
         return DeviceAdapterStreamResponse(
             status_code=self.status_code,
-            headers={"content-type": "text/plain", "x-internal": "hidden"},
+            headers=self.headers,
             body=chunks(),
             close=close,
         )
@@ -682,11 +690,159 @@ async def test_content_streams_from_engine_without_baas_download_call():
     )
 
     assert record.resource_id == intent.resource.resource_id
-    assert transport.calls[0][2].endswith(f"/{intent.resource.resource_id}/content")
+    assert transport.calls[0][2] == (
+        f"/api/resource-materializations/{intent.resource.resource_id}/content"
+    )
+    assert transport.calls[0][4] == {"disposition": "inline"}
     assert resolver.binding_calls[-1] == (42, "owner-1", "bot-1")
     assert len(http.calls) == 1
     assert [chunk async for chunk in response.body] == [b"materialized bytes"]
     await response.close()
+    assert transport.closed is True
+
+
+@pytest.mark.asyncio
+async def test_openapi_content_uses_existing_session_file_engine_endpoint():
+    transport = _Transport()
+    service, repo, _ = _service(transport=transport)
+    intent = _intent(service)
+    repo.value = replace(intent.resource, status=SessionResourceStatus.READY)
+
+    record, response = await service.open_session_file_content(
+        owner_id="owner-1",
+        bot_id="bot-1",
+        session_key="session/raw value",
+        resource_id=intent.resource.resource_id,
+        disposition="attachment",
+    )
+
+    assert record.resource_id == intent.resource.resource_id
+    assert transport.calls[0][2] == (
+        f"/api/session-files/{intent.resource.resource_id}/content"
+    )
+    assert transport.calls[0][4] == {
+        "sessionKey": "session/raw value",
+        "disposition": "attachment",
+    }
+    await response.close()
+
+
+@pytest.mark.asyncio
+async def test_openapi_content_keeps_engine_preparing_response_open():
+    transport = _Transport(
+        status_code=202,
+        headers={
+            "content-type": "application/json",
+            "retry-after": "2",
+            "cache-control": "no-store",
+        },
+    )
+    service, repo, _ = _service(transport=transport)
+    intent = _intent(service)
+    repo.value = replace(intent.resource, status=SessionResourceStatus.READY)
+
+    _, response = await service.open_session_file_content(
+        owner_id="owner-1",
+        bot_id="bot-1",
+        session_key="session/raw value",
+        resource_id=intent.resource.resource_id,
+        disposition="attachment",
+    )
+
+    assert response.status_code == 202
+    assert transport.closed is False
+    await response.close()
+
+
+@pytest.mark.asyncio
+async def test_openapi_content_reports_inline_preview_size_limit():
+    transport = _Transport(status_code=413)
+    service, repo, _ = _service(transport=transport)
+    intent = _intent(service)
+    repo.value = replace(intent.resource, status=SessionResourceStatus.READY)
+
+    with pytest.raises(ValueError, match="resource_preview_too_large"):
+        await service.open_session_file_content(
+            owner_id="owner-1",
+            bot_id="bot-1",
+            session_key="session/raw value",
+            resource_id=intent.resource.resource_id,
+            disposition="inline",
+        )
+
+    assert transport.closed is True
+
+
+@pytest.mark.asyncio
+async def test_openapi_content_maps_missing_engine_resource_to_session_missing():
+    transport = _Transport(status_code=404)
+    service, repo, _ = _service(transport=transport)
+    intent = _intent(service)
+    repo.value = replace(intent.resource, status=SessionResourceStatus.READY)
+
+    with pytest.raises(ValueError, match="resource_missing"):
+        await service.open_session_file_content(
+            owner_id="owner-1",
+            bot_id="bot-1",
+            session_key="session/raw value",
+            resource_id=intent.resource.resource_id,
+            disposition="attachment",
+        )
+
+    assert transport.closed is True
+
+
+@pytest.mark.asyncio
+async def test_openapi_content_rejects_invalid_disposition_before_transport():
+    transport = _Transport()
+    service, _, _ = _service(transport=transport)
+
+    with pytest.raises(ValueError, match="invalid_disposition"):
+        await service.open_session_file_content(
+            owner_id="owner-1",
+            bot_id="bot-1",
+            session_key="session/raw value",
+            resource_id="sr_1",
+            disposition="invalid",
+        )
+
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_openapi_content_requires_a_ready_resource():
+    transport = _Transport()
+    service, _, _ = _service(transport=transport)
+    intent = _intent(service)
+
+    with pytest.raises(ValueError, match="resource_not_ready"):
+        await service.open_session_file_content(
+            owner_id="owner-1",
+            bot_id="bot-1",
+            session_key="session/raw value",
+            resource_id=intent.resource.resource_id,
+            disposition="attachment",
+        )
+
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_openapi_content_reports_unavailable_engine_without_leaking_status():
+    transport = _Transport(status_code=502)
+    service, repo, _ = _service(transport=transport)
+    intent = _intent(service)
+    repo.value = replace(intent.resource, status=SessionResourceStatus.READY)
+
+    with pytest.raises(ValueError, match="engine_content_unavailable"):
+        await service.open_session_file_content(
+            owner_id="owner-1",
+            bot_id="bot-1",
+            session_key="session/raw value",
+            resource_id=intent.resource.resource_id,
+            disposition="attachment",
+        )
+
     assert transport.closed is True
 
 
