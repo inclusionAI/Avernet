@@ -143,19 +143,26 @@ async def list_tasks_internal(
 @router.post("/callback/report", response_model=Envelope[dict[str, Any]])
 @envelope_errors
 async def report_callback(
-    body: TaskCallbackDataDTO,
     request: Request,
-    callback: TaskLoopCallbackProtocol = Injected(TaskLoopCallbackProtocol),  # noqa: B008
+    svc: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+    auth: CallbackAuthenticator = Injected(CallbackAuthenticator),  # noqa: B008
+    registry: CallbackCorrelationRegistry = Injected(CallbackCorrelationRegistry),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
-    """执行实体(bot workflow / bcn 协作群)PUSH 回投 → 适配层 → 编排核 on_report → 翻态推进。
+    """统一回投入口:仅接 ``request``,交 ``_dispatch`` 按 body 形态区分 ClawMind/BCN/羽雀 → 转换 → 入库/推进。
 
-    领域异常(TaskStateError/TaskNotFoundError…)上抛 → ``@envelope_errors`` 映射。"""
-
-    logger.info("[callback_report] callback data log: " + str(body))
-    print("[callback_report] callback data print: " + str(body))
-    data = callback_from_dto(body)
-    await callback.report_result(data)
-    return envelope({"ok": True}, request)
+    ClawMind(HttpCallbackPayload)/BCN(CloudEvent)→ 转换 + ``ingest`` 只落 ``task_callback`` 审计;
+    羽雀(TaskCallbackRequest,框架节点级)→ ``translate`` + ``report_result`` 落库并推进编排核。
+    disposition 固定 ``result``(回投即终态/进度落库);羽雀节点级 start 仍由 task_callback_router 的
+    workflow_start/node_start 端点各自走(disposition=start)。领域异常上抛 → ``@envelope_errors`` 映射。"""
+    # 入口日志:打出回调原始 body(CloudEvent / HttpCallbackPayload / 羽雀 schema 都能见),便于排查。
+    # Starlette request.body() 首次读后缓存,_dispatch 再读仍得同一份,不冲突。
+    _body = await request.body()
+    _preview = _body[:4000].decode("utf-8", "replace")
+    if len(_body) > 4000:
+        _preview += f"...(truncated, total {len(_body)} bytes)"
+    logger.info("[report_callback] entry method=%s path=%s body=%s",
+                request.method, request.url.path, _preview)
+    return await _dispatch(request, "result", TaskCallbackRequest, svc, auth, registry)
 
 
 @router.post("/bbs/claim", response_model=Envelope[dict[str, Any]])
@@ -441,29 +448,42 @@ async def _dispatch(
             return envelope({"ok": True}, request, message="bcn event not handled")
         await svc.callback.ingest(_tc.data)
         return envelope({"ok": True}, request)
-    # 羽雀(框架节点级回投):落库 + 推进编排核。
+    # 羽雀/框架节点级回投:先按 schema_cls(TaskCallbackRequest 富 schema)校验 → translate → report_result/start_run;
+    # 不符合则兜底 TaskCallbackDataDTO(loop_task_id+result,report_callback 旧契约)→ callback_from_dto → report_result。
     try:
         req = schema_cls.model_validate_json(raw)
     except Exception:
-        raise HTTPException(status_code=422, detail="invalid callback body")
-    # source 来自已解析 body;HMAC 用原始字节。CallbackAuthError/CallbackCorrelationError 上抛 → @envelope_errors
-    auth.verify(source=req.workflow_source, headers=request.headers, raw_body=raw,
-                method=request.method, path=request.url.path)
-    tc = translate(req, disposition, registry)
+        req = None
+    if req is not None:
+        # source 来自已解析 body;HMAC 用原始字节。CallbackAuthError/CallbackCorrelationError 上抛 → @envelope_errors
+        auth.verify(source=req.workflow_source, headers=request.headers, raw_body=raw,
+                    method=request.method, path=request.url.path)
+        tc = translate(req, disposition, registry)
+        try:
+            if tc.disposition == "start":
+                await svc.callback.start_run(tc.data)
+            else:
+                await svc.callback.report_result(tc.data)
+        except TaskStateError:
+            # 幂等:result 重投到已终态节点 → 200 ack;否则 TaskStateError 上抛 → @envelope_errors 409
+            if tc.disposition == "result":
+                _payload = tc.data.data
+                _loop_task_id = _payload.get("loop_task_id") if isinstance(_payload, dict) else ""
+                cur = _find_node_status(svc, _loop_task_id)
+                if cur in _TERMINAL:
+                    return envelope({"ok": True}, request, message="idempotent")
+            raise
+        return envelope({"ok": True}, request)
+    # 兜底:TaskCallbackDataDTO(loop_task_id+result)→ callback_from_dto → report_result(落库 + 推进编排核)。
     try:
-        if tc.disposition == "start":
-            await svc.callback.start_run(tc.data)
-        else:
-            await svc.callback.report_result(tc.data)
-    except TaskStateError:
-        # 幂等:result 重投到已终态节点 → 200 ack;否则 TaskStateError 上抛 → @envelope_errors 409
-        if tc.disposition == "result":
-            _payload = tc.data.data
-            _loop_task_id = _payload.get("loop_task_id") if isinstance(_payload, dict) else ""
-            cur = _find_node_status(svc, _loop_task_id)
-            if cur in _TERMINAL:
-                return envelope({"ok": True}, request, message="idempotent")
-        raise
+        dto = TaskCallbackDataDTO.model_validate(_raw_obj if isinstance(_raw_obj, dict) else {})
+    except Exception:
+        raise HTTPException(status_code=422, detail="invalid callback body")
+    # TaskCallbackDataDTO 无 workflow_source;按 workflow_type 取 source(单测/内部可信 Noop/singlebox 直通;
+    # 生产侧该 source 应已登记密钥,否则 HMAC 校验会拒)。
+    auth.verify(source=(dto.workflow_type or "single_bot"), headers=request.headers, raw_body=raw,
+                method=request.method, path=request.url.path)
+    await svc.callback.report_result(callback_from_dto(dto))
     return envelope({"ok": True}, request)
 
 
