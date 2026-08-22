@@ -362,6 +362,28 @@ _DEFERRED_OPERATIONS = frozenset(
 )
 
 
+def test_no_deferred_operation_migrates_early():
+    """The half of the burn-down that must hold *throughout*, not just at the end.
+
+    Its sibling is ``xfail`` while the migration runs, which makes any failure
+    there the expected one — including a deferred row being flipped by mistake.
+    That row would then sit wrong for the whole feature and surface only when the
+    marker came off. This half passes today and fails the moment one of the ten
+    stops being ``ServiceChecked``, so a premature flip is loud immediately.
+    """
+    migrated_early = sorted(
+        f"{method} {path}"
+        for method, path in _DEFERRED_OPERATIONS
+        if not isinstance(AUTHORIZATION.get((method, path)), ServiceChecked)
+    )
+
+    assert not migrated_early, (
+        "these operations are deferred by spec.md's Out of Scope and must stay "
+        "ServiceChecked until their blocker is addressed: "
+        + ", ".join(migrated_early)
+    )
+
+
 @pytest.mark.xfail(
     reason=(
         "Adopting the seam is in progress — see "
@@ -678,7 +700,10 @@ def _replacement_rule(method: str, legacy_path: str, replacement_path: str):
     }
     if (method, replacement_path) in candidates:
         return candidates[(method, replacement_path)]
-    if len(candidates) == 1:
+    # Only where the address kept its path and changed method — auth-status, the
+    # single such pair. Allowing it generally would bind a twin to an unrelated
+    # operation's rule whenever a path happened to be down to one row.
+    if legacy_path == replacement_path and len(candidates) == 1:
         return next(iter(candidates.values()))
     raise AssertionError(
         f"cannot tell which rule replaced {method} {legacy_path}: "
@@ -759,4 +784,41 @@ def test_independently_checked_twins_could_not_have_migrated_anyway():
         "these twins carry {bot_id} on their path, so they could migrate with "
         "their replacement and must not be exempted from doing so: "
         + ", ".join(avoidable)
+    )
+
+
+def test_the_check_the_exempted_twins_rely_on_still_exists():
+    """The exemption is only true while that check is there.
+
+    Being unadjudicable is what makes an exemption *permissible*; it is not what
+    makes it *safe*. The four exempted twins are covered because ``_bot_behind``
+    calls ``get_local_skill``, which calls ``_require_view_access``, which
+    refuses a caller below MEMBER on the bot the skill record names. Delete that
+    and the exemption silently becomes a hole — the sibling test would keep
+    passing, since it only asks whether the twin could have migrated.
+
+    Pinned the way ``test_service_level_edit_locks_are_untouched`` pins the
+    locks: name the function, and fail if it stops doing the thing.
+    """
+    query_service = importlib.import_module(
+        "agentclaw.community.core.skill_center.services.local_skill_query_service"
+    )
+    legacy_skills = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.deprecated.skills"
+    )
+
+    assert hasattr(legacy_skills, "_bot_behind"), (
+        "the exempted twins resolve their bot through _bot_behind; without it "
+        "they no longer reach the check they are exempted on account of"
+    )
+
+    source = inspect.getsource(query_service.LocalSkillQueryService._require_view_access)
+    assert "check_collaborator_permission" in source, (
+        "_require_view_access no longer performs a collaborator check, so the "
+        "four legacy skills twins exempted in _TWINS_CHECKED_INDEPENDENTLY are "
+        "now unguarded — either restore it or migrate them"
+    )
+    assert "PermissionLevel.MEMBER" in source, (
+        "_require_view_access no longer checks at MEMBER; the exemption records "
+        "that bar, so re-derive it before changing this"
     )
