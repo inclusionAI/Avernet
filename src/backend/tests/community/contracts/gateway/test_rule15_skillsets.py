@@ -104,7 +104,7 @@ def _bind_skillset_deps(app):
     bind_mock_service(PassportPlugin, mock_passport, app)
     control = MagicMock()
     control.list_sets.return_value = [MOCK_SKILLSET_ROW]
-    control.get_legacy_set.return_value = MOCK_SKILLSET_ROW
+    control.get_set.return_value = MOCK_SKILLSET_ROW
     control.list_skills.return_value = [MOCK_SKILL_ROW]
     control.resources.return_value = [{
         **MOCK_SKILLSET_ROW,
@@ -112,7 +112,7 @@ def _bind_skillset_deps(app):
         "clis": mock_passport.query_passport_clis.return_value,
     }]
     control.delete_set.return_value = None
-    control.create_legacy_set.return_value = {**MOCK_SKILLSET_ROW, "name": "NewSet"}
+    control.create_set.return_value = {**MOCK_SKILLSET_ROW, "name": "NewSet"}
     control.update_set.return_value = {**MOCK_SKILLSET_ROW, "name": "Updated"}
     bind_mock_service(SkillSetControlPlaneServiceProtocol, control, app)
     return mock_factory, mock_passport

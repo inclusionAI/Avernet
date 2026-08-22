@@ -73,21 +73,6 @@ class _CreateRepository(_Repository):
         }
 
 
-class _LegacyReadRepository(_Repository):
-    def __init__(self, *, owner_id: str) -> None:
-        super().__init__()
-        self.owner_id = owner_id
-
-    def get_set(self, **_kwargs):
-        return {
-            "id": "set-1",
-            "bolt_id": "default",
-            "user_id": self.owner_id,
-            "is_default": False,
-            "is_active": False,
-        }
-
-
 class _Bots:
     def get_unique_by_id(self, bot_id: str) -> dict:
         assert bot_id == "bot-1"
@@ -557,7 +542,7 @@ async def test_collaborator_command_restores_desired_state_and_uses_true_owner()
     assert len(repository.restore_calls) == 1
 
 
-def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
+def test_create_rejects_missing_bot_instead_of_creating_orphan_set():
     service = SkillSetControlPlaneService(
         repository=_Repository(),
         bot_repo=_MissingBots(),
@@ -574,16 +559,16 @@ def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
     # a SkillSet not-found, so the HTTP adapter maps a single family rather
     # than also having to know about the Local Skill errors.
     with pytest.raises(SkillSetControlPlaneNotFoundError):
-        service.create_legacy_set(
+        service.create_set(
             bot_id="missing",
             owner_id="actor",
-            actor_id="actor",
+            user_id="actor",
             name="set",
             description=None,
         )
 
 
-def test_legacy_create_retains_only_virtual_default_bot_compatibility():
+def test_default_create_rejects_missing_bot_instead_of_creating_orphan_set():
     repository = _CreateRepository()
     service = SkillSetControlPlaneService(
         repository=repository,
@@ -597,19 +582,19 @@ def test_legacy_create_retains_only_virtual_default_bot_compatibility():
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    result = service.create_legacy_set(
-        bot_id="default",
-        owner_id="actor",
-        actor_id="actor",
-        name="set",
-        description=None,
-    )
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
+        service.create_set(
+            bot_id="default",
+            owner_id="actor",
+            user_id="actor",
+            name="set",
+            description=None,
+        )
 
-    assert result["bolt_id"] == "default"
-    assert repository.create_calls[0]["owner_id"] == "actor"
+    assert repository.create_calls == []
 
 
-def test_legacy_default_create_uses_owner_qualified_bot_lookup():
+def test_default_create_uses_owner_qualified_bot_lookup():
     owner_id = "owner-a"
     bots = _SharedDefaultBots(owner_id)
     repository = _CreateRepository()
@@ -625,42 +610,18 @@ def test_legacy_default_create_uses_owner_qualified_bot_lookup():
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    service.create_legacy_set(
+    service.create_set(
         bot_id="default",
         owner_id=owner_id,
-        actor_id=owner_id,
+        user_id=owner_id,
         name="owner set",
         description=None,
     )
 
     assert bots.lookups == [
         ("default", owner_id),
-        ("default", owner_id),
     ]
     assert repository.create_calls[0]["owner_id"] == owner_id
-
-
-def test_legacy_virtual_default_create_requires_owner_as_actor():
-    service = SkillSetControlPlaneService(
-        repository=_CreateRepository(),
-        bot_repo=_MissingBots(),
-        runtime=_SuccessfulRuntime(),
-        legacy_factory=object(),
-        passport=object(),
-        authorization=_Collaborators(),
-        audit_log_repo=_Audit(),
-        mcp_center=_McpCenter(allowed=True),
-        mcp_auth=_McpAuth(allowed=True),
-    )
-
-    with pytest.raises(SkillSetAccessDeniedError):
-        service.create_legacy_set(
-            bot_id="default",
-            owner_id="owner-a",
-            actor_id="collaborator",
-            name="set",
-            description=None,
-        )
 
 
 def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
@@ -697,9 +658,9 @@ def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
     ]
 
 
-def test_legacy_virtual_default_read_is_owner_scoped():
+def test_default_read_rejects_missing_bot():
     service = SkillSetControlPlaneService(
-        repository=_LegacyReadRepository(owner_id="owner"),
+        repository=_Repository(),
         bot_repo=_MissingBots(),
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
@@ -710,15 +671,9 @@ def test_legacy_virtual_default_read_is_owner_scoped():
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    assert (
-        service.get_legacy_set(
-            bot_id="default", owner_id="owner", actor_id="owner", set_id="set-1"
-        )["id"]
-        == "set-1"
-    )
-    with pytest.raises(SkillSetAccessDeniedError):
-        service.get_legacy_set(
-            bot_id="default", owner_id="owner", actor_id="other", set_id="set-1"
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
+        service.get_set(
+            bot_id="default", owner_id="owner", user_id="owner", set_id="set-1"
         )
 
 
