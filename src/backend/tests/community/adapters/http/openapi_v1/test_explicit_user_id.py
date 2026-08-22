@@ -284,8 +284,6 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
-    # Known-ID resolution is tenant-wide and returns display-only Bot metadata.
-    ("post", f"{PUBLIC_API_PREFIX}/bots/metadata/search"),
     # Tenant-identical marketplace searches expose no user-scoped state.
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
@@ -467,8 +465,8 @@ def test_the_pinned_number_of_operations_take_it():
     # the final operation. Skill Installation adds three further Bot-addressed
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
     # MCP adds eight operations, the Harness surface adds six Bot-addressed
-    # operations, and Session File adds six more.
-    assert len(taking) == 179
+    # operations, Session File adds six more, and Bot metadata queries add one.
+    assert len(taking) == 180
 
 
 def test_the_exempt_operations_take_none():

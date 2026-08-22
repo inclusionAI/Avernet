@@ -36,6 +36,7 @@ internal_dependencies:
   - agentclaw.community.core.config_compose
   - agentclaw.community.core.caller_identity.credential  # CallerToken used by BaaS outbound-rule update
   - agentclaw.community.core.devices
+  - agentclaw.community.core.engine_runtime.stage    # canonical live-stage publish binding resolution for Caller identity updates
   - agentclaw.community.core.quality.services
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.system_config

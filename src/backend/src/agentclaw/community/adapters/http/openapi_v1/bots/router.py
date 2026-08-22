@@ -122,7 +122,7 @@ from .startup_script_support import (
 from .schemas import (
     Bot,
     BotMetadata,
-    BotMetadataSearch,
+    BotMetadataQueries,
     BotActivateResult,
     BotAuthPending,
     BotAuthStatus,
@@ -197,6 +197,7 @@ def _to_bot_metadata(d: dict[str, Any]) -> BotMetadata:
     """Project a Bot record onto the deliberately display-only batch contract."""
     return BotMetadata(
         bot_id=d["bot_id"],
+        owner_id=d.get("owner_id") or "",
         bot_name=d.get("bot_name") or "",
         bot_desc=d.get("bot_desc") or "",
         engine=d.get("active_engine") or "",
@@ -501,33 +502,37 @@ async def list_bots(
 
 
 @router.post(
-    "/metadata/search",
+    "/metadata/queries",
     response_model=Envelope[Page[BotMetadata]],
-    dependencies=[Depends(require_principal)],
+    responses=USER_SCOPED_403,
 )
 @envelope_errors
-async def search_bot_metadata(
-    body: BotMetadataSearch,
+async def query_bot_metadata(
+    body: BotMetadataQueries,
     page_params: PageParamsDep,
     request: Request,
+    user_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Page[BotMetadata]]:
-    """Resolve display metadata for a caller-supplied set of known Bot IDs.
+    """Resolve display metadata for caller-supplied Bot and owner pairs.
 
     The identifiers may originate from BCN, search, recommendations, persisted
-    client state, or another source. Authentication is required, but this is a
-    tenant-wide metadata lookup rather than an ownership check. The response is
-    intentionally limited to display fields and never exposes owners, device
-    bindings, runtime configuration, credentials, or extension payloads.
+    client state, or another source. The user_id parameter names the authenticated
+    user performing this tenant-wide metadata lookup; each owner_id in the body
+    is part of a target Bot identity, not the caller identity. The response is
+    intentionally limited to display fields and the owner id the request already
+    named; it never exposes device bindings, runtime configuration, credentials,
+    or extension payloads.
 
     Unknown identifiers are omitted. Filtering happens in the repository before
     pagination, so total is the number of matching Bot records.
     """
-    bot_ids = list(dict.fromkeys(body.bot_ids))
-    result = bot_service.list_bots_by_conditions(
+    del user_id  # UserIdDep has already enforced equality with the Principal.
+    pairs = list(dict.fromkeys((item.bot_id, item.owner_id) for item in body.bots))
+    result = bot_service.list_bots_by_owner_bot_pairs(
         page=page_params.page,
         page_size=page_params.page_size,
-        bot_ids=bot_ids,
+        pairs=pairs,
     )
     items = [_to_bot_metadata(item) for item in result["items"]]
     return page(result["total"], items, request)

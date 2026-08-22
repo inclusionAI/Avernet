@@ -87,6 +87,26 @@ def _seed_non_caller_bot(world) -> None:
     )
 
 
+def _seed_ambiguous_default_bots(world) -> None:
+    _boot_verifier(world)
+    repo = world.get(BotRepository)
+    for owner_id in (_USER_ID, "another-openapi-user"):
+        repo.insert(
+            {
+                "bot_id": "default",
+                "bot_name": f"Default Bot for {owner_id}",
+                "owner_id": owner_id,
+                "owner_name": owner_id,
+                "entity_id": owner_id,
+                "entity_type": "staff",
+                "creator_id": owner_id,
+                "status": "ACTIVE",
+                "active_engine": "openclaw",
+                "bot_type": "personal",
+            }
+        )
+
+
 def _assert_no_store(response, _world) -> None:
     assert "no-store" in response.headers["cache-control"]
     assert response.headers["pragma"] == "no-cache"
@@ -112,6 +132,28 @@ def _assert_no_store(response, _world) -> None:
 )
 def get_bot_iam_token_ok():
     """The framework owns invocation."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/iam-token",
+    scenario="default_bot_without_entity_uses_the_verified_user",
+    input=CaseInput(
+        path_params={"bot_id": "default"}, query_params=_QUERY, headers=_HEADERS
+    ),
+    seed=_seed_ambiguous_default_bots,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "message": "OK",
+            "data": {"iam_token": _IAM_TOKEN},
+        },
+    ),
+    extra_assertions=(_assert_no_store,),
+)
+def get_default_bot_iam_token_without_entity_ok():
+    """The verified user disambiguates the conventional default Bot."""
 
 
 @endpoint_test(
