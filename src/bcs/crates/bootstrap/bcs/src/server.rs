@@ -1477,6 +1477,7 @@ fn build_openapi_v1_state(
     session_launch: Arc<dyn bcs_service_api::SessionLaunchService>,
     group_management: Arc<dyn GroupManagementService>,
     collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
+    judge_available: bool,
     session_repo: Arc<dyn SessionRepoPort>,
     group_message_history: Arc<dyn GroupMessageHistoryService>,
     session_files: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
@@ -1589,7 +1590,7 @@ fn build_openapi_v1_state(
         dyn bcs_service_api::application::v1::CollaborationDefinitionService,
     > = Arc::new(V1CollaborationDefinitionServiceImpl::new(
         collaboration_runtime.clone(),
-        config.llm.is_enabled(),
+        judge_available,
     ));
 
     (
@@ -2135,6 +2136,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             session_launch.clone(),
             group_management_v1.clone(),
             collaboration_runtime.clone(),
+            config.llm.is_enabled(),
             session_repo.clone(),
             group_message_history.clone(),
             session_file_service.clone(),
@@ -3629,6 +3631,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             session_launch.clone(),
             group_management_v1.clone(),
             collaboration_runtime.clone(),
+            config.llm.is_enabled(),
             session_repo.clone(),
             group_message_history.clone(),
             session_file_service.clone(),
@@ -4420,6 +4423,7 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             session_launch.clone(),
             group_management_v1.clone(),
             collaboration_runtime.clone(),
+            config.llm.is_enabled() || extensions.llm_provider.is_some(),
             session_repo.clone(),
             group_message_history.clone(),
             session_file_service.clone(),

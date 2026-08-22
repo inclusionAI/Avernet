@@ -65,6 +65,38 @@ CollaborationDefinitionParticipantSlot:
     assigned:
       type: boolean
 
+CollaborationDefinitionBotBindingAssignee:
+  type: object
+  additionalProperties: false
+  required: [type, binding]
+  description: >-
+    Participant-bound assignee. Mirrors the legacy
+    `StateMachineAssignee::BotBinding { binding }` variant, which serializes as
+    `{"type":"bot_binding","binding":...}`.
+  properties:
+    type:
+      type: string
+      enum: [bot_binding]
+    binding:
+      type: string
+      minLength: 1
+
+CollaborationDefinitionRuntimeActorAssignee:
+  type: object
+  additionalProperties: false
+  required: [type, actor]
+  description: >-
+    Runtime-resolved actor assignee. Mirrors the legacy
+    `StateMachineAssignee::RuntimeActor { actor }` variant, which serializes as
+    `{"type":"runtime_actor","actor":...}`.
+  properties:
+    type:
+      type: string
+      enum: [runtime_actor]
+    actor:
+      type: string
+      minLength: 1
+
 CollaborationDefinitionGraphNode:
   type: object
   additionalProperties: false
@@ -79,7 +111,9 @@ CollaborationDefinitionGraphNode:
       type: string
       minLength: 1
     assignee:
-      type: string
+      oneOf:
+        - $ref: "#/CollaborationDefinitionBotBindingAssignee"
+        - $ref: "#/CollaborationDefinitionRuntimeActorAssignee"
     final_output:
       type: boolean
     judge:

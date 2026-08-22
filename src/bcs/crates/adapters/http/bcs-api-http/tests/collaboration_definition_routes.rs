@@ -395,6 +395,40 @@ async fn validate_rejects_legacy_yaml_alias_by_design() {
 }
 
 #[tokio::test]
+async fn validate_empty_string_yaml_is_400() {
+    let service = Arc::new(FakeDefinitionService::default());
+    let app = test_router(service);
+    let response = app
+        .oneshot(request(
+            "POST",
+            "/api/v1/collaboration/definitions/validate",
+            json!({ "definition_yaml": "" }),
+        ))
+        .await
+        .expect("empty string response");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn validate_whitespace_only_yaml_is_400() {
+    let service = Arc::new(FakeDefinitionService::default());
+    let app = test_router(service);
+    let response = app
+        .oneshot(request(
+            "POST",
+            "/api/v1/collaboration/definitions/validate",
+            json!({ "definition_yaml": "   \n\t  " }),
+        ))
+        .await
+        .expect("whitespace response");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
+}
+
+#[tokio::test]
 async fn validate_requires_a_gateway_principal() {
     let service = Arc::new(FakeDefinitionService::default());
     let app = test_router(service);

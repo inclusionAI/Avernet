@@ -46,6 +46,12 @@ pub async fn validate(
     body: Result<Json<ValidateCollaborationDefinitionRequest>, JsonRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    if body.definition_yaml.trim().is_empty() {
+        return Err(invalid_request(
+            &request_id,
+            "definition_yaml must not be empty",
+        ));
+    }
     let outcome = service(&state, &request_id)?
         .validate_definition_yaml(ValidateCollaborationDefinition {
             definition_yaml: body.definition_yaml,
