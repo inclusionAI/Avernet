@@ -1,7 +1,7 @@
 # Friend Connect Approval and Work-Order Notification Design
 
 Date: 2026-08-22
-Status: Draft — pending confirmation before implementation
+Status: Implemented in BCS — Backend event API available
 Scope: BCS friend connect lifecycle + Backend WorkOrder notification/approval integration
 
 ## 1. Problem
@@ -22,7 +22,7 @@ Required behavior:
 4. WorkOrder approval vs notice semantics must be driven by backend-created
    `event_type`, not by frontend `item_type`.
 5. Notice-type work orders must not pass `approver_user_ids`, must pass
-   `notification_recipient_user_ids`, must not enter pending approval, and must
+   `recipient_user_ids`, must not enter pending approval, and must
    not show approve/reject buttons.
 
 ## 2. Terms
@@ -94,8 +94,15 @@ Current implementation is still Space-join centric:
 - `WorkOrderRepository.create_space_join_request(...)`
 - `WorkOrderRepository.review_space_join(...)`
 
-There is no generic `create_work_order(...)` implementation yet in the observed
-code, even though the desired business shape is generic.
+Backend now exposes the generic event creation endpoint used by BCS:
+
+```http
+POST /openapi/v1/bots/work-orders/events?user_id={actor_user_id}
+```
+
+The request body carries `event_category`, `biz_type`, `biz_id`, `event_type`,
+`applicant_user_id`, `approver_user_ids`, `recipient_user_ids`, `title`,
+`content`, `apply_reason`, and `biz_data`.
 
 ### 3.2 BCS Friend Connect
 
@@ -332,8 +339,7 @@ For friend requests that require approval:
 Creation requirements:
 
 - `approver_user_ids` must be non-empty.
-- `notification_recipient_user_ids` should be empty or ignored for approval
-  recipient creation.
+- `recipient_user_ids` must be empty for approval events.
 - A pending `ac_work_order` should be created.
 - Approval notifications should be created for each approver.
 - Inbox detail/list must expose `can_approve=true` only for eligible approvers.
@@ -350,64 +356,57 @@ For reviewed friend requests:
 Creation requirements:
 
 - `approver_user_ids` must be empty.
-- `notification_recipient_user_ids` must be non-empty.
+- `recipient_user_ids` must be non-empty.
 - Notification must not enter the pending approval flow.
 - Notification must not show approve/reject buttons.
 - Notification can be stored as `ac_work_order_notification` with
   `work_order_id = NULL`, unless product explicitly requires a terminal
   `ac_work_order` row for every notice.
 
-BCS 现阶段先把“需要审批”的 friend request 通知链路补齐；reviewed notice
-可在后续接入 Backend generic create 接口后补上。
+BCS 现阶段通过 Backend event API 同时发送“待审批”的 approval event 和
+auto-approved/reviewed 的 notice event。
 
-### 7.4 Proposed Generic Backend Interface
+### 7.4 Backend Event API
 
-Introduce a generic WorkOrder creation method:
+BCS uses the merged Backend event endpoint instead of a BCS-owned WorkOrder
+table write:
 
-```python
-def create_work_order(
-    *,
-    event_type: WorkOrderEventType,
-    biz_type: WorkOrderBizType | str,
-    biz_id: str,
-    applicant_user_id: str,
-    apply_reason: str | None,
-    biz_data: dict | None,
-    approver_user_ids: list[str],
-    notification_recipient_user_ids: list[str],
-):
-    ...
+```http
+POST /openapi/v1/bots/work-orders/events?user_id={actor_user_id}
 ```
 
-Backend validation:
+Request shape used by BCS:
 
-```python
-category = EVENT_CATEGORIES[event_type]
-
-if category is NotificationCategory.APPROVAL:
-    if not approver_user_ids:
-        raise WorkOrderNoReviewerError(...)
-    create pending work order
-    create APPROVAL notifications for approver_user_ids
-
-if category is NotificationCategory.NOTICE:
-    if approver_user_ids:
-        raise WorkOrderInvalidRequestError(...)
-    if not notification_recipient_user_ids:
-        raise WorkOrderNoRecipientError(...)
-    create NOTICE notifications only
+```json
+{
+  "event_category": "APPROVAL",
+  "biz_type": "BOT_FRIEND",
+  "biz_id": "friend-request-id",
+  "event_type": "HUMAN2BOT_FRIEND_APPLIED",
+  "applicant_user_id": "1001",
+  "approver_user_ids": ["target-owner-id"],
+  "recipient_user_ids": [],
+  "title": "好友添加申请待审批",
+  "content": "human_1001 申请添加 Bot bot_a 为好友，请在好友申请列表中处理。",
+  "apply_reason": "optional applicant message",
+  "biz_data": {
+    "request_ids": ["friend-request-id"],
+    "applicant_actor_id": "human_1001",
+    "target_bot_id": "bot_a",
+    "notification_kind": "approval_requested",
+    "message": "optional applicant message"
+  }
+}
 ```
 
-Add `WorkOrderBizType.BOT_FRIEND`:
+For notice events, BCS sends `event_category=NOTICE`, omits
+`applicant_user_id`, keeps `approver_user_ids=[]`, and puts target owner ids in
+`recipient_user_ids`.
 
-```python
-class WorkOrderBizType(StrEnum):
-    SPACE_JOIN = "SPACE_JOIN"
-    BOT_FRIEND = "BOT_FRIEND"
-```
-
-`PUBLIC_ORDER` may be added separately if public-order events need generic
-creation now; it is not required for friend add.
+Backend validates that `event_type` is registered and that the submitted
+`event_category` matches Backend `EVENT_CATEGORIES[event_type]`; therefore BCS
+uses `*_FRIEND_APPLIED` only for approval events and `*_FRIEND_REVIEWED` only
+for notice events.
 
 ## 8. BCS ↔ Backend Integration
 

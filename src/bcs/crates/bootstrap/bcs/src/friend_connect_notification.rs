@@ -9,7 +9,7 @@ use bcs_service_api::port::{
 use bcs_service_api::{ServiceError, ServiceResult};
 use serde::Serialize;
 
-const WORK_ORDER_PATH: &str = "/openapi/v1/bots/work-orders";
+const WORK_ORDER_PATH: &str = "/openapi/v1/bots/work-orders/events";
 
 #[derive(Debug, Clone)]
 pub struct HttpFriendConnectNotificationPort {
@@ -41,30 +41,37 @@ impl HttpFriendConnectNotificationPort {
         })
     }
 
-    fn work_order_url(&self) -> Result<reqwest::Url, ServiceError> {
-        self.base_url.join(WORK_ORDER_PATH).map_err(|error| {
+    fn work_order_url(&self, user_id: &str) -> Result<reqwest::Url, ServiceError> {
+        let mut url = self.base_url.join(WORK_ORDER_PATH).map_err(|error| {
             ServiceError::InternalError(format!(
                 "failed to build friend work-order url from '{}': {error}",
                 self.base_url
             ))
-        })
+        })?;
+        url.query_pairs_mut().append_pair("user_id", user_id);
+        Ok(url)
     }
 }
 
 #[derive(Debug, Serialize)]
-struct FriendWorkOrderCreateRequest {
-    event_type: String,
+struct FriendWorkOrderEventRequest {
+    event_category: String,
     biz_type: String,
     biz_id: String,
-    applicant_user_id: String,
+    event_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    apply_reason: Option<String>,
-    #[serde(default)]
-    biz_data: serde_json::Value,
+    applicant_user_id: Option<String>,
     #[serde(default)]
     approver_user_ids: Vec<String>,
     #[serde(default)]
-    notification_recipient_user_ids: Vec<String>,
+    recipient_user_ids: Vec<String>,
+    title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    apply_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    biz_data: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -79,6 +86,13 @@ struct FriendWorkOrderBizData {
 
 fn is_human_actor(actor_id: &str) -> bool {
     actor_id.starts_with("human_")
+}
+
+fn applicant_user_id(actor_id: &str) -> Option<String> {
+    actor_id
+        .strip_prefix("human_")
+        .filter(|user_id| !user_id.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn event_type_for(kind: FriendConnectNotificationKind, applicant_actor_id: &str) -> &'static str {
@@ -96,39 +110,100 @@ fn event_type_for(kind: FriendConnectNotificationKind, applicant_actor_id: &str)
     }
 }
 
-impl FriendWorkOrderCreateRequest {
+fn event_category_for(kind: FriendConnectNotificationKind) -> &'static str {
+    match kind {
+        FriendConnectNotificationKind::ApprovalRequested => "APPROVAL",
+        FriendConnectNotificationKind::AutoApproved
+        | FriendConnectNotificationKind::Reviewed => "NOTICE",
+    }
+}
+
+fn event_actor_user_id(command: &FriendConnectNotificationCommand) -> String {
+    match command.kind {
+        FriendConnectNotificationKind::ApprovalRequested => {
+            applicant_user_id(&command.applicant_actor_id)
+                .unwrap_or_else(|| command.applicant_actor_id.clone())
+        }
+        FriendConnectNotificationKind::AutoApproved
+        | FriendConnectNotificationKind::Reviewed => command
+            .recipient_user_ids
+            .first()
+            .cloned()
+            .or_else(|| applicant_user_id(&command.applicant_actor_id))
+            .unwrap_or_else(|| command.applicant_actor_id.clone()),
+    }
+}
+
+fn notification_kind_label(kind: FriendConnectNotificationKind) -> &'static str {
+    match kind {
+        FriendConnectNotificationKind::ApprovalRequested => "approval_requested",
+        FriendConnectNotificationKind::AutoApproved => "auto_approved",
+        FriendConnectNotificationKind::Reviewed => "reviewed",
+    }
+}
+
+fn title_for(kind: FriendConnectNotificationKind) -> &'static str {
+    match kind {
+        FriendConnectNotificationKind::ApprovalRequested => "好友添加申请待审批",
+        FriendConnectNotificationKind::AutoApproved => "好友添加申请已自动通过",
+        FriendConnectNotificationKind::Reviewed => "好友添加申请已处理",
+    }
+}
+
+fn content_for(command: &FriendConnectNotificationCommand) -> String {
+    match command.kind {
+        FriendConnectNotificationKind::ApprovalRequested => format!(
+            "{} 申请添加 Bot {} 为好友，请在好友申请列表中处理。",
+            command.applicant_actor_id, command.target_bot_id
+        ),
+        FriendConnectNotificationKind::AutoApproved => format!(
+            "{} 与 Bot {} 的好友申请已自动通过。",
+            command.applicant_actor_id, command.target_bot_id
+        ),
+        FriendConnectNotificationKind::Reviewed => format!(
+            "{} 与 Bot {} 的好友申请已处理。",
+            command.applicant_actor_id, command.target_bot_id
+        ),
+    }
+}
+
+impl FriendWorkOrderEventRequest {
     fn from_command(command: &FriendConnectNotificationCommand) -> Self {
         let event_type = event_type_for(command.kind, &command.applicant_actor_id);
         let biz_data = FriendWorkOrderBizData {
             request_ids: command.request_ids.clone(),
             applicant_actor_id: command.applicant_actor_id.clone(),
             target_bot_id: command.target_bot_id.clone(),
-            notification_kind: match command.kind {
-                FriendConnectNotificationKind::ApprovalRequested => "approval_requested".to_string(),
-                FriendConnectNotificationKind::AutoApproved => "auto_approved".to_string(),
-                FriendConnectNotificationKind::Reviewed => "reviewed".to_string(),
-            },
+            notification_kind: notification_kind_label(command.kind).to_string(),
             message: command.message.clone(),
         };
         let biz_data = serde_json::to_value(biz_data).expect("friend work-order biz_data json");
-        let (approver_user_ids, notification_recipient_user_ids) = match command.kind {
-            FriendConnectNotificationKind::ApprovalRequested => {
-                (command.recipient_user_ids.clone(), Vec::new())
-            }
+        let (applicant_user_id, approver_user_ids, recipient_user_ids) = match command.kind {
+            FriendConnectNotificationKind::ApprovalRequested => (
+                applicant_user_id(&command.applicant_actor_id)
+                    .or_else(|| Some(command.applicant_actor_id.clone())),
+                command.recipient_user_ids.clone(),
+                Vec::new(),
+            ),
             FriendConnectNotificationKind::AutoApproved
-            | FriendConnectNotificationKind::Reviewed => {
-                (Vec::new(), command.recipient_user_ids.clone())
-            }
+            | FriendConnectNotificationKind::Reviewed => (
+                None,
+                Vec::new(),
+                command.recipient_user_ids.clone(),
+            ),
         };
         Self {
+            event_category: event_category_for(command.kind).to_string(),
             event_type: event_type.to_string(),
             biz_type: "BOT_FRIEND".to_string(),
             biz_id: command.request_ids.first().cloned().unwrap_or_default(),
-            applicant_user_id: command.applicant_actor_id.clone(),
-            apply_reason: command.message.clone(),
-            biz_data,
+            applicant_user_id,
             approver_user_ids,
-            notification_recipient_user_ids,
+            recipient_user_ids,
+            title: title_for(command.kind).to_string(),
+            content: Some(content_for(command)),
+            apply_reason: command.message.clone(),
+            biz_data: Some(biz_data),
         }
     }
 }
@@ -139,8 +214,9 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
         if command.recipient_user_ids.is_empty() {
             return Ok(());
         }
-        let url = self.work_order_url()?;
-        let payload = FriendWorkOrderCreateRequest::from_command(&command);
+        let user_id = event_actor_user_id(&command);
+        let url = self.work_order_url(&user_id)?;
+        let payload = FriendWorkOrderEventRequest::from_command(&command);
         let response = self
             .client
             .post(url)
@@ -167,7 +243,7 @@ mod tests {
 
     #[test]
     fn builds_pending_friend_request_payload() {
-        let payload = FriendWorkOrderCreateRequest::from_command(&FriendConnectNotificationCommand {
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::ApprovalRequested,
             env: "dev".to_string(),
             request_ids: vec!["req_1".to_string()],
@@ -177,22 +253,84 @@ mod tests {
             message: Some("please add me".to_string()),
         });
 
+        assert_eq!(payload.event_category, "APPROVAL");
         assert_eq!(payload.event_type, "HUMAN2BOT_FRIEND_APPLIED");
         assert_eq!(payload.biz_type, "BOT_FRIEND");
         assert_eq!(payload.biz_id, "req_1");
-        assert_eq!(payload.applicant_user_id, "human_1001");
+        assert_eq!(payload.applicant_user_id.as_deref(), Some("1001"));
         assert_eq!(payload.apply_reason.as_deref(), Some("please add me"));
         assert_eq!(payload.approver_user_ids, vec!["user_2001".to_string()]);
-        assert!(payload.notification_recipient_user_ids.is_empty());
+        assert!(payload.recipient_user_ids.is_empty());
+        assert_eq!(payload.title, "好友添加申请待审批");
+        assert_eq!(
+            payload.content.as_deref(),
+            Some("human_1001 申请添加 Bot bot_2001 为好友，请在好友申请列表中处理。")
+        );
         assert_eq!(
             payload.biz_data,
-            serde_json::json!({
+            Some(serde_json::json!({
                 "request_ids": ["req_1"],
                 "applicant_actor_id": "human_1001",
                 "target_bot_id": "bot_2001",
                 "notification_kind": "approval_requested",
                 "message": "please add me"
-            })
+            }))
         );
+    }
+
+    #[test]
+    fn builds_auto_approved_notice_payload() {
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::AutoApproved,
+            env: "dev".to_string(),
+            request_ids: vec!["req_2".to_string()],
+            applicant_actor_id: "bot_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["user_2001".to_string()],
+            message: None,
+        });
+
+        assert_eq!(payload.event_category, "NOTICE");
+        assert_eq!(payload.event_type, "BOT2BOT_FRIEND_REVIEWED");
+        assert_eq!(payload.applicant_user_id, None);
+        assert!(payload.approver_user_ids.is_empty());
+        assert_eq!(payload.recipient_user_ids, vec!["user_2001".to_string()]);
+        assert_eq!(payload.title, "好友添加申请已自动通过");
+    }
+
+    #[test]
+    fn appends_user_id_to_work_order_event_url() {
+        let adapter = HttpFriendConnectNotificationPort::new("https://backend.example.com/api/")
+            .expect("valid url");
+        let url = adapter.work_order_url("user_1001").expect("work order url");
+        assert_eq!(
+            url.as_str(),
+            "https://backend.example.com/openapi/v1/bots/work-orders/events?user_id=user_1001"
+        );
+    }
+
+    #[test]
+    fn picks_event_actor_user_id_for_backend_user_scope() {
+        let pending = FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::ApprovalRequested,
+            env: "dev".to_string(),
+            request_ids: vec!["req_1".to_string()],
+            applicant_actor_id: "human_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["user_2001".to_string()],
+            message: None,
+        };
+        assert_eq!(event_actor_user_id(&pending), "1001");
+
+        let notice = FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::Reviewed,
+            env: "dev".to_string(),
+            request_ids: vec!["req_1".to_string()],
+            applicant_actor_id: "bot_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["user_2001".to_string()],
+            message: None,
+        };
+        assert_eq!(event_actor_user_id(&notice), "user_2001");
     }
 }
