@@ -42,7 +42,7 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
 
 
-class BotEditorWorkOrderRepository:
+class _BotEditorWorkOrderRepository:
     """Own the atomic create/review workflows specific to Bot editors."""
 
     def __init__(self, db: DatabasePlugin) -> None:

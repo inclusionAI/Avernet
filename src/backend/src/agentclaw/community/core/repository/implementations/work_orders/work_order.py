@@ -11,7 +11,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.repository.implementations.work_orders.bot_editor import (
-    BotEditorWorkOrderRepository,
+    _BotEditorWorkOrderRepository,
 )
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
@@ -67,7 +67,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         self._Approver = WorkOrderApproverModel
         self._Space = SpaceModel
         self._Member = SpaceMemberModel
-        self._bot_editor = BotEditorWorkOrderRepository(db)
+        self._bot_editor = _BotEditorWorkOrderRepository(db)
 
     @staticmethod
     def _new_no() -> str:
