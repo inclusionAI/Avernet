@@ -432,6 +432,38 @@ class BotRepository(
             )
             return [b.to_dict() for b in bots]
 
+    def list_bots_by_owner_bot_pairs(
+        self,
+        pairs: List[tuple[str, str]],
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[int, List[Dict[str, Any]]]:
+        """Page exact Bot/owner pairs within the current tenant and environment."""
+        if not pairs:
+            return 0, []
+        with self._db.orm_session() as db:
+            query = db.query(self.Model).filter(
+                or_(
+                    *[
+                        and_(
+                            self.Model.bot_id == bot_id,
+                            self.Model.owner_id == owner_id,
+                        )
+                        for bot_id, owner_id in pairs
+                    ]
+                ),
+                self.Model.is_delete == 0,
+                self._env(),
+            )
+            total = query.count()
+            bots = (
+                query.order_by(self.Model.gmt_create.desc(), self.Model.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            return total, [bot.to_dict() for bot in bots]
+
     def list_by_search(
         self,
         public: Optional[str] = None,

@@ -72,7 +72,7 @@ logger = get_logger()
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # Tenant-wide lookup returns display fields, never ownership or runtime internals.
-    ("POST", "/openapi/v1/bots/metadata/search"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/metadata/queries"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): AdmissionMode.REFUSED,
     # The item routes resolve the addressed owner from the asset and perform
     # the grant check against that exact Bot/owner pair in their handler.
