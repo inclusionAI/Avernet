@@ -331,8 +331,13 @@ def test_scaffolding_burn_down_is_reported():
 #: operation cannot be renamed to escape.
 _DEFERRED_OPERATIONS = frozenset(
     {
-        # Its handlers act on a bot named in the request body, so the gate —
-        # which decides before the handler runs — cannot key on the same value.
+        # Not a structural limit: these routes do carry {bot_id} on the path.
+        # They pass entity_id=body.entity_id to the service beside it, so a gate
+        # would adjudicate one thing while the operation acted on another; and
+        # require_harness_bot_access resolves ownership with a repository method
+        # documented as performing no owner check, skipping the check entirely
+        # for bot_id == "default". #1323 filed all three as a defect for that
+        # group's owner. Deferred until fixed, not deferred forever.
         ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"),
         ("POST", "/openapi/v1/bots/{bot_id}/harness/diagnose"),
         ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-history"),
@@ -376,6 +381,10 @@ def test_only_the_deferred_operations_remain_service_checked():
     Equality, not containment. A subset check would pass while rows that should
     have migrated sat waiting, which is the failure this is here to catch.
     """
+    # Deliberately not subtracting UNMOUNTED_OPERATIONS, unlike the assertions
+    # that compare the table against live routes. This one compares the table
+    # against itself, where an unmounted row is still a row — and exempting one
+    # would let it sit ServiceChecked forever without ever failing the burn-down.
     remaining = {
         key
         for key, rule in AUTHORIZATION.items()

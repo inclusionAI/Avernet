@@ -28,7 +28,7 @@ deletion is known to change no caller's answer.
 - **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization.py`
 - **Done when:**
   - [x] `_assert_check_rows_are_enforceable` gains a third refusal: a `Check` row on a route that does not declare `{bot_id}` on its path fails assembly, naming the route.
-  - [x] The docstring says why — the gate reads `BotIdPath`, so such a row would adjudicate a value the handler never saw — and names the two sets this excludes: harness (bot in the request body) and the retiring skills addresses (bot in the query, or resolved from the skill record).
+  - [x] The docstring says why — the gate reads `BotIdPath`, so such a row would adjudicate a value the handler never saw — and names the set this really excludes: the retiring skills addresses (bot in the query, or resolved from the skill record). It also records that this refusal does **not** catch harness, which does carry `{bot_id}` on its path; harness is stopped by the `OwnerIdDep` refusal, and its real blocker is the `entity_id` divergence #1323 filed.
   - [x] A fixture-router test covers it in both directions.
   - [x] No row changes mode; the seam itself is untouched.
 - **Depends on:** —
@@ -38,7 +38,7 @@ deletion is known to change no caller's answer.
 - **Files:** `tests/community/adapters/http/openapi_v1/test_authorization_inventory.py`
 - **Done when:**
   - [x] `test_no_live_operation_carries_the_gate` is **deleted**, not skipped or weakened.
-  - [x] Its inverse exists: every remaining `ServiceChecked` row cites the harness module and nothing else. It fails today (11 other modules still cited), so it is marked `xfail` with a reason naming this feature and flips to a real assertion in the last group.
+  - [x] Its inverse exists, keyed on the **operation** rather than the cited module: the set of rows still `ServiceChecked` must equal exactly the ten deferred operations (6 harness, 3 skills, 1 connection). Keying on citations would let a row dodge migration by re-citing itself to an already-deferred module. It fails today, naming the 89 rows still to migrate, so it is `xfail(strict)` with a reason naming this feature and flips to a real assertion in the last group.
   - [x] `scaffolding_row_count()` and `SCAFFOLDING_MODES` are untouched.
 - **Depends on:** Task 1
 

@@ -774,16 +774,24 @@ def _assert_check_rows_are_enforceable(
     request itself carries on the path — that is what ``BotIdPath`` reads. An
     operation whose bot arrives any other way cannot be keyed on the same value
     the handler acts on, and a ``Check`` row for it would adjudicate something
-    the handler never saw. Two sets of operations are in exactly that position,
-    and are excluded by this rather than by convention:
+    the handler never saw.
 
-    - **harness**, whose handlers act on a bot named in the request *body*;
-    - the **retiring skills addresses**, where two carry the bot in the query
-      string and four name no bot at all — the skill id resolves its own bot,
-      inside the handler, after this check would have had to answer.
+    The **retiring skills addresses** are the live example: two carry the bot in
+    the query string, and four name no bot at all — the skill id resolves its
+    own bot, inside the handler, after this check would have had to answer. They
+    keep the checks they already have; what this refuses is the table claiming
+    the seam covers them.
 
-    Both keep the checks they already have. What this refuses is the table
-    claiming otherwise.
+    **This does not catch harness**, and it is worth saying so where someone
+    would otherwise assume it. Those six routes are mounted under
+    ``/openapi/v1/bots/{bot_id}/harness`` and do declare ``bot_id`` on the path,
+    so they pass this refusal. What stops them today is the *second* one — no
+    harness handler consumes ``OwnerIdDep`` — and what should stop them after
+    that is judgement: they pass ``entity_id=body.entity_id`` to the service
+    beside ``bot_id``, so the gate would adjudicate one thing while the
+    operation acted on another. Adding ``OwnerIdDep`` there would satisfy all
+    three refusals and still be wrong. That is a defect to fix (#1323 filed it),
+    not a limit to encode.
     """
     socket_checks = sorted(
         f"{method} {path}"
