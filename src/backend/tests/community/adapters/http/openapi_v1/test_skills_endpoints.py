@@ -734,23 +734,6 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
         def create(self, **_kwargs):
             return self.runtime
 
-    class _Guard:
-        def acquire_for_edit(self, **_kwargs):
-            return object()
-
-        def release(self, _lease):
-            return True
-
-    class _MutationGuard:
-        def acquire(self, **_kwargs):
-            return object()
-
-        def release(self, _lease):
-            return True
-
-        def ensure_valid(self, _lease) -> None:
-            return None
-
     factory = _Factory()
     service = LocalSkillStateService(
         skills,
@@ -758,8 +741,6 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
         bots,
         object(),
         factory,
-        _MutationGuard(),
-        _Guard(),
         object(),
         object(),
         object(),

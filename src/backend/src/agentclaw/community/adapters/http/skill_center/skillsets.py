@@ -300,17 +300,14 @@ async def create_skill_set(
         bot_repo=bot_repo,
     )
 
-    try:
-        skill_set = control_plane.create_legacy_set(
-            bot_id=effective_bot_id,
-            owner_id=effective_entity_id,
-            actor_id=_legacy_actor(ctx, request.user_id),
-            name=request.name,
-            description=request.description,
-        )
-        return SkillSetDetailResponse(success=True, data=_legacy_skill_set(skill_set))
-    except Exception as e:
-        raise _legacy_error(e) from e
+    skill_set = control_plane.create_legacy_set(
+        bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
+        actor_id=_legacy_actor(ctx, request.user_id),
+        name=request.name,
+        description=request.description,
+    )
+    return SkillSetDetailResponse(success=True, data=_legacy_skill_set(skill_set))
 
 
 @router.get("/with-mcps", response_model=SkillSetsWithMCPsResponse, deprecated=True)
@@ -476,20 +473,17 @@ async def get_skill_set(
         ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
     )
 
-    try:
-        return SkillSetDetailResponse(
-            success=True,
-            data=_legacy_skill_set(
-                control_plane.get_legacy_set(
-                    bot_id=effective_bot_id,
-                    owner_id=effective_entity_id,
-                    actor_id=_legacy_actor(ctx, user_id or entity_id),
-                    set_id=skill_set_id,
-                )
-            ),
-        )
-    except Exception as exc:
-        raise _legacy_error(exc) from exc
+    return SkillSetDetailResponse(
+        success=True,
+        data=_legacy_skill_set(
+            control_plane.get_legacy_set(
+                bot_id=effective_bot_id,
+                owner_id=effective_entity_id,
+                actor_id=_legacy_actor(ctx, user_id or entity_id),
+                set_id=skill_set_id,
+            )
+        ),
+    )
 
 
 @router.put("/{skill_set_id}", response_model=SkillSetDetailResponse)
@@ -700,65 +694,62 @@ async def add_skills_to_set(
         bot_repo=bot_repo,
     )
 
-    try:
-        # Historical batch wire permits partial success.  Each member remains
-        # an atomic control-plane command; the adapter only serializes results.
-        results: dict[str, list] = {
-            "success": [],
-            "failed": [],
-            "activation_failed": [],
-        }
-        actor_id = _legacy_actor(ctx, request.user_id or entity_id)
-        # Validate the target before the legacy resolver may materialise a
-        # missing Repo asset.  A missing or immutable Set must not leave an
-        # orphan ac_skill row behind.
-        target_set = control_plane.get_set(
-            bot_id=effective_bot_id,
-            owner_id=effective_entity_id,
-            user_id=actor_id,
-            set_id=skill_set_id,
-        )
-        if target_set.get("is_default"):
-            raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
-        for skill_id in request.skill_ids:
-            try:
-                stable_skill_id = control_plane.resolve_legacy_skill_id(
-                    bot_id=effective_bot_id,
-                    owner_id=effective_entity_id,
-                    actor_id=actor_id,
-                    identifier=skill_id,
-                )
-                await control_plane.add_skill(
-                    bot_id=effective_bot_id,
-                    owner_id=effective_entity_id,
-                    user_id=actor_id,
-                    set_id=skill_set_id,
-                    skill_id=stable_skill_id,
-                )
-                results["success"].append(
-                    {"skill_id": str(stable_skill_id), "name": str(skill_id)}
-                )
-            except (
-                LocalSkillNotFoundError,
-                SkillSetControlPlaneNotFoundError,
-            ) as exc:
-                results["failed"].append({"skill_id": skill_id, "error": str(exc)})
-            except SkillSetControlPlaneConflictError as exc:
-                if str(exc) not in {
-                    "RESOURCE_DIRECT_ACTIVE",
-                    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
-                }:
-                    raise
-                results["failed"].append({"skill_id": skill_id, "error": str(exc)})
-        success_count = len(results["success"])
-        failed_count = len(results["failed"])
-        return AddSkillsResponse(
-            success=True,
-            data=results,
-            message=f"成功添加 {success_count} 个技能，失败 {failed_count} 个",
-        )
-    except Exception as exc:
-        raise _legacy_error(exc) from exc
+    # Historical batch wire permits partial success.  Each member remains
+    # an atomic control-plane command; the adapter only serializes results.
+    results: dict[str, list] = {
+        "success": [],
+        "failed": [],
+        "activation_failed": [],
+    }
+    actor_id = _legacy_actor(ctx, request.user_id or entity_id)
+    # Validate the target before the legacy resolver may materialise a
+    # missing Repo asset.  A missing or immutable Set must not leave an
+    # orphan ac_skill row behind.
+    target_set = control_plane.get_set(
+        bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
+        user_id=actor_id,
+        set_id=skill_set_id,
+    )
+    if target_set.get("is_default"):
+        raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
+    for skill_id in request.skill_ids:
+        try:
+            stable_skill_id = control_plane.resolve_legacy_skill_id(
+                bot_id=effective_bot_id,
+                owner_id=effective_entity_id,
+                actor_id=actor_id,
+                identifier=skill_id,
+            )
+            await control_plane.add_skill(
+                bot_id=effective_bot_id,
+                owner_id=effective_entity_id,
+                user_id=actor_id,
+                set_id=skill_set_id,
+                skill_id=stable_skill_id,
+            )
+            results["success"].append(
+                {"skill_id": str(stable_skill_id), "name": str(skill_id)}
+            )
+        except (
+            LocalSkillNotFoundError,
+            SkillSetControlPlaneNotFoundError,
+        ) as exc:
+            results["failed"].append({"skill_id": skill_id, "error": str(exc)})
+        except SkillSetControlPlaneConflictError as exc:
+            if str(exc) not in {
+                "RESOURCE_DIRECT_ACTIVE",
+                "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+            }:
+                raise
+            results["failed"].append({"skill_id": skill_id, "error": str(exc)})
+    success_count = len(results["success"])
+    failed_count = len(results["failed"])
+    return AddSkillsResponse(
+        success=True,
+        data=results,
+        message=f"成功添加 {success_count} 个技能，失败 {failed_count} 个",
+    )
 
 
 @router.delete("/{skill_set_id}/skills/{skill_id}", response_model=MessageResponse)
