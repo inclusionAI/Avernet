@@ -16,7 +16,6 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
-    SkillEngineNotSupportedError,
 )
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
 from agentclaw.community.core.skill_center.services import (
@@ -589,19 +588,20 @@ async def test_upload_maps_guard_failures_to_public_domain_errors(
 
 
 @pytest.mark.asyncio
-async def test_upload_fails_closed_for_unsupported_bot_engine_pair():
+async def test_upload_uses_existing_bot_runtime_without_product_matrix():
     service = _service(
         _Filesystem(),
         bot=_Bot(bot_type="desktop", engine="claude_code"),
     )
 
-    with pytest.raises(SkillEngineNotSupportedError):
-        await service.upload_local_skill(
-            bot_id="bot",
-            owner_id="owner",
-            actor_id="owner",
-            package=_zip({"SKILL.md": _skill_md()}),
-        )
+    result = await service.upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md()}),
+    )
+
+    assert result["skill"]["active"] is False
 
 
 @pytest.mark.asyncio

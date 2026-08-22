@@ -22,11 +22,6 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetManagedResourceError,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.core.skill_center.runtime_policy import (
-    BotSkillRuntimeCommand,
-    BotSkillRuntimeMutationMode,
-    require_bot_skill_runtime_command,
-)
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
     RuntimeProjectionResolver,
@@ -83,8 +78,6 @@ class LocalSkillStateService:
         self._reject_ordinary_skill_set_member(skill_id=skill_id, bot_id=bot_id)
         if not is_bot_ready(bot):
             raise LocalSkillNotReadyError()
-        command = self._runtime_command(active=active)
-        mode = require_bot_skill_runtime_command(bot, command)
         changed = self._write_desired_state(
             active=active,
             env=str(bot["env"]),
@@ -97,16 +90,12 @@ class LocalSkillStateService:
             synced = await self._reconcile_runtime(
                 bot_id=bot_id,
                 owner_id=owner_id,
-                command=command,
-                mode=mode,
             )
         else:
             synced = await self._reconcile_deactivation(
                 skill=skill,
                 owner_id=owner_id,
                 bot_id=bot_id,
-                command=command,
-                mode=mode,
             )
         if not synced:
             if changed:
@@ -126,8 +115,6 @@ class LocalSkillStateService:
                 restored = await self._reconcile_runtime(
                     bot_id=bot_id,
                     owner_id=owner_id,
-                    command=command,
-                    mode=mode,
                 )
                 if not restored:
                     raise LocalSkillRuntimeSyncError()
@@ -165,8 +152,6 @@ class LocalSkillStateService:
                 raise LocalSkillNotFoundError()
         if not is_bot_ready(bot):
             raise LocalSkillNotReadyError()
-        command = self._runtime_command(active=active)
-        mode = self._require_repo_runtime_command(bot, command)
         self._require_no_normal_skill_set_membership(
             skill_id=skill_id,
             bot=bot,
@@ -191,16 +176,12 @@ class LocalSkillStateService:
             synced = await self._reconcile_runtime(
                 owner_id=owner_id,
                 bot_id=bot_id,
-                command=command,
-                mode=mode,
             )
         else:
             synced = await self._reconcile_deactivation(
                 skill=raw,
                 owner_id=owner_id,
                 bot_id=bot_id,
-                command=command,
-                mode=mode,
             )
         if synced:
             return {
@@ -224,8 +205,6 @@ class LocalSkillStateService:
             if not await self._reconcile_runtime(
                 owner_id=owner_id,
                 bot_id=bot_id,
-                command=command,
-                mode=mode,
             ):
                 raise LocalSkillRuntimeSyncError()
         raise LocalSkillRuntimeSyncError()
@@ -280,18 +259,6 @@ class LocalSkillStateService:
             )
         return self._installations.uninstall(
             env=env, owner_id=owner_id, bot_id=bot_id, skill_id=skill_id
-        )
-
-    @staticmethod
-    def _require_repo_runtime_command(
-        bot: dict[str, Any], command: BotSkillRuntimeCommand
-    ) -> BotSkillRuntimeMutationMode:
-        return require_bot_skill_runtime_command(bot, command)
-
-    @staticmethod
-    def _runtime_command(*, active: bool) -> BotSkillRuntimeCommand:
-        return (
-            BotSkillRuntimeCommand.WRITE if active else BotSkillRuntimeCommand.CLEANUP
         )
 
     def _require_no_normal_skill_set_membership(
@@ -370,16 +337,8 @@ class LocalSkillStateService:
         owner_id: str,
         bot_id: str,
         retired_mappings=(),
-        command: BotSkillRuntimeCommand,
-        mode: BotSkillRuntimeMutationMode,
     ) -> bool:
         try:
-            if mode is BotSkillRuntimeMutationMode.CLEANUP_ONLY:
-                await self._runtime_reconciler.reconcile_cleanup(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                )
-                return True
             if retired_mappings:
                 await self._runtime_reconciler.reconcile(
                     bot_id=bot_id,
@@ -401,8 +360,6 @@ class LocalSkillStateService:
         skill: dict[str, Any],
         owner_id: str,
         bot_id: str,
-        command: BotSkillRuntimeCommand,
-        mode: BotSkillRuntimeMutationMode,
     ) -> bool:
         try:
             retired_mapping = list(
@@ -436,6 +393,4 @@ class LocalSkillStateService:
             owner_id=owner_id,
             bot_id=bot_id,
             retired_mappings=retired_mapping,
-            command=command,
-            mode=mode,
         )
