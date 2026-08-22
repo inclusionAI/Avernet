@@ -22,3 +22,5 @@ paths:
     $ref: ./openapi/session-files.yaml#/ShareSessionFilePath
   /api/v1/collaboration/sessions/shared-file/content:
     $ref: ./openapi/session-files.yaml#/SharedSessionFileContentPath
+  /api/v1/collaboration/definitions/validate:
+    $ref: ./openapi/collaboration-definitions.yaml#/CollaborationDefinitionValidatePath
