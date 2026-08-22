@@ -315,8 +315,10 @@ def summary_to_dto(s) -> TaskSummaryDTO:
                           bbs_mode=s.bbs_mode)
 
 def op_result_to_dto(result) -> TaskOpResultDTO:
+    # TaskOpResult 持 error(失败原因),无 message 字段;将 error 透出到 DTO.message,
+    # 否则 failure 时 HTTP 响应只剩 success=false、原因被吞掉,无法排查。
     return TaskOpResultDTO(task_id=result.task_id, success=result.success, run_id=result.run_id,
-                           message=getattr(result, "message", None))
+                           message=getattr(result, "error", None))
 
 
 # ===== task_loop inbound callback schemas(PUSH 回调,对齐羽雀 TaskCallbackData/TaskNodeCallbackData)=====

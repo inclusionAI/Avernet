@@ -13,10 +13,10 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地起好 singlebox 后跑(改了 task_se
 
 - writer(bot_92c2f019)产出初稿 → 自动质检 → 通过则 editor(bot_9c4ff73d)润色 / 未通过则 writer 修订
   → editor 生成最终回复(finalize)。
-- 创建 bcn 协作群时,逻辑角色→产品 bot 的绑定(``participant_bindings``)与群 ``master_bot`` 均为
-  **创建群接口的入参**(非 yaml 模板内字段),经 ``execution_config`` 透传:``_run_yaml`` 把它们塞进
+- 创建 bcn 协作群时,逻辑角色→产品 bot 的绑定(``participant_bindings``)为**创建群接口的入参**
+  (非 yaml 模板内字段),经 ``execution_config`` 透传:``_run_yaml`` 把它塞进
   ``GroupFormation.extend_props``,``TaskExecutor.form_coop_group`` 注入 BCS ``create_group``
-  (``participant_bindings`` + 顶层 ``master_bot``)。
+  (``participant_bindings``)。群 master 复用底层 ``driver_bot``(bot_ids[0]=owner),不另设字段。
 - singlebox 真实 BCS(:21000)收群后**自动运行状态机**(本后端不调 ``start_state_machine_run``),状态机
   终态经回调 POST 回 ``apiBaseUrl``(本后端 :8888 的 ``/api/v1/collaboration/tasks/callback/*``)
   → ``TaskLoopCallback.report_result`` → ``on_report`` → 图收敛。
@@ -24,8 +24,8 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地起好 singlebox 后跑(改了 task_se
 
 # 设计约束
 
-- owner/driver = writer(bot_92c2f019);故 ``owner_bot_id`` 取 writer,``participant_bot_ids`` 只列 editor,
-  ``master_bot`` 取 writer。
+- owner/driver = writer(bot_92c2f019);故 ``owner_bot_id`` 取 writer,``participant_bot_ids`` 只列 editor
+  (群 master 即 driver_bot=writer,复用底层字段)。
 - ``participant_bindings`` = ``{writer:[bot_92c2f019], editor:[bot_9c4ff73d]}``(列表短形式),
   ``TaskExecutor._state_machine_bindings`` 会归一为 ``{role:{source,bot_ids}}`` 并解析成 BCS UUID。
 - API base url 解析自 ``SINGLEBOX_BACKEND_URL``(singlebox profile),即 BCS 回投目标 = 本后端。
@@ -45,12 +45,12 @@ from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adap
 
 _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "146836")
+_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "35983")
 _TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "2000"))
 
 # 实际 bot(用户给定):writer 兼 owner/driver/master,editor 兼润色/最终回复。
-WRITER_BOT = "bot_92c2f019"
-EDITOR_BOT = "bot_9c4ff73d"
+WRITER_BOT = "bot_92c2f019:35983"
+EDITOR_BOT = "bot_9c4ff73d:35983"
 
 # 写作质检协同模板(仅描述协同策略;逻辑角色 writer/editor 的实际 bot 由创建群接口的
 # participant_bindings 绑定,不在 yaml 内)。draft→polish/revise→finalize。
@@ -195,8 +195,9 @@ _HDRS = {"x-user-id": _USER_ID, "accept": "application/json"}
 def _execute_body() -> dict:
     """``POST /api/v1/collaboration/tasks/execute`` 请求体(内部副本,免 gateway spanner)。
 
-    execution_config 透传创建群入参:``participant_bindings`` / ``master_bot`` / ``participant_bot_ids``
-    (ExecutionConfigDTO extra=allow),``_run_yaml`` 把它们塞进 GroupFormation.extend_props。
+    execution_config 透传创建群入参:``participant_bindings`` / ``participant_bot_ids``
+    (ExecutionConfigDTO extra=allow),``_run_yaml`` 把 participant_bindings 塞进 GroupFormation.extend_props。
+    群 master 复用 driver_bot(=owner_bot_id),不另传。
     """
     return {
         "task_spec": {
@@ -230,8 +231,7 @@ def _execute_body() -> dict:
                 "writer": [WRITER_BOT],
                 "editor": [EDITOR_BOT],
             },
-            # 群 master/coordinator bot(创建群接口顶层 master_bot 入参;与 driver_bot 并列)。
-            "master_bot": WRITER_BOT,
+            # 群 master 复用底层 driver_bot(=owner_bot_id=writer),不另设 master_bot。
             "group_name": "写作质检协同群",
         },
     }

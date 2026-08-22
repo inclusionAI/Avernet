@@ -128,14 +128,11 @@ class TaskExecutor:
         raw_bindings = self._state_machine_bindings(gf) if mode == "state_machine" else {}
         manager_bot_id = gf.extend_props.get("manager_bot_id") if mode == "manager_worker" else None
         originator_bot_id = gf.extend_props.get("originator_bot_id")
-        master_bot_id = gf.extend_props.get("master_bot")
         referenced_ids = list(bot_ids)
         if manager_bot_id:
             referenced_ids.append(str(manager_bot_id))
         if originator_bot_id:
             referenced_ids.append(str(originator_bot_id))
-        if master_bot_id:
-            referenced_ids.append(str(master_bot_id))
         for spec in raw_bindings.values():
             referenced_ids.extend(spec["bot_ids"])
         referenced_ids = list(dict.fromkeys(referenced_ids))
@@ -210,8 +207,6 @@ class TaskExecutor:
         service_spec = gf.extend_props.get("service_spec")
         if service_spec:
             req_kwargs["service_spec"] = service_spec
-        if master_bot_id:
-            req_kwargs["master_bot"] = bcs_uuid(str(master_bot_id))
         req = BcsCreateGroupRequest(**req_kwargs)
         res = await self._bcs.create_group(req)
         self._group_meta[res.group_id] = {

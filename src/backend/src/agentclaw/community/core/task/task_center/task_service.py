@@ -175,11 +175,10 @@ class TaskService:
                 "definition_yaml": ec.get("yaml"),
                 "task_id": task_id,
                 "api_base_url": self._api_base_url,
-                # 逻辑角色→产品 bot 绑定与群 master_bot 均为创建 bcn 协作群接口的入参(非 yaml 模板内字段):
+                # 逻辑角色→产品 bot 绑定为创建 bcn 协作群接口的入参(非 yaml 模板内字段):
                 # 经 execution_config 透传 → TaskExecutor.form_coop_group 注入 BCS create_group
-                # (state_machine participant_bindings + 顶层 master_bot)。
+                # (state_machine participant_bindings)。群 master 复用底层 driver_bot(bot_ids[0]=owner)。
                 "participant_bindings": ec.get("participant_bindings"),
-                "master_bot": ec.get("master_bot"),
             },
         )
         try:

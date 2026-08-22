@@ -46,7 +46,6 @@ class BcsCreateGroupRequest:
     topic: str | None = None
     collaboration_definition_yaml: str | None = None
     participant_bindings: dict[str, Any] | None = None
-    master_bot: str | None = None               # 群 master/coordinator bot(BCS UUID;与 driver_bot 并列的顶层字段)
     service_spec: dict[str, Any] | None = None
     start_initial_run: bool | None = None
     originator: str | None = None
@@ -120,7 +119,7 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
                 body["opening_message"] = req.opening_message
         elif req.group_strategy:
             body["group_strategy"] = req.group_strategy
-        for opt in ("context", "topic", "service_spec", "originator", "visibility", "master_bot"):
+        for opt in ("context", "topic", "service_spec", "originator", "visibility"):
             v = getattr(req, opt)
             if v is not None:
                 body[opt] = v

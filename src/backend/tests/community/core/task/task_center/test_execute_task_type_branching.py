@@ -146,9 +146,10 @@ def test_execute_dynamic_unchanged():
     assert ("on_execute", "t1") in eng.calls
 
 
-def test_execute_yaml_forwards_participant_bindings_and_master_bot_to_group():
-    """execution_config 中的 participant_bindings / master_bot 经 _run_yaml 透传进 GroupFormation.extend_props
-    (二者均为创建 bcn 协作群接口的入参,非 yaml 模板内字段),供 TaskExecutor.form_coop_group 注入 BCS create_group。"""
+def test_execute_yaml_forwards_participant_bindings_to_group():
+    """execution_config 中的 participant_bindings 经 _run_yaml 透传进 GroupFormation.extend_props
+    (创建 bcn 协作群接口的入参,非 yaml 模板内字段),供 TaskExecutor.form_coop_group 注入 BCS create_group。
+    群 master 复用底层 driver_bot(bot_ids[0]=owner),不另设 master_bot 字段。"""
     captured: dict = {}
     eng = _FakeEngine(graph=None)
 
@@ -166,9 +167,8 @@ def test_execute_yaml_forwards_participant_bindings_and_master_bot_to_group():
     }
     result = asyncio.new_event_loop().run_until_complete(svc.execute(_request(
         TaskType.YAML, yaml="def: x", participant_bot_ids=["b2", "b3"],
-        participant_bindings=bindings, master_bot="b2")))
+        participant_bindings=bindings)))
     assert result.success is True
     ep = captured["extend_props"]
     assert ep.get("definition_yaml") == "def: x"
     assert ep.get("participant_bindings") == bindings
-    assert ep.get("master_bot") == "b2"
