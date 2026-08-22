@@ -82,7 +82,7 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 > the current addresses; the component-first ones still answer, marked
 > `deprecated`, until the sunset (see **Retiring addresses** in `README.md`).
 
-### sessions (10) — engine `/api/sessions` + `/api/session-favorites`
+### sessions (10) — Owner runtime or Backend Expert Chat runtime
 
 > **An operator console, device-wide by contract.** _Amended 2026-08-09
 > (`specs/2026-08-09-openapi-v1-access-expansion/`); original 2026-07-30
@@ -101,6 +101,13 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 > provider can fan a published stage over several device instances; a
 > stage-addressed answer describes the addressed binding's current instance,
 > not the fleet.
+>
+> A BCN-authorized human friend is the deliberate exception to the operator
+> rule. For that caller these same public contracts delegate to Backend's
+> existing Expert Chat service, remain draft-only, and are scoped by its
+> owned-session index. BCN supplies authorization only; it does not store or
+> execute sessions, messages, or runtime state. The legacy Expert Chat routes
+> remain mounted unchanged during migration.
 
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
