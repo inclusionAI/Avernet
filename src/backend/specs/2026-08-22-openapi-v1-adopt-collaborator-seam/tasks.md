@@ -37,9 +37,9 @@ deletion is known to change no caller's answer.
 - **Goal:** Replace the test that encodes "the seam has no adopter", which stops being true in Group B.
 - **Files:** `tests/community/adapters/http/openapi_v1/test_authorization_inventory.py`
 - **Done when:**
-  - [ ] `test_no_live_operation_carries_the_gate` is **deleted**, not skipped or weakened.
-  - [ ] Its inverse exists: every remaining `ServiceChecked` row cites the harness module and nothing else. It fails today (11 other modules still cited), so it is marked `xfail` with a reason naming this feature and flips to a real assertion in the last group.
-  - [ ] `scaffolding_row_count()` and `SCAFFOLDING_MODES` are untouched.
+  - [x] `test_no_live_operation_carries_the_gate` is **deleted**, not skipped or weakened.
+  - [x] Its inverse exists: every remaining `ServiceChecked` row cites the harness module and nothing else. It fails today (11 other modules still cited), so it is marked `xfail` with a reason naming this feature and flips to a real assertion in the last group.
+  - [x] `scaffolding_row_count()` and `SCAFFOLDING_MODES` are untouched.
 - **Depends on:** Task 1
 
 ## Task 3: Record what the bot-chat operations actually do

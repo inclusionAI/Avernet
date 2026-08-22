@@ -46,7 +46,6 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import (
     scaffolding_row_count,
 )
 from tests.community.adapters.http.openapi_v1._route_walk import (
-    dependant_of,
     depends_on,
     effective_routes,
     operations,
@@ -318,26 +317,59 @@ def test_scaffolding_burn_down_is_reported():
     )
 
 
-# ── inertness ────────────────────────────────────────────────────────────────
+# ── burn-down ────────────────────────────────────────────────────────────────
 
 
-def test_no_live_operation_carries_the_gate():
-    """Why this change cannot have altered any answer, proved structurally.
+#: The modules a ``ServiceChecked`` row may still cite once this feature lands.
+#:
+#: Four operations are deferred, each for a reason recorded in ``spec.md``'s
+#: *Out of Scope*, and nothing else may join them. Harness cannot be adjudicated
+#: as it stands — its handlers act on a bot from the request body. The three
+#: skills rows share their checks with six retiring addresses the seam cannot
+#: reach, so migrating them would uncover those. Connection guards what may be
+#: *composed* rather than how it is served, which is a trade-off this feature
+#: does not settle.
+_DEFERRED_CITATIONS = frozenset(
+    {
+        "…openapi_v1.harness.router",
+        "…core.skill_center.services.local_skill_query_service",
+        "…core.skill_center.services.local_skill_upload_service",
+        "…core.engine_runtime.connection",
+    }
+)
 
-    A status-for-status sweep would only sample the behaviour; this shows the
-    seam is attached to nothing at all, so there is no request it could be
-    reached on. When the first group migrates, this test changes to name the
-    operations that legitimately carry it.
+
+@pytest.mark.xfail(
+    reason=(
+        "Adopting the seam is in progress — see "
+        "specs/2026-08-22-openapi-v1-adopt-collaborator-seam. Flips to a real "
+        "assertion in that feature's last group, once every migrating row has "
+        "left ServiceChecked."
+    ),
+    strict=True,
+)
+def test_only_the_deferred_operations_remain_service_checked():
+    """The burn-down, asserted rather than described.
+
+    Replaces ``test_no_live_operation_carries_the_gate``, which encoded "the
+    seam has no adopter" — true when #1323 shipped the mechanism and adopted it
+    nowhere, and false from this feature's first migrating group onward. What
+    matters now is not that the gate is unused but that everything still
+    claiming a service check is one of the four deliberate exceptions.
+
+    Deleted rather than weakened: a test asserting "no adopter" cannot be made
+    to mean "the right adopters" by loosening it.
     """
-    from agentclaw.community.adapters.http.openapi_v1.bot_access import require_check
+    cited = {
+        rule.where
+        for rule in AUTHORIZATION.values()
+        if isinstance(rule, ServiceChecked)
+    }
 
-    gated = [
-        path_of(ctx)
-        for ctx in effective_routes(build_public_router())
-        if depends_on(dependant_of(ctx), require_check)
-    ]
-
-    assert gated == []
+    assert cited <= _DEFERRED_CITATIONS, (
+        "these modules still hold a ServiceChecked row and are not among the "
+        f"deferred four: {sorted(cited - _DEFERRED_CITATIONS)}"
+    )
 
 
 def test_service_level_edit_locks_are_untouched():
