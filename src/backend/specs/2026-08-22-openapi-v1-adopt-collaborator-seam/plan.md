@@ -9,13 +9,14 @@ check that bar came from — leaving type gates, edit locks and audit writes
 untouched. The prerequisite goes first because two groups cannot flip without
 it.
 
-The seam gains one capability, and a narrow one: it can read the addressed bot
-from the **query string** as well as the path, because that is the only way the
-six retiring skills addresses declare it. The gate stays deterministic — two
-wire values, `bot_id` and `owner_id` — and the row says which of two locations
-`bot_id` comes from. It does not mirror handler logic and cannot: an operation
-whose bot comes from the request body is not adjudicable at all, which is the
-structural reason harness is out of scope.
+**The seam is not modified.** Everything adjudicated here is adjudicable by it
+as it stands: the bot on the path, the owner from `OwnerIdDep`. Two sets of
+operations cannot be — harness, whose bot comes from the request body, and the
+six retiring skills addresses, where two carry the bot in the query and four
+resolve it from the skill record inside the handler. Both are excluded rather
+than accommodated, and the legacy six keep their check by moving it into the
+`deprecated/` package, where the same file already does exactly this for the
+grant.
 
 ## Affected Components
 
@@ -58,45 +59,40 @@ changes, both intended:
 
 ## Key Files & Functions
 
-### Prerequisite — the seam resolves the bot where the handler does
+### Prerequisite — make the seam's limit an enforced one
 
-`bot_access.gate` reads `bot_id: BotIdPath` today, so it cannot adjudicate the
-six legacy skills addresses, where `bot_id` is a required *query* parameter
-(`deprecated/_requery.py:LegacyBotIdQuery`). #1323's invariant is "the gate and
-the handler read the same value", not "the value is on the path" — so the gate
-takes the source from the row.
+The seam decides before the handler runs, so it can only adjudicate an operation
+whose bot is on the path. That is true today and stays true; what is missing is
+that nothing *refuses* a `Check` row on an operation that does not qualify.
 
 ```diff
-# .../openapi_v1/authorization.py
--@dataclass(frozen=True)
--class Check:
--    level: PermissionLevel
-+@dataclass(frozen=True)
-+class Check:
-+    level: PermissionLevel
-+    #: Where this route's own handler reads the bot from. "path" for every
-+    #: current address; "query" only for retiring addresses that predate
-+    #: bot-first addressing. Never a guess — it must match the handler.
-+    bot_from: Literal["path", "query"] = "path"
+# .../openapi_v1/authorization.py — _assert_check_rows_are_enforceable
+ # existing: refuse Check on a WebSocket route
+ # existing: refuse Check whose handler does not consume OwnerIdDep
++# new: refuse Check on a route that does not declare {bot_id} on its path.
++#      The gate reads BotIdPath; a route without one would have the gate
++#      adjudicate a value the handler never saw. This is what makes the
++#      harness and legacy-skills exclusions structural rather than
++#      documented — neither can acquire a Check row by accident.
 ```
 
-```python
-# .../openapi_v1/bot_access.py — require_check builds one of two gates
-def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
-    # Two closures rather than one Optional-typed parameter: a route publishes
-    # bot_id in exactly one place, and a gate that accepts either would accept
-    # a request naming both.
-    if rule.bot_from == "query":
-        async def gate(request, bot_id: LegacyBotIdQuery, caller_id: UserIdDep,
-                       owner_id: OwnerIdDep) -> AsyncIterator[None]: ...
-    else:
-        async def gate(request, bot_id: BotIdPath, caller_id: UserIdDep,
-                       owner_id: OwnerIdDep) -> AsyncIterator[None]: ...
-```
+### Prerequisite — keep the legacy skills addresses checked
 
-`_assert_check_rows_are_enforceable` gains a third refusal: a `Check` row whose
-`bot_from` disagrees with where the route actually declares `bot_id`. That keeps
-the field from becoming a second declaration free to drift.
+`deprecated/skills.py` already resolves the bot from the skill record and checks
+the *grant* there, calling itself the place that mechanism "moves here and dies
+here". The collaborator check joins it, so deleting the service-side check in
+Task 10 does not silently uncover six retiring addresses.
+
+```diff
+# .../openapi_v1/deprecated/skills.py:226 — _bot_behind
+     record = query_service.get_local_skill(skill_id=skill_id, actor_id=user_id)
+     _require_skills_grant(caller, record)
++    _require_skills_collaborator(collaborators, record, user_id=user_id)
+     return str(record["bolt_id"]), str(record["user_id"])
+# The collection and upload shims get the same call; they carry bot_id in the
+# query, which is enough for a check here even though it is not enough for the
+# gate, because this runs where the values are already resolved.
+```
 
 ### Per group — the shape of one migration
 
@@ -204,29 +200,39 @@ None. No manifest change.
 - **One 93-row commit.** Rejected: every group is a behaviour change with its
   own argument, and a single PR makes the conflict window in `authorization.py`
   as wide as the review.
-- **A `bot_from` lookup derived from the route** rather than declared on
-  `Check`. Attractive — it cannot drift — but the route object is not available
-  where `require_check` builds the gate. Declared instead, with an assembly-time
-  assertion that it matches; same guarantee, one phase later.
+- **Teaching the seam to read the bot from the query string**, so the two
+  query-addressed legacy skills routes could be adjudicated. Rejected once the
+  count was checked: it would have served 2 rows, not the 6 first assumed, and
+  the other 4 name no bot at all so they need a non-seam answer regardless.
+  Carrying the check in `deprecated/skills.py` covers all 6 by one mechanism,
+  needs no seam change, and dies with the package.
+- **Deleting the 6 legacy skills addresses** instead. Rejected: same reason as
+  the rest of the package — it retires addresses ahead of their schedule.
+- **Leaving `bot_skill_asset_service`'s check in place** to cover them.
+  Rejected: it double-checks every current caller for the sake of six retiring
+  ones.
 
 ## Rollout
 
 No flag, no migration. Order is a dependency order, not a preference:
 
 ```bash
-# 1. prerequisite — nothing else can flip a twin without it
-#    bot_access path-or-query + Check.bot_from + the third enforceability refusal
+# 1. prerequisite — refuse a Check row the seam cannot key on; retire the
+#    no-adopter assertion. No row changes mode.
 # 2. bot_chats     (2 → NoCheck)      no check to delete; smallest correction
 # 3. diagnostics   (2 → Check)        router-local, no lock, no audit, no twins
 # 4. render_screens(3 → Check)        same shape, one bar
 # 5. authorized_apps(3 → Check)       needs OwnerIdDep on 3 handlers first
-# 6. skill_center hook (19 → Check)   clean boolean, no entanglement
-# 7. bot_skill_assets  (10 → Check)   + 6 legacy twins
-# 8. engine_runtime    (26 → Check)   + 16 legacy twins; keep the type gate
-# 9. connection        (1 → Check)    the argued exception; see Risks
-# 10. publication facade (16 → Check) keep `level` and the lock; writes no audit
-# 11. channels         (6 → Check)    keep the edit lock
-# 12. collaborator_service (5 → Check) keep capability and space checks
+# 6. skill_center hook (19 → Check)   + delete skill_set_control_plane's audit
+# 7. legacy skills                    move the collaborator check into
+#                                     deprecated/skills.py, before 8 removes it
+# 8. bot_skill_assets  (10 → Check)   + delete local_skill_upload_service's audit
+# 9. engine_runtime    (26 → Check)   keep the type gate
+# 10. engine twins     (16 → Check)   path-addressed, no seam change needed
+# 11. connection        (1 → Check)   the argued exception; see Risks
+# 12. publication facade (16 → Check) keep `level` and the lock
+# 13. channels         (6 → Check)    keep the edit lock
+# 14. collaborator_service (5 → Check) keep capability and space checks
 ```
 
 Steps 2–4 are deliberately first and deliberately dull: they put the `Check`

@@ -74,8 +74,11 @@ rather than the deprecation schedule's.
       argued, not silently adopted — **the rule is that the code decides and the
       row is corrected to match, never the reverse.**
 - [ ] Each of the 22 retiring `deprecated/` twins of an in-scope operation
-      refuses and admits the same callers as its replacement, and this is
-      asserted by test rather than by inspection.
+      refuses and admits the same callers as its replacement, asserted by test
+      rather than by inspection. Sixteen reach that by being adjudicated like
+      their replacement; the six legacy skills addresses reach it by keeping a
+      check inside the `deprecated/` package, because they cannot be
+      adjudicated — see below.
 - [ ] For every adjudicated operation, the bar is decided from the same two wire
       values the handler acts on: the bot the request addresses, read from the
       same part of the request the handler declares it in, and the same resolved
@@ -105,12 +108,17 @@ rather than the deprecation schedule's.
 - Deleting the service-side collaborator check each of those relied on.
 - The 22 retiring `deprecated/` addresses that are twins of an in-scope
   operation, which become adjudicated rather than inheriting.
-- Letting the seam read the addressed bot from the query string as well as the
-  path. **This is the only change the seam itself needs, and only six rows force
-  it** — the retiring skills addresses, which predate bot-first addressing and
-  still publish `bot_id` as a query parameter. Every other in-scope operation,
-  and the sixteen path-addressed twins, are adjudicable by the seam exactly as
-  it stands today.
+- **No change to the seam.** Every operation this feature adjudicates is
+  adjudicable by the seam exactly as it stands today: the 91 current addresses
+  and the 16 retiring twins that carry the bot on the path.
+- Keeping the six retiring skills addresses checked by moving their collaborator
+  check into the `deprecated/` package. They cannot be adjudicated: two carry
+  the bot in the query string and four name no bot at all — the skill id
+  resolves its own bot, inside the handler, after the gate would have had to
+  decide. `deprecated/skills.py` already resolves `(bot, owner)` from the record
+  and already checks the *grant* there, describing itself as where that
+  mechanism "moves here and dies here"; the collaborator check joins it and dies
+  with the package.
 - Adding the owner parameter to the 3 authorized-apps handlers, which cannot
   carry an enforced row without it.
 - Correcting the 2 bot-chat rows to the mode that matches their code.
@@ -129,8 +137,10 @@ rather than the deprecation schedule's.
   6.
 - **The 40 `OWNER_SCOPED` operations.** Blocked on #906 / #907, and a policy
   change rather than a consolidation: collaborators start getting through.
-- **The 20 remaining `INHERITED` operations** — twins of `OWNER_SCOPED`
-  addresses, which follow their replacements whenever those are decided.
+- **The 26 remaining `INHERITED` operations** — 20 twin `OWNER_SCOPED`
+  addresses and follow their replacements whenever those are decided; 6 are the
+  legacy skills addresses above, which stay `INHERITED` because the row is
+  honest: what governs them is not decided here.
 - **Introducing an edit lock where none exists today.** #1323 *Decisions* 1
   stands: locks stay exactly where they are, and this feature must preserve them
   rather than extend or remove them.
