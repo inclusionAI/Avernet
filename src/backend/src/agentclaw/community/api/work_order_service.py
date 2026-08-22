@@ -70,12 +70,24 @@ class WorkOrderServiceProtocol(Protocol):
     ) -> WorkOrderRecord: ...
 
     @abstractmethod
+    def create_bot_editor_request(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        applicant_user_id: str,
+        reason: str,
+    ) -> WorkOrderRecord: ...
+
+    @abstractmethod
     def list_items(
         self,
         *,
         actor_id: str,
         query_type: WorkOrderQueryType,
         item_type: WorkOrderItemType,
+        biz_type: str | None = None,
+        biz_id: str | None = None,
         page_no: int,
         page_size: int,
     ) -> tuple[int, list[WorkOrderListItem]]: ...

@@ -706,6 +706,14 @@ _UNGRANTED_APP_CASES = {
         ),
         "assert_starved": lambda response: response.status_code == 404,
     },
+    ("POST", "/openapi/v1/bots/{bot_id}/editor-requests"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/bot-1/editor-requests",
+            params={"owner_id": "owner-1"},
+            json={"reason": "joint editing"},
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("GET", "/openapi/v1/bots/work-orders"): {
         "request": lambda client: client.get("/openapi/v1/bots/work-orders"),
         "assert_starved": lambda response: response.status_code == 404,

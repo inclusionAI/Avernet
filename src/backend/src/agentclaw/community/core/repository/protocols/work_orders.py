@@ -80,6 +80,21 @@ class WorkOrderRepositoryProtocol(Protocol):
     ) -> WorkOrderRecord: ...
 
     @abstractmethod
+    def create_bot_editor_request(
+        self,
+        *,
+        bot_pk: int,
+        bot_id: str,
+        bot_name: str,
+        owner_id: str,
+        space_id: int,
+        applicant_user_id: str,
+        applicant_name: str,
+        apply_reason: str,
+        env: str,
+    ) -> WorkOrderRecord: ...
+
+    @abstractmethod
     def list_items(
         self,
         *,
@@ -87,6 +102,8 @@ class WorkOrderRepositoryProtocol(Protocol):
         env: str,
         query_type: WorkOrderQueryType,
         item_type: WorkOrderItemType,
+        biz_type: str | None = None,
+        biz_id: str | None = None,
         offset: int,
         limit: int,
     ) -> tuple[int, list[WorkOrderListItem]]: ...
@@ -98,6 +115,18 @@ class WorkOrderRepositoryProtocol(Protocol):
 
     @abstractmethod
     def review_space_join(
+        self,
+        *,
+        work_order_id: int,
+        reviewer_user_id: str,
+        review_remark: str | None,
+        target_status: WorkOrderStatus,
+        notification: WorkOrderNotificationDraft,
+        env: str,
+    ) -> WorkOrderReviewResult: ...
+
+    @abstractmethod
+    def review_bot_editor_request(
         self,
         *,
         work_order_id: int,

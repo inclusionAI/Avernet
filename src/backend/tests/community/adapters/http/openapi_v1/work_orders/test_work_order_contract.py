@@ -153,6 +153,34 @@ def test_create_join_request_rejects_reason_over_512_characters(client):
     assert response.status_code == 422
 
 
+def test_create_bot_editor_request_uses_principal_and_named_owner(
+    client, work_order_service
+):
+    record = _work_order()
+    record.biz_type = WorkOrderBizType.BOT_COLLABORATOR
+    record.biz_id = "bot-7"
+    work_order_service.create_bot_editor_request.return_value = record
+
+    response = client.post(
+        "/openapi/v1/bots/bot-7/editor-requests",
+        params={"owner_id": "bot-owner"},
+        json={"reason": "joint editing"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"] == {
+        "work_order_id": 11,
+        "work_order_no": "WO-11",
+        "status": "PENDING",
+    }
+    work_order_service.create_bot_editor_request.assert_called_once_with(
+        bot_id="bot-7",
+        owner_id="bot-owner",
+        applicant_user_id="owner-1",
+        reason="joint editing",
+    )
+
+
 def _space_join_display_data() -> str:
     return json.dumps(
         {
@@ -214,6 +242,8 @@ def test_list_work_orders_maps_plain_and_notification_items(client, work_order_s
         "actor_id": "owner-1",
         "query_type": "INITIATED_BY_ME",
         "item_type": "ALL",
+        "biz_type": None,
+        "biz_id": None,
         "page_no": 2,
         "page_size": 5,
     }
@@ -318,6 +348,46 @@ def test_get_work_order_maps_nested_content(client, work_order_service):
     work_order_service.get_detail.assert_called_once_with(
         work_order_id=11, actor_id="owner-1"
     )
+
+
+def test_get_bot_editor_work_order_maps_business_content(client, work_order_service):
+    record = _work_order(
+        biz_data=json.dumps(
+            {
+                "bot_id": "bot-7",
+                "bot_name": "Data Bot",
+                "owner_id": "owner-1",
+                "space_id": 7,
+                "applicant_name": "Applicant",
+                "requested_role": "member",
+            }
+        )
+    )
+    record.biz_type = WorkOrderBizType.BOT_COLLABORATOR
+    record.biz_id = "bot-7"
+    work_order_service.get_detail.return_value = WorkOrderDetail(
+        work_order=record,
+        event_type=WorkOrderEventType.BOT_COLLABORATOR_APPLIED,
+        title="pending",
+        space_id=0,
+        space_name="",
+        applicant_name="applicant-1",
+        can_approve=True,
+    )
+
+    response = client.get("/openapi/v1/bots/work-orders/11")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["content"] == {
+        "bot_id": "bot-7",
+        "bot_name": "Data Bot",
+        "owner_id": "owner-1",
+        "space_id": 7,
+        "applicant_user_id": "applicant-1",
+        "applicant_name": "Applicant",
+        "requested_role": "member",
+        "reason": "join",
+    }
 
 
 @pytest.mark.parametrize(

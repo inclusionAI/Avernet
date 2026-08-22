@@ -12,6 +12,7 @@ someone other than the verified caller.
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import jwt
 
@@ -24,12 +25,14 @@ from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
+    bind_overrides,
     endpoint_test,
 )
 
 _USER_ID = "work-orders-endpoint-user"
 _APPLICANT_ID = "work-orders-endpoint-applicant"
 _OTHER_OWNER_ID = "work-orders-endpoint-owner"
+_BOT_ID = "work-orders-endpoint-bot"
 _SIGNING_KEY = "work-orders-endpoint-secret-at-least-32-bytes"
 
 
@@ -93,6 +96,23 @@ def _seed_joinable_space(world) -> None:
     _enable_public_auth(world)
     world.get(SpaceServiceProtocol).create_team(
         name="Joinable Team", creator_id=_OTHER_OWNER_ID
+    )
+
+
+def _seed_bot_editor_request(world) -> None:
+    _enable_public_auth(world)
+
+    def _create_bot_editor_request(_self, **_kwargs):
+        return SimpleNamespace(
+            id=1,
+            work_order_no="WO-BOT-EDITOR-1",
+            status="PENDING",
+        )
+
+    bind_overrides(
+        world,
+        WorkOrderServiceProtocol,
+        {"create_bot_editor_request": _create_bot_editor_request},
     )
 
 
@@ -197,6 +217,47 @@ def create_space_join_request_happy():
     expect=ExpectError(status=403),
 )
 def create_space_join_request_wrong_user():
+    """The framework owns invocation."""
+
+
+# ── POST /openapi/v1/bots/{bot_id}/editor-requests ───────────────────────────────
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/editor-requests",
+    scenario="happy",
+    seed=_seed_bot_editor_request,
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _USER_ID, "owner_id": _OTHER_OWNER_ID},
+        json_body={"reason": "please let me edit"},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=201,
+        json_contains={
+            "code": 201000,
+            "data": {"work_order_id": 1, "status": "PENDING"},
+        },
+    ),
+)
+def create_bot_editor_request_happy():
+    """The framework owns invocation."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/editor-requests",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        path_params={"bot_id": _BOT_ID},
+        json_body={"reason": "please let me edit"},
+    ),
+    expect=ExpectError(status=403),
+)
+def create_bot_editor_request_wrong_user():
     """The framework owns invocation."""
 
 

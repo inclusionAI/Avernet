@@ -33,6 +33,7 @@ class WorkOrderApproverStatus(StrEnum):
 
 class WorkOrderBizType(StrEnum):
     SPACE_JOIN = "SPACE_JOIN"
+    BOT_COLLABORATOR = "BOT_COLLABORATOR"
 
 
 class NotificationCategory(StrEnum):
@@ -111,6 +112,9 @@ class WorkOrderMessageTitle(StrEnum):
     SPACE_JOIN_APPROVED = "空间加入申请已通过"
     SPACE_JOIN_REJECTED = "空间加入申请未通过"
     SPACE_MEMBER_ADDED = "你已被添加到空间"
+    BOT_COLLABORATOR_PENDING = "Bot 共同编辑申请待审批"
+    BOT_COLLABORATOR_APPROVED = "Bot 共同编辑申请已通过"
+    BOT_COLLABORATOR_REJECTED = "Bot 共同编辑申请未通过"
 
 
 class WorkOrderMessageContent(StrEnum):
@@ -122,6 +126,13 @@ class WorkOrderMessageContent(StrEnum):
         "你加入空间「{space_name}」的申请未通过。拒绝原因：{review_remark}"
     )
     SPACE_MEMBER_ADDED = "你已被添加到空间「{space_name}」。"
+    BOT_COLLABORATOR_PENDING = (
+        "用户「{applicant_name}」申请共同编辑 Bot「{bot_name}」，请及时处理。"
+    )
+    BOT_COLLABORATOR_APPROVED = "你共同编辑 Bot「{bot_name}」的申请已通过。"
+    BOT_COLLABORATOR_REJECTED = (
+        "你共同编辑 Bot「{bot_name}」的申请未通过。拒绝原因：{review_remark}"
+    )
 
 
 class WorkOrderApproverRecord(BaseModel):
