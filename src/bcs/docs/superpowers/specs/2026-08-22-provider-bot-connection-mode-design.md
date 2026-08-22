@@ -70,9 +70,16 @@ For **plugin** mode (only reached for allow-listed providers, §3.0):
 - **Skip `bindings.insert_binding(...)`** entirely (the `provider_core.rs:202-222` block). → no provider_binding row → `resolve_delivery_target` ⇒ `WebSocket`, `is_provider_downlink_bot` ⇒ false ⇒ WS allowed.
 - `register_with_owner_and_token(bot_uuid, capabilities, owner, token)` is still called, but the `token` passed to it is **not** a usable runtime token — it is a `MOCK_`-prefixed placeholder (so the store's reconcile branch can recognize "pre-registered, no plugin attached yet"; see §3.5). The real token is minted later from the WS connect path.
 - If `repo.get(provider_bot_ref)` already exists (plugin connected first): `register_with_owner_and_token` already soft-merges capabilities. **Plugin-mode further requires: do not replace `session_token`** (IV-3). This is achieved by a new plugin-mode merge path (or a flag) that preserves the existing real token instead of `existing.session_token.replace(...)` (`memory.rs:660`, `lib.rs:1417`).
-- The response `bot_runtime_token` is returned for audit/observability but is **not** the token the plugin connects with. (Open: return the MOCK placeholder or `None`; see §6 Open question 1.)
 
 For **gateway** mode: behave exactly as today (write binding; `bot_runtime_token` only for `static_bearer`/`provider_admin` auth modes, `provider_core.rs:185-189`).
+
+For **plugin** mode response: **no special handling** — the response `bot_runtime_token` follows the exact same auth_mode rule as gateway (returned for `static_bearer`/`provider_admin`, absent for `agentpass`). The `MOCK_` placeholder in §3.3 is an **internal store sentinel only** (used by the reconcile branch in §3.5 to recognize "pre-registered, no plugin attached yet"); it is **never exposed** to the provider and does **not** alter the response.
+
+### 3.3a Internal sentinel vs. external response (clarification)
+
+Two distinct token roles in plugin mode, do not conflate:
+- **External response** (`RegisterProviderBotResponse.bot_runtime_token`): gateway's existing auth_mode rule, unchanged. Plugin mode does not branch on it.
+- **Internal `session_token` written to the registry** (`register_with_owner_and_token(token=MOCK_…)`, §3.3): a `MOCK_`-prefixed sentinel that the store's reconcile branch (§3.5) keys off. The real runtime token is minted later on the WS connect path and returned to the plugin via `BotConnectResponse.token` / `BCN_BOT_TOKEN`, regardless of what the registration response carried.
 
 ### 3.4 First-connect persistence (`register_streaming_connection`, `bot-store`)
 
@@ -137,6 +144,6 @@ Business asks for link-level logs to aid triage. Each reconcile branch and each 
 ## 6. Open questions
 
 0. **Admission of plugin mode (DECIDED)**: only `allowed_switch_provider_ids` providers may use `connection_mode=plugin`. Provider-id gate at the handler (`routes/providers.rs`), rejecting plugin-from-non-allow-listed with `400`. This reuses the same allow-list that already gives these providers `bot_uuid == provider_bot_ref` (IV-1). Confirmed 2026-08-22.
-1. Plugin-mode response `bot_runtime_token`: return the `MOCK_` placeholder (for provider audit) or `None`? Default: return `None` with a `message` explaining the plugin obtains its token via WS connect. Pending user confirmation.
+1. **DECIDED**: plugin-mode response `bot_runtime_token` gets **no special handling** — gateway's existing auth_mode rule applies unchanged; the internal `MOCK_` sentinel is never exposed to the provider. Confirmed 2026-08-22.
 2. Whether to also record `connection_mode` as a `bot_info` audit-only field (not used by behavior). Default: **no** (YAGNI). Pending user confirmation.
 3. Whether delete/list/attributes provider endpoints (which key off the binding) should gain a registry-fallback for plugin bots (which have no binding). Default: **no this round** — documented limitation; plugin bots are managed via WS/onboard lifecycle, not the binding-keyed provider-admin endpoints. Pending user confirmation.
