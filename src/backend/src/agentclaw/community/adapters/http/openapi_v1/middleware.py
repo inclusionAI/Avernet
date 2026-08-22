@@ -63,8 +63,7 @@ _DEPRECATION_HEADER = b"deprecation"
 _SUNSET_HEADER = b"sunset"
 
 _SENSITIVE_ROUTES = {
-    ("GET", "/openapi/v1/org/user/iam-token"),
-    ("POST", "/openapi/v1/bots/{bot_id}/caller-identity"),
+    ("POST", "/openapi/v1/bots/{bot_id}/iam-token"),
 }
 _CACHE_CONTROL_HEADER = b"cache-control"
 _CACHE_CONTROL_VALUE = b"no-store, no-cache, must-revalidate"

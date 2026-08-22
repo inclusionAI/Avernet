@@ -8,9 +8,9 @@ internal names belong in ``#`` comments.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
 
@@ -102,6 +102,38 @@ class Bot(BaseModel):
     owner_entity_id: str = Field(
         description="The user who owns the bot — echoes the user_id the request named."
     )
+
+
+BotMetadataId = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
+]
+
+
+class BotMetadataSearch(BaseModel):
+    """Known Bot identifiers whose display metadata should be resolved."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bot_ids: list[BotMetadataId] = Field(
+        min_length=1,
+        max_length=100,
+        description=(
+            "Bot identifiers to resolve. Identifiers may come from any upstream "
+            "source; duplicates are ignored. At most 100 may be submitted."
+        ),
+    )
+
+
+class BotMetadata(BaseModel):
+    """Display-safe Bot metadata, without ownership or runtime internals."""
+
+    bot_id: str = Field(description="Unique Bot identifier.")
+    bot_name: str = Field(description="Display name.")
+    bot_desc: str = Field(description="Display description; may be empty.")
+    engine: str = Field(description="Engine that powers the Bot.")
+    bot_type: str = Field(description="Bot kind, such as personal or service.")
+    status: str = Field(description="Current lifecycle status.")
 
 
 class BotCreate(BaseModel):

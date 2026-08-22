@@ -684,17 +684,19 @@ id 恰好等于该段上的某个字面量，它在该地址上就不可达。�
 
 <!-- reserved-component-names -->
 ```text
-approvals  authorized  all  ceiling  check-name  connection  engine  identity
-loadtest  local  logs  mcp  models  resources  routines  sessions
-skills
+all  approvals  authorized  catalog  ceiling  check-name  connection  engine  identity
+loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
+work-order-notifications  work-orders
 ```
 
-其中九个 —— `approvals`、`connection`、`engine`、`identity`、`models`、`resources`、
-`routines`、`sessions`、`skills` —— **只被待退役的旧地址占着**。Agent 在前的寻址已把每个
-带 Agent 作用域的组件移出了那一段，因此旧地址删除之后，清单只剩下六个：
+其中八个 —— `approvals`、`connection`、`engine`、`identity`、`models`、`resources`、
+`routines`、`sessions` —— **只被待退役的旧地址占着**。Agent 在前的寻址已把每个
+带 Agent 作用域的组件移出了那一段；租户级 Skill Workbench 状态接口仍占用 `skills`，
+因此旧地址删除之后，清单只剩下十五个：
 
 ```text
-authorized  ceiling  check-name  loadtest  logs  mcp
+all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  metadata  mcp  skills  spaces
+work-order-notifications  work-orders
 ```
 
 在旧地址还在应答的这段时间里，上面那份长清单才是准确的：id 为 `sessions` 的 Agent 在
@@ -1135,12 +1137,11 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   地址，因为此前没有可供退役的公共路径。本次生成的 Gateway `bots.openapi.json` 是该公共面的
   发布产物，必须原样同步到独立 OCB Gateway。
 
-- **2026-08-18** —— 将旧 `/api/v1/token/iam` 的两种能力拆分迁移到 OpenAPI：
-  `GET /openapi/v1/org/user/iam-token` 返回第一方聊天所需 IAM Token，
-  `POST /openapi/v1/bots/{bot_id}/caller-identity` 为 Bot 准备 Caller 身份。两条操作均
-  要求 Gateway 用户身份并在 Backend 复核 `user_id`，应用单独调用按 `REFUSED` 拒绝；
-  响应统一使用 Envelope，敏感响应由统一中间件禁止缓存。Avernet Gateway 增加 `org` 转发域和
-  精确用户鉴权规则；实际发布前仍需同步 OCB Gateway SOFA 配置。
+- **2026-08-18** —— 将旧 `/api/v1/token/iam` 的 IAM Token 返回和按需 Caller
+  身份准备能力合并迁移为 `POST /openapi/v1/bots/{bot_id}/iam-token`。前端只传
+  Bot 与运行时上下文，Backend 判断是否需要 Caller Exchange；该操作要求 Gateway
+  用户身份并复核 `user_id`，应用单独调用按 `REFUSED` 拒绝。响应统一使用 Envelope，
+  敏感响应由统一中间件禁止缓存；实际发布前仍需同步 OCB Gateway SOFA 配置。
 
 - **2026-08-15** —— **Agent 在前的寻址。** 每个带 Agent 作用域的操作都迁到
   `/openapi/v1/bots/{bot_id}/<component>/…`，推翻了 2026-08-03 的组件在前规则。原先九个

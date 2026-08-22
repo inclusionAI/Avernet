@@ -232,6 +232,133 @@
         "title": "AuthorizedBot",
         "type": "object"
       },
+      "BcsPublicRequest": {
+        "description": "New-version publish body (backend route POST /openapi/v1/bots/{bot_uuid}/public-bcs).",
+        "properties": {
+          "public_scope": {
+            "description": "Publish scope. user opens the bot into the user-visible namespace; agent opens it into the agent/group namespace. Drives the stored approval sub-block key and the BCS visibility field.",
+            "enum": [
+              "user",
+              "agent"
+            ],
+            "title": "Public Scope",
+            "type": "string"
+          },
+          "view_depts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ViewDept"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Open department list (each has deptNo and deptName). Stored on the approval ticket context; the deptName values join into friend_ext.<public_*_approval>.view_friend_deps.",
+            "title": "View Depts"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "enum": [
+                  "public",
+                  "protected",
+                  "private"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Request target visibility (BCS enum). private short-circuits the approval ticket and PATCHes the BCS visibility field directly; public/protected go through the approval flow and are stored on the pending approval block for the callback to apply.",
+            "title": "Visibility"
+          }
+        },
+        "required": [
+          "public_scope"
+        ],
+        "title": "BcsPublicRequest",
+        "type": "object"
+      },
+      "BcsPublishResult": {
+        "additionalProperties": true,
+        "description": "The approval-start result returned by public_bcs_bot.\n\nMirrors the ApprovalWorkflowPlugin.start_approval return shape; extra fields\nare kept (forward-compat) so the response surface stays stable as the prod\napproval reply adds keys.",
+        "properties": {
+          "approval_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The approval ticket's review URL (None on the private direct-update path).",
+            "title": "Approval Url"
+          },
+          "error_msg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error message when success is False.",
+            "title": "Error Msg"
+          },
+          "last_operate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ticket's last-operate marker on COMPLETED (AGREE / DISAGREE / CANCEL).",
+            "title": "Last Operate"
+          },
+          "puid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The approval ticket's global-unique id (None on the private direct-update path).",
+            "title": "Puid"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ticket's state at submit (PROCESSING / COMPLETED).",
+            "title": "State"
+          },
+          "success": {
+            "description": "Whether submitting the approval ticket (or the private direct BCS PATCH) succeeded.",
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "BcsPublishResult",
+        "type": "object"
+      },
       "Bot": {
         "description": "An agent (bot) record.",
         "example": {
@@ -986,6 +1113,74 @@
         "title": "BotMcpItem",
         "type": "object"
       },
+      "BotMetadata": {
+        "description": "Display-safe Bot metadata, without ownership or runtime internals.",
+        "properties": {
+          "bot_desc": {
+            "description": "Display description; may be empty.",
+            "title": "Bot Desc",
+            "type": "string"
+          },
+          "bot_id": {
+            "description": "Unique Bot identifier.",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "bot_name": {
+            "description": "Display name.",
+            "title": "Bot Name",
+            "type": "string"
+          },
+          "bot_type": {
+            "description": "Bot kind, such as personal or service.",
+            "title": "Bot Type",
+            "type": "string"
+          },
+          "engine": {
+            "description": "Engine that powers the Bot.",
+            "title": "Engine",
+            "type": "string"
+          },
+          "status": {
+            "description": "Current lifecycle status.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "bot_name",
+          "bot_desc",
+          "engine",
+          "bot_type",
+          "status"
+        ],
+        "title": "BotMetadata",
+        "type": "object"
+      },
+      "BotMetadataSearch": {
+        "additionalProperties": false,
+        "description": "Known Bot identifiers whose display metadata should be resolved.",
+        "properties": {
+          "bot_ids": {
+            "description": "Bot identifiers to resolve. Identifiers may come from any upstream source; duplicates are ignored. At most 100 may be submitted.",
+            "items": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Bot Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bot_ids"
+        ],
+        "title": "BotMetadataSearch",
+        "type": "object"
+      },
       "BotSpaceAssignment": {
         "description": "Persisted Bot ownership-Space assignment.",
         "properties": {
@@ -1135,32 +1330,6 @@
           "kind"
         ],
         "title": "BusinessSpace",
-        "type": "object"
-      },
-      "CallerIdentityReady": {
-        "description": "Confirmation that Caller identity preparation completed successfully.",
-        "properties": {
-          "bot_id": {
-            "description": "Bot whose Caller identity was prepared.",
-            "title": "Bot Id",
-            "type": "string"
-          },
-          "ready": {
-            "default": true,
-            "description": "Always true when Caller identity preparation succeeded.",
-            "title": "Ready",
-            "type": "boolean"
-          },
-          "stage": {
-            "$ref": "#/components/schemas/RuntimeStage",
-            "description": "Bot runtime stage prepared for Caller authentication."
-          }
-        },
-        "required": [
-          "bot_id",
-          "stage"
-        ],
-        "title": "CallerIdentityReady",
         "type": "object"
       },
       "Ceiling": {
@@ -3772,6 +3941,48 @@
         "title": "Envelope[AuthorizedApp]",
         "type": "object"
       },
+      "Envelope_BcsPublishResult_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BcsPublishResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[BcsPublishResult]",
+        "type": "object"
+      },
       "Envelope_BotActivateResult_": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -4106,48 +4317,6 @@
           "request_id"
         ],
         "title": "Envelope[Bot]",
-        "type": "object"
-      },
-      "Envelope_CallerIdentityReady_": {
-        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
-        "properties": {
-          "code": {
-            "description": "6-digit code: HTTP status (3) + business subcode (3).",
-            "example": 200000,
-            "title": "Code",
-            "type": "integer"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CallerIdentityReady"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Response payload; present but null on errors or empty results."
-          },
-          "message": {
-            "description": "Human-readable status; always English (e.g. \"OK\").",
-            "example": "OK",
-            "title": "Message",
-            "type": "string"
-          },
-          "request_id": {
-            "description": "Trace id; mirrors the X-Trace-Id response header.",
-            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
-            "title": "Request Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message",
-          "data",
-          "request_id"
-        ],
-        "title": "Envelope[CallerIdentityReady]",
         "type": "object"
       },
       "Envelope_Ceiling_": {
@@ -6080,6 +6249,48 @@
           "request_id"
         ],
         "title": "Envelope[Page[BotInventoryItem]]",
+        "type": "object"
+      },
+      "Envelope_Page_BotMetadata__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_BotMetadata_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[BotMetadata]]",
         "type": "object"
       },
       "Envelope_Page_Bot__": {
@@ -11584,6 +11795,31 @@
         "title": "Page[BotInventoryItem]",
         "type": "object"
       },
+      "Page_BotMetadata_": {
+        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/BotMetadata"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "example": 1,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[BotMetadata]",
+        "type": "object"
+      },
       "Page_Bot_": {
         "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
         "properties": {
@@ -15785,7 +16021,29 @@
         "title": "UpdateSpaceMemberRoleRequest",
         "type": "object"
       },
+      "ViewDept": {
+        "description": "An open department scoped onto the publish request (BCS friend gating).",
+        "properties": {
+          "deptName": {
+            "description": "The department's display name.",
+            "title": "Deptname",
+            "type": "string"
+          },
+          "deptNo": {
+            "description": "The department's canonical code.",
+            "title": "Deptno",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deptNo",
+          "deptName"
+        ],
+        "title": "ViewDept",
+        "type": "object"
+      },
       "WorkOrderApprovalRequest": {
+        "description": "Decision submitted to the unified work-order approval endpoint.",
         "properties": {
           "decision": {
             "$ref": "#/components/schemas/WorkOrderDecision",
@@ -16040,6 +16298,7 @@
         ]
       },
       "WorkOrderLegacyReviewResponse": {
+        "description": "Compatibility response returned by the legacy review endpoints.",
         "properties": {
           "review_remark": {
             "anyOf": [
@@ -16050,6 +16309,7 @@
                 "type": "null"
               }
             ],
+            "description": "Reviewer comment, or null when no comment was supplied.",
             "title": "Review Remark"
           },
           "reviewed_at": {
@@ -16061,16 +16321,20 @@
                 "type": "null"
               }
             ],
+            "description": "UTC time when the review decision was recorded.",
             "title": "Reviewed At"
           },
           "reviewer_user_id": {
+            "description": "Identifier of the reviewer.",
             "title": "Reviewer User Id",
             "type": "string"
           },
           "status": {
-            "$ref": "#/components/schemas/WorkOrderStatus"
+            "$ref": "#/components/schemas/WorkOrderStatus",
+            "description": "Status after the review decision."
           },
           "work_order_id": {
+            "description": "Identifier of the reviewed work order.",
             "title": "Work Order Id",
             "type": "integer"
           }
@@ -23605,6 +23869,172 @@
         "summary": "List Mcp Tenants",
         "tags": [
           "mcp"
+        ]
+      }
+    },
+    "/openapi/v1/bots/metadata/search": {
+      "post": {
+        "description": "Resolve display metadata for a caller-supplied set of known Bot IDs.\n\nThe identifiers may originate from BCN, search, recommendations, persisted\nclient state, or another source. Authentication is required, but this is a\ntenant-wide metadata lookup rather than an ownership check. The response is\nintentionally limited to display fields and never exposes owners, device\nbindings, runtime configuration, credentials, or extension payloads.\n\nUnknown identifiers are omitted. Filtering happens in the repository before\npagination, so total is the number of matching Bot records.",
+        "operationId": "search_bot_metadata_openapi_v1_bots_metadata_search_post",
+        "parameters": [
+          {
+            "description": "1-based page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page (max 100).",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page (max 100).",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotMetadataSearch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_BotMetadata__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Search Bot Metadata",
+        "tags": [
+          "bots"
         ]
       }
     },
@@ -36864,220 +37294,6 @@
         ]
       }
     },
-    "/openapi/v1/bots/{bot_id}/caller-identity": {
-      "post": {
-        "description": "Prepare the caller credential required by this bot's chat runtime.",
-        "operationId": "prepare_caller_identity_openapi_v1_bots__bot_id__caller_identity_post",
-        "parameters": [
-          {
-            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
-            "in": "path",
-            "name": "bot_id",
-            "required": true,
-            "schema": {
-              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
-              "title": "Bot Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Bot runtime stage whose Caller identity is prepared.",
-            "in": "query",
-            "name": "stage",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/RuntimeStage",
-              "default": "draft",
-              "description": "Bot runtime stage whose Caller identity is prepared."
-            }
-          },
-          {
-            "description": "Published release identifier when preparing a published runtime.",
-            "in": "query",
-            "name": "publish_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Published release identifier when preparing a published runtime.",
-              "title": "Publish Id"
-            }
-          },
-          {
-            "description": "Entity identifier used to resolve the Caller credential.",
-            "in": "query",
-            "name": "entity_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Entity identifier used to resolve the Caller credential.",
-              "title": "Entity Id"
-            }
-          },
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_CallerIdentityReady_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 400000,
-                  "message": "Bad Request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 401000,
-                  "message": "Unauthorized",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing or invalid credentials"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 403000,
-                  "message": "Forbidden",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "The user_id names a user the authenticated caller may not act for"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 404000,
-                  "message": "Not found",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not found — also returned when the resource exists but does not belong to the caller"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 409000,
-                  "message": "Conflict",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Conflicts with current state"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 422000,
-                  "message": "Invalid request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Request failed validation"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 500000,
-                  "message": "Internal Server Error",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Internal error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 502000,
-                  "message": "Bad Gateway",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
-          }
-        },
-        "summary": "Prepare Caller Identity",
-        "tags": [
-          "Caller identity"
-        ]
-      }
-    },
     "/openapi/v1/bots/{bot_id}/channels": {
       "get": {
         "description": "List user-managed draft DingTalk Channels for the addressed Bot.",
@@ -44779,6 +44995,220 @@
         ]
       }
     },
+    "/openapi/v1/bots/{bot_id}/iam-token": {
+      "post": {
+        "description": "Return the IAM token and prepare Caller identity when the Bot requires it.",
+        "operationId": "get_bot_iam_token_openapi_v1_bots__bot_id__iam_token_post",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bot runtime stage whose Caller identity may be prepared.",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Bot runtime stage whose Caller identity may be prepared."
+            }
+          },
+          {
+            "description": "Published release identifier for the addressed runtime.",
+            "in": "query",
+            "name": "publish_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Published release identifier for the addressed runtime.",
+              "title": "Publish Id"
+            }
+          },
+          {
+            "description": "Entity identifier used to resolve the Bot unambiguously.",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Entity identifier used to resolve the Bot unambiguously.",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_IamToken_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Get Bot Iam Token",
+        "tags": [
+          "Bot IAM token"
+        ]
+      }
+    },
     "/openapi/v1/bots/{bot_id}/identity": {
       "get": {
         "description": "List every identity file type a bot can carry and whether each exists.\n\nEvery entry comes from the one runtime the stage parameter names, so a\nfile's presence is always reported for the runtime asked about.\n\nA file reports exists false both when it is absent and when it exists\nwith empty content. Entry order is not guaranteed — key off type.",
@@ -49758,6 +50188,183 @@
         "summary": "Get Bot Passport",
         "tags": [
           "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/public-bcs": {
+      "post": {
+        "description": "Publish a bot to users — opens a botpublish approval ticket.",
+        "operationId": "publish_bcs_bot_openapi_v1_bots__bot_id__public_bcs_post",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BcsPublicRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BcsPublishResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Publish Bcs Bot",
+        "tags": [
+          "collaboration-bots"
         ]
       }
     },
@@ -63500,162 +64107,6 @@
         "summary": "Get User Identity",
         "tags": [
           "org"
-        ]
-      }
-    },
-    "/openapi/v1/org/user/iam-token": {
-      "get": {
-        "description": "Return the signed-in user's IAM token for the first-party chat client.",
-        "operationId": "get_iam_token_openapi_v1_org_user_iam_token_get",
-        "parameters": [
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_IamToken_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 400000,
-                  "message": "Bad Request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 401000,
-                  "message": "Unauthorized",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing or invalid credentials"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 403000,
-                  "message": "Forbidden",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "The user_id names a user the authenticated caller may not act for"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 404000,
-                  "message": "Not found",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not found — also returned when the resource exists but does not belong to the caller"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 409000,
-                  "message": "Conflict",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Conflicts with current state"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 422000,
-                  "message": "Invalid request",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Request failed validation"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 500000,
-                  "message": "Internal Server Error",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Internal error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "example": {
-                  "code": 502000,
-                  "message": "Bad Gateway",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
-          }
-        },
-        "summary": "Get Iam Token",
-        "tags": [
-          "org-user"
         ]
       }
     }
