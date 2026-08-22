@@ -416,7 +416,7 @@ def test_initialize_personal_space_exposes_created_state(
     data = response.json()["data"]
     assert data["space_type"] == "PERSONAL"
     assert data["created"] is was_created
-    assert data["current_user_role"] == "OWNER"
+    assert data["current_user_role"] == "ADMIN"
     space_service.initialize_personal.assert_called_once_with(user_id="owner-1")
 
 

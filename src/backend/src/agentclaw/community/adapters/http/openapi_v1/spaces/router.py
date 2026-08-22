@@ -112,7 +112,7 @@ def _created_space(record) -> SpaceCreated:
         space_code=record.space_code,
         space_name=record.name,
         space_type=record.space_type,
-        current_user_role=SpaceRole.OWNER,
+        current_user_role=SpaceRole.ADMIN,
         is_creator=True,
         member_count=1,
         owner_count=1,

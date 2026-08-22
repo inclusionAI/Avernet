@@ -24,12 +24,19 @@ class SpaceType(_DocumentedEnum):
 class SpaceRole(_DocumentedEnum):
     """Role held by a user in a Space."""
 
-    OWNER = "OWNER"
+    # Canonical role for the current API contract.
+    ADMIN = "ADMIN"
     MEMBER = "MEMBER"
+    # Compatibility-only input aliases for old clients and historical rows.
+    # New clients and new writes must use ADMIN; responses are canonical ADMIN.
+    OWNER = "OWNER"
+    ADMINISTRATOR = "ADMINISTRATOR"
 
     __descriptions__ = {
-        "OWNER": "May manage the Space and its membership.",
+        "ADMIN": "May manage the Space and its membership.",
         "MEMBER": "May use the Space without managing its membership.",
+        "OWNER": "Legacy alias for ADMIN.",
+        "ADMINISTRATOR": "Legacy alias for ADMIN.",
     }
 
 

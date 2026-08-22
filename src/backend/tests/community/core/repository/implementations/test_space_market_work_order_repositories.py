@@ -240,7 +240,7 @@ def test_space_repository_full_member_lifecycle(db) -> None:
     assert total == 2
     assert {item.space.id for item in spaces} == {personal.id, team.id}
     personal_summary = next(item for item in spaces if item.space.id == personal.id)
-    assert personal_summary.current_user_role is SpaceRole.OWNER
+    assert personal_summary.current_user_role is SpaceRole.ADMIN
 
     filtered_total, filtered = repository.list_spaces(
         user_id="owner-1",
@@ -281,7 +281,7 @@ def test_space_repository_full_member_lifecycle(db) -> None:
     updated = repository.update_member_role(
         space_id=team.id, user_id="member-1", role=SpaceRole.OWNER, env="dev"
     )
-    assert updated.role is SpaceRole.OWNER
+    assert updated.role is SpaceRole.ADMIN
     assert (
         repository.update_member_role(
             space_id=team.id, user_id="missing", role=SpaceRole.OWNER, env="dev"

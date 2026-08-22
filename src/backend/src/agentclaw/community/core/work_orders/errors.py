@@ -43,3 +43,7 @@ class WorkOrderJoinNotAllowedError(WorkOrderError):
 
 class WorkOrderNoReviewerError(WorkOrderError):
     pass
+
+
+class WorkOrderInvalidEventError(WorkOrderError):
+    pass

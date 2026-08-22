@@ -19,11 +19,31 @@ if TYPE_CHECKING:
         WorkOrderReviewResult,
         WorkOrderStatus,
         WorkOrderDecision,
+        WorkOrderEventCreatedResult,
+        NotificationCategory,
     )
 
 
 @runtime_checkable
 class WorkOrderRepositoryProtocol(Protocol):
+    @abstractmethod
+    def create_work_order_event(
+        self,
+        *,
+        event_category: NotificationCategory,
+        biz_type: str,
+        biz_id: str,
+        event_type: str,
+        applicant_user_id: str | None,
+        approver_user_ids: list[str],
+        recipient_user_ids: list[str],
+        title: str,
+        content: str | None,
+        apply_reason: str | None,
+        biz_data: str | None,
+        env: str,
+    ) -> WorkOrderEventCreatedResult: ...
+
     @abstractmethod
     def create_work_order(
         self,
