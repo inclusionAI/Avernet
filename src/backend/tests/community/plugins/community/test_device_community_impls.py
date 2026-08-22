@@ -4,7 +4,7 @@ Covers:
 - ``CommunityHealthProbe`` — direct-HTTP /readiness probe (all branches: no
   bindings, no-url binding, healthy/unhealthy/exception probes, payload parsing,
   list_bindings failure, sandbox unsupported).
-- ``CommunityDeviceSyncDispatcher`` / ``CommunityDeviceSyncService`` — no-op sync.
+- ``CommunityDeviceSyncDispatcher`` — selects the DI-provided BaaS DeviceSync service.
 - ``CommunityDeviceAdapterTransport`` — no-op relay transport.
 
 These ship in the community distribution, so they must be exercised directly

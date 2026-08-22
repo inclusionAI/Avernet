@@ -30,7 +30,7 @@ from agentclaw.community.core.devices.services.local_device_filesystem import Lo
 from tests.community.factories.access import make_staff_user
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
 from tests.community.framework.device_seams import (
-    RecordingLocalDeviceSync,
+    RecordingDeviceSync,
     install_fake_filesystem_dispatcher,
     install_fake_resolver,
     install_fake_sync_dispatcher,
@@ -59,7 +59,7 @@ def _expected_symlink(engine: str) -> dict:
     }
 
 
-def _record_for_bot(world) -> RecordingLocalDeviceSync:
+def _record_for_bot(world) -> RecordingDeviceSync:
     """Patch ``DeviceSyncDispatcher.dispatch``, ``DeviceFilesystemDispatcher.
     dispatch``/``for_bot``, and ``DeviceContextResolver.resolve_for_bot`` so
     the activate/deactivate paths can drive a stable recording DeviceSync service
@@ -72,7 +72,7 @@ def _record_for_bot(world) -> RecordingLocalDeviceSync:
     routed to a real ``LocalDeviceFileSystem`` so the on-disk symlink ops
     that ``skill_service.deactivate_skill`` makes work normally.
     """
-    rec = RecordingLocalDeviceSync(skills_dir=None)  # real impl, noop + records
+    rec = RecordingDeviceSync()
     local_fs = LocalDeviceFileSystem()  # real pathlib-backed fs
 
     world._resolve_calls = []

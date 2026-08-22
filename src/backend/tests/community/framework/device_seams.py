@@ -27,10 +27,10 @@ class _CallRecord:
     kwargs: dict
 
 
-class RecordingLocalDeviceSync:
+class RecordingDeviceSync:
     """Recording DeviceSync test double with deterministic no-network results."""
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self) -> None:
         self.calls: list[_CallRecord] = []
 
     def sync_symlinks(self, symlinks):  # type: ignore[no-untyped-def]

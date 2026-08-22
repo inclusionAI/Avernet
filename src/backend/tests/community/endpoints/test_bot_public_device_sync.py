@@ -11,7 +11,7 @@ from tests.community.factories.bot_collaborator import make_bot
 from tests.community.factories.devices import make_active_local_device
 from tests.community.framework import CaseInput, ExpectSuccess, endpoint_test
 from tests.community.framework.device_seams import (
-    RecordingLocalDeviceSync,
+    RecordingDeviceSync,
     install_fake_resolver,
     install_fake_sync_dispatcher,
 )
@@ -21,9 +21,9 @@ _OWNER = "u_owner"
 _OWNER_NAME = "Owner U"
 
 
-def _record_dispatch(world) -> RecordingLocalDeviceSync:
+def _record_dispatch(world) -> RecordingDeviceSync:
     """Wire the resolver and dispatcher to a recording DeviceSync service."""
-    rec = RecordingLocalDeviceSync(skills_dir=None)  # real impl, noop + records
+    rec = RecordingDeviceSync()
     install_fake_resolver(
         world,
         provider="baas",

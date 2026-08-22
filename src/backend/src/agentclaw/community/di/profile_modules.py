@@ -142,9 +142,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             # The reuse column's concerns, now community:
             CommunityAICodingModule(),      # empty workflow catalog (no AntCode)
             CommunityNotifyModule(),    # no-op notify sender (no DingTalk)
-            # Outbound rules + device-sync — community (empty rules / no-op dispatch).
+            # Outbound rules are shared by test and singlebox. DeviceSync is
+            # selected per profile below.
             CommunityOutboundRulesModule(),
-            CommunityDeviceSyncModule(),
             # App services — corp-free test module: real BotChatService, local_sql
             # router, dummy Dima config, community no-op code-platform (AntCode).
             TestAppServicesModule(),
@@ -155,7 +155,11 @@ def modules_for(profile: DeployProfile) -> list[Module]:
                 TestHttpClientModule,
             )
 
-            column.extend([TestDevicesModule(), TestHttpClientModule()])
+            column.extend([
+                CommunityDeviceSyncModule(),
+                TestDevicesModule(),
+                TestHttpClientModule(),
+            ])
         else:
             from agentclaw.community.di.modules.singlebox_access_module import (
                 SingleboxAccessModule,

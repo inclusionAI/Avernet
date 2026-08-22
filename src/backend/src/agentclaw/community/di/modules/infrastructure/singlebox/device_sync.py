@@ -5,6 +5,9 @@ from injector import Module, inject, provider, singleton
 
 from agentclaw.community.core.devices.services.baas_device_sync import BaasDeviceSyncService
 from agentclaw.community.core.devices.services.baas_invoke_transport import BaasInvokeTransport
+from agentclaw.community.core.devices.services.singlebox_device_sync import (
+    SingleboxDeviceSyncService,
+)
 from agentclaw.community.core.devices.services.device_context import DeviceContext
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
@@ -31,6 +34,7 @@ class SingleboxDeviceSyncModule(Module):
                 baas_service=baas_service,
                 device_uuid=conn_info.get("device_uuid"),
             )
-            return BaasDeviceSyncService(transport=transport, conn_info=conn_info)
+            baas_sync = BaasDeviceSyncService(transport=transport, conn_info=conn_info)
+            return SingleboxDeviceSyncService(delegate=baas_sync)
 
         return LocalDeviceSyncDispatcher(device_sync_factory=baas_device_sync)

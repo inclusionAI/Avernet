@@ -1,12 +1,7 @@
-"""LocalDeviceSyncDispatcher — Rule 20 LOCAL dispatcher Plugin (selection only).
+"""Singlebox DeviceSync dispatcher.
 
-A selection-only dispatcher that inherits :class:`DeviceSyncDispatcher` and
-is decorated ``@plugin_impl(mode=LOCAL)``.
-It selects a DI-injected ``Callable[[DeviceContext], DeviceSync]`` factory. It contains
-selection only — no HTTP, filesystem, or provider workflow — and is NOT bound
-as the general singlebox/test/community dispatcher (``CommunityDeviceSyncModule``
-binds ``CommunityDeviceSyncDispatcher`` for those profiles). Exposing complete
-Singlebox DeviceSync is out of scope for this refactor.
+The Plugin selects a DI-provided Core ``DeviceSync`` service for the resolved
+device context. Singlebox wiring supplies the shared BaaS implementation.
 """
 from __future__ import annotations
 

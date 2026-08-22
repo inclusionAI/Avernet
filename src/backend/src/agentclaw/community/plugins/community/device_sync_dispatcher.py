@@ -37,7 +37,7 @@ class CommunityDeviceSyncDispatcher(DeviceSyncDispatcher):
     def __init__(self, device_sync_factory: Callable[[DeviceContext], DeviceSync]) -> None:
         self._device_sync_factory = device_sync_factory
 
-    def dispatch(self, ctx: "DeviceContext") -> DeviceSync:
+    def dispatch(self, ctx: DeviceContext) -> DeviceSync:
         logger.info(
             "[CommunityDeviceSyncDispatcher] route (bot=%s, provider=%s)",
             getattr(ctx, "bot_id", "?"),

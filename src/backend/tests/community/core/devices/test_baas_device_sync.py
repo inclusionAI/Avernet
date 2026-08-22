@@ -233,31 +233,17 @@ def test_mcp_delegations_go_through_transport():
         assert plugin.sync_remove_mcp("a") is True
         assert plugin.has_mcp("a") is True
 
+    mt.push_single_mcp.assert_called_once_with(
+        transport,
+        {"server_code": "a"},
+        api_key=None,
+        custom_headers=None,
+        endpoint_env="PROD",
+        transport_protocol=None,
+    )
     mt.probe_mcp.assert_called_once_with(transport, "a")
     mt.remove_mcp.assert_called_once_with(transport, "a")
     mt.filter_servers.assert_called_once_with(transport, [])
-
-
-# ── Desktop parity (single BaasDeviceSyncService, transport-only differential)
-
-
-def test_desktop_baas_runs_same_business_logic_via_single_service():
-    """one ``BaasDeviceSyncService`` covers cloud + desktop; the desktop
-    differential is transport-only (no ``DesktopBaasDeviceSyncService``
-    subclass). The single service runs the same business logic regardless of
-    the injected transport."""
-    from agentclaw.community.core.devices.services.baas_device_sync import (
-        BaasDeviceSyncService,
-    )
-
-    transport = _make_transport()
-    plugin = BaasDeviceSyncService(transport=transport, conn_info=_conn_info())
-    plugin.sync_symlinks([])
-
-    transport.post.assert_called_once_with(
-        "/api/skills/symlink/clean",
-        json={"directories": ["/home/admin/.openclaw/workspace/skills"]},
-    )
 
 
 def test_sync_symlinks_returns_failure_on_generic_exception():
