@@ -36,7 +36,7 @@ class WorkOrderServiceProtocol(Protocol):
         approver_user_ids: list[str],
         recipient_user_ids: list[str],
         title: str,
-        content: str | None,
+        content: dict[str, object] | None,
         apply_reason: str | None,
         biz_data: dict[str, object] | None,
         actor_id: str,

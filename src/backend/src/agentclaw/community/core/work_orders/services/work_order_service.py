@@ -50,11 +50,11 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderItemType,
     WorkOrderMessageContent,
     WorkOrderMessageTitle,
+    WorkOrderTitleKey,
     WorkOrderNotificationDraft,
     WorkOrderQueryType,
     WorkOrderStatus,
     WorkOrderDecision,
-    NotificationCategory,
     WorkOrderEventCreatedResult,
 )
 from agentclaw.community.utils.env_utils import get_current_env
@@ -100,7 +100,7 @@ class WorkOrderService:
         approver_user_ids: list[str],
         recipient_user_ids: list[str],
         title: str,
-        content: str | None,
+        content: dict[str, object] | None,
         apply_reason: str | None,
         biz_data: dict[str, object] | None,
         actor_id: str,
@@ -114,9 +114,7 @@ class WorkOrderService:
         event_type = self._required_text(
             event_type, limit=64, error=WorkOrderInvalidEventError
         )
-        title = self._required_text(
-            title, limit=256, error=WorkOrderInvalidEventError
-        )
+        title = self._required_text(title, limit=256, error=WorkOrderInvalidEventError)
         actor_id = self._required_text(
             actor_id, limit=256, error=WorkOrderAccessDeniedError
         )
@@ -152,17 +150,27 @@ class WorkOrderService:
             raise WorkOrderInvalidEventError("unsupported event category")
         reason = (apply_reason or "").strip() or None
         if reason is not None and len(reason) > 512:
-            raise WorkOrderInvalidEventError("apply_reason must contain no more than 512 characters")
+            raise WorkOrderInvalidEventError(
+                "apply_reason must contain no more than 512 characters"
+            )
+        serialized_content = (
+            json.dumps(content, ensure_ascii=False) if content is not None else None
+        )
         serialized_data = (
             json.dumps(biz_data, ensure_ascii=False) if biz_data is not None else None
         )
+        if event_type == WorkOrderEventType.SPACE_JOIN_APPLIED.value:
+            title = WorkOrderTitleKey.SPACE_JOIN_PENDING.value
         result = self._repository.create_work_order_event(
-            event_category=event_category, biz_type=biz_type, biz_id=biz_id,
-            event_type=event_type, applicant_user_id=applicant or None,
+            event_category=event_category,
+            biz_type=biz_type,
+            biz_id=biz_id,
+            event_type=event_type,
+            applicant_user_id=applicant or None,
             approver_user_ids=approvers,
             recipient_user_ids=recipients,
             title=title,
-            content=content,
+            content=serialized_content,
             apply_reason=reason,
             biz_data=serialized_data,
             env=get_current_env(),
@@ -476,14 +484,14 @@ class WorkOrderNotificationService:
         review_remark: str | None,
     ) -> WorkOrderNotificationDraft:
         if target_status is WorkOrderStatus.APPROVED:
-            title = WorkOrderMessageTitle.SPACE_JOIN_APPROVED.value
+            title = WorkOrderTitleKey.SPACE_JOIN_APPROVED.value
             content = WorkOrderMessageContent.SPACE_JOIN_APPROVED.value.format(
                 space_name=detail.space_name
             )
         elif target_status is WorkOrderStatus.REJECTED:
             if review_remark is None:
                 raise WorkOrderInvalidRemarkError("review remark is required")
-            title = WorkOrderMessageTitle.SPACE_JOIN_REJECTED.value
+            title = WorkOrderTitleKey.SPACE_JOIN_REJECTED.value
             content = WorkOrderMessageContent.SPACE_JOIN_REJECTED.value.format(
                 space_name=detail.space_name,
                 review_remark=review_remark,

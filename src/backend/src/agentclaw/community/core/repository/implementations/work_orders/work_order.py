@@ -40,6 +40,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderQueryType,
     WorkOrderReviewResult,
     WorkOrderStatus,
+    WorkOrderTitleKey,
     WorkOrderDecision,
     WorkOrderApproverStatus,
     WorkOrderEventCreatedResult,
@@ -216,9 +217,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                     .one_or_none()
                 )
                 if space is None:
-                    raise WorkOrderNotFoundError(
-                        "work-order business object not found"
-                    )
+                    raise WorkOrderNotFoundError("work-order business object not found")
 
                 member = (
                     db.query(self._Member)
@@ -266,7 +265,11 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                     event_type=f"{order.biz_type}_REVIEWED",
                     biz_type=order.biz_type,
                     biz_id=order.biz_id,
-                    title=f"{order.biz_type} {target.value}",
+                    title=(
+                        WorkOrderTitleKey[f"SPACE_JOIN_{target.value}"].value
+                        if order.biz_type == WorkOrderBizType.SPACE_JOIN.value
+                        else f"{order.biz_type} {target.value}"
+                    ),
                     content=review_remark,
                     env=env,
                 )
@@ -453,7 +456,9 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 )
                 items.append(
                     WorkOrderListItem(
-                        work_order=work_order.to_record() if work_order is not None else None,
+                        work_order=work_order.to_record()
+                        if work_order is not None
+                        else None,
                         notification=notification.to_record()
                         if notification is not None
                         else None,
@@ -540,6 +545,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 work_order=work_order.to_record(),
                 event_type=event_type,
                 title=title,
+                content=notification.content if notification is not None else None,
                 space_id=space.id if space is not None else 0,
                 space_name=space.name if space is not None else "",
                 applicant_name=work_order.applicant_user_id,
@@ -687,7 +693,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                         notification.biz_type, "value", notification.biz_type
                     ),
                     biz_id=notification.biz_id,
-                    title=notification.title,
+                    title=WorkOrderTitleKey[f"SPACE_JOIN_{target_status.value}"].value,
                     content=notification.content,
                     env=env,
                 )
