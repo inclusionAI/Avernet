@@ -62,8 +62,10 @@ class SkillRepoSyncPlugin(Plugin, Protocol):
           to fall back to the NAS path because concurrent rsyncs can
           create transient partial-delete races (see incident
           2026-05-13: 32 skill rows wrongly deleted).
-        - **Local (noop sync)**: returns ``default_fallback`` directly.
-          No NAS race surface; lenient fallback is safe.
+        - **Local (host-directory sync)**: returns the existing
+          ``get_local_skills_root()/skills-repo`` corpus it inspected during
+          ``sync()``; falls back to ``default_fallback`` when that source is
+          absent so offline development remains lenient.
 
         Args:
             default_fallback: Path to use when the sync plugin has no

@@ -239,6 +239,26 @@ class SkillParser:
 
     @classmethod
     def parse(cls, skill_path: Path) -> dict[str, Any] | None:
+        """Parse a package whose wrapper directory is part of its identity."""
+        return cls._parse_path(skill_path, require_directory_name_match=True)
+
+    @classmethod
+    def parse_repository(cls, skill_path: Path) -> dict[str, Any] | None:
+        """Parse a governed Repo asset with path and display-name separation.
+
+        Repo catalog identity is its ``git://`` directory path while the
+        manifest ``name`` is display metadata.  Historical catalog entries
+        intentionally allow those values to differ.
+        """
+        return cls._parse_path(skill_path, require_directory_name_match=False)
+
+    @classmethod
+    def _parse_path(
+        cls,
+        skill_path: Path,
+        *,
+        require_directory_name_match: bool,
+    ) -> dict[str, Any] | None:
         skill_file = cls.find_skill_file(skill_path)
         if not skill_file:
             return None
@@ -249,7 +269,7 @@ class SkillParser:
             raise SkillManifestError("SKILL_FILE_READ_ERROR", str(exc)) from exc
 
         skill_info = cls.parse_content(content)
-        if skill_info["name"] != skill_path.name:
+        if require_directory_name_match and skill_info["name"] != skill_path.name:
             raise SkillManifestError(
                 "NAME_DIRECTORY_MISMATCH",
                 "Skill folder name must match SKILL.md field 'name'. "
