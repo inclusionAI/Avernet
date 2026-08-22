@@ -12,23 +12,31 @@ import pytest
 from agentclaw.community.core.repository.implementations.spaces.space import (
     SpaceRepository,
 )
+from agentclaw.community.core.spaces.errors import SpaceAlreadyExistsError
 from agentclaw.community.core.spaces.models import SpaceRecord, SpaceType
 from agentclaw.community.core.spaces.services.space_service import SpaceService
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterTeamCreateError,
     SkillCenterTeamCreateRequest,
     SkillCenterTeamCreateResult,
+    SkillCenterTeamQueryRequest,
+    SkillCenterTeamQueryResult,
 )
 
 
-def _space() -> SpaceRecord:
+def _space(
+    *,
+    space_type: SpaceType = SpaceType.TEAM,
+    sc_team_id: str | None = None,
+) -> SpaceRecord:
     now = datetime(2026, 8, 18, 10, 0, 0)
     return SpaceRecord(
         id=7,
         space_code="spc-0123456789abcdef0123",
-        space_type=SpaceType.TEAM,
-        name="Demo Team",
-        personal_owner_id=None,
+        space_type=space_type,
+        name="Demo Team" if space_type is SpaceType.TEAM else "个人空间",
+        personal_owner_id=("owner-1" if space_type is SpaceType.PERSONAL else None),
+        sc_team_id=sc_team_id,
         env="dev",
         created_by="owner-1",
         updated_by="owner-1",
@@ -119,13 +127,191 @@ def test_create_team_rejects_invalid_name(name: str) -> None:
     skill_center.create_team.assert_not_called()
 
 
-def test_initialize_personal_delegates_to_repository() -> None:
-    repository = MagicMock()
-    repository.initialize_personal.return_value = (_space(), True)
-    service = SpaceService(repository, MagicMock())
+def test_initialize_personal_creates_sc_team_before_local_commit() -> None:
+    personal = _space(space_type=SpaceType.PERSONAL)
+    state = {"committed": False, "rolled_back": False}
 
-    assert service.initialize_personal(user_id="owner-1") == (_space(), True)
-    repository.initialize_personal.assert_called_once_with(user_id="owner-1", env="dev")
+    @contextmanager
+    def create_transaction(*, user_id: str, env: str):
+        assert (user_id, env) == ("owner-1", "dev")
+        try:
+            yield personal
+        except Exception:
+            state["rolled_back"] = True
+            raise
+        else:
+            state["committed"] = True
+
+    repository = MagicMock()
+    repository.get_personal_space.return_value = None
+    repository.create_personal_transaction.side_effect = create_transaction
+    skill_center = MagicMock()
+    skill_center.create_team.return_value = SkillCenterTeamCreateResult(
+        team_id="sc-personal-7"
+    )
+    service = SpaceService(repository, skill_center)
+
+    record, created = service.initialize_personal(user_id="owner-1")
+
+    assert created is True
+    assert record.sc_team_id == "sc-personal-7"
+    assert state == {"committed": True, "rolled_back": False}
+    skill_center.create_team.assert_called_once_with(
+        SkillCenterTeamCreateRequest(
+            team_code=personal.space_code,
+            team_name="个人空间",
+            ref_source_id="7",
+        )
+    )
+    skill_center.get_team_by_ref_source.assert_not_called()
+
+
+def test_initialize_personal_rolls_back_when_sc_creation_fails() -> None:
+    personal = _space(space_type=SpaceType.PERSONAL)
+    state = {"committed": False, "rolled_back": False}
+
+    @contextmanager
+    def create_transaction(*, user_id: str, env: str):
+        try:
+            yield personal
+        except Exception:
+            state["rolled_back"] = True
+            raise
+        else:
+            state["committed"] = True
+
+    repository = MagicMock()
+    repository.get_personal_space.return_value = None
+    repository.create_personal_transaction.side_effect = create_transaction
+    skill_center = MagicMock()
+    skill_center.create_team.side_effect = SkillCenterTeamCreateError("SC failed")
+
+    with pytest.raises(SkillCenterTeamCreateError, match="SC failed"):
+        SpaceService(repository, skill_center).initialize_personal(user_id="owner-1")
+
+    assert state == {"committed": False, "rolled_back": True}
+
+
+def test_initialize_personal_returns_existing_sc_binding_without_external_calls() -> (
+    None
+):
+    existing = _space(space_type=SpaceType.PERSONAL, sc_team_id="sc-personal-existing")
+    repository = MagicMock()
+    repository.get_personal_space.return_value = existing
+    skill_center = MagicMock()
+
+    assert SpaceService(repository, skill_center).initialize_personal(
+        user_id="owner-1"
+    ) == (existing, False)
+
+    repository.create_personal_transaction.assert_not_called()
+    repository.personal_sc_team_binding_transaction.assert_not_called()
+    skill_center.create_team.assert_not_called()
+    skill_center.get_team_by_ref_source.assert_not_called()
+
+
+@pytest.mark.parametrize("mapping_found", [True, False])
+def test_initialize_personal_repairs_missing_existing_sc_binding(
+    mapping_found: bool,
+) -> None:
+    existing = _space(space_type=SpaceType.PERSONAL)
+
+    @contextmanager
+    def binding_transaction(*, space_id: int, env: str):
+        assert (space_id, env) == (7, "dev")
+        yield existing
+
+    repository = MagicMock()
+    repository.get_personal_space.return_value = existing
+    repository.personal_sc_team_binding_transaction.side_effect = binding_transaction
+    skill_center = MagicMock()
+    skill_center.get_team_by_ref_source.return_value = (
+        SkillCenterTeamQueryResult(team_id="sc-found") if mapping_found else None
+    )
+    skill_center.create_team.return_value = SkillCenterTeamCreateResult(
+        team_id="sc-created"
+    )
+
+    record, created = SpaceService(repository, skill_center).initialize_personal(
+        user_id="owner-1"
+    )
+
+    assert created is False
+    assert record.sc_team_id == ("sc-found" if mapping_found else "sc-created")
+    skill_center.get_team_by_ref_source.assert_called_once_with(
+        SkillCenterTeamQueryRequest(source="OCB", ref_source_id="7")
+    )
+    if mapping_found:
+        skill_center.create_team.assert_not_called()
+    else:
+        skill_center.create_team.assert_called_once_with(
+            SkillCenterTeamCreateRequest(
+                team_code=existing.space_code,
+                team_name="个人空间",
+                ref_source_id="7",
+            )
+        )
+
+
+def test_initialize_personal_recovers_from_concurrent_local_creation() -> None:
+    existing = _space(space_type=SpaceType.PERSONAL, sc_team_id="sc-concurrent-winner")
+
+    @contextmanager
+    def conflicting_transaction(*, user_id: str, env: str):
+        raise SpaceAlreadyExistsError("personal space already exists")
+        yield  # pragma: no cover - contextmanager requires a generator
+
+    repository = MagicMock()
+    repository.get_personal_space.side_effect = [None, existing]
+    repository.create_personal_transaction.side_effect = conflicting_transaction
+    skill_center = MagicMock()
+
+    assert SpaceService(repository, skill_center).initialize_personal(
+        user_id="owner-1"
+    ) == (existing, False)
+
+    skill_center.create_team.assert_not_called()
+    skill_center.get_team_by_ref_source.assert_not_called()
+
+
+def test_initialize_personal_reraises_concurrent_creation_without_winner() -> None:
+    @contextmanager
+    def conflicting_transaction(*, user_id: str, env: str):
+        raise SpaceAlreadyExistsError("personal space already exists")
+        yield  # pragma: no cover - contextmanager requires a generator
+
+    repository = MagicMock()
+    repository.get_personal_space.side_effect = [None, None]
+    repository.create_personal_transaction.side_effect = conflicting_transaction
+    skill_center = MagicMock()
+
+    with pytest.raises(SpaceAlreadyExistsError, match="personal space already exists"):
+        SpaceService(repository, skill_center).initialize_personal(user_id="owner-1")
+
+    skill_center.create_team.assert_not_called()
+    skill_center.get_team_by_ref_source.assert_not_called()
+
+
+def test_initialize_personal_uses_binding_completed_by_concurrent_request() -> None:
+    stale = _space(space_type=SpaceType.PERSONAL)
+    current = _space(space_type=SpaceType.PERSONAL, sc_team_id="sc-concurrent-binding")
+
+    @contextmanager
+    def binding_transaction(*, space_id: int, env: str):
+        assert (space_id, env) == (7, "dev")
+        yield current
+
+    repository = MagicMock()
+    repository.get_personal_space.return_value = stale
+    repository.personal_sc_team_binding_transaction.side_effect = binding_transaction
+    skill_center = MagicMock()
+
+    assert SpaceService(repository, skill_center).initialize_personal(
+        user_id="owner-1"
+    ) == (current, False)
+
+    skill_center.create_team.assert_not_called()
+    skill_center.get_team_by_ref_source.assert_not_called()
 
 
 def test_list_spaces_normalizes_filters_and_pagination() -> None:

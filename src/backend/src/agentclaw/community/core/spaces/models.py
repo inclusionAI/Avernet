@@ -53,6 +53,7 @@ class SpaceMemberRecord(BaseModel):
     id: int
     space_id: int
     user_id: str
+    user_name: str | None = None
     role: SpaceRole
     env: str
     created_by: str
@@ -71,7 +72,6 @@ class SpaceSummaryRecord(BaseModel):
 class SpaceMemberSummaryRecord(BaseModel):
     member: SpaceMemberRecord
     is_creator: bool
-    user_name: str | None = None
     display_name: str | None = None
 
 

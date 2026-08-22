@@ -6,6 +6,7 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
 from agentclaw.community.core.spaces.errors import (
+    SpaceAlreadyExistsError,
     SpaceNameInvalidError,
     SpaceNotFoundError,
     SpaceScTeamBindingNotFoundError,
@@ -45,9 +46,63 @@ class SpaceService:
         self._skill_center_client = skill_center_client
 
     def initialize_personal(self, *, user_id: str) -> tuple[SpaceRecord, bool]:
-        return self._repository.initialize_personal(
-            user_id=user_id, env=get_current_env()
-        )
+        env = get_current_env()
+        existing = self._repository.get_personal_space(user_id=user_id, env=env)
+        if existing is not None:
+            return self._ensure_personal_sc_team_binding(existing, env=env), False
+
+        try:
+            with self._repository.create_personal_transaction(
+                user_id=user_id, env=env
+            ) as record:
+                result = self._skill_center_client.create_team(
+                    SkillCenterTeamCreateRequest(
+                        team_code=record.space_code,
+                        team_name=record.name,
+                        ref_source_id=str(record.id),
+                    )
+                )
+                record.sc_team_id = result.team_id
+            return record, True
+        except SpaceAlreadyExistsError:
+            # A concurrent initializer may have committed the unique personal
+            # Space first. Re-read it and ensure that its SC binding is complete.
+            existing = self._repository.get_personal_space(user_id=user_id, env=env)
+            if existing is None:
+                raise
+            return self._ensure_personal_sc_team_binding(existing, env=env), False
+
+    def _ensure_personal_sc_team_binding(
+        self, space: SpaceRecord, *, env: str
+    ) -> SpaceRecord:
+        if space.sc_team_id:
+            return space
+
+        # Lock the existing personal Space while resolving its external mapping,
+        # so concurrent initialization requests cannot create duplicate SC Teams.
+        with self._repository.personal_sc_team_binding_transaction(
+            space_id=space.id, env=env
+        ) as current:
+            if current.sc_team_id:
+                return current
+            resolved = self._skill_center_client.get_team_by_ref_source(
+                SkillCenterTeamQueryRequest(
+                    source=_SC_SPACE_REF_SOURCE,
+                    ref_source_id=str(current.id),
+                )
+            )
+            if resolved is None:
+                created = self._skill_center_client.create_team(
+                    SkillCenterTeamCreateRequest(
+                        team_code=current.space_code,
+                        team_name=current.name,
+                        ref_source_id=str(current.id),
+                    )
+                )
+                current.sc_team_id = created.team_id
+            else:
+                current.sc_team_id = resolved.team_id
+        return current
 
     def batch_query_personal(
         self, *, user_ids: list[str]

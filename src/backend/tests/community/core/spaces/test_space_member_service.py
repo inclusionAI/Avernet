@@ -44,13 +44,17 @@ def _space(
 
 
 def _member(
-    *, user_id: str = "member-1", role: SpaceRole = SpaceRole.MEMBER
+    *,
+    user_id: str = "member-1",
+    user_name: str | None = None,
+    role: SpaceRole = SpaceRole.MEMBER,
 ) -> SpaceMemberRecord:
     now = datetime(2026, 8, 18, 10, 0, 0)
     return SpaceMemberRecord(
         id=2,
         space_id=7,
         user_id=user_id,
+        user_name=user_name,
         role=role,
         env="test",
         created_by="owner-1",
@@ -78,9 +82,7 @@ def test_list_members_checks_membership_and_normalizes_pagination() -> None:
         page_size=20,
     ) == (0, [])
 
-    access.require_space_member.assert_called_once_with(
-        space_id=7, user_id="member-1"
-    )
+    access.require_space_member.assert_called_once_with(space_id=7, user_id="member-1")
     repository.list_members.assert_called_once_with(
         space_id=7, env="dev", keyword="alice", offset=40, limit=20
     )
@@ -108,6 +110,7 @@ def test_add_member_propagates_requested_role_to_repository() -> None:
         space_id=7,
         actor_id="owner-1",
         user_id=" owner-2 ",
+        user_name="  Owner Two  ",
         role=SpaceRole.OWNER,
     )
 
@@ -115,10 +118,43 @@ def test_add_member_propagates_requested_role_to_repository() -> None:
     repository.add_member.assert_called_once_with(
         space_id=7,
         user_id="owner-2",
+        user_name="Owner Two",
         role=SpaceRole.OWNER,
         creator_id="owner-1",
         env="dev",
     )
+
+
+@pytest.mark.parametrize("user_name", [None, "", "   "])
+def test_add_member_normalizes_missing_or_blank_user_name_to_none(user_name) -> None:
+    service, repository, _ = _service()
+    repository.get_member.return_value = None
+    repository.add_member.return_value = _member()
+
+    service.add_member(
+        space_id=7,
+        actor_id="owner-1",
+        user_id="member-1",
+        user_name=user_name,
+        role=SpaceRole.MEMBER,
+    )
+
+    assert repository.add_member.call_args.kwargs["user_name"] is None
+
+
+def test_add_member_rejects_user_name_over_128_characters() -> None:
+    service, repository, _ = _service()
+
+    with pytest.raises(SpaceMemberInvalidError, match="at most 128"):
+        service.add_member(
+            space_id=7,
+            actor_id="owner-1",
+            user_id="member-1",
+            user_name="x" * 129,
+            role=SpaceRole.MEMBER,
+        )
+
+    repository.add_member.assert_not_called()
 
 
 @pytest.mark.parametrize("user_id", ["", "   "])
@@ -163,9 +199,10 @@ def test_delete_member_returns_true_for_existing_non_creator() -> None:
     service, repository, _ = _service()
     repository.delete_member.return_value = True
 
-    assert service.delete_member(
-        space_id=7, actor_id="owner-1", user_id=" member-1 "
-    ) is True
+    assert (
+        service.delete_member(space_id=7, actor_id="owner-1", user_id=" member-1 ")
+        is True
+    )
     repository.delete_member.assert_called_once_with(
         space_id=7, user_id="member-1", env="dev"
     )

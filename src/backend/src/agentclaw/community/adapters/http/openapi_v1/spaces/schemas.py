@@ -217,9 +217,7 @@ class SpaceSkillItem(_UtcResponseModel):
         default=None,
         description="Current user's active Skill grant, or null when ungranted.",
     )
-    can_edit: bool = Field(
-        description="Whether the current user may edit this Skill."
-    )
+    can_edit: bool = Field(description="Whether the current user may edit this Skill.")
     can_grant: bool = Field(
         description="Whether the current user may grant team Skill edit access."
     )
@@ -244,6 +242,11 @@ class AddSpaceMemberRequest(BaseModel):
 
     member_user_id: str = Field(
         min_length=1, max_length=256, description="Identifier of the user to add."
+    )
+    member_user_name: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Snapshot of the member's user name; may be omitted.",
     )
     role: SpaceRole = Field(
         default=SpaceRole.MEMBER,
