@@ -40,8 +40,10 @@ themselves.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 
+from agentclaw.community.adapters.http.openapi_v1.admission_modes import (
+    AdmissionMode,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     GrantNotResolvableError,
 )
@@ -49,73 +51,8 @@ from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.log import get_logger
 
+
 logger = get_logger()
-
-class AdmissionMode(StrEnum):
-    """How an operation treats a caller that names no end user.
-
-    Every mode answers one question — *an application is calling with no human
-    on the wire; what does this operation do about it?* — and what separates
-    them is two things: whether the operation names a bot, and **how it decides
-    which bot**.
-
-    That second part is the whole of the own-bot / addressed-bot split, and
-    it is not a
-    permission rule: both run the identical grant check. They differ only in
-    where the addressed bot's owner comes from, because ``bot_id`` alone does
-    not identify a bot.
-
-    **Each mode with something to enforce has a dependency that spells it**, so
-    a route's declaration and its table entry say the same thing in two places
-    and ``test_admission_inventory.py`` fails when they disagree:
-    ``require_granted_own_bot`` for own-bot, ``require_granted_addressed_bot``
-    for addressed-bot, ``refuse_app_only_caller`` for refused (all in
-    ``principal.py``). ``GRANT_FILTERED`` and ``USER_GATED`` cannot be a route
-    dependency — they shape the *result* through
-    :meth:`ActingCaller.granted_bot_ids` — and ``OPEN`` has nothing to declare.
-    """
-
-    #: **One bot, always the delegating user's own.** These groups resolve
-    #: through ``get_by_id_and_owner(bot_id, delegating user)``, so the owner is
-    #: that user by construction and the request cannot name another. Admitted
-    #: iff a live grant covers ``(app, bot, delegating user)``. Declared as
-    #: ``Depends(require_granted_own_bot)``, which never reads an owner off the
-    #: wire.
-    GRANT_CHECKED_OWN_BOT = "grant-checked"
-    #: **One bot, possibly someone else's.** The same check, against the bot
-    #: the request addresses: these operations publish an ``owner_id`` query
-    #: parameter that defaults to the caller's own, and the grant is looked up
-    #: on ``(app, bot, that owner, delegating user)``. Declared as
-    #: ``Depends(require_granted_addressed_bot)``, the one dependency entitled
-    #: to read that parameter.
-    #:
-    #: The owner therefore comes *from the request*, not from the grant record.
-    #: An earlier revision had it the other way round — the lookup asked "any
-    #: grant on this bot id" and took whatever owner came back — which was safe
-    #: only while the unique key happened to make that row singular.
-    GRANT_CHECKED_ADDRESSED_BOT = "grant-checked-owner-addressed"
-    #: **A set of bots, not one.** Admitted unconditionally; it is the *result*
-    #: that is narrowed, to the bots this application was granted. Refusing
-    #: outright would be wrong — the question "which bots may I reach?" is one
-    #: an application is entitled to ask, and the empty answer discloses nothing.
-    GRANT_FILTERED = "grant-filtered"
-    #: **No bot; the named user's account.** Nothing to scope to a bot, so the
-    #: gate is the relationship itself: admitted only while the application
-    #: holds at least one live grant from that user. A stranger application
-    #: therefore learns nothing about an account that never authorized it.
-    USER_GATED = "user-gated"
-    #: **No bot and no user.** The answer is identical for every authenticated
-    #: caller in the tenant — a name-availability check and the MCP catalogue —
-    #: so there is no scope to enforce and authentication alone is the bar.
-    OPEN = "open"
-    #: **Refused**, with a ``401``. Also what an operation *absent* from the
-    #: table gets, which is the point: a route added tomorrow is refused until
-    #: someone decides otherwise, rather than admitted because nobody noticed.
-    #: A *listed* refused operation additionally declares
-    #: ``Depends(refuse_app_only_caller)``, so the decision is visible on the
-    #: route and holds even if this table were mislabelled; the absent-by-default
-    #: refusal has no route to declare anything on and stays central.
-    REFUSED = "refused"
 
 
 #: Every public operation, keyed by ``(method, path)`` exactly as FastAPI
