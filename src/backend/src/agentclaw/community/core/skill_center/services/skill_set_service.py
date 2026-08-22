@@ -938,17 +938,8 @@ class SkillSetService:
             if git_paths:
                 # 修复: 传递 user_id 和 bolt_id 到 activate_skill，确保设备操作正确路由
                 # 获取 Bot 的 owner_id（用于设备绑定查询）
-                bot = (
-                    self._bot_repo.get_by_id_and_owner(
-                        self.bot_id, str(self.entity_id)
-                    )
-                    if self.entity_id
-                    else None
-                )
-                owner_id = bot.get("owner_id") if bot else None
-                # fallback: 如果获取不到 owner_id，使用 entity_id 或 user_id
-                if not owner_id:
-                    owner_id = self.entity_id or user_id
+
+                owner_id = self.entity_id or user_id
 
                 # Activate all concurrently with proper device routing
                 activation_results = await asyncio.gather(
@@ -2807,17 +2798,8 @@ class SkillSetSwitcher(_DeviceSyncMixin):
         # Step 3: Activate all skills in new set concurrently
         # 修复: 传递 user_id 和 bolt_id 到 activate_skill，确保设备操作正确路由
         # 获取 Bot 的 owner_id（用于设备绑定查询）
-        bot = (
-            self.skill_set_service._bot_repo.get_by_id_and_owner(
-                self.skill_set_service.bot_id,
-                str(self.skill_set_service.entity_id),
-            )
-            if self.skill_set_service.entity_id
-            else None
-        )
-        owner_id = bot.get("owner_id") if bot else None
-        if not owner_id:
-            owner_id = self.skill_set_service.entity_id or user_id
+
+        owner_id = self.skill_set_service.entity_id or user_id
 
         skill_infos = [(skill.get('id'), skill.get('git_path')) for skill in new_skills]
         if skill_infos:
@@ -3014,17 +2996,8 @@ class SkillSetSwitcher(_DeviceSyncMixin):
 
         # 修复: 传递 user_id 和 bolt_id 到 activate_skill，确保设备操作正确路由
         # 获取 Bot 的 owner_id（用于设备绑定查询）
-        bot = (
-            self.skill_set_service._bot_repo.get_by_id_and_owner(
-                self.skill_set_service.bot_id,
-                str(self.skill_set_service.entity_id),
-            )
-            if self.skill_set_service.entity_id
-            else None
-        )
-        owner_id = bot.get("owner_id") if bot else None
-        if not owner_id:
-            owner_id = self.skill_set_service.entity_id or user_id
+
+        owner_id = self.skill_set_service.entity_id or user_id
 
         # Activate all concurrently
         if tasks:
