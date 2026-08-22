@@ -649,6 +649,7 @@ class SkillsPoolLayoutRepository(
         self,
         *,
         scope: BotSkillLayoutScope,
+        owner_id: str,
         migration_generation: str,
         lease_owner: str,
         preparation_id: str,
@@ -669,6 +670,7 @@ class SkillsPoolLayoutRepository(
                 .filter(
                     Skill.env == scope.env,
                     Skill.bolt_id == scope.bot_id,
+                    Skill.user_id == owner_id,
                     Skill.git_path.like("local://%"),
                 )
                 .with_for_update()

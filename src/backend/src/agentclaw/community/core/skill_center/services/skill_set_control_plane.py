@@ -57,7 +57,6 @@ from agentclaw.community.core.skills_pool.edit_guard import (
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.core.workspace.skill_layout import runtime_layout_engine_for_bot
 from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.utils.env_utils import get_current_env
 
 
 class SkillSetControlPlaneService:
@@ -138,31 +137,24 @@ class SkillSetControlPlaneService:
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         self._require_mutable_bot(bot)
-        scope = self._scope(bot, bot_id)
-        try:
-            mutation_lease = self._mutation_guard.acquire(scope=scope)
-        except BotCapabilityMutationBusyError as exc:
-            raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY") from exc
-        except BotCapabilityMutationLockUnavailableError as exc:
-            raise SkillSetControlPlaneLockUnavailableError() from exc
-        try:
-            item = self._repository.create_set(
-                bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
-                name=name,
-                description=description,
-                engine_type=self._engine(bot),
-            )
-            self._ensure_mutation_lease(mutation_lease)
-            self._audit(
-                bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
-                actor_id=user_id,
-                action="skill_set_create",
-            )
-            return item
-        finally:
-            self._mutation_guard.release(mutation_lease)
+        # Creating an inactive SkillSet is metadata-only: it neither changes
+        # the effective capability projection nor has a compensating runtime
+        # action.  Do not take the long-lived Bot mutation fence here; that
+        # fence belongs to operations which can race a desired-state rollback.
+        item = self._repository.create_set(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            name=name,
+            description=description,
+            engine_type=self._engine(bot),
+        )
+        self._audit(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            actor_id=user_id,
+            action="skill_set_create",
+        )
+        return item
 
     def create_legacy_set(
         self,
@@ -190,33 +182,20 @@ class SkillSetControlPlaneService:
                 description=description,
             )
 
-        scope = BotSkillLayoutScope(
-            env=get_current_env(), entity_id=actor_id, bot_id="default"
+        item = self._repository.create_set(
+            bot_id="default",
+            owner_id=actor_id,
+            name=name,
+            description=description,
+            engine_type="openclaw",
         )
-        try:
-            mutation_lease = self._mutation_guard.acquire(scope=scope)
-        except BotCapabilityMutationBusyError as exc:
-            raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY") from exc
-        except BotCapabilityMutationLockUnavailableError as exc:
-            raise SkillSetControlPlaneLockUnavailableError() from exc
-        try:
-            item = self._repository.create_set(
-                bot_id="default",
-                owner_id=actor_id,
-                name=name,
-                description=description,
-                engine_type="openclaw",
-            )
-            self._ensure_mutation_lease(mutation_lease)
-            self._audit(
-                bot_id="default",
-                owner_id=actor_id,
-                actor_id=actor_id,
-                action="skill_set_create_legacy_default",
-            )
-            return item
-        finally:
-            self._mutation_guard.release(mutation_lease)
+        self._audit(
+            bot_id="default",
+            owner_id=actor_id,
+            actor_id=actor_id,
+            action="skill_set_create_legacy_default",
+        )
+        return item
 
     def get_set(self, *, bot_id: str, owner_id: str, user_id: str, set_id: str) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
