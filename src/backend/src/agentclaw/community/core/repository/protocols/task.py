@@ -45,6 +45,16 @@ class TaskInfoRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def list_records(
+        self,
+        status: Optional["Status"] = None,
+        *,
+        owner_user_id: Optional[str] = None,
+    ) -> list["TaskInfoRecord"]:
+        """Return newest-first records, optionally filtered by status and owner."""
+        ...
+
+    @abstractmethod
     def list_by_status(
         self,
         status: "Status",

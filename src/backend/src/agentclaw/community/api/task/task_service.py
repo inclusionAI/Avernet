@@ -10,14 +10,14 @@ from agentclaw.community.core.task.domain.models import (
     TaskNode,
     TaskOpResult,
     TaskSpec,
-    TaskSummary,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
+from agentclaw.community.core.task.repository.types import TaskInfoRecord
 
 
 @runtime_checkable
 class TaskServiceProtocol(Protocol):
-    """系统唯一对外入口(2 API)。facade 内部由 ExecutionEngine 编排核协调
+    """系统唯一对外入口。facade 内部由 ExecutionEngine 编排核协调
     TaskGraphService/TaskPlanner/TaskDispatcher/TaskRunner。"""
 
     async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
@@ -31,10 +31,12 @@ class TaskServiceProtocol(Protocol):
         """任务执行详情可视化(整图或按 node_id 子树投影),只读。"""
         ...
 
-    def list_tasks(self, status: "str | None" = None) -> list[TaskSummary]:
-        """列出任务摘要(轻量投影),按 run_id 降序(最新在前);可选按图级 status 过滤。
-
-        visualization/看板列表视图用;不返回完整图对象。"""
+    def list_tasks(
+        self,
+        status: "str | None" = None,
+        owner_user_id: "str | None" = None,
+    ) -> list[TaskInfoRecord]:
+        """列持久化任务记录,可选按状态和 owner 过滤。"""
         ...
 
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:

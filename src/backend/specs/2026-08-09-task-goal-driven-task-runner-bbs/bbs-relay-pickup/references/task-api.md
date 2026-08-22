@@ -9,18 +9,19 @@
 
 ## 发现(读面,无需 claim)
 
-### GET /api/v1/collaboration/tasks/list — 列任务轻量投影
+### GET /api/v1/collaboration/tasks/list — 列持久化任务记录
 
-响应 `data: TaskSummaryDTO[]`(每项含 `bbs_mode`):
+响应 `data: TaskInfoRecordDTO[]`:
 ```json
 [
-  {"task_id":"t1","run_id":1,"status":"PLANNING","title":"...","node_count":3,"loop_round":0,"bbs_mode":true},
-  {"task_id":"t2","run_id":2,"status":"DONE",  "title":"...","node_count":1,"loop_round":0,"bbs_mode":false}
+  {"id":1,"task_id":"t1","source_type":"bot","owner_user_id":"u1","owner_bot_id":"b1",
+   "execution_config":{"task_type":"dynamic"},"task_spec":{"metadata":{"task_id":"t1","title":"...","instruction":"..."}},
+   "status":"PENDING","gmt_create":"2026-08-22T10:00:00","gmt_modified":"2026-08-22T10:00:00"}
 ]
 ```
-**客户端筛 `bbs_mode==true`**;再跳过 `status` 为 `DONE` / `HUNG` 者。
+列表不含运行图 `bbs_mode`;对每个 `task_id` 请求 `/dashboard`,筛图 `extend_props.bbs_mode==true`,再跳过图 `status` 为 `DONE` / `HUNG` 者。
 ```bash
-curl -s "$BASE/api/v1/collaboration/tasks/list" | jq '.data[] | select(.bbs_mode==true) | .task_id'
+curl -s "$BASE/api/v1/collaboration/tasks/list" | jq -r '.data[].task_id'
 ```
 
 ### GET /api/v1/collaboration/tasks/dashboard?task_id=<id> — 取整图
@@ -145,8 +146,8 @@ curl -s --json @result.json "$BASE/api/v1/collaboration/tasks/bbs/result" | jq '
 ```bash
 ME=botA; BASE=http://127.0.0.1:8000
 # 步①
-curl -s "$BASE/api/v1/collaboration/tasks/list" | jq '.data[] | select(.bbs_mode==true) | .task_id'      # → "t1"
-curl -s "$BASE/api/v1/collaboration/tasks/dashboard?task_id=t1" | jq '.data'                              # 自判
+curl -s "$BASE/api/v1/collaboration/tasks/list" | jq -r '.data[].task_id'                                # 枚举候选
+curl -s "$BASE/api/v1/collaboration/tasks/dashboard?task_id=t1" | jq '.data | select(.extend_props.bbs_mode==true)' # 筛 BBS + 自判
 # 步②
 curl -s --json "{\"task_id\":\"t1\",\"bot_id\":\"$ME\"}" "$BASE/api/v1/collaboration/tasks/bbs/claim" | jq '.data.root_node_id'
 # 步④

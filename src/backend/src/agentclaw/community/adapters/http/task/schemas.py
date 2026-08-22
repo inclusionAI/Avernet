@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -177,15 +178,19 @@ class TaskNodeDTO(BaseModel):
     run_info: RuntimeInfoDTO = Field(default_factory=RuntimeInfoDTO)
 
 
-class TaskSummaryDTO(BaseModel):
-    """GET /openapi/v1/collaboration/tasks/list 返回项(轻量投影)。"""
+class TaskInfoRecordDTO(BaseModel):
+    """GET .../collaboration/tasks/list 返回的持久化任务记录。"""
+
+    id: int
     task_id: str
-    run_id: int
+    source_type: str
+    owner_user_id: str
+    owner_bot_id: str
+    execution_config: dict[str, Any] | None = None
+    task_spec: dict[str, Any]
     status: str
-    title: str = ""
-    node_count: int = 0
-    loop_round: int = 0
-    bbs_mode: bool = False
+    gmt_create: datetime | None = None
+    gmt_modified: datetime | None = None
 
 
 class TaskExecutionGraphDTO(BaseModel):
@@ -308,11 +313,21 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
 
 
 
-def summary_to_dto(s) -> TaskSummaryDTO:
-    """TaskSummary -> TaskSummaryDTO(Rule 22)。"""
-    return TaskSummaryDTO(task_id=s.task_id, run_id=s.run_id, status=s.status.value,
-                          title=s.title, node_count=s.node_count, loop_round=s.loop_round,
-                          bbs_mode=s.bbs_mode)
+def task_info_record_to_dto(record) -> TaskInfoRecordDTO:
+    """TaskInfoRecord -> TaskInfoRecordDTO(Rule 22)。"""
+    return TaskInfoRecordDTO(
+        id=record.id,
+        task_id=record.task_id,
+        source_type=record.source_type,
+        owner_user_id=record.owner_user_id,
+        owner_bot_id=record.owner_bot_id,
+        execution_config=(dict(record.execution_config)
+                          if record.execution_config is not None else None),
+        task_spec=dict(record.task_spec),
+        status=record.status.value,
+        gmt_create=record.gmt_create,
+        gmt_modified=record.gmt_modified,
+    )
 
 def op_result_to_dto(result) -> TaskOpResultDTO:
     # TaskOpResult 持 error(失败原因),无 message 字段;将 error 透出到 DTO.message,

@@ -1,6 +1,7 @@
 """Declarative endpoint coverage for internal collaboration task routes."""
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
@@ -10,8 +11,8 @@ from agentclaw.community.core.task.domain.models import (
     Status,
     TaskExecutionGraph,
     TaskOpResult,
-    TaskSummary,
 )
+from agentclaw.community.core.task.repository.types import TaskInfoRecord
 from agentclaw.community.core.task.task_discovery.discovery_service import DiscoveryService
 from agentclaw.community.core.task.task_discovery.scheduler import TaskDiscoveryScheduler
 from tests.community.framework import (
@@ -68,13 +69,20 @@ def _seed_task_service(world) -> None:
     def dashboard(_self, _task_id, _node_id=None):
         return TaskExecutionGraph(run_id=1, loop_round=0, status=Status.PENDING)
 
-    def list_tasks(_self, _status=None):
+    def list_tasks(_self, _status=None, owner_user_id=None):
+        assert owner_user_id is None
         return [
-            TaskSummary(
+            TaskInfoRecord(
+                id=1,
                 task_id="task-endpoint-1",
-                run_id=1,
+                source_type="bot",
+                owner_user_id="user-endpoint-1",
+                owner_bot_id="bot-endpoint-1",
+                execution_config={"task_type": "dynamic"},
+                task_spec=_TASK_SPEC,
                 status=Status.PENDING,
-                title="Endpoint case",
+                gmt_create=datetime(2026, 8, 22, 10, 0, 0),
+                gmt_modified=datetime(2026, 8, 22, 10, 0, 0),
             )
         ]
 

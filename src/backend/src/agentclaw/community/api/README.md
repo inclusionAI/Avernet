@@ -85,6 +85,7 @@ internal_dependencies:
   - agentclaw.community.core.skill_center            # Local Skill recoverable deletion lifecycle contract
   - agentclaw.community.core.task.domain.models      # TaskInfo, TaskExecutionGraph, TaskOpResult, TaskCallbackData — typed in task_service.py and task_loop_callback.py
   - agentclaw.community.core.task.domain.requests    # TaskInfoRequest — typed in task_service.py Protocol execute signature
+  - agentclaw.community.core.task.repository.types   # TaskInfoRecord — typed in task_service.py Protocol list_tasks signature
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py

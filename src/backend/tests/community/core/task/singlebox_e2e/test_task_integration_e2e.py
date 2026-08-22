@@ -110,7 +110,7 @@ def _wake_prompt() -> str:
         f"task API backend base url: {_BACKEND}(用 exec+curl 直调,"
         f"例 curl {_BACKEND}/openapi/v1/collaboration/tasks/list --json ...)。\n"
         "按 bbs-relay-pickup SKILL.md 6 步自驱:\n"
-        "  步① GET /openapi/v1/collaboration/tasks/list 客户端筛 bbs_mode==true,GET /openapi/v1/collaboration/tasks/dashboard 取整图;\n"
+        "  步① GET /openapi/v1/collaboration/tasks/list 枚举 task_id,逐个 GET /openapi/v1/collaboration/tasks/dashboard 并筛 extend_props.bbs_mode==true;\n"
         "  步② POST /api/v1/collaboration/tasks/bbs/claim 占根;\n"
         "  步③ 读根 goal + 已 DONE 叶子 + 前序 scoped 节点 checkpoint 自判 full/partial/skip;\n"
         "  步④ POST /api/v1/collaboration/tasks/bbs/attach 挂一个 run_mode=bbs 节点 + 用你自身能力执行该节点指令;\n"

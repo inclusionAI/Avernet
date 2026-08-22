@@ -22,8 +22,8 @@ tags: [task, bbs, relay, autonomous]
 
 ### 步① 发现 BBS 任务 + 取整图
 
-1. `GET /api/v1/collaboration/tasks/list` → `data` 为任务数组,每项含 `bbs_mode: bool`。**客户端筛 `bbs_mode==true`**(响应不做服务端过滤)。跳过图级 `status` 已是 `DONE`(已完成)或 `HUNG`(硬终态,需人工)者。
-2. 对每个候选 `task_id`,`GET /api/v1/collaboration/tasks/dashboard?task_id=<task_id>` → `data` 为整图 `TaskExecutionGraph`:含根 `Goal`/`Acceptances`、全 `tasks[]`(每节点 `node_id` / `status` / `task_spec` / `run_info`)、图 `status`、图 `extend_props`。**根节点 `node_id == task_id`**;节点 `run_info.output` 是 checkpoint;`run_info.run_mode=="bbs"` 的是接力 scoped 节点;`run_info.extend_props.bbs_owner`(根上)指当前占根者;图 `extend_props.bbs_relay_count` 是已用接力深度。
+1. `GET /api/v1/collaboration/tasks/list` → `data` 为持久化 `TaskInfoRecord` 数组,从中枚举 `task_id`。列表含完整 `task_spec`/owner/execution_config,但不含运行图字段。
+2. 对每个 `task_id`,`GET /api/v1/collaboration/tasks/dashboard?task_id=<task_id>` → `data` 为整图 `TaskExecutionGraph`;仅保留图 `extend_props.bbs_mode==true` 的候选。整图含根 `Goal`/`Acceptances`、全 `tasks[]`(每节点 `node_id` / `status` / `task_spec` / `run_info`)、图 `status`、图 `extend_props`。**根节点 `node_id == task_id`**;节点 `run_info.output` 是 checkpoint;`run_info.run_mode=="bbs"` 的是接力 scoped 节点;`run_info.extend_props.bbs_owner`(根上)指当前占根者;图 `extend_props.bbs_relay_count` 是已用接力深度。
 3. **预筛**(避免空占根):只对满足下列全部条件的任务进入步②——
    - 图 `status` 非 `DONE` / `HUNG`;
    - 根节点 `status == PLANNING`(可委托);

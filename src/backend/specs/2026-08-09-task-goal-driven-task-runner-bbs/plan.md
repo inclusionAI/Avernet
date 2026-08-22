@@ -10,6 +10,10 @@
 
 **Spec:** `src/backend/specs/2026-08-09-task-goal-driven-task-runner-bbs/spec.md`(权威 WHAT/WHY;本计划为其 HOW delta,声明不破坏上游 `2026-08-09-task-goal-driven-execution-framework` 契约)
 
+> **2026-08-22 读契约修订:** `/list` 改为返回持久化 `TaskInfoRecord`;BBS skill 从 list
+> 枚举 `task_id`,再经 `/dashboard` 的 `extend_props.bbs_mode` 过滤。下文旧的
+> `TaskSummary.bbs_mode` 直出步骤由此修订覆盖。
+
 ## Global Constraints
 
 (逐字引自 spec §2.3 / §7.3 / §13.3,每个 task 隐含遵守)

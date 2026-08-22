@@ -2,6 +2,9 @@
 
 > 详细步骤(文件/接口/TDD 代码/提交)见同目录 `plan.md`。本文件为可勾选任务索引 + 依赖 + 验证点。
 > 上游:`2026-08-09-task-goal-driven-execution-framework`(权威)。声明不破坏上游契约。分支 `feat/task-goal-driven-collab-dev`。
+>
+> **2026-08-22 修订:** HTTP `/list` 返回 `TaskInfoRecord`;T1 的 `TaskSummary.bbs_mode`
+> 仅保留为图服务内部投影。BBS 发现改为 list 枚举 task_id + dashboard 筛 bbs_mode。
 
 ## 依赖图
 

@@ -1,4 +1,4 @@
-"""TaskService facade(2 API):系统唯一对外入口,内部持 ExecutionEngine 编排核。对齐 plan §3.7。
+"""TaskService facade:系统唯一对外入口,内部持 ExecutionEngine 编排核。对齐 plan §3.7。
 
 facade 内部 ``_build_engine`` 构造 ExecutionEngine(收传输端口 bot/bcs/discover,由 DI 从配置注入);
 引擎 ``_build_*`` 内部 new 引擎自带策略 + 接线 TaskExecutor,无子类化、无外部 reach-in setter。
@@ -23,7 +23,7 @@ from agentclaw.community.core.repository.protocols.task import (
 )
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult, NodeOpResult, Status, TaskExecutionGraph, TaskNode, TaskNodePatch,
-    TaskOpResult, TaskSpec, TaskSummary, TaskType,
+    TaskOpResult, TaskSpec, TaskType,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.repository.types import (
@@ -42,7 +42,7 @@ logger = logging.getLogger("task.service")
 # 契约,core/ 不 import api/(见 test_service_api_conformance.py:core 服务不继承 api Protocol,
 # 由 @runtime_checkable 的 isinstance/issubclass 做结构化一致性校验)。此处置空基类即可。
 class TaskService:
-    """对外 facade(2 API);内部持 ExecutionEngine 编排核 + TaskGraphService + Harness(可选)+ TaskLoopCallback。
+    """对外 facade;内部持 ExecutionEngine 编排核 + TaskGraphService + Harness(可选)+ TaskLoopCallback。
 
     验收 100% 走回调回投;engine 不主动验,无 verify/bbs port。engine 对调用方不可见(无 property)。
     """
@@ -243,10 +243,16 @@ class TaskService:
         """任务执行详情可视化(整图或按 node_id 子树投影),只读。"""
         return self._graph.query_task_dashboard(task_id, node_id)
 
-    def list_tasks(self, status: str | None = None) -> list[TaskSummary]:
-        """列任务摘要(轻量投影),按 run_id 降序;status 非 None 时按图级状态过滤。"""
+    def list_tasks(
+        self,
+        status: str | None = None,
+        owner_user_id: str | None = None,
+    ) -> list[TaskInfoRecord]:
+        """列持久化 ``task_info`` 记录,可选按状态和 owner 过滤。"""
+        if self._task_info_repo is None:
+            return []
         st = Status(status) if status else None
-        return self._graph.list_task_summaries(st)
+        return self._task_info_repo.list_records(st, owner_user_id=owner_user_id)
 
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(委托 TaskGraphService.claim_bbs_owner)。

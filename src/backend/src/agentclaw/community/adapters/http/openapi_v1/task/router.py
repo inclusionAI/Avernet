@@ -2,7 +2,7 @@
 
 POST /openapi/v1/collaboration/tasks/execute   — 提交任务(delegate TaskServiceProtocol.execute)
 GET  /openapi/v1/collaboration/tasks/dashboard  — 查任务图(delegate TaskServiceProtocol.get_task_dashboard)
-GET  /openapi/v1/collaboration/tasks/list       — 列任务摘要(delegate TaskServiceProtocol.list_tasks)
+GET  /openapi/v1/collaboration/tasks/list       — 列持久化任务记录(delegate TaskServiceProtocol.list_tasks)
 
 前端公开面经 gateway spanner 鉴权(``/openapi/v1/collaboration/**`` → user+app required)。内部接口
 (回投 / bbs 接力 / 任务发现阶段)见 ``adapters/http/task/``(前缀 ``/api/v1/collaboration/tasks``,不经 spanner)。
@@ -17,15 +17,16 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
 from agentclaw.community.adapters.http.task.schemas import (
     TaskExecutionGraphDTO,
+    TaskInfoRecordDTO,
     TaskInfoRequestDTO,
     TaskOpResultDTO,
-    TaskSummaryDTO,
     graph_to_dto,
     op_result_to_dto,
-    summary_to_dto,
+    task_info_record_to_dto,
     task_info_request_from_dto,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
@@ -68,19 +69,20 @@ async def get_task_dashboard(
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
 
 
-@router.get("/list", response_model=Envelope[list[TaskSummaryDTO]])
+@router.get("/list", response_model=Envelope[list[TaskInfoRecordDTO]])
 @envelope_errors
 async def list_tasks(
     request: Request,
+    user_id: UserIdDep,
     status: str | None = None,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[list[TaskSummaryDTO]]:
-    """列任务摘要(轻量投影),按 run_id 降序(最新在前)。可选 ``status`` 过滤图级状态。
+) -> Envelope[list[TaskInfoRecordDTO]]:
+    """列持久化 ``task_info`` 记录,按更新时间降序。可选 ``status`` 过滤记录状态。
 
-    visualization/看板列表视图用;不返回完整图对象。非法 ``status`` 过滤值 → 400
+    返回完整 ``TaskInfoRecord`` 字段(含 task_spec/execution_config/owner)。非法 ``status`` → 400
     (``Status(invalid)`` 会抛 ``ValueError``,router 层先校验;经 ``HTTPException`` → 中央 handler
     → ``ErrorEnvelope``,非 500)。"""
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
-    items = service.list_tasks(status)
-    return envelope([summary_to_dto(s) for s in items], request)
+    items = service.list_tasks(status, owner_user_id=user_id)
+    return envelope([task_info_record_to_dto(item) for item in items], request)

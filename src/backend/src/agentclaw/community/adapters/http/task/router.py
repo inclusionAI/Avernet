@@ -9,7 +9,7 @@
 端点(同一任务模块,不同阶段):
   POST /api/v1/collaboration/tasks/execute          — 提交任务(公开面镜像;delegate TaskServiceProtocol.execute)
   GET  /api/v1/collaboration/tasks/dashboard         — 查任务图(公开面镜像;delegate get_task_dashboard)
-  GET  /api/v1/collaboration/tasks/list              — 列任务摘要(公开面镜像;delegate list_tasks)
+  GET  /api/v1/collaboration/tasks/list              — 列持久化任务记录(公开面镜像;delegate list_tasks)
   POST /api/v1/collaboration/tasks/callback/report  — 执行实体回投(delegate TaskLoopCallbackProtocol.report_result)
   POST /api/v1/collaboration/tasks/bbs/claim        — BBS 接力步②:CAS 占根(恰一赢,输者 409)
   POST /api/v1/collaboration/tasks/bbs/attach        — BBS 接力步④:挂 run_mode=bbs scoped 子节点 + start
@@ -47,15 +47,15 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackDataDTO,
     TaskCallbackRequest,
     TaskExecutionGraphDTO,
+    TaskInfoRecordDTO,
     TaskInfoRequestDTO,
     TaskNodeCallbackRequest,
     TaskOpResultDTO,
-    TaskSummaryDTO,
     acceptance_result_from_dto,
     callback_from_dto,
     graph_to_dto,
     op_result_to_dto,
-    summary_to_dto,
+    task_info_record_to_dto,
     task_info_request_from_dto,
     task_spec_from_dto,
 )
@@ -123,20 +123,20 @@ async def get_task_dashboard_internal(
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
 
 
-@router.get("/list", response_model=Envelope[list[TaskSummaryDTO]])
+@router.get("/list", response_model=Envelope[list[TaskInfoRecordDTO]])
 @envelope_errors
 async def list_tasks_internal(
     request: Request,
     status: str | None = None,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[list[TaskSummaryDTO]]:
-    """列任务摘要(内部副本,按 run_id 降序;可选 ``status`` 过滤图级状态)。
+) -> Envelope[list[TaskInfoRecordDTO]]:
+    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态过滤)。
 
     非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。"""
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
     items = service.list_tasks(status)
-    return envelope([summary_to_dto(s) for s in items], request)
+    return envelope([task_info_record_to_dto(item) for item in items], request)
 
 
 # ===== 回投 / BBS 接力 =====
