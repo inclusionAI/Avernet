@@ -272,10 +272,13 @@ fn validate_endpoint_policy(
     url_guard: &OutboundUrlGuard,
 ) -> Result<(), &'static str> {
     let url = Url::parse(raw_url).map_err(|_| "invalid_url")?;
-    if url.scheme() != "https"
-        && (url.scheme() != "http"
-            || (policy.require_https && (!policy.allow_http_loopback || !is_loopback_host(&url))))
-    {
+    let allowlisted_http = url.scheme() == "http"
+        && url_guard.allows_allowlisted_host_port(raw_url);
+    let http_allowed = url.scheme() == "http"
+        && (!policy.require_https
+            || (policy.allow_http_loopback && is_loopback_host(&url))
+            || allowlisted_http);
+    if url.scheme() != "https" && !http_allowed {
         return Err("https_required");
     }
     if !url.username().is_empty() || url.password().is_some() {
@@ -428,11 +431,11 @@ mod tests {
     }
 
     #[test]
-    fn private_endpoint_allowlist_can_enable_an_exact_non_standard_port() {
+    fn private_endpoint_allowlist_can_enable_http_and_an_exact_non_standard_port() {
         let entry = bcs_config_api::PrivateEndpointAllowlistEntryConfig {
             host: "*.hooks.example.internal".to_string(),
             cidrs: vec!["10.20.0.0/16".to_string()],
-            ports: vec![8443],
+            ports: vec![80, 8443],
         };
         let guard = OutboundUrlGuard::strict()
             .with_private_endpoint_allowlist(&[entry])
@@ -449,6 +452,22 @@ mod tests {
         assert!(
             validate_endpoint_policy(
                 "https://worker.hooks.example.internal:9443/events",
+                WebhookEndpointPolicy::production(),
+                &guard,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_endpoint_policy(
+                "http://worker.hooks.example.internal/events",
+                WebhookEndpointPolicy::production(),
+                &guard,
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_endpoint_policy(
+                "http://worker.hooks.example.internal:8080/events",
                 WebhookEndpointPolicy::production(),
                 &guard,
             )
