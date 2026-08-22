@@ -71,9 +71,6 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
-    SkillSetControlPlaneLockUnavailableError,
-    SkillSetRuntimeReconcileError,
-    SkillSetAccessDeniedError,
 )
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
@@ -112,21 +109,6 @@ def _legacy_skill_set(item: dict) -> SkillSetResponse:
             "type": item.get("type", "custom"),
         }
     )
-
-
-def _legacy_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, (LocalSkillNotFoundError, SkillSetControlPlaneNotFoundError)):
-        return HTTPException(status_code=404, detail="Skill set not found")
-    if isinstance(exc, SkillSetAccessDeniedError):
-        return HTTPException(status_code=403, detail="Forbidden")
-    if isinstance(exc, SkillSetControlPlaneConflictError):
-        return HTTPException(status_code=400, detail=str(exc))
-    if isinstance(exc, SkillSetControlPlaneLockUnavailableError):
-        return HTTPException(status_code=503, detail="Skill set mutation unavailable")
-    if isinstance(exc, SkillSetRuntimeReconcileError):
-        return HTTPException(status_code=500, detail="Skill set runtime sync failed")
-    logger.exception("[skillsets] compatibility adapter failed", exc_info=exc)
-    return HTTPException(status_code=500, detail="Skill set operation failed")
 
 
 def _get_path_params(
@@ -242,38 +224,35 @@ async def list_skill_sets(
     )
 
     actor_id = _legacy_actor(ctx, user_id or entity_id)
-    try:
-        skill_sets = control_plane.list_sets(
+    skill_sets = control_plane.list_sets(
+        bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
+        user_id=actor_id,
+    )
+    data = []
+    for item in skill_sets:
+        skills = control_plane.list_skills(
             bot_id=effective_bot_id,
             owner_id=effective_entity_id,
             user_id=actor_id,
+            set_id=item["id"],
         )
-        data = []
-        for item in skill_sets:
-            skills = control_plane.list_skills(
-                bot_id=effective_bot_id,
-                owner_id=effective_entity_id,
-                user_id=actor_id,
-                set_id=item["id"],
-            )
-            skill_set_dict = {
-                **item,
-                "is_active": True if item.get("is_default") else item.get("is_active"),
-                "skills": [
-                    SkillInSetSummary(
-                        id=str(skill.get("id")) if skill.get("id") is not None else "",
-                        name=skill.get("name"),
-                        description=skill.get("description"),
-                        path=skill.get(
-                            "git_path"
-                        ),  # git_path stores both git:// and local:// paths
-                    )
-                    for skill in skills
-                ],
-            }
-            data.append(_legacy_skill_set(skill_set_dict))
-    except Exception as exc:
-        raise _legacy_error(exc) from exc
+        skill_set_dict = {
+            **item,
+            "is_active": True if item.get("is_default") else item.get("is_active"),
+            "skills": [
+                SkillInSetSummary(
+                    id=str(skill.get("id")) if skill.get("id") is not None else "",
+                    name=skill.get("name"),
+                    description=skill.get("description"),
+                    path=skill.get(
+                        "git_path"
+                    ),  # git_path stores both git:// and local:// paths
+                )
+                for skill in skills
+            ],
+        }
+        data.append(_legacy_skill_set(skill_set_dict))
 
     return SkillSetListResponse(success=True, data=data, count=len(data))
 
@@ -321,16 +300,13 @@ async def create_skill_set(
         bot_repo=bot_repo,
     )
 
-    try:
-        skill_set = control_plane.create_legacy_set(
-            bot_id=effective_bot_id,
-            actor_id=_legacy_actor(ctx, request.user_id),
-            name=request.name,
-            description=request.description,
-        )
-        return SkillSetDetailResponse(success=True, data=_legacy_skill_set(skill_set))
-    except Exception as e:
-        raise _legacy_error(e) from e
+    skill_set = control_plane.create_legacy_set(
+        bot_id=effective_bot_id,
+        actor_id=_legacy_actor(ctx, request.user_id),
+        name=request.name,
+        description=request.description,
+    )
+    return SkillSetDetailResponse(success=True, data=_legacy_skill_set(skill_set))
 
 
 @router.get("/with-mcps", response_model=SkillSetsWithMCPsResponse, deprecated=True)
@@ -496,19 +472,16 @@ async def get_skill_set(
         ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
     )
 
-    try:
-        return SkillSetDetailResponse(
-            success=True,
-            data=_legacy_skill_set(
-                control_plane.get_legacy_set(
-                    bot_id=effective_bot_id,
-                    actor_id=_legacy_actor(ctx, user_id or entity_id),
-                    set_id=skill_set_id,
-                )
-            ),
-        )
-    except Exception as exc:
-        raise _legacy_error(exc) from exc
+    return SkillSetDetailResponse(
+        success=True,
+        data=_legacy_skill_set(
+            control_plane.get_legacy_set(
+                bot_id=effective_bot_id,
+                actor_id=_legacy_actor(ctx, user_id or entity_id),
+                set_id=skill_set_id,
+            )
+        ),
+    )
 
 
 @router.put("/{skill_set_id}", response_model=SkillSetDetailResponse)
@@ -549,21 +522,18 @@ async def update_skill_set(
         bot_repo=bot_repo,
     )
 
-    try:
-        # ``is_default`` was accepted by the old schema but is not a mutable
-        # domain field.  Preserve the wire by ignoring it as the old handler
-        # did for immutable system sets.
-        skill_set = control_plane.update_set(
-            bot_id=effective_bot_id,
-            owner_id=effective_entity_id,
-            user_id=_legacy_actor(ctx, request.user_id or entity_id),
-            set_id=skill_set_id,
-            name=request.name,
-            description=request.description,
-        )
-        return SkillSetDetailResponse(success=True, data=_legacy_skill_set(skill_set))
-    except Exception as exc:
-        raise _legacy_error(exc) from exc
+    # ``is_default`` was accepted by the old schema but is not a mutable
+    # domain field.  Preserve the wire by ignoring it as the old handler
+    # did for immutable system sets.
+    skill_set = control_plane.update_set(
+        bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
+        user_id=_legacy_actor(ctx, request.user_id or entity_id),
+        set_id=skill_set_id,
+        name=request.name,
+        description=request.description,
+    )
+    return SkillSetDetailResponse(success=True, data=_legacy_skill_set(skill_set))
 
 
 @router.delete("/{skill_set_id}", response_model=MessageResponse)
@@ -610,16 +580,13 @@ async def delete_skill_set(
         bot_repo=bot_repo,
     )
 
-    try:
-        control_plane.delete_set(
-            bot_id=effective_bot_id,
-            owner_id=effective_entity_id,
-            user_id=_legacy_actor(ctx, user_id or entity_id),
-            set_id=skill_set_id,
-        )
-        return MessageResponse(success=True, message="Skill set deleted successfully")
-    except Exception as exc:
-        raise _legacy_error(exc) from exc
+    control_plane.delete_set(
+        bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
+        user_id=_legacy_actor(ctx, user_id or entity_id),
+        set_id=skill_set_id,
+    )
+    return MessageResponse(success=True, message="Skill set deleted successfully")
 
 
 # ==================== SkillSet-Skill Association APIs ====================
@@ -656,15 +623,12 @@ async def get_skill_set_skills(
         ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
     )
 
-    try:
-        skills = control_plane.list_skills(
-            bot_id=effective_bot_id,
-            owner_id=effective_entity_id,
-            user_id=_legacy_actor(ctx, user_id or entity_id),
-            set_id=skill_set_id,
-        )
-    except Exception as exc:
-        raise _legacy_error(exc) from exc
+    skills = control_plane.list_skills(
+        bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
+        user_id=_legacy_actor(ctx, user_id or entity_id),
+        set_id=skill_set_id,
+    )
     return SkillSetSkillsResponse(
         success=True,
         data=[
@@ -728,64 +692,61 @@ async def add_skills_to_set(
         bot_repo=bot_repo,
     )
 
-    try:
-        # Historical batch wire permits partial success.  Each member remains
-        # an atomic control-plane command; the adapter only serializes results.
-        results: dict[str, list] = {
-            "success": [],
-            "failed": [],
-            "activation_failed": [],
-        }
-        actor_id = _legacy_actor(ctx, request.user_id or entity_id)
-        # Validate the target before the legacy resolver may materialise a
-        # missing Repo asset.  A missing or immutable Set must not leave an
-        # orphan ac_skill row behind.
-        target_set = control_plane.get_set(
-            bot_id=effective_bot_id,
-            owner_id=effective_entity_id,
-            user_id=actor_id,
-            set_id=skill_set_id,
-        )
-        if target_set.get("is_default"):
-            raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
-        for skill_id in request.skill_ids:
-            try:
-                stable_skill_id = control_plane.resolve_legacy_skill_id(
-                    bot_id=effective_bot_id,
-                    actor_id=actor_id,
-                    identifier=skill_id,
-                )
-                await control_plane.add_skill(
-                    bot_id=effective_bot_id,
-                    owner_id=effective_entity_id,
-                    user_id=actor_id,
-                    set_id=skill_set_id,
-                    skill_id=stable_skill_id,
-                )
-                results["success"].append(
-                    {"skill_id": str(stable_skill_id), "name": str(skill_id)}
-                )
-            except (
-                LocalSkillNotFoundError,
-                SkillSetControlPlaneNotFoundError,
-            ) as exc:
-                results["failed"].append({"skill_id": skill_id, "error": str(exc)})
-            except SkillSetControlPlaneConflictError as exc:
-                if str(exc) not in {
-                    "RESOURCE_DIRECT_ACTIVE",
-                    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
-                }:
-                    raise
-                results["failed"].append({"skill_id": skill_id, "error": str(exc)})
-        success_count = len(results["success"])
-        failed_count = len(results["failed"])
-        return AddSkillsResponse(
-            success=True,
-            data=results,
-            message=f"成功添加 {success_count} 个技能，失败 {failed_count} 个",
-        )
-    except Exception as exc:
-        raise _legacy_error(exc) from exc
+    # Historical batch wire permits partial success.  Each member remains
+    # an atomic control-plane command; the adapter only serializes results.
+    results: dict[str, list] = {
+        "success": [],
+        "failed": [],
+        "activation_failed": [],
+    }
+    actor_id = _legacy_actor(ctx, request.user_id or entity_id)
+    # Validate the target before the legacy resolver may materialise a
+    # missing Repo asset.  A missing or immutable Set must not leave an
+    # orphan ac_skill row behind.
+    target_set = control_plane.get_set(
+        bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
+        user_id=actor_id,
+        set_id=skill_set_id,
+    )
+    if target_set.get("is_default"):
+        raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
+    for skill_id in request.skill_ids:
+        try:
+            stable_skill_id = control_plane.resolve_legacy_skill_id(
+                bot_id=effective_bot_id,
+                actor_id=actor_id,
+                identifier=skill_id,
+            )
+            await control_plane.add_skill(
+                bot_id=effective_bot_id,
+                owner_id=effective_entity_id,
+                user_id=actor_id,
+                set_id=skill_set_id,
+                skill_id=stable_skill_id,
+            )
+            results["success"].append(
+                {"skill_id": str(stable_skill_id), "name": str(skill_id)}
+            )
+        except (
+            LocalSkillNotFoundError,
+            SkillSetControlPlaneNotFoundError,
+        ) as exc:
+            results["failed"].append({"skill_id": skill_id, "error": str(exc)})
+        except SkillSetControlPlaneConflictError as exc:
+            if str(exc) not in {
+                "RESOURCE_DIRECT_ACTIVE",
+                "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+            }:
+                raise
+            results["failed"].append({"skill_id": skill_id, "error": str(exc)})
+    success_count = len(results["success"])
+    failed_count = len(results["failed"])
+    return AddSkillsResponse(
+        success=True,
+        data=results,
+        message=f"成功添加 {success_count} 个技能，失败 {failed_count} 个",
+    )
 
 
 @router.delete("/{skill_set_id}/skills/{skill_id}", response_model=MessageResponse)
@@ -833,21 +794,16 @@ async def remove_skill_from_set(
         bot_repo=bot_repo,
     )
 
-    try:
-        result = await control_plane.remove_skill(
-            bot_id=effective_bot_id,
-            owner_id=effective_entity_id,
-            user_id=_legacy_actor(ctx, user_id or entity_id),
-            set_id=skill_set_id,
-            skill_id=skill_id,
-        )
-        if not result.get("changed"):
-            raise HTTPException(status_code=404, detail="Skill not found in skill set")
-        return MessageResponse(success=True, message="Skill removed from skill set")
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise _legacy_error(exc) from exc
+    result = await control_plane.remove_skill(
+        bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
+        user_id=_legacy_actor(ctx, user_id or entity_id),
+        set_id=skill_set_id,
+        skill_id=skill_id,
+    )
+    if not result.get("changed"):
+        raise SkillSetControlPlaneNotFoundError("Skill not found in skill set")
+    return MessageResponse(success=True, message="Skill removed from skill set")
 
 
 # ==================== Default SkillSet APIs ====================
@@ -1844,21 +1800,18 @@ async def add_mcp_to_skill_set(
         ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
     )
 
-    try:
-        await control_plane.add_mcp(
-            bot_id=effective_bot_id,
-            owner_id=effective_entity_id,
-            user_id=_legacy_actor(ctx, entity_id),
-            set_id=skill_set_id,
-            server_code=request.server_code,
-        )
-        return AddMCPResponse(
-            success=True,
-            message="MCP server added to skill set successfully",
-            server_code=request.server_code,
-        )
-    except Exception as e:
-        raise _legacy_error(e) from e
+    await control_plane.add_mcp(
+        bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
+        user_id=_legacy_actor(ctx, entity_id),
+        set_id=skill_set_id,
+        server_code=request.server_code,
+    )
+    return AddMCPResponse(
+        success=True,
+        message="MCP server added to skill set successfully",
+        server_code=request.server_code,
+    )
 
 
 @router.delete("/{skill_set_id}/mcps/{server_code}", response_model=MessageResponse)
@@ -1901,16 +1854,13 @@ async def remove_mcp_from_skill_set(
         ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
     )
 
-    try:
-        await control_plane.remove_mcp(
-            bot_id=effective_bot_id,
-            owner_id=effective_entity_id,
-            user_id=_legacy_actor(ctx, entity_id),
-            set_id=skill_set_id,
-            server_code=server_code,
-        )
-    except Exception as e:
-        raise _legacy_error(e) from e
+    await control_plane.remove_mcp(
+        bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
+        user_id=_legacy_actor(ctx, entity_id),
+        set_id=skill_set_id,
+        server_code=server_code,
+    )
     return MessageResponse(
         success=True, message="MCP server removed from skill set successfully"
     )

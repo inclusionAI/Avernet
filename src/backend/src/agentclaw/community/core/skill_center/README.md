@@ -65,6 +65,7 @@ internal_dependencies:
   - agentclaw.community.core.config
   - agentclaw.community.core.config_compose
   - agentclaw.community.core.devices
+  - agentclaw.community.core.errors    # transport-free DomainError base for SkillSet control-plane errors
   - agentclaw.community.core.events
   - agentclaw.community.core.mcp
   - agentclaw.community.core.models
