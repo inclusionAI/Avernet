@@ -32,6 +32,10 @@ from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.human_bot_friendship_service import (
+    HumanBotFriendshipServiceProtocol,
+)
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 from agentclaw.community.plugin_api.models import BotModel
@@ -110,11 +114,13 @@ def connections(relay: FakeRelay):
 
 
 @pytest.fixture
-def client(relay: FakeRelay, connections: _FakeConnections):
+def client(relay: FakeRelay, connections: _FakeConnections, friendships, expert):
     class _M(Module):
         def configure(self, binder):
             binder.bind(EngineRuntimeRelayProtocol, to=relay)
             binder.bind(EngineConnectionServiceProtocol, to=connections)
+            binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
+            binder.bind(ExpertChatServiceProtocol, to=expert)
 
     app = FastAPI()
     for group in _ENGINE_RUNTIME_GROUPS:
