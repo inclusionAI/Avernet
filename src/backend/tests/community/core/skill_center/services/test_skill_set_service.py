@@ -1044,7 +1044,7 @@ class TestAddSkillsToSetOwnerIdResolution:
     async def test_auto_activate_uses_bot_owner_id(self):
         """When bot has owner_id, it should be used for activate_skill."""
         bot_repo = MagicMock()
-        bot_repo.get_by_id.return_value = {"id": "bot-1", "owner_id": "owner_abc"}
+        bot_repo.get_by_id_and_owner.return_value = {"id": "bot-1", "owner_id": "owner_abc"}
 
         skill_repo = MagicMock()
         skill_repo.get_by_id.return_value = {"id": "10", "name": "skill-a", "git_path": "git://biz/skill-a"}
@@ -1070,11 +1070,16 @@ class TestAddSkillsToSetOwnerIdResolution:
         skill_service.activate_skill.assert_called_once_with(
             "git://biz/skill-a", user_id="owner_abc", bolt_id="bot-1"
         )
+        assert bot_repo.get_by_id_and_owner.call_args_list[-1].args == (
+            "bot-1",
+            "staff_entity1",
+        )
+        bot_repo.get_by_id.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_auto_activate_false_is_reported_and_not_synced(self):
         bot_repo = MagicMock()
-        bot_repo.get_by_id.return_value = {
+        bot_repo.get_by_id_and_owner.return_value = {
             "id": "bot-1",
             "owner_id": "owner_abc",
         }
@@ -1127,7 +1132,7 @@ class TestAddSkillsToSetOwnerIdResolution:
     async def test_auto_activate_fallback_to_entity_id_when_no_owner(self):
         """When bot exists but owner_id is None, fallback to entity_id."""
         bot_repo = MagicMock()
-        bot_repo.get_by_id.return_value = {"id": "bot-1", "owner_id": None}
+        bot_repo.get_by_id_and_owner.return_value = {"id": "bot-1", "owner_id": None}
 
         skill_repo = MagicMock()
         skill_repo.get_by_id.return_value = {"id": "10", "name": "skill-a", "git_path": "git://biz/skill-a"}
@@ -1158,7 +1163,7 @@ class TestAddSkillsToSetOwnerIdResolution:
     async def test_auto_activate_fallback_to_user_id_when_no_bot(self):
         """When bot_repo returns None, fallback to entity_id then user_id."""
         bot_repo = MagicMock()
-        bot_repo.get_by_id.return_value = None
+        bot_repo.get_by_id_and_owner.return_value = None
 
         skill_repo = MagicMock()
         skill_repo.get_by_id.return_value = {"id": "10", "name": "skill-a", "git_path": "git://biz/skill-a"}
@@ -1249,7 +1254,7 @@ class TestSwitchToSkillSetOwnerIdResolution:
     async def test_switch_uses_bot_owner_id(self):
         """When bot has owner_id, switch_to_skill_set should use it for activate_skill."""
         bot_repo = MagicMock()
-        bot_repo.get_by_id.return_value = {"id": "bot-1", "owner_id": "owner_xyz"}
+        bot_repo.get_by_id_and_owner.return_value = {"id": "bot-1", "owner_id": "owner_xyz"}
 
         skill_service = MagicMock()
         skill_service.activate_skill = AsyncMock(return_value=True)
@@ -1276,12 +1281,17 @@ class TestSwitchToSkillSetOwnerIdResolution:
         skill_service.activate_skill.assert_called_once_with(
             "git://biz/skill-a", user_id="owner_xyz", bolt_id="bot-1"
         )
+        assert bot_repo.get_by_id_and_owner.call_args_list[-1].args == (
+            "bot-1",
+            "staff_entity1",
+        )
+        bot_repo.get_by_id.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_switch_fallback_to_entity_id_when_no_owner(self):
         """When bot exists but owner_id is None, fallback to entity_id."""
         bot_repo = MagicMock()
-        bot_repo.get_by_id.return_value = {"id": "bot-1", "owner_id": None}
+        bot_repo.get_by_id_and_owner.return_value = {"id": "bot-1", "owner_id": None}
 
         skill_service = MagicMock()
         skill_service.activate_skill = AsyncMock(return_value=True)
@@ -1313,7 +1323,7 @@ class TestSwitchToSkillSetOwnerIdResolution:
     async def test_switch_fallback_to_user_id_when_no_bot(self):
         """When bot_repo returns None, fallback to entity_id then user_id."""
         bot_repo = MagicMock()
-        bot_repo.get_by_id.return_value = None
+        bot_repo.get_by_id_and_owner.return_value = None
 
         skill_service = MagicMock()
         skill_service.activate_skill = AsyncMock(return_value=True)
@@ -1398,7 +1408,7 @@ class TestSyncSkillSetToActiveOwnerIdResolution:
     async def test_sync_uses_bot_owner_id(self):
         """When bot has owner_id, sync_skill_set_to_active should use it for activate_skill."""
         bot_repo = MagicMock()
-        bot_repo.get_by_id.return_value = {"id": "bot-1", "owner_id": "owner_sync"}
+        bot_repo.get_by_id_and_owner.return_value = {"id": "bot-1", "owner_id": "owner_sync"}
 
         skill_service = MagicMock()
         skill_service.activate_skill = AsyncMock(return_value=True)
@@ -1430,7 +1440,7 @@ class TestSyncSkillSetToActiveOwnerIdResolution:
     async def test_sync_fallback_to_entity_id_when_no_owner(self):
         """When bot exists but owner_id is None, fallback to entity_id."""
         bot_repo = MagicMock()
-        bot_repo.get_by_id.return_value = {"id": "bot-1", "owner_id": None}
+        bot_repo.get_by_id_and_owner.return_value = {"id": "bot-1", "owner_id": None}
 
         skill_service = MagicMock()
         skill_service.activate_skill = AsyncMock(return_value=True)
@@ -1462,7 +1472,7 @@ class TestSyncSkillSetToActiveOwnerIdResolution:
     async def test_sync_fallback_to_user_id_when_no_bot(self):
         """When bot_repo returns None, fallback to entity_id then user_id."""
         bot_repo = MagicMock()
-        bot_repo.get_by_id.return_value = None
+        bot_repo.get_by_id_and_owner.return_value = None
 
         skill_service = MagicMock()
         skill_service.activate_skill = AsyncMock(return_value=True)
