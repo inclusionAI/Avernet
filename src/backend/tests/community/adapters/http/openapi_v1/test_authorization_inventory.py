@@ -323,7 +323,14 @@ def test_scaffolding_burn_down_is_reported():
 #: The modules a ``ServiceChecked`` row may still cite once this feature lands.
 #:
 #: Four operations are deferred, each for a reason recorded in ``spec.md``'s
-#: *Out of Scope*, and nothing else may join them. Harness cannot be adjudicated
+#: *Out of Scope*, and nothing else may join them.
+#:
+#: **Two of these strings are forward references.** The table does not cite
+#: ``local_skill_query_service`` or ``local_skill_upload_service`` yet — Task 9
+#: writes them when it corrects the three skills rows that today cite
+#: ``bot_skill_asset_service`` and are not checked there. Task 9 must use these
+#: spellings exactly; a different one leaves this set unsatisfiable and is
+#: caught when Task 15 removes the ``xfail``. Harness cannot be adjudicated
 #: as it stands — its handlers act on a bot from the request body. The three
 #: skills rows share their checks with six retiring addresses the seam cannot
 #: reach, so migrating them would uncover those. Connection guards what may be
