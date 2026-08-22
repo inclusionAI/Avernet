@@ -11,8 +11,7 @@ exercise a real route end to end (see
 """
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock, patch
-import asyncio
+from unittest.mock import MagicMock
 
 
 class TestSkillSetAutoActivateDeviceRouting:
@@ -35,12 +34,8 @@ class TestSkillSetAutoActivateDeviceRouting:
         device_plugin = MagicMock()
         path_factory = MagicMock()
 
-        # Mock get_by_id 返回带 owner_id 的 bot
-        def mock_get_bot(bot_id):
-            bot = MagicMock()
-            bot.get.return_value = "staff_197444"
-            return bot
-        bot_repo.get_by_id = mock_get_bot
+        # Runtime routing resolves the addressed Bot by (bot_id, owner_id).
+        bot_repo.get_by_id_and_owner.return_value = {"owner_id": "staff_197444"}
 
         # 路径
         test_path = Path("/tmp/test_passes")
@@ -98,7 +93,7 @@ class TestSkillSetAutoActivateDeviceRouting:
         service._sync_symlinks_to_device_if_needed = MagicMock(return_value=True)
 
         # 执行添加 skill 到已激活的技能集
-        result = await service.add_skills_to_set(
+        await service.add_skills_to_set(
             skill_set_id="1",
             skill_ids=["1"],
             user_id="197444"
@@ -135,12 +130,8 @@ class TestSkillSetAutoActivateDeviceRouting:
         path_factory = MagicMock()
 
         # 协作模式：entity_id 是 team_xxx，但 owner_id 应该是管理员的 staff 号
-        def mock_get_bot_collab(bot_id):
-            bot = MagicMock()
-            # 返回 owner_id（服务Bot 的 owner）
-            bot.get.side_effect = lambda k, d=None: {"owner_id": "staff_999999"}.get(k, d)
-            return bot
-        bot_repo.get_by_id = mock_get_bot_collab
+        # 返回 owner_id（服务Bot 的 owner）
+        bot_repo.get_by_id_and_owner.return_value = {"owner_id": "staff_999999"}
 
         test_path = Path("/tmp/test_collab")
         test_path.mkdir(parents=True, exist_ok=True)
@@ -193,7 +184,7 @@ class TestSkillSetAutoActivateDeviceRouting:
         service.mcp_center.get_mcp_by_skill_set.return_value = []
         service._sync_symlinks_to_device_if_needed = MagicMock(return_value=True)
 
-        result = await service.add_skills_to_set(
+        await service.add_skills_to_set(
             skill_set_id="1",
             skill_ids=["1"],
             user_id="197444"
@@ -224,8 +215,8 @@ class TestSkillSetAutoActivateDeviceRouting:
         device_plugin = MagicMock()
         path_factory = MagicMock()
 
-        # get_by_id 返回 None（查不到 bot）
-        bot_repo.get_by_id.return_value = None
+        # 精确 owner-qualified lookup 查不到 Bot。
+        bot_repo.get_by_id_and_owner.return_value = None
 
         test_path = Path("/tmp/test_fallback")
         test_path.mkdir(parents=True, exist_ok=True)
@@ -278,7 +269,7 @@ class TestSkillSetAutoActivateDeviceRouting:
         service.mcp_center.get_mcp_by_skill_set.return_value = []
         service._sync_symlinks_to_device_if_needed = MagicMock(return_value=True)
 
-        result = await service.add_skills_to_set(
+        await service.add_skills_to_set(
             skill_set_id="1",
             skill_ids=["1"],
             user_id="197444"
@@ -570,4 +561,3 @@ class TestActivationFailedVisibility:
         shutil.rmtree("/tmp/test_empty", ignore_errors=True)
         shutil.rmtree("/tmp/test_repo_empty", ignore_errors=True)
         shutil.rmtree("/tmp/test_local_empty", ignore_errors=True)
-

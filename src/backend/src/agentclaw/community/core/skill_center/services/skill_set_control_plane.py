@@ -157,7 +157,7 @@ class SkillSetControlPlaneService:
                 description=description,
             )
         if bot_id != "default":
-            raise LocalSkillNotFoundError()
+            raise SkillSetControlPlaneNotFoundError()
         if actor_id != owner_id:
             raise SkillSetAccessDeniedError()
 
