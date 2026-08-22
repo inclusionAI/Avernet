@@ -499,6 +499,12 @@
         "run_id": { "$ref": "#/$defs/OpaqueId" },
         "node_id": { "$ref": "#/$defs/OpaqueId" },
         "attempt": { "$ref": "#/$defs/NonNegativeInteger" },
+        "predecessor_node_ids": {
+          "type": "array",
+          "description": "All direct predecessor node IDs in the run definition. Empty for an initial node. Events recorded before this field was introduced may omit it.",
+          "items": { "$ref": "#/$defs/OpaqueId" },
+          "uniqueItems": true
+        },
         "assignee_id": { "$ref": "#/$defs/OpaqueId" },
         "started_at": { "$ref": "#/$defs/Timestamp" },
         "timeout_deadline": { "$ref": "#/$defs/Timestamp" }
