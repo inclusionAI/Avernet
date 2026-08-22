@@ -5,13 +5,15 @@ create_group 三态(chat/manager_worker/state_machine);state_machine 强制 star
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
 
@@ -98,7 +100,45 @@ def _map_status(resp: httpx.Response) -> None:
 class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing + REST); exercised by singlebox/corp acceptance / 联调, not CI LOCAL line coverage
     def __init__(self, token: BcsTokenProvider, *, http_client: httpx.AsyncClient | None = None) -> None:
         self._t = token
+        self._owns_client = http_client is None
         self._client = http_client or httpx.AsyncClient(base_url=token.base_url)
+        # An httpx AsyncClient/connection pool is not safe to share across
+        # asyncio event loops. The task module has a FastAPI loop plus poller
+        # and harness loops, so keep the owned client pinned to the first loop
+        # and use a short-lived client whenever a different loop calls us.
+        self._client_loop: asyncio.AbstractEventLoop | None = None
+
+    @asynccontextmanager
+    async def _client_for_current_loop(self) -> AsyncIterator[httpx.AsyncClient]:
+        """Yield an AsyncClient that belongs to the current event loop."""
+        current_loop = asyncio.get_running_loop()
+        if not self._owns_client:
+            # Injected clients are test/custom transport ownership; preserve
+            # their lifecycle and behavior exactly as before.
+            yield self._client
+            return
+
+        if self._client_loop is None:
+            self._client_loop = current_loop
+            yield self._client
+            return
+
+        if self._client_loop is current_loop:
+            yield self._client
+            return
+
+        # Do not move the persistent pool to another loop. A per-call client
+        # is safe here and is closed on the loop that created it.
+        logger.warning(
+            "[bcs_http] event loop changed; using isolated client previous_loop=%s current_loop=%s",
+            id(self._client_loop),
+            id(current_loop),
+        )
+        client = httpx.AsyncClient(base_url=self._t.base_url)
+        try:
+            yield client
+        finally:
+            await client.aclose()
 
     def _sign(self, method: str, path: str, ts: str) -> dict[str, str]:
         sig = hmac.new(self._t.secret.encode(), f"{ts}{method}{path}".encode(), hashlib.sha256).hexdigest()
@@ -117,7 +157,8 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
             method, path, sorted((json or {}).keys()), bool(idempotency_key),
         )
         try:
-            r = await self._client.request(method, path, json=json, headers=headers)
+            async with self._client_for_current_loop() as client:
+                r = await client.request(method, path, json=json, headers=headers)
         except Exception:
             logger.exception("[bcs_http] request transport failed method=%s path=%s", method, path)
             raise
@@ -186,7 +227,8 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         params: dict[str, Any] = {"limit": limit}
         if since_msg_id:
             params["since_msg_id"] = since_msg_id
-        r = await self._client.request("GET", path, params=params, headers=headers)
+        async with self._client_for_current_loop() as client:
+            r = await client.request("GET", path, params=params, headers=headers)
         _map_status(r)
         return r.json()
 
@@ -228,7 +270,8 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
             params["task_claim_mode"] = "true" if claim else "false"
         if dream is not None:
             params["task_dream_mode"] = "true" if dream else "false"
-        r = await self._client.request("GET", path, params=params, headers=headers)
+        async with self._client_for_current_loop() as client:
+            r = await client.request("GET", path, params=params, headers=headers)
         _map_status(r)
         items = r.json().get("items", [])
         return [BotTaskModeRoster(
