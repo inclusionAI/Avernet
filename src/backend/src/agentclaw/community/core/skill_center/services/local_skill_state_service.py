@@ -38,12 +38,6 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectionReconcilerProtocol,
 )
-from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
-    BotCapabilityMutationBusyError,
-    BotCapabilityMutationGuard,
-    BotCapabilityMutationLease,
-    BotCapabilityMutationLockUnavailableError,
-)
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
@@ -81,7 +75,6 @@ class LocalSkillStateService:
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_set_service_factory: SkillSetServiceFactory,
-        mutation_guard: BotCapabilityMutationGuard,
         edit_guard: SkillsPoolEditGuard,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
         skill_set_repo: SkillSetRepository,
@@ -92,7 +85,6 @@ class LocalSkillStateService:
         self._bot_repo = bot_repo
         self._collaborators = collaborator_service
         self._skill_set_service_factory = skill_set_service_factory
-        self._mutation_guard = mutation_guard
         self._edit_guard = edit_guard
         self._pool_skills = pool_skills
         self._skill_set_repo = skill_set_repo
@@ -103,87 +95,74 @@ class LocalSkillStateService:
     ) -> dict[str, Any]:
         scope = self._discover_scope(skill_id)
         try:
-            mutation_lease = self._mutation_guard.acquire(scope=scope)
-        except BotCapabilityMutationBusyError as exc:
+            lease = self._edit_guard.acquire_for_edit(scope=scope)
+        except SkillsPoolEditBusyError as exc:
             raise LocalSkillEditBusyError() from exc
-        except BotCapabilityMutationLockUnavailableError as exc:
+        except SkillsPoolEditRollbackError as exc:
+            raise LocalSkillLayoutRollbackError() from exc
+        except SkillsPoolEditLockUnavailableError as exc:
             raise LocalSkillEditLockUnavailableError() from exc
+        except SkillsPoolEditPausedError as exc:
+            raise LocalSkillEditPausedError() from exc
         try:
-            try:
-                lease = self._edit_guard.acquire_for_edit(scope=scope)
-            except SkillsPoolEditBusyError as exc:
-                raise LocalSkillEditBusyError() from exc
-            except SkillsPoolEditRollbackError as exc:
-                raise LocalSkillLayoutRollbackError() from exc
-            except SkillsPoolEditLockUnavailableError as exc:
-                raise LocalSkillEditLockUnavailableError() from exc
-            except SkillsPoolEditPausedError as exc:
-                raise LocalSkillEditPausedError() from exc
-            try:
-                skill, bot, owner_id, bot_id = self._authorize(skill_id, actor_id)
-                self._reject_ordinary_skill_set_member(skill_id=skill_id, bot_id=bot_id)
-                if self._scope_for(bot, bot_id) != scope:
-                    raise LocalSkillNotFoundError()
-                if not is_bot_ready(bot):
-                    raise LocalSkillNotReadyError()
-                command = self._runtime_command(active=active)
-                mode = require_bot_skill_runtime_command(bot, command)
-                changed = self._write_desired_state(
-                    active=active,
-                    env=str(bot["env"]),
+            skill, bot, owner_id, bot_id = self._authorize(skill_id, actor_id)
+            self._reject_ordinary_skill_set_member(skill_id=skill_id, bot_id=bot_id)
+            if self._scope_for(bot, bot_id) != scope:
+                raise LocalSkillNotFoundError()
+            if not is_bot_ready(bot):
+                raise LocalSkillNotReadyError()
+            command = self._runtime_command(active=active)
+            mode = require_bot_skill_runtime_command(bot, command)
+            changed = self._write_desired_state(
+                active=active,
+                env=str(bot["env"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                skill_id=skill_id,
+            )
+
+            if active:
+                synced = await self._reconcile_runtime(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    command=command,
+                    mode=mode,
+                )
+            else:
+                synced = await self._reconcile_deactivation(
+                    skill=skill,
                     owner_id=owner_id,
                     bot_id=bot_id,
-                    skill_id=skill_id,
+                    command=command,
+                    mode=mode,
                 )
-                self._ensure_mutation_lease(mutation_lease)
-
-                if active:
-                    synced = await self._reconcile_runtime(
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        command=command,
-                        mode=mode,
-                    )
-                else:
-                    synced = await self._reconcile_deactivation(
-                        skill=skill,
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        command=command,
-                        mode=mode,
-                    )
-                self._ensure_mutation_lease(mutation_lease)
-                if not synced:
-                    if changed:
-                        self._ensure_mutation_lease(mutation_lease)
-                        try:
-                            self._write_desired_state(
-                                active=not active,
-                                env=str(bot["env"]),
-                                owner_id=owner_id,
-                                bot_id=bot_id,
-                                skill_id=skill_id,
-                            )
-                        except Exception as exc:
-                            raise LocalSkillStorageError() from exc
-                        # Restore through the established runtime synchronizer.
-                        # It owns each engine's actual active-root compatibility,
-                        # including Claude Code's historical workspace root.
-                        restored = await self._reconcile_runtime(
-                            bot_id=bot_id,
+            if not synced:
+                if changed:
+                    try:
+                        self._write_desired_state(
+                            active=not active,
+                            env=str(bot["env"]),
                             owner_id=owner_id,
-                            command=command,
-                            mode=mode,
+                            bot_id=bot_id,
+                            skill_id=skill_id,
                         )
-                        self._ensure_mutation_lease(mutation_lease)
-                        if not restored:
-                            raise LocalSkillRuntimeSyncError()
-                    raise LocalSkillRuntimeSyncError()
-                return {**skill, "active": active, "changed": changed}
-            finally:
-                self._edit_guard.release(lease)
+                    except Exception as exc:
+                        raise LocalSkillStorageError() from exc
+                    # Restore through the established runtime synchronizer.
+                    # It owns each engine's actual active-root compatibility,
+                    # including Claude Code's historical workspace root.
+                    restored = await self._reconcile_runtime(
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        command=command,
+                        mode=mode,
+                    )
+                    if not restored:
+                        raise LocalSkillRuntimeSyncError()
+                raise LocalSkillRuntimeSyncError()
+            return {**skill, "active": active, "changed": changed}
         finally:
-            self._mutation_guard.release(mutation_lease)
+            self._edit_guard.release(lease)
 
     async def set_repo_skill_active(
         self,
@@ -220,40 +199,63 @@ class LocalSkillStateService:
         mode = self._require_repo_runtime_command(bot, command)
         scope = self._scope_for(bot, bot_id)
         try:
-            mutation_lease = self._mutation_guard.acquire(scope=scope)
-        except BotCapabilityMutationBusyError as exc:
+            lease = self._edit_guard.acquire_for_edit(scope=scope)
+        except SkillsPoolEditBusyError as exc:
             raise LocalSkillEditBusyError() from exc
-        except BotCapabilityMutationLockUnavailableError as exc:
+        except SkillsPoolEditRollbackError as exc:
+            raise LocalSkillLayoutRollbackError() from exc
+        except SkillsPoolEditLockUnavailableError as exc:
             raise LocalSkillEditLockUnavailableError() from exc
+        except SkillsPoolEditPausedError as exc:
+            raise LocalSkillEditPausedError() from exc
         try:
+            self._require_no_normal_skill_set_membership(
+                skill_id=skill_id,
+                bot=bot,
+                owner_id=owner_id,
+                bot_id=bot_id,
+            )
+            if active:
+                self._require_no_runtime_name_conflict(
+                    skill=raw, bot=bot, owner_id=owner_id, bot_id=bot_id
+                )
             try:
-                lease = self._edit_guard.acquire_for_edit(scope=scope)
-            except SkillsPoolEditBusyError as exc:
-                raise LocalSkillEditBusyError() from exc
-            except SkillsPoolEditRollbackError as exc:
-                raise LocalSkillLayoutRollbackError() from exc
-            except SkillsPoolEditLockUnavailableError as exc:
-                raise LocalSkillEditLockUnavailableError() from exc
-            except SkillsPoolEditPausedError as exc:
-                raise LocalSkillEditPausedError() from exc
-            try:
-                # Membership and Installation are guarded by the same Bot
-                # mutation lease.  Rechecking below avoids accepting stale
-                # Direct state while a SkillSet command changes the Resolver
-                # input for this Bot.
-                self._require_no_normal_skill_set_membership(
-                    skill_id=skill_id,
-                    bot=bot,
+                changed = self._write_desired_state(
+                    active=active,
+                    env=str(bot["env"]),
                     owner_id=owner_id,
                     bot_id=bot_id,
+                    skill_id=skill_id,
                 )
-                if active:
-                    self._require_no_runtime_name_conflict(
-                        skill=raw, bot=bot, owner_id=owner_id, bot_id=bot_id
-                    )
+            except Exception as exc:
+                raise LocalSkillStorageError() from exc
+            if active:
+                synced = await self._reconcile_runtime(
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    command=command,
+                    mode=mode,
+                )
+            else:
+                synced = await self._reconcile_deactivation(
+                    skill=raw,
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    command=command,
+                    mode=mode,
+                )
+            if synced:
+                return {
+                    **raw,
+                    "bolt_id": bot_id,
+                    "user_id": owner_id,
+                    "active": active,
+                    "changed": changed,
+                }
+            if changed:
                 try:
-                    changed = self._write_desired_state(
-                        active=active,
+                    self._write_desired_state(
+                        active=not active,
                         env=str(bot["env"]),
                         owner_id=owner_id,
                         bot_id=bot_id,
@@ -261,56 +263,16 @@ class LocalSkillStateService:
                     )
                 except Exception as exc:
                     raise LocalSkillStorageError() from exc
-                self._ensure_mutation_lease(mutation_lease)
-                if active:
-                    synced = await self._reconcile_runtime(
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        command=command,
-                        mode=mode,
-                    )
-                else:
-                    synced = await self._reconcile_deactivation(
-                        skill=raw,
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        command=command,
-                        mode=mode,
-                    )
-                self._ensure_mutation_lease(mutation_lease)
-                if synced:
-                    return {
-                        **raw,
-                        "bolt_id": bot_id,
-                        "user_id": owner_id,
-                        "active": active,
-                        "changed": changed,
-                    }
-                if changed:
-                    self._ensure_mutation_lease(mutation_lease)
-                    try:
-                        self._write_desired_state(
-                            active=not active,
-                            env=str(bot["env"]),
-                            owner_id=owner_id,
-                            bot_id=bot_id,
-                            skill_id=skill_id,
-                        )
-                    except Exception as exc:
-                        raise LocalSkillStorageError() from exc
-                    if not await self._reconcile_runtime(
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        command=command,
-                        mode=mode,
-                    ):
-                        raise LocalSkillRuntimeSyncError()
-                    self._ensure_mutation_lease(mutation_lease)
-                raise LocalSkillRuntimeSyncError()
-            finally:
-                self._edit_guard.release(lease)
+                if not await self._reconcile_runtime(
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    command=command,
+                    mode=mode,
+                ):
+                    raise LocalSkillRuntimeSyncError()
+            raise LocalSkillRuntimeSyncError()
         finally:
-            self._mutation_guard.release(mutation_lease)
+            self._edit_guard.release(lease)
 
     def _discover_scope(self, skill_id: str) -> BotSkillLayoutScope:
         """Find only the lock identity before serializing the authoritative read."""
@@ -325,12 +287,6 @@ class LocalSkillStateService:
         if bot is None:
             raise LocalSkillNotFoundError()
         return self._scope_for(bot, bot_id)
-
-    def _ensure_mutation_lease(self, lease: BotCapabilityMutationLease) -> None:
-        try:
-            self._mutation_guard.ensure_valid(lease)
-        except BotCapabilityMutationLockUnavailableError as exc:
-            raise LocalSkillEditLockUnavailableError() from exc
 
     def _authorize(
         self, skill_id: str, actor_id: str

@@ -163,15 +163,8 @@ class SkillSetRuntimeReconcileError(DomainError):
     def __init__(self, detail: str = "Skill set runtime sync failed") -> None:
         super().__init__(detail)
 
-
 class SkillSetControlPlaneLockUnavailableError(DomainError):
-    """The Bot capability mutation fence is unavailable; mutation failed closed.
-
-    The mutation never started, so the caller may retry once the fence is
-    reachable again. That is a conflict with the current state of the Bot, not
-    the service being out of rotation — see the status map for why this is not
-    a 503.
-    """
+    """The runtime layout edit boundary is unavailable; mutation failed closed."""
 
     def __init__(self, detail: str = "Skill set mutation unavailable") -> None:
         super().__init__(detail)

@@ -198,21 +198,6 @@ class _Guard:
         return True
 
 
-class _MutationGuard:
-    def __init__(self) -> None:
-        self.releases = 0
-
-    def acquire(self, *, scope):
-        return object()
-
-    def ensure_valid(self, _lease) -> None:
-        return None
-
-    def release(self, _lease):
-        self.releases += 1
-        return True
-
-
 class _Runtime:
     def __init__(self, success: bool) -> None:
         self.success = success
@@ -372,14 +357,12 @@ def _service(
     pool_layout: bool = False,
     guard_error=None,
     guard_release_error: Exception | None = None,
-    mutation_guard=None,
     engine: str = "openclaw",
     bot_type: str | None = None,
 ):
     skills = _Skills(active=active, git_path=git_path)
     sets = _Sets(skills, associated=associated)
     guard = _Guard(on_acquire, guard_release_error)
-    mutation_guard = mutation_guard or _MutationGuard()
     if guard_error is not None:
 
         def fail_acquire(*, scope):
@@ -395,7 +378,6 @@ def _service(
         _Bots(status, entity_id, engine=engine, bot_type=bot_type),
         collaborators or _Collaborators(),
         factory,
-        mutation_guard,
         guard,
         skills,
         sets,
@@ -419,31 +401,26 @@ def _service(
 async def test_state_change_maps_guard_failures_to_public_domain_errors(
     guard_error, expected_error
 ):
-    mutation_guard = _MutationGuard()
     service, _skills, _sets, _guard, _runtime, _factory = _service(
-        guard_error=guard_error, mutation_guard=mutation_guard
+        guard_error=guard_error
     )
 
     with pytest.raises(expected_error):
         await service.set_local_skill_active(
             skill_id="9", actor_id="owner", active=True
         )
-    assert mutation_guard.releases == 1
 
 
 @pytest.mark.asyncio
-async def test_mutation_lease_releases_when_pool_guard_release_fails():
-    mutation_guard = _MutationGuard()
+async def test_pool_guard_release_failure_propagates():
     service, _skills, _sets, _guard, _runtime, _factory = _service(
         guard_release_error=RuntimeError("pool release failed"),
-        mutation_guard=mutation_guard,
     )
 
     with pytest.raises(RuntimeError, match="pool release failed"):
         await service.set_local_skill_active(
             skill_id="9", actor_id="owner", active=True
         )
-    assert mutation_guard.releases == 1
 
 
 @pytest.mark.asyncio
@@ -589,7 +566,6 @@ def _repo_service(
         _RepoBots(bot_type=bot_type, engine=engine),
         _Collaborators(),
         factory,
-        _MutationGuard(),
         guard,
         skills,
         factory.set_service,
@@ -611,7 +587,6 @@ async def test_repo_direct_accepts_shared_scanner_sentinel_and_reconciles():
     assert installations.events == ["install:pre:bot:9"]
     assert runtime.calls == 0
     assert len(runtime.publish_calls) == len(runtime.verify_calls) == 1
-    assert service._mutation_guard.releases == 1
 
 
 @pytest.mark.asyncio

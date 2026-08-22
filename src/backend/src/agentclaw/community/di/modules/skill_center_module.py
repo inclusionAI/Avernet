@@ -125,9 +125,6 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectionReconcilerProtocol as CoreBotRuntimeProjectionReconcilerProtocol,
 )
-from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
-    BotCapabilityMutationGuard,
-)
 from agentclaw.community.core.skill_center.services.active_skillset_installation_materializer import (
     ActiveSkillSetInstallationMaterializer,
 )
@@ -329,9 +326,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             scope=singleton,
         )
         binder.bind(
-            BotCapabilityMutationGuard, to=BotCapabilityMutationGuard, scope=singleton
-        )
-        binder.bind(
             BotCapabilityAuthorizationHookProtocol,
             to=CollaboratorBotCapabilityAuthorizationHook,
             scope=singleton,
@@ -473,7 +467,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_set_service_factory: SkillSetServiceFactory,
-        mutation_guard: BotCapabilityMutationGuard,
         edit_guard: SkillsPoolEditGuard,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
         runtime_reconciler: CoreBotRuntimeProjectionReconcilerProtocol,
@@ -484,7 +477,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             bot_repo,
             collaborator_service,
             skill_set_service_factory,
-            mutation_guard,
             edit_guard,
             pool_skills,
             skill_set_repo,
