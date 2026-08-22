@@ -82,6 +82,13 @@ fn event_timestamp(milliseconds: u64) -> Result<String, CollaborationRuntimeErro
     })
 }
 
+fn predecessor_node_ids(compiled: &CompiledStateMachine, node_id: &str) -> Vec<String> {
+    let mut predecessor_node_ids = compiled.upstreams.get(node_id).cloned().unwrap_or_default();
+    predecessor_node_ids.sort();
+    predecessor_node_ids.dedup();
+    predecessor_node_ids
+}
+
 fn content_value(value: Value) -> Result<Value, CollaborationRuntimeError> {
     let size = serde_json::to_vec(&value)
         .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
@@ -534,6 +541,10 @@ impl CollaborationRuntime {
             ("node_id".to_string(), serde_json::json!(node_id)),
             ("attempt".to_string(), serde_json::json!(node_run.attempt)),
             (
+                "predecessor_node_ids".to_string(),
+                serde_json::json!(predecessor_node_ids(compiled, node_id)),
+            ),
+            (
                 "started_at".to_string(),
                 serde_json::json!(event_timestamp(now)?),
             ),
@@ -719,6 +730,10 @@ impl CollaborationRuntime {
                 ("run_id".to_string(), serde_json::json!(run.run_id.clone())),
                 ("node_id".to_string(), serde_json::json!(node_id)),
                 ("attempt".to_string(), serde_json::json!(attempt)),
+                (
+                    "predecessor_node_ids".to_string(),
+                    serde_json::json!(predecessor_node_ids(compiled, node_id)),
+                ),
                 (
                     "assignee_id".to_string(),
                     serde_json::json!(assignee_bot_id.clone()),
