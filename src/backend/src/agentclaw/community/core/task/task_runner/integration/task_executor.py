@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 _DISPATCH_CONCURRENCY = 8
 _BCS_PARTICIPANT_ROLES = {"driver", "consultant", "manager", "worker", "observer"}
 
+# BCN 协作群事件回调投递路径:投到 task 模块的 `/api/v1/collaboration/tasks/callback/report`
+# (主 router 的 report 回投路由),该路由 ``callback.report_result`` → ``on_report`` 驱动图态(收口 DONE)。
+# 注:该路由按 ``TaskCallbackDataDTO``(loop_task_id + result{success,...})校验 body;BCS event_subscriptions
+# 推的是 CloudEvent(event_type/scope/data,无 loop_task_id)。要让 CloudEvent 真能走通,需在 /callback/report
+# 侧把 CloudEvent 适配成 TaskCallbackDataDTO(或让该路由兼容 CloudEvent),否则会 422。
+_BCN_EVENT_CALLBACK_PATH = "/api/v1/collaboration/tasks/callback/report"
+
 
 class TaskExecutor:
     def __init__(self, *, bot, bcs, formatter, context, sink, poller, identity_resolver=None, graph=None) -> None:
@@ -210,7 +217,9 @@ class TaskExecutor:
                     }
                     for binding, spec in raw_bindings.items()
                 }
-            req_kwargs["start_initial_run"] = False
+            # 默认让 BCS 建群即自动开跑初始状态机(YAML 路径 + 动态派发均如此);
+            # 调用方可经 extend_props["start_initial_run"]=False 显式关闭、改为手动 start_state_machine_run。
+            req_kwargs["start_initial_run"] = bool(gf.extend_props.get("start_initial_run", True))
             # state_machine 群需 opening_message(task-loop panel),taskId = 任务ID
             _task_id = gf.extend_props.get("task_id")
             if _task_id:
@@ -234,6 +243,20 @@ class TaskExecutor:
         service_spec = gf.extend_props.get("service_spec")
         if service_spec:
             req_kwargs["service_spec"] = service_spec
+        # BCN 事件回调订阅(创建协作群入参 event_subscriptions):BCS 把 state_machine.* 等 CloudEvent
+        # 推到本后端 task 模块回调路径。sink.url = api_base_url + 回调路径(api_base_url 去尾斜杠)。
+        _api_base = gf.extend_props.get("api_base_url")
+        if _api_base:
+            req_kwargs["event_subscriptions"] = [{
+                "name": "group-webhook",
+                "event_filters": ["group.*", "session.*", "task.*", "state_machine.*", "message.created"],
+                "payload": {"mode": "metadata_only"},
+                "sink": {
+                    "type": "webhook",
+                    "url": str(_api_base).rstrip("/") + _BCN_EVENT_CALLBACK_PATH,
+                    "request_timeout_ms": 2000,
+                },
+            }]
         req = BcsCreateGroupRequest(**req_kwargs)
         res = await self._bcs.create_group(req)
         self._group_meta[res.group_id] = {

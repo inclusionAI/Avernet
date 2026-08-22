@@ -150,6 +150,9 @@ async def report_callback(
     """执行实体(bot workflow / bcn 协作群)PUSH 回投 → 适配层 → 编排核 on_report → 翻态推进。
 
     领域异常(TaskStateError/TaskNotFoundError…)上抛 → ``@envelope_errors`` 映射。"""
+
+    logger.info("[callback_report] callback data log: " + str(body))
+    print("[callback_report] callback data print: " + str(body))
     data = callback_from_dto(body)
     await callback.report_result(data)
     return envelope({"ok": True}, request)

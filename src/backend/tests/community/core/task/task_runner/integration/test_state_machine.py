@@ -10,7 +10,9 @@ from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter impo
     BcsCreateGroupResult, BcsHttpAdapter,
 )
 from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
-from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.task_executor import (
+    TaskExecutor, _BCN_EVENT_CALLBACK_PATH,
+)
 from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (
     _DoubleBcsBotIdentityResolver,
 )
@@ -184,3 +186,26 @@ def test_get_group_session_reads_latest_running_session_id_not_create():
     sid = _run(exe.get_group_session("grp-1"))
     assert sid == "sess-latest"
     assert not bcs.create_called
+
+
+def test_form_coop_group_subscribes_bcn_event_callback_with_api_base_url():
+    """form_coop_group 用 api_base_url + task 回调路径订阅 BCN 事件 webhook(event_subscriptions.sink.url)。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["drv"], collab_mode="state_machine",
+        members_info=[{"bot_id": "drv", "role": "manager"}],
+        extend_props={"collaboration_definition_yaml": "kind: collab",
+                      "api_base_url": "https://cb.example.com/"},
+    )))
+    subs = bcs.created_req.event_subscriptions
+    assert subs and len(subs) == 1
+    sub = subs[0]
+    assert sub["name"] == "group-webhook"
+    assert sub["sink"]["type"] == "webhook"
+    # api_base_url 去尾斜杠 + 回调路径
+    assert sub["sink"]["url"] == "https://cb.example.com" + _BCN_EVENT_CALLBACK_PATH
+    assert sub["sink"]["url"].endswith("/api/v1/collaboration/tasks/callback/report")
+    assert sub["payload"] == {"mode": "metadata_only"}
+    assert "state_machine.*" in sub["event_filters"]

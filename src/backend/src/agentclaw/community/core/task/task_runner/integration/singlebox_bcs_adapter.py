@@ -44,6 +44,8 @@ class SingleboxBcsAdapter(BcsHttpAdapter):  # pragma: no cover — live singlebo
                 body["participant_bindings"] = req.participant_bindings
         elif req.group_strategy:
             body["group_strategy"] = req.group_strategy
+        if req.event_subscriptions:
+            body["event_subscriptions"] = req.event_subscriptions
         for opt in ("context", "topic", "service_spec", "originator", "visibility"):
             v = getattr(req, opt)
             if v is not None:

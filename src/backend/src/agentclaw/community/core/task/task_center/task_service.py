@@ -175,6 +175,8 @@ class TaskService:
                 "definition_yaml": ec.get("yaml"),
                 "task_id": task_id,
                 "api_base_url": self._api_base_url,
+                # YAML 路径不手动 start_state_machine_run:让 BCS 建群即自动开跑初始状态机。
+                "start_initial_run": True,
                 # 逻辑角色→产品 bot 绑定为创建 bcn 协作群接口的入参(非 yaml 模板内字段):
                 # 经 execution_config 透传 → TaskExecutor.form_coop_group 注入 BCS create_group
                 # (state_machine participant_bindings)。群 master 复用底层 driver_bot(bot_ids[0]=owner)。
@@ -194,7 +196,8 @@ class TaskService:
         self._persist_node_run(task_id, task_info, run_mode="coop_group",
                                assignee=start.group_id, session_id=start.session_id,
                                extend_props=run_extend)
-        return TaskOpResult(task_id=task_id, success=True, run_id=run_id)
+        extend_props = {"group_id": start.group_id}
+        return TaskOpResult(task_id=task_id, success=True, run_id=run_id, extend_props=extend_props)
 
     def _persist_node_run(self, task_id, task_info, *, run_mode, assignee, session_id,
                           extend_props=None):

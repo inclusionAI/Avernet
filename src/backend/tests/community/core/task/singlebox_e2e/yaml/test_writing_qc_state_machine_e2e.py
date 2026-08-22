@@ -252,12 +252,20 @@ class TestWritingQcStateMachineE2E(unittest.TestCase):
                 pr.raise_for_status()
                 g = pr.json().get("data") or {}
                 tasks = g.get("tasks") or []
-                snap = [
-                    (t.get("node_id"), t.get("status"),
-                     (t.get("run_info") or {}).get("run_mode") or "",
-                     str((t.get("run_info") or {}).get("assignee") or "")[:24])
-                    for t in tasks
-                ]
+                snap = []
+                for t in tasks:
+                    ri = t.get("run_info") or {}
+                    snap.append({
+                        "node_id": t.get("node_id"),
+                        "status": t.get("status"),
+                        "run_mode": ri.get("run_mode") or "",
+                        "assignee": str(ri.get("assignee") or "")[:32],
+                        # extend_props 含 group_id / run_id(state_machine)/ session_id(chat);
+                        # acceptance_result.verdict 看 PASS/FAIL。
+                        "extend_props": ri.get("extend_props") or {},
+                        "exec_error": ri.get("exec_error"),
+                        "verdict": (ri.get("acceptance_result") or {}).get("verdict"),
+                    })
                 print(f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} nodes={snap}")
                 if g.get("status") in ("DONE", "HUNG"):
                     break

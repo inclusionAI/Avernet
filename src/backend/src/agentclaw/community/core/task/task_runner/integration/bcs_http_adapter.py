@@ -51,6 +51,7 @@ class BcsCreateGroupRequest:
     originator: str | None = None
     visibility: str | None = None
     opening_message: dict[str, Any] | None = None
+    event_subscriptions: list[dict[str, Any]] | None = None    # 内联事件订阅(回调 webhook);BCS 把 CloudEvent 推到 sink.url
 
 
 @dataclass
@@ -119,6 +120,8 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
                 body["opening_message"] = req.opening_message
         elif req.group_strategy:
             body["group_strategy"] = req.group_strategy
+        if req.event_subscriptions:
+            body["event_subscriptions"] = req.event_subscriptions
         for opt in ("context", "topic", "service_spec", "originator", "visibility"):
             v = getattr(req, opt)
             if v is not None:

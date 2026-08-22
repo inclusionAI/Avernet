@@ -279,6 +279,7 @@ class TaskOpResult:
     success: bool
     error: str | None = None
     run_id: int | None = None
+    extend_props: dict | None = None
 
 
 @dataclass
