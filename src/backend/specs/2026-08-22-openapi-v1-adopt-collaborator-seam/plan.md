@@ -78,21 +78,58 @@ that nothing *refuses* a `Check` row on an operation that does not qualify.
 
 ### Prerequisite — keep the legacy skills addresses checked
 
-`deprecated/skills.py` already resolves the bot from the skill record and checks
-the *grant* there, calling itself the place that mechanism "moves here and dies
-here". The collaborator check joins it, so deleting the service-side check in
-Task 10 does not silently uncover six retiring addresses.
+Today these six are checked by accident: they call the same handlers as their
+replacements, and those handlers go through `bot_skill_asset_service`, which
+does the collaborator check. Task 9 deletes it from the service. So the check
+has to be somewhere the legacy addresses still reach, or six bot-scoped
+addresses go from checked to unchecked.
+
+The seam cannot be that somewhere. It is a **route-level dependency** — FastAPI
+runs it before the handler, holding only the raw request. Four of the six name
+no bot in the request at all; the bot is in the database, found by looking the
+skill up. The other two carry `bot_id` in the query, which the gate does not
+read.
+
+`deprecated/skills.py` can, because its code runs **inside** the request, after
+the lookup, already holding the bot and the owner. There are **two** insertion
+points, because the two shapes take different routes through the file:
 
 ```diff
-# .../openapi_v1/deprecated/skills.py:226 — _bot_behind
+# deprecated/skills.py:226 — _bot_behind, used by the four {skill_id} routes
      record = query_service.get_local_skill(skill_id=skill_id, actor_id=user_id)
      _require_skills_grant(caller, record)
-+    _require_skills_collaborator(collaborators, record, user_id=user_id)
++    _require_skills_collaborator(
++        collaborators, bot_id=record["bolt_id"], owner_id=record["user_id"],
++        user_id=user_id,
++    )
      return str(record["bolt_id"]), str(record["user_id"])
-# The collection and upload shims get the same call; they carry bot_id in the
-# query, which is enough for a check here even though it is not enough for the
-# gate, because this runs where the values are already resolved.
 ```
+
+```diff
+# deprecated/skills.py:109 — _check_collection_grant, used by the collection
+# and upload shims, which never touch _bot_behind
+ def _check_collection_grant(caller, *, bot_id, owner_id, user_id) -> None:
+-    if not caller.is_application:
+-        return
+-    caller.require_bot(bot_id, owner_id=owner_id or user_id)
++    if caller.is_application:
++        caller.require_bot(bot_id, owner_id=owner_id or user_id)
++    _require_skills_collaborator(
++        collaborators, bot_id=bot_id, owner_id=owner_id or user_id,
++        user_id=user_id,
++    )
+# The existing check is a *grant* check and returns immediately for a human
+# caller, so it covers none of the collaborator dimension on its own.
+```
+
+**This file has already been bitten by exactly this.** `_collection_shim`'s
+docstring records it: the replacements get their check from
+`dependencies=_GRANT_CHECKED` on their own routes, but `legacy_route` registers
+an *endpoint*, not a route, and route-level dependencies are not carried across
+— "*without `_check_collection_grant` an application holding no grant at all
+would read and write skills through them. That is not hypothetical: it is
+exactly what this file did for one commit, caught in review.*" Moving the skills
+group onto the seam is the same move that caused it, one dimension over.
 
 ### Per group — the shape of one migration
 

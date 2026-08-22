@@ -104,8 +104,9 @@ the table.
 - **Goal:** Carry the collaborator check into the `deprecated/` package before Task 9 deletes it from the service, so six retiring addresses are not silently uncovered.
 - **Files:** `.../openapi_v1/deprecated/skills.py`
 - **Done when:**
-  - [ ] `_bot_behind` (`:226`) performs the collaborator check beside the grant check it already performs, against the `(bot, owner)` it already resolves from the record.
-  - [ ] The collection and upload shims get the same check; their `bot_id` is a query parameter, which is enough here because this runs after resolution rather than before the handler.
+  - [ ] `_bot_behind` (`:226`) performs the collaborator check beside the grant check it already performs, against the `(bot, owner)` it already resolves from the record. This covers the four `{skill_id}` routes.
+  - [ ] `_check_collection_grant` (`:109`) performs it too, for the collection and upload shims — **they never call `_bot_behind`**, and the grant check there returns immediately for a human caller, so it covers none of the collaborator dimension on its own.
+  - [ ] Both call one shared helper, so the two paths cannot drift to different bars.
   - [ ] The module docstring is extended: it already says the second mechanism "moves here and dies here" about the grant; it now says the same about the collaborator bar, and why these six cannot be adjudicated (two carry the bot in the query, four resolve it from the skill).
   - [ ] All six rows stay `INHERITED` — the row is honest, because what governs them is not decided in the table.
   - [ ] A test drives each of the six and its replacement with the same caller and asserts identical admit/refuse and identical refusal bodies.
