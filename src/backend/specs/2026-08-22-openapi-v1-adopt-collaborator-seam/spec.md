@@ -73,21 +73,22 @@ rather than the deprecation schedule's.
       the level #1323 recorded, the difference is called out explicitly and
       argued, not silently adopted — **the rule is that the code decides and the
       row is corrected to match, never the reverse.**
-- [ ] Each of the 22 retiring `deprecated/` twins of an in-scope operation
-      refuses and admits the same callers as its replacement, asserted by test
-      rather than by inspection. Sixteen reach that by being adjudicated like
-      their replacement; the six legacy skills addresses reach it by keeping a
-      check inside the `deprecated/` package, because they cannot be
-      adjudicated — see below.
-- [ ] For every adjudicated operation, the bar is decided from the same two wire
-      values the handler acts on: the bot the request addresses, read from the
-      same part of the request the handler declares it in, and the same resolved
-      owner. No arrangement of request parameters can aim the check at one bot
-      while the handler acts on another.
-- [ ] An operation whose handler takes its bot from anywhere else — a body
-      field, say — **cannot** be adjudicated and must be refused an enforced row
-      rather than given one that does not match. This is a structural limit of
-      deciding the bar before the handler runs, not a gap to close later.
+- [ ] Each of the 22 old addresses under `deprecated/` still admits and refuses
+      exactly the callers its replacement does, proven by test rather than by
+      reading the code. Sixteen get there by being checked the same way as their
+      replacement. The other six — the old skills addresses — get there by
+      keeping a check inside the `deprecated/` package instead, because the seam
+      cannot check them at all (see the rule above).
+- [ ] The check and the handler use the same bot and the same owner. Both read
+      the bot from the URL path and the owner from the query string, so a caller
+      cannot have permission checked against one bot while the handler changes a
+      different one.
+- [ ] If a handler gets its bot from somewhere the check cannot read — from the
+      request body, for example — then that operation does **not** get a `Check`
+      row. `Check` means "the seam enforces this", and here the seam cannot, so
+      the row would be a false claim. Adding one makes the application refuse to
+      start. This is permanent, not a gap to close later: the check runs before
+      the handler, so it can only read what the request itself carries.
 - [ ] Every edit lock enforced today is still enforced afterwards, on the same
       operations, refusing the same callers.
 - [ ] No in-scope operation ends up unaudited, and none ends up audited twice for
