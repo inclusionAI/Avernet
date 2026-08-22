@@ -88,6 +88,7 @@ def svc():
     m = MagicMock()
     m.get_bot.return_value = BOT
     m.list_bots_by_conditions.return_value = {"total": 1, "items": [BOT]}
+    m.list_bots_by_owner_bot_pairs.return_value = {"total": 1, "items": [BOT]}
     m.check_bot_name_exists.return_value = True
     m.update_bot.return_value = {**BOT, "bot_name": "Renamed"}
     m.restart_bot.return_value = {**BOT, "status": "PENDING"}
@@ -241,8 +242,14 @@ def test_list_bots_filters_reach_service(client, svc):
 
 def test_search_bot_metadata_returns_only_display_fields(client, svc):
     response = client.post(
-        "/openapi/v1/bots/metadata/search?page=2&page_size=5",
-        json={"bot_ids": ["b1", "b1", "b2"]},
+        "/openapi/v1/bots/metadata/queries?page=2&page_size=5",
+        json={
+            "bots": [
+                {"bot_id": "b1", "owner_id": "u1"},
+                {"bot_id": "b1", "owner_id": "u1"},
+                {"bot_id": "b2", "owner_id": "u2"},
+            ]
+        },
     )
 
     assert response.status_code == 200
@@ -251,6 +258,7 @@ def test_search_bot_metadata_returns_only_display_fields(client, svc):
         "items": [
             {
                 "bot_id": "b1",
+                "owner_id": "u1",
                 "bot_name": "N",
                 "bot_desc": "D",
                 "engine": "teclaw",
@@ -259,18 +267,24 @@ def test_search_bot_metadata_returns_only_display_fields(client, svc):
             }
         ],
     }
-    assert svc.list_bots_by_conditions.call_args.kwargs == {
+    assert svc.list_bots_by_owner_bot_pairs.call_args.kwargs == {
         "page": 2,
         "page_size": 5,
-        "bot_ids": ["b1", "b2"],
+        "pairs": [("b1", "u1"), ("b2", "u2")],
     }
 
 
-@pytest.mark.parametrize("bot_ids", [[], [f"b{i}" for i in range(101)]])
-def test_search_bot_metadata_rejects_invalid_batch_size(client, bot_ids):
+@pytest.mark.parametrize(
+    "bots",
+    [
+        [],
+        [{"bot_id": f"b{i}", "owner_id": f"u{i}"} for i in range(101)],
+    ],
+)
+def test_search_bot_metadata_rejects_invalid_batch_size(client, bots):
     response = client.post(
-        "/openapi/v1/bots/metadata/search",
-        json={"bot_ids": bot_ids},
+        "/openapi/v1/bots/metadata/queries",
+        json={"bots": bots},
     )
 
     assert response.status_code == 422

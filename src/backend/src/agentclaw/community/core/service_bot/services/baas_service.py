@@ -3642,25 +3642,49 @@ class BaasService:  # pragma: no cover
         if stage == PublishStage.DRAFT.value:
             binding_id = bot.get("binding_id")
         elif stage in {PublishStage.VERIFY.value, PublishStage.ONLINE.value}:
-            if (
-                not isinstance(publish_id, int)
-                or isinstance(publish_id, bool)
-                or publish_id <= 0
-            ):
-                raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
-            record = self._bot_publish_repo.get_by_id(publish_id)
-            if (
-                record is None
-                or getattr(record, "source_bot_id", None) != bot_id
-                or getattr(record, "owner_id", None) != owner_user_id
-            ):
-                raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
-            ext = getattr(record, "ext", None)
-            binding_id = (
-                (ext.get("binding") or {}).get(stage)
-                if isinstance(ext, dict)
-                else None
-            )
+            if publish_id is None:
+                # Delayed to avoid the engine_runtime package's composition
+                # imports forming a cycle while service_bot is initialized.
+                from agentclaw.community.core.engine_runtime.stage import (
+                    DeviceNotBoundError,
+                    EngineStageNotLiveError,
+                    resolve_stage_bind_id,
+                )
+
+                try:
+                    binding_id = resolve_stage_bind_id(
+                        self._bot_publish_repo,
+                        self._device_binding_repo,
+                        bot_pk=int(bot.get("id") or 0),
+                        bot_id=bot_id,
+                        stage=stage,
+                        env=str(bot.get("env") or ""),
+                    )
+                except (DeviceNotBoundError, EngineStageNotLiveError, ValueError) as exc:
+                    raise CallerCredentialError(CALLER_TARGET_NOT_FOUND) from exc
+            else:
+                # Retain the internal/legacy exact-version path.  The public
+                # OpenAPI no longer accepts publish_id and always uses the
+                # server-selected live release above.
+                if (
+                    not isinstance(publish_id, int)
+                    or isinstance(publish_id, bool)
+                    or publish_id <= 0
+                ):
+                    raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+                record = self._bot_publish_repo.get_by_id(publish_id)
+                if (
+                    record is None
+                    or getattr(record, "source_bot_id", None) != bot_id
+                    or getattr(record, "owner_id", None) != owner_user_id
+                ):
+                    raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+                ext = getattr(record, "ext", None)
+                binding_id = (
+                    (ext.get("binding") or {}).get(stage)
+                    if isinstance(ext, dict)
+                    else None
+                )
         else:
             raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
         if not self._is_valid_caller_binding_id(binding_id):

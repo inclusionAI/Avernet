@@ -80,10 +80,6 @@ async def get_bot_iam_token(
         default=RuntimeStage.DRAFT,
         description="Bot runtime stage whose Caller identity may be prepared.",
     ),
-    publish_id: int | None = Query(
-        default=None,
-        description="Published release identifier for the addressed runtime.",
-    ),
     entity_id: str | None = Query(
         default=None,
         description="Entity identifier used to resolve the Bot unambiguously.",
@@ -91,14 +87,21 @@ async def get_bot_iam_token(
     service: CallerIamTokenServiceProtocol = Injected(CallerIamTokenServiceProtocol),
 ) -> Envelope[IamToken]:
     """Return the IAM token and prepare Caller identity when the Bot requires it."""
-    del user_id  # Identity equality is enforced by UserIdDep before this handler.
+    normalized_entity_id = (entity_id or "").strip() or None
+    # Every user owns a Bot named ``default``.  When the browser has no explicit
+    # chat target yet, scope that otherwise-ambiguous identifier to the verified
+    # user instead of attempting a tenant-wide unique lookup.
+    if bot_id == "default" and normalized_entity_id is None:
+        normalized_entity_id = user_id
     result = await service.get_iam_token(
         iam_token=request.cookies.get("IAM_TOKEN") or "",
         auth_request=_auth_request(request),
         bot_id=bot_id,
         stage=CoreCallerIdentityStage(stage.value),
-        publish_id=publish_id,
-        entity_id=entity_id,
+        # Published runtime selection is server-owned.  The runtime updater
+        # resolves the live release for ``stage`` from the exact Bot row.
+        publish_id=None,
+        entity_id=normalized_entity_id,
         is_test_exchange=False,
     )
     _raise_for_error(result.error)

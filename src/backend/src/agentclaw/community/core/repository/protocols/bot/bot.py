@@ -213,6 +213,16 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_bots_by_owner_bot_pairs(
+        self,
+        pairs: List[tuple[str, str]],
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[int, List[Dict[str, Any]]]:
+        """List live Bots matching exact ``(bot_id, owner_id)`` pairs."""
+        ...
+
+    @abstractmethod
     def list_domain_bots(
         self,
         page: int | None = None,

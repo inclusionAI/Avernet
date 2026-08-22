@@ -1172,6 +1172,11 @@
             "title": "Engine",
             "type": "string"
           },
+          "owner_id": {
+            "description": "Owner identifier paired with the Bot identifier.",
+            "title": "Owner Id",
+            "type": "string"
+          },
           "status": {
             "description": "Current lifecycle status.",
             "title": "Status",
@@ -1180,6 +1185,7 @@
         },
         "required": [
           "bot_id",
+          "owner_id",
           "bot_name",
           "bot_desc",
           "engine",
@@ -1189,27 +1195,51 @@
         "title": "BotMetadata",
         "type": "object"
       },
-      "BotMetadataSearch": {
+      "BotMetadataQueries": {
         "additionalProperties": false,
-        "description": "Known Bot identifiers whose display metadata should be resolved.",
+        "description": "Exact Bot identities whose display metadata should be resolved.",
         "properties": {
-          "bot_ids": {
-            "description": "Bot identifiers to resolve. Identifiers may come from any upstream source; duplicates are ignored. At most 100 may be submitted.",
+          "bots": {
+            "description": "Bot and owner identifier pairs to resolve. Pairs may come from any upstream source; duplicates are ignored. At most 100 may be submitted.",
             "items": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
+              "$ref": "#/components/schemas/BotMetadataQuery"
             },
             "maxItems": 100,
             "minItems": 1,
-            "title": "Bot Ids",
+            "title": "Bots",
             "type": "array"
           }
         },
         "required": [
-          "bot_ids"
+          "bots"
         ],
-        "title": "BotMetadataSearch",
+        "title": "BotMetadataQueries",
+        "type": "object"
+      },
+      "BotMetadataQuery": {
+        "additionalProperties": false,
+        "description": "One exact Bot identity whose display metadata should be resolved.",
+        "properties": {
+          "bot_id": {
+            "description": "Bot identifier.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Owner identifier paired with bot_id to identify one Bot.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "owner_id"
+        ],
+        "title": "BotMetadataQuery",
         "type": "object"
       },
       "BotSpaceAssignment": {
@@ -23903,10 +23933,10 @@
         ]
       }
     },
-    "/openapi/v1/bots/metadata/search": {
+    "/openapi/v1/bots/metadata/queries": {
       "post": {
-        "description": "Resolve display metadata for a caller-supplied set of known Bot IDs.\n\nThe identifiers may originate from BCN, search, recommendations, persisted\nclient state, or another source. Authentication is required, but this is a\ntenant-wide metadata lookup rather than an ownership check. The response is\nintentionally limited to display fields and never exposes owners, device\nbindings, runtime configuration, credentials, or extension payloads.\n\nUnknown identifiers are omitted. Filtering happens in the repository before\npagination, so total is the number of matching Bot records.",
-        "operationId": "search_bot_metadata_openapi_v1_bots_metadata_search_post",
+        "description": "Resolve display metadata for caller-supplied Bot and owner pairs.\n\nThe identifiers may originate from BCN, search, recommendations, persisted\nclient state, or another source. The user_id parameter names the authenticated\nuser performing this tenant-wide metadata lookup; each owner_id in the body\nis part of a target Bot identity, not the caller identity. The response is\nintentionally limited to display fields and the owner id the request already\nnamed; it never exposes device bindings, runtime configuration, credentials,\nor extension payloads.\n\nUnknown identifiers are omitted. Filtering happens in the repository before\npagination, so total is the number of matching Bot records.",
+        "operationId": "query_bot_metadata_openapi_v1_bots_metadata_queries_post",
         "parameters": [
           {
             "description": "1-based page number.",
@@ -23934,13 +23964,25 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/BotMetadataSearch"
+                "$ref": "#/components/schemas/BotMetadataQueries"
               }
             }
           },
@@ -23986,6 +24028,21 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -24063,7 +24120,7 @@
             "description": "Upstream service error"
           }
         },
-        "summary": "Search Bot Metadata",
+        "summary": "Query Bot Metadata",
         "tags": [
           "bots"
         ]
@@ -45051,24 +45108,6 @@
               "$ref": "#/components/schemas/RuntimeStage",
               "default": "draft",
               "description": "Bot runtime stage whose Caller identity may be prepared."
-            }
-          },
-          {
-            "description": "Published release identifier for the addressed runtime.",
-            "in": "query",
-            "name": "publish_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Published release identifier for the addressed runtime.",
-              "title": "Publish Id"
             }
           },
           {
