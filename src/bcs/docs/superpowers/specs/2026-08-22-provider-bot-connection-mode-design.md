@@ -68,22 +68,31 @@ Add a `connection_mode: ProviderBotConnectionMode` to `RegisterProviderBotComman
 For **plugin** mode (only reached for allow-listed providers, §3.0):
 - **Deterministic `bot_uuid == provider_bot_ref`** (IV-1). For allow-listed providers the handler already sets `bot_uuid = Some(provider_bot_ref.clone())` (`providers.rs:225`); plugin mode keeps that. The §3.0 admission gate guarantees plugin commands only arrive from those providers, so IV-1 holds.
 - **Skip `bindings.insert_binding(...)`** entirely (the `provider_core.rs:202-222` block). → no provider_binding row → `resolve_delivery_target` ⇒ `WebSocket`, `is_provider_downlink_bot` ⇒ false ⇒ WS allowed.
-- `register_with_owner_and_token(bot_uuid, capabilities, owner, token)` is still called, but the `token` passed to it is **not** a usable runtime token — it is a `MOCK_`-prefixed placeholder (so the store's reconcile branch can recognize "pre-registered, no plugin attached yet"; see §3.5). The real token is minted later from the WS connect path.
-- If `repo.get(provider_bot_ref)` already exists (plugin connected first): `register_with_owner_and_token` already soft-merges capabilities. **Plugin-mode further requires: do not replace `session_token`** (IV-3). This is achieved by a new plugin-mode merge path (or a flag) that preserves the existing real token instead of `existing.session_token.replace(...)` (`memory.rs:660`, `lib.rs:1417`).
+- **Token rule (DECIDED 2026-08-23)**: provider registration is the **only** path that writes `bcs_bots`/`session_token`. The token written depends on whether a bot already exists at `provider_bot_ref`:
+  - **Bot does NOT exist** (truly new): write a `MOCK_`-prefixed placeholder `session_token` (`mock_token()`). No real runtime token yet → the plugin will promote it on first WS connect (§3.5).
+  - **Bot already exists AND has a real (non-MOCK) token** (the plugin connected first, or a存量 bot that was补注册): **preserve the existing real token** — do NOT replace it with MOCK. Only soft-merge capabilities (name/summary/skills/…) so `created_by`, the live WS connection, and the real session token are untouched. This rule is what makes scenario 3 (§3.4b) safe: the DB stays on the bot's real token, so a later WS reconnect by `find_bot_by_token(old Realtoken)` still resolves and token refresh is never needed against a MOCK.
+  - **Bot already exists AND token is MOCK** (idempotent re-register of a not-yet-attached plugin bot): keep the existing MOCK (do not mint a fresh MOCK).
+- `register_with_owner_and_token(bot_uuid, capabilities, owner, token)` is still the write call; the provider-core layer computes `token` per the rule above (read existing token via `BotRegistryCoreService::load_token`, `memory.rs:1337`/`lib.rs:2265`, before the write). The store's shared method keeps its current `session_token.replace(token)` semantics unchanged — the "preserve real token" rule is satisfied by passing the **same** real token back in.
 
 For **gateway** mode: behave exactly as today (write binding; `bot_runtime_token` only for `static_bearer`/`provider_admin` auth modes, `provider_core.rs:185-189`).
-
-For **plugin** mode response: **no special handling** — the response `bot_runtime_token` follows the exact same auth_mode rule as gateway (returned for `static_bearer`/`provider_admin`, absent for `agentpass`). The `MOCK_` placeholder in §3.3 is an **internal store sentinel only** (used by the reconcile branch in §3.5 to recognize "pre-registered, no plugin attached yet"); it is **never exposed** to the provider and does **not** alter the response.
 
 ### 3.3a Internal sentinel vs. external response (clarification)
 
 Two distinct token roles in plugin mode, do not conflate:
-- **External response** (`RegisterProviderBotResponse.bot_runtime_token`): gateway's existing auth_mode rule, unchanged. Plugin mode does not branch on it.
-- **Internal `session_token` written to the registry** (`register_with_owner_and_token(token=MOCK_…)`, §3.3): a `MOCK_`-prefixed sentinel that the store's reconcile branch (§3.5) keys off. The real runtime token is minted later on the WS connect path and returned to the plugin via `BotConnectResponse.token` / `BCN_BOT_TOKEN`, regardless of what the registration response carried.
+- **External response** (`RegisterProviderBotResponse.bot_runtime_token`): for plugin mode, **always `None`** (DECIDED 2026-08-23, see Open-Risk #4 / Q2). Rationale: the real runtime token the plugin uses is returned to it from the WS handshake (`BotConnectResponse.token` / `BCN_BOT_TOKEN`), so the registration-side token is dead data; returning `None` also trivially guarantees the `MOCK_` placeholder is never exposed to the provider. (This refines locked decision 3's "no special handling" wording: plugin mode branches to `None`; gateway mode keeps the auth_mode rule.)
+- **Internal `session_token` written to the registry** (§3.3): `MOCK_` when the bot is newly created by the provider, the existing real token when the bot already exists (preserved). The `MOCK_` sentinel is keyed off only by the WS-connect promote branch (§3.5); it never leaves BCS.
 
-### 3.4 First-connect persistence (`register_streaming_connection`, `bot-store`)
+### 3.4 Persistence stays provider-side only (DECIDED 2026-08-23)
 
-Today the first-connect token is memory-only (fact 2). To let a plugin-first bot survive and be reconciled by a later provider registration, **persist the token at first connect** in plugin mode: `save_to_db(bot_id, caps, Some(token), None)` inside `register_streaming_connection` when the bot is created by a WS connect.
+Provider registration writes `bcs_bots` + `session_token` (MOCK for new, preserve-real for existing) as in §3.3. The **WS connect path does NOT persist** (matches today's `register_streaming_connection`, `lib.rs:2405` "token in memory only, will persist on onboard"). This drops the earlier "persist token at first WS connect" plan (§3.4 of the prior draft) — the business confirmed plugin connect should not落库.
+
+Implication: a plugin-first bot (scenario 1) has no `bcs_bots` row until the provider later registers it; its session token lives in `token_to_bot` memory + (on onboard) disk. This is today's behavior and is unchanged. The promote branch (§3.5) still flips a MOCK placeholder to a real token **in memory** (and the provider's next registration, if any, preserves that real token write to `bcs_bots`); the WS path itself does not add a new persistence surface.
+
+### 3.4b The three business scenarios (verified, 2026-08-23)
+
+1. **存量 provider 没注册,bot 已 WS 连接生成 token 但未落库** — no MOCK record exists; the自助 bot operates on its memory token unaffected. Plugin connect does not persist (§3.4). ✅ no change.
+2. **新 bot,provider 完成注册 + 写 MOCK token** — provider writes `bcs_bots` with MOCK. Plugin's first WS connect must carry `bot_id = provider_bot_ref` (empty token): `connect_bot` is_new arm calls §3.5's promote, locates the bot by id, detects MOCK, mints a real token, attaches ws, returns it to the plugin. ✅ (If the plugin connects without `bot_id`, the existing `new_bot_uuid()` builds an independent自助 bot that does not converge to the pre-registered ref — contract: to claim a plugin-mode pre-registered bot, connect with `bot_id = provider_bot_ref`.)
+3. **存量 bot,provider 补注册(数据订正)写 MOCK,但 bot 还用老真 token 连** — **prevented by §3.3's token rule**: the补注册 sees an existing bot with a real token and preserves it (does not overwrite with MOCK), so the DB stays on the bot's real token. A later bot restart/WS reconnect with the old real token still resolves via `find_bot_by_token` and reconnects unchanged — **no token refresh is required against a MOCK**, because no MOCK was written over a real-token bot. The "detect MOCK → refresh" path therefore only fires for scenario 2 (initial promote), keeping a single clean reconciliation. (If the provider-side补注册 ever did write MOCK over a real token anyway — a data error — the bot's `find_bot_by_token(old Realtoken)` would miss on a DB-only restart, since DB would hold MOCK; this is why §3.3's preserve-real rule is load-bearing.)
 
 Scope guardrails:
 - This persistence enlargement applies when the connect mints a **new** bot (the WS-driven create path). It does not change onboard-driven persistence.
@@ -93,12 +102,14 @@ Scope guardrails:
 
 Move the reconcile decision **out of `connect_bot`'s lock-free `repo.get`** (`bot_core.rs:712-714`) and **into `register_streaming_connection`'s write lock** (`lib.rs:2355` / `memory.rs:1478`). `connect_bot`, when given a `bot_id` that exists, no longer unconditionally returns `AlreadyRegistered`; instead it calls `register_streaming_connection`, which decides atomically under the write lock:
 
-| Bot exists? | `session_token` state | `ws_connection` | Action |
+| Bot exists? | `session_token` state | `ws_connection` | Action (empty-token, `bot_id` provided path) |
 |---|---|---|---|
-| No | — | — | **Create** bot + new real token + attach ws. (plugin-first) |
-| Yes | `MOCK_…` placeholder | (any) | **Promote**: replace token with real token + attach ws. (provider-first, plugin arrives) |
-| Yes | real token, not connected | none | **Reconnect**: keep token + attach ws. (same plugin instance re Connecting) |
-| Yes | real token, already connected | present | `Err(AlreadyConnected)`. (existing protection) |
+| No | — | — | **Create** bot + new real token + attach ws. (plugin-first /自助) |
+| Yes | `MOCK_…` placeholder | (any) | **Promote**: replace MOCK with real token + attach ws. (provider-first, plugin arrives; scenario 2) |
+| Yes | real token | none | `Err(AlreadyRegistered)`. (anti-hijack: empty-token claim of a real-token bot is refused) |
+| Yes | real token | present | `Err(AlreadyConnected)`. (existing protection) |
+
+Note: the "keep real token + attach ws" **Reconnect** path is NOT part of this empty-token table — it is the existing `reconnect_streaming(token)` path, reachable only when the connector **presents the real token** (`connect_bot`'s `is_new=false` arm via `find_bot_by_token` success, `bot_core.rs:690`). The empty-token `is_new=true` path (this table) refuses real-token bots to prevent hijack; promotion is exclusive to the MOCK sentinel. (Reconciles spec §3.5 table with §5.5 anti-hijack — Plan Open-Risk #2.)
 
 `MOCK_` placeholder is a BCS-internal sentinel (prefix on the `session_token`), not a credential. The branch is only reachable for a bot whose token is exactly that sentinel — i.e. a plugin-mode pre-registered bot with no plugin attached yet. Any attempt to connect with a real-token/existing bot guarded by `AlreadyConnected`; any attempt that supplies no `bot_id` mints a brand-new uuid as today (does not collide with a deterministic `provider_bot_ref`).
 
