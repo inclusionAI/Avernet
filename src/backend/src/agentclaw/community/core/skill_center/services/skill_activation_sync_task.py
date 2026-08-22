@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import uuid4
 
@@ -137,10 +136,9 @@ class SkillActivationSyncWork:
     #: not be replayed as the desired-state write. Empty when the operation
     #: needs none — never absent.
     action_args: dict[str, object]
-    #: Correlates the task with the request that enqueued it.
+    #: Correlates every attempt at this task in the logs. Generated at enqueue;
+    #: the handler receives no row id of its own.
     request_id: str
-    #: When the operation was requested, timezone-aware and normalized to UTC.
-    requested_at: datetime
 
 
 def build_skill_activation_sync_idempotency_key(
@@ -195,17 +193,19 @@ def build_skill_activation_sync_payload(
     *,
     scope: SkillActivationSyncScope,
     action: SkillActivationSyncAction,
-    action_args: dict[str, object] | None = None,
-    request_id: str | None = None,
-    requested_at: datetime | None = None,
+    action_args: dict[str, object] = {},
 ) -> dict[str, object]:
     """Build the persisted work description.
 
-    ``request_id`` and ``requested_at`` default to a fresh id and the current
-    time, so a call site that has neither still produces a task that can be
-    correlated and aged. Both are stamped at *enqueue* time on purpose: they
-    describe the request, and a task that is retried or resumed after a restart
-    keeps the values of the request that created it.
+    ``request_id`` is generated here rather than accepted, because it exists for
+    the handler rather than the caller: ``TaskHandler.handle`` is given the
+    payload and nothing else — not the row id — so without it a handler has no
+    identifier to log. It is stamped once at enqueue and travels with the task,
+    so every attempt at the same work logs the same id.
+
+    ``action_args`` is copied rather than stored by reference: the empty default
+    is shared across calls, and the caller's dict must not be able to change a
+    payload after it is built.
     """
     return {
         "scope": {
@@ -214,15 +214,12 @@ def build_skill_activation_sync_payload(
             "bot_id": scope.bot_id,
         },
         "action_type": action.value,
-        "action_args": dict(action_args or {}),
-        "request_id": request_id or uuid4().hex,
-        "requested_at": (requested_at or datetime.now(UTC)).isoformat(),
+        "action_args": dict(action_args),
+        "request_id": uuid4().hex,
     }
 
 
-def parse_skill_activation_sync_payload(
-    payload: dict | None,
-) -> SkillActivationSyncWork:
+def parse_skill_activation_sync_payload(payload: dict) -> SkillActivationSyncWork:
     """Validate a persisted payload and return the work it describes.
 
     Raises ``ValueError`` on anything malformed, including an unrecognised
@@ -233,9 +230,6 @@ def parse_skill_activation_sync_payload(
     retrying it would hold the Bot's dedup key until the deadline while blocking
     every subsequent activation behind a row that can never run.
     """
-    if not isinstance(payload, dict):
-        raise ValueError("payload must be an object")
-
     raw_scope = payload.get("scope")
     if not isinstance(raw_scope, dict):
         raise ValueError("scope must be an object")
@@ -255,33 +249,18 @@ def parse_skill_activation_sync_payload(
         raise ValueError(f"unknown action_type {raw_action!r}") from error
 
     raw_args = payload.get("action_args")
-    if raw_args is None:
-        action_args: dict[str, object] = {}
-    elif isinstance(raw_args, dict):
-        action_args = dict(raw_args)
-    else:
+    if not isinstance(raw_args, dict):
         raise ValueError("action_args must be an object")
 
     request_id = payload.get("request_id")
     if not isinstance(request_id, str) or not request_id.strip():
         raise ValueError("request_id must be a non-empty string")
 
-    raw_requested_at = payload.get("requested_at")
-    if not isinstance(raw_requested_at, str):
-        raise ValueError("requested_at must be an ISO timestamp")
-    try:
-        requested_at = datetime.fromisoformat(raw_requested_at)
-    except ValueError as error:
-        raise ValueError("requested_at must be an ISO timestamp") from error
-    if requested_at.tzinfo is None:
-        raise ValueError("requested_at must include a timezone")
-
     return SkillActivationSyncWork(
         scope=SkillActivationSyncScope(**scope_values),
         action=action,
-        action_args=action_args,
+        action_args=dict(raw_args),
         request_id=request_id,
-        requested_at=requested_at.astimezone(UTC),
     )
 
 
@@ -290,9 +269,7 @@ def enqueue_skill_activation_sync(
     *,
     scope: SkillActivationSyncScope,
     action: SkillActivationSyncAction,
-    action_args: dict[str, object] | None = None,
-    request_id: str | None = None,
-    requested_at: datetime | None = None,
+    action_args: dict[str, object] = {},
     deadline_seconds: int = SKILL_ACTIVATION_SYNC_DEADLINE_SECONDS,
     delay_seconds: int = 0,
 ) -> EnqueueResult:
@@ -319,8 +296,6 @@ def enqueue_skill_activation_sync(
             scope=scope,
             action=action,
             action_args=action_args,
-            request_id=request_id,
-            requested_at=requested_at,
         ),
         deadline_seconds=deadline_seconds,
         delay_seconds=delay_seconds,
