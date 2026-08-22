@@ -22,7 +22,7 @@ exactly the checks they have.
 - `src/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization.py` — the table; every group edits its own rows here.
 - `.../openapi_v1/bot_access.py` — the seam. Gains path-or-query bot resolution.
 - `.../openapi_v1/engine_runtime/gating.py` + `core/engine_runtime/relay.py` + `core/engine_runtime/gate.py` — 26 rows; the check is `require_bot_operator` inside `relay.resolve_bot`.
-- `core/engine_runtime/connection.py:205` — 1 row; the same check, placed to guard *credential composition*.
+- `core/engine_runtime/connection.py` — **not modified.** Its row is deferred; `build` resolves its own bot rather than going through `relay.resolve_bot`, so the engine-runtime deletion does not reach it.
 - `core/skill_center/authorization_hook.py` — 19 rows; a clean `can_manage_bot` boolean.
 - `core/skill_center/services/bot_skill_asset_service.py` — **7** rows (the `{skill_id}` operations); several resolvers each calling `check_collaborator_permission(..., MEMBER)`.
 - `core/skill_center/services/local_skill_query_service.py` and `local_skill_upload_service.py` — **not modified.** They check the 3 deferred skills rows *and* all 6 retiring skills addresses; the table cites neither.
@@ -44,7 +44,7 @@ No route, request or response shape changes. Two caller-visible behaviour
 changes, both intended:
 
 ```jsonc
-// The 16 retiring deprecated/ addresses whose replacement is in scope and
+// The 15 retiring deprecated/ addresses whose replacement is in scope and
 // Before: checked incidentally, because the check sat inside the shared handler.
 // After:  checked by the seam, same bar as the replacement. Same masked 404.
 ```
@@ -137,14 +137,13 @@ None. No manifest change.
 
 ## Risks & Mitigations
 
-- **Risk:** `connection.py:205` places its check inside `build`, deliberately —
-  its own comment says the rule is "about what may be *composed*, not about how
-  it is served", so any future caller of `build` is covered. The thing composed
-  is an operator credential granting `operator.admin` over every session on the
-  device. A route-level gate protects today's only caller, not tomorrow's.
-  **Mitigation:** treat this row as the one argued exception — flip the row to
-  `Check(MEMBER)` and **keep** the in-`build` check, or delete it only with a
-  test asserting `build` has no second caller. Flagged for the review gate.
+- **Deferred, not risked:** `connection.py:205` places its check inside `build`,
+  deliberately — its comment says the rule is "about what may be *composed*, not
+  about how it is served", and what is composed grants `operator.admin` over
+  every session on the device. A route-level gate covers today's only caller,
+  not tomorrow's. Rather than argue that trade-off inside a migration, the row
+  and its retiring twin are out of scope. `build` resolves its own bot, so
+  nothing else in this feature touches it.
 - **Risk:** deleting a permission check also deletes the masked-404 that hid
   bot existence, if the remaining error path answers differently.
   **Mitigation:** each group's tests assert the refusal body is byte-identical
@@ -212,9 +211,9 @@ No flag, no migration. Order is a dependency order, not a preference:
 #                                     collection/upload rows are deferred, so
 #                                     nothing they share with the retiring
 #                                     addresses is touched
-# 9. engine_runtime    (26 → Check)   keep the type gate
-# 10. engine twins     (16 → Check)   path-addressed, no seam change needed
-# 11. connection        (1 → Check)   the argued exception; see Risks
+# 8. engine_runtime    (26 → Check)   keep the type gate
+# 9. engine twins      (15 → Check)   path-addressed; the connection twin is
+#                                     deferred with its replacement
 # 12. publication facade (16 → Check) keep `level` and the lock
 # 13. channels         (6 → Check)    keep the edit lock
 # 14. collaborator_service (5 → Check) keep capability and space checks

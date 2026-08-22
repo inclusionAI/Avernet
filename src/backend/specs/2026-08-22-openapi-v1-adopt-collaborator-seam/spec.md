@@ -4,7 +4,7 @@
 
 The seam that answers *"may this person do this to this bot?"* shipped in
 #1323 with no adopter: every row in its table records what some service
-enforces elsewhere, and no row is enforced by the seam itself. This moves 88 of
+enforces elsewhere, and no row is enforced by the seam itself. This moves 87 of
 those operations onto the seam and deletes the service-side check each one was
 relying on, so that for those operations the answer is decided in exactly one
 place.
@@ -57,7 +57,7 @@ rather than the deprecation schedule's.
 
 ## Acceptance Criteria
 
-- [ ] 88 of the 90 in-scope operations carry `Check(level)` and the seam
+- [ ] 87 of the 89 in-scope operations carry `Check(level)` and the seam
       attaches the gate to each — verified structurally, not by sampling. The
       remaining 2 (bot chats) carry `NoCheck` with the reason below.
 - [ ] For each operation that gains `Check`, the service-side collaborator check
@@ -73,7 +73,7 @@ rather than the deprecation schedule's.
       the level #1323 recorded, the difference is called out explicitly and
       argued, not silently adopted — **the rule is that the code decides and the
       row is corrected to match, never the reverse.**
-- [ ] Each of the 16 old addresses under `deprecated/` whose replacement is
+- [ ] Each of the 15 old addresses under `deprecated/` whose replacement is
       migrated still admits and refuses exactly the callers its replacement
       does, proven by test rather than by reading the code. The other six — the
       old skills addresses — are untouched, because this feature no longer
@@ -92,34 +92,39 @@ rather than the deprecation schedule's.
       operations, refusing the same callers.
 - [ ] No in-scope operation ends up unaudited, and none ends up audited twice for
       one request.
+- [ ] **Every group traces its own rows to the code that really checks them**,
+      route by route, rather than trusting the module its citation names. The
+      mapping is recorded in that group's change, and the bar comes from what
+      the trace found. A citation has already been wrong once, for 3 of 10 rows
+      in one group; this is the step that catches the next one.
 - [ ] Every row left as `ServiceChecked` cites the module that really performs
       its check. Three skills rows cite one that does not, and correcting them is
       part of this feature even though those rows do not migrate — a wrong
       citation already sent this plan looking for a bar in the wrong module.
 - [ ] Every operation whose bar is enforced publishes the parameter that names
       the bot owner it adjudicates.
-- [ ] `scaffolding_row_count()` falls from 181 to 75. The remaining
-      `ServiceChecked` rows are exactly 9: the 6 harness rows and the 3 skills
-      rows deferred below.
+- [ ] `scaffolding_row_count()` falls from 181 to 77. The remaining
+      `ServiceChecked` rows are exactly 10: 6 harness, 3 skills, 1 connection —
+      each deferred for a reason recorded below.
 - [ ] No operation outside the 90 in-scope rows changes which callers it admits
       or refuses.
 
 ## In Scope
 
-- 90 of the table's 99 `ServiceChecked` operations (the table is 246 rows today:
+- 89 of the table's 99 `ServiceChecked` operations (the table is 246 rows today:
   99 `ServiceChecked`, 65 `NoCheck`, 40 `OWNER_SCOPED`, 42 `INHERITED`, 0
   `Check`): 26 engine-runtime gating, 19 skill-centre
   authorization hook, 16 service-publication facade, **7** bot-skill asset
   service, 6 channels, 5 collaborator service, 3 authorized apps, 3 render
-  screens, 2 bot chats, 2 diagnostics, 1 engine-runtime connection.
+  screens, 2 bot chats, 2 diagnostics.
 - Correcting the citation on the 3 skills rows that name a module which does not
   check them, even though those rows stay `ServiceChecked`.
 - Deleting the service-side collaborator check each of those relied on.
-- The 16 retiring `deprecated/` addresses that twin a migrated operation and
+- The 15 retiring `deprecated/` addresses that twin a migrated operation and
   carry the bot on the path, which become adjudicated rather than inheriting.
 - **No change to the seam, and no new authorization code anywhere.** Every
   operation this feature adjudicates is adjudicable by the seam exactly as it
-  stands today: the 88 current addresses and the 16 retiring twins that carry
+  stands today: the 87 current addresses and the 15 retiring twins that carry
   the bot on the path.
 - Adding the owner parameter to the 3 authorized-apps handlers, which cannot
   carry an enforced row without it.
@@ -127,6 +132,14 @@ rather than the deprecation schedule's.
 
 ## Out of Scope
 
+- **The connection operation** (`GET /bots/{bot_id}/connection`) and its
+  retiring twin. Its check sits inside `connection.py:build`, deliberately — the
+  comment there says the rule is about what may be *composed*, not how it is
+  served, and what is composed grants `operator.admin` over every session on the
+  device. Whether a route-level gate adequately replaces a composition-level one
+  is a real question, not answered this session. `build` resolves its own bot
+  rather than going through `relay.resolve_bot`, so deferring it costs nothing —
+  the engine-runtime deletion does not reach it.
 - **Three skills operations** — `GET` and `POST /bots/{bot_id}/skills`, and
   `POST /bots/{bot_id}/skills/upload-folder`. Their checks live in
   `local_skill_query_service` and `local_skill_upload_service`, **not** in the
@@ -146,13 +159,13 @@ rather than the deprecation schedule's.
   blast radius (ownership also resolves through a method documented as
   performing no owner check, and one bot id skips the check entirely).
   **`ServiceChecked` therefore does not reach zero in this feature**; it reaches
-  9 — these 6 plus the 3 skills rows above.
+  10 — these 6, the 3 skills rows, and connection.
 - **The 40 `OWNER_SCOPED` operations.** Blocked on #906 / #907, and a policy
   change rather than a consolidation: collaborators start getting through.
-- **The 26 remaining `INHERITED` operations** — 20 twin `OWNER_SCOPED`
+- **The 27 remaining `INHERITED` operations** — 20 twin `OWNER_SCOPED`
   addresses and follow their replacements whenever those are decided; 6 are the
-  legacy skills addresses, untouched along with the three current rows they
-  share their checks with.
+  legacy skills addresses and 1 the legacy connection address, each untouched
+  along with the current row it shares its check with.
 - **Introducing an edit lock where none exists today.** #1323 *Decisions* 1
   stands: locks stay exactly where they are, and this feature must preserve them
   rather than extend or remove them.
@@ -168,7 +181,12 @@ rather than the deprecation schedule's.
   code decides, the row is corrected to describe it, and a bar is never invented
   to justify a citation. Applying that rule made those two `NoCheck` rather than
   `Check`.
-- Do any of the 90 operations have a caller that is not a human collaborator
-  (an application acting under a grant), for which the collaborator bar is the
-  wrong question entirely? Admission is a separate seam, but the interaction is
-  untested while no row is enforced.
+- ~~Do any operations have an application caller for which the collaborator bar
+  is the wrong question?~~ **Settled: it is never the wrong question.** The two
+  seams ask different things and neither substitutes for the other. Admission
+  asks whether an application holds a grant for the bot it acts on; this seam
+  asks whether the *acting user* may reach that bot at all. A user granting an
+  application access to a bot — their own or someone else's — does not establish
+  that the user has access, so the collaborator check still runs. The seam
+  already reads the verified user (`caller_id: UserIdDep`), so nothing needs
+  changing; recorded so it is not re-opened.

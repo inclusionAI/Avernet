@@ -6,11 +6,20 @@ Each **group** below is one PR against `dev_refactory_collaboration`. Land and
 merge a group before starting the next: `authorization.py` is edited by every
 group and by the base branch, so overlapping PRs conflict in that one file.
 
-Every group after Group A follows the same three moves — **derive**, **flip**,
-**delete** — plus its own tests. "Derive" always means reading the bar out of
-the code being deleted and recording the evidence (the `required_level=`
-argument, the module constant, or the literal), never copying the number from
-the table.
+Every group after Group A follows the same three moves — **trace**, **flip**,
+**delete** — plus its own tests.
+
+**Trace** is the first move and the load-bearing one. For each row in the group,
+follow the route to the code that actually performs its check, and record the
+mapping in that group's change. Do not assume the module the row cites is the
+one that checks it: for the skills group the citation was wrong for 3 of 10
+rows, and that error survived a full planning pass. The bar comes from what the
+trace found — the `required_level=` argument, the module constant, or the
+literal — never from the number in the table. If a trace disagrees with a
+citation, correct the citation in the same change.
+
+A group is only ready to flip once every one of its rows has been traced and the
+deletion is known to change no caller's answer.
 
 ---
 
@@ -113,26 +122,16 @@ the table.
   - [ ] Tests: below-bar caller refused byte-identically to an absent bot; a personal bot addressed at a published stage still answers 501, not 404.
 - **Depends on:** Task 9
 
-## Task 11: Adjudicate the sixteen retiring engine-runtime addresses
+## Task 11: Adjudicate the fifteen retiring engine-runtime addresses
 - **Goal:** Keep the path-addressed legacy twins checked once `require_bot_operator` is gone from the relay.
 - **Files:** `.../openapi_v1/authorization.py`
 - **Done when:**
-  - [ ] All 16 legacy rows (approvals ×3, connection, engine ×3, models ×2, sessions ×7) are `Check(MEMBER)`. They need nothing from the seam: each declares `{bot_id}` on its path already, just at a different position than its replacement.
+  - [ ] All 15 legacy rows (approvals ×3, engine ×3, models ×2, sessions ×7) are `Check(MEMBER)`. **`/bots/connection/{bot_id}` is not among them** — it shares `connection.py:build` with its replacement, which is deferred, so it keeps the check it has. They need nothing from the seam: each declares `{bot_id}` on its path already, just at a different position than its replacement.
   - [ ] A test drives each and its replacement with the same caller and asserts identical admit/refuse.
-  - [ ] `INHERITED` falls from 42 to 26 — 20 twin an `OWNER_SCOPED` address and 6 are the legacy skills addresses Task 10 covers inside the `deprecated/` package.
+  - [ ] `INHERITED` falls from 42 to 27 — 20 twin an `OWNER_SCOPED` address, 6 are the legacy skills addresses, and 1 is the legacy connection address; each is untouched along with the current row it shares its check with.
 - **Depends on:** Task 10
 
-## Task 12: Decide and record what guards the operator credential
-- **Goal:** Settle the one row where the plan proposes an exception, explicitly rather than by omission.
-- **Files:** `core/engine_runtime/connection.py`, `.../openapi_v1/authorization.py`
-- **Done when:**
-  - [ ] The `GET /bots/{bot_id}/connection` row is `Check(MEMBER)`.
-  - [ ] **A decision is recorded, with its argument, between:** keeping `require_bot_operator` inside `build` (`connection.py:205`) because the check guards *credential composition* — its own comment says the rule is about what may be composed, not how it is served, and what is composed grants `operator.admin` over every session on the device — **or** deleting it behind a test proving `build` has no caller other than this route.
-  - [ ] Whichever is chosen, `connection.py`'s comment is rewritten to describe what is now true.
-  - [ ] Tests: a below-bar caller receives no credential, byte-identically to an absent bot.
-- **Depends on:** Task 11
-
-## Task 13: Move the service-publication facade onto the seam
+## Task 12: Move the service-publication facade onto the seam
 - **Goal:** 16 rows at two different bars, without breaking the edit lock that reads the same value.
 - **Files:** `core/service_bot/services/service_publication_facade.py`, `.../openapi_v1/authorization.py`
 - **Done when:**
@@ -141,9 +140,9 @@ the table.
   - [ ] Only `if level < required_level: raise ServicePublicationNotFoundError` is deleted from `_resolve_bot`. **`level` stays computed** — `:242`–`:266` use it for lock applicability and an OWNER branch — and the `require_service` bot-type refusal stays.
   - [ ] `_require_draft_lock` (`:544`) is untouched and still refuses when another collaborator holds the lock.
   - [ ] Tests: the lock still refuses; an OWNER-barred operation still refuses an ADMIN collaborator; `_actions` (`:245`, `:250`) reports the same list it does today, since it branches on the `level` this task keeps computing. The facade writes no audit rows of its own, so the seam's is the only one.
-- **Depends on:** Task 12
+- **Depends on:** Task 11
 
-## Task 14: Move the channels group onto the seam
+## Task 13: Move the channels group onto the seam
 - **Goal:** 6 rows at two bars, keeping the edit lock #1323 promised to leave alone.
 - **Files:** `.../openapi_v1/channels/router.py`, `.../openapi_v1/authorization.py`
 - **Done when:**
@@ -152,9 +151,9 @@ the table.
   - [ ] Every `_require_admin` call is deleted and the helper with them; **`_require_edit_lock` (`:173`) stays**, along with the documented 423 response.
   - [ ] `_authorize` (`:136`) survives if the lock still needs the resolved bot.
   - [ ] Tests: the lock still returns 423 when another collaborator holds it; a MEMBER is refused a write and admitted a read.
-- **Depends on:** Task 13
+- **Depends on:** Task 12
 
-## Task 15: Move the editors group onto the seam
+## Task 14: Move the editors group onto the seam
 - **Goal:** 5 rows, checked by the very service the endpoints manage.
 - **Files:** `core/bot_collaborator/services/collaborator_service.py`, `.../openapi_v1/authorization.py`
 - **Done when:**
@@ -163,19 +162,19 @@ the table.
   - [ ] Only `_check_operable_permission` calls are deleted. **`_editor_policy.require_capability` (`:392`) and `require_team_space_member` (`:393`) stay** — they are capability and space checks, not collaborator bars.
   - [ ] The gate reading levels from the same service whose rows the handlers write is exercised by a test that adds an editor and immediately re-adjudicates.
   - [ ] Tests: refusal byte-identical to an absent bot; `DELETE /editors/me` still lets a MEMBER remove themselves. `collaborator_service` writes no audit rows of its own, so the seam's is the only one.
-- **Depends on:** Task 14
+- **Depends on:** Task 13
 
-## Task 16: Tests & Verification
+## Task 15: Tests & Verification
 - **Goal:** Ensure the feature meets every spec acceptance criterion.
 - **Files:** `tests/community/adapters/http/openapi_v1/`, `src/backend/docs/openapi-v1/README.md`
 - **Done when:**
   - [ ] Task 4's inverse assertion is un-`xfail`ed and passes: the only remaining `ServiceChecked` rows are the 6 harness rows.
-  - [ ] `scaffolding_row_count()` has fallen from 181 to **75** — 90 `ServiceChecked` rows leave (88 to `Check`, 2 to `NoCheck`) and 16 `INHERITED` twins become `Check`, so 106 in total. The end state is 9 `ServiceChecked` (6 harness, 3 skills), 67 `NoCheck`, 40 `OWNER_SCOPED`, 26 `INHERITED`, 104 `Check`, summing to the table's 246. The numbers are asserted, not described.
+  - [ ] `scaffolding_row_count()` has fallen from 181 to **77** — 89 `ServiceChecked` rows leave (87 to `Check`, 2 to `NoCheck`) and 15 `INHERITED` twins become `Check`, so 104 in total. The end state is 10 `ServiceChecked` (6 harness, 3 skills, 1 connection), 67 `NoCheck`, 40 `OWNER_SCOPED`, 27 `INHERITED`, 102 `Check`, summing to the table's 246. The numbers are asserted, not described.
   - [ ] Every `Check` row's handler declares `OwnerIdDep` and its route declares `{bot_id}` on the path — both enforced at assembly by Task 1, now also asserted over the live surface.
   - [ ] No operation outside the migrated set changed which callers it admits or refuses.
   - [ ] `docs/openapi-v1/README.md`: the five-modes table, the burn-down numbers and a new dated changelog entry all reflect the end state.
   - [ ] Full backend suite and `scripts/ci/python_sast_local.sh` in changed-files mode both clean.
-- **Depends on:** Task 15
+- **Depends on:** Task 14
 
 ---
 
@@ -191,9 +190,9 @@ the table.
   - Theme: The one group needing a handler change before its rows can flip; the change lands separately from the flip so each is reviewable alone.
 - **Group E — Skill centre:** Tasks 8, 9
   - Theme: 19 hook rows plus the 7 `{skill_id}` asset rows, `skill_set_control_plane`'s audit write reconciled, and three rows deliberately left behind with their citation corrected — because the modules that check them also check six retiring addresses this feature will not touch.
-- **Group F — Engine runtime:** Tasks 10, 11, 12
-  - Theme: The largest group and its sixteen path-addressed twins, keeping bot-type gating intact, and the argued decision about what guards the operator credential.
-- **Group G — The entangled three:** Tasks 13, 14, 15
+- **Group F — Engine runtime:** Tasks 10, 11
+  - Theme: The largest group and its fifteen path-addressed twins, keeping bot-type gating intact. The connection row and its twin are deferred — their check guards credential composition rather than route access, and that trade-off is not settled inside a migration.
+- **Group G — The entangled three:** Tasks 12, 13, 14
   - Theme: The groups where the permission check shares code with something that must survive it — a computed level, an edit lock, a capability policy.
-- **Group H — Verification:** Task 16
+- **Group H — Verification:** Task 15
   - Theme: Final spec acceptance check and the documentation end state.
