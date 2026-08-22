@@ -56,6 +56,7 @@ class TaskService:
                  api_base_url: str | None = None) -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
         bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
+        任务模式 roster 圈定的 provider 取自 bcs.provider_id(端口自带凭据),不再单独透传。
 
         ``task_info_repo``(可选):task_info 持久化协议(DI 在 prod 注入真实实现;``None``
         时 execute 跳过持久化,纯内核/单测路径用)。``callback_repo``(可选):回投落库协议(同上,

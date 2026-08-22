@@ -1729,7 +1729,12 @@ mod tests {
         .await?;
 
         let before = check_sqlite_migrations(&db).await?;
-        assert_eq!(before.current_version, Some(10));
+        // v12 (add_bot_task_modes) stays applied after we delete only v11
+        // (group_opening_message), so max applied is now 12 even though v11 is
+        // the sole pending migration. origin's version had group_opening_message
+        // as the tail; the merge appends task_modes at v12, so current_version
+        // drops to 12 (not 10) and v11 remains the only pending re-apply.
+        assert_eq!(before.current_version, Some(12));
         assert_eq!(
             before
                 .pending_versions
@@ -1747,14 +1752,14 @@ mod tests {
                 .iter()
                 .any(|column| column == "opening_message_json")
         );
-        assert_eq!(
-            migration_rows(&db).await?.last(),
-            Some(&(
-                11,
-                "group_opening_message".to_string(),
-                "sqlite".to_string()
-            ))
-        );
+        // group_opening_message is no longer the tail migration (task_modes at v12
+        // follows it), so assert it was re-applied as the version-11 row rather than
+        // as the last row. The column check above already proves the migration
+        // re-added opening_message_json; this row check pins it to the right version.
+        assert!(migration_rows(&db)
+            .await?
+            .iter()
+            .any(|(version, name, _)| *version == 11 && name == "group_opening_message"));
         Ok(())
     }
 

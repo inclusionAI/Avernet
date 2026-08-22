@@ -191,8 +191,11 @@ class TaskModule(Module):
                 sm_status="completed", sm_output=_coop_pass_output,
                 poll_once_then_terminal=True, terminal_after=1,
             )
+            # double 端口不参与 roster 圈定,沿用全部候选。
         else:
-            bcs = SingleboxBcsAdapter(LocalBcsTokenProvider.from_env())
+            token = LocalBcsTokenProvider.from_env()
+            bcs = SingleboxBcsAdapter(token)
+            # provider_id 由 bcs 端口自带(token.provider_id=SINGLEBOX_BCS_PROVIDER_ID);空→roster 圈定关闭(旧行为)。
         return bot, bcs
 
     @staticmethod
