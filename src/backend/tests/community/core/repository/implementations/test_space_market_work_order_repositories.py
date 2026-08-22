@@ -6,6 +6,7 @@ from datetime import datetime
 
 import pytest
 
+from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketSource,
@@ -43,6 +44,7 @@ from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
     WorkOrderNotificationModel,
 )
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugins.local.database import SqliteDB, reset_for_tests
 
 
@@ -75,6 +77,115 @@ def _review_notification(
         title=title,
         content=content,
     )
+
+
+def _bot_review_notification(
+    *, applicant_user_id: str, bot_id: str
+) -> WorkOrderNotificationDraft:
+    return WorkOrderNotificationDraft(
+        recipient_user_id=applicant_user_id,
+        notification_category=NotificationCategory.NOTICE,
+        event_type=WorkOrderEventType.BOT_COLLABORATOR_REVIEWED,
+        biz_type=WorkOrderBizType.BOT_COLLABORATOR,
+        biz_id=bot_id,
+        title="Bot 共同编辑申请已通过",
+        content="approved",
+    )
+
+
+def test_bot_editor_request_approval_creates_member_collaborator(db) -> None:
+    spaces = SpaceRepository(db)
+    team = _team(spaces)
+    spaces.add_member(
+        space_id=team.id,
+        user_id="applicant-1",
+        role=SpaceRole.MEMBER,
+        creator_id="owner-1",
+        env="dev",
+    )
+    with db.orm_session() as session:
+        bot = BotModel(
+            bot_id="bot-editor-1",
+            bot_name="Editor Bot",
+            entity_id="owner-1",
+            entity_type="user",
+            creator_id="owner-1",
+            owner_id="owner-1",
+            status="ACTIVE",
+            bot_type="service",
+            space_id=team.id,
+            env="dev",
+        )
+        session.add(bot)
+        session.flush()
+        session.refresh(bot)
+        bot_pk = bot.id
+
+    repository = WorkOrderRepository(db)
+    record = repository.create_bot_editor_request(
+        bot_pk=bot_pk,
+        bot_id="bot-editor-1",
+        bot_name="Editor Bot",
+        owner_id="owner-1",
+        space_id=team.id,
+        applicant_user_id="applicant-1",
+        applicant_name="Applicant",
+        apply_reason="joint editing",
+        env="dev",
+    )
+    data = json.loads(record.biz_data)
+    assert data["requested_role"] == "member"
+    assert data["space_id"] == team.id
+
+    with pytest.raises(WorkOrderAlreadyPendingError):
+        repository.create_bot_editor_request(
+            bot_pk=bot_pk,
+            bot_id="bot-editor-1",
+            bot_name="Editor Bot",
+            owner_id="owner-1",
+            space_id=team.id,
+            applicant_user_id="applicant-1",
+            applicant_name="Applicant",
+            apply_reason="again",
+            env="dev",
+        )
+
+    result = repository.review_bot_editor_request(
+        work_order_id=record.id,
+        reviewer_user_id="owner-1",
+        review_remark=None,
+        target_status=WorkOrderStatus.APPROVED,
+        notification=_bot_review_notification(
+            applicant_user_id="applicant-1", bot_id="bot-editor-1"
+        ),
+        env="dev",
+    )
+    assert result.status is WorkOrderStatus.APPROVED
+    with db.orm_session() as session:
+        collaborator = (
+            session.query(BotCollaboratorModel)
+            .filter(
+                BotCollaboratorModel.bot_pk == bot_pk,
+                BotCollaboratorModel.user_id == "applicant-1",
+                BotCollaboratorModel.env == "dev",
+            )
+            .one()
+        )
+        assert collaborator.role == "member"
+        assert collaborator.operator_id == "owner-1"
+
+    total, items = repository.list_items(
+        actor_id="applicant-1",
+        env="dev",
+        query_type=WorkOrderQueryType.INITIATED_BY_ME,
+        item_type=WorkOrderItemType.ALL,
+        biz_type=WorkOrderBizType.BOT_COLLABORATOR.value,
+        biz_id="bot-editor-1",
+        offset=0,
+        limit=20,
+    )
+    assert total == 1
+    assert items[0].work_order.id == record.id
 
 
 def test_unified_work_order_create_and_approval_lifecycle(db) -> None:

@@ -10,6 +10,9 @@ from injector import inject
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 
+from agentclaw.community.core.repository.implementations.work_orders.bot_editor import (
+    _BotEditorWorkOrderRepository,
+)
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
 )
@@ -64,6 +67,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         self._Approver = WorkOrderApproverModel
         self._Space = SpaceModel
         self._Member = SpaceMemberModel
+        self._bot_editor = _BotEditorWorkOrderRepository(db)
 
     @staticmethod
     def _new_no() -> str:
@@ -338,6 +342,31 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             db.refresh(row)
             return row.to_record()
 
+    def create_bot_editor_request(
+        self,
+        *,
+        bot_pk: int,
+        bot_id: str,
+        bot_name: str,
+        owner_id: str,
+        space_id: int,
+        applicant_user_id: str,
+        applicant_name: str,
+        apply_reason: str,
+        env: str,
+    ):
+        return self._bot_editor.create_bot_editor_request(
+            bot_pk=bot_pk,
+            bot_id=bot_id,
+            bot_name=bot_name,
+            owner_id=owner_id,
+            space_id=space_id,
+            applicant_user_id=applicant_user_id,
+            applicant_name=applicant_name,
+            apply_reason=apply_reason,
+            env=env,
+        )
+
     def list_items(
         self,
         *,
@@ -345,6 +374,8 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         env: str,
         query_type: WorkOrderQueryType,
         item_type: WorkOrderItemType,
+        biz_type: str | None = None,
+        biz_id: str | None = None,
         offset: int,
         limit: int,
     ):
@@ -426,6 +457,11 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                     query = query.filter(
                         self._Notification.notification_category == item_type.value
                     )
+
+            if biz_type is not None:
+                query = query.filter(self._WorkOrder.biz_type == biz_type)
+            if biz_id is not None:
+                query = query.filter(self._WorkOrder.biz_id == biz_id)
 
             total = query.count()
             rows = (
@@ -716,6 +752,25 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 review_remark=review_remark,
                 reviewed_at=reviewed_at,
             )
+
+    def review_bot_editor_request(
+        self,
+        *,
+        work_order_id: int,
+        reviewer_user_id: str,
+        review_remark: str | None,
+        target_status: WorkOrderStatus,
+        notification: WorkOrderNotificationDraft,
+        env: str,
+    ):
+        return self._bot_editor.review_bot_editor_request(
+            work_order_id=work_order_id,
+            reviewer_user_id=reviewer_user_id,
+            review_remark=review_remark,
+            target_status=target_status,
+            notification=notification,
+            env=env,
+        )
 
     def get_notification(
         self,

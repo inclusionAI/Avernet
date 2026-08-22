@@ -126,6 +126,7 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("put", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"),
     ("get", "/openapi/v1/bots/{bot_id}/editors"),
     ("post", "/openapi/v1/bots/{bot_id}/editors"),
+    ("post", "/openapi/v1/bots/{bot_id}/editor-requests"),
     ("patch", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"),
     ("delete", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"),
     ("delete", "/openapi/v1/bots/{bot_id}/editors/me"),

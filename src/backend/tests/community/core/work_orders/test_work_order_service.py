@@ -1,5 +1,6 @@
 """Unit tests for work-order orchestration and recipient notifications."""
 
+import json
 from datetime import datetime
 from unittest.mock import MagicMock
 
@@ -9,6 +10,7 @@ from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.models import SpaceRecord, SpaceType
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
+    WorkOrderApplicantAlreadyEditorError,
     WorkOrderApplicantAlreadyMemberError,
     WorkOrderInvalidReasonError,
     WorkOrderInvalidRemarkError,
@@ -20,6 +22,7 @@ from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderBizType,
     WorkOrderDetail,
+    WorkOrderDecision,
     APPROVAL_EVENT_TYPES,
     EVENT_CATEGORIES,
     WorkOrderEventType,
@@ -110,12 +113,183 @@ def _service():
     spaces = MagicMock()
     access = MagicMock()
     notifications = MagicMock(spec=WorkOrderNotificationService)
+    bots = MagicMock()
+    collaborator_repository = MagicMock()
+    collaborators = MagicMock()
+    member_management = MagicMock()
     return (
-        WorkOrderService(repository, spaces, access, notifications),
+        WorkOrderService(
+            repository,
+            spaces,
+            access,
+            notifications,
+            bots,
+            collaborator_repository,
+            collaborators,
+            member_management,
+        ),
         repository,
         spaces,
         access,
         notifications,
+    )
+
+
+def _bot_editor_service():
+    repository = MagicMock()
+    spaces = MagicMock()
+    access = MagicMock()
+    notifications = MagicMock(spec=WorkOrderNotificationService)
+    bots = MagicMock()
+    collaborator_repository = MagicMock()
+    collaborators = MagicMock()
+    member_management = MagicMock()
+    service = WorkOrderService(
+        repository,
+        spaces,
+        access,
+        notifications,
+        bots,
+        collaborator_repository,
+        collaborators,
+        member_management,
+    )
+    return (
+        service,
+        repository,
+        access,
+        notifications,
+        bots,
+        collaborator_repository,
+        collaborators,
+        member_management,
+    )
+
+
+def test_create_bot_editor_request_enforces_eligibility_and_delegates() -> None:
+    (
+        service,
+        repository,
+        access,
+        _,
+        bots,
+        collaborator_repository,
+        _,
+        member_management,
+    ) = _bot_editor_service()
+    bots.get_by_id_and_owner.return_value = {
+        "id": 17,
+        "bot_id": "bot-17",
+        "bot_name": "Editor Bot",
+        "bot_type": "service",
+        "owner_id": "owner-1",
+        "space_id": 7,
+    }
+    member_management.can_manage_collaborators.return_value = True
+    access.require_space_reference.return_value = _space()
+    collaborator_repository.get_by_bot_and_user.return_value = None
+    repository.create_bot_editor_request.return_value = _work_order()
+
+    result = service.create_bot_editor_request(
+        bot_id="bot-17",
+        owner_id="owner-1",
+        applicant_user_id="applicant-1",
+        reason="  joint editing  ",
+    )
+
+    assert result == _work_order()
+    access.require_space_member.assert_called_once_with(
+        space_id=7, user_id="applicant-1"
+    )
+    repository.create_bot_editor_request.assert_called_once_with(
+        bot_pk=17,
+        bot_id="bot-17",
+        bot_name="Editor Bot",
+        owner_id="owner-1",
+        space_id=7,
+        applicant_user_id="applicant-1",
+        applicant_name="applicant-1",
+        apply_reason="joint editing",
+        env="dev",
+    )
+
+
+def test_bot_owner_cannot_request_editor_access() -> None:
+    service, repository, _, _, bots, _, _, _ = _bot_editor_service()
+    bots.get_by_id_and_owner.return_value = {
+        "id": 17,
+        "bot_id": "bot-17",
+        "owner_id": "owner-1",
+    }
+
+    with pytest.raises(WorkOrderApplicantAlreadyEditorError):
+        service.create_bot_editor_request(
+            bot_id="bot-17",
+            owner_id="owner-1",
+            applicant_user_id="owner-1",
+            reason="joint editing",
+        )
+
+    repository.create_bot_editor_request.assert_not_called()
+
+
+def test_unified_approval_dispatches_bot_editor_side_effect() -> None:
+    service, repository, _, notifications, _, _, collaborators, _ = (
+        _bot_editor_service()
+    )
+    work_order = _work_order().model_copy(
+        update={
+            "biz_type": WorkOrderBizType.BOT_COLLABORATOR,
+            "biz_id": "bot-17",
+            "biz_data": json.dumps(
+                {
+                    "bot_id": "bot-17",
+                    "bot_name": "Editor Bot",
+                    "owner_id": "owner-1",
+                }
+            ),
+        }
+    )
+    detail = _detail().model_copy(update={"work_order": work_order})
+    repository.get_detail.return_value = detail
+    notification = WorkOrderNotificationDraft(
+        recipient_user_id="applicant-1",
+        notification_category=NotificationCategory.NOTICE,
+        event_type=WorkOrderEventType.BOT_COLLABORATOR_REVIEWED,
+        biz_type=WorkOrderBizType.BOT_COLLABORATOR,
+        biz_id="bot-17",
+        title="approved",
+        content="approved",
+    )
+    notifications.build_bot_editor_review_result.return_value = notification
+    expected = WorkOrderReviewResult(
+        work_order_id=11,
+        status=WorkOrderStatus.APPROVED,
+        decision=WorkOrderDecision.APPROVED,
+        reviewer_user_id="owner-1",
+        review_remark=None,
+        reviewed_at=NOW,
+    )
+    repository.review_bot_editor_request.return_value = expected
+
+    result = service.process_approval(
+        work_order_id=11,
+        actor_id="owner-1",
+        decision=WorkOrderDecision.APPROVED,
+        review_remark=None,
+    )
+
+    assert result == expected
+    repository.review_bot_editor_request.assert_called_once_with(
+        work_order_id=11,
+        reviewer_user_id="owner-1",
+        review_remark=None,
+        target_status=WorkOrderStatus.APPROVED,
+        notification=notification,
+        env="dev",
+    )
+    collaborators.on_collaboration_changed.assert_called_once_with(
+        "bot-17", "owner-1", "dev"
     )
 
 
@@ -197,6 +371,8 @@ def test_list_items_forwards_filters_and_normalizes_pagination() -> None:
         env="dev",
         query_type=WorkOrderQueryType.PROCESSED_BY_ME,
         item_type=WorkOrderItemType.NOTICE,
+        biz_type=None,
+        biz_id=None,
         offset=20,
         limit=10,
     )
