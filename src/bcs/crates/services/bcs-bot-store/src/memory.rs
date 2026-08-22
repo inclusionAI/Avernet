@@ -19,8 +19,8 @@ use bcs_service_api::{
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotTaskModesQuery, TaskModeMatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotDynamicStatus, BotMetricCount,
-    BotMetricsSnapshotPort, FriendCheckInStrategy, RegisteredBot, ServiceError, ServiceResult,
-    Skill, UserVisibility,
+    BotMetricsSnapshotPort, ConnectStreamError, FriendCheckInStrategy, RegisteredBot, ServiceError,
+    ServiceResult, Skill, UserVisibility, is_mock_token,
 };
 
 fn unix_millis() -> u64 {
@@ -1474,6 +1474,139 @@ impl BotRepoPort for MemoryBotRepo {
     }
 
     // ===== Streaming Connection Management =====
+
+    async fn connect_or_promote_streaming(
+        &self,
+        bot_id: String,
+    ) -> Result<String, ConnectStreamError> {
+        let existing_token = self.load_token(&bot_id).await;
+        let is_mock = existing_token.as_deref().map(is_mock_token).unwrap_or(false);
+        let bot_exists = {
+            let in_mem = self.bots.read().await.get(&bot_id).is_some();
+            in_mem || existing_token.is_some() || self.bot_info_path(&bot_id).exists()
+        };
+        let in_memory_connected = {
+            let bots = self.bots.read().await;
+            bots.get(&bot_id)
+                .map(|bot| bot.ws_connection.is_some())
+                .unwrap_or(false)
+        };
+        let token_preview = |t: &str| format!("{}...", &t[..t.len().min(4)]);
+
+        match (bot_exists, is_mock, in_memory_connected) {
+            (false, _, _) => {
+                let session_token = uuid::Uuid::new_v4().to_string();
+                let mut bots = self.bots.write().await;
+                bots.insert(
+                    bot_id.clone(),
+                    RegisteredBotInner {
+                        bot_id: bot_id.clone(),
+                        last_heartbeat: Instant::now(),
+                        capabilities: BotCapabilities::default(),
+                        dynamic_status: BotDynamicStatus::default(),
+                        ws_connection: Some(BotConnection {
+                            session_token: session_token.clone(),
+                            connected_at: Instant::now(),
+                        }),
+                        session_token: Some(session_token.clone()),
+                        env: Some(resolve_env()),
+                        status: bcs_service_api::ActorStatus::Online,
+                        actor_kind: bcs_service_api::ActorKind::Bot,
+                        created_by: None,
+                        protocol_version: 1,
+                        user_visibility: UserVisibility::default(),
+                        friend_ext: serde_json::Map::new(),
+                        friend_check_in_strategy: FriendCheckInStrategy::default(),
+                    },
+                );
+                self.token_to_bot
+                    .write()
+                    .await
+                    .insert(session_token.clone(), bot_id.clone());
+                info!(
+                    bot_id = %bot_id,
+                    branch = "create",
+                    token_preview = %token_preview(&session_token),
+                    "register_streaming_connection: create"
+                );
+                Ok(session_token)
+            }
+            (true, true, _) => {
+                let previous_mock = existing_token.clone();
+                let session_token = uuid::Uuid::new_v4().to_string();
+                {
+                let mut bots = self.bots.write().await;
+                if let Some(bot) = bots.get_mut(&bot_id) {
+                    bot.ws_connection = Some(BotConnection {
+                        session_token: session_token.clone(),
+                        connected_at: Instant::now(),
+                    });
+                    bot.session_token = Some(session_token.clone());
+                    bot.last_heartbeat = Instant::now();
+                } else {
+                    bots.insert(
+                        bot_id.clone(),
+                        RegisteredBotInner {
+                            bot_id: bot_id.clone(),
+                            last_heartbeat: Instant::now(),
+                            capabilities: BotCapabilities::default(),
+                            dynamic_status: BotDynamicStatus::default(),
+                            ws_connection: Some(BotConnection {
+                                session_token: session_token.clone(),
+                                connected_at: Instant::now(),
+                            }),
+                            session_token: Some(session_token.clone()),
+                            env: Some(resolve_env()),
+                            status: bcs_service_api::ActorStatus::Online,
+                            actor_kind: bcs_service_api::ActorKind::Bot,
+                            created_by: None,
+                            protocol_version: 1,
+                            user_visibility: UserVisibility::default(),
+                            friend_ext: serde_json::Map::new(),
+                            friend_check_in_strategy: FriendCheckInStrategy::default(),
+                        },
+                    );
+                }
+                } // end bots.write() scope (drop before save_token re-acquires it)
+                if let Err(err) = self.save_token(&bot_id, &session_token).await {
+                    warn!(
+                        bot_id = %bot_id,
+                        error = %err,
+                        "connect_or_promote_streaming: promote_mock disk repair failed"
+                    );
+                }
+                let mut token_to_bot = self.token_to_bot.write().await;
+                if let Some(prev) = previous_mock {
+                    token_to_bot.remove(&prev);
+                }
+                token_to_bot.insert(session_token.clone(), bot_id.clone());
+                info!(
+                    bot_id = %bot_id,
+                    branch = "promote_mock",
+                    previous_token_kind = "mock",
+                    token_preview = %token_preview(&session_token),
+                    "register_streaming_connection: promote_mock"
+                );
+                Ok(session_token)
+            }
+            (true, false, true) => {
+                warn!(
+                    bot_id = %bot_id,
+                    branch = "already_connected",
+                    "connect_or_promote_streaming: real-token bot already connected"
+                );
+                Err(ConnectStreamError::AlreadyConnected(bot_id))
+            }
+            (true, false, false) => {
+                warn!(
+                    bot_id = %bot_id,
+                    branch = "already_registered",
+                    "connect_or_promote_streaming: refusing empty/stale-token claim of real-token bot"
+                );
+                Err(ConnectStreamError::AlreadyRegistered(bot_id))
+            }
+        }
+    }
 
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()> {
         let mut bots = self.bots.write().await;

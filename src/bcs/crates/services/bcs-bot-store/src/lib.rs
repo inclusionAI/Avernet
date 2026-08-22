@@ -32,7 +32,8 @@ use bcs_service_api::{
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch,
     BotDynamicStatus, BotMetricCount,
-    BotMetricsSnapshotPort, RegisteredBot, ServiceError, ServiceResult, Skill,
+    BotMetricsSnapshotPort, ConnectStreamError, RegisteredBot, ServiceError, ServiceResult, Skill,
+    is_mock_token,
 };
 
 pub mod memory;
@@ -2351,6 +2352,148 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     // ===== Streaming Connection Management =====
+
+    async fn connect_or_promote_streaming(
+        &self,
+        bot_id: String,
+    ) -> Result<String, ConnectStreamError> {
+        // Decide the branch from the registry's authoritative current token
+        // (memory → DB fallback via load_token) and existence (memory or DB),
+        // before taking the write lock, so a DB-only bot after a BCS restart is
+        // still located and a previously-registered bot (even with no token) is
+        // refused rather than silently overwritten.
+        let existing_token = self.load_token(&bot_id).await;
+        let is_mock = existing_token.as_deref().map(is_mock_token).unwrap_or(false);
+        let bot_exists = {
+            let in_mem = self.bots.read().await.get(&bot_id).is_some();
+            in_mem || existing_token.is_some() || self.exists_in_db(&bot_id).await
+        };
+        // ws_connection presence and connected state are only meaningful in
+        // memory; a DB-only entry has no live connection.
+        let in_memory_connected = {
+            let bots = self.bots.read().await;
+            bots.get(&bot_id)
+                .map(|bot| bot.ws_connection.is_some())
+                .unwrap_or(false)
+        };
+        let token_preview = |t: &str| format!("{}...", &t[..t.len().min(4)]);
+
+        match (bot_exists, is_mock, in_memory_connected) {
+            // truly new (no record anywhere) → create with a real token
+            (false, _, _) => {
+                let session_token = uuid::Uuid::new_v4().to_string();
+                let mut bots = self.bots.write().await;
+                bots.insert(
+                    bot_id.clone(),
+                    RegisteredBotInner {
+                        bot_uuid: bot_id.clone(),
+                        last_heartbeat: Instant::now(),
+                        capabilities: BotCapabilities::default(),
+                        dynamic_status: BotDynamicStatus::default(),
+                        status: bcs_service_api::ActorStatus::Online,
+                        actor_kind: bcs_service_api::ActorKind::Bot,
+                        ws_connection: Some(BotConnection {
+                            session_token: session_token.clone(),
+                            connected_at: Instant::now(),
+                        }),
+                        session_token: Some(session_token.clone()),
+                        env: Some(resolve_env()),
+                        hidden: false,
+                        created_by: None,
+                    },
+                );
+                self.token_to_bot
+                    .write()
+                    .await
+                    .insert(session_token.clone(), bot_id.clone());
+                info!(
+                    bot_id = %bot_id,
+                    branch = "create",
+                    token_preview = %token_preview(&session_token),
+                    "register_streaming_connection: create"
+                );
+                Ok(session_token)
+            }
+            // pre-registered plugin bot, not yet attached → promote MOCK → real
+            (true, true, _) => {
+                let previous_mock = existing_token.clone();
+                let session_token = uuid::Uuid::new_v4().to_string();
+                let mut bots = self.bots.write().await;
+                if let Some(bot) = bots.get_mut(&bot_id) {
+                    bot.ws_connection = Some(BotConnection {
+                        session_token: session_token.clone(),
+                        connected_at: Instant::now(),
+                    });
+                    bot.session_token = Some(session_token.clone());
+                    bot.last_heartbeat = Instant::now();
+                } else {
+                    // DB-only after restart: hydrate the entry with the new real
+                    // token so subsequent connects see a real-token bot.
+                    bots.insert(
+                        bot_id.clone(),
+                        RegisteredBotInner {
+                            bot_uuid: bot_id.clone(),
+                            last_heartbeat: Instant::now(),
+                            capabilities: BotCapabilities::default(),
+                            dynamic_status: BotDynamicStatus::default(),
+                            status: bcs_service_api::ActorStatus::Online,
+                            actor_kind: bcs_service_api::ActorKind::Bot,
+                            ws_connection: Some(BotConnection {
+                                session_token: session_token.clone(),
+                                connected_at: Instant::now(),
+                            }),
+                            session_token: Some(session_token.clone()),
+                            env: Some(resolve_env()),
+                            hidden: false,
+                            created_by: None,
+                        },
+                    );
+                }
+                // Repair DB: write the real token over the stale MOCK so a
+                // later restart resolves the bot by token (scenario 3 fix).
+                if let Err(err) = self.save_token_to_db(&bot_id, &session_token).await {
+                    warn!(
+                        bot_id = %bot_id,
+                        error = %err,
+                        "connect_or_promote_streaming: promote_mock DB repair failed"
+                    );
+                }
+                let mut token_to_bot = self.token_to_bot.write().await;
+                if let Some(prev) = previous_mock {
+                    token_to_bot.remove(&prev);
+                }
+                token_to_bot.insert(session_token.clone(), bot_id.clone());
+                info!(
+                    bot_id = %bot_id,
+                    branch = "promote_mock",
+                    previous_token_kind = "mock",
+                    token_preview = %token_preview(&session_token),
+                    "register_streaming_connection: promote_mock"
+                );
+                Ok(session_token)
+            }
+            // real token, already connected → reject
+            (true, false, true) => {
+                warn!(
+                    bot_id = %bot_id,
+                    branch = "already_connected",
+                    "connect_or_promote_streaming: real-token bot already connected"
+                );
+                Err(ConnectStreamError::AlreadyConnected(bot_id))
+            }
+            // real token, not connected → anti-hijack: refuse an empty/stale-token
+            // claim of a real-token bot. (Reconnect by the real token still works
+            // via the existing reconnect_streaming(token) path.)
+            (true, false, false) => {
+                warn!(
+                    bot_id = %bot_id,
+                    branch = "already_registered",
+                    "connect_or_promote_streaming: refusing empty/stale-token claim of real-token bot"
+                );
+                Err(ConnectStreamError::AlreadyRegistered(bot_id))
+            }
+        }
+    }
 
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()> {
         info!(bot_id = %bot_id, "register_streaming_connection: registering new connection");

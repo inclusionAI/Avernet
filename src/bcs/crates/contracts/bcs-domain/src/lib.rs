@@ -84,8 +84,8 @@ pub use opening_message::{
 pub use proposal::GroupChatProposal;
 pub use provider::{
     BotDeliveryTarget, CoordinationMode, CoordinationSurface, ProviderAuthMode,
-    ProviderBotBinding, ProviderCoordinationConfig, ProviderCredential,
-    ProviderOrganizationManagementConfig, ProviderRecord, RedactedToken,
+    ProviderBotBinding, ProviderBotConnectionMode, ProviderCoordinationConfig,
+    ProviderCredential, ProviderOrganizationManagementConfig, ProviderRecord, RedactedToken,
 };
 pub use registry::{
     AgentCredentials, BindingChannel, BindingChannels, BotCapabilities, BotConnectParams,

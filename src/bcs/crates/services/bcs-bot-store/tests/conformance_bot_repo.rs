@@ -6,6 +6,7 @@ use bcs_db_api::{DbPlugin, DbStatement, DbValue as Value};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCapabilities, BotMetricsSnapshotPort, BotRepoPort,
+    ConnectStreamError, mock_token,
 };
 use bcs_test_support::contract::port::bot_metrics_snapshot_port_contract_tests;
 use bcs_test_support::contract::repo::bot_repo_port_contract_tests;
@@ -223,6 +224,106 @@ async fn assert_metrics_actors_counted(repo: &dyn BotMetricsSnapshotPort) {
             && count.visibility.as_deref() == Some("protected")
             && count.count == 1
     }));
+}
+
+#[tokio::test]
+async fn connect_or_promote_streaming_creates_bot_when_absent() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let repo = MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf());
+
+    let token = repo
+        .connect_or_promote_streaming("plugin-bot:alice".to_string())
+        .await
+        .expect("create");
+    assert!(!token.is_empty());
+    // newly created token is a real (non-MOCK) value the bot can reconnect with
+    assert!(!bcs_service_api::is_mock_token(&token));
+    assert_eq!(repo.load_token("plugin-bot:alice").await.as_deref(), Some(token.as_str()));
+}
+
+#[tokio::test]
+async fn connect_or_promote_streaming_promotes_mock_to_real() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let repo = MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf());
+
+    // provider registered a plugin bot, so the stored token is MOCK
+    let mock = mock_token();
+    repo.register_with_owner_and_token(
+        "plugin-bot:alice".to_string(),
+        BotCapabilities {
+            name: Some("Plugin Bot".to_string()),
+            visibility: "protected".to_string(),
+            ..Default::default()
+        },
+        "11111111",
+        &mock,
+    )
+    .await
+    .expect("register plugin bot with mock token");
+    assert!(bcs_service_api::is_mock_token(&mock));
+
+    // plugin reconnects (empty token), bot located by id -> mock promoted to real
+    let promoted = repo
+        .connect_or_promote_streaming("plugin-bot:alice".to_string())
+        .await
+        .expect("promote");
+    assert!(!bcs_service_api::is_mock_token(&promoted));
+    assert_eq!(
+        repo.load_token("plugin-bot:alice").await.as_deref(),
+        Some(promoted.as_str())
+    );
+}
+
+#[tokio::test]
+async fn connect_or_promote_streaming_refuses_real_token_claim_with_already_registered() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let repo = MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf());
+
+    // a normally-onboarded bot with a real token, not connected
+    repo.register_with_owner_and_token(
+        "real-bot:alice".to_string(),
+        BotCapabilities {
+            name: Some("Real Bot".to_string()),
+            visibility: "protected".to_string(),
+            ..Default::default()
+        },
+        "11111111",
+        "real-runtime-token",
+    )
+    .await
+    .expect("register real-token bot");
+
+    let err = repo
+        .connect_or_promote_streaming("real-bot:alice".to_string())
+        .await
+        .expect_err("real-token bot refused");
+    assert!(matches!(err, ConnectStreamError::AlreadyRegistered(id) if id == "real-bot:alice"));
+    // token untouched
+    assert_eq!(
+        repo.load_token("real-bot:alice").await.as_deref(),
+        Some("real-runtime-token")
+    );
+}
+
+#[tokio::test]
+async fn connect_or_promote_streaming_refuses_real_token_connected_with_already_connected() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let repo = MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf());
+
+    // first connect creates the bot + real token + an active ws connection
+    let first = repo
+        .connect_or_promote_streaming("live-bot:alice".to_string())
+        .await
+        .expect("first connect");
+    assert!(repo.is_connected("live-bot:alice").await);
+
+    // second connect for the same live bot => already connected
+    let err = repo
+        .connect_or_promote_streaming("live-bot:alice".to_string())
+        .await
+        .expect_err("live bot already connected");
+    assert!(matches!(err, ConnectStreamError::AlreadyConnected(id) if id == "live-bot:alice"));
+    assert_eq!(repo.load_token("live-bot:alice").await.as_deref(), Some(first.as_str()));
 }
 
 async fn sqlite_db() -> Arc<dyn DbPlugin> {
