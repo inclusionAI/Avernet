@@ -82,6 +82,14 @@ from agentclaw.community.core.expert_chat.errors import (
 from agentclaw.community.core.bot_chat.bcn_friendship import (
     FriendshipSourceUnavailableError,
 )
+from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
+from agentclaw.community.core.expert_chat.errors import (
+    BotNotFoundError as ExpertBotNotFoundError,
+    ConnectionError as ExpertConnectionError,
+)
+from agentclaw.community.core.bot_chat.bcn_friendship import (
+    FriendshipSourceUnavailableError,
+)
 from agentclaw.community.core.session_resources.types import SessionResourceRecord
 from agentclaw.community.di import Injected
 router = APIRouter(
