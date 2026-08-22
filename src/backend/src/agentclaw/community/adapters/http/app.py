@@ -467,7 +467,8 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
     # client-side flow (bad input, missing auth), so it gets one compact line
     # without a traceback: enough to see that the request was refused and with
     # what arguments, without a per-401 stack in the log file. It used to get
-    # nothing at all, which is why a refused request could not be traced.
+    # nothing at all, which is why a refused request could not be traced. The
+    # one exception is a 4xx that wraps a cause — see below.
     #
     # 3xx stays silent: the only one is ``LoginRedirectRequired``, an ordinary
     # step in the login flow rather than a failure to diagnose.
@@ -482,10 +483,19 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
             params_suffix(request),
         )
     elif status >= 400:
+        # A 4xx raised ``from`` something is a refusal this service synthesised
+        # out of an underlying failure, and the cause is the only record of why
+        # — a lock error answering 409 says the fence could not be taken but
+        # not that the cache backend was unreachable. Status alone is the wrong
+        # question for a traceback: what matters is whether anything happened
+        # underneath that a reader would otherwise never see. A bare 4xx (the
+        # common case: bad input, missing auth, unknown id) has no cause and
+        # still gets one compact line, so this puts no stack behind a 401.
         logger.warning(
             "[DomainError %s] %s on %s %s: %s%s",
             status, type(exc).__name__, request.method, request.url.path,
             exc.detail, params_suffix(request),
+            exc_info=exc if exc.__cause__ is not None else None,
         )
     if _is_public_api(request):
         return _public_error_envelope(status, request)

@@ -52,6 +52,13 @@ def _build_app() -> FastAPI:
     async def raise_unhandled():
         raise RuntimeError("kaboom-runtime")
 
+    @app.get("/raise-caused/{which}")
+    async def raise_caused(which: str):
+        try:
+            raise RuntimeError("cache backend unreachable")
+        except RuntimeError as exc:
+            raise _ROUTE_MAP[which](f"boom-{which}") from exc
+
     return app
 
 
@@ -164,14 +171,41 @@ def test_4xx_domain_error_logs_one_compact_warning(client, monkeypatch):
     client.get("/raise/notfound")
     assert any("[DomainError %s]" in str(a[0]) for a, _ in calls), \
         f"expected a 4xx DomainError warning, got: {calls}"
-    assert all("exc_info" not in k for _, k in calls), \
-        "4xx must not carry a traceback"
+    assert all(k.get("exc_info") is None for _, k in calls), \
+        "a bare 4xx must not carry a traceback"
 
     # 3xx stays silent: LoginRedirectRequired is a step in the login flow, not
     # a failure anyone debugs.
     calls.clear()
     client.get("/raise/redirect")
     assert calls == [], f"302 must not log, got: {calls}"
+
+
+def test_4xx_raised_from_a_cause_logs_that_cause(client, monkeypatch):
+    """The status a caller sees and the detail an operator needs are different
+    questions.
+
+    ``SkillSetControlPlaneLockUnavailableError`` answers 409 — the mutation
+    fence could not be taken, which is a conflict, not an outage. But it is
+    raised ``from`` the cache failure underneath, and keying the traceback off
+    the status alone dropped that cause on the floor: the log said the fence
+    was unavailable and never said why. A 4xx that wraps a cause now carries
+    it.
+    """
+    from agentclaw.community.adapters.http import app as app_mod
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        app_mod.logger, "warning",
+        lambda *a, **k: calls.append((a, k)),
+    )
+    client.get("/raise-caused/conflict")
+
+    logged = [k["exc_info"] for _, k in calls if k.get("exc_info") is not None]
+    assert logged, f"a caused 4xx must log its cause, got: {calls}"
+    cause = logged[0].__cause__
+    assert isinstance(cause, RuntimeError)
+    assert str(cause) == "cache backend unreachable"
 
 
 def test_handler_logs_the_params_stashed_by_the_public_decorator(monkeypatch):
