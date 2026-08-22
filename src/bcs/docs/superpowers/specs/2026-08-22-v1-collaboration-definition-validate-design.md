@@ -129,7 +129,12 @@ binding, identity rejection, and service wiring failure, not for invalid YAML.
 New file `src/bcs/api-contracts/v1/openapi/collaboration-definitions.yaml`:
 
 - Operation `POST /api/v1/collaboration/definitions/validate`, root node key
-  `CollaborationDefinitionValidatePath`, `operationId: validate_collaboration_definition`.
+  `CollaborationDefinitionValidatePath`, `operationId: validate_definition`
+  (the operationId omits the `collaboration` token because
+  `scripts/validate_openapi_contract.py` flags `collaboration`/`bcn`/`openapi`
+  as routing/version-only naming and would reject it; the path
+  `/api/v1/collaboration/definitions/validate` supplies the domain context,
+  mirroring the template precedent `list_templates`/`get_template`).
 - Tags `["Collaboration / Definitions"]`.
 - Request body (required, `application/json`):
   `CollaborationDefinitionValidateRequest { definition_yaml: string, required, minLength: 1 }`.
