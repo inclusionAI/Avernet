@@ -23,12 +23,22 @@ A BCN plugin connects its bot to BCS over **WebSocket with an empty token** (`ad
 
 ## 3. Design
 
+### 3.0 Admission gate (plugin only on allow-listed providers)
+
+`connection_mode=plugin` is accepted **only** when the request's `provider_id` is in the server's `allowed_switch_provider_ids` configuration (`bootstrap/bcs/src/config.rs:749`, threaded as `HttpAppState.allowed_switch_provider_ids`, `state.rs:471`).
+
+- **In the allow-list**: the handler already sets `bot_uuid = Some(provider_bot_ref.clone())` today (`providers.rs:225`), i.e. the deterministic-id invariant (IV-1) is already true for these providers. Plugin mode reuses that same precondition and same component path.
+- **Outside the allow-list**: `connection_mode=plugin` is rejected. `connection_mode=gateway` is the only permitted value (and remains the default when the field is absent).
+
+The admission check lives in the handler `register_provider_bot` (`routes/providers.rs`), before constructing `RegisterProviderBotCommand`, so the service layer never sees a plugin command from a non-allow-listed provider. Error responses are `400` (`connection_mode plugin requires an allow-listed provider`) — reusing `ProviderRouteError::bad_request`.
+
 ### 3.1 Invariants (plugin mode)
 
-- **IV-1**: A plugin-mode bot's `bot_uuid` is exactly the request's `provider_bot_ref` (deterministic id). This is what lets a later plugin WS connect (which sends `bot_id = provider_bot_ref`) land on the same bot record.
+- **IV-1**: A plugin-mode bot's `bot_uuid` is exactly the request's `provider_bot_ref` (deterministic id). This is what lets a later plugin WS connect (which sends `bot_id = provider_bot_ref`) land on the same bot record. **Scope**: only true for providers in `allowed_switch_provider_ids` — which is exactly the set allowed to register plugin bots (§3.0), so the invariant is universally true for every plugin registration that BCS accepts.
 - **IV-2**: The `session_token` is **not a connect credential** in plugin mode — it is a runtime token the plugin and BCS negotiate, returned via `BotConnectResponse.token` / `BCN_BOT_TOKEN`.
 - **IV-3**: Provider registration of an **already-existing** plugin bot does **not** replace its `session_token` (so an already-connected plugin keeps its token and WS connection).
 - **IV-4**: The reconcile that promotes a pre-registered (MOCK-token) plugin bot to a real-token connected bot happens **inside the store write lock**, not in the lock-free `connect_bot` existence check. The store lock is mutually exclusive, so two writers never truly overlap; the second always observes the first's final state.
+- **IV-5**: Only providers in `allowed_switch_provider_ids` may register plugin bots (§3.0). Plugin mode is undefined for other providers and is rejected at the handler.
 
 ### 3.2 Wire contract
 
@@ -55,8 +65,8 @@ pub connection_mode: Option<ProviderBotConnectionModeDto>,
 
 Add a `connection_mode: ProviderBotConnectionMode` to `RegisterProviderBotCommand` (`service-api/.../application/provider.rs:77`) and `RegisterProviderBotParams` (`service-api/.../core/provider.rs:27`), threaded through `register_provider_bot` (`routes/providers.rs:217` and `application/provider.rs:244`).
 
-For **plugin** mode:
-- **Force deterministic `bot_uuid == provider_bot_ref`** (IV-1). Do not gate on `allowed_switch_provider_ids` for plugin mode (today `bot_uuid = Some(provider_bot_ref.clone())` only happens under that gate, `providers.rs:225`).
+For **plugin** mode (only reached for allow-listed providers, §3.0):
+- **Deterministic `bot_uuid == provider_bot_ref`** (IV-1). For allow-listed providers the handler already sets `bot_uuid = Some(provider_bot_ref.clone())` (`providers.rs:225`); plugin mode keeps that. The §3.0 admission gate guarantees plugin commands only arrive from those providers, so IV-1 holds.
 - **Skip `bindings.insert_binding(...)`** entirely (the `provider_core.rs:202-222` block). → no provider_binding row → `resolve_delivery_target` ⇒ `WebSocket`, `is_provider_downlink_bot` ⇒ false ⇒ WS allowed.
 - `register_with_owner_and_token(bot_uuid, capabilities, owner, token)` is still called, but the `token` passed to it is **not** a usable runtime token — it is a `MOCK_`-prefixed placeholder (so the store's reconcile branch can recognize "pre-registered, no plugin attached yet"; see §3.5). The real token is minted later from the WS connect path.
 - If `repo.get(provider_bot_ref)` already exists (plugin connected first): `register_with_owner_and_token` already soft-merges capabilities. **Plugin-mode further requires: do not replace `session_token`** (IV-3). This is achieved by a new plugin-mode merge path (or a flag) that preserves the existing real token instead of `existing.session_token.replace(...)` (`memory.rs:660`, `lib.rs:1417`).
@@ -113,6 +123,9 @@ Business asks for link-level logs to aid triage. Each reconcile branch and each 
 
 ## 5. Test plan
 
+0. **Admission gate (§3.0)**: provider in `allowed_switch_provider_ids` with `connection_mode=plugin` ⇒ accepted; provider **not** in the list with `connection_mode=plugin` ⇒ `400` (`connection_mode plugin requires an allow-listed provider`); same non-allow-listed provider with `connection_mode=gateway` (or absent) ⇒ accepted (no regression).
+
+
 1. **DTO**: absent ⇒ gateway; `"plugin"`/`"gateway"` parse; unknown value ⇒ 400.
 2. **Gateway regression**: binding written; `bot_runtime_token` only for static_bearer/provider_admin; behavior unchanged.
 3. **Plugin P-before-W**: register (plugin) creates bot with MOCK token, no binding; then WS connect with `bot_id=provider_bot_ref` empty-token ⇒ returns same `bot_uuid`, real token != MOCK, no new bot, `resolve_delivery_target == WebSocket`, `is_provider_downlink_bot == false`, **no** provider_binding row.
@@ -123,6 +136,7 @@ Business asks for link-level logs to aid triage. Each reconcile branch and each 
 
 ## 6. Open questions
 
+0. **Admission of plugin mode (DECIDED)**: only `allowed_switch_provider_ids` providers may use `connection_mode=plugin`. Provider-id gate at the handler (`routes/providers.rs`), rejecting plugin-from-non-allow-listed with `400`. This reuses the same allow-list that already gives these providers `bot_uuid == provider_bot_ref` (IV-1). Confirmed 2026-08-22.
 1. Plugin-mode response `bot_runtime_token`: return the `MOCK_` placeholder (for provider audit) or `None`? Default: return `None` with a `message` explaining the plugin obtains its token via WS connect. Pending user confirmation.
 2. Whether to also record `connection_mode` as a `bot_info` audit-only field (not used by behavior). Default: **no** (YAGNI). Pending user confirmation.
 3. Whether delete/list/attributes provider endpoints (which key off the binding) should gain a registry-fallback for plugin bots (which have no binding). Default: **no this round** — documented limitation; plugin bots are managed via WS/onboard lifecycle, not the binding-keyed provider-admin endpoints. Pending user confirmation.
