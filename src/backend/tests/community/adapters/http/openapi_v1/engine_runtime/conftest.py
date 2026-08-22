@@ -150,6 +150,7 @@ class FakeExpertChat:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.sessions: dict[str, Any] = {"items": [], "total": 0}
+        self.session: dict[str, Any] = {"id": "friend-session", "title": "Friend"}
 
     def add_chat_bot(self, *args, **kwargs):
         self.calls.append(("add_chat_bot", args, kwargs))
@@ -158,6 +159,38 @@ class FakeExpertChat:
     async def list_chat_sessions(self, *args, **kwargs):
         self.calls.append(("list_chat_sessions", args, kwargs))
         return self.sessions
+
+    async def create_chat_session(self, *args, **kwargs):
+        self.calls.append(("create_chat_session", args, kwargs))
+        return {"session_key": self.session["id"]}
+
+    async def get_owned_chat_session(self, *args, **kwargs):
+        self.calls.append(("get_owned_chat_session", args, kwargs))
+        return self.session
+
+    async def update_owned_chat_session(self, *args, **kwargs):
+        self.calls.append(("update_owned_chat_session", args, kwargs))
+        fields = args[4] if len(args) > 4 else kwargs.get("fields", {})
+        return {**self.session, **fields}
+
+    async def delete_owned_chat_session(self, *args, **kwargs):
+        self.calls.append(("delete_owned_chat_session", args, kwargs))
+        return True
+
+    async def list_owned_chat_session_messages(self, *args, **kwargs):
+        self.calls.append(("list_owned_chat_session_messages", args, kwargs))
+        return {
+            "items": [{"id": "m1", "role": "user", "content": "hello"}],
+            "total": 1,
+        }
+
+    async def clear_owned_chat_session_messages(self, *args, **kwargs):
+        self.calls.append(("clear_owned_chat_session_messages", args, kwargs))
+        return True
+
+    async def set_owned_chat_session_favorite(self, *args, **kwargs):
+        self.calls.append(("set_owned_chat_session_favorite", args, kwargs))
+        return True
 
 
 @pytest.fixture

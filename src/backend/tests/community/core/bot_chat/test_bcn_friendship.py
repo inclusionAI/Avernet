@@ -64,6 +64,15 @@ def test_malformed_admission_response_fails_closed():
         )
 
 
+def test_non_object_admission_response_fails_closed():
+    client = FakeHttpClient([["not", "an", "object"]])
+
+    with pytest.raises(FriendshipSourceUnavailableError):
+        BcnHumanBotFriendshipService(client).is_friend(
+            human_id="staff", bot_id="bot", owner_id="owner", request_headers={}
+        )
+
+
 def test_transport_failure_fails_closed_instead_of_using_legacy_relationships():
     client = FakeHttpClient([httpx.ConnectError("down")])
 

@@ -703,3 +703,47 @@ def test_owner_path_does_not_query_bcn_or_expert_chat(
     assert relay.paths == ["/api/sessions"]
     assert friendships.calls == []
     assert expert.calls == []
+
+
+@pytest.mark.parametrize(
+    ("method", "suffix", "body", "expert_method"),
+    [
+        ("post", "", {"title": "Named"}, "create_chat_session"),
+        ("get", "/friend-session", None, "get_owned_chat_session"),
+        ("patch", "/friend-session", {"title": "Renamed"}, "update_owned_chat_session"),
+        ("delete", "/friend-session", None, "delete_owned_chat_session"),
+        ("get", "/friend-session/messages", None, "list_owned_chat_session_messages"),
+        ("delete", "/friend-session/messages", None, "clear_owned_chat_session_messages"),
+        ("get", "/favorites", None, "list_chat_sessions"),
+        ("put", "/friend-session/favorite", None, "set_owned_chat_session_favorite"),
+        ("delete", "/friend-session/favorite", None, "set_owned_chat_session_favorite"),
+    ],
+)
+def test_each_friend_session_operation_reuses_expert_chat(
+    make_client, friendships, expert, relay, method, suffix, body, expert_method
+):
+    friendships.allowed = True
+    expert.sessions = {"items": [expert.session], "total": 1}
+    client = make_client(router, caller="friend-1")
+    kwargs = {"params": {"owner_id": OWNER}}
+    if body is not None:
+        kwargs["json"] = body
+
+    response = getattr(client, method)(f"{_base()}{suffix}", **kwargs)
+
+    assert response.status_code in (200, 201), response.json()
+    assert expert_method in [call[0] for call in expert.calls]
+    assert relay.calls == []
+
+
+def test_friend_access_is_draft_only(make_client, friendships, expert):
+    friendships.allowed = True
+    client = make_client(router, caller="friend-1")
+
+    response = client.get(
+        _base(), params={"owner_id": OWNER, "stage": "online"}
+    )
+
+    assert fails(response, 404)["message"] == "Not found"
+    assert friendships.calls == []
+    assert expert.calls == []
