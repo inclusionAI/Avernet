@@ -77,16 +77,17 @@ class LocalSkillRepoSyncPlugin(MockSeam, SkillRepoSyncPlugin):
         return Path.home() / ".openclaw" / "workspace" / "skills"
 
     def get_scan_target(self, default_fallback: Path) -> Path:
-        """Local mode has no atomic skills_target; return the caller's
-        fallback (typically the market repo dir). Lenient on purpose:
-        local has no NAS race surface, so the strict cloud behavior
-        (raise) would be unhelpful for offline dev.
-        """
-        logger.info(
-            "[LocalSkillRepoSync.get_scan_target] scan_target=%s (fallback, local mode)",
-            default_fallback,
+        """Prefer the host corpus reported by this local sync implementation."""
+        root = self.get_local_skills_root()
+        repo_dir = root / "skills-repo" if root is not None else None
+        scan_target = (
+            repo_dir if repo_dir is not None and repo_dir.is_dir() else default_fallback
         )
-        return default_fallback
+        logger.info(
+            "[LocalSkillRepoSync.get_scan_target] scan_target=%s (local mode)",
+            scan_target,
+        )
+        return scan_target
 
     def get_data_init_skill_md_path(self) -> str:
         """Prefer ``$DATA_INIT_SKILL_MD_PATH``, else ``~/.agents/skills/data-init/SKILL.md``
