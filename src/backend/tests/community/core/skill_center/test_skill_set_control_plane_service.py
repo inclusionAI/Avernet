@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -24,13 +23,7 @@ from agentclaw.community.core.skill_center.services.skill_set_control_plane impo
 from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
     BotRuntimeProjectionReconciler,
 )
-from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
-    BotCapabilityMutationGuard,
-    BotCapabilityMutationLockUnavailableError,
-)
-from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
-from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
 class _Guard:
@@ -48,35 +41,6 @@ class _Guard:
         assert self.held
         self.held = False
         return True
-
-
-class _MutationGuard:
-    def acquire(self, *, scope):
-        assert scope.bot_id == "bot-1"
-        return object()
-
-    def release(self, _lease) -> bool:
-        return True
-
-    def ensure_valid(self, _lease) -> None:
-        return None
-
-
-class _AnyMutationGuard(_MutationGuard):
-    def acquire(self, *, scope):
-        self.scope = scope
-        return object()
-
-
-class _CreationMustNotAcquireMutationGuard:
-    def acquire(self, **_kwargs):
-        raise AssertionError("metadata-only SkillSet creation must not take mutation guard")
-
-    def release(self, _lease) -> bool:
-        raise AssertionError("creation must not release a lease it did not acquire")
-
-    def ensure_valid(self, _lease) -> None:
-        raise AssertionError("creation must not validate a mutation lease")
 
 
 class _Repository:
@@ -213,39 +177,6 @@ class _Runtime:
 class _Audit:
     def insert(self, _data) -> None:
         return None
-
-
-class _Cache:
-    def __init__(self) -> None:
-        self.held: dict[str, str] = {}
-
-    def acquire_lock_strict(self, key: str, ttl: int) -> str | None:
-        if key in self.held:
-            return None
-        self.held[key] = "token"
-        return "token"
-
-    def release_lock(self, key: str, token: str) -> bool:
-        if self.held.get(key) != token:
-            return False
-        del self.held[key]
-        return True
-
-    def renew_lock_strict(self, key: str, token: str, ttl: int) -> bool:
-        return self.held.get(key) == token
-
-
-class _BlockingRuntime:
-    def __init__(self, started, unblock) -> None:
-        self._started = started
-        self._unblock = unblock
-
-    async def reconcile(self, **_kwargs) -> None:
-        self._started.set()
-        await self._unblock.wait()
-
-    async def reconcile_cleanup(self, **kwargs) -> None:
-        await self.reconcile(**kwargs)
 
 
 class _SuccessfulRuntime:
@@ -600,7 +531,6 @@ async def test_collaborator_command_keeps_one_guard_through_restore_and_uses_tru
         legacy_factory=object(),
         passport=object(),
         authorization=collaborators,
-        mutation_guard=_MutationGuard(),
         edit_guard=guard,
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -627,64 +557,6 @@ async def test_collaborator_command_keeps_one_guard_through_restore_and_uses_tru
     assert guard.held is False
 
 
-@pytest.mark.asyncio
-async def test_legacy_bot_uses_layout_neutral_fence_for_the_full_runtime_window():
-    """A non-Pool Bot still rejects a concurrent mutation while reconcile runs."""
-    started = __import__("asyncio").Event()
-    unblock = __import__("asyncio").Event()
-    repository = _Repository()
-    cache = _Cache()
-    service = SkillSetControlPlaneService(
-        repository=repository,
-        bot_repo=_Bots(),
-        runtime=_BlockingRuntime(started, unblock),
-        legacy_factory=object(),
-        passport=object(),
-        authorization=_Collaborators(),
-        mutation_guard=BotCapabilityMutationGuard(cache),
-        # This stand-in deliberately has no Pool participation behaviour.  The
-        # capability guard, not the Pool guard, is the assertion under test.
-        edit_guard=_Guard(),
-        audit_log_repo=_Audit(),
-        mcp_center=_McpCenter(allowed=True),
-        mcp_auth=_McpAuth(allowed=True),
-    )
-
-    first = __import__("asyncio").create_task(
-        service.activate(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            user_id="true-owner",
-            set_id="set-1",
-        )
-    )
-    await started.wait()
-    with pytest.raises(Exception, match="BOT_MUTATION_BUSY"):
-        await service.deactivate(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            user_id="true-owner",
-            set_id="set-1",
-        )
-    unblock.set()
-    await first
-    assert cache.held == {}
-
-
-def test_mutation_guard_keeps_same_env_bot_ids_isolated_by_tenant():
-    cache = _Cache()
-    guard = BotCapabilityMutationGuard(cache)
-    scope = BotSkillLayoutScope(env="dev", entity_id="entity-1", bot_id="bot-1")
-
-    with avernet_tenant_scope("tenant-a"):
-        first = guard.acquire(scope=scope)
-    with avernet_tenant_scope("tenant-b"):
-        second = guard.acquire(scope=scope)
-    assert first.key != second.key
-    assert guard.release(first)
-    assert guard.release(second)
-
-
 def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
     service = SkillSetControlPlaneService(
         repository=_Repository(),
@@ -693,7 +565,6 @@ def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -721,7 +592,6 @@ def test_legacy_create_retains_only_virtual_default_bot_compatibility():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_CreationMustNotAcquireMutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -739,7 +609,7 @@ def test_legacy_create_retains_only_virtual_default_bot_compatibility():
     assert repository.create_calls[0]["owner_id"] == "actor"
 
 
-def test_addressed_create_does_not_take_mutation_guard() -> None:
+def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
     repository = _CreateRepository()
     service = SkillSetControlPlaneService(
         repository=repository,
@@ -748,7 +618,6 @@ def test_addressed_create_does_not_take_mutation_guard() -> None:
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_CreationMustNotAcquireMutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -783,7 +652,6 @@ def test_legacy_virtual_default_read_is_owner_scoped():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -808,7 +676,6 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -837,7 +704,6 @@ def test_skill_set_acl_denial_is_forbidden_not_not_found():
         legacy_factory=object(),
         passport=object(),
         authorization=_DeniedCollaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -861,7 +727,6 @@ def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
         legacy_factory=_ResourceLegacyFactory(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -890,7 +755,6 @@ def test_list_sets_uses_aicoding_default_then_claude_code_fallback_for_coding_im
         legacy_factory=_ResourceLegacyFactory(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -917,7 +781,6 @@ def test_update_set_uses_runtime_default_candidates_for_coding_image():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -954,7 +817,6 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
         legacy_factory=_ResourceLegacyFactory(),
         passport=object(),
         authorization=authorization,
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -988,7 +850,6 @@ async def test_skill_set_mutation_fails_closed_for_unsupported_bot_engine_pair()
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -1017,7 +878,6 @@ async def test_historical_bot_skill_set_deactivate_uses_cleanup_projection():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -1052,7 +912,6 @@ def test_skill_set_metadata_mutations_share_the_runtime_matrix_gate():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -1090,7 +949,6 @@ def test_historical_bot_may_delete_an_inactive_skill_set_without_new_runtime_wri
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -1105,29 +963,8 @@ def test_historical_bot_may_delete_an_inactive_skill_set_without_new_runtime_wri
     )
 
 
-def test_mutation_guard_heartbeat_fails_closed_and_stops_on_release(monkeypatch):
-    cache = _Cache()
-    guard = BotCapabilityMutationGuard(cache)
-    monkeypatch.setattr(guard, "_HEARTBEAT_SECONDS", 0.01)
-    cache.renew_lock_strict = lambda *_args, **_kwargs: False
-    lease = guard.acquire(
-        scope=BotSkillLayoutScope(env="dev", entity_id="entity-1", bot_id="bot-1")
-    )
-
-    deadline = time.time() + 1
-    while not lease.lost.is_set() and time.time() < deadline:
-        time.sleep(0.01)
-
-    with pytest.raises(BotCapabilityMutationLockUnavailableError):
-        guard.ensure_valid(lease)
-    assert guard.release(lease) is False
-    assert lease.heartbeat is not None
-    assert not lease.heartbeat.is_alive()
-
-
 @pytest.mark.asyncio
-async def test_skill_set_releases_mutation_lease_when_pool_release_fails():
-    cache = _Cache()
+async def test_skill_set_pool_guard_release_failure_propagates():
     service = SkillSetControlPlaneService(
         repository=_Repository(),
         bot_repo=_Bots(),
@@ -1135,7 +972,6 @@ async def test_skill_set_releases_mutation_lease_when_pool_release_fails():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=BotCapabilityMutationGuard(cache),
         edit_guard=_FailingReleaseGuard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -1149,7 +985,6 @@ async def test_skill_set_releases_mutation_lease_when_pool_release_fails():
             user_id="true-owner",
             set_id="set-1",
         )
-    assert cache.held == {}
 
 
 def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membership():
@@ -1163,7 +998,6 @@ def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membershi
         legacy_factory=factory,
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
@@ -1199,7 +1033,6 @@ async def test_mcp_direct_activation_checks_permission_before_writing_desired_st
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=mcp_center,
@@ -1234,7 +1067,6 @@ async def test_mcp_direct_activation_denies_before_writing_desired_state():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
         edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=False),

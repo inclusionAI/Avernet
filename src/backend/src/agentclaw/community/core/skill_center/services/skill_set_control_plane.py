@@ -40,12 +40,6 @@ from agentclaw.community.core.skill_center.runtime_policy import (
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectionReconcilerProtocol,
 )
-from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
-    BotCapabilityMutationBusyError,
-    BotCapabilityMutationGuard,
-    BotCapabilityMutationLease,
-    BotCapabilityMutationLockUnavailableError,
-)
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditBusyError,
     SkillsPoolEditGuard,
@@ -68,7 +62,6 @@ class SkillSetControlPlaneService:
         legacy_factory: LegacySkillSetCompatibilityFactoryProtocol,
         passport: PassportPlugin,
         authorization: BotCapabilityAuthorizationHookProtocol,
-        mutation_guard: BotCapabilityMutationGuard,
         edit_guard: SkillsPoolEditGuard,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
@@ -80,7 +73,6 @@ class SkillSetControlPlaneService:
         self._legacy_factory = legacy_factory
         self._passport = passport
         self._authorization = authorization
-        self._mutation_guard = mutation_guard
         self._edit_guard = edit_guard
         self._audit_log_repo = audit_log_repo
         self._mcp_center = mcp_center
@@ -141,8 +133,7 @@ class SkillSetControlPlaneService:
         self._require_mutable_bot(bot)
         # Creating an inactive SkillSet is metadata-only: it neither changes
         # the effective capability projection nor has a compensating runtime
-        # action.  Do not take the long-lived Bot mutation fence here; that
-        # fence belongs to operations which can race a desired-state rollback.
+        # action, so it does not enter the Pool edit boundary.
         item = self._repository.create_set(
             bot_id=bot_id,
             owner_id=str(bot["owner_id"]),
@@ -240,33 +231,22 @@ class SkillSetControlPlaneService:
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         self._require_mutable_bot(bot)
-        scope = self._scope(bot, bot_id)
-        try:
-            mutation_lease = self._mutation_guard.acquire(scope=scope)
-        except BotCapabilityMutationBusyError as exc:
-            raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY") from exc
-        except BotCapabilityMutationLockUnavailableError as exc:
-            raise SkillSetControlPlaneLockUnavailableError() from exc
-        try:
-            item = self._repository.update_set(
-                bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
-                set_id=set_id,
-                name=name,
-                description=description,
-                engine_type=self._engine(bot),
-                default_engine_types=self._default_engine_types(bot),
-            )
-            self._ensure_mutation_lease(mutation_lease)
-            self._audit(
-                bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
-                actor_id=user_id,
-                action="skill_set_update",
-            )
-            return item
-        finally:
-            self._mutation_guard.release(mutation_lease)
+        item = self._repository.update_set(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            set_id=set_id,
+            name=name,
+            description=description,
+            engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
+        )
+        self._audit(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            actor_id=user_id,
+            action="skill_set_update",
+        )
+        return item
 
     def delete_set(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
@@ -283,28 +263,17 @@ class SkillSetControlPlaneService:
             else BotSkillRuntimeCommand.WRITE
         )
         self._require_mutable_bot(bot, command)
-        scope = self._scope(bot, bot_id)
-        try:
-            mutation_lease = self._mutation_guard.acquire(scope=scope)
-        except BotCapabilityMutationBusyError as exc:
-            raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY") from exc
-        except BotCapabilityMutationLockUnavailableError as exc:
-            raise SkillSetControlPlaneLockUnavailableError() from exc
-        try:
-            self._repository.delete_set(
-                bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
-                engine_type=self._engine(bot),
-                default_engine_types=self._default_engine_types(bot),
-            )
-            self._ensure_mutation_lease(mutation_lease)
-            self._audit(
-                bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
-                actor_id=user_id,
-                action="skill_set_delete",
-            )
-        finally:
-            self._mutation_guard.release(mutation_lease)
+        self._repository.delete_set(
+            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
+        )
+        self._audit(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            actor_id=user_id,
+            action="skill_set_delete",
+        )
 
     def list_skills(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
@@ -688,73 +657,54 @@ class SkillSetControlPlaneService:
         mutation,
         command: BotSkillRuntimeCommand = BotSkillRuntimeCommand.WRITE,
     ) -> dict:
-        """Keep one Bot edit lease across UoW, projection and compensation.
-
-        Releasing the lease after the database write would let a Direct command
-        or another SkillSet request race ``restore_desired_state`` and have its
-        desired state erased.  The lock is intentionally held for the complete
-        externally-visible command, including the restore projection.
-        """
+        """Apply one desired-state mutation and synchronously reconcile runtime."""
         scope = self._scope(bot, bot_id)
         try:
-            mutation_lease = self._mutation_guard.acquire(scope=scope)
-        except BotCapabilityMutationBusyError as exc:
+            lease = self._edit_guard.acquire_for_edit(scope=scope)
+        except (
+            SkillsPoolEditBusyError,
+            SkillsPoolEditRollbackError,
+            SkillsPoolEditPausedError,
+        ) as exc:
             raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY") from exc
-        except BotCapabilityMutationLockUnavailableError as exc:
+        except SkillsPoolEditLockUnavailableError as exc:
             raise SkillSetControlPlaneLockUnavailableError() from exc
         try:
-            try:
-                lease = self._edit_guard.acquire_for_edit(scope=scope)
-            except (
-                SkillsPoolEditBusyError,
-                SkillsPoolEditRollbackError,
-                SkillsPoolEditPausedError,
-            ) as exc:
-                raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY") from exc
-            except SkillsPoolEditLockUnavailableError as exc:
-                raise SkillSetControlPlaneLockUnavailableError() from exc
-            try:
-                mode = self._require_mutable_bot(bot, command)
-                self._ensure_mutation_lease(mutation_lease)
-                mutation_result = mutation()
-                self._ensure_mutation_lease(mutation_lease)
-                # An inactive-set membership change has no runtime projection
-                # to apply.  Reconcile only becomes a required side effect
-                # when that membership is active (or for all lifecycle/sync
-                # commands), preserving the legacy inactive draft contract.
-                if action in {
-                    "skill_set_add_skill",
-                    "skill_set_remove_skill",
-                    "skill_set_add_mcp",
-                    "skill_set_remove_mcp",
-                } and not mutation_result.item.get("is_active"):
-                    result = {
-                        **mutation_result.item,
-                        "changed": mutation_result.changed,
-                        **mutation_result.details,
-                    }
-                else:
-                    result = await self._reconcile(
-                        bot=bot,
-                        bot_id=bot_id,
-                        actor_id=actor_id,
-                        mutation=mutation_result,
-                        mutation_lease=mutation_lease,
-                        command=command,
-                        mode=mode,
-                    )
-                self._ensure_mutation_lease(mutation_lease)
-                self._audit(
+            mode = self._require_mutable_bot(bot, command)
+            mutation_result = mutation()
+            # An inactive-set membership change has no runtime projection
+            # to apply.  Reconcile only becomes a required side effect
+            # when that membership is active (or for all lifecycle/sync
+            # commands), preserving the legacy inactive draft contract.
+            if action in {
+                "skill_set_add_skill",
+                "skill_set_remove_skill",
+                "skill_set_add_mcp",
+                "skill_set_remove_mcp",
+            } and not mutation_result.item.get("is_active"):
+                result = {
+                    **mutation_result.item,
+                    "changed": mutation_result.changed,
+                    **mutation_result.details,
+                }
+            else:
+                result = await self._reconcile(
+                    bot=bot,
                     bot_id=bot_id,
-                    owner_id=str(bot["owner_id"]),
                     actor_id=actor_id,
-                    action=action,
+                    mutation=mutation_result,
+                    command=command,
+                    mode=mode,
                 )
-                return result
-            finally:
-                self._edit_guard.release(lease)
+            self._audit(
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                actor_id=actor_id,
+                action=action,
+            )
+            return result
         finally:
-            self._mutation_guard.release(mutation_lease)
+            self._edit_guard.release(lease)
 
     async def _reconcile(
         self,
@@ -763,7 +713,6 @@ class SkillSetControlPlaneService:
         bot_id: str,
         actor_id: str,
         mutation: SkillSetMutation,
-        mutation_lease: BotCapabilityMutationLease,
         command: BotSkillRuntimeCommand,
         mode: BotSkillRuntimeMutationMode,
     ) -> dict:
@@ -773,8 +722,6 @@ class SkillSetControlPlaneService:
                 command=command, mode=mode, bot_id=bot_id, owner_id=owner_id
             )
         except Exception as exc:
-            # A stale holder must never compensate over a newer command.
-            self._ensure_mutation_lease(mutation_lease)
             self._repository.restore_desired_state(
                 bot_id=bot_id,
                 owner_id=owner_id,
@@ -787,16 +734,8 @@ class SkillSetControlPlaneService:
                 )
             except Exception as restore_error:
                 raise SkillSetRuntimeReconcileError() from restore_error
-            self._ensure_mutation_lease(mutation_lease)
             raise SkillSetRuntimeReconcileError() from exc
-        self._ensure_mutation_lease(mutation_lease)
         return {**mutation.item, "changed": mutation.changed, **mutation.details}
-
-    def _ensure_mutation_lease(self, lease: BotCapabilityMutationLease) -> None:
-        try:
-            self._mutation_guard.ensure_valid(lease)
-        except BotCapabilityMutationLockUnavailableError as exc:
-            raise SkillSetControlPlaneLockUnavailableError() from exc
 
     def _audit(self, *, bot_id: str, owner_id: str, actor_id: str, action: str) -> None:
         self._audit_log_repo.insert(
