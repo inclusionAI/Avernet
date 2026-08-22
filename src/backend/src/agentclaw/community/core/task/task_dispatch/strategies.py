@@ -128,7 +128,14 @@ class SearchBasedDispatchStrategy:
             bot_id=owner, message=prompt, metadata={"phase": "search"},
         )
         sr = _parse_search_result(run)
-        logger.info("[search] node=%s → outcome=%s bot_id=%s group=%s miss=%s",
+        # 把任务描述(目标)塞进 GroupFormation.extend_props,供 form_coop_group 设 BCS 建群 context
+        # (→ <GroupContext> `目标`);与 _run_yaml 路径对齐。取 goal.objective→instruction→title。
+        if sr.group_formation is not None:
+            _spec = node.task_spec
+            _tc = ((_spec.goal.objective or _spec.metadata.instruction or _spec.metadata.title) or "").strip()
+            if _tc:
+                sr.group_formation.extend_props["task_context"] = _tc
+        logger.info("[task_dispatch_search] node=%s → outcome=%s bot_id=%s group=%s miss=%s",
                     node.node_id, sr.outcome, sr.bot_id, sr.group_id, sr.miss_reason)
         return sr
 

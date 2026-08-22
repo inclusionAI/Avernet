@@ -13,7 +13,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, TaskInfo, TaskSpec,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import (
-    SearchBasedDispatchStrategy, _scope_by_task_mode_roster,
+    SearchBasedDispatchStrategy, SearchOutcome, _scope_by_task_mode_roster,
 )
 from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import BotTaskModeRoster
@@ -150,3 +150,31 @@ def _any_node():
     return TaskNode(node_id="c1", task_id="t1", status=Status.PENDING,
                     task_spec=_task_info().task_spec, run_info=RuntimeInfo(),
                     node_run_graph=None)  # type: ignore[arg-type]
+
+
+class _MultiBot:
+    """send_and_wait_async 返 HIT_MULTI_BOTS(manager_worker 群),供验 task_context 透传。"""
+
+    async def send_and_wait_async(self, *, bot_id, message, metadata=None,
+                                  timeout=180.0, poll_interval=2.0):
+        return {"status": "COMPLETED",
+                "result": {"content": json.dumps({
+                    "outcome": "HIT_MULTI_BOTS",
+                    "bot_ids": ["A", "B"],
+                    "collab_mode": "manager_worker",
+                    "members_info": [{"bot_id": "A", "role": "manager"},
+                                     {"bot_id": "B", "role": "worker"}],
+                })}}
+
+
+class TestSearchStrategyThreadsTaskContext:
+    def test_hit_multi_bots_threads_task_context_into_group_formation(self):
+        """动态拉群(HIT_MULTI_BOTS)把 node.task_spec 的目标(objective)透传进
+        GroupFormation.extend_props['task_context'],供 form_coop_group 设 BCS 建群 context。"""
+        bot, discover = _MultiBot(), _Discover([])
+        strat = SearchBasedDispatchStrategy(bot, discover, bcs=None, provider_id="")
+        result = _run(strat.apply(_any_node(), _graph()))
+        assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
+        assert result.group_formation is not None
+        # _task_info().goal.objective == "分析"
+        assert result.group_formation.extend_props.get("task_context") == "分析"
