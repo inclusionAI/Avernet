@@ -61,15 +61,19 @@ def test_payload_carries_scope_and_action_type():
     # The discriminator is persisted as the enum's plain value, not repr().
     assert payload["action_type"] == "placeholder"
     assert payload["action_args"] == {"set_id": "s-1"}
-    assert payload["request_id"]
 
 
-def test_payload_defaults_are_generated_per_call():
-    first = build_skill_activation_sync_payload(scope=_scope(), action=ACTION)
-    second = build_skill_activation_sync_payload(scope=_scope(), action=ACTION)
+def test_payload_defaults_action_args_to_empty():
+    payload = build_skill_activation_sync_payload(scope=_scope(), action=ACTION)
 
-    assert first["action_args"] == {}
-    assert first["request_id"] != second["request_id"]
+    assert payload["action_args"] == {}
+
+
+def test_payload_carries_nothing_beyond_the_work_identity():
+    """No generated correlation id: the task row's own id is the identity."""
+    payload = build_skill_activation_sync_payload(scope=_scope(), action=ACTION)
+
+    assert set(payload) == {"scope", "action_type", "action_args"}
 
 
 def test_payload_copies_action_args():
@@ -103,7 +107,6 @@ def test_parse_round_trips_a_built_payload():
     assert work.scope == _scope()
     assert work.action is ACTION
     assert work.action_args == {"set_id": "s-1"}
-    assert work.request_id == payload["request_id"]
 
 
 def test_parse_rejects_an_absent_action_args():
@@ -126,8 +129,6 @@ def test_parse_rejects_an_absent_action_args():
         (lambda p: p.update(action_type=""), "action_type"),
         (lambda p: p.update(action_args=["set_id"]), "action_args"),
         (lambda p: p.update(action_args=None), "action_args"),
-        (lambda p: p.update(request_id=" "), "request_id"),
-        (lambda p: p.pop("request_id"), "request_id"),
     ],
 )
 def test_parse_rejects_malformed_payloads(mutate, expected):

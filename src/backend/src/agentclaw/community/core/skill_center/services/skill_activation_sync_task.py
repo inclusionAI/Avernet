@@ -46,7 +46,6 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
-from uuid import uuid4
 
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
@@ -136,9 +135,6 @@ class SkillActivationSyncWork:
     #: not be replayed as the desired-state write. Empty when the operation
     #: needs none — never absent.
     action_args: dict[str, object]
-    #: Correlates every attempt at this task in the logs. Generated at enqueue;
-    #: the handler receives no row id of its own.
-    request_id: str
 
 
 def build_skill_activation_sync_idempotency_key(
@@ -197,11 +193,10 @@ def build_skill_activation_sync_payload(
 ) -> dict[str, object]:
     """Build the persisted work description.
 
-    ``request_id`` is generated here rather than accepted, because it exists for
-    the handler rather than the caller: ``TaskHandler.handle`` is given the
-    payload and nothing else — not the row id — so without it a handler has no
-    identifier to log. It is stamped once at enqueue and travels with the task,
-    so every attempt at the same work logs the same id.
+    The payload carries only what identifies the work: which Bot, which
+    operation, and that operation's arguments. It deliberately holds no
+    generated correlation id — a fresh UUID would correlate to nothing the
+    caller knows, and ``ac_task_queue.id`` is already the task's identity.
 
     ``action_args`` is copied rather than stored by reference: the empty default
     is shared across calls, and the caller's dict must not be able to change a
@@ -215,7 +210,6 @@ def build_skill_activation_sync_payload(
         },
         "action_type": action.value,
         "action_args": dict(action_args),
-        "request_id": uuid4().hex,
     }
 
 
@@ -252,15 +246,10 @@ def parse_skill_activation_sync_payload(payload: dict) -> SkillActivationSyncWor
     if not isinstance(raw_args, dict):
         raise ValueError("action_args must be an object")
 
-    request_id = payload.get("request_id")
-    if not isinstance(request_id, str) or not request_id.strip():
-        raise ValueError("request_id must be a non-empty string")
-
     return SkillActivationSyncWork(
         scope=SkillActivationSyncScope(**scope_values),
         action=action,
         action_args=dict(raw_args),
-        request_id=request_id,
     )
 
 
