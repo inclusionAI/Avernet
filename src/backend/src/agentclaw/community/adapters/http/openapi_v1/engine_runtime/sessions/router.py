@@ -71,7 +71,9 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import r
 from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
+    EngineUpstreamError,
 )
+from agentclaw.community.core.resources.service import FileTooLargeError
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError as ExpertBotNotFoundError,
@@ -639,7 +641,7 @@ def _session_file_headers(headers: object) -> dict[str, str]:
         return {"Content-Type": "application/octet-stream"}
     # COSEC: the upstream header bag is untrusted at this public boundary;
     # forward only a fixed response-header allowlist after rejecting CR/LF.
-    allowed = {"content-type", "content-length", "content-disposition"}
+    allowed = {"content-type", "content-length", "content-disposition", "retry-after", "cache-control"}
     safe: dict[str, str] = {}
     for key, value in headers.items():
         normalized = str(key).lower()
@@ -648,6 +650,10 @@ def _session_file_headers(headers: object) -> dict[str, str]:
         if "\r" in value or "\n" in value:
             continue
         if normalized == "content-length" and not value.isdecimal():
+            continue
+        if normalized == "retry-after" and not value.isdecimal():
+            continue
+        if normalized == "cache-control" and value.lower() != "no-store":
             continue
         safe["-".join(part.capitalize() for part in normalized.split("-"))] = value
     safe.setdefault("Content-Type", "application/octet-stream")
@@ -806,7 +812,15 @@ async def list_ready_session_files(
     )
 
 
-@router.get("/{session_id}/files/{resource_id}/content")
+@router.get(
+    "/{session_id}/files/{resource_id}/content",
+    response_model=None,
+    responses={
+        200: {"description": "File content or a ready external-download descriptor."},
+        202: {"description": "Large attachment download is being prepared."},
+        413: {"description": "Inline preview is too large."},
+    },
+)
 @envelope_errors
 async def stream_session_file_content(
     bot_id: BotIdPath,
@@ -833,6 +847,10 @@ async def stream_session_file_content(
             disposition=disposition,
         )
     except ValueError as exc:
+        if str(exc) == "resource_preview_too_large":
+            raise FileTooLargeError("File too large for preview") from exc
+        if str(exc) == "engine_content_unavailable":
+            raise EngineUpstreamError("session file content unavailable") from exc
         _session_file_not_found(exc)
     async def body() -> AsyncIterator[bytes]:
         try:
@@ -842,10 +860,13 @@ async def stream_session_file_content(
         finally:
             await upstream.close()
     headers = _session_file_headers(upstream.headers)
-    headers.setdefault(
-        "Content-Disposition", f'{disposition}; filename="{record.filename}"'
+    if upstream.status_code == 200 and headers.get("Content-Type", "").split(";", 1)[0].lower() != "application/json":
+        headers.setdefault("Content-Disposition", f'{disposition}; filename="{record.filename}"')
+    return StreamingResponse(
+        body(),
+        status_code=upstream.status_code,
+        headers=headers,
     )
-    return StreamingResponse(body(), headers=headers)
 
 
 @router.delete("/{session_id}/files/{resource_id}", response_model=Envelope[Deleted])

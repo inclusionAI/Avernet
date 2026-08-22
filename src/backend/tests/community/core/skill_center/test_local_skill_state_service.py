@@ -9,7 +9,6 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
-    SkillEngineNotSupportedError,
     SkillManagedBySkillSetError,
     SkillRuntimeNameConflictError,
 )
@@ -363,6 +362,26 @@ async def test_activate_changes_desired_state_then_reconciles():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["claude_code", "aicoding"])
+async def test_existing_coding_bot_can_activate_local_skill(engine: str) -> None:
+    service, skills, installations, _guard, _runtime, _factory = _service(
+        engine=engine,
+        bot_type="personal",
+    )
+
+    result = await service.set_local_skill_active(
+        skill_id="9", actor_id="owner", active=True
+    )
+
+    assert result["active"] is True
+    assert skills.active is True
+    assert installations.events == ["remove"]
+    assert service._runtime_reconciler.calls == [
+        {"bot_id": "bot", "owner_id": "owner"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_activate_does_not_mutate_default_set_membership_before_runtime_sync():
     service, _skills, sets, _guard, runtime, _factory = _service(associated=False)
 
@@ -541,21 +560,22 @@ async def test_repo_direct_rejects_normal_skill_set_membership_before_writing_st
 
 
 @pytest.mark.asyncio
-async def test_repo_direct_fails_closed_for_unsupported_bot_engine_pair():
-    service, _skills, installations, _runtime = _repo_service(
+async def test_repo_direct_uses_existing_bot_runtime_without_product_matrix():
+    service, _skills, installations, runtime = _repo_service(
         bot_type="desktop", engine="claude_code"
     )
 
-    with pytest.raises(SkillEngineNotSupportedError):
-        await service.set_repo_skill_active(
-            skill_id="9", bot_id="bot", owner_id="owner", actor_id="owner", active=True
-        )
+    result = await service.set_repo_skill_active(
+        skill_id="9", bot_id="bot", owner_id="owner", actor_id="owner", active=True
+    )
 
-    assert installations.events == []
+    assert result["active"] is True
+    assert installations.events == ["install:pre:bot:9"]
+    assert len(runtime.publish_calls) == len(runtime.verify_calls) == 1
 
 
 @pytest.mark.asyncio
-async def test_historical_aicoding_local_skill_can_deactivate_but_cannot_activate():
+async def test_literal_aicoding_local_skill_can_deactivate_and_reactivate():
     service, skills, installations, _guard, runtime, _factory = _service(
         active=True,
         engine="aicoding",
@@ -569,20 +589,19 @@ async def test_historical_aicoding_local_skill_can_deactivate_but_cannot_activat
     assert result["active"] is False
     assert skills.active is False
     assert installations.events == ["add"]
-    assert service._runtime_reconciler.cleanup_calls == [
-        {"bot_id": "bot", "owner_id": "owner"}
-    ]
-    assert runtime.publish_calls == []
+    assert service._runtime_reconciler.cleanup_calls == []
+    assert len(runtime.publish_calls) == len(runtime.verify_calls) == 1
 
-    with pytest.raises(SkillEngineNotSupportedError):
-        await service.set_local_skill_active(
-            skill_id="9", actor_id="owner", active=True
-        )
-    assert installations.events == ["add"]
+    result = await service.set_local_skill_active(
+        skill_id="9", actor_id="owner", active=True
+    )
+    assert result["active"] is True
+    assert skills.active is True
+    assert installations.events == ["add", "remove"]
 
 
 @pytest.mark.asyncio
-async def test_historical_aicoding_repo_skill_can_deactivate_but_cannot_activate():
+async def test_literal_aicoding_repo_skill_can_deactivate_and_reactivate():
     service, _skills, installations, runtime = _repo_service(
         active=True,
         engine="aicoding",
@@ -594,15 +613,19 @@ async def test_historical_aicoding_repo_skill_can_deactivate_but_cannot_activate
 
     assert result["active"] is False
     assert installations.events == ["uninstall:pre:bot:9"]
-    assert service._runtime_reconciler.cleanup_calls == [
-        {"bot_id": "bot", "owner_id": "owner"}
-    ]
-    assert runtime.publish_calls == []
+    assert service._runtime_reconciler.cleanup_calls == []
+    assert len(runtime.publish_calls) == len(runtime.verify_calls) == 1
 
-    with pytest.raises(SkillEngineNotSupportedError):
-        await service.set_repo_skill_active(
-            skill_id="9", bot_id="bot", owner_id="owner", actor_id="owner", active=True
-        )
+    runtime.publish_results.append(True)
+    runtime.verify_results.append(True)
+    result = await service.set_repo_skill_active(
+        skill_id="9", bot_id="bot", owner_id="owner", actor_id="owner", active=True
+    )
+    assert result["active"] is True
+    assert installations.events == [
+        "uninstall:pre:bot:9",
+        "install:pre:bot:9",
+    ]
 
 
 @pytest.mark.asyncio

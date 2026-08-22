@@ -107,6 +107,7 @@ def _record() -> SessionResourceRecord:
 
 
 class _ContentUpstream:
+    status_code = 200
     headers = {"content-type": "text/plain", "content-length": "3"}
 
     @property
@@ -172,7 +173,7 @@ def _seed_happy_services(world) -> None:
     def answer_records(_self, **_kwargs):
         return [record]
 
-    async def open_content(_self, **_kwargs):
+    async def open_session_file_content(_self, **_kwargs):
         return record, _ContentUpstream()
 
     bind_overrides(
@@ -183,7 +184,7 @@ def _seed_happy_services(world) -> None:
             "complete_upload": answer_record,
             "get_status": answer_record,
             "list_resources": answer_records,
-            "open_content": open_content,
+            "open_session_file_content": open_session_file_content,
             "delete": answer_record,
         },
     )

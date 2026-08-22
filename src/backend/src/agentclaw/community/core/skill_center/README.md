@@ -28,6 +28,14 @@ provides:
   - "BotRuntimeProjectionReconcilerProtocol"
   - "ActiveSkillSetInstallationMaterializer"
   - "LocalSkillCleanupWorkModel"
+  - "SkillActivationSyncAction"
+  - "SkillActivationSyncScope"
+  - "SkillActivationSyncTaskHandler"
+  - "SkillActivationSyncWork"
+  - "enqueue_skill_activation_sync"
+  - "build_skill_activation_sync_payload"
+  - "parse_skill_activation_sync_payload"
+  - "build_skill_activation_sync_idempotency_key"
 consumes:
   - "BotRepository"
   - "BotCollabLogRepositoryProtocol"
@@ -70,6 +78,7 @@ internal_dependencies:
   - agentclaw.community.core.models
   - agentclaw.community.core.spaces.services
   - agentclaw.community.core.skills_pool
+  - agentclaw.community.core.task_queue    # durable enqueue for Bot-level activation sync
   - agentclaw.community.core.workspace
   - agentclaw.community.di.modules
   - agentclaw.community.di.runtime_mode
@@ -126,6 +135,19 @@ deletion and Pool cutover/rollback paths. Phase 1 intentionally has no
 cache-backed cross-command Bot mutation fence: the current compensating restore
 remains a best-effort compatibility path for non-concurrent mutations, while
 durable serialization is deferred to the task-queue design.
+
+`skill_activation_sync_task.py` is the enqueue half of that durable design:
+`skill_center.activation_sync`, one task type shared by every
+activation-shaped operation, discriminated by the payload's `action_type` and
+deduped on the Bot — `(env, entity_id, bot_id)` — so at most one
+synchronization per Bot is ever live. A second operation arriving mid-sync
+joins the live task and gets `created=False`; that is only correct while the
+handler reconciles against desired state read from the database, so the
+handler that consumes these rows must not replay `action_args` as its
+desired-state write. `SkillActivationSyncTaskHandler` is a skeleton: it owns
+the registry key and the payload validation, and its `_run` seam reports
+`Fail` until the body lands. It is not registered, and no call site enqueues,
+so the control plane's inline mutate-then-reconcile path is unchanged.
 
 Phase 1 does not run a global Local Installation backfill and does not treat
 historical Default exclusions as an active-state source. The small number of

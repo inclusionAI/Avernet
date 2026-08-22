@@ -12904,13 +12904,7 @@
           },
           "bot_type": {
             "description": "Published kind of Bot.",
-            "enum": [
-              "personal",
-              "service",
-              "desktop"
-            ],
-            "title": "Bot Type",
-            "type": "string"
+            "title": "Bot Type"
           },
           "description": {
             "description": "Public Bot description.",
@@ -12933,14 +12927,6 @@
             "type": "string"
           },
           "owner_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Optional public owner name.",
             "title": "Owner Name"
           },
@@ -12967,11 +12953,7 @@
         "properties": {
           "reasons": {
             "description": "Public reasons for the recommendation.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Reasons",
-            "type": "array"
+            "title": "Reasons"
           },
           "score": {
             "description": "Recommendation relevance score.",
@@ -12979,14 +12961,6 @@
             "type": "number"
           },
           "short_profile": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Optional short public recommendation profile.",
             "title": "Short Profile"
           }

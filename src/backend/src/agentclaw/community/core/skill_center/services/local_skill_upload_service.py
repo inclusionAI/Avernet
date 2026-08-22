@@ -43,9 +43,6 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
 )
-from agentclaw.community.core.skill_center.runtime_policy import (
-    require_supported_bot_skill_runtime,
-)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectionReconcilerProtocol,
 )
@@ -130,7 +127,6 @@ class LocalSkillUploadService:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
-            require_supported_bot_skill_runtime(bot)
             name, description, files = self._unpack(package)
             is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=owner_id)
             await self._retry_pending_cleanup(
