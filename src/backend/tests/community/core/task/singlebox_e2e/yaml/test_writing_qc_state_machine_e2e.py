@@ -49,8 +49,8 @@ _USER_ID = os.environ.get("SINGLEBOX_USER_ID", "35983")
 _TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "2000"))
 
 # 实际 bot(用户给定):writer 兼 owner/driver/master,editor 兼润色/最终回复。
-WRITER_BOT = "bot_92c2f019:35983"
-EDITOR_BOT = "bot_9c4ff73d:35983"
+WRITER_BOT = "bot_92c2f019"
+EDITOR_BOT = "bot_9c4ff73d"
 
 # 写作质检协同模板(仅描述协同策略;逻辑角色 writer/editor 的实际 bot 由创建群接口的
 # participant_bindings 绑定,不在 yaml 内)。draft→polish/revise→finalize。

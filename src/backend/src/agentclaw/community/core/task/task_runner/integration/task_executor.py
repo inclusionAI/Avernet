@@ -10,7 +10,7 @@ import logging
 import time
 from typing import Any
 
-from agentclaw.community.core.task.domain.models import TaskNode
+from agentclaw.community.core.task.domain.models import TaskNode, TaskNodePatch
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 
@@ -29,10 +29,11 @@ _BCS_PARTICIPANT_ROLES = {"driver", "consultant", "manager", "worker", "observer
 
 
 class TaskExecutor:
-    def __init__(self, *, bot, bcs, formatter, context, sink, poller, identity_resolver=None) -> None:
+    def __init__(self, *, bot, bcs, formatter, context, sink, poller, identity_resolver=None, graph=None) -> None:
         """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
         context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
-        R0 骨架允许 None;bbs 路径不依赖任何端口。"""
+        graph: TaskGraphService|None,动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props
+        (dashboard 可见);None 时跳过(单测/无图路径)。R0 骨架允许 None;bbs 路径不依赖任何端口。"""
         self._bot = bot
         self._bcs = bcs
         self._formatter = formatter
@@ -40,6 +41,7 @@ class TaskExecutor:
         self._sink = sink
         self._poller = poller
         self._identity_resolver = identity_resolver
+        self._graph = graph
         self._group_meta: dict[str, dict[str, Any]] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
 
     async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[bool]:
@@ -97,6 +99,7 @@ class TaskExecutor:
                 loop_task_id=loop_task_id, group_id=group_id, collab_mode=collab_mode,
                 registered_at=time.monotonic(), session_id=session_id, run_id=None,
             ))
+            self._persist_dispatch_ids(node, group_id=group_id, session_id=session_id, run_id=None)
             return True
 
     async def _dispatch_state_machine(self, node, group_id, meta, loop_task_id) -> bool:
@@ -111,7 +114,23 @@ class TaskExecutor:
             loop_task_id=loop_task_id, group_id=group_id, collab_mode="state_machine",
             registered_at=time.monotonic(), session_id=None, run_id=run_id,
         ))
+        self._persist_dispatch_ids(node, group_id=group_id, session_id=None, run_id=run_id)
         return True
+
+    def _persist_dispatch_ids(self, node: TaskNode, *, group_id: str,
+                              session_id: str | None, run_id: str | None) -> None:
+        """动态派发后把 group_id/session_id/run_id 落进节点 run_info.extend_props(dashboard 可见)。
+        yaml 路径(``_run_yaml``)已写 group_id/session_id;动态派发路径在此补齐:chat/manager_worker
+        写 session_id,state_machine 写 run_id。仅 extend_props fold,不翻态(节点已由 _drain 置 RUNNING)。"""
+        if self._graph is None:
+            return
+        ep: dict[str, Any] = {"group_id": group_id}
+        if session_id is not None:
+            ep["session_id"] = session_id
+        if run_id is not None:
+            ep["run_id"] = run_id
+        self._graph.update_task_node_info(TaskNodePatch(
+            task_id=node.task_id, node_id=node.node_id, extend_props_patch=ep))
 
     async def form_coop_group(self, gf: GroupFormation) -> str:
         bot_ids = list(dict.fromkeys(gf.bot_ids))

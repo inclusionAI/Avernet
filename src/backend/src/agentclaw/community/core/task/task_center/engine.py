@@ -117,6 +117,7 @@ class ExecutionEngine:
         exe = TaskExecutor(
             bot=self._bot, bcs=self._bcs, formatter=PromptFormatterImpl(),
             context=self, sink=self, poller=poller, identity_resolver=self._bcs_identity,
+            graph=self._graph,
         )
         import threading as _t
         self._poller_thread = _t.Thread(target=poller.run_poll_loop, daemon=True, name="task-exec-poller")

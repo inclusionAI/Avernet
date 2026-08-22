@@ -62,7 +62,7 @@ from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adap
 
 _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "146836")
+_USER_ID = os.environ.get("SINGLEBOX_USER_ID", "35983")
 _TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "2000"))
 # 独立 owner 名:避免与其它 e2e 的 task-owner-* 共用 bot 造成 skill 串扰
 _OWNER_BOT_NAME = "task-owner-3mode-bot"

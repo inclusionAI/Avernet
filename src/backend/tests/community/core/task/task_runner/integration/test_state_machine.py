@@ -126,3 +126,33 @@ def test_state_machine_binding_keys_are_roles_and_values_are_bcs_uuids():
     assert req.participant_bindings["manager"]["bot_ids"] == ["mgr:double-owner"]
     assert req.participant_bindings["researcher"]["bot_ids"] == ["worker:double-owner"]
     assert [p["role"] for p in req.participants] == ["driver", "consultant"]
+
+
+class _Graph:
+    """记录 update_task_node_info 的 patch(白盒断言动态派发写了哪些 extend_props)。"""
+
+    def __init__(self):
+        self.patches: list = []
+
+    def update_task_node_info(self, patch):
+        self.patches.append(patch)
+
+
+def test_dispatch_state_machine_persists_group_run_ids_to_node_extend_props():
+    """动态派发 state_machine 后,group_id/run_id 应落进节点 run_info.extend_props(dashboard 可见),
+    补齐 _run_yaml 路径之外动态 coop_group 节点的 group/run 透出 gap。"""
+    bcs = _Bcs()
+    poller = _Poller()
+    graph = _Graph()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=poller, identity_resolver=_DoubleBcsBotIdentityResolver(), graph=graph)
+    _run(exe.form_coop_group(GroupFormation(bot_ids=["drv"], collab_mode="state_machine",
+                                            members_info=[{"bot_id": "drv", "role": "manager"}],
+                                            extend_props={"collaboration_definition_yaml": "kind: collab"})))
+    _run(exe.dispatch([_node()]))
+    ep_patches = [p for p in graph.patches if p.extend_props_patch]
+    assert ep_patches, "动态派发未写节点 extend_props"
+    patch = ep_patches[-1]
+    assert patch.task_id == "t1" and patch.node_id == "n1"
+    assert patch.extend_props_patch.get("group_id") == "g1"
+    assert patch.extend_props_patch.get("run_id") == "run_9"
