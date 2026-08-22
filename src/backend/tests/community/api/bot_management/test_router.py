@@ -500,8 +500,8 @@ class TestGetBotStatus:
             "status": "ACTIVE",
             "active_engine": "aicoding",
             "template_type": "applicationCoding",
-            # start_status 缺失 / 仍在 STARTING：仓库还没 clone 完
-            "ext": {},
+            # 明确仍在初始化：仓库还没 clone 完。
+            "ext": {"start_status": "PENDING"},
         }
         resp = tc.get("/api/bots/default/status")
         data = resp.json()
@@ -567,13 +567,31 @@ class TestGetBotStatus:
 
     # claude_code + applicationCoding 在创建链路里被路由成 aicoding 引擎，
     # 但 ac_bots.active_engine 写库时保留 claude_code。两种取值都要覆盖。
-    def test_claude_code_app_bot_repos_gating(self, client):
+    def test_claude_code_app_bot_active_binding_backfills_missing_marker(self, client):
         tc, svc, _ = client
         svc.get_bot.return_value = {
             **BOT_SAMPLE,
             "status": "ACTIVE",
             "active_engine": "claude_code",
             "template_type": "applicationCoding",
+            "device_binding": {
+                "status": "ACTIVE",
+                "device_id": "BOT-ready",
+                "device_provider": "baas",
+            },
+            "ext": {},
+        }
+        resp = tc.get("/api/bots/default/status")
+        assert resp.json()["data"]["is_ready"] is True
+
+    def test_app_bot_missing_marker_without_active_binding_is_not_ready(self, client):
+        tc, svc, _ = client
+        svc.get_bot.return_value = {
+            **BOT_SAMPLE,
+            "status": "ACTIVE",
+            "active_engine": "claude_code",
+            "template_type": "applicationCoding",
+            "device_binding": {"status": "PENDING", "device_provider": "baas"},
             "ext": {},
         }
         resp = tc.get("/api/bots/default/status")
