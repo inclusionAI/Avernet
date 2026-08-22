@@ -99,9 +99,9 @@ class TaskExecutor:
         async with sem:
             if collab_mode == "state_machine":
                 return await self._dispatch_state_machine(node, group_id, meta, loop_task_id)
-            ctx = self._context.build(node.task_id, node.node_id)
-            prompt = self._formatter.format_execute(ctx, node)
-            session_id = await self._bcs.create_session(group_id, bootstrap_prompt=prompt)
+            # chat / manager_worker:建群(create_group)已把任务指令作为 context 投入、且自带初始 session;
+            # 复用该初始 session(get_group_session),不再 create_session 重复建群里的第二个 session。
+            session_id = await self.get_group_session(group_id)
             self._poller.register(BcsGroupHandle(
                 loop_task_id=loop_task_id, group_id=group_id, collab_mode=collab_mode,
                 registered_at=time.monotonic(), session_id=session_id, run_id=None,

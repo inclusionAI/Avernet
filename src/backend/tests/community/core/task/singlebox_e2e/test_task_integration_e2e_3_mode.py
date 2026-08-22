@@ -139,6 +139,21 @@ def _print_task_details(g: dict | None, task_id: str) -> None:
             print(f"      output={str(out)[:300]!r}")
 
 
+def _signature(g: dict | None) -> tuple:
+    """图态签名(graph.status + bbs_mode/bbs_owner + 各节点 status/run_mode/assignee),用于检测轮询间状态变化,
+    变化时触发 ``_print_task_details`` 打印(提升 task-details 打印频率,不只在最后打一次)。"""
+    if not g:
+        return ()
+    ep = g.get("extend_props") or {}
+    nodes = tuple(
+        (t.get("node_id"), t.get("status"),
+         (t.get("run_info") or {}).get("run_mode"),
+         str((t.get("run_info") or {}).get("assignee") or "")[:24])
+        for t in g.get("tasks") or []
+    )
+    return (g.get("status"), ep.get("bbs_mode"), str(ep.get("bbs_owner") or "")[:24], nodes)
+
+
 def _execute_body(owner_id: str) -> dict:
     """``POST /api/v1/collaboration/tasks/execute`` 请求体(TaskInfoDTO):基础架构方向三份交付物。
 
@@ -256,6 +271,7 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
 
             # 等自然升 BBS:Poll 直到 bbs_mode 置 true(架构师名册 MISS→HUNG→升 BBS)或全图 DONE / 超时
             g: dict = {}
+            last_sig: tuple | None = None
             deadline = time.monotonic() + _TIMEOUT
             while time.monotonic() < deadline:
                 g = await _get_dashboard(cli, task_id)
@@ -270,6 +286,9 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                 ]
                 print(f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
                       f"bbs_mode={(g.get('extend_props') or {}).get('bbs_mode')} nodes={snap}")
+                if _signature(g) != last_sig:
+                    last_sig = _signature(g)
+                    _print_task_details(g, task_id)
                 if (g.get("extend_props") or {}).get("bbs_mode"):
                     _ep = g.get("extend_props") or {}
                     _nodes = {t["node_id"]: t for t in g.get("tasks") or []}
@@ -329,6 +348,9 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                     ]
                     print(f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
                           f"bbs_owner={nodes_first_ext(g,'bbs_owner')} nodes={snap}")
+                    if _signature(g) != last_sig:
+                        last_sig = _signature(g)
+                        _print_task_details(g, task_id)
                     if g.get("status") in ("DONE", "HUNG"):
                         break
                     busy = any((t.get("status") == "RUNNING") for t in g.get("tasks") or [])
