@@ -11,7 +11,7 @@ use bcs_bot_store::{MemoryBotRepo, PersistentBotRepo};
 use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{
     DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbSqlFlavor, DbStatement,
-    DbTransactionStep, DbTransactionStepResult, DbValue as Value,
+    DbTransactionStep, DbTransactionStepResult, DbValue as Value, db_get_column, db_get_column_opt,
 };
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
@@ -20,6 +20,7 @@ use bcs_service_api::{
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort, BotTaskModesQuery,
     FriendCheckInStrategy, TaskModeMatch, UserVisibility,
 };
+use bcs_service_api::types::ServiceError;
 use tokio::sync::Barrier;
 
 #[tokio::test]
@@ -666,6 +667,42 @@ async fn persistent_control_plane_internal_attributes_round_trip_and_clear_frien
         updated.friend_check_in_strategy,
         FriendCheckInStrategy::DeptFree
     );
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT user_visibility, friend_ext, friend_check_in_strategy, \
+                    json_extract(bot_info, '$.user_visibility') AS bot_info_user_visibility, \
+                    json_extract(bot_info, '$.friend_ext') AS bot_info_friend_ext, \
+                    json_extract(bot_info, '$.friend_check_in_strategy') AS bot_info_friend_check_in_strategy \
+             FROM bcs_bots WHERE bot_uuid = ? AND env = ?",
+            vec![Value::from("attributes"), Value::from("dev")],
+        ))
+        .await
+        .expect("read physical attributes");
+    let row = rows.first().expect("physical attributes row");
+    assert_eq!(
+        db_get_column::<String>(row, "user_visibility").expect("user visibility"),
+        "private"
+    );
+    assert_eq!(
+        db_get_column::<String>(row, "friend_ext").expect("friend extension"),
+        r#"{"scope":"engineering"}"#
+    );
+    assert_eq!(
+        db_get_column::<String>(row, "friend_check_in_strategy").expect("strategy"),
+        "DEPT_FREE"
+    );
+    for column in [
+        "bot_info_user_visibility",
+        "bot_info_friend_ext",
+        "bot_info_friend_check_in_strategy",
+    ] {
+        assert!(
+            db_get_column_opt::<String>(row, column)
+                .expect("bot info attribute")
+                .is_none(),
+            "{column} must not be written to bot_info"
+        );
+    }
 
     let cleared = repo
         .patch_control_plane(
@@ -685,6 +722,70 @@ async fn persistent_control_plane_internal_attributes_round_trip_and_clear_frien
         cleared.friend_check_in_strategy,
         FriendCheckInStrategy::DeptFree
     );
+}
+
+#[tokio::test]
+async fn persistent_control_plane_rejects_invalid_physical_internal_attributes() {
+    let (repo, db) = fixture().await;
+    for bot_id in [
+        "invalid-user-visibility",
+        "invalid-friend-ext",
+        "invalid-friend-check-in-strategy",
+    ] {
+        seed_bot(
+            db.as_ref(),
+            bot_id,
+            "Invalid Attributes",
+            "bot",
+            "protected",
+            "online",
+            Some("staff-1"),
+            "2026-01-01 00:00:00",
+        )
+        .await;
+    }
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_bots SET user_visibility = ? WHERE bot_uuid = ? AND env = ?",
+        vec![
+            Value::from("invalid"),
+            Value::from("invalid-user-visibility"),
+            Value::from("dev"),
+        ],
+    ))
+    .await
+    .expect("corrupt user visibility");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_bots SET friend_ext = ? WHERE bot_uuid = ? AND env = ?",
+        vec![
+            Value::from("[]"),
+            Value::from("invalid-friend-ext"),
+            Value::from("dev"),
+        ],
+    ))
+    .await
+    .expect("corrupt friend extension");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_bots SET friend_check_in_strategy = ? WHERE bot_uuid = ? AND env = ?",
+        vec![
+            Value::from("UNKNOWN"),
+            Value::from("invalid-friend-check-in-strategy"),
+            Value::from("dev"),
+        ],
+    ))
+    .await
+    .expect("corrupt friend check-in strategy");
+
+    for bot_id in [
+        "invalid-user-visibility",
+        "invalid-friend-ext",
+        "invalid-friend-check-in-strategy",
+    ] {
+        let error = repo
+            .get_control_plane(bot_id, "dev")
+            .await
+            .expect_err("invalid persisted attributes must fail closed");
+        assert!(matches!(error, ServiceError::InternalError(_)));
+    }
 }
 
 #[tokio::test]
@@ -927,6 +1028,9 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
             agent_code TEXT,
             task_claim_mode INTEGER NOT NULL DEFAULT 0,
             task_dream_mode INTEGER NOT NULL DEFAULT 0,
+            user_visibility TEXT NOT NULL DEFAULT 'protected',
+            friend_ext JSON,
+            friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL',
             UNIQUE (bot_uuid, env)
         )",
     ))
