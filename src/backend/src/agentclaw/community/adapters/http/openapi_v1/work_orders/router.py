@@ -49,9 +49,10 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderQueryType as DomainWorkOrderQueryType,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 
-router = APIRouter(tags=["work-orders"])
+router = APIRouter(tags=["work-orders"], route_class=PublicAPIRoute)
 PositiveIdPath = Annotated[int, Path(ge=1, description="Positive numeric identifier.")]
 PageNoQuery = Annotated[int, Query(ge=1, description="One-based page number.")]
 PageSizeQuery = Annotated[

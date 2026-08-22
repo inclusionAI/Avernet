@@ -46,10 +46,11 @@ from .schemas import (
     LocalOpenFolder,
     LocalOpenFolderResult,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/bots", tags=["local-bots"])
+router = APIRouter(prefix="/openapi/v1/bots", tags=["local-bots"], route_class=PublicAPIRoute)
 
 _GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]

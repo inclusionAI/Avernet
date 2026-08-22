@@ -22,6 +22,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     PageParamsDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
 )
@@ -71,6 +72,7 @@ publish_status_router = APIRouter(
     prefix="/openapi/v1/bots/skills",
     tags=["skills"],
     dependencies=[Depends(require_principal)],
+    route_class=PublicAPIRoute,
 )
 
 
@@ -103,7 +105,7 @@ async def get_skill_publish_status(
     return envelope(SkillPublishStatus.model_validate(data), request)
 
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/skills", tags=["skills"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/skills", tags=["skills"], route_class=PublicAPIRoute)
 
 #: The bot authorization for an application caller, on the two operations the
 #: shared dependency can decide — the **addressed-bot** dependency, because the

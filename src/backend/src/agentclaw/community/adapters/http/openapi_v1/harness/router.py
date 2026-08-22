@@ -63,6 +63,7 @@ from agentclaw.community.adapters.http.harness.router import (
     _get_scan_report_type,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
 
@@ -70,6 +71,7 @@ router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/harness",
     tags=["harness"],
     dependencies=[Depends(refuse_app_only_caller)],
+    route_class=PublicAPIRoute,
 )
 
 

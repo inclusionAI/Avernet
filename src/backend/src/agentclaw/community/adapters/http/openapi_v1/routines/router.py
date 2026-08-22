@@ -38,8 +38,9 @@ from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
 from .schemas import Routine, RoutineSpec, RoutineRun, RoutineUpdate, ScheduleTrigger
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/routines", tags=["routines"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/routines", tags=["routines"], route_class=PublicAPIRoute)
 
 logger = get_logger()
 

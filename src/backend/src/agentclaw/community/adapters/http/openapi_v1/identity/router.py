@@ -47,8 +47,9 @@ from .schemas import (
     IdentityFileType,
     IdentityFileWrite,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/identity", tags=["identity"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/identity", tags=["identity"], route_class=PublicAPIRoute)
 
 #: The path parameter naming which identity file an operation addresses.
 FileTypePath = Annotated[

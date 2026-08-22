@@ -40,9 +40,10 @@ from .schemas import (
     HealthFindingDetail,
     HealthFindingGroup,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/diagnostics", tags=["diagnostics"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/diagnostics", tags=["diagnostics"], route_class=PublicAPIRoute)
 
 ScanIdQuery = Annotated[
     int | None,

@@ -79,14 +79,16 @@ from .schemas import (
     McpServerDetail,
     McpTenant,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/mcp", tags=["mcp"])
+router = APIRouter(prefix="/openapi/v1/bots/mcp", tags=["mcp"], route_class=PublicAPIRoute)
 _GRANT_CHECKED_ADDRESSED_BOT = [Depends(require_granted_addressed_bot)]
 
 bot_mcp_router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/mcps",
     tags=["mcp"],
     dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+    route_class=PublicAPIRoute,
 )
 
 #: What the *configuration* operations declare: ``REFUSED`` to a machine

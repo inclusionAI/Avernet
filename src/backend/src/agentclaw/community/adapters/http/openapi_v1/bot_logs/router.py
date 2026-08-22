@@ -24,6 +24,7 @@ from agentclaw.community.core.bot_chat.schemas import (
     SessionListResponse,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 # Every operation here is ``REFUSED`` to a machine caller acting alone: on this
 # group ``user_id`` means *whose traces to read* over a tenant-level
@@ -35,6 +36,7 @@ router = APIRouter(
     prefix="/openapi/v1/bots/logs",
     tags=["bot-logs"],
     dependencies=[Depends(refuse_app_only_caller)],
+    route_class=PublicAPIRoute,
 )
 
 PrincipalDep = Annotated[Principal, Depends(require_user_and_app_principal)]

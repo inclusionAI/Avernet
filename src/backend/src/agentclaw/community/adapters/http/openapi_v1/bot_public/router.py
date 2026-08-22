@@ -29,10 +29,11 @@ from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
 from .schemas import DiscoveredPublicBot, PublicBot, RuntimeState
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
-router = APIRouter(prefix="/openapi/v1/bots/catalog", tags=["bot-catalog"])
+router = APIRouter(prefix="/openapi/v1/bots/catalog", tags=["bot-catalog"], route_class=PublicAPIRoute)
 
 
 def _request_id(request: Request) -> str:

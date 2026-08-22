@@ -40,6 +40,7 @@ from .schemas import (
     SkillSetSkillItem,
     UpdateSkillSetRequest,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 _GRANT_CHECKED_ADDRESSED_BOT = [Depends(require_granted_addressed_bot)]
 
@@ -47,6 +48,7 @@ router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/skill-sets",
     tags=["skill-sets"],
     dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+    route_class=PublicAPIRoute,
 )
 SetIdPath = Annotated[str, Path(description="Decimal SkillSet identifier.")]
 SkillIdPath = Annotated[str, Path(description="Decimal Skill identifier.")]

@@ -57,11 +57,12 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.staff_dept import DeptSearchItem, StaffDeptPlugin
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/org/user", tags=["org"])
-dept_router = APIRouter(prefix="/openapi/v1/org/dept", tags=["org"])
+router = APIRouter(prefix="/openapi/v1/org/user", tags=["org"], route_class=PublicAPIRoute)
+dept_router = APIRouter(prefix="/openapi/v1/org/dept", tags=["org"], route_class=PublicAPIRoute)
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 

@@ -26,8 +26,9 @@ from agentclaw.community.core.operator_context import OperatorContext
 from agentclaw.community.di import Injected
 
 from .schemas import BcsPublicRequest, BcsPublishResult
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots", tags=["collaboration-bots"])
+router = APIRouter(prefix="/openapi/v1/bots", tags=["collaboration-bots"], route_class=PublicAPIRoute)
 
 
 @router.post("/{bot_id}/public-bcs", response_model=Envelope[BcsPublishResult])

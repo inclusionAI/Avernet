@@ -227,6 +227,10 @@ from .service_publications import (
 from .spaces import router as spaces_router
 from .work_orders import router as work_orders_router
 from .token import caller_identity_router, token_router
+from agentclaw.community.adapters.http.openapi_v1.authorization import (
+    PublicAPIRoute,
+    assert_every_route_authorized,
+)
 
 # Every public route lives under this prefix. Exported so app-level handlers can
 # tell a public request from an internal one (e.g. to envelope validation errors
@@ -405,7 +409,7 @@ def build_public_router() -> APIRouter:
     ``user_id`` parameter itself is always per handler (see "Naming the end
     user" above).
     """
-    public = APIRouter()
+    public = APIRouter(route_class=PublicAPIRoute)
     # The caller's own identity — the one operation whose answer IS the user,
     # so it takes no ``user_id`` and can answer no 403: it gets the base error
     # table, not the user-scoped one. The caller is the sole top-level public
@@ -526,6 +530,11 @@ def build_public_router() -> APIRouter:
         responses=USER_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
+    # The two failures `PublicAPIRoute` cannot see itself: a router built
+    # without it (whose routes never ran its `__init__`), and a table row left
+    # behind by a rename. Raising here means the application does not start,
+    # which is the point — an operation nothing governs is never served.
+    assert_every_route_authorized(public)
     return public
 
 

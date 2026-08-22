@@ -26,9 +26,10 @@ from agentclaw.community.core.bot_collaborator.models import CollaboratorRecord
 from agentclaw.community.di import Injected
 
 from .schemas import Editor, EditorCreate, EditorList, EditorRole, EditorUpdate
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/editors", tags=["editors"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/editors", tags=["editors"], route_class=PublicAPIRoute)
 EditorIdPath = Annotated[
     int,
     Path(ge=1, description="Editor-relation identifier returned by this collection."),
