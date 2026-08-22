@@ -556,25 +556,46 @@ class SkillSetControlPlaneService:
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
-        return [
-            {
-                **item,
-                # System Default remains a platform projection.  Ordinary-set
-                # MCP membership is canonical desired state, not a legacy BFF
-                # association, so BFF reads observe the same rows as OpenAPI.
-                "mcps": (
-                    self._repository.list_mcps(
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        set_id=item["id"],
-                        engine_type=self._engine(bot),
-                        default_engine_types=self._default_engine_types(bot),
-                    )
-                ),
-                "clis": default_clis if item["is_default"] else [],
-            }
-            for item in items
-        ]
+        # Default MCPs are not stored as ordinary ac_skill_set_mcp rows.  The
+        # legacy service combines engine/template defaults, explicit rows, and
+        # ac_default_skillset_mcp_exclusion.  Keep that proven projection for
+        # the published BFF resource response; ordinary Sets stay canonical.
+        legacy = (
+            self._legacy_factory.create(
+                entity_id=str(bot.get("entity_id") or owner_id),
+                bot_id=bot_id,
+                engine_type=self._engine(bot),
+                entity_type=bot.get("entity_type") or "staff",
+            )
+            if any(item["is_default"] for item in items)
+            else None
+        )
+        resources: list[dict] = []
+        for item in items:
+            if item["is_default"]:
+                assert legacy is not None
+                mcps = legacy.get_set_mcp_servers(
+                    str(item["id"]),
+                    user_id=owner_id,
+                    bot_id=bot_id,
+                    engine_type=self._engine(bot),
+                )
+            else:
+                mcps = self._repository.list_mcps(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    set_id=item["id"],
+                    engine_type=self._engine(bot),
+                    default_engine_types=self._default_engine_types(bot),
+                )
+            resources.append(
+                {
+                    **item,
+                    "mcps": mcps,
+                    "clis": default_clis if item["is_default"] else [],
+                }
+            )
+        return resources
 
     async def _mutate(
         self,

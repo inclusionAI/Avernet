@@ -206,12 +206,17 @@ class _LegacyResolutionRepository(_Repository):
 class _LegacySkillSetService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, str]] = []
+        self.default_mcp_calls: list[dict] = []
 
     def resolve_or_create_legacy_market_skill(
         self, *, identifier: str, owner_id: str, bot_id: str
     ) -> str:
         self.calls.append((identifier, owner_id, bot_id))
         return "stable-skill-id"
+
+    def get_set_mcp_servers(self, skill_set_id: str, **kwargs) -> list[dict]:
+        self.default_mcp_calls.append({"skill_set_id": skill_set_id, **kwargs})
+        return [{"server_code": "legacy-default-mcp"}]
 
 
 class _LegacyFactory:
@@ -258,9 +263,27 @@ class _DefaultResourceRepository(_ResourceRepository):
         return [{"server_code": "visible-default-mcp"}]
 
 
+class _MixedResourceRepository(_DefaultResourceRepository):
+    def list_sets(self, **kwargs) -> list[dict]:
+        self.list_set_calls.append(kwargs)
+        return [
+            {"id": "global-default", "is_default": True},
+            {"id": "ordinary-set", "is_default": False},
+        ]
+
+    def list_mcps(self, **kwargs):
+        self.list_mcp_calls.append(kwargs)
+        return [{"server_code": "ordinary-set-mcp"}]
+
+
 class _ResourceLegacyFactory:
+    def __init__(self) -> None:
+        self.service = _LegacySkillSetService()
+        self.calls: list[dict] = []
+
     def create(self, **_kwargs):
-        return _LegacySkillSetService()
+        self.calls.append(_kwargs)
+        return self.service
 
 
 class _McpAuth:
@@ -849,11 +872,12 @@ def test_update_set_uses_runtime_default_candidates_for_coding_image():
 def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_scope():
     repository = _DefaultResourceRepository()
     authorization = _Collaborators()
+    legacy = _ResourceLegacyFactory()
     service = SkillSetControlPlaneService(
         repository=repository,
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),
-        legacy_factory=_ResourceLegacyFactory(),
+        legacy_factory=legacy,
         passport=object(),
         authorization=authorization,
         audit_log_repo=_Audit(),
@@ -865,16 +889,48 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
         bot_id="bot-1", owner_id="true-owner", user_id="collaborator"
     )
 
-    assert result[0]["mcps"] == [{"server_code": "visible-default-mcp"}]
+    assert result[0]["mcps"] == [{"server_code": "legacy-default-mcp"}]
     assert authorization.calls == [{
         "bot_id": "bot-1", "owner_id": "true-owner", "actor_id": "collaborator"
     }]
+    assert repository.list_mcp_calls == []
+    assert legacy.service.default_mcp_calls == [{
+        "skill_set_id": "global-default",
+        "user_id": "true-owner",
+        "bot_id": "bot-1",
+        "engine_type": "openclaw",
+    }]
+
+
+def test_resources_keeps_ordinary_mcp_membership_on_canonical_repository_path():
+    repository = _MixedResourceRepository()
+    legacy = _ResourceLegacyFactory()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=legacy,
+        passport=object(),
+        authorization=_Collaborators(),
+        mutation_guard=_MutationGuard(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    result = service.resources(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner"
+    )
+
+    assert result[0]["mcps"] == [{"server_code": "legacy-default-mcp"}]
+    assert result[1]["mcps"] == [{"server_code": "ordinary-set-mcp"}]
     assert repository.list_mcp_calls == [{
         "bot_id": "bot-1",
         "owner_id": "true-owner",
-            "set_id": "global-default",
-            "engine_type": "openclaw",
-            "default_engine_types": ("openclaw",),
+        "set_id": "ordinary-set",
+        "engine_type": "openclaw",
+        "default_engine_types": ("openclaw",),
     }]
 
 
