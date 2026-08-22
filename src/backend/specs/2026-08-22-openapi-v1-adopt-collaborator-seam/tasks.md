@@ -46,10 +46,10 @@ deletion is known to change no caller's answer.
 - **Goal:** Correct the two rows that cite a collaborator check which does not exist.
 - **Files:** `.../openapi_v1/authorization.py`
 - **Done when:**
-  - [ ] Both `/bots/{bot_id}/chats` rows are `NoCheck` with a reason stating that the records are scoped to the acting user and the addressed owner is never read.
-  - [ ] The finding is recorded in the change's description: `core/bot_chat/service.py` contains no collaborator check, and the handler does `del owner_id` before calling `list_sessions(owner_id=user_id)` (`bot_chats/router.py:107`, `:166`).
-  - [ ] No handler, no service and no dependency changes — `require_granted_addressed_bot` stays exactly as it is.
-  - [ ] A test asserts the two operations admit and refuse exactly the callers they do today.
+  - [x] Both `/bots/{bot_id}/chats` rows are `NoCheck` with a reason stating that the records are scoped to the acting user and the addressed owner is never read.
+  - [x] The finding is recorded in the change's description: `core/bot_chat/service.py` contains no collaborator check, and the handler does `del owner_id` before calling `list_sessions(owner_id=user_id)` (`bot_chats/router.py:107`, `:166`).
+  - [x] No handler, no service and no dependency changes — `require_granted_addressed_bot` stays exactly as it is.
+  - [x] A test asserts the two operations admit and refuse exactly the callers they do today.
 - **Depends on:** Task 2
 
 ## Task 4: Move the diagnostics group onto the seam

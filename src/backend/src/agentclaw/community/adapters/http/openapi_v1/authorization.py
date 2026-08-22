@@ -202,10 +202,17 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.channels.router"),
     ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"):
         ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.channels.router"),
+    # Not bot-scoped despite the address. Both handlers take the addressed
+    # owner, ``del`` it, and query on the *acting user* instead
+    # (``bot_chats/router.py:107``, ``:166``), so there is no collaborator
+    # dimension to adjudicate: a caller sees their own chat records and nobody
+    # else's, whoever owns the bot. These rows read ``ServiceChecked(MEMBER,
+    # "…core.bot_chat.service")`` until 2026-08-22; that module contains no
+    # collaborator check of any kind, and the bar was never enforced anywhere.
     ("GET", "/openapi/v1/bots/{bot_id}/chats"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.bot_chat.service"),
+        NoCheck("chat records are scoped to the acting user, not the addressed bot"),
     ("GET", "/openapi/v1/bots/{bot_id}/chats/{trace_id}"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.bot_chat.service"),
+        NoCheck("chat records are scoped to the acting user, not the addressed bot"),
     ("GET", "/openapi/v1/bots/{bot_id}/connection"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.engine_runtime.connection"),
     ("GET", "/openapi/v1/bots/{bot_id}/containers"):

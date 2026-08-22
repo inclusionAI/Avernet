@@ -120,3 +120,55 @@ async def test_detail_masks_a_trace_from_a_different_path_bot():
     service.get_session.assert_awaited_once_with(
         trace_id="trace-1", owner_id="user-1", log_source="db"
     )
+
+
+@pytest.mark.asyncio
+async def test_the_addressed_owner_is_discarded_for_the_acting_user():
+    """Why these two operations carry ``NoCheck`` rather than a collaborator bar.
+
+    Their rows read ``ServiceChecked(MEMBER, "…core.bot_chat.service")`` until
+    2026-08-22 — a citation to a module that contains no collaborator check of
+    any kind, so the bar was recorded but never enforced anywhere. What the
+    handlers actually do is query on the *acting user* and drop the addressed
+    owner entirely, which leaves no collaborator dimension to adjudicate: a
+    caller sees their own chat records and nobody else's, whoever owns the bot.
+
+    This pins that behaviour so the row stays honest. If either operation is
+    ever made to answer for the addressed owner, it becomes bot-scoped, and this
+    test says so before the ``NoCheck`` reason quietly turns false.
+    """
+    service = SimpleNamespace(
+        list_sessions=AsyncMock(
+            return_value=SessionListResponse(
+                sessions=[], total=0, page=1, limit=10, has_more=False
+            )
+        )
+    )
+
+    await list_bot_chats(
+        request=_request("/openapi/v1/bots/bot-1/chats"),
+        bot_id="bot-1",
+        user_id="acting-user",
+        owner_id="a-different-owner",
+        trace_id=None,
+        session_id=None,
+        session_key=None,
+        query=None,
+        biz_scene=None,
+        biz_task_id=None,
+        group_id=None,
+        match_mode=None,
+        include_output_match=None,
+        time_scope=None,
+        from_date=None,
+        to_date=None,
+        page=1,
+        limit=10,
+        log_source=None,
+        service=service,
+    )
+
+    assert service.list_sessions.await_args.kwargs["owner_id"] == "acting-user", (
+        "the query is scoped to the acting user; if it ever addresses the named "
+        "owner instead, the operation is bot-scoped and NoCheck is wrong"
+    )
