@@ -14,8 +14,12 @@ class SpaceType(StrEnum):
 
 
 class SpaceRole(StrEnum):
-    OWNER = "OWNER"
+    # Canonical role used by all new business logic and persisted writes.
+    ADMIN = "ADMIN"
     MEMBER = "MEMBER"
+    # Compatibility-only aliases. Do not use these for new data or business rules.
+    OWNER = "OWNER"
+    ADMINISTRATOR = "ADMINISTRATOR"
 
 
 class SpaceJoinStatus(StrEnum):

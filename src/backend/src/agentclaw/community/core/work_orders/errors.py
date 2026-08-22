@@ -51,3 +51,7 @@ class WorkOrderBotEditorRequestNotAllowedError(WorkOrderError):
 
 class WorkOrderNoReviewerError(WorkOrderError):
     pass
+
+
+class WorkOrderInvalidEventError(WorkOrderError):
+    pass

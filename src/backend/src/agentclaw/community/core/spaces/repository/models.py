@@ -90,19 +90,20 @@ class SpaceMemberModel(Base):
     __table_args__ = (
         UniqueConstraint("env", "space_id", "user_id", name="uk_space_member"),
         Index("idx_space_member_user", "env", "user_id", "status"),
-        CheckConstraint("role IN ('ADMINISTRATOR', 'MEMBER')", name="ck_space_member_role"),
+        CheckConstraint("role IN ('ADMIN', 'ADMINISTRATOR', 'MEMBER')", name="ck_space_member_role"),
         CheckConstraint("status IN ('ACTIVE', 'INACTIVE')", name="ck_space_member_status"),
         CheckConstraint("env <> ''", name="ck_space_member_env_not_empty"),
     )
 
     def to_record(self) -> SpaceMemberRecord:
+        # Historical ADMINISTRATOR rows are exposed as the canonical ADMIN role.
         return SpaceMemberRecord(
             id=self.id,
             space_id=self.space_id,
             user_id=self.user_id,
             role=(
-                SpaceRole.OWNER
-                if self.role == "ADMINISTRATOR"
+                SpaceRole.ADMIN
+                if self.role in ("ADMIN", "ADMINISTRATOR")
                 else SpaceRole.MEMBER
             ),
             env=self.env,

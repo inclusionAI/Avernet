@@ -168,6 +168,7 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderApplicantAlreadyMemberError,
     WorkOrderBotEditorRequestNotAllowedError,
     WorkOrderInvalidReasonError,
+    WorkOrderInvalidEventError,
     WorkOrderInvalidRemarkError,
     WorkOrderJoinNotAllowedError,
     WorkOrderNoReviewerError,
@@ -357,6 +358,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         404,
         WorkOrderPublicErrorMessage.NOT_FOUND,
     ),
+    WorkOrderInvalidEventError: (400, "Invalid work-order event"),
     WorkOrderInvalidReasonError: (
         400,
         WorkOrderPublicErrorMessage.INVALID_REASON,
@@ -711,6 +713,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
+    WorkOrderInvalidEventError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidReasonError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidRemarkError: WorkOrderErrorCode.INVALID_REMARK,
     WorkOrderAccessDeniedError: WorkOrderErrorCode.ACCESS_DENIED,

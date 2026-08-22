@@ -105,7 +105,9 @@ class SpaceMemberService:
         if space.space_type is SpaceType.PERSONAL:
             raise PersonalSpaceInvariantError("personal space role is immutable")
         normalized = self._user_id(user_id)
-        if normalized == space.created_by and role is not SpaceRole.OWNER:
+        if normalized == space.created_by and role not in (
+            SpaceRole.ADMIN, SpaceRole.OWNER, SpaceRole.ADMINISTRATOR
+        ):
             raise SpaceCreatorInvariantError("space creator cannot be demoted")
         updated = self._repository.update_member_role(
             space_id=space_id,

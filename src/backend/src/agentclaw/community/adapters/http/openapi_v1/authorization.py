@@ -514,6 +514,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the named user's own work orders and notifications"),
     ("POST", "/openapi/v1/bots/work-order-notifications/{notification_id}/read"):
         NoCheck("the named user's own work orders and notifications"),
+    ("POST", "/openapi/v1/bots/work-orders/events"):
+        NoCheck("the named user creates their own work-order event"),
     ("GET", "/openapi/v1/bots/work-orders"):
         NoCheck("the named user's own work orders and notifications"),
     ("GET", "/openapi/v1/bots/work-orders/{work_order_id}"):

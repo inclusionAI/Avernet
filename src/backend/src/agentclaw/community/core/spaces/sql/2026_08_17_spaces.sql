@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS ac_space_member (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     space_id BIGINT UNSIGNED NOT NULL,
     user_id VARCHAR(128) NOT NULL,
-    role VARCHAR(24) NOT NULL COMMENT 'ADMINISTRATOR/MEMBER',
+    role VARCHAR(24) NOT NULL COMMENT 'Canonical values: ADMIN/MEMBER; ADMINISTRATOR retained for legacy rows',
     status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/INACTIVE',
     created_by VARCHAR(128) NOT NULL,
     removed_at TIMESTAMP NULL,
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS ac_space_member (
     PRIMARY KEY (id),
     UNIQUE KEY uk_space_member (env, space_id, user_id),
     KEY idx_space_member_user (env, user_id, status),
-    CONSTRAINT ck_space_member_role CHECK (role IN ('ADMINISTRATOR', 'MEMBER')),
+    CONSTRAINT ck_space_member_role CHECK (role IN ('ADMIN', 'ADMINISTRATOR', 'MEMBER')),
     CONSTRAINT ck_space_member_status CHECK (status IN ('ACTIVE', 'INACTIVE')),
     CONSTRAINT ck_space_member_env_not_empty CHECK (env <> '')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -86,13 +86,13 @@ ALTER TABLE ac_space_member
     ADD COLUMN IF NOT EXISTS removed_at TIMESTAMP NULL,
     ADD COLUMN IF NOT EXISTS removed_by VARCHAR(128) NULL,
     MODIFY COLUMN env VARCHAR(20) NOT NULL;
-UPDATE ac_space_member SET role = 'ADMINISTRATOR' WHERE role = 'OWNER';
+UPDATE ac_space_member SET role = 'ADMIN' WHERE role IN ('OWNER', 'ADMINISTRATOR');
 UPDATE ac_space_member SET status = 'ACTIVE' WHERE status IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_space_member
     ON ac_space_member (env, space_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_space_member_user
     ON ac_space_member (env, user_id, status);
 ALTER TABLE ac_space_member
-    ADD CONSTRAINT IF NOT EXISTS ck_space_member_role CHECK (role IN ('ADMINISTRATOR', 'MEMBER')),
+    ADD CONSTRAINT IF NOT EXISTS ck_space_member_role CHECK (role IN ('ADMIN', 'ADMINISTRATOR', 'MEMBER')),
     ADD CONSTRAINT IF NOT EXISTS ck_space_member_status CHECK (status IN ('ACTIVE', 'INACTIVE')),
     ADD CONSTRAINT IF NOT EXISTS ck_space_member_env_not_empty CHECK (env <> '');

@@ -48,8 +48,12 @@ class SpaceRepository(SpaceRepositoryProtocol):
 
     @staticmethod
     def _stored_role(role: SpaceRole) -> str:
-        """Keep the existing OWNER projection over the final ADMINISTRATOR row."""
-        return "ADMINISTRATOR" if role is SpaceRole.OWNER else SpaceRole.MEMBER.value
+        """Persist only ADMIN/MEMBER; OWNER and ADMINISTRATOR are input aliases."""
+        return (
+            SpaceRole.ADMIN.value
+            if role in (SpaceRole.ADMIN, SpaceRole.OWNER, SpaceRole.ADMINISTRATOR)
+            else SpaceRole.MEMBER.value
+        )
 
     def initialize_personal(self, *, user_id: str, env: str):
         try:
@@ -80,7 +84,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member(
                         space_id=space.id,
                         user_id=user_id,
-                        role=self._stored_role(SpaceRole.OWNER),
+                        role=self._stored_role(SpaceRole.ADMIN),
                         env=env,
                         created_by=user_id,
                     )
@@ -123,7 +127,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member(
                         space_id=space.id,
                         user_id=creator_id,
-                        role=self._stored_role(SpaceRole.OWNER),
+                        role=self._stored_role(SpaceRole.ADMIN),
                         env=env,
                         created_by=creator_id,
                     )
@@ -294,7 +298,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     db.query(func.count(self._Member.id))
                     .filter(
                         self._Member.space_id == row.id,
-                        self._Member.role == self._stored_role(SpaceRole.OWNER),
+                        self._Member.role == self._stored_role(SpaceRole.ADMIN),
                         self._Member.env == env,
                         self._Member.status == "ACTIVE",
                     )

@@ -14,6 +14,11 @@ class WorkOrderStatus(StrEnum):
     REJECTED = "REJECTED"
 
 
+class WorkOrderEventStatus(StrEnum):
+    PENDING = "PENDING"
+    CREATED = "CREATED"
+
+
 class WorkOrderDecision(StrEnum):
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
@@ -200,7 +205,7 @@ class WorkOrderNotificationBadgeSummary(BaseModel):
 
 
 class WorkOrderListItem(BaseModel):
-    work_order: WorkOrderRecord
+    work_order: WorkOrderRecord | None
     notification: WorkOrderNotificationRecord | None
     can_approve: bool
 
@@ -213,6 +218,14 @@ class WorkOrderDetail(BaseModel):
     space_name: str
     applicant_name: str
     can_approve: bool
+
+
+class WorkOrderEventCreatedResult(BaseModel):
+    event_category: NotificationCategory
+    work_order_id: int | None
+    work_order_no: str | None
+    notification_ids: list[int]
+    status: WorkOrderEventStatus
 
 
 class WorkOrderReviewResult(BaseModel):
