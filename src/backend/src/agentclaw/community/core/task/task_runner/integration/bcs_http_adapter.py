@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -15,6 +16,15 @@ from typing import Any
 import httpx
 
 from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import BcsTokenProvider
+
+
+logger = logging.getLogger(__name__)
+
+
+def _response_summary(resp: httpx.Response) -> str:
+    """Return a bounded response summary without leaking auth headers or large bodies."""
+    text = (resp.text or "").replace("\n", " ")
+    return text[:500]
 
 
 class BcsClientError(Exception):
@@ -102,8 +112,27 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
             headers["Idempotency-Key"] = idempotency_key
         if extra_headers:
             headers.update(extra_headers)
-        r = await self._client.request(method, path, json=json, headers=headers)
-        _map_status(r)
+        logger.info(
+            "[bcs_http] request method=%s path=%s json_keys=%s idempotency=%s",
+            method, path, sorted((json or {}).keys()), bool(idempotency_key),
+        )
+        try:
+            r = await self._client.request(method, path, json=json, headers=headers)
+        except Exception:
+            logger.exception("[bcs_http] request transport failed method=%s path=%s", method, path)
+            raise
+        logger.info(
+            "[bcs_http] response method=%s path=%s status=%s body=%s",
+            method, path, r.status_code, _response_summary(r),
+        )
+        try:
+            _map_status(r)
+        except Exception:
+            logger.exception(
+                "[bcs_http] response rejected method=%s path=%s status=%s body=%s",
+                method, path, r.status_code, _response_summary(r),
+            )
+            raise
         return r
 
     async def create_group(self, req: BcsCreateGroupRequest) -> BcsCreateGroupResult:

@@ -807,11 +807,30 @@ class ExecutionEngine:
                 run_nodes.extend(payload[0])
             elif kind == "group":
                 node, gf = payload
-                logger.info("[drain] task=%s node=%s 拉群(collab=%s)", task_id, node.node_id, gf.collab_mode)
+                logger.info(
+                    "[drain] task=%s node=%s 拉群开始 collab=%s bot_ids=%s members=%s",
+                    task_id,
+                    node.node_id,
+                    gf.collab_mode,
+                    list(getattr(gf, "bot_ids", []) or []),
+                    list(getattr(gf, "members_info", []) or []),
+                )
                 try:
                     gid = await self._runner.form_coop_group(gf)
+                    logger.info(
+                        "[drain] task=%s node=%s 拉群成功 group_id=%s collab=%s",
+                        task_id, node.node_id, gid, gf.collab_mode,
+                    )
                 except Exception as ex:  # noqa: BLE001  拉群异常→清 dispatching 留 PENDING 交 harness
-                    logger.warning("[drain] task=%s node=%s 拉群异常:%s→留 PENDING 待 harness", task_id, node.node_id, ex)
+                    logger.exception(
+                        "[drain] task=%s node=%s 拉群失败 exc_type=%s exc=%s collab=%s bot_ids=%s",
+                        task_id,
+                        node.node_id,
+                        type(ex).__name__,
+                        ex,
+                        gf.collab_mode,
+                        list(getattr(gf, "bot_ids", []) or []),
+                    )
                     with self._lock_for(task_id):
                         self._graph.update_task_node_info(
                             TaskNodePatch(task_id=task_id, node_id=node.node_id, run_mode="", assignee="",

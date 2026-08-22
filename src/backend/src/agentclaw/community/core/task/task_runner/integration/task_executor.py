@@ -167,7 +167,26 @@ class TaskExecutor:
             raise BotIdentityResolutionError(
                 f"group bindings reference bots outside GroupFormation.bot_ids: {unknown}"
             )
-        resolved = self._identity_resolver.resolve_many(referenced_ids)
+        logger.info(
+            "[task_executor] form_coop_group start collab=%s bot_ids=%s referenced_ids=%s manager_bot_id=%s originator_bot_id=%s",
+            mode,
+            bot_ids,
+            referenced_ids,
+            manager_bot_id,
+            originator_bot_id,
+        )
+        try:
+            resolved = self._identity_resolver.resolve_many(referenced_ids)
+        except Exception:
+            logger.exception(
+                "[task_executor] form_coop_group identity resolution failed collab=%s bot_ids=%s referenced_ids=%s",
+                mode, bot_ids, referenced_ids,
+            )
+            raise
+        logger.info(
+            "[task_executor] form_coop_group identities resolved collab=%s resolved=%s",
+            mode, resolved,
+        )
 
         def bcs_uuid(product_bot_id: str) -> str:
             try:
@@ -258,7 +277,27 @@ class TaskExecutor:
                 },
             }]
         req = BcsCreateGroupRequest(**req_kwargs)
-        res = await self._bcs.create_group(req)
+        logger.info(
+            "[task_executor] form_coop_group create_group request collab=%s driver_bot=%s participants=%s group_strategy=%s has_definition=%s has_bindings=%s",
+            mode,
+            req.driver_bot,
+            req.participants,
+            req.group_strategy,
+            bool(req.collaboration_definition_yaml),
+            bool(req.participant_bindings),
+        )
+        try:
+            res = await self._bcs.create_group(req)
+        except Exception:
+            logger.exception(
+                "[task_executor] form_coop_group create_group failed collab=%s driver_bot=%s participants=%s group_strategy=%s",
+                mode, req.driver_bot, req.participants, req.group_strategy,
+            )
+            raise
+        logger.info(
+            "[task_executor] form_coop_group create_group succeeded collab=%s group_id=%s session_id=%s run_id=%s",
+            mode, res.group_id, res.session_id, res.run_id,
+        )
         self._group_meta[res.group_id] = {
             "collab_mode": mode, "gf": gf,
             "definition_ref": res.definition_ref, "session_id": res.session_id,
