@@ -1118,6 +1118,7 @@ async def switch_skill_set(
 
     result = await control_plane.switch(
         bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
         actor_id=ctx.user_id,
         set_id=request.skill_set_id,
     )
@@ -1165,6 +1166,7 @@ async def sync_skill_set(
 
     result = await control_plane.sync(
         bot_id=effective_bot_id,
+        owner_id=effective_entity_id,
         actor_id=ctx.user_id,
         set_id=request.skill_set_id,
     )

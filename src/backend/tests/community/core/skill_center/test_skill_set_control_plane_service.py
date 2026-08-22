@@ -142,6 +142,34 @@ class _MissingBots:
     def get_unique_by_id(self, _bot_id: str):
         return None
 
+    def get_by_id_and_owner(self, _bot_id: str, _owner_id: str):
+        return None
+
+
+class _SharedDefaultBots:
+    """A real shared ``default`` Bot namespace with no global lookup."""
+
+    def __init__(self, owner_id: str) -> None:
+        self.owner_id = owner_id
+        self.lookups: list[tuple[str, str]] = []
+
+    def get_unique_by_id(self, _bot_id: str) -> dict:
+        raise AssertionError("legacy default must never use a global bot lookup")
+
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict | None:
+        self.lookups.append((bot_id, owner_id))
+        if (bot_id, owner_id) != ("default", self.owner_id):
+            return None
+        return {
+            "owner_id": owner_id,
+            "env": "pre",
+            "entity_id": owner_id,
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+            "entity_type": "staff",
+            "status": "ACTIVE",
+        }
+
 
 class _UnsupportedBots(_Bots):
     def get_unique_by_id(self, bot_id: str) -> dict:
@@ -577,6 +605,7 @@ def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
     with pytest.raises(SkillSetControlPlaneNotFoundError):
         service.create_legacy_set(
             bot_id="missing",
+            owner_id="actor",
             actor_id="actor",
             name="set",
             description=None,
@@ -600,6 +629,7 @@ def test_legacy_create_retains_only_virtual_default_bot_compatibility():
 
     result = service.create_legacy_set(
         bot_id="default",
+        owner_id="actor",
         actor_id="actor",
         name="set",
         description=None,
@@ -607,6 +637,62 @@ def test_legacy_create_retains_only_virtual_default_bot_compatibility():
 
     assert result["bolt_id"] == "default"
     assert repository.create_calls[0]["owner_id"] == "actor"
+
+
+def test_legacy_default_create_uses_owner_qualified_bot_lookup():
+    owner_id = "owner-a"
+    bots = _SharedDefaultBots(owner_id)
+    repository = _CreateRepository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=bots,
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    service.create_legacy_set(
+        bot_id="default",
+        owner_id=owner_id,
+        actor_id=owner_id,
+        name="owner set",
+        description=None,
+    )
+
+    assert bots.lookups == [
+        ("default", owner_id),
+        ("default", owner_id),
+    ]
+    assert repository.create_calls[0]["owner_id"] == owner_id
+
+
+def test_legacy_virtual_default_create_requires_owner_as_actor():
+    service = SkillSetControlPlaneService(
+        repository=_CreateRepository(),
+        bot_repo=_MissingBots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    with pytest.raises(SkillSetAccessDeniedError):
+        service.create_legacy_set(
+            bot_id="default",
+            owner_id="owner-a",
+            actor_id="collaborator",
+            name="set",
+            description=None,
+        )
 
 
 def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
@@ -659,11 +745,15 @@ def test_legacy_virtual_default_read_is_owner_scoped():
     )
 
     assert (
-        service.get_legacy_set(bot_id="default", actor_id="owner", set_id="set-1")["id"]
+        service.get_legacy_set(
+            bot_id="default", owner_id="owner", actor_id="owner", set_id="set-1"
+        )["id"]
         == "set-1"
     )
     with pytest.raises(SkillSetAccessDeniedError):
-        service.get_legacy_set(bot_id="default", actor_id="other", set_id="set-1")
+        service.get_legacy_set(
+            bot_id="default", owner_id="owner", actor_id="other", set_id="set-1"
+        )
 
 
 @pytest.mark.asyncio
@@ -682,7 +772,12 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    await service.sync(bot_id="bot-1", actor_id="true-owner", set_id="set-1")
+    await service.sync(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        actor_id="true-owner",
+        set_id="set-1",
+    )
 
     assert repository.set_active_calls == [
         {
@@ -694,6 +789,35 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
                 "default_engine_types": ("openclaw",),
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_legacy_default_sync_uses_owner_qualified_bot_lookup():
+    owner_id = "owner-a"
+    bots = _SharedDefaultBots(owner_id)
+    repository = _Repository()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=bots,
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Collaborators(),
+        edit_guard=_Guard(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    await service.sync(
+        bot_id="default",
+        owner_id=owner_id,
+        actor_id=owner_id,
+        set_id="set-1",
+    )
+
+    assert bots.lookups == [("default", owner_id)]
+    assert repository.set_active_calls[0]["owner_id"] == owner_id
 
 
 def test_skill_set_acl_denial_is_forbidden_not_not_found():
@@ -1005,7 +1129,10 @@ def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membershi
     )
 
     stable_id = service.resolve_legacy_skill_id(
-        bot_id="bot-1", actor_id="true-owner", identifier="market/example"
+        bot_id="bot-1",
+        owner_id="true-owner",
+        actor_id="true-owner",
+        identifier="market/example",
     )
 
     assert stable_id == "stable-skill-id"

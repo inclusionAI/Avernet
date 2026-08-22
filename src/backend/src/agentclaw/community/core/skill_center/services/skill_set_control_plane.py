@@ -94,16 +94,15 @@ class SkillSetControlPlaneService:
             raise SkillSetAccessDeniedError()
         return bot
 
-    def _legacy_bot(self, *, bot_id: str, user_id: str) -> dict:
-        """Resolve the owner only for a released wire that cannot name one."""
-        bot = self._bot_repo.get_unique_by_id(bot_id)
-        if bot is None:
-            raise SkillSetControlPlaneNotFoundError()
-        return self._bot(
-            bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
-            user_id=user_id,
-        )
+    def _legacy_bot(self, *, bot_id: str, owner_id: str, actor_id: str) -> dict:
+        """Resolve a Legacy-wire Bot by its durable owner-qualified identity.
+
+        ``bot_id`` is not globally unique: the historical virtual ``default``
+        Bot exists once per owner.  Legacy adapters already resolve the owner
+        from their entity input, so they must never fall back to a global
+        lookup here.
+        """
+        return self._bot(bot_id=bot_id, owner_id=owner_id, user_id=actor_id)
 
     @staticmethod
     def _scope(bot: dict, bot_id: str) -> BotSkillLayoutScope:
@@ -153,6 +152,7 @@ class SkillSetControlPlaneService:
         self,
         *,
         bot_id: str,
+        owner_id: str,
         actor_id: str,
         name: str,
         description: str | None,
@@ -165,26 +165,30 @@ class SkillSetControlPlaneService:
         Keep that one owner-scoped case without restoring arbitrary orphan
         SkillSet creation for caller-supplied Bot ids.
         """
-        if self._bot_repo.get_unique_by_id(bot_id) is not None or bot_id != "default":
-            bot = self._legacy_bot(bot_id=bot_id, user_id=actor_id)
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if bot is not None:
             return self.create_set(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=owner_id,
                 user_id=actor_id,
                 name=name,
                 description=description,
             )
+        if bot_id != "default":
+            raise LocalSkillNotFoundError()
+        if actor_id != owner_id:
+            raise SkillSetAccessDeniedError()
 
         item = self._repository.create_set(
             bot_id="default",
-            owner_id=actor_id,
+            owner_id=owner_id,
             name=name,
             description=description,
             engine_type="openclaw",
         )
         self._audit(
             bot_id="default",
-            owner_id=actor_id,
+            owner_id=owner_id,
             actor_id=actor_id,
             action="skill_set_create_legacy_default",
         )
@@ -198,24 +202,29 @@ class SkillSetControlPlaneService:
             default_engine_types=self._default_engine_types(bot),
         )
 
-    def get_legacy_set(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
+    def get_legacy_set(
+        self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
+    ) -> dict:
         """Read a pre-Bot-record legacy set; canonical reads remain strict."""
-        bot = self._bot_repo.get_unique_by_id(bot_id)
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is not None:
             return self.get_set(
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                owner_id=owner_id,
                 user_id=actor_id,
                 set_id=set_id,
             )
         if bot_id != "default":
             raise SkillSetControlPlaneNotFoundError()
         item = self._repository.get_set(
-            bot_id=bot_id, owner_id=actor_id, set_id=set_id, engine_type="openclaw"
+            bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type="openclaw"
         )
         # The released no-Bot compatibility wire is owner-scoped.  ``default``
         # is a shared sentinel rather than a globally readable Bot identity.
-        if not item.get("is_default") and str(item.get("user_id") or "") != actor_id:
+        if (
+            not item.get("is_default")
+            and str(item.get("user_id") or "") != owner_id
+        ) or actor_id != owner_id:
             raise SkillSetAccessDeniedError()
         return item
 
@@ -286,7 +295,7 @@ class SkillSetControlPlaneService:
         )
 
     def resolve_legacy_skill_id(
-        self, *, bot_id: str, actor_id: str, identifier: str
+        self, *, bot_id: str, owner_id: str, actor_id: str, identifier: str
     ) -> str:
         """Resolve the published batch wire to a durable ``ac_skill.id``.
 
@@ -298,7 +307,9 @@ class SkillSetControlPlaneService:
         requests never call this method and therefore never create assets from
         a name/path.
         """
-        bot = self._legacy_bot(bot_id=bot_id, user_id=actor_id)
+        bot = self._legacy_bot(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        )
         try:
             return self._repository.resolve_legacy_skill_id(
                 bot_id=bot_id, identifier=identifier
@@ -575,9 +586,13 @@ class SkillSetControlPlaneService:
             ),
         )
 
-    async def switch(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
+    async def switch(
+        self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
+    ) -> dict:
         """Compatibility command for the deprecated single-select switch API."""
-        bot = self._legacy_bot(bot_id=bot_id, user_id=actor_id)
+        bot = self._legacy_bot(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        )
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
@@ -592,9 +607,13 @@ class SkillSetControlPlaneService:
             ),
         )
 
-    async def sync(self, *, bot_id: str, actor_id: str, set_id: str) -> dict:
+    async def sync(
+        self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
+    ) -> dict:
         """Compatibility command that adds this Set without disabling peers."""
-        bot = self._legacy_bot(bot_id=bot_id, user_id=actor_id)
+        bot = self._legacy_bot(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        )
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
