@@ -112,6 +112,33 @@ async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
     return r.json().get("data") or {}
 
 
+def _print_task_details(g: dict | None, task_id: str) -> None:
+    """经 dashboard 接口取到任务详情后,打印图状态 + 每节点完整 run_info(extend_props/output/verdict/exec_error)
+    便于 e2e 排查三模态落地与收口情况。"""
+    if not g:
+        print(f"[task-details] task={task_id} (empty dashboard)")
+        return
+    ep = g.get("extend_props") or {}
+    print(f"[task-details] task={task_id} graph.status={g.get('status')} "
+          f"loop_round={g.get('loop_round')} bbs_mode={ep.get('bbs_mode')} "
+          f"bbs_owner={str(ep.get('bbs_owner') or '-')[:24]} "
+          f"bbs_relay_count={ep.get('bbs_relay_count')} node_count={len(g.get('tasks') or [])}")
+    for t in g.get("tasks") or []:
+        ri = t.get("run_info") or {}
+        print(f"  - node={t.get('node_id')} status={t.get('status')} "
+              f"run_mode={ri.get('run_mode') or '-'} assignee={str(ri.get('assignee') or '-')[:40]}")
+        if ri.get("extend_props"):
+            print(f"      extend_props={ri.get('extend_props')}")
+        if ri.get("exec_error"):
+            print(f"      exec_error={ri.get('exec_error')}")
+        ar = ri.get("acceptance_result") or {}
+        if ar:
+            print(f"      acceptance={ar}")
+        out = ri.get("output")
+        if out:
+            print(f"      output={str(out)[:300]!r}")
+
+
 def _execute_body(owner_id: str) -> dict:
     """``POST /api/v1/collaboration/tasks/execute`` 请求体(TaskInfoDTO):基础架构方向三份交付物。
 
@@ -272,10 +299,10 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
             )
 
             # 5) 唤醒金庸自驱 bbs-relay-pickup 收口"架构师名册"侧:
-            #    一次唤醒 = 一段接力;未收口且图空闲则再唤醒,上限 BBS_MAX_DEPTH 次。
+            #    BBS 一次唤醒即收口(自判"架构师名册"段 full → 挂 bbs scoped 节点 → 写回),不多次唤醒。
             wake_prompt = _wake_prompt(task_id, jy_id)
             wakes = 0
-            while g.get("status") not in ("DONE", "HUNG") and wakes < _BBS_MAX_DEPTH:
+            while g.get("status") not in ("DONE", "HUNG") and wakes < 1:
                 wakes += 1
                 print(f"[wake#{wakes}] 唤醒金庸自驱 bbs-relay-pickup ...")
                 try:
@@ -309,6 +336,12 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                     if not busy and not held:
                         break
                     await asyncio.sleep(5.0)
+
+            # 任务详情:经 dashboard 接口取全量并打印(便于 e2e 排查三模态落地)
+            detail_g = await _get_dashboard(cli, task_id)
+            if detail_g is not None:
+                g = detail_g
+            _print_task_details(g, task_id)
 
         # 6) 断言:3-mode natural 三种执行模态共存 + 图收口 DONE。
         #    断言取宽容(≥1 每模态):LLM 自分解/自判非确定,只要三模态共存即达到 3-mode 意图。

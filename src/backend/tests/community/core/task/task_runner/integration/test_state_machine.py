@@ -209,3 +209,16 @@ def test_form_coop_group_subscribes_bcn_event_callback_with_api_base_url():
     assert sub["sink"]["url"].endswith("/api/v1/collaboration/tasks/callback/report")
     assert sub["payload"] == {"mode": "metadata_only"}
     assert "state_machine.*" in sub["event_filters"]
+
+
+def test_form_coop_group_sets_group_context_from_task_context():
+    """form_coop_group 把 extend_props['task_context'] 设进 BCS 建群的 context(→ <GroupContext> `目标`)。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["drv"], collab_mode="manager_worker",
+        members_info=[{"bot_id": "drv", "role": "manager"}],
+        extend_props={"task_context": "写一篇关于远程办公协作工具趋势的短文"},
+    )))
+    assert bcs.created_req.context == "写一篇关于远程办公协作工具趋势的短文"

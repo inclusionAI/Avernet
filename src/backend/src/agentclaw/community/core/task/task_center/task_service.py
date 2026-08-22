@@ -166,6 +166,10 @@ class TaskService:
         from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
         ec = request.execution_config
         has_yaml = bool(ec.get("yaml"))
+        # 任务描述(目标)取 goal.objective → instruction → title 的第一个非空,作为 BCS 建群的 context,
+        # 注入 <GroupContext> 的 `目标` 行(BCS resolve_session_topic:session input→group.context→label)。
+        _ts = task_info.task_spec
+        _task_context = ((_ts.goal.objective or _ts.metadata.instruction or _ts.metadata.title) or "").strip()
         gf = GroupFormation(
             bot_ids=[request.owner_bot_id, *ec.get("participant_bot_ids", [])],
             collab_mode="state_machine" if has_yaml else "manager_worker",
@@ -181,6 +185,8 @@ class TaskService:
                 # 经 execution_config 透传 → TaskExecutor.form_coop_group 注入 BCS create_group
                 # (state_machine participant_bindings)。群 master 复用底层 driver_bot(bot_ids[0]=owner)。
                 "participant_bindings": ec.get("participant_bindings"),
+                # 任务描述(目标)→ BCS 建群 context → <GroupContext> `目标` 行。
+                "task_context": _task_context or None,
             },
         )
         try:

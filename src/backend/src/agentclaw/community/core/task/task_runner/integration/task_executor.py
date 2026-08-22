@@ -276,6 +276,11 @@ class TaskExecutor:
                     "request_timeout_ms": 2000,
                 },
             }]
+        # 任务描述(目标)→ BCS 创建群的 context 字段。BCS ``resolve_session_topic`` 把 group.context
+        # 兜底注入 <GroupContext> 的 `目标` 行(session input 为空时,如建群 BotJoined)。
+        _task_context = gf.extend_props.get("task_context")
+        if _task_context:
+            req_kwargs["context"] = _task_context
         req = BcsCreateGroupRequest(**req_kwargs)
         logger.info(
             "[task_executor] form_coop_group create_group request collab=%s driver_bot=%s participants=%s group_strategy=%s has_definition=%s has_bindings=%s",
