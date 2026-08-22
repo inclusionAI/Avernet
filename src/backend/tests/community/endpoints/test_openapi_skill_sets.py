@@ -65,7 +65,12 @@ class _Runtime:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    async def reconcile(self, *, bot_id: str, owner_id: str) -> None:
+    async def snapshot_skill_mappings(self, **_kwargs):
+        return ()
+
+    async def reconcile(
+        self, *, bot_id: str, owner_id: str, retired_mappings=()
+    ) -> None:
         self.calls.append((bot_id, owner_id))
 
 

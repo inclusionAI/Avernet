@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from injector import inject
 
 from agentclaw.community.core.skill_center.authorization_hook import (
@@ -38,6 +40,10 @@ from agentclaw.community.core.skill_center.runtime_policy import (
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectionReconcilerProtocol,
 )
+from agentclaw.community.core.skills_pool.mapping_intent import (
+    retired_logical_skill_mappings,
+)
+from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.core.workspace.skill_layout import runtime_layout_engine_for_bot
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -609,6 +615,12 @@ class SkillSetControlPlaneService:
     ) -> dict:
         """Apply one desired-state mutation and synchronously reconcile runtime."""
         mode = self._require_mutable_bot(bot, command)
+        previous_mappings: Sequence[PoolSkillMapping] = ()
+        if mode is not BotSkillRuntimeMutationMode.CLEANUP_ONLY:
+            previous_mappings = await self._runtime.snapshot_skill_mappings(
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+            )
         mutation_result = mutation()
         # An inactive-set membership change has no runtime projection
         # to apply.  Reconcile only becomes a required side effect
@@ -633,6 +645,7 @@ class SkillSetControlPlaneService:
                 mutation=mutation_result,
                 command=command,
                 mode=mode,
+                previous_mappings=previous_mappings,
             )
         self._audit(
             bot_id=bot_id,
@@ -651,11 +664,25 @@ class SkillSetControlPlaneService:
         mutation: SkillSetMutation,
         command: BotSkillRuntimeCommand,
         mode: BotSkillRuntimeMutationMode,
+        previous_mappings: Sequence[PoolSkillMapping],
     ) -> dict:
         owner_id = str(bot["owner_id"])
+        current_mappings: Sequence[PoolSkillMapping] = ()
         try:
+            if mode is not BotSkillRuntimeMutationMode.CLEANUP_ONLY:
+                current_mappings = await self._runtime.snapshot_skill_mappings(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                )
             await self._reconcile_runtime(
-                command=command, mode=mode, bot_id=bot_id, owner_id=owner_id
+                command=command,
+                mode=mode,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                retired_mappings=retired_logical_skill_mappings(
+                    list(previous_mappings),
+                    list(current_mappings),
+                ),
             )
         except Exception as exc:
             self._repository.restore_desired_state(
@@ -666,7 +693,14 @@ class SkillSetControlPlaneService:
             )
             try:
                 await self._reconcile_runtime(
-                    command=command, mode=mode, bot_id=bot_id, owner_id=owner_id
+                    command=command,
+                    mode=mode,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    retired_mappings=retired_logical_skill_mappings(
+                        list(current_mappings),
+                        list(previous_mappings),
+                    ),
                 )
             except Exception as restore_error:
                 raise SkillSetRuntimeReconcileError() from restore_error
@@ -734,8 +768,13 @@ class SkillSetControlPlaneService:
         mode: BotSkillRuntimeMutationMode,
         bot_id: str,
         owner_id: str,
+        retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
         if mode is BotSkillRuntimeMutationMode.CLEANUP_ONLY:
             await self._runtime.reconcile_cleanup(bot_id=bot_id, owner_id=owner_id)
             return
-        await self._runtime.reconcile(bot_id=bot_id, owner_id=owner_id)
+        await self._runtime.reconcile(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            retired_mappings=retired_mappings,
+        )
