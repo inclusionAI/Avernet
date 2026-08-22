@@ -9,7 +9,6 @@ pub fn protected_router() -> Router<ApiState> {
         "/api/v1/collaboration",
         routes::bot::router()
             .merge(routes::collaboration_template::router())
-            .merge(routes::collaboration_definition::router())
             .merge(routes::session_file::protected_router()),
     )
 }
