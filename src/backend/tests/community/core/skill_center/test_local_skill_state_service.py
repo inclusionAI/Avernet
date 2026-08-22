@@ -5,9 +5,6 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.skill_center.errors import (
-    LocalSkillEditBusyError,
-    LocalSkillEditLockUnavailableError,
-    LocalSkillLayoutRollbackError,
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
@@ -26,11 +23,6 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
 from agentclaw.community.core.skills_pool.models import (
     RegisteredSkillAsset,
     SkillMappingSourceLayout,
-)
-from agentclaw.community.core.skills_pool.edit_guard import (
-    SkillsPoolEditBusyError,
-    SkillsPoolEditLockUnavailableError,
-    SkillsPoolEditRollbackError,
 )
 
 
@@ -176,26 +168,6 @@ class _Bots:
 class _Collaborators:
     def check_collaborator_permission(self, *_args):
         return {"has_permission": True}
-
-
-class _Guard:
-    def __init__(self, on_acquire=None, release_error: Exception | None = None) -> None:
-        self.events: list[str] = []
-        self._on_acquire = on_acquire
-        self._release_error = release_error
-
-    def acquire_for_edit(self, *, scope):
-        self.events.append(f"acquire:{scope.env}:{scope.entity_id}:{scope.bot_id}")
-        if self._on_acquire is not None:
-            self._on_acquire()
-            self._on_acquire = None
-        return object()
-
-    def release(self, _lease):
-        self.events.append("release")
-        if self._release_error is not None:
-            raise self._release_error
-        return True
 
 
 class _Runtime:
@@ -353,22 +325,12 @@ def _service(
     entity_id: str = "owner",
     associated: bool = True,
     collaborators=None,
-    on_acquire=None,
     pool_layout: bool = False,
-    guard_error=None,
-    guard_release_error: Exception | None = None,
     engine: str = "openclaw",
     bot_type: str | None = None,
 ):
     skills = _Skills(active=active, git_path=git_path)
     sets = _Sets(skills, associated=associated)
-    guard = _Guard(on_acquire, guard_release_error)
-    if guard_error is not None:
-
-        def fail_acquire(*, scope):
-            raise guard_error
-
-        guard.acquire_for_edit = fail_acquire
     runtime = _Runtime(sync_success)
     runtime_reconciler = _RuntimeReconciler(runtime, skills, pool_layout=pool_layout)
     factory = _Factory(runtime)
@@ -378,54 +340,16 @@ def _service(
         _Bots(status, entity_id, engine=engine, bot_type=bot_type),
         collaborators or _Collaborators(),
         factory,
-        guard,
         skills,
         sets,
         runtime_reconciler,
     )
-    return service, skills, sets, guard, runtime, factory
+    return service, skills, sets, None, runtime, factory
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("guard_error", "expected_error"),
-    [
-        (SkillsPoolEditBusyError("busy"), LocalSkillEditBusyError),
-        (SkillsPoolEditRollbackError("rollback"), LocalSkillLayoutRollbackError),
-        (
-            SkillsPoolEditLockUnavailableError("cache"),
-            LocalSkillEditLockUnavailableError,
-        ),
-    ],
-)
-async def test_state_change_maps_guard_failures_to_public_domain_errors(
-    guard_error, expected_error
-):
-    service, _skills, _sets, _guard, _runtime, _factory = _service(
-        guard_error=guard_error
-    )
-
-    with pytest.raises(expected_error):
-        await service.set_local_skill_active(
-            skill_id="9", actor_id="owner", active=True
-        )
-
-
-@pytest.mark.asyncio
-async def test_pool_guard_release_failure_propagates():
-    service, _skills, _sets, _guard, _runtime, _factory = _service(
-        guard_release_error=RuntimeError("pool release failed"),
-    )
-
-    with pytest.raises(RuntimeError, match="pool release failed"):
-        await service.set_local_skill_active(
-            skill_id="9", actor_id="owner", active=True
-        )
-
-
-@pytest.mark.asyncio
-async def test_activate_changes_desired_state_then_reconciles_under_bot_layout_lock():
-    service, _skills, sets, guard, runtime, factory = _service()
+async def test_activate_changes_desired_state_then_reconciles():
+    service, _skills, sets, _guard, runtime, factory = _service()
 
     result = await service.set_local_skill_active(
         skill_id="9", actor_id="owner", active=True
@@ -435,7 +359,6 @@ async def test_activate_changes_desired_state_then_reconciles_under_bot_layout_l
     assert result["changed"] is True
     assert sets.events == ["remove"]
     assert runtime.calls == 1
-    assert guard.events == ["acquire:pre:owner:bot", "release"]
     assert service._runtime_reconciler.calls == [{"bot_id": "bot", "owner_id": "owner"}]
 
 
@@ -557,7 +480,6 @@ def _repo_service(
     runtime = _Runtime(sync_success)
     runtime_reconciler = _RuntimeReconciler(runtime, skills)
     factory = _RepoFactory(runtime, normal_member=bool(references))
-    guard = _Guard()
     if active_assets is not None:
         skills.list_bot_active_assets = lambda **_kwargs: active_assets
     service = LocalSkillStateService(
@@ -566,7 +488,6 @@ def _repo_service(
         _RepoBots(bot_type=bot_type, engine=engine),
         _Collaborators(),
         factory,
-        guard,
         skills,
         factory.set_service,
         runtime_reconciler,
@@ -873,43 +794,9 @@ async def test_deactivate_invalid_locator_fails_closed_and_restores_desired_stat
 
 
 @pytest.mark.asyncio
-async def test_lock_rereads_desired_state_changed_while_waiting_before_calculating_changed():
-    service, skills, sets, _guard, runtime, _factory = _service(
-        active=False,
-        on_acquire=lambda: setattr(skills, "active", True),
-    )
-
-    result = await service.set_local_skill_active(
-        skill_id="9", actor_id="owner", active=True
-    )
-
-    assert result["changed"] is False
-    assert skills.active is True
-    assert sets.events == []
-    assert runtime.calls == 1
-
-
-@pytest.mark.asyncio
-async def test_lock_rereads_prior_state_for_runtime_failure_compensation_after_waiting():
-    service, skills, sets, _guard, runtime, _factory = _service(
-        active=False,
-        sync_success=False,
-        on_acquire=lambda: setattr(skills, "active", True),
-    )
-
-    with pytest.raises(LocalSkillRuntimeSyncError):
-        await service.set_local_skill_active(
-            skill_id="9", actor_id="owner", active=True
-        )
-
-    assert skills.active is True
-    assert sets.events == []
-    assert runtime.calls == 1
-
-
 @pytest.mark.asyncio
 async def test_runtime_failure_restores_previous_desired_state_before_fixed_failure():
-    service, skills, sets, guard, runtime, _factory = _service(
+    service, skills, sets, _guard, runtime, _factory = _service(
         active=False, sync_success=False
     )
 
@@ -921,7 +808,6 @@ async def test_runtime_failure_restores_previous_desired_state_before_fixed_fail
     assert skills.active is False
     assert sets.events == ["remove", "add"]
     assert runtime.calls == 2
-    assert guard.events[-1] == "release"
 
 
 @pytest.mark.asyncio
@@ -986,37 +872,34 @@ async def test_failed_runtime_compensation_never_claims_runtime_sync_error():
 @pytest.mark.asyncio
 async def test_non_local_skill_is_masked_before_lock_or_runtime():
     for source in ("git://market/one", "center://published-skill"):
-        service, _skills, _sets, guard, runtime, _factory = _service(git_path=source)
+        service, _skills, _sets, _guard, runtime, _factory = _service(git_path=source)
 
         with pytest.raises(LocalSkillNotFoundError):
             await service.set_local_skill_active(
                 skill_id="9", actor_id="owner", active=True
             )
 
-        assert guard.events == []
         assert runtime.calls == 0
 
 
 @pytest.mark.asyncio
 async def test_non_ready_or_unauthorized_request_never_mutates_or_syncs_runtime():
-    service, _skills, _sets, guard, runtime, _factory = _service(status="PENDING")
+    service, _skills, _sets, _guard, runtime, _factory = _service(status="PENDING")
     with pytest.raises(LocalSkillNotReadyError):
         await service.set_local_skill_active(
             skill_id="9", actor_id="owner", active=True
         )
-    assert guard.events == ["acquire:pre:owner:bot", "release"]
     assert runtime.calls == 0
 
     class _Denied:
         def check_collaborator_permission(self, *_args):
             return {"has_permission": False}
 
-    service, _skills, _sets, guard, runtime, _factory = _service(
+    service, _skills, _sets, _guard, runtime, _factory = _service(
         collaborators=_Denied()
     )
     with pytest.raises(LocalSkillNotFoundError):
         await service.set_local_skill_active(
             skill_id="9", actor_id="attacker", active=True
         )
-    assert guard.events == ["acquire:pre:owner:bot", "release"]
     assert runtime.calls == 0

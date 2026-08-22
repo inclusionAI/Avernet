@@ -26,23 +26,6 @@ from agentclaw.community.core.skill_center.services.bot_runtime_projection_recon
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 
 
-class _Guard:
-    def __init__(self) -> None:
-        self.held = False
-        self.scopes = []
-
-    def acquire_for_edit(self, *, scope):
-        assert not self.held
-        self.held = True
-        self.scopes.append(scope)
-        return object()
-
-    def release(self, _lease) -> bool:
-        assert self.held
-        self.held = False
-        return True
-
-
 class _Repository:
     def __init__(self) -> None:
         self.restore_calls = []
@@ -187,13 +170,11 @@ class _AicodingImageBots(_Bots):
 
 
 class _Runtime:
-    def __init__(self, guard: _Guard) -> None:
-        self._guard = guard
+    def __init__(self) -> None:
         self.owners = []
 
     async def reconcile(self, *, bot_id: str, owner_id: str) -> None:
         assert bot_id == "bot-1"
-        assert self._guard.held
         self.owners.append(owner_id)
         if len(self.owners) == 1:
             raise RuntimeError("runtime failed")
@@ -224,12 +205,6 @@ class _CleanupRuntime(_SuccessfulRuntime):
 
     async def reconcile_cleanup(self, **kwargs) -> None:
         self.cleanup_calls.append(kwargs)
-
-
-class _FailingReleaseGuard(_Guard):
-    def release(self, lease) -> bool:
-        super().release(lease)
-        raise RuntimeError("pool release failed")
 
 
 class _LegacyResolutionRepository(_Repository):
@@ -547,11 +522,10 @@ class _FailingRuntimePassport(_RuntimePassport):
 
 
 @pytest.mark.asyncio
-async def test_collaborator_command_keeps_one_guard_through_restore_and_uses_true_owner():
-    guard = _Guard()
+async def test_collaborator_command_restores_desired_state_and_uses_true_owner():
     repository = _Repository()
     collaborators = _Collaborators()
-    runtime = _Runtime(guard)
+    runtime = _Runtime()
     service = SkillSetControlPlaneService(
         repository=repository,
         bot_repo=_Bots(),
@@ -559,7 +533,6 @@ async def test_collaborator_command_keeps_one_guard_through_restore_and_uses_tru
         legacy_factory=object(),
         passport=object(),
         authorization=collaborators,
-        edit_guard=guard,
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -582,7 +555,6 @@ async def test_collaborator_command_keeps_one_guard_through_restore_and_uses_tru
     ]
     assert runtime.owners == ["true-owner", "true-owner"]
     assert len(repository.restore_calls) == 1
-    assert guard.held is False
 
 
 def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
@@ -593,7 +565,6 @@ def test_legacy_create_rejects_missing_bot_instead_of_creating_orphan_set():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -621,7 +592,6 @@ def test_legacy_create_retains_only_virtual_default_bot_compatibility():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -650,7 +620,6 @@ def test_legacy_default_create_uses_owner_qualified_bot_lookup():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -679,7 +648,6 @@ def test_legacy_virtual_default_create_requires_owner_as_actor():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -704,7 +672,6 @@ def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -738,7 +705,6 @@ def test_legacy_virtual_default_read_is_owner_scoped():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -766,7 +732,6 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -803,7 +768,6 @@ async def test_legacy_default_sync_uses_owner_qualified_bot_lookup():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -828,7 +792,6 @@ def test_skill_set_acl_denial_is_forbidden_not_not_found():
         legacy_factory=object(),
         passport=object(),
         authorization=_DeniedCollaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -851,7 +814,6 @@ def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
         legacy_factory=_ResourceLegacyFactory(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -879,7 +841,6 @@ def test_list_sets_uses_aicoding_default_then_claude_code_fallback_for_coding_im
         legacy_factory=_ResourceLegacyFactory(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -905,7 +866,6 @@ def test_update_set_uses_runtime_default_candidates_for_coding_image():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -941,7 +901,6 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
         legacy_factory=_ResourceLegacyFactory(),
         passport=object(),
         authorization=authorization,
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -974,7 +933,6 @@ async def test_skill_set_mutation_fails_closed_for_unsupported_bot_engine_pair()
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1002,7 +960,6 @@ async def test_historical_bot_skill_set_deactivate_uses_cleanup_projection():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1036,7 +993,6 @@ def test_skill_set_metadata_mutations_share_the_runtime_matrix_gate():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1073,7 +1029,6 @@ def test_historical_bot_may_delete_an_inactive_skill_set_without_new_runtime_wri
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1087,30 +1042,6 @@ def test_historical_bot_may_delete_an_inactive_skill_set_without_new_runtime_wri
     )
 
 
-@pytest.mark.asyncio
-async def test_skill_set_pool_guard_release_failure_propagates():
-    service = SkillSetControlPlaneService(
-        repository=_Repository(),
-        bot_repo=_Bots(),
-        runtime=_SuccessfulRuntime(),
-        legacy_factory=object(),
-        passport=object(),
-        authorization=_Collaborators(),
-        edit_guard=_FailingReleaseGuard(),
-        audit_log_repo=_Audit(),
-        mcp_center=_McpCenter(allowed=True),
-        mcp_auth=_McpAuth(allowed=True),
-    )
-
-    with pytest.raises(RuntimeError, match="pool release failed"):
-        await service.activate(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            user_id="true-owner",
-            set_id="set-1",
-        )
-
-
 def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membership():
     """The legacy batch adapter keeps its historical implicit Repo creation."""
     repository = _LegacyResolutionRepository()
@@ -1122,7 +1053,6 @@ def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membershi
         legacy_factory=factory,
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1160,7 +1090,6 @@ async def test_mcp_direct_activation_checks_permission_before_writing_desired_st
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=mcp_center,
         mcp_auth=auth,
@@ -1194,7 +1123,6 @@ async def test_mcp_direct_activation_denies_before_writing_desired_state():
         legacy_factory=object(),
         passport=object(),
         authorization=_Collaborators(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=False),
         mcp_auth=_McpAuth(allowed=False),

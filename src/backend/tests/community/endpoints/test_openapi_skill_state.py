@@ -52,15 +52,6 @@ class _Resolver:
         return _Secret()
 
 
-class _Guard:
-    def acquire_for_edit(self, *, scope):
-        assert (scope.env, scope.entity_id, scope.bot_id) == ("dev", _OWNER, _BOT_ID)
-        return object()
-
-    def release(self, _lease):
-        return True
-
-
 class _Runtime:
     def __init__(self, success: bool) -> None:
         self.success = success
@@ -176,7 +167,6 @@ def _seed_state(world, *, runtime_success: bool) -> None:
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             runtime_factory,
-            _Guard(),
             world.get(SkillRepository),
             world.get(SkillSetRepository),
             runtime_factory._runtime,

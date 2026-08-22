@@ -20,8 +20,6 @@ from agentclaw.community.core.repository.skill_set_control_plane_types import (
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     McpPermissionDeniedError,
-    SkillSetControlPlaneConflictError,
-    SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
     SkillSetAccessDeniedError,
     SkillSetRuntimeReconcileError,
@@ -40,14 +38,6 @@ from agentclaw.community.core.skill_center.runtime_policy import (
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectionReconcilerProtocol,
 )
-from agentclaw.community.core.skills_pool.edit_guard import (
-    SkillsPoolEditBusyError,
-    SkillsPoolEditGuard,
-    SkillsPoolEditLockUnavailableError,
-    SkillsPoolEditPausedError,
-    SkillsPoolEditRollbackError,
-)
-from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.core.workspace.skill_layout import runtime_layout_engine_for_bot
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -62,7 +52,6 @@ class SkillSetControlPlaneService:
         legacy_factory: LegacySkillSetCompatibilityFactoryProtocol,
         passport: PassportPlugin,
         authorization: BotCapabilityAuthorizationHookProtocol,
-        edit_guard: SkillsPoolEditGuard,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         mcp_auth: MCPAuthPlugin,
@@ -73,7 +62,6 @@ class SkillSetControlPlaneService:
         self._legacy_factory = legacy_factory
         self._passport = passport
         self._authorization = authorization
-        self._edit_guard = edit_guard
         self._audit_log_repo = audit_log_repo
         self._mcp_center = mcp_center
         self._mcp_auth = mcp_auth
@@ -103,12 +91,6 @@ class SkillSetControlPlaneService:
         lookup here.
         """
         return self._bot(bot_id=bot_id, owner_id=owner_id, user_id=actor_id)
-
-    @staticmethod
-    def _scope(bot: dict, bot_id: str) -> BotSkillLayoutScope:
-        return BotSkillLayoutScope(
-            env=str(bot["env"]), entity_id=str(bot["entity_id"]), bot_id=bot_id
-        )
 
     def list_sets(self, *, bot_id: str, owner_id: str, user_id: str) -> list[dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
@@ -677,53 +659,39 @@ class SkillSetControlPlaneService:
         command: BotSkillRuntimeCommand = BotSkillRuntimeCommand.WRITE,
     ) -> dict:
         """Apply one desired-state mutation and synchronously reconcile runtime."""
-        scope = self._scope(bot, bot_id)
-        try:
-            lease = self._edit_guard.acquire_for_edit(scope=scope)
-        except (
-            SkillsPoolEditBusyError,
-            SkillsPoolEditRollbackError,
-            SkillsPoolEditPausedError,
-        ) as exc:
-            raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY") from exc
-        except SkillsPoolEditLockUnavailableError as exc:
-            raise SkillSetControlPlaneLockUnavailableError() from exc
-        try:
-            mode = self._require_mutable_bot(bot, command)
-            mutation_result = mutation()
-            # An inactive-set membership change has no runtime projection
-            # to apply.  Reconcile only becomes a required side effect
-            # when that membership is active (or for all lifecycle/sync
-            # commands), preserving the legacy inactive draft contract.
-            if action in {
-                "skill_set_add_skill",
-                "skill_set_remove_skill",
-                "skill_set_add_mcp",
-                "skill_set_remove_mcp",
-            } and not mutation_result.item.get("is_active"):
-                result = {
-                    **mutation_result.item,
-                    "changed": mutation_result.changed,
-                    **mutation_result.details,
-                }
-            else:
-                result = await self._reconcile(
-                    bot=bot,
-                    bot_id=bot_id,
-                    actor_id=actor_id,
-                    mutation=mutation_result,
-                    command=command,
-                    mode=mode,
-                )
-            self._audit(
+        mode = self._require_mutable_bot(bot, command)
+        mutation_result = mutation()
+        # An inactive-set membership change has no runtime projection
+        # to apply.  Reconcile only becomes a required side effect
+        # when that membership is active (or for all lifecycle/sync
+        # commands), preserving the legacy inactive draft contract.
+        if action in {
+            "skill_set_add_skill",
+            "skill_set_remove_skill",
+            "skill_set_add_mcp",
+            "skill_set_remove_mcp",
+        } and not mutation_result.item.get("is_active"):
+            result = {
+                **mutation_result.item,
+                "changed": mutation_result.changed,
+                **mutation_result.details,
+            }
+        else:
+            result = await self._reconcile(
+                bot=bot,
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
                 actor_id=actor_id,
-                action=action,
+                mutation=mutation_result,
+                command=command,
+                mode=mode,
             )
-            return result
-        finally:
-            self._edit_guard.release(lease)
+        self._audit(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            actor_id=actor_id,
+            action=action,
+        )
+        return result
 
     async def _reconcile(
         self,

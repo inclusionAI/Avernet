@@ -120,11 +120,12 @@ they do not reconstruct it from Default exclusions or BFF state.
 
 Direct activation and canonical SkillSet mutations commit desired state in the
 repository transaction and then reconcile the complete runtime projection.
-The existing `SkillsPoolEditGuard` is held only to preserve Pool rollback
-exclusion. Phase 1 intentionally has no cache-backed cross-command Bot mutation
-fence: the current compensating restore remains a best-effort compatibility
-path for non-concurrent mutations, while durable serialization is deferred to
-the task-queue design.
+They do not acquire `SkillsPoolEditGuard`: Pool editing is a file-corpus and
+layout-migration concern, retained only by Local package upload/replacement/
+deletion and Pool cutover/rollback paths. Phase 1 intentionally has no
+cache-backed cross-command Bot mutation fence: the current compensating restore
+remains a best-effort compatibility path for non-concurrent mutations, while
+durable serialization is deferred to the task-queue design.
 
 Phase 1 does not run a global Local Installation backfill and does not treat
 historical Default exclusions as an active-state source. The small number of
