@@ -126,7 +126,7 @@ the table.
 - **Goal:** Keep the path-addressed legacy twins checked once `require_bot_operator` is gone from the relay.
 - **Files:** `.../openapi_v1/authorization.py`
 - **Done when:**
-  - [ ] All 16 legacy rows (approvals ×3, connection, engine ×3, models ×2, sessions ×7) are `Check(MEMBER)` with the default `bot_from="path"`.
+  - [ ] All 16 legacy rows (approvals ×3, connection, engine ×3, models ×2, sessions ×7) are `Check(MEMBER)`. They need nothing from the seam: each declares `{bot_id}` on its path already, just at a different position than its replacement.
   - [ ] A test drives each and its replacement with the same caller and asserts identical admit/refuse.
   - [ ] `INHERITED` falls from 42 to 26 — 20 twin an `OWNER_SCOPED` address and 6 are the legacy skills addresses Task 10 covers inside the `deprecated/` package.
 - **Depends on:** Task 11
