@@ -105,9 +105,12 @@ rather than the deprecation schedule's.
 - Deleting the service-side collaborator check each of those relied on.
 - The 22 retiring `deprecated/` addresses that are twins of an in-scope
   operation, which become adjudicated rather than inheriting.
-- Extending the seam to resolve the addressed bot from wherever the operation's
-  own handler resolves it, so the twins whose bot is not on the path can be
-  adjudicated at all.
+- Letting the seam read the addressed bot from the query string as well as the
+  path. **This is the only change the seam itself needs, and only six rows force
+  it** — the retiring skills addresses, which predate bot-first addressing and
+  still publish `bot_id` as a query parameter. Every other in-scope operation,
+  and the sixteen path-addressed twins, are adjudicable by the seam exactly as
+  it stands today.
 - Adding the owner parameter to the 3 authorized-apps handlers, which cannot
   carry an enforced row without it.
 - Correcting the 2 bot-chat rows to the mode that matches their code.

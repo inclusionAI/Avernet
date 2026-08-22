@@ -104,7 +104,8 @@ the table.
   - [ ] The bar is derived from `authorization_hook.py:34` (`PermissionLevel.MEMBER`) and recorded.
   - [ ] All 19 rows are `Check(MEMBER)`.
   - [ ] `CollaboratorBotCapabilityAuthorizationHook.can_manage_bot` and the protocol are deleted, along with every call site and the DI binding; nothing is left implementing a hook nobody calls.
-  - [ ] Tests: refusal byte-identical to an absent bot; one audit row per mutating request; no capability or space check is lost.
+  - [ ] The service-side audit write is reconciled: `skill_set_control_plane.py:61` takes an `audit_log_repo` and writes its own `BotCollabLog` row, and the seam now writes one too. Delete the service-side write so a mutation leaves exactly one row.
+  - [ ] Tests: refusal byte-identical to an absent bot; **exactly one** audit row per mutating request; no capability or space check is lost.
 - **Depends on:** Task 9
 
 ## Task 11: Move the bot-skill assets onto the seam
@@ -113,7 +114,8 @@ the table.
 - **Done when:**
   - [ ] The bar is derived from every `check_collaborator_permission(..., PermissionLevel.MEMBER)` site (`:304`, `:405`, and any other the task enumerates) and recorded per row.
   - [ ] All 10 rows are `Check(MEMBER)`; each permission call is deleted while the bot resolution and skill-kind logic stay.
-  - [ ] Tests: refusal byte-identical to an absent bot; one audit row per mutating request.
+  - [ ] The service-side audit write is reconciled the same way: `local_skill_upload_service.py:89` writes its own row; delete it so the seam's is the only one.
+  - [ ] Tests: refusal byte-identical to an absent bot; **exactly one** audit row per mutating request.
 - **Depends on:** Task 10
 
 ## Task 12: Adjudicate the six retiring skills addresses
@@ -163,7 +165,7 @@ the table.
   - [ ] All 16 rows are `Check(MEMBER)` or `Check(OWNER)` to match.
   - [ ] Only `if level < required_level: raise ServicePublicationNotFoundError` is deleted from `_resolve_bot`. **`level` stays computed** — `:242`–`:266` use it for lock applicability and an OWNER branch — and the `require_service` bot-type refusal stays.
   - [ ] `_require_draft_lock` (`:544`) is untouched and still refuses when another collaborator holds the lock.
-  - [ ] Tests: the lock still refuses; exactly one audit row per mutating request, given the facade writes its own; an OWNER-barred operation still refuses an ADMIN collaborator.
+  - [ ] Tests: the lock still refuses; an OWNER-barred operation still refuses an ADMIN collaborator; `_actions` (`:245`, `:250`) reports the same list it does today, since it branches on the `level` this task keeps computing. The facade writes no audit rows of its own, so the seam's is the only one.
 - **Depends on:** Task 15
 
 ## Task 17: Move the channels group onto the seam
@@ -185,7 +187,7 @@ the table.
   - [ ] The 5 rows are `Check(MEMBER)` / `Check(ADMIN)` to match.
   - [ ] Only `_check_operable_permission` calls are deleted. **`_editor_policy.require_capability` (`:392`) and `require_team_space_member` (`:393`) stay** — they are capability and space checks, not collaborator bars.
   - [ ] The gate reading levels from the same service whose rows the handlers write is exercised by a test that adds an editor and immediately re-adjudicates.
-  - [ ] Tests: refusal byte-identical to an absent bot; one audit row per mutating request, given the service writes its own; `DELETE /editors/me` still lets a MEMBER remove themselves.
+  - [ ] Tests: refusal byte-identical to an absent bot; `DELETE /editors/me` still lets a MEMBER remove themselves. `collaborator_service` writes no audit rows of its own, so the seam's is the only one.
 - **Depends on:** Task 17
 
 ## Task 19: Tests & Verification

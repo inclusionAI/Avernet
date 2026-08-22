@@ -171,9 +171,17 @@ None. No manifest change.
   bot existence, if the remaining error path answers differently.
   **Mitigation:** each group's tests assert the refusal body is byte-identical
   to an absent bot's, as #1323's own `ENVELOPE_ERRORS` test does.
-- **Risk:** double audit. The seam writes a row on non-`GET`; the publication
-  facade and `collaborator_service` write their own.
-  **Mitigation:** per-group task asserts exactly one row per mutating request.
+- **Risk:** double audit, and **only in the skill-centre group**. The seam
+  writes a `BotCollabLog` row on every non-`GET` by a non-owner;
+  `skill_center/services/skill_set_control_plane.py:61` and
+  `local_skill_upload_service.py:89` take an `audit_log_repo` and write their
+  own. Adopting the seam there makes both fire. Verified by grep rather than
+  inherited from #1323, whose "the audit record in 2 services" gave the count
+  and left the two unnamed — the publication facade and `collaborator_service`
+  write **no** audit rows at all (zero references each).
+  **Mitigation:** Tasks 10 and 11 delete the service-side write and assert
+  exactly one row per mutating request; no other group has an audit to
+  reconcile.
 - **Risk:** `authorization.py` is a merge-conflict magnet and the base moves
   fast (10 commits in 30 minutes on 2026-08-22, two touching this file).
   **Mitigation:** one group per PR, rebased and landed before the next starts.
@@ -216,7 +224,7 @@ No flag, no migration. Order is a dependency order, not a preference:
 # 7. bot_skill_assets  (10 → Check)   + 6 legacy twins
 # 8. engine_runtime    (26 → Check)   + 16 legacy twins; keep the type gate
 # 9. connection        (1 → Check)    the argued exception; see Risks
-# 10. publication facade (16 → Check) keep `level`, the lock and the audit
+# 10. publication facade (16 → Check) keep `level` and the lock; writes no audit
 # 11. channels         (6 → Check)    keep the edit lock
 # 12. collaborator_service (5 → Check) keep capability and space checks
 ```
