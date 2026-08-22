@@ -15,6 +15,13 @@ class BotRuntimeProjectionReconcilerProtocol(
 ):
     """Transport-facing contract; Core depends only on its sibling contract."""
 
+    async def snapshot_skill_mappings(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+    ) -> tuple[PoolSkillMapping, ...]: ...
+
     async def reconcile(
         self,
         *,
