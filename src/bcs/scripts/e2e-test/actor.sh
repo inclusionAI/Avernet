@@ -8,6 +8,7 @@
 #   GET  /bots/my                  routes::bots::list_my_bots
 #   GET  /bots/paged               routes::bots::list_bots_paged
 #   POST /bots/query               routes::bots::query_bots
+#   GET  /v2/bots/search           routes::bots::search_bots
 #   POST /bots/{id}/chat-async     routes::bot_chat::bot_chat_async
 # (GET /bots/{id}/groups is exercised in group.sh's test_bot_groups_of_bot.)
 
@@ -19,6 +20,7 @@ E2E_TESTS_ACTOR=(
     "test_bots_my"
     "test_bots_paged"
     "test_bots_query"
+    "test_bots_search"
     "test_bot_chat_async"
 )
 
@@ -184,6 +186,56 @@ test_bots_query() {
         fail "/bots/query resolved $n bot(s) (expected >=2)"
         TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+}
+
+# GET /v2/bots/search — bot search with name/keyword filtering.
+# Anonymous caller (no Bearer) resolves to the public visibility scope, so the
+# result may legitimately be empty; we assert the response envelope shape, not a
+# non-empty result (mirrors the test_actor_list stance above).
+test_bots_search() {
+    info "Bots: GET /v2/bots/search (default)"
+    api_get "/v2/bots/search?limit=20"
+    if [ "$HTTP_STATUS" != "200" ]; then
+        fail "GET /v2/bots/search returned $HTTP_STATUS"; TESTS_FAILED=$((TESTS_FAILED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1)); return
+    fi
+    pass "GET /v2/bots/search returned 200"
+    TESTS_PASSED=$((TESTS_PASSED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    # Response is { items: [...], total: N, offset: N, limit: N }.
+    local ok
+    ok=$(printf '%s' "$RESPONSE" | python3 -c "
+import json,sys
+try:
+    d=json.load(sys.stdin)
+    print('1' if isinstance(d.get('items'),list) and isinstance(d.get('total'),int) and isinstance(d.get('offset'),int) and isinstance(d.get('limit'),int) else '0')
+except Exception:
+    print('0')
+" 2>/dev/null || echo 0)
+    if [ "$ok" = "1" ]; then
+        pass "/v2/bots/search returned well-formed envelope"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        fail "/v2/bots/search returned malformed envelope"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    # Filtered search: explicit visibility + limit echo validation.
+    info "Bots: GET /v2/bots/search (visibility=public, limit=5, offset=0, tc_bot=false)"
+    api_get "/v2/bots/search?visibility=public&limit=5&offset=0&tc_bot=false"
+    if [ "$HTTP_STATUS" != "200" ]; then
+        fail "GET /v2/bots/search(filtered) returned $HTTP_STATUS"; TESTS_FAILED=$((TESTS_FAILED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1)); return
+    fi
+    pass "GET /v2/bots/search(filtered) returned 200"
+    TESTS_PASSED=$((TESTS_PASSED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    # Invalid limit (0) must be rejected with 400 — exercises param validation.
+    info "Bots: GET /v2/bots/search (invalid limit=0 -> 400)"
+    api_get "/v2/bots/search?limit=0"
+    case "$HTTP_STATUS" in
+        400) pass "/v2/bots/search rejected limit=0 with 400"; TESTS_PASSED=$((TESTS_PASSED + 1)) ;;
+        *)   fail "/v2/bots/search limit=0 returned $HTTP_STATUS (expected 400)"; TESTS_FAILED=$((TESTS_FAILED + 1)) ;;
+    esac
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
 }
 

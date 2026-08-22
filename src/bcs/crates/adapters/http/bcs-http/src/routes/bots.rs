@@ -4,12 +4,15 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use bcs_protocol::{BotConnectParams, QueryBotsRequest, SetVisibilityRequest, UpdateStatusRequest};
+use bcs_protocol::{
+    BotConnectParams, BotSearchEntry, BotSearchQuery, QueryBotsRequest, SetVisibilityRequest,
+    UpdateStatusRequest,
+};
 use bcs_service_api::{
-    ActorStatus, BotConnectCommand, BotDetailCommand, BotDetailResult, BotLeaveCommand,
+    ActorKind, ActorStatus, BotConnectCommand, BotDetailCommand, BotDetailResult, BotLeaveCommand,
     BotListCommand, BotListEntry, BotPagedListCommand, BotQueryByIdsCommand, BotQueryEntry,
     BotStatusUpdateCommand, BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryCommand,
-    BotVisibilityQueryResult, ConnectError, MyBotsCommand, ServiceError,
+    BotVisibilityQueryResult, ConnectError, MyBotsCommand, SearchBotsCommand, ServiceError,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -121,7 +124,7 @@ pub async fn update_bot_status(
     Ok(Json(serde_json::json!({
         "updated": result.updated,
         "bot_uuid": result.bot_uuid,
-        "status": to_wire_dynamic_status(result.status)
+        "status": to_wire_dynamic_status(result.status),
     })))
 }
 
@@ -384,10 +387,10 @@ fn bot_detail_to_json(bot: BotDetailResult) -> Value {
     serde_json::json!({
         "bot_uuid": bot.bot_uuid,
         "capabilities": to_wire_capabilities(bot.capabilities),
+        "status": actor_status_to_wire(bot.status),
         "created_by": bot.created_by,
         "actor_kind": bot.actor_kind,
         "env": bot.env,
-        "status": actor_status_to_wire(bot.status),
         "dynamic_status": to_wire_dynamic_status_response(bot.dynamic_status),
     })
 }
@@ -444,6 +447,121 @@ fn bot_visibility_to_json(result: BotVisibilityQueryResult) -> Value {
             "visibility": result.visibility
         }
     })
+}
+
+/// `GET /v2/bots/search` — bot search with name fuzzy + keyword filtering + is_friend.
+/// Spec: docs/superpowers/specs/2026-08-20-bot-search-endpoint-design.md
+pub async fn search_bots(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    Query(q): Query<BotSearchQuery>,
+) -> Result<Json<Value>, HttpAdapterError> {
+    // ── Validate pagination + filter params (spec §3.5) ────────────────────────
+    let offset = q.offset.unwrap_or(0);
+    let limit = match q.limit.unwrap_or(20) {
+        limit if (1..=100).contains(&limit) => limit,
+        limit => {
+            return Err(HttpAdapterError::BadRequest(format!(
+                "limit must be between 1 and 100, got {limit}"
+            )))
+        }
+    };
+    let visibility = match q.visibility.as_deref() {
+        Some(v) if matches!(v, "public" | "protected" | "private") => Some(v.to_string()),
+        Some(v) => {
+            return Err(HttpAdapterError::BadRequest(format!(
+                "visibility must be public|protected|private, got '{v}'"
+            )))
+        }
+        None => None,
+    };
+    let status = match q.status.as_deref() {
+        Some("online") => Some(ActorStatus::Online),
+        Some("hidden") => Some(ActorStatus::Hidden),
+        Some(v) => {
+            return Err(HttpAdapterError::BadRequest(format!(
+                "status must be online|hidden, got '{v}'"
+            )))
+        }
+        None => None,
+    };
+
+    // ── Resolve caller (optional Bearer) ───────────────────────────────────────
+    let caller_id = caller_actor_id_from_headers(&state, &headers, &uri).await;
+
+    // ── Effective visibility scope (spec §3.6.2) ───────────────────────────────
+    // No Bearer → force public (ignore any client-provided visibility). Bearer +
+    // explicit visibility → respect it. Bearer + no visibility → None (service
+    // yields the default public+protected scope).
+    let effective_visibility = match (&caller_id, &visibility) {
+        (None, _) => Some("public".to_string()),
+        (Some(_), v) => v.clone(),
+    };
+
+    // ── Query the registry via the application service (carries status/online) ─
+    let result = state
+        .services
+        .bot_query
+        .search_bots(SearchBotsCommand {
+            q: q.q.clone(),
+            visibility: effective_visibility,
+            status,
+            requester_actor_id: caller_id.clone(),
+            tc_bot: q.tc_bot,
+        })
+        .await
+        .map_err(bot_use_case_error_to_http)?;
+
+    // ── Friend set from the caller's edge_grants (spec §3.7) ───────────────────
+    // Anonymous callers are friends with nobody (empty set), so the is_friend
+    // filter naturally resolves is_friend=true → none, is_friend=false → all.
+    let friend_ids: std::collections::HashSet<String> = match &caller_id {
+        Some(caller) => match state.connect.list_friends(caller).await {
+            Ok(entries) => entries.into_iter().map(|e| e.actor_id).collect(),
+            Err(_) => std::collections::HashSet::new(),
+        },
+        None => std::collections::HashSet::new(),
+    };
+
+    // ── is_friend post-filter (caller-dependent) + pagination ──────────────────
+    let filtered: Vec<BotQueryEntry> = result
+        .items
+        .into_iter()
+        .filter(|bot| match q.is_friend {
+            Some(want_friend) => friend_ids.contains(&bot.bot_uuid) == want_friend,
+            None => true,
+        })
+        .collect();
+
+    let total = filtered.len() as u64;
+    let page_items: Vec<BotQueryEntry> = filtered
+        .into_iter()
+        .skip(offset as usize)
+        .take(limit as usize)
+        .collect();
+
+    // ── Build response (is_friend field only for authenticated callers) ────────
+    let items: Vec<BotSearchEntry> = page_items
+        .into_iter()
+        .map(|bot| BotSearchEntry {
+            bot_uuid: bot.bot_uuid.clone(),
+            name: bot.capabilities.name.clone(),
+            summary: bot.capabilities.summary.clone(),
+            visibility: bot.visibility,
+            status: actor_status_to_wire(bot.status).to_string(),
+            actor_kind: actor_kind_to_wire(bot.actor_kind).to_string(),
+            is_online: bot.dynamic_status.status == "active",
+            is_friend: caller_id.as_ref().map(|_| friend_ids.contains(&bot.bot_uuid)),
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    })))
 }
 
 async fn resolve_bot_caller(
@@ -508,6 +626,13 @@ fn actor_status_to_wire(status: ActorStatus) -> &'static str {
     match status {
         ActorStatus::Online => "online",
         ActorStatus::Hidden => "hidden",
+    }
+}
+
+fn actor_kind_to_wire(kind: ActorKind) -> &'static str {
+    match kind {
+        ActorKind::Bot => "bot",
+        ActorKind::Human => "human",
     }
 }
 
@@ -684,3 +809,4 @@ async fn dispatch_visibility_sync_after_update(
 fn invalid_visibility_message() -> &'static str {
     "visibility must be 'public', 'protected', or 'private'"
 }
+

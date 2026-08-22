@@ -114,9 +114,10 @@ pub use bot_use_cases::{
     OrganizationMemberSummary,
     BotLeaveResult, BotListCommand, BotListEntry, BotListResult, BotManagementService,
     BotPagedListCommand, BotPagedListResult, BotQueryByIdsCommand, BotQueryByIdsResult,
-    BotQueryEntry, BotQueryService, BotStatusUpdateCommand, BotStatusUpdateResult, BotUseCaseError,
-    BotVisibilityCommand, BotVisibilityQueryCommand, BotVisibilityQueryResult, BotVisibilityResult,
-    MyBotsCommand, SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult,
+    BotQueryEntry, BotQueryService, BotSearchResult, BotStatusUpdateCommand, BotStatusUpdateResult,
+    BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryCommand, BotVisibilityQueryResult,
+    BotVisibilityResult, MyBotsCommand, SearchBotsCommand, SwitchDeliveryToProviderCommand,
+    SwitchDeliveryToProviderResult,
 };
 pub use friends::{
     CreateFriendRequestCommand, FriendListEntry, FriendRequestDecisionCommand, FriendService,
@@ -157,7 +158,7 @@ pub use message_flow::{
 };
 pub use onboard::{
     AdminBotOnboardCommand, BotOnboardCommand, BotOnboardResult, BotOnboardingService,
-    OnboardActorIdentity,
+    EnsureBotCommand, EnsureBotResult, OnboardActorIdentity,
 };
 pub use application::{
     DeleteProviderBotCommand, DeleteProviderBotOutcome, ProviderBotCoordinationCommand,
