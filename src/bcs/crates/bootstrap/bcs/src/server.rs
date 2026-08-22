@@ -1481,6 +1481,7 @@ fn build_openapi_v1_state(
     session_files: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
     system_message: Arc<dyn SystemMessageService>,
     principal_verifier: Arc<dyn PrincipalVerifier>,
+    connect_service: Arc<dyn bcs_service_api::application::ConnectService>,
     event_subscription_service: Arc<dyn bcs_service_api::application::v1::EventSubscriptionService>,
     group_event_subscription_provisioner: Arc<
         dyn bcs_service_api::application::v1::GroupEventSubscriptionProvisioner,
@@ -1568,18 +1569,21 @@ fn build_openapi_v1_state(
             group_link_url: config.invite.group_link_url.clone(),
             session_link_url: config.invite.session_link_url.clone(),
         });
-    let invitation_service = Arc::new(InvitationFriendshipServiceImpl::new(
-        friends,
-        friend_requests,
-        invitation_groups,
-        invitation_sessions,
-        registry,
-        invite,
-        invite_token_secret,
-        InvitationFriendshipServiceConfig {
-            default_ttl_seconds: config.invite.default_ttl_seconds,
-        },
-    ));
+    let invitation_service = Arc::new(
+        InvitationFriendshipServiceImpl::new(
+            friends,
+            friend_requests,
+            invitation_groups,
+            invitation_sessions,
+            registry,
+            invite,
+            invite_token_secret,
+            InvitationFriendshipServiceConfig {
+                default_ttl_seconds: config.invite.default_ttl_seconds,
+            },
+        )
+        .with_friend_connection_service(connect_service),
+    );
 
     (
         ApiState::new(
@@ -1587,10 +1591,11 @@ fn build_openapi_v1_state(
             session_service.clone(),
             session_service,
             invitation_service.clone(),
-            invitation_service,
+            invitation_service.clone(),
             principal_verifier,
         )
         .with_bot_service(bot_service)
+        .with_friend_connection_service(invitation_service)
         .with_session_file_service(session_file_service, session_file_url_projector)
         .with_event_subscription_service(event_subscription_service),
         internal_bot_attributes_service,
@@ -2126,6 +2131,7 @@ impl Default for BcsServerState {
             session_file_service.clone(),
             system_message.clone(),
             gateway_principal_verifier.clone(),
+            Arc::new(bcs_test_support::NoopConnectService),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
         );
@@ -3618,6 +3624,7 @@ impl BcsServer {
             session_file_service.clone(),
             use_cases.system_message.clone(),
             gateway_principal_verifier.clone(),
+            Arc::new(bcs_test_support::NoopConnectService),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
         );
@@ -4412,6 +4419,7 @@ impl BcsServer {
             session_file_service.clone(),
             use_cases.system_message.clone(),
             gateway_principal_verifier.clone(),
+            connect_service.clone(),
             eventing_runtime.service,
             eventing_runtime.group_provisioner,
         );

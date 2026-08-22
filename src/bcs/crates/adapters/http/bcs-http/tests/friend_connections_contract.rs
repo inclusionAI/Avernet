@@ -323,7 +323,7 @@ async fn build_app(
 }
 
 #[tokio::test]
-async fn v2_friend_request_requires_bearer_even_with_from_actor() {
+async fn friend_connection_request_requires_bearer_even_with_from_actor() {
     let temp_dir = TempDir::new().unwrap();
     let app = build_app(
         &temp_dir,
@@ -338,7 +338,7 @@ async fn v2_friend_request_requires_bearer_even_with_from_actor() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v2/friends/request")
+                .uri("/collaboration/friend-connections/requests")
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::json!({
@@ -357,7 +357,7 @@ async fn v2_friend_request_requires_bearer_even_with_from_actor() {
 }
 
 #[tokio::test]
-async fn v2_friend_request_allows_human_to_act_as_owned_bot() {
+async fn friend_connection_request_allows_human_to_act_as_owned_bot() {
     let connect = Arc::new(RecordingConnectService::default());
     let bot_query = Arc::new(RecordingBotQueryService::with_owned_bot(
         "bot-owned",
@@ -377,7 +377,7 @@ async fn v2_friend_request_allows_human_to_act_as_owned_bot() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v2/friends/request")
+                .uri("/collaboration/friend-connections/requests")
                 .header("authorization", "Bearer human-token")
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -411,7 +411,7 @@ async fn v2_friend_request_allows_human_to_act_as_owned_bot() {
 }
 
 #[tokio::test]
-async fn v2_friend_request_rejects_unowned_bot_impersonation() {
+async fn friend_connection_request_rejects_unowned_bot_impersonation() {
     let connect = Arc::new(RecordingConnectService::default());
     let bot_query = Arc::new(RecordingBotQueryService::default());
     let temp_dir = TempDir::new().unwrap();
@@ -428,7 +428,7 @@ async fn v2_friend_request_rejects_unowned_bot_impersonation() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v2/friends/request")
+                .uri("/collaboration/friend-connections/requests")
                 .header("authorization", "Bearer human-token")
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -449,7 +449,7 @@ async fn v2_friend_request_rejects_unowned_bot_impersonation() {
 }
 
 #[tokio::test]
-async fn v2_friend_request_rejects_bot_behalf_of_other_bot() {
+async fn friend_connection_request_rejects_bot_behalf_of_other_bot() {
     let connect = Arc::new(RecordingConnectService::default());
     let bot_query = Arc::new(RecordingBotQueryService::default());
     let temp_dir = TempDir::new().unwrap();
@@ -466,7 +466,7 @@ async fn v2_friend_request_rejects_bot_behalf_of_other_bot() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v2/friends/request")
+                .uri("/collaboration/friend-connections/requests")
                 .header("authorization", "Bearer caller-token")
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -487,7 +487,7 @@ async fn v2_friend_request_rejects_bot_behalf_of_other_bot() {
 }
 
 #[tokio::test]
-async fn v2_friend_list_by_actor_uses_requested_actor() {
+async fn friend_connection_list_by_actor_uses_requested_actor() {
     let connect = Arc::new(RecordingConnectService::default());
     let temp_dir = TempDir::new().unwrap();
     let app = build_app(
@@ -503,7 +503,7 @@ async fn v2_friend_list_by_actor_uses_requested_actor() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/v2/friends?actor=target-bot&actor_kind=bot")
+                .uri("/collaboration/friend-connections?actor=target-bot&actor_kind=bot")
                 .header("authorization", "Bearer caller-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -524,7 +524,7 @@ async fn v2_friend_list_by_actor_uses_requested_actor() {
 
 
 #[tokio::test]
-async fn v2_friend_request_accepts_via_recorded_service() {
+async fn friend_connection_request_accepts_via_recorded_service() {
     let connect = Arc::new(RecordingConnectService::default());
     let temp_dir = TempDir::new().unwrap();
     let app = build_app(
@@ -540,7 +540,7 @@ async fn v2_friend_request_accepts_via_recorded_service() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v2/friends/requests/req-77/accept")
+                .uri("/collaboration/friend-connections/requests/req-77/accept")
                 .header("authorization", "Bearer caller-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -559,7 +559,7 @@ async fn v2_friend_request_accepts_via_recorded_service() {
 }
 
 #[tokio::test]
-async fn v2_friend_request_rejects_with_reason() {
+async fn friend_connection_request_rejects_with_reason() {
     let connect = Arc::new(RecordingConnectService::default());
     let temp_dir = TempDir::new().unwrap();
     let app = build_app(
@@ -575,7 +575,7 @@ async fn v2_friend_request_rejects_with_reason() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v2/friends/requests/req-88/reject")
+                .uri("/collaboration/friend-connections/requests/req-88/reject")
                 .header("authorization", "Bearer caller-token")
                 .header("content-type", "application/json")
                 .body(Body::from(serde_json::json!({ "reason": "nope" }).to_string()))
@@ -598,7 +598,7 @@ async fn v2_friend_request_rejects_with_reason() {
 }
 
 #[tokio::test]
-async fn v2_friend_request_cancel_and_revoke_delegate_to_service() {
+async fn friend_connection_request_cancel_and_revoke_delegate_to_service() {
     let connect = Arc::new(RecordingConnectService::default());
     connect.request_lookup.lock().await.insert(
         "req-99".to_string(),
@@ -634,7 +634,7 @@ async fn v2_friend_request_cancel_and_revoke_delegate_to_service() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v2/friends/requests/req-99/cancel")
+                .uri("/collaboration/friend-connections/requests/req-99/cancel")
                 .header("authorization", "Bearer caller-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -649,8 +649,8 @@ async fn v2_friend_request_cancel_and_revoke_delegate_to_service() {
     let revoke_response = app
         .oneshot(
             Request::builder()
-                .method("POST")
-                .uri("/v2/friends/peer-bot/revoke")
+                .method("DELETE")
+                .uri("/collaboration/friend-connections/peer-bot")
                 .header("authorization", "Bearer caller-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -670,7 +670,7 @@ async fn v2_friend_request_cancel_and_revoke_delegate_to_service() {
 
 
 #[tokio::test]
-async fn v2_friend_request_cancel_rejects_other_caller() {
+async fn friend_connection_request_cancel_rejects_other_caller() {
     let connect = Arc::new(RecordingConnectService::default());
     connect.request_lookup.lock().await.insert(
         "req-100".to_string(),
@@ -705,7 +705,7 @@ async fn v2_friend_request_cancel_rejects_other_caller() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v2/friends/requests/req-100/cancel")
+                .uri("/collaboration/friend-connections/requests/req-100/cancel")
                 .header("authorization", "Bearer caller-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -718,7 +718,7 @@ async fn v2_friend_request_cancel_rejects_other_caller() {
 }
 
 #[tokio::test]
-async fn v2_friend_requests_list_routes_through_service() {
+async fn friend_connection_requests_list_routes_through_service() {
     let connect = Arc::new(RecordingConnectService::default());
     let temp_dir = TempDir::new().unwrap();
     let app = build_app(
@@ -734,7 +734,7 @@ async fn v2_friend_requests_list_routes_through_service() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/v2/friends/requests?direction=sent&status=approved&page=2&page_size=10")
+                .uri("/collaboration/friend-connections/requests?direction=sent&status=approved&page=2&page_size=10")
                 .header("authorization", "Bearer caller-token")
                 .body(Body::empty())
                 .unwrap(),

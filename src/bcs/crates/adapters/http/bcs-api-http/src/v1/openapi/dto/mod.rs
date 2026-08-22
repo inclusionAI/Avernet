@@ -2,6 +2,7 @@ pub mod bot;
 pub mod channel;
 pub mod event_subscription;
 pub mod friendship;
+pub mod friend_connection;
 pub mod group;
 pub mod invitation;
 pub mod session;

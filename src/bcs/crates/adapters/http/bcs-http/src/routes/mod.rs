@@ -78,4 +78,4 @@ pub(crate) fn reject_judge_definition_when_unavailable(
     }
     Ok(())
 }
-pub mod v2_friends;
+pub mod friend_connections;
