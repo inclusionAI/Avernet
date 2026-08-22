@@ -166,7 +166,9 @@ def test_engine_runtime_routes_document_501_and_504():
         for method, operation in methods.items():
             documented = set(operation["responses"])
             extras = {"501", "504"} & documented
-            if path in runtime_paths:
+            if operation.get("x-contract-status") == "contract-only":
+                assert extras == {"501"}, f"{method.upper()} {path} missing 501"
+            elif path in runtime_paths:
                 assert extras == {"501", "504"}, (
                     f"{method.upper()} {path} missing {extras}"
                 )

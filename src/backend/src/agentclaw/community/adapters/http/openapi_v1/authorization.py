@@ -506,6 +506,69 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("Space membership, adjudicated by the Space service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"):
         NoCheck("Space membership, adjudicated by the Space service"),
+    # Phase 2 Space Skill routes deliberately answer only the standard 501
+    # contract-only envelope until their services exist.  They have no resource
+    # to adjudicate yet; their explicit user-only admission is on the router.
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/import-from-git"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/upgrade"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/replace"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/refresh-from-git"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path:path}"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/upgrade-impact"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/materialization-retry"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/retirement-impact"):
+        NoCheck("contract-only Space Skill read; no domain resource exists yet"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/retirement"):
+        NoCheck("contract-only Space Skill command; no domain resource exists yet"),
     ("POST", "/openapi/v1/bots/work-order-notifications/read-all"):
         NoCheck("the named user's own work orders and notifications"),
     ("GET", "/openapi/v1/bots/work-order-notifications/unread-count"):
@@ -578,7 +641,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/auth-status"): INHERITED,
     ("GET", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,
     ("PUT", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,}
-
 
 #: Operations whose router exists but which ``build_public_router`` does not
 #: mount, so they are in the table without being on the surface.

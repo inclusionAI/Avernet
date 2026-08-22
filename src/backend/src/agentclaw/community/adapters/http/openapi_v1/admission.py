@@ -48,6 +48,9 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     GrantNotResolvableError,
 )
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
+from agentclaw.community.adapters.http.openapi_v1.schemas_space_skill import (
+    SPACE_SKILL_CONTRACT_ONLY_OPERATIONS,
+)
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.log import get_logger
 
@@ -775,6 +778,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/loadtest/hello"): AdmissionMode.REFUSED,
     ("WEBSOCKET", "/openapi/v1/bots/loadtest/ws/echo"): AdmissionMode.REFUSED,
 }
+
+ADMISSION.update(
+    dict.fromkeys(SPACE_SKILL_CONTRACT_ONLY_OPERATIONS, AdmissionMode.REFUSED)
+)
 
 #: Kept as an explicit empty set so the admission-inventory test continues to
 #: make any future handler-level grant exception visible in review.
