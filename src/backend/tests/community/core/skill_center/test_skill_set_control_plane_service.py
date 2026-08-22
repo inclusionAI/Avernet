@@ -912,8 +912,6 @@ def test_resources_keeps_ordinary_mcp_membership_on_canonical_repository_path():
         legacy_factory=legacy,
         passport=object(),
         authorization=_Collaborators(),
-        mutation_guard=_MutationGuard(),
-        edit_guard=_Guard(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
