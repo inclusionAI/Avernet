@@ -15,6 +15,7 @@ EXPECTED_OPERATIONS = {
     ("get", "/api/v1/collaboration/bots/{bot_id}/candidates/search"),
     ("get", "/api/v1/collaboration/templates"),
     ("get", "/api/v1/collaboration/templates/{template_id}"),
+    ("post", "/api/v1/collaboration/definitions/validate"),
     ("get", "/api/v1/collaboration/sessions/{session_id}/files"),
     ("post", "/api/v1/collaboration/sessions/{session_id}/files"),
     ("get", "/api/v1/collaboration/sessions/{session_id}/files/{file_id}"),
@@ -37,7 +38,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_12_approved_internal_operations() -> None:
+def test_contract_contains_exactly_the_13_approved_internal_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 

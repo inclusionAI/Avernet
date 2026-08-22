@@ -43,6 +43,7 @@ use bcs_api_http::{ApiState, PrincipalVerifier};
 use bcs_app_bot::{BotServiceConfig, BotServiceImpl, InternalBotAttributesServiceImpl};
 use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
 use bcs_app_invitation::{InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl};
+use bcs_app_collaboration_definition::CollaborationDefinitionServiceImpl as V1CollaborationDefinitionServiceImpl;
 use bcs_app_collaboration_template::CollaborationTemplateServiceImpl as V1CollaborationTemplateServiceImpl;
 use bcs_app_session::{
     GroupSessionConnectionServiceImpl, SessionFileApplicationServiceImpl, SessionServiceConfig,
@@ -1537,7 +1538,7 @@ fn build_openapi_v1_state(
         relation,
         session_repo,
         group_message_history,
-        collaboration_runtime,
+        collaboration_runtime.clone(),
         system_message.clone(),
         SessionServiceConfig { relation_env },
     ));
@@ -1584,6 +1585,12 @@ fn build_openapi_v1_state(
     let collaboration_template_service: Arc<
         dyn bcs_service_api::application::v1::CollaborationTemplateService,
     > = Arc::new(V1CollaborationTemplateServiceImpl::new(collaboration_templates));
+    let collaboration_definition_service: Arc<
+        dyn bcs_service_api::application::v1::CollaborationDefinitionService,
+    > = Arc::new(V1CollaborationDefinitionServiceImpl::new(
+        collaboration_runtime.clone(),
+        config.llm.is_enabled(),
+    ));
 
     (
         ApiState::new(
@@ -1597,7 +1604,8 @@ fn build_openapi_v1_state(
         .with_bot_service(bot_service)
         .with_session_file_service(session_file_service, session_file_url_projector)
         .with_event_subscription_service(event_subscription_service)
-        .with_collaboration_template_service(collaboration_template_service),
+        .with_collaboration_template_service(collaboration_template_service)
+        .with_collaboration_definition_service(collaboration_definition_service),
         internal_bot_attributes_service,
     )
 }

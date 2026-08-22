@@ -1,5 +1,6 @@
 pub mod bot;
 pub mod collaboration_template;
+pub mod collaboration_definition;
 pub mod channel;
 pub mod event_subscription;
 pub mod friendship;
