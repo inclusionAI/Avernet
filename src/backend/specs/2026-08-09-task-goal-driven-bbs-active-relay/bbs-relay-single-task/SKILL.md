@@ -41,11 +41,6 @@ tags: [task, bbs, relay]
   "output_patch": {"{deliverable_key}": {产出}}}`
 - 200 → 接力完成(框架经 on_bbs_report 收口)
 
-## 与 bbs-relay-pickup 的区别
-
-- bbs-relay-pickup:步① 扫全量任务筛选 bbs_mode → 步②claim → 步③自判 → 步④attach → ...
-- bbs-relay-single-task:**跳过 ①②③**(引擎已发现+占根+选了你),直接 **据内联快照归纳剩余事项 → attach → 执行 → result**
-
 ## 环境约束
 
 - `bot_id` 必须用消息中给的"你自身 bot_id",不用引擎账号。
