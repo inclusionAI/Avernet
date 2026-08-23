@@ -39,6 +39,13 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
+# ``sync_mcp_details_for_bot`` 的并发上限。每条投递最终是一次设备侧阻塞 HTTP
+# (插件内含 3 次重试),经 ``asyncio.to_thread`` 落到 event loop 的默认线程池
+# (``min(32, cpu_count + 4)``,全进程共享),所以这个值同时约束对单台设备的
+# 突发请求数和本路径占用的共享线程数。``_sync_mcp_details`` 的同名上限是 5——
+# 那条链路自己 collect MCP 列表,两者可能并发打同一台设备。
+_DESIRED_STATE_DETAIL_CONCURRENCY = 10
+
 
 def _merge_cli_items(
     current: list[CliItem] | None,
@@ -258,7 +265,14 @@ class MCPSyncService:
         """
         _bot = bot_id or "unknown"
         try:
-            ctx = self._resolver_provider().resolve_for_bot(bot_id, entity_id or user_id)
+            # resolve_for_bot 是同步的,且内部要打一次阻塞 ws-info HTTP + 若干 DB
+            # 查询。直接在协程里调用会占住 event loop,把 caller 的并发投递重新
+            # 串行化(caller 的 gather 只有等这里让出才能轮到下一个 MCP)。
+            ctx = await asyncio.to_thread(
+                self._resolver_provider().resolve_for_bot,
+                bot_id,
+                entity_id or user_id,
+            )
         except (DeviceNotBoundError, UnknownProviderError):
             error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
             logger.error("[MCPSyncService] %s", error)
@@ -278,6 +292,103 @@ class MCPSyncService:
             logger.error("[MCPSyncService] %s", error)
             return {"success": False, "error": error}
 
+        return {"success": True}
+
+    async def sync_mcp_details_for_bot(
+        self,
+        *,
+        user_id: str,
+        mcp_entries: list[dict[str, Any]],
+        bot_id: str,
+        entity_id: Optional[str] = None,
+        engine_type: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """把一批已备齐的 MCP 详情推送到**同一个** bot 的设备。
+
+        跟逐条 ``sync_mcp_detail`` 只差一处,但是决定性的一处:设备解析
+        (``resolve_for_bot`` + dispatch)只做一次。一份 desired state 里所有 MCP
+        的目标 bot 相同,逐条解析等于把同一个答案算 N 遍——每遍一次 ws-info HTTP
+        加若干 DB 查询。与 ``_sync_mcp_details`` 的差别则在入参:那条链路自己去
+        ``BotMCPProvider`` collect 列表,这里直接收 caller already-resolved 的
+        desired state。
+
+        投递按 ``_DESIRED_STATE_DETAIL_CONCURRENCY`` 并发;单条失败不中断其余,
+        由 caller 依 ``success`` 决定下游动作。
+
+        Args:
+            user_id: 用户 ID。仅用于 ``build_mcp_sync_payload`` 取该用户的 MCP
+                配置(api_key 等),是 per-user 维度。
+            mcp_entries: 待推送的 MCP 详情列表;caller 已备齐,本方法不再回查。
+            bot_id: 目标 bot ID——列表内所有 MCP 共用。
+            entity_id: bot 所属实体 ID,缺省回退到 ``user_id``。
+            engine_type: 引擎类型,默认 ``openclaw``。
+
+        Returns:
+            ``{"success": bool, "error": str|None}`` 格式的结果字典,失败时
+            ``error`` 里列出失败的 server_code。
+        """
+        _bot = bot_id or "unknown"
+        if not mcp_entries:
+            # 无 MCP 可投递:不必解析设备。allow-list 的声明是 caller 的事。
+            return {"success": True}
+
+        try:
+            # resolve_for_bot 同步且内部有阻塞 ws-info HTTP + DB 查询,放线程池,
+            # 否则会占住 event loop。
+            ctx = await asyncio.to_thread(
+                self._resolver_provider().resolve_for_bot,
+                bot_id,
+                entity_id or user_id,
+            )
+        except (DeviceNotBoundError, UnknownProviderError):
+            error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
+            logger.error("[MCPSyncService] %s", error)
+            return {"success": False, "error": error}
+        plugin = self._device_sync_dispatcher_provider().dispatch(ctx)
+
+        semaphore = asyncio.Semaphore(_DESIRED_STATE_DETAIL_CONCURRENCY)
+
+        async def deliver(mcp_data: dict[str, Any]) -> bool:
+            async with semaphore:
+                return await self._sync_mcp_detail(
+                    plugin=plugin,
+                    user_id=user_id,
+                    mcp_data=mcp_data,
+                    engine_type=engine_type,
+                )
+
+        # return_exceptions=True:单条失败不能把其余任务留成 orphan——否则它们会在
+        # 本方法返回后继续往设备投递。
+        results = await asyncio.gather(
+            *(deliver(entry) for entry in mcp_entries), return_exceptions=True
+        )
+
+        failed: list[str] = []
+        for entry, result in zip(mcp_entries, results, strict=True):
+            if isinstance(result, asyncio.CancelledError):
+                # 取消来自上层,不是单条 MCP 失败,必须向上抛。
+                raise result
+            server_code = (
+                entry.get("serverCode") or entry.get("server_code") or "unknown"
+            )
+            if isinstance(result, Exception):
+                logger.warning(
+                    "[MCPSyncService] MCP 详情投递异常: bot=%s, server_code=%s",
+                    _bot, server_code, exc_info=result,
+                )
+                failed.append(server_code)
+            elif not result:
+                failed.append(server_code)
+
+        if failed:
+            error = f"向 bot={_bot} 推送 MCP 配置失败: {', '.join(failed)}"
+            logger.error("[MCPSyncService] %s", error)
+            return {"success": False, "error": error}
+
+        logger.info(
+            "[MCPSyncService] desired state 详情推送完成: bot=%s, count=%s",
+            _bot, len(mcp_entries),
+        )
         return {"success": True}
 
     async def remove_mcp_detail(
@@ -786,7 +897,10 @@ class MCPSyncService:
             return False
 
         # 用 MCPConfigService 合并用户自定义配置与默认模板，生成设备端需要的完整 payload。
-        _api_key, merged_headers, _endpoint_env, _transport_protocol = self.mcp_config_service.build_mcp_sync_payload(
+        # 同步方法且要读一次 DB,跟 sync_single_mcp 一样放线程池——留在协程里会占住
+        # event loop,让并发投递退化成串行。
+        _api_key, merged_headers, _endpoint_env, _transport_protocol = await asyncio.to_thread(
+            self.mcp_config_service.build_mcp_sync_payload,
             user_id=user_id,
             mcp_data=mcp_data,
             api_key=api_key,
