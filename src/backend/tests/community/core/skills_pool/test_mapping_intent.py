@@ -273,6 +273,31 @@ def test_reuses_one_engine_locator_for_historical_skill_versions() -> None:
     }
 
 
+@pytest.mark.parametrize("evidence", [{}, {"other_runtime_evidence": "kept"}])
+def test_accepts_omitted_locator_evidence_when_no_local_skills(
+    evidence: dict[str, object],
+) -> None:
+    """Old runtimes may omit a field that has no values to report."""
+
+    assert local_locators_from_evidence([], [], evidence) == {}
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        None,
+        {"local_locators": None},
+        {"local_locators": []},
+        {"local_locators": {"unexpected": "local:///runtime/pool/unexpected"}},
+    ],
+)
+def test_rejects_invalid_locator_evidence_when_no_local_skills(
+    evidence: dict[str, object] | None,
+) -> None:
+    with pytest.raises(ValueError, match="Engine"):
+        local_locators_from_evidence([], [], evidence)
+
+
 @pytest.mark.parametrize(
     "evidence",
     [
