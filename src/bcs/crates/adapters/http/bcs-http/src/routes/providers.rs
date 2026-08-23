@@ -45,6 +45,8 @@ pub struct ProviderStreamGrayResponse {
 #[serde(deny_unknown_fields)]
 pub struct PatchProviderBotAttributesRequest {
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub visibility: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub user_visibility: Option<UserVisibility>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub friend_ext: Option<Map<String, Value>>,
@@ -54,7 +56,8 @@ pub struct PatchProviderBotAttributesRequest {
 
 impl PatchProviderBotAttributesRequest {
     fn is_empty(&self) -> bool {
-        self.user_visibility.is_none()
+        self.visibility.is_none()
+            && self.user_visibility.is_none()
             && self.friend_ext.is_none()
             && self.friend_check_in_strategy.is_none()
     }
@@ -62,6 +65,7 @@ impl PatchProviderBotAttributesRequest {
     fn into_command(self, bot_id: String) -> PatchBotInternalAttributes {
         PatchBotInternalAttributes {
             bot_id,
+            visibility: self.visibility,
             user_visibility: self.user_visibility,
             friend_ext: self.friend_ext,
             friend_check_in_strategy: self.friend_check_in_strategy,
@@ -357,6 +361,7 @@ pub async fn patch_provider_bot_attributes(
     info!(
         provider_id,
         bot_uuid,
+        has_visibility = body.visibility.is_some(),
         has_user_visibility = body.user_visibility.is_some(),
         has_friend_ext = body.friend_ext.is_some(),
         friend_ext_key_count = body.friend_ext.as_ref().map(|value| value.len()),
