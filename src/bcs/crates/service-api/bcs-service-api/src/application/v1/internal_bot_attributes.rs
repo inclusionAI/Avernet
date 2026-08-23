@@ -34,17 +34,6 @@ pub struct BotInternalAttributes {
     pub friend_check_in_strategy: FriendCheckInStrategy,
 }
 
-impl Default for BotInternalAttributes {
-    fn default() -> Self {
-        Self {
-            visibility: default_visibility(),
-            user_visibility: UserVisibility::default(),
-            friend_ext: Map::new(),
-            friend_check_in_strategy: FriendCheckInStrategy::default(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PatchBotInternalAttributes {
     pub bot_id: String,
