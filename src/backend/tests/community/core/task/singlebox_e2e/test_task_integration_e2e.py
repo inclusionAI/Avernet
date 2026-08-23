@@ -232,7 +232,8 @@ class TestTaskIntegrationE2E(unittest.TestCase):
             self.assertIsNotNone(nd, f"{gid} 未出现")
             self.assertEqual(nd["status"], "DONE", f"{gid} 未 DONE")
             self.assertEqual((nd["run_info"] or {}).get("run_mode"), "coop_group", f"{gid} 非 coop_group")
-            self.assertTrue(str((nd["run_info"] or {}).get("assignee") or "").startswith("grp_"),
+            # 群 id 前缀容忍两种后端:本地 stub/double 产 ``grp_<8hex>``;真 BCS(:21000)产 ``bcs_grp_<uuid>``。
+            self.assertTrue(str((nd["run_info"] or {}).get("assignee") or "").startswith(("grp_", "bcs_grp_")),
                             f"{gid} assignee 非群 id")
         # 实际建了 3 个群
         group_count = sum(

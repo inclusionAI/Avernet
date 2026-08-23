@@ -160,7 +160,14 @@ def _execute_body(writer_id: str, editor_id: str) -> dict:
     execution_config 透传创建群入参:``participant_bindings`` / ``participant_bot_ids``
     (ExecutionConfigDTO extra=allow),``_run_yaml`` 把 participant_bindings 塞进 GroupFormation.extend_props。
     群 master 复用 driver_bot(=owner_bot_id),不另传。
+
+    execute 端直接以 BCS ``bot_id:owner_id`` 透传身份(owner_id = provisioner 的 user_id = 本测试 ``_USER_ID``,
+    与 ``singlebox_engine_adapter.set_bcs_visibility`` 的 ``f"{bot_id}:{user_id}"`` 同源),触发 ``resolve_many``
+    对带 ``:`` 的透传、不再查 BotService。provision 端(``onboard_to_bcn`` / ``set_bcs_visibility``)仍用纯 bot_id
+    (内部自行拼 ``:{user_id}``),故此处只改发给 execute 的入参,不动 provisioner 调用。
     """
+    writer = f"{writer_id}:{_USER_ID}"
+    editor = f"{editor_id}:{_USER_ID}"
     return {
         "task_spec": {
             "metadata": {
@@ -183,15 +190,15 @@ def _execute_body(writer_id: str, editor_id: str) -> dict:
         "source_type": "bot",
         "owner_user_id": _USER_ID,
         # owner/driver = writer;participant_bot_ids 只列 editor(writer 已在 owner 槽)。
-        "owner_bot_id": writer_id,
+        "owner_bot_id": writer,
         "execution_config": {
             "task_type": "yaml",
             "yaml": WRITING_QC_YAML,
-            "participant_bot_ids": [editor_id],
+            "participant_bot_ids": [editor],
             # 逻辑角色→产品 bot 绑定(创建群接口 participant_bindings 入参)。
             "participant_bindings": {
-                "writer": [writer_id],
-                "editor": [editor_id],
+                "writer": [writer],
+                "editor": [editor],
             },
             # 群 master 复用底层 driver_bot(=owner_bot_id=writer),不另设 master_bot。
             "group_name": "写作质检协同群",
@@ -288,7 +295,8 @@ class TestWritingQcStateMachineE2E(unittest.TestCase):
         self.assertEqual(root.get("status"), "DONE", "根未 DONE")
         ri = root.get("run_info") or {}
         self.assertEqual(ri.get("run_mode"), "coop_group", "根非 coop_group")
-        self.assertTrue(str(ri.get("assignee") or "").startswith("grp_"),
+        # 群 id 前缀容忍两种后端:本地 stub/double 产 ``grp_<8hex>``;真 BCS(:21000)产 ``bcs_grp_<uuid>``。
+        self.assertTrue(str(ri.get("assignee") or "").startswith(("grp_", "bcs_grp_")),
                         f"根 assignee 非群 id:{ri.get('assignee')!r}")
         acceptance = ri.get("acceptance_result") or {}
         self.assertEqual(acceptance.get("verdict"), "PASS",

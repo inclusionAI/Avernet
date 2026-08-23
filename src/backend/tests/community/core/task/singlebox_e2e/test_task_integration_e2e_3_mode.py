@@ -408,7 +408,8 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
         for n in coop_nodes:
             self.assertEqual(n.get("status"), "DONE", f"coop_group 子任务未 DONE:{n.get('node_id')}")
             self.assertTrue(
-                str((n.get("run_info") or {}).get("assignee") or "").startswith("grp_"),
+                # 群 id 前缀容忍两种后端:本地 stub/double 产 ``grp_<8hex>``;真 BCS(:21000)产 ``bcs_grp_<uuid>``。
+                str((n.get("run_info") or {}).get("assignee") or "").startswith(("grp_", "bcs_grp_")),
                 f"coop_group assignee 非群 id:{n.get('node_id')} assignee={(n.get('run_info') or {}).get('assignee')}",
             )
 
