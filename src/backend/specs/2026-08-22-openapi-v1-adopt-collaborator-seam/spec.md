@@ -90,8 +90,12 @@ rather than the deprecation schedule's.
       the handler, so it can only read what the request itself carries.
 - [ ] Every edit lock enforced today is still enforced afterwards, on the same
       operations, refusing the same callers.
-- [ ] No in-scope operation ends up unaudited, and none ends up audited twice for
-      one request.
+- [ ] No in-scope operation ends up unaudited. Where a service already writes its
+      own audit row, it is kept only when the seam's row does not cover the same
+      ground — the seam audits non-owners only, and keys on route and method, so
+      a service row that records an owner's action or a domain action name is not
+      a duplicate. A service row that carries neither is deleted. Task 8 found
+      the skill-centre write is the first kind; the reasoning is in `plan.md`.
 - [ ] **Every group traces its own rows to the code that really checks them**,
       route by route, rather than trusting the module its citation names. The
       mapping is recorded in that group's change, and the bar comes from what

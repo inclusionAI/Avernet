@@ -6,9 +6,6 @@ from collections.abc import Sequence
 
 from injector import inject
 
-from agentclaw.community.core.skill_center.authorization_hook import (
-    BotCapabilityAuthorizationHookProtocol,
-)
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
     BotRepository,
@@ -23,7 +20,6 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     McpPermissionDeniedError,
     SkillSetControlPlaneNotFoundError,
-    SkillSetAccessDeniedError,
     SkillSetRuntimeReconcileError,
 )
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
@@ -52,7 +48,6 @@ class SkillSetControlPlaneService:
         runtime: BotRuntimeProjectionReconcilerProtocol,
         legacy_factory: LegacySkillSetCompatibilityFactoryProtocol,
         passport: PassportPlugin,
-        authorization: BotCapabilityAuthorizationHookProtocol,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         mcp_auth: MCPAuthPlugin,
@@ -62,7 +57,6 @@ class SkillSetControlPlaneService:
         self._runtime = runtime
         self._legacy_factory = legacy_factory
         self._passport = passport
-        self._authorization = authorization
         self._audit_log_repo = audit_log_repo
         self._mcp_center = mcp_center
         self._mcp_auth = mcp_auth
@@ -75,12 +69,6 @@ class SkillSetControlPlaneService:
             # adapter maps a single family: an invisible Bot scope is a SkillSet
             # not-found, not a Local Skill one.
             raise SkillSetControlPlaneNotFoundError()
-        if not self._authorization.can_manage_bot(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            actor_id=user_id,
-        ):
-            raise SkillSetAccessDeniedError()
         return bot
 
     def _legacy_bot(self, *, bot_id: str, owner_id: str, actor_id: str) -> dict:

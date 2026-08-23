@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -144,21 +145,6 @@ class _Bots:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict | None:
         bot = self.get_unique_by_id(bot_id)
         return bot if owner_id == bot["owner_id"] else None
-
-
-class _Collaborators:
-    def __init__(self) -> None:
-        self.calls = []
-
-    def can_manage_bot(self, **kwargs):
-        self.calls.append(kwargs)
-        return True
-
-
-class _DeniedCollaborators(_Collaborators):
-    def can_manage_bot(self, **kwargs):
-        self.calls.append(kwargs)
-        return False
 
 
 class _MissingBots:
@@ -644,7 +630,6 @@ class _FailingRuntimePassport(_RuntimePassport):
 @pytest.mark.asyncio
 async def test_collaborator_command_restores_desired_state_and_uses_true_owner():
     repository = _Repository()
-    collaborators = _Collaborators()
     runtime = _Runtime()
     service = SkillSetControlPlaneService(
         repository=repository,
@@ -652,7 +637,6 @@ async def test_collaborator_command_restores_desired_state_and_uses_true_owner()
         runtime=runtime,
         legacy_factory=object(),
         passport=object(),
-        authorization=collaborators,
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -666,13 +650,10 @@ async def test_collaborator_command_restores_desired_state_and_uses_true_owner()
             set_id="set-1",
         )
 
-    assert collaborators.calls == [
-        {
-            "bot_id": "bot-1",
-            "owner_id": "true-owner",
-            "actor_id": "collaborator",
-        }
-    ]
+    # The hook that recorded (bot, true-owner, actor) is gone: the seam
+    # adjudicates before the handler runs, against the same OwnerIdDep the
+    # handler acts on. What is still this service's to prove is that the *true*
+    # owner — not the caller — reaches the runtime, which the next lines do.
     assert runtime.owners == ["true-owner", "true-owner"]
     assert runtime.snapshot_calls == [
         {"bot_id": "bot-1", "owner_id": "true-owner"},
@@ -708,7 +689,6 @@ async def test_deactivate_retires_mappings_removed_from_the_runtime_projection()
         runtime=runtime,
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -737,7 +717,6 @@ def test_create_rejects_missing_bot_instead_of_creating_orphan_set():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -764,7 +743,6 @@ def test_default_create_rejects_missing_bot_instead_of_creating_orphan_set():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -792,7 +770,6 @@ def test_default_create_uses_owner_qualified_bot_lookup():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -820,7 +797,6 @@ def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -854,7 +830,6 @@ def test_create_inactive_set_does_not_require_runtime_readiness() -> None:
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -880,7 +855,6 @@ def test_inactive_set_metadata_updates_do_not_require_runtime_readiness() -> Non
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -926,7 +900,6 @@ async def test_inactive_set_membership_does_not_require_runtime_readiness(
         runtime=runtime,
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -955,7 +928,6 @@ async def test_active_set_membership_still_requires_runtime_readiness() -> None:
         runtime=_Runtime(fail_first=False),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -980,7 +952,6 @@ def test_default_read_rejects_missing_bot():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1001,7 +972,6 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1037,7 +1007,6 @@ async def test_legacy_default_sync_uses_owner_qualified_bot_lookup():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1054,25 +1023,98 @@ async def test_legacy_default_sync_uses_owner_qualified_bot_lookup():
     assert repository.set_active_calls[0]["owner_id"] == owner_id
 
 
-def test_skill_set_acl_denial_is_forbidden_not_not_found():
+def test_skill_set_acl_denial_moved_to_the_seam_and_changed_status():
+    """The denial this service used to raise is now the seam's, and answers 404.
+
+    This asserted that a denied collaborator got ``SkillSetAccessDeniedError``
+    — 403 Forbidden, code 403201 — rather than a not-found. All nineteen of
+    these operations now carry ``Check(MEMBER)``, so ``bot_access`` refuses
+    before the handler runs and answers ``BotAccessRefusedError``: **404 Not
+    found, byte-identical to a bot that does not exist.**
+
+    That is a caller-visible change and the intended one. A 403 tells a caller
+    the bot exists and they may not reach it; the seam's whole masked-404
+    contract is that authorization and existence must be indistinguishable, so
+    an id cannot be probed for existence through a refusal. What the service
+    used to do was the oracle this consolidation closes.
+
+    Kept as a test rather than deleted because the *bar* still has to be
+    MEMBER — only where it is enforced, and what it answers, have moved.
+    """
+    from agentclaw.community.adapters.http.openapi_v1.authorization import (
+        AUTHORIZATION,
+        Check,
+    )
+    from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+
+    adjudicated = {
+        key: rule
+        for key, rule in AUTHORIZATION.items()
+        if isinstance(rule, Check)
+        and ("/skill-sets" in key[1] or key[1].endswith("/mcps"))
+    }
+    assert adjudicated, "the skill-set operations are no longer adjudicated"
+    assert all(
+        rule.level is PermissionLevel.MEMBER for rule in adjudicated.values()
+    ), "the bar moved off MEMBER, which can_manage_bot enforced before the seam"
+
+
+def test_the_service_keeps_writing_its_own_audit_row_after_the_seam_took_over():
+    """``_audit`` survives the migration, and deliberately so.
+
+    The plan expected this write to be deleted once ``bot_access`` began
+    auditing these operations, so that one mutation left exactly one row.
+    Reading both writers side by side shows that would drop rows rather than
+    de-duplicate them:
+
+    * The seam audits **only non-owner** mutations — ``bot_access`` guards its
+      write with ``level < PermissionLevel.OWNER``. A bot owner editing their
+      own skill sets is audited here today and would be audited nowhere at all
+      afterwards.
+    * The two rows do not carry the same thing. The seam's ``detail`` is
+      ``{"route": ..., "method": ...}``, which is what the *transport* knows;
+      this one is ``{"action": "skill_set_create"}``, a domain name no route
+      template encodes.
+
+    So the overlap is a second row for a non-owner on four operations, and the
+    alternative is a coverage hole. This write was never the authorization
+    check — it runs *after* the mutation and was never consulted to permit one
+    — so consolidating the check did not make it redundant.
+    """
+    rows: list[dict] = []
+
+    class _RecordingAudit:
+        def insert(self, data) -> None:
+            rows.append(data)
+
     service = SkillSetControlPlaneService(
-        repository=_Repository(),
+        repository=_CreateRepository(),
         bot_repo=_Bots(),
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_DeniedCollaborators(),
-        audit_log_repo=_Audit(),
+        audit_log_repo=_RecordingAudit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
     )
 
-    with pytest.raises(SkillSetAccessDeniedError):
-        service.list_sets(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            user_id="collaborator",
-        )
+    # The owner acting on their own bot: the case the seam does not audit.
+    service.create_set(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        name="set",
+        description=None,
+    )
+
+    assert len(rows) == 1, "the owner's own mutation stopped being audited"
+    assert rows[0]["bot_id"] == "bot-1"
+    assert rows[0]["owner_id"] == "true-owner"
+    assert rows[0]["operator_id"] == "true-owner"
+    assert json.loads(rows[0]["detail"]) == {"action": "skill_set_create"}, (
+        "the semantic action name is what this row adds over the seam's "
+        "route-and-method one; losing it makes the two rows redundant"
+    )
 
 
 def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
@@ -1083,7 +1125,6 @@ def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
         runtime=_SuccessfulRuntime(),
         legacy_factory=_ResourceLegacyFactory(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1110,7 +1151,6 @@ def test_list_sets_uses_aicoding_default_then_claude_code_fallback_for_coding_im
         runtime=_SuccessfulRuntime(),
         legacy_factory=_ResourceLegacyFactory(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1135,7 +1175,6 @@ def test_update_set_uses_runtime_default_candidates_for_coding_image():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1163,7 +1202,6 @@ def test_update_set_uses_runtime_default_candidates_for_coding_image():
 
 def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_scope():
     repository = _DefaultResourceRepository()
-    authorization = _Collaborators()
     legacy = _ResourceLegacyFactory()
     service = SkillSetControlPlaneService(
         repository=repository,
@@ -1171,7 +1209,6 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
         runtime=_SuccessfulRuntime(),
         legacy_factory=legacy,
         passport=object(),
-        authorization=authorization,
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1182,9 +1219,8 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
     )
 
     assert result[0]["mcps"] == [{"server_code": "legacy-default-mcp"}]
-    assert authorization.calls == [{
-        "bot_id": "bot-1", "owner_id": "true-owner", "actor_id": "collaborator"
-    }]
+    # See above: the collaborator adjudication moved to the seam, so there
+    # is no hook call left to observe here.
     assert repository.list_mcp_calls == []
     assert legacy.service.default_mcp_calls == [{
         "skill_set_id": "global-default",
@@ -1203,7 +1239,6 @@ def test_resources_keeps_ordinary_mcp_membership_on_canonical_repository_path():
         runtime=_SuccessfulRuntime(),
         legacy_factory=legacy,
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1235,7 +1270,6 @@ async def test_existing_coding_bot_can_activate_skill_set(bots) -> None:
         runtime=runtime,
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1265,7 +1299,6 @@ async def test_existing_claude_code_skill_set_deactivate_uses_full_projection():
         runtime=runtime,
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1308,7 +1341,6 @@ def test_existing_coding_bot_metadata_mutations_ignore_product_creation_matrix(
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1341,7 +1373,6 @@ def test_historical_bot_may_delete_an_inactive_skill_set_without_new_runtime_wri
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1365,7 +1396,6 @@ def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membershi
         runtime=_SuccessfulRuntime(),
         legacy_factory=factory,
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
@@ -1402,7 +1432,6 @@ async def test_mcp_direct_activation_checks_permission_before_writing_desired_st
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=mcp_center,
         mcp_auth=auth,
@@ -1435,7 +1464,6 @@ async def test_mcp_direct_activation_denies_before_writing_desired_state():
         runtime=_SuccessfulRuntime(),
         legacy_factory=object(),
         passport=object(),
-        authorization=_Collaborators(),
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=False),
         mcp_auth=_McpAuth(allowed=False),

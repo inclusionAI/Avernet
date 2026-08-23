@@ -120,3 +120,86 @@ def current_operations(document: dict):
                 continue
             if is_current(operation):
                 yield method, path, operation
+
+
+class SeamBots:
+    """A bot repository for which the addressed bot always exists.
+
+    The seam resolves a level by loading the bot and then asking the
+    collaborator service about the caller. A group's own router tests are not
+    about either question — they mount one router to assert what a handler does
+    *once admitted* — so this double answers "yes, under that owner" and lets
+    the level fall out of ``SeamCollaborators``.
+
+    Permissive on purpose, and safe to be: no refusal is asserted through it.
+    Whether a caller is admitted at all is ``test_bot_access.py``'s subject,
+    against its own doubles, and whether an operation carries the gate is
+    ``test_authorization_inventory.py``'s. What would be unsafe is the reverse —
+    a router test that *did* assert a refusal against a double it also owns,
+    which would pass whatever the seam did.
+    """
+
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str):
+        return {"id": 1, "bot_id": bot_id, "owner_id": owner_id, "env": "dev"}
+
+
+class SeamCollaborators:
+    """The level every non-owner caller holds. Owners never reach this.
+
+    ``resolve_operable_permission_level`` short-circuits ``user_id ==
+    owner_id`` to ``OWNER`` before it consults a collaborator service at all,
+    so a test whose caller owns the bot gets ``OWNER`` regardless of what this
+    is constructed with.
+    """
+
+    def __init__(self, level=None) -> None:
+        from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+
+        self.level = PermissionLevel.NONE if level is None else level
+
+    def get_operable_permission_level(self, *, bot, user_id, env=None):
+        return self.level
+
+
+class SeamAudit:
+    """Collects the rows the seam writes, so a test can read them."""
+
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+
+    def insert(self, data):
+        self.rows.append(data)
+        return data
+
+
+def bind_bot_access_seam(binder, *, bots=None, collaborators=None, audit=None):
+    """Wire the three services ``bot_access`` needs, on a bare-``FastAPI`` app.
+
+    Once a group's rows are ``Check``, ``PublicAPIRoute`` attaches the gate to
+    every one of its routes, and the gate fails **closed** when the repository
+    or the collaborator service is unbound — which is what a hand-built test app
+    is. Without this the whole group's router tests answer 404 for a caller who
+    owns the bot, and the failure names the seam rather than the test's wiring.
+
+    ``InstanceProvider`` rather than ``to=obj`` because injector
+    isinstance-checks a bare instance and these protocols are not all
+    ``@runtime_checkable`` — the same reason ``test_bot_access.py`` does it.
+    """
+    from injector import InstanceProvider  # noqa: PLC0415
+
+    from agentclaw.community.core.repository.protocols.bot import (  # noqa: PLC0415
+        BotCollabLogRepositoryProtocol,
+        BotRepository,
+    )
+    from agentclaw.community.core.bot_collaborator.protocols import (  # noqa: PLC0415
+        CollaboratorServiceProtocol,
+    )
+
+    binder.bind(BotRepository, to=InstanceProvider(bots or SeamBots()))
+    binder.bind(
+        CollaboratorServiceProtocol,
+        to=InstanceProvider(collaborators or SeamCollaborators()),
+    )
+    binder.bind(
+        BotCollabLogRepositoryProtocol, to=InstanceProvider(audit or SeamAudit())
+    )

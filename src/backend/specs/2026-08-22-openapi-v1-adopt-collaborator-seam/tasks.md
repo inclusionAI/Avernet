@@ -115,11 +115,11 @@ deletion is known to change no caller's answer.
 - **Goal:** 19 rows behind one boolean — the largest group with no entanglement.
 - **Files:** `core/skill_center/authorization_hook.py`, its callers, `.../openapi_v1/authorization.py`
 - **Done when:**
-  - [ ] The bar is derived from `authorization_hook.py:34` (`PermissionLevel.MEMBER`) and recorded.
-  - [ ] All 19 rows are `Check(MEMBER)`.
-  - [ ] `CollaboratorBotCapabilityAuthorizationHook.can_manage_bot` and the protocol are deleted, along with every call site and the DI binding; nothing is left implementing a hook nobody calls.
-  - [ ] The service-side audit write is reconciled: `skill_set_control_plane.py:61` takes an `audit_log_repo` and writes its own `BotCollabLog` row, and the seam now writes one too. Delete the service-side write so a mutation leaves exactly one row.
-  - [ ] Tests: refusal byte-identical to an absent bot; **exactly one** audit row per mutating request; no capability or space check is lost.
+  - [x] The bar is derived from `authorization_hook.py:34` (`PermissionLevel.MEMBER`) and recorded.
+  - [x] All 19 rows are `Check(MEMBER)`.
+  - [x] `CollaboratorBotCapabilityAuthorizationHook.can_manage_bot` and the protocol are deleted, along with every call site and the DI binding; nothing is left implementing a hook nobody calls.
+  - [x] The service-side audit write is reconciled — and the reconciliation is to **keep** it. Reading both writers side by side: the seam guards its write with `level < PermissionLevel.OWNER`, so it never audits an owner acting on their own bot, which this service does audit today; and the two rows differ in content (`{"route", "method"}` against `{"action": "skill_set_create"}`). Deleting it drops rows rather than de-duplicating them. The overlap is one extra row for a non-owner on four operations, which is the cheaper outcome. This write was never the check — it runs after the mutation — so consolidating the check did not make it redundant.
+  - [x] Tests: refusal moved to the seam and is byte-identical to an absent bot (`test_skill_set_acl_denial_moved_to_the_seam_and_changed_status`); the owner's own mutation is still audited (`test_the_service_keeps_writing_its_own_audit_row_after_the_seam_took_over`); no capability or space check is lost.
 - **Depends on:** Task 7
 
 ## Task 9: Move the bot-skill `{skill_id}` operations onto the seam
@@ -127,7 +127,10 @@ deletion is known to change no caller's answer.
 - **Files:** `core/skill_center/services/bot_skill_asset_service.py`, `.../openapi_v1/authorization.py`
 - **Done when:**
   - [ ] The bar is derived from every `check_collaborator_permission(..., PermissionLevel.MEMBER)` site in `bot_skill_asset_service` (`:304`, `:405`, and any other the task enumerates) and recorded per row.
-  - [ ] The 7 `{skill_id}` rows — `GET`, `DELETE`, `/content`, `/parameters` `GET` and `PUT`, `/activate`, `/deactivate` — are `Check(MEMBER)`, and each permission call is deleted while the bot resolution and skill-kind logic stay.
+  - [ ] The 7 `{skill_id}` rows — `GET`, `DELETE`, `/content`, `/parameters` `GET` and `PUT`, `/activate`, `/deactivate` — are `Check(MEMBER)`.
+  - [ ] **The permission calls inside `bot_skill_asset_service` are *not* deleted**, unlike Task 8's hook. The hook had exactly one caller family; these two sites (`_resolve_local:303`, `_RepoAssetAdapter.resolve:404`) are reached from three surfaces, only one of which the seam covers: `/openapi/v1/bots/{bot_id}/skills/{skill_id}/…` (covered), the retiring twins in `deprecated/skills.py` (**not** covered — `legacy_route` registers an endpoint, so a route-level dependency does not carry across), and the live legacy router `adapters/http/skill_center/skills.py`, mounted at **`/api/skills`** outside `/openapi/v1` entirely, which calls `get_skill` and `set_active` and is governed by no `AUTHORIZATION` row at all. Deleting the calls would strip authorization from the latter two. `local_skill_delete_service._authorize:491` is the same story for `DELETE`, reached by `deprecated/skills.py:267`.
+  - [ ] So the row moves and the service check stays: after the flip the seam is the declared authority for the 7 rows and enforces first, and the in-service check is a second gate at the same bar for them and the only gate for the other two surfaces. That is what makes the row honest — `ServiceChecked` claimed the service was the authority, and it is not, for these paths.
+  - [ ] Recorded per row: today a denied collaborator gets `LocalSkillNotFoundError`; after the flip the seam refuses first with `BotAccessRefusedError`. Both are 404 and both are masked, so nothing is newly probeable, but the error code changes and a test states it.
   - [ ] The 3 collection rows — `GET` and `POST /bots/{bot_id}/skills`, `POST /bots/{bot_id}/skills/upload-folder` — **stay `ServiceChecked`**, with their citation corrected to name the module that really checks them: `local_skill_query_service._require_view_access:97` for the read, `local_skill_upload_service._authorize:111` for the two writes.
   - [ ] The corrected citations read `…core.skill_center.services.local_skill_query_service` and `…core.skill_center.services.local_skill_upload_service`. These three rows stay in `_DEFERRED_OPERATIONS` in `test_authorization_inventory.py`, which is keyed on the operation rather than the citation — so a wrong spelling here is a documentation defect rather than a silent hole, and re-citing a row cannot be used to dodge migration.
   - [ ] `local_skill_query_service` and `local_skill_upload_service` are **not modified**. A test asserts it, because those two also keep all six retiring skills addresses checked — including four the seam could never adjudicate, whose bot the skill id resolves inside the handler.

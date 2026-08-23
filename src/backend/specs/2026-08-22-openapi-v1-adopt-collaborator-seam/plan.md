@@ -156,9 +156,19 @@ None. No manifest change.
   inherited from #1323, whose "the audit record in 2 services" gave the count
   and left the two unnamed — the publication facade and `collaborator_service`
   write **no** audit rows at all (zero references each).
-  **Mitigation:** Tasks 10 and 11 delete the service-side write and assert
-  exactly one row per mutating request; no other group has an audit to
-  reconcile.
+  **Mitigation — revised once Task 8 read both writers side by side.**
+  Deleting the service-side write does not de-duplicate, it drops rows. The
+  seam guards its write with `level < PermissionLevel.OWNER`, so it never
+  audits an owner acting on their own bot — a case `skill_set_control_plane`
+  audits today. And the two rows differ in content: the seam's `detail` is
+  `{"route", "method"}`, the service's is `{"action": "skill_set_create"}`, a
+  domain name no route template encodes. So the service write **stays**, and
+  the overlap is one extra row for a non-owner on four operations — the cheaper
+  of the two outcomes. It was never the authorization check (it runs after the
+  mutation, and was never consulted to permit one), so consolidating the check
+  did not make it redundant. Pinned by
+  `test_the_service_keeps_writing_its_own_audit_row_after_the_seam_took_over`.
+  `local_skill_upload_service`'s write stays for the same reason.
 - **Risk:** `authorization.py` is a merge-conflict magnet and the base moves
   fast (10 commits in 30 minutes on 2026-08-22, two touching this file).
   **Mitigation:** one group per PR, rebased and landed before the next starts.
@@ -206,7 +216,7 @@ No flag, no migration. Order is a dependency order, not a preference:
 # 3. diagnostics   (2 → Check)        router-local, no lock, no audit, no twins
 # 4. render_screens(3 → Check)        same shape, one bar
 # 5. authorized_apps(3 → Check)       needs OwnerIdDep on 3 handlers first
-# 6. skill_center hook (19 → Check)   + delete skill_set_control_plane's audit
+# 6. skill_center hook (19 → Check)   audit write kept — see the risk above
 # 7. bot_skill_assets  (7 → Check)    the {skill_id} operations only; the
 #                                     collection/upload rows are deferred, so
 #                                     nothing they share with the retiring
