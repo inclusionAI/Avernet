@@ -10,15 +10,18 @@ from fastapi import HTTPException
 from agentclaw.community.adapters.http.skill_center.schemas import (
     ActivateRequest,
     AddSkillsRequest,
+    DeactivateSkillSetRequest,
     SearchRequest,
 )
 from agentclaw.community.adapters.http.skill_center.skillsets import (
     add_skills_to_set,
     get_default_skill_set,
+    get_skill_set_mcps,
 )
 from agentclaw.community.adapters.http.skill_center.skills import (
     activate_skill,
     deactivate_skill,
+    deactivate_skill_set,
     get_market_tree,
     list_local_market_skills,
     list_market_skills,
@@ -96,6 +99,143 @@ class _Catalog:
             "status": "completed",
             "result": {"synced": True, "database": {"failed": 0}},
         }
+
+
+class _AddressedBots:
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str):
+        assert (bot_id, owner_id) == ("persisted-bot", "owner")
+        return {
+            "active_engine": "claude_code",
+            "bot_type": "personal",
+            "template_type": "normalCC",
+        }
+
+
+class _LegacySetScopeControlPlane:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    def resolve_legacy_set_scope(self, **kwargs):
+        self.calls.append(("resolve", kwargs))
+        return SimpleNamespace(owner_id="owner", bot_id="persisted-bot")
+
+    def get_set(self, **kwargs):
+        self.calls.append(("get_set", kwargs))
+        assert kwargs["bot_id"] == "persisted-bot"
+        assert kwargs["owner_id"] == "owner"
+        return {"id": "set-1", "is_default": False}
+
+    def list_mcps(self, **kwargs):
+        self.calls.append(("list_mcps", kwargs))
+        assert kwargs["bot_id"] == "persisted-bot"
+        assert kwargs["owner_id"] == "owner"
+        return [
+            {
+                "id": "mcp-1",
+                "server_code": "mcp.example",
+                "name": "Example MCP",
+                "description": None,
+                "icon": None,
+            }
+        ]
+
+    async def deactivate(self, **kwargs):
+        self.calls.append(("deactivate", kwargs))
+        assert kwargs["bot_id"] == "persisted-bot"
+        assert kwargs["owner_id"] == "owner"
+        return {"id": "set-1", "changed": True}
+
+
+@pytest.mark.asyncio
+async def test_legacy_mcp_read_recovers_non_default_bot_from_exact_set_id() -> None:
+    control_plane = _LegacySetScopeControlPlane()
+
+    response = await get_skill_set_mcps(
+        "set-1",
+        user_id="owner",
+        entity_id=None,
+        entity_type=None,
+        bot_id=None,
+        engine_type=None,
+        ctx=SimpleNamespace(user_id="owner", bot_id="default"),
+        bot_repo=_AddressedBots(),
+        skill_set_service_factory=object(),
+        control_plane=control_plane,
+    )
+
+    assert response.model_dump() == {
+        "success": True,
+        "data": [
+            {
+                "id": "mcp-1",
+                "server_code": "mcp.example",
+                "name": "Example MCP",
+                "description": None,
+                "icon": None,
+                "status": "ONLINE",
+            }
+        ],
+        "count": 1,
+    }
+    assert control_plane.calls[0] == (
+        "resolve",
+        {
+            "set_id": "set-1",
+            "actor_id": "owner",
+            "owner_id_hint": None,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_legacy_mcp_read_never_redirects_an_explicit_bot_address() -> None:
+    class _ExplicitControlPlane(_LegacySetScopeControlPlane):
+        def resolve_legacy_set_scope(self, **_kwargs):
+            raise AssertionError("explicit bot_id must not enter legacy fallback")
+
+    control_plane = _ExplicitControlPlane()
+
+    await get_skill_set_mcps(
+        "set-1",
+        user_id="owner",
+        entity_id="owner",
+        entity_type=None,
+        bot_id="persisted-bot",
+        engine_type=None,
+        ctx=SimpleNamespace(user_id="owner", bot_id="default"),
+        bot_repo=_AddressedBots(),
+        skill_set_service_factory=object(),
+        control_plane=control_plane,
+    )
+
+    assert control_plane.calls[0][0] == "get_set"
+
+
+@pytest.mark.asyncio
+async def test_legacy_deactivate_recovers_non_default_bot_from_exact_set_id() -> None:
+    control_plane = _LegacySetScopeControlPlane()
+
+    response = await deactivate_skill_set(
+        DeactivateSkillSetRequest(skill_set_id="set-1"),
+        ctx=SimpleNamespace(user_id="owner", bot_id="default"),
+        bot_repo=_AddressedBots(),
+        activator_factory=object(),
+        control_plane=control_plane,
+    )
+
+    assert response.model_dump() == {
+        "success": True,
+        "message": "Skill set deactivated",
+        "data": {"deactivated": ["set-1"], "failed": []},
+    }
+    assert control_plane.calls[0] == (
+        "resolve",
+        {
+            "set_id": "set-1",
+            "actor_id": "owner",
+            "owner_id_hint": None,
+        },
+    )
 
 
 @pytest.mark.asyncio

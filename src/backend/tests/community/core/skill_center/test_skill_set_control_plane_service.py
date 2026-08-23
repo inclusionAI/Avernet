@@ -17,7 +17,6 @@ from agentclaw.community.core.repository.implementations.skill_center.skill_set_
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
-    SkillSetAccessDeniedError,
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
     McpPermissionDeniedError,
@@ -27,6 +26,9 @@ from agentclaw.community.core.skill_center.services.skill_set_control_plane impo
 )
 from agentclaw.community.core.skill_center.services.bot_runtime_projection_reconciler import (
     BotRuntimeProjectionReconciler,
+)
+from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
+    LegacySkillSetScope,
 )
 from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
@@ -79,6 +81,17 @@ class _CreateRepository(_Repository):
             "is_default": False,
             "is_active": False,
         }
+
+
+class _LegacyScopeRepository(_Repository):
+    def __init__(self, scope: LegacySkillSetScope | None) -> None:
+        super().__init__()
+        self.scope = scope
+        self.scope_calls: list[str] = []
+
+    def resolve_legacy_set_scope(self, *, set_id: str):
+        self.scope_calls.append(set_id)
+        return self.scope
 
 
 class _InactiveMembershipRepository(_Repository):
@@ -816,6 +829,64 @@ def test_default_create_uses_owner_qualified_bot_lookup():
         ("default", owner_id),
     ]
     assert repository.create_calls[0]["owner_id"] == owner_id
+
+
+def test_legacy_set_scope_recovers_persisted_bot_then_applies_actor_acl() -> None:
+    repository = _LegacyScopeRepository(
+        LegacySkillSetScope(owner_id="true-owner", bot_id="bot-1")
+    )
+    authorization = _Authorization()
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=authorization,
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    scope = service.resolve_legacy_set_scope(
+        set_id="set-1",
+        actor_id="collaborator",
+        owner_id_hint=None,
+    )
+
+    assert scope == LegacySkillSetScope(owner_id="true-owner", bot_id="bot-1")
+    assert repository.scope_calls == ["set-1"]
+    assert authorization.calls == [
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "actor_id": "collaborator",
+        }
+    ]
+
+
+def test_legacy_set_scope_rejects_conflicting_owner_hint() -> None:
+    repository = _LegacyScopeRepository(
+        LegacySkillSetScope(owner_id="true-owner", bot_id="bot-1")
+    )
+    service = SkillSetControlPlaneService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+    )
+
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
+        service.resolve_legacy_set_scope(
+            set_id="set-1",
+            actor_id="collaborator",
+            owner_id_hint="wrong-owner",
+        )
 
 
 def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:

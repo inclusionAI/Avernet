@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
+    LegacySkillSetScope,
+)
+
 
 @runtime_checkable
 class SkillSetControlPlaneServiceProtocol(Protocol):
@@ -26,6 +30,14 @@ class SkillSetControlPlaneServiceProtocol(Protocol):
     def get_set(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> dict[str, Any]: ...
+
+    def resolve_legacy_set_scope(
+        self,
+        *,
+        set_id: str,
+        actor_id: str,
+        owner_id_hint: str | None,
+    ) -> LegacySkillSetScope | None: ...
 
     def resolve_legacy_skill_id(
         self, *, bot_id: str, owner_id: str, actor_id: str, identifier: str
