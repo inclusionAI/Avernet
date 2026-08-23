@@ -132,6 +132,7 @@ mod config_loader;
 mod env;
 mod error;
 mod eventing_wiring;
+mod friend_connect_notification;
 pub mod http_adapter;
 mod identity_wiring;
 pub mod lifecycle;

@@ -31,6 +31,7 @@ use crate::config::{
     LlmConfig, LlmProviderType,
 };
 use crate::lifecycle::LifecycleOrchestrator;
+use crate::friend_connect_notification::HttpFriendConnectNotificationPort;
 use crate::plugins::{
     DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
     build_registered_channel_provider, build_registered_leader_election,
@@ -1484,6 +1485,7 @@ fn build_openapi_v1_state(
     system_message: Arc<dyn SystemMessageService>,
     collaboration_templates: Arc<dyn CollaborationTemplateService>,
     principal_verifier: Arc<dyn PrincipalVerifier>,
+    connect_service: Arc<dyn bcs_service_api::application::ConnectService>,
     event_subscription_service: Arc<dyn bcs_service_api::application::v1::EventSubscriptionService>,
     group_event_subscription_provisioner: Arc<
         dyn bcs_service_api::application::v1::GroupEventSubscriptionProvisioner,
@@ -1571,18 +1573,21 @@ fn build_openapi_v1_state(
             group_link_url: config.invite.group_link_url.clone(),
             session_link_url: config.invite.session_link_url.clone(),
         });
-    let invitation_service = Arc::new(InvitationFriendshipServiceImpl::new(
-        friends,
-        friend_requests,
-        invitation_groups,
-        invitation_sessions,
-        registry,
-        invite,
-        invite_token_secret,
-        InvitationFriendshipServiceConfig {
-            default_ttl_seconds: config.invite.default_ttl_seconds,
-        },
-    ));
+let invitation_service = Arc::new(
+        InvitationFriendshipServiceImpl::new(
+            friends,
+            friend_requests,
+            invitation_groups,
+            invitation_sessions,
+            registry,
+            invite,
+            invite_token_secret,
+            InvitationFriendshipServiceConfig {
+                default_ttl_seconds: config.invite.default_ttl_seconds,
+            },
+        )
+        .with_friend_connection_service(connect_service),
+    );
     let collaboration_template_service: Arc<
         dyn bcs_service_api::application::v1::CollaborationTemplateService,
     > = Arc::new(V1CollaborationTemplateServiceImpl::new(collaboration_templates));
@@ -1599,10 +1604,11 @@ fn build_openapi_v1_state(
             session_service.clone(),
             session_service,
             invitation_service.clone(),
-            invitation_service,
+            invitation_service.clone(),
             principal_verifier,
         )
         .with_bot_service(bot_service)
+        .with_friend_connection_service(invitation_service)
         .with_session_file_service(session_file_service, session_file_url_projector)
         .with_event_subscription_service(event_subscription_service)
         .with_collaboration_template_service(collaboration_template_service)
@@ -2143,6 +2149,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             system_message.clone(),
             collaboration_templates.clone(),
             gateway_principal_verifier.clone(),
+            Arc::new(bcs_test_support::NoopConnectService),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
         );
@@ -3638,6 +3645,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             use_cases.system_message.clone(),
             collaboration_templates.clone(),
             gateway_principal_verifier.clone(),
+            Arc::new(bcs_test_support::NoopConnectService),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
         );
@@ -4102,12 +4110,21 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
         // See docs/superpowers/plans/2026-08-19-v2-friends-parallel-interface.md.
         let friend_svc: Arc<dyn bcs_service_api::FriendCoreService> =
             legacy_friend_core.clone();
+        let friend_connect_notification: Arc<dyn bcs_service_api::FriendConnectNotificationPort> =
+            match config.friend_work_order_base_url.as_deref() {
+                Some(base_url) => Arc::new(
+                    HttpFriendConnectNotificationPort::new(base_url)
+                        .expect("friend_work_order_base_url must be a valid HTTP(S) URL"),
+                ),
+                None => Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
+            };
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
             Arc::new(bcs_edge_permission::DbConnectService::new(
                 edge_grant_store.clone(),
                 profile_store.clone(),
                 request_store.clone(),
                 bot_config_store.clone(),
+                friend_connect_notification,
                 edge_permission_env,
             ));
         let admission_service: Arc<dyn bcs_service_api::application::AdmissionService> =
@@ -4430,6 +4447,7 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             use_cases.system_message.clone(),
             collaboration_templates.clone(),
             gateway_principal_verifier.clone(),
+            connect_service.clone(),
             eventing_runtime.service,
             eventing_runtime.group_provisioner,
         );

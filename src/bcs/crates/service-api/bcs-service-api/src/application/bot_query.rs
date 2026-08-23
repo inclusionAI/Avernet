@@ -83,7 +83,7 @@ pub struct BotQueryByIdsResult {
     pub bots: Vec<BotQueryEntry>,
 }
 
-/// Request for `GET /v2/bots/search`: name/summary fuzzy search + visibility
+/// Request for `GET /bots/search`: name/summary fuzzy search + visibility
 /// + actor-status filtering over the active bot registry.
 ///
 /// `visibility`: `None` → return `public` + `protected` bots (default visible
@@ -106,7 +106,7 @@ pub struct SearchBotsCommand {
     pub tc_bot: Option<bool>,
 }
 
-/// Response payload for `GET /v2/bots/search`.
+/// Response payload for `GET /bots/search`.
 ///
 /// The service returns the **full** filtered + sorted set; the delivery
 /// adapter applies caller-dependent `is_friend` post-filtering and pagination

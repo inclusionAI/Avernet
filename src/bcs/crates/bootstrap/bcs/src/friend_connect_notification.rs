@@ -265,20 +265,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn notify_returns_internal_error_when_backend_is_unavailable() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind unavailable backend");
-        let mut adapter = HttpFriendConnectNotificationPort::new(&format!(
-            "http://{}",
-            listener.local_addr().expect("backend address")
-        ))
-        .expect("valid url");
-        adapter.client = reqwest::Client::builder()
-            .no_proxy()
-            .timeout(std::time::Duration::from_millis(100))
-            .build()
-            .expect("build test client");
+    async fn notify_returns_internal_error_when_backend_unreachable() {
+        let adapter = HttpFriendConnectNotificationPort::new("http://127.0.0.1:9").expect("valid url");
         let result = adapter
             .notify(FriendConnectNotificationCommand {
                 kind: FriendConnectNotificationKind::ApprovalRequested,

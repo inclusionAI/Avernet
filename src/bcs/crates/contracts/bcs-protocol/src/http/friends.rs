@@ -1,4 +1,4 @@
-//! Wire types for `/friends/*` (edge-permission model).
+//! Wire types for internal friend connection routes (edge-permission model).
 //!
 //! New-model DTOs (edge-permission reform) live here. The legacy
 //! `FriendApiResponse`/`FriendEntry` types are retained for the existing
@@ -6,17 +6,18 @@
 use serde::{Deserialize, Serialize};
 
 /// Request body for creating a friend (connect) request.
-/// Old `/friends/*` path uses `from_bot`; new `/v2/friends/*` path uses `from_actor` + `actor_kind`.
-/// Both fields coexist for backward compat (old clients send `from_bot`, v2 clients send `from_actor`).
+/// Old `/friends/*` path uses `from_bot`; `/collaboration/friend-connections/*` uses
+/// `from_actor` + `actor_kind` as an authenticated act-as target. Both fields
+/// coexist for backward compatibility with old clients.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateFriendRequestBody {
     /// Old path: caller bot UUID (fallback when no Bearer). Used by bcs-cli.
     #[serde(default)]
     pub from_bot: Option<String>,
-    /// V2 path: caller actor id (raw staff_no or bot_uuid; fallback when no Bearer).
+    /// friend-connections path: act-as actor id (raw staff_no or bot_uuid).
     #[serde(default)]
     pub from_actor: Option<String>,
-    /// V2 path: caller actor kind: "human" → prefix `human_`, "bot" → use as-is.
+    /// friend-connections path: actor kind: "human" → prefix `human_`, "bot" → use as-is.
     #[serde(default)]
     pub actor_kind: Option<String>,
     pub to_bot: String,
