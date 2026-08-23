@@ -34,6 +34,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import envelope_erro
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     AUTHORIZATION,
+    INHERITED,
     OWNER_SCOPED,
     SCAFFOLDING_MODES,
     Check,
@@ -354,6 +355,28 @@ _DEFERRED_OPERATIONS = frozenset(
         # route is served. Whether a route-level gate replaces that is not a
         # question this feature settles.
         ("GET", "/openapi/v1/bots/{bot_id}/connection"),
+        # The ten session operations whose bar is not one level. Their handlers
+        # run ``_resolve_session_backend``: owner-or-collaborator-at-MEMBER
+        # first, and **on refusal**, at draft stage, a BCN-verified friendship
+        # — a friend who is no collaborator reaches the bot's sessions through
+        # ExpertChat. A route-level ``Check(MEMBER)`` refuses before the
+        # handler runs, so it would close that path outright rather than
+        # relocate it. The seam adjudicates one level; this is a disjunction,
+        # and expressing it is not a question this feature settles.
+        #
+        # The six *file* operations under the same prefix are not here: they
+        # call ``resolve_operable_bot`` directly, with no fallback, and did
+        # migrate.
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions"),
+        ("POST", "/openapi/v1/bots/{bot_id}/sessions"),
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions/favorites"),
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
+        ("PATCH", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
     }
 )
 
@@ -901,18 +924,24 @@ def test_the_asset_service_check_the_unseamed_surfaces_rely_on_still_exists():
 
 
 def test_the_twin_guard_catches_an_abandoned_twin():
-    """The guard above is vacuous until a row migrates; prove it can still fire.
+    """Prove the guard can still fire, on a pair that has already migrated.
 
-    A guard that only ever runs over zero candidates is indistinguishable from
-    one that is broken, and this one stays vacuous until Group F. So drive it:
-    migrate a replacement without its twin and confirm it names the address,
-    then migrate at a different bar and confirm it names that too.
+    A guard is only as good as its ability to fail, and the way this one stops
+    being able to is by having nothing left to run over. So both halves are
+    staged here rather than assumed: the twin is put *back* to ``INHERITED``
+    before the abandoned case is driven, because the real table now has it at
+    ``Check`` and reading the guard as firing when it had nothing to catch is
+    precisely the false pass this test exists to rule out.
+
+    Then the same pair at a different bar, and finally the state the table
+    really holds — which must pass.
     """
     replacement = ("GET", "/openapi/v1/bots/{bot_id}/sessions")
     twin = ("GET", "/openapi/v1/bots/sessions/{bot_id}")
     saved = (AUTHORIZATION[replacement], AUTHORIZATION[twin])
     try:
         AUTHORIZATION[replacement] = Check(PermissionLevel.MEMBER)
+        AUTHORIZATION[twin] = INHERITED
 
         with pytest.raises(AssertionError) as abandoned:
             test_a_retiring_twin_migrates_with_its_replacement()

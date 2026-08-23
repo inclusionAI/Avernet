@@ -24,6 +24,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
     user_scoped_client,
 )
 from agentclaw.community.adapters.http.openapi_v1 import _ENGINE_RUNTIME_GROUPS
@@ -43,7 +44,7 @@ from agentclaw.community.core.repository.implementations.bot.bot import BotRepos
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
-from .conftest import BOT, OWNER, FakeRelay
+from .conftest import BOT, OWNER, FakeRelay, bind_seam_from_relay
 
 TENANT_A = "tenant-a"
 TENANT_B = "tenant-b"
@@ -121,11 +122,15 @@ def client(relay: FakeRelay, connections: _FakeConnections, friendships, expert)
             binder.bind(EngineConnectionServiceProtocol, to=connections)
             binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
             binder.bind(ExpertChatServiceProtocol, to=expert)
+            # The gate reads the same ``relay.bots`` this sweep drives, so a
+            # foreign bot is foreign to both and the refusal stays one answer.
+            bind_seam_from_relay(binder, relay)
 
     app = FastAPI()
     for group in _ENGINE_RUNTIME_GROUPS:
         app.include_router(group)
     app.dependency_overrides[require_principal] = lambda: {"user_id": OWNER}
+    mount_public_error_handlers(app)
     attach_injector(app, Injector([_M()]))
     return user_scoped_client(app, OWNER)
 

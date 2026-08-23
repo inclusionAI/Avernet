@@ -143,23 +143,26 @@ deletion is known to change no caller's answer.
 - **Depends on:** Task 8
 
 ## Task 10: Move the engine-runtime groups onto the seam
-- **Goal:** 26 rows — the largest group — while keeping bot-type gating intact.
+- **Goal:** the engine-runtime rows, while keeping bot-type gating intact — 16 of the 26, once the group was traced.
 - **Files:** `core/engine_runtime/relay.py`, `core/engine_runtime/gate.py`, `.../openapi_v1/engine_runtime/gating.py`, `.../openapi_v1/authorization.py`
 - **Done when:**
-  - [ ] The bar is derived from `gate.py:OPERATOR_LEVEL` (`MEMBER`) and recorded, with the docstring's "one bar for every operation on the surface" quoted as the evidence.
-  - [ ] All 26 rows are `Check(MEMBER)`.
-  - [ ] `require_bot_operator` is deleted from `relay.resolve_bot` (`relay.py:140`); `require_operable_bot` in `gating.resolve_operable_bot` **stays**, so an unsupported bot type still answers 501.
-  - [ ] `relay.py:289`'s self-resolve (`resolve_bot(bot_id, owner_id, owner_id)`) is checked and its behaviour is unchanged.
-  - [ ] Tests: below-bar caller refused byte-identically to an absent bot; a personal bot addressed at a published stage still answers 501, not 404.
+  - [x] The bar is derived from `gate.py:OPERATOR_LEVEL` (`MEMBER`) and recorded, with the docstring's "one bar for every operation on the surface" quoted as the evidence.
+  - [x] 16 rows are `Check(MEMBER)`: engine (4), models (2), nodes (1), approvals (3), diagnostics (2) — plus the six session **file** operations, which call `resolve_operable_bot` directly.
+  - [x] **Ten session rows are deferred, and this is the group's own finding.** `sessions/router.py:_resolve_session_backend` is not a single-level bar: it calls `resolve_operable_bot`, and **on `BotNotFoundError`**, at draft stage, asks `HumanBotFriendshipService.is_friend` — a BCN-verified friend who is no collaborator reaches the bot's sessions through `ExpertChat`. `Check(MEMBER)` refuses before the handler runs, so it closes that path outright instead of relocating it. The seam adjudicates one level; this is a disjunction, and expressing it is a seam change this feature ruled out. Recorded in `_DEFERRED_OPERATIONS` with the reason. Caught by `test_sessions.py`'s friend tests, not by reading the table.
+  - [x] **`require_bot_operator` stays in `relay.resolve_bot`**, where the task said to delete it. The deferred sessions handlers turn that exact refusal into the friend fallback, so deleting it would not merely leave them unchanged — it would make `resolve_operable_bot` *succeed* for a stranger and serve them as an operator. With it kept, the sixteen migrated rows are adjudicated by the seam first and re-checked at the same bar underneath, which is the Task 9 pattern; the ten deferred ones are untouched.
+  - [x] `require_operable_bot` in `gating.resolve_operable_bot` **stays**, so an unsupported bot type still answers 501.
+  - [x] `relay.py`'s self-resolve (`resolve_bot(bot_id, owner_id, owner_id)`) is unchanged — it addresses the owner as caller, which the adjudication admits.
+  - [x] Tests: the twenty-route operator sweep in `test_operator_access.py` now drives the real gate — its seam doubles read the same `relay.operators` the fake does, so `add_operator` still describes one world; a personal bot addressed at a published stage still answers 501, not 404.
 - **Depends on:** Task 9
 
 ## Task 11: Adjudicate the fifteen retiring engine-runtime addresses
-- **Goal:** Keep the path-addressed legacy twins checked once `require_bot_operator` is gone from the relay.
+- **Goal:** Keep the path-addressed legacy twins carrying the same bar as their replacements.
 - **Files:** `.../openapi_v1/authorization.py`
 - **Done when:**
-  - [ ] All 15 legacy rows (approvals ×3, engine ×3, models ×2, sessions ×7) are `Check(MEMBER)`. **`/bots/connection/{bot_id}` is not among them** — it shares `connection.py:build` with its replacement, which is deferred, so it keeps the check it has. They need nothing from the seam: each declares `{bot_id}` on its path already, just at a different position than its replacement.
-  - [ ] A test drives each and its replacement with the same caller and asserts identical admit/refuse.
-  - [ ] `INHERITED` falls from 42 to 27 — 20 twin an `OWNER_SCOPED` address, 6 are the legacy skills addresses, and 1 is the legacy connection address; each is untouched along with the current row it shares its check with.
+  - [x] The 8 legacy rows whose replacement migrated (approvals ×3, engine ×3, models ×2) are `Check(MEMBER)`. They need nothing from the seam: each declares `{bot_id}` on its path already, just at a different position than its replacement. `test_a_retiring_twin_migrates_with_its_replacement` is what named them — it fired on the first attempt and listed all fifteen, which is what the guard was written for.
+  - [x] **The 7 sessions twins stay `INHERITED`**, because their replacements did not migrate (Task 10): they share the friend-fallback handlers. **`/bots/connection/{bot_id}` is not among the migrated either** — it shares `connection.py:build` with its replacement, which is deferred.
+  - [x] The twins are driven against their replacements by `test_legacy_parity.py`, which passes unchanged; the guard above is what asserts the bars match, per pair, at assembly time.
+  - [x] `INHERITED` falls by 8. The rest are untouched along with the current row each shares its check with.
 - **Depends on:** Task 10
 
 ## Task 12: Move the service-publication facade onto the seam

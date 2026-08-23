@@ -176,12 +176,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/activate"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
-    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
-    ("GET", "/openapi/v1/bots/{bot_id}/approvals/modes"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+    ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/approvals/modes"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/auth-status"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/authorized-apps"):
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.authorized_apps.router"),
@@ -214,10 +211,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.OWNER, "…core.service_bot.services.service_publication_facade"),
     ("GET", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/diagnostics/health"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.diagnostics.router"),
-    ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.diagnostics.router"),
+    ("GET", "/openapi/v1/bots/{bot_id}/diagnostics/health"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"): Check(PermissionLevel.MEMBER),
     ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
     ("GET", "/openapi/v1/bots/{bot_id}/edit-lock"):
@@ -236,16 +231,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.ADMIN, "…core.bot_collaborator.services.collaborator_service"),
     ("PATCH", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"):
         ServiceChecked(PermissionLevel.ADMIN, "…core.bot_collaborator.services.collaborator_service"),
-    ("GET", "/openapi/v1/bots/{bot_id}/engine/available"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
-    ("GET", "/openapi/v1/bots/{bot_id}/engine/capabilities"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+    ("GET", "/openapi/v1/bots/{bot_id}/engine/available"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/engine/capabilities"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
-    ("GET", "/openapi/v1/bots/{bot_id}/engine/status"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"):
         ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.harness.router"),
     ("POST", "/openapi/v1/bots/{bot_id}/harness/diagnose"):
@@ -289,12 +280,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/mcps"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(PermissionLevel.MEMBER),
-    ("GET", "/openapi/v1/bots/{bot_id}/models"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
-    ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
-    ("GET", "/openapi/v1/bots/{bot_id}/nodes"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+    ("GET", "/openapi/v1/bots/{bot_id}/models"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/nodes"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/passport"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/public-bcs"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/render-screens"):
@@ -318,39 +306,43 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/sessions"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+        ServiceChecked(PermissionLevel.MEMBER,
+                       "…openapi_v1.engine_runtime.sessions.router"),
     ("POST", "/openapi/v1/bots/{bot_id}/sessions"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
-    ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
-    ("POST", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-intents"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
-    ("POST", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-complete"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
-    ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+        ServiceChecked(PermissionLevel.MEMBER,
+                       "…openapi_v1.engine_runtime.sessions.router"),
+    ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-intents"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-complete"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content"): Check(PermissionLevel.MEMBER),
     ("GET",
      "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}"
-     "/materialize-status"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+     "/materialize-status"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/sessions/favorites"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+        ServiceChecked(PermissionLevel.MEMBER,
+                       "…openapi_v1.engine_runtime.sessions.router"),
     ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+        ServiceChecked(PermissionLevel.MEMBER,
+                       "…openapi_v1.engine_runtime.sessions.router"),
     ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+        ServiceChecked(PermissionLevel.MEMBER,
+                       "…openapi_v1.engine_runtime.sessions.router"),
     ("PATCH", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+        ServiceChecked(PermissionLevel.MEMBER,
+                       "…openapi_v1.engine_runtime.sessions.router"),
     ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+        ServiceChecked(PermissionLevel.MEMBER,
+                       "…openapi_v1.engine_runtime.sessions.router"),
     ("PUT", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+        ServiceChecked(PermissionLevel.MEMBER,
+                       "…openapi_v1.engine_runtime.sessions.router"),
     ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+        ServiceChecked(PermissionLevel.MEMBER,
+                       "…openapi_v1.engine_runtime.sessions.router"),
     ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.gating"),
+        ServiceChecked(PermissionLevel.MEMBER,
+                       "…openapi_v1.engine_runtime.sessions.router"),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/resources"): Check(PermissionLevel.MEMBER),
@@ -506,18 +498,18 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("a task, not a bot; the surface is not mounted"),
 
     # ── Retiring addresses in ``deprecated/`` ─────────────────────────────
-    ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): INHERITED,
-    ("PUT", "/openapi/v1/bots/approvals/{bot_id}/mode"): INHERITED,
-    ("GET", "/openapi/v1/bots/approvals/{bot_id}/modes"): INHERITED,
+    ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/approvals/{bot_id}/modes"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/connection/{bot_id}"): INHERITED,
-    ("GET", "/openapi/v1/bots/engine/{bot_id}/available"): INHERITED,
-    ("GET", "/openapi/v1/bots/engine/{bot_id}/capabilities"): INHERITED,
-    ("GET", "/openapi/v1/bots/engine/{bot_id}/status"): INHERITED,
+    ("GET", "/openapi/v1/bots/engine/{bot_id}/available"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/engine/{bot_id}/capabilities"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/engine/{bot_id}/status"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/identity/{bot_id}"): INHERITED,
     ("GET", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): INHERITED,
     ("PUT", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): INHERITED,
-    ("GET", "/openapi/v1/bots/models/{bot_id}"): INHERITED,
-    ("GET", "/openapi/v1/bots/models/{bot_id}/{model_id:path}"): INHERITED,
+    ("GET", "/openapi/v1/bots/models/{bot_id}"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/models/{bot_id}/{model_id:path}"): Check(PermissionLevel.MEMBER),
     ("DELETE", "/openapi/v1/bots/resources"): INHERITED,
     ("GET", "/openapi/v1/bots/resources"): INHERITED,
     ("GET", "/openapi/v1/bots/resources/download"): INHERITED,
@@ -537,8 +529,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): INHERITED,
     ("GET", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): INHERITED,
     ("PATCH", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): INHERITED,
-    ("DELETE", "/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages"):
-        INHERITED,
+    ("DELETE", "/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages"): INHERITED,
     ("GET", "/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages"): INHERITED,
     ("GET", "/openapi/v1/bots/skills"): INHERITED,
     ("POST", "/openapi/v1/bots/skills/upload"): INHERITED,

@@ -162,14 +162,28 @@ rather than the deprecation schedule's.
   them means first changing what they address, which is a bug fix with its own
   blast radius (ownership also resolves through a method documented as
   performing no owner check, and one bot id skips the check entirely).
+- **Ten session operations** — the list, the create, the favourites read, and
+  the per-session read, update, delete, favourite pair and message pair. Found
+  by tracing the group, not by reading the table: their handlers run
+  `sessions/router.py:_resolve_session_backend`, which is not a single-level
+  bar. It asks for owner-or-collaborator-at-MEMBER first and, **on refusal**,
+  at draft stage, asks BCN whether the caller is a *friend* of the bot — a
+  friend who is no collaborator reaches the bot's sessions through ExpertChat.
+  A route-level `Check(MEMBER)` refuses before the handler runs, so it would
+  close that path outright rather than relocate it. The seam adjudicates one
+  level; this is a disjunction, and expressing it is a seam change this feature
+  ruled out. The six session **file** operations under the same prefix are not
+  affected — they call `resolve_operable_bot` directly, with no fallback — and
+  did migrate.
   **`ServiceChecked` therefore does not reach zero in this feature**; it reaches
-  10 — these 6, the 3 skills rows, and connection.
+  20 — these 10, the 6 harness rows, the 3 skills rows, and connection.
 - **The 40 `OWNER_SCOPED` operations.** Blocked on #906 / #907, and a policy
   change rather than a consolidation: collaborators start getting through.
-- **The 27 remaining `INHERITED` operations** — 20 twin `OWNER_SCOPED`
-  addresses and follow their replacements whenever those are decided; 6 are the
-  legacy skills addresses and 1 the legacy connection address, each untouched
-  along with the current row it shares its check with.
+- **The remaining `INHERITED` operations.** Most twin `OWNER_SCOPED` addresses
+  and follow their replacements whenever those are decided; 6 are the legacy
+  skills addresses, 7 the legacy sessions addresses, and 1 the legacy
+  connection address — each untouched along with the current row it shares its
+  check with.
 - **Introducing an edit lock where none exists today.** #1323 *Decisions* 1
   stands: locks stay exactly where they are, and this feature must preserve them
   rather than extend or remove them.

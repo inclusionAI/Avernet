@@ -18,6 +18,7 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
     user_scoped_client,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
@@ -43,6 +44,13 @@ class FakeRelay:
     policy (MEMBER vs ADMIN) is core's business, exercised in
     ``tests/community/core/engine_runtime``; at this boundary a caller is
     either an operator or not.
+
+    The relay keeps that second step even though most of this package's rows
+    are ``Check(MEMBER)`` now, because the sessions group did **not** migrate:
+    its handlers turn the relay's refusal into the friend fallback, so the
+    refusal has to still happen. :attr:`operators` therefore feeds two things
+    at once — this method, and the seam doubles :func:`bind_seam_from_relay`
+    wires — which is what keeps one ``add_operator`` call describing one world.
     """
 
     def __init__(self) -> None:
@@ -120,13 +128,73 @@ class FakeRelay:
     def add_operator(
         self, caller_id: str, *, bot_id: str = BOT, owner_id: str = OWNER
     ) -> None:
-        """Admit ``caller_id`` as a (member-level) collaborator of the bot."""
+        """Admit ``caller_id`` as a member-level collaborator of the bot.
+
+        Read by both gates — this fake's own adjudication and the seam doubles
+        :func:`bind_seam_from_relay` wires — so one call still describes one
+        caller's relation to one bot.
+        """
         self.operators.add((bot_id, owner_id, caller_id))
 
     @property
     def paths(self) -> list[str]:
         """Forwards that actually reached the transport."""
         return [c["path"] for c in self.calls]
+
+
+def bind_seam_from_relay(binder, relay: FakeRelay) -> None:
+    """Wire ``bot_access`` so it adjudicates from the fake relay's own state.
+
+    These operations declare ``Check(MEMBER)``, so the gate runs before every
+    handler in this package and fails closed against an app that binds neither
+    a bot repository nor a collaborator service. It could be given generic
+    doubles, but then ``relay.add_operator(...)`` and ``relay.bots`` would
+    describe one world and the gate another, and every operator test in this
+    package would be asserting against a fixture rather than the surface.
+
+    So both doubles read the relay: a bot exists to the gate exactly when it
+    exists to the relay, and a caller is MEMBER exactly when
+    :meth:`FakeRelay.add_operator` said so. The owner never reaches the
+    collaborator double at all — ``resolve_operable_permission_level``
+    short-circuits ``user_id == owner_id`` to OWNER.
+
+    The relay still adjudicates too, and deliberately: the sessions group did
+    not migrate, and its handlers depend on the relay refusing so they can
+    offer the friend fallback. Two gates at one bar, reading one set.
+    """
+    from injector import InstanceProvider
+
+    from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+    from agentclaw.community.core.bot_collaborator.protocols import (
+        CollaboratorServiceProtocol,
+    )
+    from agentclaw.community.core.repository.protocols.bot import (
+        BotCollabLogRepositoryProtocol,
+        BotRepository,
+    )
+
+    class _Bots:
+        def get_by_id_and_owner(self, bot_id: str, owner_id: str):
+            if (bot_id, owner_id) not in relay.bots:
+                return None
+            return {"id": 1, "bot_id": bot_id, "owner_id": owner_id, "env": "dev"}
+
+    class _Collaborators:
+        def get_operable_permission_level(self, *, bot, user_id, env=None):
+            key = (str(bot["bot_id"]), str(bot["owner_id"]), user_id)
+            return (
+                PermissionLevel.MEMBER
+                if key in relay.operators
+                else PermissionLevel.NONE
+            )
+
+    class _Audit:
+        def insert(self, data):
+            return data
+
+    binder.bind(BotRepository, to=InstanceProvider(_Bots()))
+    binder.bind(CollaboratorServiceProtocol, to=InstanceProvider(_Collaborators()))
+    binder.bind(BotCollabLogRepositoryProtocol, to=InstanceProvider(_Audit()))
 
 
 @pytest.fixture
@@ -223,10 +291,15 @@ def make_client(relay, friendships, expert):
                 binder.bind(EngineRuntimeRelayProtocol, to=relay)
                 binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
                 binder.bind(ExpertChatServiceProtocol, to=expert)
+                bind_seam_from_relay(binder, relay)
 
         app = FastAPI()
         app.include_router(router)
         app.dependency_overrides[require_principal] = lambda: resolved
+        # The seam refuses before the handler, so ``@envelope_errors`` never
+        # sees it and the refusal needs the application's own handler to
+        # become the 404 body these tests read.
+        mount_public_error_handlers(app)
         attach_injector(app, Injector([_M()]))
         return user_scoped_client(app, caller)
 

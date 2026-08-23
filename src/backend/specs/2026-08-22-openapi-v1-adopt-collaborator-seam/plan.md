@@ -221,8 +221,12 @@ No flag, no migration. Order is a dependency order, not a preference:
 #                                     collection/upload rows are deferred, so
 #                                     nothing they share with the retiring
 #                                     addresses is touched
-# 8. engine_runtime    (26 → Check)   keep the type gate
-# 9. engine twins      (15 → Check)   path-addressed; the connection twin is
+# 8. engine_runtime    (16 → Check)   keep the type gate; ten session rows
+#                                     deferred — their bar is a disjunction
+#                                     (operator OR draft-stage friend), not
+#                                     a level, so Check would close a path
+# 9. engine twins      (8 → Check)    path-addressed; the sessions twins
+#                                     follow their replacements and stay; the connection twin is
 #                                     deferred with its replacement
 # 12. publication facade (16 → Check) keep `level` and the lock
 # 13. channels         (6 → Check)    keep the edit lock
