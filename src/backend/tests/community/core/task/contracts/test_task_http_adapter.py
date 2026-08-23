@@ -23,6 +23,7 @@ from injector import Injector, Module, provider, singleton
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.core.repository.protocols.task import TaskInfoRepositoryProtocol
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.principal import require_user_id
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
 from agentclaw.community.adapters.http.task.router import router as task_internal_router
@@ -110,6 +111,7 @@ def client():
     app = FastAPI()
     app.include_router(task_router)
     app.include_router(task_internal_router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "owner_user"}
     app.dependency_overrides[require_user_id] = lambda: "owner_user"
     attach_injector(app, injector)
     return TestClient(app), injector
