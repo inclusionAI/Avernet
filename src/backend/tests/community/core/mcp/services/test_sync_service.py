@@ -766,3 +766,180 @@ class TestSyncMcpDetailToAllBots:
 
         assert result["success"] is True
         assert result["sync_results"][0]["reason"] == "缺少设备连接信息"
+
+
+class TestSyncMcpDetailsForBot:
+    """sync_mcp_details_for_bot: resolve once, then fan out — and stay off the loop.
+
+    The bug this entrypoint exists for: looping ``sync_mcp_detail`` re-resolved the
+    device per MCP, and ``resolve_for_bot`` is synchronous with a blocking ws-info
+    round trip inside. Running it on the event loop serialized the caller's fan-out
+    no matter how wide the semaphore was.
+    """
+
+    def _entries(self, n):
+        return [{"server_code": f"mcp.s{i}"} for i in range(n)]
+
+    @pytest.mark.asyncio
+    async def test_device_is_resolved_once_for_the_whole_batch(self):
+        resolver, dispatcher, plugin = _make_resolver_and_dispatcher()
+        svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)
+
+        result = await svc.sync_mcp_details_for_bot(
+            user_id="u1", mcp_entries=self._entries(14), bot_id="bot1",
+        )
+
+        assert result["success"] is True
+        # 14 MCPs, one device resolution — not 14.
+        assert resolver.resolve_for_bot.call_count == 1
+        assert dispatcher.dispatch.call_count == 1
+        assert plugin.sync_single_mcp.call_count == 14
+
+    @pytest.mark.asyncio
+    async def test_blocking_work_is_kept_off_the_event_loop(self):
+        """resolve_for_bot and build_mcp_sync_payload both block; if either ran
+        inline the fan-out below could never overlap."""
+        import threading
+
+        loop_thread = threading.get_ident()
+        threads: dict[str, int] = {}
+
+        ctx = _make_ctx()
+
+        def record_resolve(*_a, **_k):
+            threads["resolve"] = threading.get_ident()
+            return ctx
+
+        def record_payload(**_k):
+            threads["payload"] = threading.get_ident()
+            return (None, {}, "PROD", None)
+
+        resolver, dispatcher, plugin = _make_resolver_and_dispatcher()
+        resolver.resolve_for_bot.side_effect = record_resolve
+        svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)
+        svc.mcp_config_service.build_mcp_sync_payload.side_effect = record_payload
+
+        await svc.sync_mcp_details_for_bot(
+            user_id="u1", mcp_entries=self._entries(2), bot_id="bot1",
+        )
+
+        assert threads["resolve"] != loop_thread
+        assert threads["payload"] != loop_thread
+
+    @pytest.mark.asyncio
+    async def test_deliveries_overlap_up_to_the_bound(self):
+        import threading
+        import time
+
+        from agentclaw.community.core.mcp.services import sync_service as mod
+
+        lock = threading.Lock()
+        inflight = peak = 0
+
+        def slow_push(*_a, **_k):
+            nonlocal inflight, peak
+            with lock:
+                inflight += 1
+                peak = max(peak, inflight)
+            time.sleep(0.02)
+            with lock:
+                inflight -= 1
+            return True
+
+        plugin = _make_plugin(sync_single_mcp=MagicMock(side_effect=slow_push))
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)
+
+        bound = mod._DESIRED_STATE_DETAIL_CONCURRENCY
+        result = await svc.sync_mcp_details_for_bot(
+            user_id="u1", mcp_entries=self._entries(bound * 2), bot_id="bot1",
+        )
+
+        assert result["success"] is True
+        # Serial delivery would peak at 1. The bound caps it; the shared
+        # to_thread pool may cap it lower on a small box, hence the range.
+        assert 1 < peak <= bound
+
+    @pytest.mark.asyncio
+    async def test_failed_entry_reports_its_server_code(self):
+        pushed = []
+
+        def push(mcp_data, **_k):
+            code = mcp_data["server_code"]
+            pushed.append(code)
+            return code != "mcp.s1"
+
+        plugin = _make_plugin(sync_single_mcp=MagicMock(side_effect=push))
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)
+
+        result = await svc.sync_mcp_details_for_bot(
+            user_id="u1", mcp_entries=self._entries(3), bot_id="bot1",
+        )
+
+        assert result["success"] is False
+        assert "mcp.s1" in result["error"]
+        # Fan-out attempts every entry; only the verdict is negative.
+        assert sorted(pushed) == ["mcp.s0", "mcp.s1", "mcp.s2"]
+
+    @pytest.mark.asyncio
+    async def test_raising_entry_fails_the_batch_without_escaping(self):
+        def push(mcp_data, **_k):
+            if mcp_data["server_code"] == "mcp.s1":
+                raise RuntimeError("device refused the payload")
+            return True
+
+        plugin = _make_plugin(sync_single_mcp=MagicMock(side_effect=push))
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)
+
+        result = await svc.sync_mcp_details_for_bot(
+            user_id="u1", mcp_entries=self._entries(3), bot_id="bot1",
+        )
+
+        assert result["success"] is False
+        assert "mcp.s1" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_cancellation_propagates_instead_of_reporting_failure(self):
+        import asyncio
+
+        def push(mcp_data, **_k):
+            if mcp_data["server_code"] == "mcp.s1":
+                raise asyncio.CancelledError()
+            return True
+
+        plugin = _make_plugin(sync_single_mcp=MagicMock(side_effect=push))
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)
+
+        with pytest.raises(asyncio.CancelledError):
+            await svc.sync_mcp_details_for_bot(
+                user_id="u1", mcp_entries=self._entries(2), bot_id="bot1",
+            )
+
+    @pytest.mark.asyncio
+    async def test_empty_batch_does_not_touch_the_device(self):
+        resolver, dispatcher, plugin = _make_resolver_and_dispatcher()
+        svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)
+
+        result = await svc.sync_mcp_details_for_bot(
+            user_id="u1", mcp_entries=[], bot_id="bot1",
+        )
+
+        assert result["success"] is True
+        resolver.resolve_for_bot.assert_not_called()
+        plugin.sync_single_mcp.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unbound_device_reports_the_missing_connection_error(self):
+        resolver, dispatcher, plugin = _make_resolver_and_dispatcher(unavailable=True)
+        svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)
+
+        result = await svc.sync_mcp_details_for_bot(
+            user_id="u1", mcp_entries=self._entries(2), bot_id="bot1",
+        )
+
+        assert result["success"] is False
+        assert "缺少设备连接信息" in result["error"]
+        plugin.sync_single_mcp.assert_not_called()
