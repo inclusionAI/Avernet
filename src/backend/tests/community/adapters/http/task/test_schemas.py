@@ -52,7 +52,7 @@ def test_op_result_to_dto_returns_extend_props():
 @pytest.mark.parametrize(
     ("runtime", "product"),
     [
-        ("PENDING", "EXECUTING"),
+        ("PENDING", "DEFINED"),
         ("PLANNING", "EXECUTING"),
         ("RUNNING", "EXECUTING"),
         ("HUNG", "REVIEWING"),
