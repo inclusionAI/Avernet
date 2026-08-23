@@ -110,6 +110,7 @@ pub struct BotControlPlanePatch {
 impl BotControlPlaneRecord {
     pub fn internal_attributes(&self) -> BotInternalAttributes {
         BotInternalAttributes {
+            visibility: self.visibility.clone(),
             user_visibility: self.user_visibility,
             friend_ext: self.friend_ext.clone(),
             friend_check_in_strategy: self.friend_check_in_strategy,
