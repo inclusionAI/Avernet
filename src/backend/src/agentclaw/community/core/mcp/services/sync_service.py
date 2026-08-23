@@ -20,6 +20,10 @@ from agentclaw.community.core.devices.services.device_context import (
 )
 from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.core.mcp.services.detail_fanout import (
+    fan_out_mcp_details,
+    server_code_of,
+)
 from agentclaw.community.core.mcp.services.passport_scope import (
     passport_mcp_codes_from_entries,
     passport_mcp_items_from_entries,
@@ -39,12 +43,10 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
-# ``sync_mcp_details_for_bot`` 的并发上限。每条投递最终是一次设备侧阻塞 HTTP
-# (插件内含 3 次重试),经 ``asyncio.to_thread`` 落到 event loop 的默认线程池
-# (``min(32, cpu_count + 4)``,全进程共享),所以这个值同时约束对单台设备的
-# 突发请求数和本路径占用的共享线程数。``_sync_mcp_details`` 的同名上限是 5——
-# 那条链路自己 collect MCP 列表,两者可能并发打同一台设备。
+# 详情投递的并发上限,理由见 ``detail_fanout.fan_out_mcp_details``。两条链路各有
+# 一个:desired state 投递(caller 给定列表)与 collect 后投递,可能并发打同一台设备。
 _DESIRED_STATE_DETAIL_CONCURRENCY = 10
+_COLLECTED_DETAIL_CONCURRENCY = 5
 
 
 def _merge_cli_items(
@@ -306,14 +308,11 @@ class MCPSyncService:
         """把一批已备齐的 MCP 详情推送到**同一个** bot 的设备。
 
         跟逐条 ``sync_mcp_detail`` 只差一处,但是决定性的一处:设备解析
-        (``resolve_for_bot`` + dispatch)只做一次。一份 desired state 里所有 MCP
-        的目标 bot 相同,逐条解析等于把同一个答案算 N 遍——每遍一次 ws-info HTTP
-        加若干 DB 查询。与 ``_sync_mcp_details`` 的差别则在入参:那条链路自己去
-        ``BotMCPProvider`` collect 列表,这里直接收 caller already-resolved 的
-        desired state。
-
-        投递按 ``_DESIRED_STATE_DETAIL_CONCURRENCY`` 并发;单条失败不中断其余,
-        由 caller 依 ``success`` 决定下游动作。
+        (``resolve_for_bot`` + dispatch)只做一次。一份 desired state 里所有
+        MCP 的目标 bot 相同,逐条解析等于把同一个答案算 N 遍——每遍一次阻塞
+        ws-info HTTP 加若干 DB 查询,而且跑在 event loop 上,会把 caller 的并发
+        投递重新串行化。与 ``_sync_mcp_details`` 的差别则在入参:那条链路自己去
+        ``BotMCPProvider`` collect 列表,这里直接收 caller 给定的 desired state。
 
         Args:
             user_id: 用户 ID。仅用于 ``build_mcp_sync_payload`` 取该用户的 MCP
@@ -324,8 +323,8 @@ class MCPSyncService:
             engine_type: 引擎类型,默认 ``openclaw``。
 
         Returns:
-            ``{"success": bool, "error": str|None}`` 格式的结果字典,失败时
-            ``error`` 里列出失败的 server_code。
+            ``{"success": bool, "error": str}``,失败时 ``error`` 列出失败的
+            server_code。
         """
         _bot = bot_id or "unknown"
         if not mcp_entries:
@@ -333,7 +332,7 @@ class MCPSyncService:
             return {"success": True}
 
         try:
-            # resolve_for_bot 同步且内部有阻塞 ws-info HTTP + DB 查询,放线程池,
+            # resolve_for_bot 同步且内含阻塞 ws-info HTTP + DB 查询,放线程池,
             # 否则会占住 event loop。
             ctx = await asyncio.to_thread(
                 self._resolver_provider().resolve_for_bot,
@@ -346,42 +345,21 @@ class MCPSyncService:
             return {"success": False, "error": error}
         plugin = self._device_sync_dispatcher_provider().dispatch(ctx)
 
-        semaphore = asyncio.Semaphore(_DESIRED_STATE_DETAIL_CONCURRENCY)
-
-        async def deliver(mcp_data: dict[str, Any]) -> bool:
-            async with semaphore:
-                return await self._sync_mcp_detail(
-                    plugin=plugin,
-                    user_id=user_id,
-                    mcp_data=mcp_data,
-                    engine_type=engine_type,
-                )
-
-        # return_exceptions=True:单条失败不能把其余任务留成 orphan——否则它们会在
-        # 本方法返回后继续往设备投递。
-        results = await asyncio.gather(
-            *(deliver(entry) for entry in mcp_entries), return_exceptions=True
+        _successes, failures = await fan_out_mcp_details(
+            mcps=mcp_entries,
+            push_one=lambda mcp: self._sync_mcp_detail(
+                plugin=plugin,
+                user_id=user_id,
+                mcp_data=mcp,
+                engine_type=engine_type,
+            ),
+            concurrency=_DESIRED_STATE_DETAIL_CONCURRENCY,
+            bot_id=bot_id,
         )
 
-        failed: list[str] = []
-        for entry, result in zip(mcp_entries, results, strict=True):
-            if isinstance(result, asyncio.CancelledError):
-                # 取消来自上层,不是单条 MCP 失败,必须向上抛。
-                raise result
-            server_code = (
-                entry.get("serverCode") or entry.get("server_code") or "unknown"
-            )
-            if isinstance(result, Exception):
-                logger.warning(
-                    "[MCPSyncService] MCP 详情投递异常: bot=%s, server_code=%s",
-                    _bot, server_code, exc_info=result,
-                )
-                failed.append(server_code)
-            elif not result:
-                failed.append(server_code)
-
-        if failed:
-            error = f"向 bot={_bot} 推送 MCP 配置失败: {', '.join(failed)}"
+        if failures:
+            codes = [server_code_of(m) or "unknown" for m in failures]
+            error = f"向 bot={_bot} 推送 MCP 配置失败: {', '.join(codes)}"
             logger.error("[MCPSyncService] %s", error)
             return {"success": False, "error": error}
 
@@ -779,77 +757,28 @@ class MCPSyncService:
             )
         self._enrich_from_mcp_center(all_mcps)
 
-        mcp_codes_list = [
-            (m.get("server_code") or m.get("serverCode"))
-            for m in all_mcps
-            if m.get("server_code") or m.get("serverCode")
-        ]
+        mcp_codes_list = [c for c in map(server_code_of, all_mcps) if c]
         logger.info(
             "[MCPSyncService] 正在推送 %s 个 MCP 详情到 bot=%s, codes=%s, "
             "entity_id=%s, user_id=%s",
             len(all_mcps), bot_id, mcp_codes_list, entity_id, user_id,
         )
 
-        # 3. 并发推送，但限制并发数为 5，防止一次性向设备发太多 HTTP 请求把引擎压垮。
-        semaphore = asyncio.Semaphore(5)
+        # 3. 并发推送并归类结果——限流与异常兜底见 ``fan_out_mcp_details``。
+        successes, failures = await fan_out_mcp_details(
+            mcps=all_mcps,
+            push_one=lambda mcp: self._sync_mcp_detail(
+                plugin=plugin,
+                user_id=user_id,
+                mcp_data=mcp,
+                engine_type=engine_type,
+            ),
+            concurrency=_COLLECTED_DETAIL_CONCURRENCY,
+            bot_id=bot_id,
+        )
 
-        async def sync_one(mcp: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-            async with semaphore:
-                server_code = mcp.get("server_code") or mcp.get("serverCode")
-                if not server_code:
-                    logger.warning(
-                        "[MCPSyncService] 跳过无 server_code 的 MCP, "
-                        "bot_id=%s, mcp=%s",
-                        bot_id, mcp,
-                    )
-                    return (mcp, False)
-                try:
-                    # 经共享 helper 合并 payload 并下发；插件按容器类型决定投递方式
-                    # （arca/baas 单条 /api/mcp；teclaw 整产物）。
-                    ok = await self._sync_mcp_detail(
-                        plugin=plugin,
-                        user_id=user_id,
-                        mcp_data=mcp,
-                        engine_type=engine_type,
-                    )
-                    return (mcp, ok)
-                except Exception as e:
-                    logger.error(
-                        "[MCPSyncService] 同步 %s 异常, bot_id=%s, error=%s",
-                        server_code, bot_id, e,
-                    )
-                    return (mcp, False)
-
-        tasks = [sync_one(mcp) for mcp in all_mcps]
-        # return_exceptions=True 保证单个 MCP 失败不会阻断其他 MCP 的同步。
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # 4. 分类收集成功和失败的 MCP；CancelledError 必须向上抛，不能吞掉。
-        successes: list[dict[str, Any]] = []
-        failures: list[dict[str, Any]] = []
-
-        for mcp, res in zip(all_mcps, results, strict=True):
-            if isinstance(res, asyncio.CancelledError):
-                # CancelledError 代表上层要求取消任务，必须向上抛，不能吞掉。
-                raise res
-            if isinstance(res, Exception):
-                server_code = mcp.get("server_code") or mcp.get("serverCode")
-                logger.error(
-                    "[MCPSyncService] 任务异常 %s, bot_id=%s, error=%s",
-                    server_code, bot_id, res,
-                )
-                failures.append(mcp)
-            elif res[1]:
-                successes.append(mcp)
-            else:
-                failures.append(mcp)
-
-        success_codes = [
-            (m.get("server_code") or m.get("serverCode")) for m in successes
-        ]
-        failed_codes = [
-            (m.get("server_code") or m.get("serverCode")) for m in failures
-        ]
+        success_codes = [server_code_of(m) for m in successes]
+        failed_codes = [server_code_of(m) for m in failures]
         logger.info(
             "[MCPSyncService] 详情同步完成: 成功 %s, 失败 %s, success_codes=%s, failed_codes=%s, "
             "bot_id=%s, entity_id=%s, user_id=%s",
