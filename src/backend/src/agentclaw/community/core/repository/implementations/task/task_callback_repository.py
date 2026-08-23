@@ -50,6 +50,34 @@ class TaskCallbackRepository(TaskCallbackRepositoryProtocol):
             db.refresh(row)
             return row.to_record()
 
+    def upsert(self, rec: TaskCallbackRecord) -> TaskCallbackRecord:
+        """按 ``(run_id, node_id)`` insert-or-update:已存在则覆盖可变列,否则 insert。
+        回投可重放(start 后 result) → 刷新同一行,而非撞唯一键。"""
+        with self._db.orm_session() as db:
+            existing = (
+                db.query(self._model)
+                .filter(
+                    self._model.run_id == rec.run_id,
+                    self._model.node_id == rec.node_id,
+                )
+                .first()
+            )
+            if existing is not None:
+                existing.status = rec.status
+                existing.orig_callback_data = rec.orig_callback_data
+                existing.execution_graph = _dumps(rec.execution_graph)
+                existing.result = _dumps(rec.result)
+                existing.result_success = rec.result_success
+                existing.exec_error = rec.exec_error
+                existing.extend_props = _dumps(rec.extend_props)
+                db.flush()
+                return existing.to_record()
+            row = self._to_row(rec)
+            db.add(row)
+            db.flush()
+            db.refresh(row)
+            return row.to_record()
+
     def get(self, run_id: str, node_id: str) -> Optional[TaskCallbackRecord]:
         with self._db.orm_session() as db:
             row = (
@@ -70,3 +98,14 @@ class TaskCallbackRepository(TaskCallbackRepositoryProtocol):
                 .all()
             )
             return [r.to_record() for r in rows]
+
+    def get_latest_by_session(self, main_session_id: str) -> Optional[TaskCallbackRecord]:
+        """按 ``main_session_id`` 取最新一条回调(``gmt_modified`` desc、``id`` desc),供 dashboard 反查 execution_graph。"""
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self._model)
+                .filter(self._model.main_session_id == main_session_id)
+                .order_by(self._model.gmt_modified.desc(), self._model.id.desc())
+                .first()
+            )
+            return row.to_record() if row else None

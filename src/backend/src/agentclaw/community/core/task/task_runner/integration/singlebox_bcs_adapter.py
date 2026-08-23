@@ -37,13 +37,17 @@ class SingleboxBcsAdapter(BcsHttpAdapter):  # pragma: no cover — live singlebo
         is_sm = req.group_strategy == "state_machine" or req.collaboration_definition_yaml
         if is_sm:
             body["group_strategy"] = "state_machine"
-            body["start_initial_run"] = False
+            # 透传调用方(form_coop_group)的 start_initial_run;未设时默认 False(向后兼容)。
+            # 不得硬编码 False —— state_machine + event_subscriptions 时 BCS 要求自动启动(groups.rs:627)。
+            body["start_initial_run"] = req.start_initial_run if req.start_initial_run is not None else False
             if req.collaboration_definition_yaml:
                 body["collaboration_definition_yaml"] = req.collaboration_definition_yaml
             if req.participant_bindings:
                 body["participant_bindings"] = req.participant_bindings
         elif req.group_strategy:
             body["group_strategy"] = req.group_strategy
+        if req.event_subscriptions:
+            body["event_subscriptions"] = req.event_subscriptions
         for opt in ("context", "topic", "service_spec", "originator", "visibility"):
             v = getattr(req, opt)
             if v is not None:

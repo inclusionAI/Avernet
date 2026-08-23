@@ -5,9 +5,10 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Success/error envelopes come from the unified /openapi/v1 contract
 # (``openapi_v1.contracts.Envelope`` / ``ErrorEnvelope``); this module keeps only
@@ -44,12 +45,47 @@ class TaskSpecDTO(BaseModel):
     goal: GoalDTO = Field(default_factory=GoalDTO)
 
 
-class TaskInfoDTO(BaseModel):
-    """POST /openapi/v1/collaboration/tasks/execute 请求体。"""
-    task_spec: TaskSpecDTO
-    source_channel_type: str = Field("bot", description="任务来源渠道: bot / coop_group")
-    source_channel_id: str = Field(..., description="来源ID: bot_id / 协作群id")
-    execution_config: dict[str, Any] = Field(default_factory=dict, description="执行配置(MAX_DEPTH/MAX_LOOP/MAX_HARNESS/bot/workflow 等)")
+class RequestMetadataDTO(BaseModel):
+    title: str = Field("", description="任务标题")
+    instruction: str = Field("", description="核心执行指令(Prompt)")
+
+
+class RequestAcceptanceDTO(BaseModel):
+    id: str = Field(..., description="验收标准唯一标识")
+    acceptance: str = Field("", description="验收标准具体描述")
+
+
+class RequestGoalDTO(BaseModel):
+    objective: str = Field("", description="任务目标描述")
+    acceptances: list[RequestAcceptanceDTO] = Field(default_factory=list, description="验收标准列表")
+
+
+class RequestTaskSpecDTO(BaseModel):
+    metadata: RequestMetadataDTO
+    context: ContextDTO = Field(default_factory=ContextDTO)
+    goal: RequestGoalDTO = Field(default_factory=GoalDTO)
+
+
+class ExecutionConfigDTO(BaseModel):
+    """执行配置(task_type 必填;yaml/workflow_id 可选;其余键允许透传)。"""
+
+    model_config = ConfigDict(extra="allow")
+    task_type: Literal["yaml", "workflow", "dynamic"] = Field(..., description="任务类型")
+    yaml: str | dict[str, Any] | None = Field(None, description="yaml 内联或引用")
+    workflow_id: str | None = Field(None, description="workflow id")
+
+
+class TaskInfoRequestDTO(BaseModel):
+    """POST .../collaboration/tasks/execute 请求体(对外扁平契约;task_id 服务端生成)。"""
+
+    task_spec: RequestTaskSpecDTO
+    source_type: Literal["bot", "coop_group", "api"] = Field("bot", description="触发渠道类型")
+    owner_user_id: str = Field(..., description="userId")
+    owner_bot_id: str = Field(..., description="botId")
+    execution_config: ExecutionConfigDTO = Field(
+        default_factory=lambda: ExecutionConfigDTO(task_type="dynamic"),
+        description="执行配置(task_type/yaml/workflow_id + 透传键)",
+    )
 
 
 class BbsClaimDTO(BaseModel):
@@ -103,6 +139,7 @@ class TaskOpResultDTO(BaseModel):
     success: bool
     run_id: int = Field(0, description="图运行实例ID")
     message: str | None = None
+    extend_props: dict[str, Any] = Field(default_factory=dict, description="操作结果扩展属性")
 
 
 class AcceptanceResultDTO(BaseModel):
@@ -142,15 +179,28 @@ class TaskNodeDTO(BaseModel):
     run_info: RuntimeInfoDTO = Field(default_factory=RuntimeInfoDTO)
 
 
-class TaskSummaryDTO(BaseModel):
-    """GET /openapi/v1/collaboration/tasks/list 返回项(轻量投影)。"""
+class TaskInfoRecordDTO(BaseModel):
+    """GET .../collaboration/tasks/list 返回的持久化任务记录。"""
+
+    id: int
     task_id: str
-    run_id: int
+    source_type: str
+    owner_user_id: str
+    owner_bot_id: str
+    execution_config: dict[str, Any] | None = None
+    task_spec: dict[str, Any]
     status: str
-    title: str = ""
-    node_count: int = 0
-    loop_round: int = 0
-    bbs_mode: bool = False
+    gmt_create: datetime | None = None
+    gmt_modified: datetime | None = None
+
+
+class TaskRelationDTO(BaseModel):
+    """分解树边(一等公民);承载结构归属,单入(每非根节点恰好 1 入边=结构父)。"""
+
+    src_id: str = Field(..., description="结构父(分解源/被依赖)")
+    dst_id: str = Field(..., description="结构子(分解产物/依赖方)")
+    type: str = Field("DEPENDENCY", description="关系类型")
+    extend_props: dict[str, Any] = Field(default_factory=dict, description="关系扩展属性")
 
 
 class TaskExecutionGraphDTO(BaseModel):
@@ -159,7 +209,27 @@ class TaskExecutionGraphDTO(BaseModel):
     status: str
     output: dict[str, Any] = Field(default_factory=dict)
     tasks: list[TaskNodeDTO] = Field(default_factory=list)
+    relations: list[TaskRelationDTO] = Field(default_factory=list, description="依赖关系(分解树)")
     extend_props: dict[str, Any] = Field(default_factory=dict)
+    execution_graph: dict[str, Any] | None = None  # 回调审计 DAG 快照(按 root session_id 从 task_callback 反查挂图级)
+
+
+def runtime_status_to_product_status(status: Any) -> str:
+    """Map runtime task states to product-facing dashboard states.
+
+    ``PENDING`` is exposed as product ``DEFINED``. ``DRAFTING`` remains an
+    authoring-layer state and is not produced by the runtime dashboard.
+    Runtime ``HUNG`` is exposed as ``REVIEWING``; other active runtime states
+    are ``EXECUTING``.
+    """
+    value = status.value if hasattr(status, "value") else str(status)
+    return {
+        "PENDING": "DEFINED",
+        "HUNG": "REVIEWING",
+        "DONE": "DONE",
+        "FAILED": "FAILED",
+        "CANCELLED": "CANCELLED",
+    }.get(value, "EXECUTING")
 
 
 # ===== DTO <-> domain conversion(Rule 22:adapter 唯一写/读翻译位) =====
@@ -182,25 +252,42 @@ def task_spec_from_dto(dto: TaskSpecDTO):
     )
 
 
-def task_info_from_dto(dto: TaskInfoDTO):
-    from agentclaw.community.core.task.domain.models import TaskInfo
-    return TaskInfo(
-        task_spec=task_spec_from_dto(dto.task_spec),
-        source_channel_type=dto.source_channel_type,
-        source_channel_id=dto.source_channel_id,
-        execution_config=dict(dto.execution_config),
+def task_info_request_from_dto(dto: TaskInfoRequestDTO):
+    """TaskInfoRequestDTO → domain TaskInfoRequest(Rule 22:adapter 唯一写翻译位)。"""
+    from agentclaw.community.core.task.domain.models import TaskSourceType, TaskType
+    from agentclaw.community.core.task.domain.requests import (
+        RequestAcceptance, RequestContext, RequestGoal, RequestMetadata,
+        RequestTaskSpec, TaskInfoRequest,
+    )
+    ec = dto.execution_config
+    execution_config: dict[str, Any] = dict(ec.model_dump(exclude_none=True))
+    execution_config["task_type"] = TaskType(ec.task_type)
+    return TaskInfoRequest(
+        task_spec=RequestTaskSpec(
+            metadata=RequestMetadata(title=dto.task_spec.metadata.title,
+                                     instruction=dto.task_spec.metadata.instruction),
+            context=RequestContext(background=dto.task_spec.context.background,
+                                   extend_props=dict(dto.task_spec.context.extend_props)),
+            goal=RequestGoal(objective=dto.task_spec.goal.objective,
+                             acceptances=[RequestAcceptance(id=a.id, acceptance=a.acceptance)
+                                          for a in dto.task_spec.goal.acceptances]),
+        ),
+        source_type=TaskSourceType(dto.source_type),
+        owner_user_id=dto.owner_user_id,
+        owner_bot_id=dto.owner_bot_id,
+        execution_config=execution_config,
     )
 
 
 def callback_from_dto(dto: TaskCallbackDataDTO):
     from agentclaw.community.core.task.domain.models import TaskCallbackData
-    return TaskCallbackData(
-        loop_task_id=dto.loop_task_id,
-        workflow_type=dto.workflow_type,
-        workflow_id=dto.workflow_id,
-        instance_id=dto.instance_id,
-        result=dict(dto.result),
-    )
+    return TaskCallbackData(data={
+        "loop_task_id": dto.loop_task_id,
+        "workflow_type": dto.workflow_type,
+        "workflow_id": dto.workflow_id,
+        "instance_id": dto.instance_id,
+        "result": dict(dto.result),
+    })
 
 
 def acceptance_result_from_dto(dto: AcceptanceResultDTO):
@@ -222,7 +309,8 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
                                       gaps=list(ar.gaps))
                   if ar is not None else None)
         nodes.append(TaskNodeDTO(
-            node_id=n.node_id, task_id=n.task_id, status=n.status.value,
+            node_id=n.node_id, task_id=n.task_id,
+            status=runtime_status_to_product_status(n.status),
             task_spec=TaskSpecDTO(
                 metadata=MetadataDTO(task_id=n.task_spec.metadata.task_id,
                                      title=n.task_spec.metadata.title,
@@ -249,22 +337,43 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
                                     ) for e in n.run_info.action_log]
                                     if include_action_log else [])),
         ))
+    relations = [
+        TaskRelationDTO(src_id=r.src_id, dst_id=r.dst_id, type=r.type.value,
+                        extend_props=dict(r.extend_props))
+        for r in graph.relations
+    ]
     return TaskExecutionGraphDTO(
-        run_id=graph.run_id, loop_round=graph.loop_round, status=graph.status.value,
-        output=dict(graph.output), tasks=nodes, extend_props=dict(graph.extend_props),
+        run_id=graph.run_id, loop_round=graph.loop_round,
+        status=runtime_status_to_product_status(graph.status),
+        output=dict(graph.output), tasks=nodes, relations=relations,
+        extend_props=dict(graph.extend_props),
+        execution_graph=graph.execution_graph,
     )
 
 
 
-def summary_to_dto(s) -> TaskSummaryDTO:
-    """TaskSummary -> TaskSummaryDTO(Rule 22)。"""
-    return TaskSummaryDTO(task_id=s.task_id, run_id=s.run_id, status=s.status.value,
-                          title=s.title, node_count=s.node_count, loop_round=s.loop_round,
-                          bbs_mode=s.bbs_mode)
+def task_info_record_to_dto(record) -> TaskInfoRecordDTO:
+    """TaskInfoRecord -> TaskInfoRecordDTO(Rule 22)。"""
+    return TaskInfoRecordDTO(
+        id=record.id,
+        task_id=record.task_id,
+        source_type=record.source_type,
+        owner_user_id=record.owner_user_id,
+        owner_bot_id=record.owner_bot_id,
+        execution_config=(dict(record.execution_config)
+                          if record.execution_config is not None else None),
+        task_spec=dict(record.task_spec),
+        status=runtime_status_to_product_status(record.status),
+        gmt_create=record.gmt_create,
+        gmt_modified=record.gmt_modified,
+    )
 
 def op_result_to_dto(result) -> TaskOpResultDTO:
+    # TaskOpResult 持 error(失败原因),无 message 字段;将 error 透出到 DTO.message,
+    # 否则 failure 时 HTTP 响应只剩 success=false、原因被吞掉,无法排查。
     return TaskOpResultDTO(task_id=result.task_id, success=result.success, run_id=result.run_id,
-                           message=getattr(result, "message", None))
+                           message=getattr(result, "error", None),
+                           extend_props=dict(result.extend_props or {}))
 
 
 # ===== task_loop inbound callback schemas(PUSH 回调,对齐羽雀 TaskCallbackData/TaskNodeCallbackData)=====

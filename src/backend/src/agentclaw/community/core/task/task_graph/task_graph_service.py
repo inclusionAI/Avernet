@@ -147,11 +147,12 @@ class TaskGraphService:
                 status=Status.RUNNING,
                 tasks=[root],
                 relations=[],
+                task_id=task_id,
             )
             root.node_run_graph = graph  # 回填循环引用(in-memory)
             graph.extend_props["execution_config"] = dict(task_info.execution_config)
-            graph.extend_props["source_channel_type"] = task_info.source_channel_type
-            graph.extend_props["source_channel_id"] = task_info.source_channel_id
+            graph.extend_props["source_type"] = task_info.source_type
+            graph.extend_props["owner_bot_id"] = task_info.owner_bot_id
             self._graphs[task_id] = graph
             return graph
 
@@ -510,6 +511,7 @@ class TaskGraphService:
                     if r.src_id in subtree and r.dst_id in subtree
                 ],
                 extend_props=dict(graph.extend_props),
+                task_id=graph.task_id,
             )
 
     # ===== 派生只读查询(均从 relations 分解树派生)=====

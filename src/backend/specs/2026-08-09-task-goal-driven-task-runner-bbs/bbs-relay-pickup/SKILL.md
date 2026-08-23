@@ -13,17 +13,17 @@ tags: [task, bbs, relay, autonomous]
 
 ## 环境约束(必须遵守)
 
-- **唯一工具是 `exec`**:所有 task API 经 `exec`+HTTP 直调(`/openapi/v1/collaboration/tasks/*` 与 `/api/v1/collaboration/tasks/bbs/*`),用 `curl ... --json` 发请求、`jq` 解析响应。**禁止引用 bcs-cli 或任何子命令**。
+- **唯一工具是 `exec`**:所有 task API 经 `exec`+HTTP 直调(`/api/v1/collaboration/tasks/*` 与 `/api/v1/collaboration/tasks/bbs/*`),用 `curl ... --json` 发请求、`jq` 解析响应。**禁止引用 bcs-cli 或任何子命令**。
 - 本 skill 只编排"接力 loop":发现 / 占根 / 自判 / 挂节点 / 写回。**"干活"本身是你(agent)的原生能力**,skill 不演示怎么完成具体子任务。
-- 状态写口**只走**三条 `bbs/*` 路由(claim / attach / result);**不得**调 `/openapi/v1/collaboration/tasks/execute`、`/api/v1/collaboration/tasks/callback/report` 等 framework dispatch/callback 路由——那些是框架自驱路径,与接力冲突。
+- 状态写口**只走**三条 `bbs/*` 路由(claim / attach / result);**不得**调 `/api/v1/collaboration/tasks/execute`、`/api/v1/collaboration/tasks/callback/report` 等 framework dispatch/callback 路由——那些是框架自驱路径,与接力冲突。
 - 响应统一信封 `Envelope`:`{"code": int, "message": str, "data": <载荷>, "request_id": str}`(`code=200000` 为成功)。读 `data`;`code != 200000` 或 4xx/5xx 按各步错误约定处理。
 
 ## 被唤醒后执行(6 步)
 
 ### 步① 发现 BBS 任务 + 取整图
 
-1. `GET /openapi/v1/collaboration/tasks/list` → `data` 为任务数组,每项含 `bbs_mode: bool`。**客户端筛 `bbs_mode==true`**(响应不做服务端过滤)。跳过图级 `status` 已是 `DONE`(已完成)或 `HUNG`(硬终态,需人工)者。
-2. 对每个候选 `task_id`,`GET /openapi/v1/collaboration/tasks/dashboard?task_id=<task_id>` → `data` 为整图 `TaskExecutionGraph`:含根 `Goal`/`Acceptances`、全 `tasks[]`(每节点 `node_id` / `status` / `task_spec` / `run_info`)、图 `status`、图 `extend_props`。**根节点 `node_id == task_id`**;节点 `run_info.output` 是 checkpoint;`run_info.run_mode=="bbs"` 的是接力 scoped 节点;`run_info.extend_props.bbs_owner`(根上)指当前占根者;图 `extend_props.bbs_relay_count` 是已用接力深度。
+1. `GET /api/v1/collaboration/tasks/list` → `data` 为持久化 `TaskInfoRecord` 数组,从中枚举 `task_id`。列表含完整 `task_spec`/owner/execution_config,但不含运行图字段。
+2. 对每个 `task_id`,`GET /api/v1/collaboration/tasks/dashboard?task_id=<task_id>` → `data` 为整图 `TaskExecutionGraph`;仅保留图 `extend_props.bbs_mode==true` 的候选。整图含根 `Goal`/`Acceptances`、全 `tasks[]`(每节点 `node_id` / `status` / `task_spec` / `run_info`)、图 `status`、图 `extend_props`。**根节点 `node_id == task_id`**;节点 `run_info.output` 是 checkpoint;`run_info.run_mode=="bbs"` 的是接力 scoped 节点;`run_info.extend_props.bbs_owner`(根上)指当前占根者;图 `extend_props.bbs_relay_count` 是已用接力深度。
 3. **预筛**(避免空占根):只对满足下列全部条件的任务进入步②——
    - 图 `status` 非 `DONE` / `HUNG`;
    - 根节点 `status == PLANNING`(可委托);
@@ -90,7 +90,7 @@ tags: [task, bbs, relay, autonomous]
 > 详见 `references/idempotency.md`。
 1. **claim 成功才允许 attach / 干活。** 未占根不得 attach(服务端校验持有者,非持有者 409)。
 2. **attach 必须挂 `run_mode="bbs"` 节点。** 服务端强制;不要试图挂其它 run_mode。
-3. **写回必经 `bbs/result`。** 不得调 `/openapi/v1/collaboration/tasks/execute`、`/api/v1/collaboration/tasks/callback/report` 或任何旁路写口;只有 `bbs/result` 走 BBS collector-free 回投面(`on_bbs_report`)且自动释放 claim。
+3. **写回必经 `bbs/result`。** 不得调 `/api/v1/collaboration/tasks/execute`、`/api/v1/collaboration/tasks/callback/report` 或任何旁路写口;只有 `bbs/result` 走 BBS collector-free 回投面(`on_bbs_report`)且自动释放 claim。
 4. **`bbs/result` 一次 pass 一次**;发了即释放 claim,不中途 checkpoint。
 5. **接力只读不重做**:下个 bot 读已 DONE 叶子 + 前序 scoped 节点 `run_info.output` checkpoint,绝不重复已 DONE 的工作。
 6. **深度闸**:每次成功 attach 消耗 1 个 `bbs_relay_count`;`>= BBS_MAX_DEPTH`(默认 3) → 图 `HUNG(stuck)` 人工入口、拒 attach。故 scoped 节点宜少宜准。

@@ -32,6 +32,9 @@ class _StubCallback:
     async def report_result(self, data):
         self.calls.append(("result", data))
 
+    async def ingest(self, data):
+        self.calls.append(("ingest", data))
+
 
 def _raise(exc):
     async def _f(data):
@@ -64,6 +67,10 @@ class _StubService:
             if tid == task_id:
                 g.tasks.append(_make_node(tid, nid, st))
         return g
+
+    async def apply_manager_worker_event(self, raw):  # noqa: ANN001 stub
+        """manager_worker 分流回调 stub:router BCN 分支调它;记录便于断言。"""
+        self.callback.calls.append(("manager_worker", raw))
 
 
 class _StubTaskModule(Module):
@@ -115,7 +122,7 @@ class TestRouter:
         c, svc = client
         r = c.post("/api/v1/collaboration/tasks/callback/node_result", json=_body(node=True))
         assert r.status_code == 200, r.text
-        assert svc.callback.calls[0][1].loop_task_id == "t1::c1"
+        assert svc.callback.calls[0][1].data["loop_task_id"] == "t1::c1"
 
     def test_workflow_start_success(self, client):
         c, svc = client
@@ -176,3 +183,36 @@ class TestRouter:
         c, _ = client
         r = c.post("/api/v1/collaboration/tasks/callback/node_result", json={"task_id": "t1"})  # 缺必填
         assert r.status_code == 422, r.text
+
+    def test_claw_mind_callback_ingests_only(self, client):
+        # ClawMind HttpCallbackPayload → 只落库(ingest),不推进引擎(不走 start/result)
+        c, svc = client
+        body = {"workflow_id": "wf-1", "flow_id": "fl-1", "status": "succeeded",
+                "ext_info": {"flow_runs": {"status": "succeeded", "origin_session_id": "S-9"},
+                             "node_executions": []}}
+        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=body)
+        assert r.status_code == 200, r.text
+        assert svc.callback.calls and svc.callback.calls[0][0] == "ingest"
+        assert all(k == "ingest" for k, _ in svc.callback.calls)
+
+    def test_bcn_callback_ingests_only(self, client):
+        # BCN CloudEvent(已处理事件)→ 只落库(ingest),不推进引擎
+        c, svc = client
+        evt = {"spec_version": "1.0", "event_id": "e1",
+               "event_type": "state_machine.node.completed", "source": "bcs",
+               "scope": {"group_id": "g1", "session_id": "s1", "run_id": "r1"},
+               "stream": {"key": "k", "sequence": 1}, "actor": {"type": "bot", "id": "b"},
+               "data": {"run_id": "r1", "node_id": "n1", "outcome": "success", "output": {"x": 1}}}
+        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=evt)
+        assert r.status_code == 200, r.text
+        assert svc.callback.calls and svc.callback.calls[0][0] == "ingest"
+        assert all(k == "ingest" for k, _ in svc.callback.calls)
+
+    def test_bcn_unhandled_event_acks_without_ingest(self, client):
+        c, svc = client
+        evt = {"spec_version": "1.0", "event_id": "e2", "event_type": "message.created",
+               "source": "bcs", "scope": {"group_id": "g1", "session_id": "s1"},
+               "stream": {"key": "k", "sequence": 1}, "actor": {}, "data": {}}
+        r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=evt)
+        assert r.status_code == 200, r.text
+        assert svc.callback.calls == []  # 非处理事件:不落库、不推进

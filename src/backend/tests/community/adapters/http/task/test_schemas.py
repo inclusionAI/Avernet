@@ -2,8 +2,10 @@ import pytest
 from pydantic import ValidationError
 
 from agentclaw.community.adapters.http.task.schemas import (
-    TaskCallbackRequest, TaskNodeCallbackRequest,
+    TaskCallbackRequest, TaskNodeCallbackRequest, op_result_to_dto,
+    runtime_status_to_product_status,
 )
+from agentclaw.community.core.task.domain.models import TaskOpResult
 
 
 def _base(**kw):
@@ -34,3 +36,30 @@ def test_workflow_source_literal():
 def test_required_fields_enforced():
     with pytest.raises(ValidationError):
         TaskCallbackRequest(task_id="t1", workflow_source="bcn")  # 缺必填
+
+
+def test_op_result_to_dto_returns_extend_props():
+    dto = op_result_to_dto(TaskOpResult(
+        task_id="t1",
+        success=True,
+        run_id=1,
+        extend_props={"group_id": "bcs_grp_1"},
+    ))
+
+    assert dto.extend_props == {"group_id": "bcs_grp_1"}
+
+
+@pytest.mark.parametrize(
+    ("runtime", "product"),
+    [
+        ("PENDING", "DEFINED"),
+        ("PLANNING", "EXECUTING"),
+        ("RUNNING", "EXECUTING"),
+        ("HUNG", "REVIEWING"),
+        ("DONE", "DONE"),
+        ("FAILED", "FAILED"),
+        ("CANCELLED", "CANCELLED"),
+    ],
+)
+def test_runtime_status_to_product_status(runtime, product):
+    assert runtime_status_to_product_status(runtime) == product

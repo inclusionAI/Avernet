@@ -8,7 +8,7 @@ tags: [task, search, dispatch]
 
 # task-search
 
-任务目标驱动的**任务派发搜推决策** skill,运行在 **owner bot**(source_channel_id)。框架语义预查候选 bot 集(分字段 title/objective/background 调 BCSFuse recommend),把候选集喂入 prompt;本 skill 在候选里决出**谁执行 + 怎么执行(多 bot 拉哪种协作群)**,不自取 BCSFuse。
+任务目标驱动的**任务派发搜推决策** skill,运行在 **owner bot**(owner_bot_id)。框架语义预查候选 bot 集(分字段 title/objective/background 调 BCSFuse recommend),把候选集喂入 prompt;本 skill 在候选里决出**谁执行 + 怎么执行(多 bot 拉哪种协作群)**,不自取 BCSFuse。
 
 ## 环境约束(必须遵守)
 

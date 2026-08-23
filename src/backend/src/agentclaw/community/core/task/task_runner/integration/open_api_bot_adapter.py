@@ -1,7 +1,7 @@
 """OpenApiBotAdapter:BaaS Open API 单 bot 派发(httpx async,对齐 send_bot_message.py)。
 
 ensure_grant:GET allowed-bots → 缺则 POST grant(Cookie+Referer 登录态,非 Bearer)。
-send_message:POST /openapi/v1/messages(Bearer)→ message_id(=run_id)。
+send_message:POST /openapi/v1/messages(Bearer)→ message_id(=run_id);顺带回包 session_id(BaaS 当前未返时前向兼容为 None,将来补字段自动落库)。
 get_run:GET /openapi/v1/messages/{id}→ {status,result,error}(status 大小写不敏感)。
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.integration.ports import ApiKeyProvider, OpenApiBotPort
+from agentclaw.community.core.task.task_runner.integration.ports import ApiKeyProvider, BotSendResult, OpenApiBotPort
 
 
 # api_key_prefix 未设置时,回落取 api_key 前多少位作 URL 路径段。
@@ -84,12 +84,14 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
             raise OpenApiAuthError(f"grant {g.status_code} {g.text}")
         _map_status(g)
 
-    async def send_message(self, *, bot_id: str, message: str, metadata: dict[str, Any]) -> str:
+    async def send_message(self, *, bot_id: str, message: str, metadata: dict[str, Any]) -> BotSendResult:
         r = await self._client.post("/openapi/v1/messages",
                                     json={"bot_id": bot_id, "message": message},
                                     headers={"Authorization": f"Bearer {self._k.api_key}"})
         _map_status(r)
-        return (r.json().get("data") or {}).get("message_id")
+        data = r.json().get("data") or {}
+        # message_id 即 run_id;session_id 前向兼容——当前 BaaS 回包未提供时为 None,将来 BaaS 补字段自动落库。
+        return BotSendResult(run_id=data.get("message_id"), session_id=data.get("session_id"))
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         r = await self._client.get(f"/openapi/v1/messages/{run_id}",
@@ -125,7 +127,8 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
                                    metadata: dict[str, Any] | None, timeout: float,
                                    poll_interval: float) -> dict[str, Any]:
         await self.ensure_grant(bot_id)
-        run_id = await self.send_message(bot_id=bot_id, message=message, metadata=metadata or {})
+        sent = await self.send_message(bot_id=bot_id, message=message, metadata=metadata or {})
+        run_id = sent.run_id
         deadline = time.monotonic() + timeout
         last_status = ""
         while True:

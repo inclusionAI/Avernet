@@ -20,6 +20,7 @@ task-level callback → 400, non-holder BBS op → 409, invalid status → 400).
 from __future__ import annotations
 
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.task.domain.errors import GraphAlreadyInitializedError
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
@@ -38,6 +39,7 @@ from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
+    bind_overrides,
     endpoint_test,
 )
 
@@ -56,8 +58,8 @@ def _task_info(task_id: str) -> TaskInfo:
                 acceptances=[AcceptanceCriteria(id="ac1", description="d1")],
             ),
         ),
-        source_channel_type="bot",
-        source_channel_id="owner_bot",
+        source_type="bot",
+        owner_bot_id="owner_bot",
         execution_config={"MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3},
     )
 
@@ -77,6 +79,20 @@ def _task_spec_dto(task_id: str) -> dict:
 def _seed_graph(world, task_id: str) -> None:
     """Initialize a clean PENDING root graph (no background on_execute)."""
     world.get(TaskGraphService).initialize_graph(_task_info(task_id))
+
+
+def _seed_execute_conflict(world) -> None:
+    """Bind a TaskService substitute that exercises the public 409 mapping.
+
+    The HTTP contract deliberately generates task ids server-side, so a request
+    cannot provide a stable id to reproduce a graph collision directly. Keep
+    the endpoint test at the adapter boundary by binding the domain-error
+    substitute through the injector instead of mutating ``world.get(...)``.
+    """
+    async def execute(_self, _request):
+        raise GraphAlreadyInitializedError("task graph already exists")
+
+    bind_overrides(world, TaskServiceProtocol, {"execute": execute})
 
 
 def _seed_graph_bbs(world, task_id: str, *, claim_bot: str | None = None) -> None:
@@ -110,9 +126,10 @@ def _run_root(world, task_id: str) -> None:
             "goal": {"objective": "产出尽调报告",
                      "acceptances": [{"id": "ac1", "description": "d1"}]},
         },
-        "source_channel_type": "bot",
-        "source_channel_id": "owner_bot",
-        "execution_config": {"MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3},
+        "source_type": "bot",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {"task_type": "dynamic", "MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3},
     }),
     expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
@@ -130,11 +147,12 @@ def execute_ok():
             "context": {"background": "", "extend_props": {}},
             "goal": {"objective": "", "acceptances": []},
         },
-        "source_channel_type": "bot",
-        "source_channel_id": "owner_bot",
-        "execution_config": {},
+        "source_type": "bot",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {"task_type": "dynamic"},
     }),
-    seed=lambda w: _seed_graph(w, "t_exec_conflict"),
+    seed=_seed_execute_conflict,
     expect=ExpectError(status=409),
 )
 def execute_conflict_on_reexecute():

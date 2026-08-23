@@ -134,8 +134,8 @@ def _execute_body(owner_id: str) -> dict:
                 ],
             },
         },
-        "source_channel_type": "bot",
-        "source_channel_id": owner_id,
+        "source_type": "bot",
+        "owner_bot_id": owner_id,
         # MAX_DEPTH=1:架构师名册子任务在 depth-1 MISS 直走 miss_depth_exhausted 升 BBS(不 re-plan 嵌套);
         # 技术栈概览子任务同为 depth-1,命中 bot 正常执行不受影响。
         "execution_config": {"MAX_DEPTH": 1, "BBS_MAX_DEPTH": _BBS_MAX_DEPTH},

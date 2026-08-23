@@ -45,7 +45,7 @@ def test_single_bot_terminal_reports_and_unregisters():
     p.set_on_result(sink)
     p.register(SingleBotHandle(loop_task_id="t1::c1", run_id="r1", bot_id="b1", registered_at=time.monotonic()))
     _run(p._poll_once())
-    assert sink.reports[0].result["success"] is True
+    assert sink.reports[0].data["result"]["success"] is True
     assert p.pending() == 0
 
 
@@ -68,8 +68,8 @@ def test_sla_timeout_reports_fail_and_unregisters():
     p.register(SingleBotHandle(loop_task_id="t1::c1", run_id="r1", bot_id="b1", registered_at=0.0))
     t[0] = 100.0  # 远超 sla
     _run(p._poll_once())
-    assert sink.reports[0].result["success"] is False
-    assert sink.reports[0].result["exec_error"] == "sla_timeout"
+    assert sink.reports[0].data["result"]["success"] is False
+    assert sink.reports[0].data["result"]["exec_error"] == "sla_timeout"
     assert bot.cancelled == ["r1"]
     assert p.pending() == 0
 
@@ -85,5 +85,5 @@ def test_consecutive_failures_report_poll_exhausted():
     p.register(SingleBotHandle(loop_task_id="t1::c1", run_id="r1", bot_id="b1", registered_at=time.monotonic()))
     for _ in range(5):
         _run(p._poll_once())
-    assert any(r.result.get("exec_error") == "poll_exhausted" for r in sink.reports)
+    assert any(r.data["result"].get("exec_error") == "poll_exhausted" for r in sink.reports)
     assert p.pending() == 0

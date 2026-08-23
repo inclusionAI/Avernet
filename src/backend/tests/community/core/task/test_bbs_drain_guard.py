@@ -30,8 +30,8 @@ def _ti(tid: str) -> TaskInfo:
             context=Context(background="bg"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
-        source_channel_type="bot",
-        source_channel_id="botA",
+        source_type="bot",
+        owner_bot_id="botA",
         execution_config={},
     )
 

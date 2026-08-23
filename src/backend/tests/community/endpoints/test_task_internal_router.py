@@ -1,6 +1,7 @@
 """Declarative endpoint coverage for internal collaboration task routes."""
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
@@ -10,8 +11,8 @@ from agentclaw.community.core.task.domain.models import (
     Status,
     TaskExecutionGraph,
     TaskOpResult,
-    TaskSummary,
 )
+from agentclaw.community.core.task.repository.types import TaskInfoRecord
 from agentclaw.community.core.task.task_discovery.discovery_service import DiscoveryService
 from agentclaw.community.core.task.task_discovery.scheduler import TaskDiscoveryScheduler
 from tests.community.framework import (
@@ -30,8 +31,10 @@ _TASK_SPEC = {
 }
 _EXECUTE_BODY = {
     "task_spec": _TASK_SPEC,
-    "source_channel_type": "bot",
-    "source_channel_id": "bot-endpoint-1",
+    "source_type": "bot",
+    "owner_user_id": "user-endpoint-1",
+    "owner_bot_id": "bot-endpoint-1",
+    "execution_config": {"task_type": "dynamic"},
 }
 _CALLBACK_BODY = {
     "task_id": "task-endpoint-1",
@@ -58,23 +61,31 @@ class _CallbackTaskService:
 
 
 def _seed_task_service(world) -> None:
-    async def execute(_self, task_info):
+    async def execute(_self, _task_info):
         return TaskOpResult(
-            task_id=task_info.task_spec.metadata.task_id,
+            task_id="task-endpoint-1",
             success=True,
             run_id=1,
+            extend_props={"group_id": "bcs_grp_endpoint_1"},
         )
 
     def dashboard(_self, _task_id, _node_id=None):
         return TaskExecutionGraph(run_id=1, loop_round=0, status=Status.PENDING)
 
-    def list_tasks(_self, _status=None):
+    def list_tasks(_self, _status=None, owner_user_id=None):
+        assert owner_user_id is None
         return [
-            TaskSummary(
+            TaskInfoRecord(
+                id=1,
                 task_id="task-endpoint-1",
-                run_id=1,
+                source_type="bot",
+                owner_user_id="user-endpoint-1",
+                owner_bot_id="bot-endpoint-1",
+                execution_config={"task_type": "dynamic"},
+                task_spec=_TASK_SPEC,
                 status=Status.PENDING,
-                title="Endpoint case",
+                gmt_create=datetime(2026, 8, 22, 10, 0, 0),
+                gmt_modified=datetime(2026, 8, 22, 10, 0, 0),
             )
         ]
 
@@ -110,14 +121,9 @@ def _seed_callback_service(world) -> None:
 
 
 def _seed_callback_report(world) -> None:
-    async def report_result(_self, _data) -> None:
-        return None
-
-    bind_overrides(
-        world,
-        TaskLoopCallbackProtocol,
-        {"report_result": report_result},
-    )
+    # /callback/report resolves TaskServiceProtocol and invokes svc.callback;
+    # binding TaskLoopCallbackProtocol alone does not affect that dependency.
+    _seed_callback_service(world)
 
 
 def _seed_scheduler_error(world) -> None:
@@ -145,7 +151,16 @@ def _seed_scheduled_trigger_error(world) -> None:
     scenario="happy_ok",
     seed=_seed_task_service,
     input=CaseInput(json_body=_EXECUTE_BODY),
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"task_id": "task-endpoint-1"}}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "task_id": "task-endpoint-1",
+                "extend_props": {"group_id": "bcs_grp_endpoint_1"},
+            },
+        },
+    ),
 )
 def execute_happy():
     pass

@@ -93,8 +93,8 @@ def _execute_body(owner_id: str) -> dict:
                 ],
             },
         },
-        "source_channel_type": "bot",
-        "source_channel_id": owner_id,
+        "source_type": "bot",
+        "owner_bot_id": owner_id,
         # MAX_DEPTH=1:N_field_interview MISS 即在 <root 子> 下 @depth=1 → miss_depth_exhausted 触发升 BBS。
         # BBS_MAX_DEPTH=3 留 relay 接力预算。
         "execution_config": {"MAX_DEPTH": 1, "BBS_MAX_DEPTH": 3},
@@ -110,7 +110,7 @@ def _wake_prompt() -> str:
         f"task API backend base url: {_BACKEND}(用 exec+curl 直调,"
         f"例 curl {_BACKEND}/openapi/v1/collaboration/tasks/list --json ...)。\n"
         "按 bbs-relay-pickup SKILL.md 6 步自驱:\n"
-        "  步① GET /openapi/v1/collaboration/tasks/list 客户端筛 bbs_mode==true,GET /openapi/v1/collaboration/tasks/dashboard 取整图;\n"
+        "  步① GET /openapi/v1/collaboration/tasks/list 枚举 task_id,逐个 GET /openapi/v1/collaboration/tasks/dashboard 并筛 extend_props.bbs_mode==true;\n"
         "  步② POST /api/v1/collaboration/tasks/bbs/claim 占根;\n"
         "  步③ 读根 goal + 已 DONE 叶子 + 前序 scoped 节点 checkpoint 自判 full/partial/skip;\n"
         "  步④ POST /api/v1/collaboration/tasks/bbs/attach 挂一个 run_mode=bbs 节点 + 用你自身能力执行该节点指令;\n"
@@ -232,7 +232,8 @@ class TestTaskIntegrationE2E(unittest.TestCase):
             self.assertIsNotNone(nd, f"{gid} 未出现")
             self.assertEqual(nd["status"], "DONE", f"{gid} 未 DONE")
             self.assertEqual((nd["run_info"] or {}).get("run_mode"), "coop_group", f"{gid} 非 coop_group")
-            self.assertTrue(str((nd["run_info"] or {}).get("assignee") or "").startswith("grp_"),
+            # 群 id 前缀容忍两种后端:本地 stub/double 产 ``grp_<8hex>``;真 BCS(:21000)产 ``bcs_grp_<uuid>``。
+            self.assertTrue(str((nd["run_info"] or {}).get("assignee") or "").startswith(("grp_", "bcs_grp_")),
                             f"{gid} assignee 非群 id")
         # 实际建了 3 个群
         group_count = sum(

@@ -224,7 +224,7 @@ router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"])
 3. 确保 `TASK_ENGINE=skill` 生效（singlebox 起态或运行时切换）。
 
 ### 6.2 drive
-- `POST /openapi/v1/collaboration/tasks/execute`，body = `gwqie46v7hzr1w6h` TaskInfo（metadata.task_id 固定；goal.objective=产出尽调报告；5 acceptances；execution_config: MAX_DEPTH/BBS_MAX_DEPTH；source_channel_id=owner bot）。
+- `POST /openapi/v1/collaboration/tasks/execute`，body = `gwqie46v7hzr1w6h` TaskInfo（metadata.task_id 固定；goal.objective=产出尽调报告；5 acceptances；execution_config: MAX_DEPTH/BBS_MAX_DEPTH；owner_bot_id=owner bot）。
 - 轮询 `GET /openapi/v1/collaboration/tasks/dashboard?task_id=`（带超时），至 `status ∈ {DONE, HUNG}`。
 
 ### 6.3 assert（happy，AC-4）
@@ -288,5 +288,5 @@ router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"])
 - **R5（启停开销）**：gated + `--module task_e2e` 单跑 + 复用 coverage harness。
 - **R6（catalog）**：用例 setup 创建固定 worker bot 集；搜推 skill 按 node→bot 映射（案例剧本）。
 - **OQ-1**：`TASK_ENGINE=skill`（或 `RUNTIME_MODE` local/dev）激活，prod 默认不变。
-- **OQ-2**：验收 skill 跑在 owner bot（`source_channel_id`）。
+- **OQ-2**：验收 skill 跑在 owner bot（`owner_bot_id`）。
 - **OQ-3（已定）**：coop_group 走真实 BCS（singlebox 起栈含 BCS）；form_coop_group 对接 BCS POST /groups，group_strategy 三态对齐 CollaborationRuntimeDefinition。

@@ -23,7 +23,7 @@ def test_poller_session_mode_reports_completed():
     p.register(BcsGroupHandle(loop_task_id="t::g", group_id="g1", collab_mode="chat",
                               registered_at=time.monotonic(), session_id="s1", run_id=None))
     _run(p._poll_once())
-    assert sink.reports[0].result["success"] is True
+    assert sink.reports[0].data["result"]["success"] is True
 
 
 def test_poller_run_mode_reports_completed():
@@ -38,4 +38,4 @@ def test_poller_run_mode_reports_completed():
     p.register(BcsGroupHandle(loop_task_id="t::g", group_id="g1", collab_mode="state_machine",
                               registered_at=time.monotonic(), session_id=None, run_id="run_9"))
     _run(p._poll_once())
-    assert sink.reports[0].result["success"] is True
+    assert sink.reports[0].data["result"]["success"] is True

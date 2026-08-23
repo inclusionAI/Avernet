@@ -14,7 +14,7 @@ from typing import Any
 
 # ===== 枚举 =====
 class Status(StrEnum):
-    """任务/节点执行状态(6 态,含 PLANNING)。"""
+    """任务/节点执行状态(7 态,含 PLANNING/CANCELLED)。"""
 
     PENDING = "PENDING"      # 待处理
     PLANNING = "PLANNING"    # 规划中(被分解委托子执行,显式委托态)
@@ -22,6 +22,7 @@ class Status(StrEnum):
     DONE = "DONE"            # 已成功完成
     FAILED = "FAILED"        # 执行失败(验收未通过,带 gaps)
     HUNG = "HUNG"            # 已挂起/暂停(仅 stuck:迭代达上限执行不下去,需人介入)
+    CANCELLED = "CANCELLED"  # 已取消
 
 
 class AcceptanceVerdict(StrEnum):
@@ -48,6 +49,22 @@ class NodeAction(StrEnum):
     TRANSITION = "transition"   # 框架直驱翻态(HUNG/传播 DONE);payload: reason
 
 
+class TaskSourceType(StrEnum):
+    """触发渠道类型(bot / 协作群 / 开放 API)。"""
+
+    BOT = "bot"
+    COOP_GROUP = "coop_group"
+    API = "api"
+
+
+class TaskType(StrEnum):
+    """任务类型(yaml / workflow / dynamic)。"""
+
+    YAML = "yaml"
+    WORKFLOW = "workflow"
+    DYNAMIC = "dynamic"
+
+
 # ===== 规格面(Task Specification)=====
 @dataclass
 class Metadata:
@@ -55,11 +72,17 @@ class Metadata:
     title: str
     instruction: str               # 核心执行指令(Prompt/提示词)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {"task_id": self.task_id, "title": self.title, "instruction": self.instruction}
+
 
 @dataclass
 class Context:
     background: str
     extend_props: dict[str, Any] = field(default_factory=dict)  # 上下文扩展属性(非结构化补充)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"background": self.background, "extend_props": dict(self.extend_props)}
 
 
 @dataclass
@@ -67,11 +90,17 @@ class AcceptanceCriteria:
     id: str
     description: str               # 验收标准的具体描述(无 type 字段)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "description": self.description}
+
 
 @dataclass
 class Goal:
     objective: str
     acceptances: list[AcceptanceCriteria]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"objective": self.objective, "acceptances": [a.to_dict() for a in self.acceptances]}
 
 
 @dataclass
@@ -80,14 +109,21 @@ class TaskSpec:
     context: Context
     goal: Goal                     # 无 SLA
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "metadata": self.metadata.to_dict(),
+            "context": self.context.to_dict(),
+            "goal": self.goal.to_dict(),
+        }
+
 
 @dataclass
 class TaskInfo:
     """对外 ``execute`` 入参。"""
 
     task_spec: TaskSpec
-    source_channel_type: str       # "bot" | "coop_group"
-    source_channel_id: str         # bot_id / 协作群 id
+    source_type: str       # "bot" | "coop_group"
+    owner_bot_id: str         # owning bot id
     execution_config: dict[str, Any] = field(default_factory=dict)  # 指定 bot/workflow yaml/MAX_DEPTH 等
 
 
@@ -172,6 +208,10 @@ class TaskExecutionGraph:
     tasks: list[TaskNode] = field(default_factory=list)
     relations: list[Relation] = field(default_factory=list)   # 依赖关系(分解树,一等公民)
     extend_props: dict[str, Any] = field(default_factory=dict)
+    execution_graph: dict[str, Any] | None = None  # 回调审计图快照(BCN/ClawMind DAG,按 session_id 反查挂图级;只读投影)
+    task_id: str = ""   # 整图所属任务 ID(initialize 透传;query_task_dashboard 子树投影复制;
+                        # 供 bbs_runner.notify 经 _schedule_bbs_notify→run_bbs 取 task_id,
+                        # 因 run_bbs 链路只拿到 execution_graph、无法回溯 task_id)
     # 派生不持久: depth / child_tasks / parent_task(均从 relations 分解树派生)
 
 
@@ -244,6 +284,7 @@ class TaskOpResult:
     success: bool
     error: str | None = None
     run_id: int | None = None
+    extend_props: dict | None = None
 
 
 @dataclass
@@ -260,13 +301,19 @@ class NodeOpResult:
 
 @dataclass
 class TaskCallbackData:
-    """回投数据协议(对齐执行模块文档)。"""
+    """回投数据协议(对齐执行模块文档)。
 
-    loop_task_id: str             # 关联回框架侧 (task_id, node_id)
-    workflow_type: str            # "single_bot" | "bcn_coop_group" | "bbs" | ...
-    workflow_id: int
-    instance_id: int              # workflow 运行实例 id
-    result: dict[str, Any]        # {"success":bool,"data":Any,"gaps":list[str]} / {"exec_error":str}
+    单字段 ``data: Any``:执行实体 PUSH 回投的载荷。约定为 ``dict``,内含回框架路由键与结果:
+    ``loop_task_id``("task_id::node_id")、``workflow_type``、``workflow_id``/``instance_id``、
+    ``workflow_source``/``workflow_instance_id``(落 ``task_callback`` 时的 NOT NULL 来源)、
+    ``result``({``success``/``data``/``gaps``/``exec_error``/``fail_detail``/``_ext_info``})。
+    非回投构造路径请经各 ``translator`` 组装该 dict。
+
+    消费侧约定:``data`` 为 ``dict`` 时从中解析回调记录字段并落 ``task_callback`` 表
+    (见 ``TaskLoopCallback``);非 ``dict`` 时仅作原始透传,不解析、不落库。
+    """
+
+    data: Any
 
 
 @dataclass

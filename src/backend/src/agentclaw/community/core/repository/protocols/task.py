@@ -45,6 +45,16 @@ class TaskInfoRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def list_records(
+        self,
+        status: Optional["Status"] = None,
+        *,
+        owner_user_id: Optional[str] = None,
+    ) -> list["TaskInfoRecord"]:
+        """Return newest-first records, optionally filtered by status and owner."""
+        ...
+
+    @abstractmethod
     def list_by_status(
         self,
         status: "Status",
@@ -138,6 +148,15 @@ class TaskNodeRunInfoRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def get_by_session_id(self, session_id: str) -> Optional["TaskNodeRunInfoRecord"]:
+        """按 BCS ``session_id`` 查 ``task_node_run_info``(BCN/ClawMind 回调收敛用)。
+
+        ``task_node_run_info.session_id`` = BCS 建群/建 session 返的 session_id;
+        BCN/ClawMind 回调的 ``main_session_id`` 同源。据此反查框架 (task_id, node_id)。
+        """
+        ...
+
+    @abstractmethod
     def list_by_run_mode(
         self,
         run_mode: str,
@@ -187,6 +206,14 @@ class TaskCallbackRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def upsert(self, rec: "TaskCallbackRecord") -> "TaskCallbackRecord":
+        """Insert-or-refresh the callback row keyed by ``(run_id, node_id)``:
+        an existing row's mutable columns are overwritten; absent → insert.
+        Used by the callback receive path so replayable callbacks (start then
+        result) refresh one row instead of raising on the unique key."""
+        ...
+
+    @abstractmethod
     def get(self, run_id: str, node_id: str) -> Optional["TaskCallbackRecord"]:
         """Return the callback, or ``None``."""
         ...
@@ -196,4 +223,13 @@ class TaskCallbackRepositoryProtocol(Protocol):
         self, main_session_id: str, *, limit: int = 100
     ) -> list["TaskCallbackRecord"]:
         """Callbacks for ``main_session_id`` (backs ``idx_session_id``)."""
+        ...
+
+    @abstractmethod
+    def get_latest_by_session(
+        self, main_session_id: str,
+    ) -> Optional["TaskCallbackRecord"]:
+        """Latest callback for ``main_session_id`` (``gmt_modified``/``id`` desc); ``None`` if absent.
+
+        dashboard 按 root 节点的 BCS ``session_id`` 反查 ``task_callback.execution_graph`` 挂图级用。"""
         ...
