@@ -2215,6 +2215,15 @@ class BotService:
             "items": items,
         }
 
+    def get_bot_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
+        """按 bot_id 单查 bot 详情(owner_id / bot_name 等),不限 caller/owner;查不到返 ``None``。
+
+        供内部读侧用——例如 dashboard 给任务节点 ``assignee`` 附加归属(owner_id)/名称(bot_name),
+        不需 owner 权限校验。复用 ``list_bots_by_conditions(bot_id=...)`` 精确单查,取 ``items[0]``。"""
+        page = self.list_bots_by_conditions(bot_id=bot_id, page=1, page_size=1)
+        items = (page or {}).get("items") or []
+        return items[0] if items else None
+
     def list_bots_by_search(
         self,
         public: Optional[str] = None,

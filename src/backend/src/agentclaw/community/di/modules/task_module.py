@@ -98,11 +98,16 @@ class TaskModule(Module):
             task_node_run_info_repo = injector.get(TaskNodeRunInfoRepositoryProtocol)
         except Exception:  # noqa: BLE101 未绑定 → 跳过 task_node_run_info 落库
             task_node_run_info_repo = None
+        try:
+            bot_service = injector.get(BotServiceProtocol)
+        except Exception:  # noqa: BLE101 未绑定 → dashboard 不附加 assignee 的 bot 归属/名
+            bot_service = None
         return TaskService(
             graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
             bcs_identity=bcs_identity, task_info_repo=task_info_repo,
             callback_repo=callback_repo, task_node_repo=task_node_repo,
             task_node_run_info_repo=task_node_run_info_repo,
+            bot_service=bot_service,
             api_base_url=self._resolve_api_base_url(),
         )
 

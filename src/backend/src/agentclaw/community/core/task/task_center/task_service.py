@@ -53,6 +53,7 @@ class TaskService:
                  task_id_provider: Callable[[], str] | None = None,
                  task_node_repo: TaskNodeRepositoryProtocol | None = None,
                  task_node_run_info_repo: TaskNodeRunInfoRepositoryProtocol | None = None,
+                 bot_service=None,
                  api_base_url: str | None = None) -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
         bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
@@ -72,6 +73,7 @@ class TaskService:
         self._task_node_repo = task_node_repo
         self._run_info_repo = task_node_run_info_repo
         self._callback_repo = callback_repo
+        self._bot_service = bot_service
         self._api_base_url = api_base_url
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
@@ -334,7 +336,33 @@ class TaskService:
                 rec = None
             if rec is not None and rec.execution_graph is not None:
                 graph.execution_graph = rec.execution_graph
+        self._attach_assignee_bot_info(graph)
         return graph
+
+    def _attach_assignee_bot_info(self, graph: TaskExecutionGraph) -> None:
+        """single_bot / bbs 节点:按 assignee(纯 bot_id)查 ``BotServiceProtocol.get_bot_by_id``,
+        把 ``owner_id`` / ``bot_name`` 折进节点 ``run_info.extend_props``(assignee_owner_id / assignee_name;
+        只读投影,供前端展示 bot 归属+名)。coop_group(assignee 是 group_id 非机器人)、未配
+        ``bot_service``、未命中或异常 → 不写、不阻断 dashboard。同 bot_id 缓存(一次查询)。"""
+        if self._bot_service is None:
+            return
+        cache: dict[str, dict | None] = {}
+        for node in graph.tasks:
+            if node.run_info.run_mode not in ("single_bot", "bbs"):
+                continue
+            bot_id = (node.run_info.assignee or "").strip()
+            if not bot_id:
+                continue
+            if bot_id not in cache:
+                try:
+                    cache[bot_id] = self._bot_service.get_bot_by_id(bot_id)
+                except Exception as exc:  # noqa: BLE001 查 bot 失败不阻断只读 dashboard
+                    logger.warning("[dashboard] get_bot_by_id 失败 bot_id=%s: %s", bot_id, exc)
+                    cache[bot_id] = None
+            info = cache.get(bot_id)
+            if isinstance(info, dict):
+                node.run_info.extend_props["assignee_owner_id"] = info.get("owner_id")
+                node.run_info.extend_props["assignee_name"] = info.get("bot_name")
 
     def list_tasks(
         self,

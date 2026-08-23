@@ -23,7 +23,9 @@ async def notify(execution_graph, *, bcs, bot, graph, backend_url: str,
         logger.info("[bbs-runner] skip: bcs/bot 缺失 task=%s", task_id)
         return
     try:
-        roster = await bcs.list_bots_by_task_modes(dream=True, match="any")
+        roster = await bcs.list_bots_by_task_modes(claim=False, dream=False, match="any")
+        if roster and len(roster) > 10:
+            roster = roster[:10]
     except Exception as exc:
         logger.warning("[bbs-runner] roster 取失败 task=%s:%s", task_id, exc)
         return
@@ -31,6 +33,7 @@ async def notify(execution_graph, *, bcs, bot, graph, backend_url: str,
         logger.info("[bbs-runner] 无 dream-mode bot task=%s,留可恢复态", task_id)
         return
 
+    logger.info("[bbs-runner] roster 取成功 task=%s, roster=%s, num=%d", task_id, roster, len(roster))
     # Phase 1: bid (并发评估,3分钟超时)
     try:
         bid_results = await asyncio.wait_for(
