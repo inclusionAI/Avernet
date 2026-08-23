@@ -10,10 +10,22 @@ use bcs_app_bot::{BotServiceConfig, InternalBotAttributesServiceImpl};
 use bcs_bot::BotControlPlaneCore;
 use bcs_bot_store::MemoryBotRepo;
 use bcs_service_api::{
-    BotCapabilities, BotControlPlaneCoreService, BotRepoPort, FriendCheckInStrategy,
-    InternalBotAttributesService, PatchBotInternalAttributes, ServiceError, ServiceResult,
-    UserVisibility,
+    BotCapabilities, BotControlPlaneCoreService, BotInternalAttributes, BotRepoPort,
+    FriendCheckInStrategy, InternalBotAttributesService, PatchBotInternalAttributes, ServiceError,
+    ServiceResult, UserVisibility,
 };
+
+#[test]
+fn internal_attributes_deserialize_legacy_data_with_default_visibility() {
+    let attributes: BotInternalAttributes = serde_json::from_value(serde_json::json!({
+        "user_visibility": "protected",
+        "friend_ext": {},
+        "friend_check_in_strategy": "APPROVAL"
+    }))
+    .expect("legacy attributes deserialize");
+
+    assert_eq!(attributes.visibility, "protected");
+}
 
 #[tokio::test]
 async fn internal_attributes_default_and_partial_patch_round_trip_through_control_plane() {
