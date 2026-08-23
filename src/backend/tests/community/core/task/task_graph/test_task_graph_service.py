@@ -62,6 +62,10 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
     return TaskNodePatch(task_id=task_id, node_id=node_id, **kw)
 
 
+def test_status_includes_cancelled():
+    assert Status.CANCELLED.value == "CANCELLED"
+
+
 @pytest.fixture
 def svc() -> TaskGraphService:
     return TaskGraphService()

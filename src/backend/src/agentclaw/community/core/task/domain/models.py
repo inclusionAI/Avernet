@@ -14,7 +14,7 @@ from typing import Any
 
 # ===== 枚举 =====
 class Status(StrEnum):
-    """任务/节点执行状态(6 态,含 PLANNING)。"""
+    """任务/节点执行状态(7 态,含 PLANNING/CANCELLED)。"""
 
     PENDING = "PENDING"      # 待处理
     PLANNING = "PLANNING"    # 规划中(被分解委托子执行,显式委托态)
@@ -22,6 +22,7 @@ class Status(StrEnum):
     DONE = "DONE"            # 已成功完成
     FAILED = "FAILED"        # 执行失败(验收未通过,带 gaps)
     HUNG = "HUNG"            # 已挂起/暂停(仅 stuck:迭代达上限执行不下去,需人介入)
+    CANCELLED = "CANCELLED"  # 已取消
 
 
 class AcceptanceVerdict(StrEnum):
