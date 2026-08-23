@@ -39,6 +39,9 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     AddMCPResponse,
     SetSkillSetActiveResponse,
 )
+from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
+    recover_legacy_skill_set_scope,
+)
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.adapters.http.dependencies import (
     get_request_context,
@@ -181,6 +184,35 @@ def _get_path_params(
         )
 
     return effective_entity_id, effective_bot_id, effective_engine, runtime_engine, effective_entity_type, is_desktop
+
+
+def _get_skill_set_path_params(
+    ctx: RequestContext,
+    *,
+    set_id: str,
+    entity_id: Optional[str],
+    entity_type: Optional[str],
+    bot_id: Optional[str],
+    engine_type: Optional[str],
+    bot_repo: BotRepository,
+    control_plane: SkillSetControlPlaneServiceProtocol,
+) -> tuple:
+    """Resolve the deprecated optional Bot address before normal path handling."""
+    entity_id, bot_id = recover_legacy_skill_set_scope(
+        set_id=set_id,
+        actor_id=_legacy_actor(ctx, entity_id),
+        owner_id_hint=entity_id,
+        bot_id_hint=bot_id,
+        control_plane=control_plane,
+    )
+    return _get_path_params(
+        ctx,
+        entity_id,
+        entity_type,
+        bot_id,
+        engine_type,
+        bot_repo=bot_repo,
+    )
 
 
 # ==================== SkillSet Management APIs ====================
@@ -469,8 +501,15 @@ async def get_skill_set(
         runtime_engine,
         effective_entity_type,
         is_desktop,
-    ) = _get_path_params(
-        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    ) = _get_skill_set_path_params(
+        ctx,
+        set_id=skill_set_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     return SkillSetDetailResponse(
@@ -505,23 +544,24 @@ async def update_skill_set(
     ),
 ) -> SkillSetDetailResponse:
     """Update a skill set."""
-    # Priority: query param bot_id > request body bot_id > ctx.bot_id > default
-    effective_bot_id = bot_id or request.bot_id or ctx.bot_id or "default"
-    # Get effective path parameters (pass effective_bot_id directly)
+    # Preserve omission so the legacy resolver can recover a non-default Bot.
+    bot_id_hint = bot_id or request.bot_id
     (
         effective_entity_id,
-        _,
+        effective_bot_id,
         effective_engine,
         runtime_engine,
         effective_entity_type,
         _is_desktop,
-    ) = _get_path_params(
+    ) = _get_skill_set_path_params(
         ctx,
-        entity_id,
-        entity_type,
-        effective_bot_id,
-        engine_type,
+        set_id=skill_set_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        bot_id=bot_id_hint,
+        engine_type=engine_type,
         bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     # ``is_default`` was accepted by the old schema but is not a mutable
@@ -563,9 +603,6 @@ async def delete_skill_set(
     ),
 ) -> MessageResponse:
     """Delete a skill set."""
-    # Get effective path parameters
-    # entity_id 优先使用 user_id，否则使用传入的 entity_id
-    effective_entity_id_param = user_id or entity_id
     (
         effective_entity_id,
         effective_bot_id,
@@ -573,13 +610,15 @@ async def delete_skill_set(
         runtime_engine,
         effective_entity_type,
         is_desktop,
-    ) = _get_path_params(
+    ) = _get_skill_set_path_params(
         ctx,
-        effective_entity_id_param,
-        entity_type,
-        bot_id,
-        engine_type,
+        set_id=skill_set_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        bot_id=bot_id,
+        engine_type=engine_type,
         bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     control_plane.delete_set(
@@ -621,8 +660,15 @@ async def get_skill_set_skills(
         runtime_engine,
         effective_entity_type,
         is_desktop,
-    ) = _get_path_params(
-        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    ) = _get_skill_set_path_params(
+        ctx,
+        set_id=skill_set_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     skills = control_plane.list_skills(
@@ -673,25 +719,24 @@ async def add_skills_to_set(
     ),
 ) -> AddSkillsResponse:
     """Add skills to a skill set."""
-    # Get effective path parameters
-    # Priority: request body bot_id > query param bot_id > ctx.bot_id > default
-    effective_bot_id = request.bot_id or bot_id or ctx.bot_id or "default"
-    # entity_id 优先使用 request.user_id，否则使用传入的 entity_id
-    effective_entity_id_param = request.user_id or entity_id
+    # Preserve omission so the legacy resolver can recover a non-default Bot.
+    bot_id_hint = request.bot_id or bot_id
     (
         effective_entity_id,
-        _,
+        effective_bot_id,
         effective_engine,
         runtime_engine,
         effective_entity_type,
         _is_desktop,
-    ) = _get_path_params(
+    ) = _get_skill_set_path_params(
         ctx,
-        effective_entity_id_param,
-        entity_type,
-        effective_bot_id,
-        engine_type,
+        set_id=skill_set_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        bot_id=bot_id_hint,
+        engine_type=engine_type,
         bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     # Historical batch wire permits partial success.  Each member remains
@@ -778,9 +823,6 @@ async def remove_skill_from_set(
     ),
 ) -> MessageResponse:
     """Remove a skill from a skill set."""
-    # Get effective path parameters
-    # entity_id 优先使用 user_id，否则使用传入的 entity_id
-    effective_entity_id_param = user_id or entity_id
     (
         effective_entity_id,
         effective_bot_id,
@@ -788,13 +830,15 @@ async def remove_skill_from_set(
         runtime_engine,
         effective_entity_type,
         is_desktop,
-    ) = _get_path_params(
+    ) = _get_skill_set_path_params(
         ctx,
-        effective_entity_id_param,
-        entity_type,
-        bot_id,
-        engine_type,
+        set_id=skill_set_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        bot_id=bot_id,
+        engine_type=engine_type,
         bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     result = await control_plane.remove_skill(
@@ -1722,8 +1766,15 @@ async def get_skill_set_mcps(
         runtime_engine,
         effective_entity_type,
         is_desktop,
-    ) = _get_path_params(
-        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    ) = _get_skill_set_path_params(
+        ctx,
+        set_id=skill_set_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     legacy_set = control_plane.get_set(
@@ -1800,8 +1851,15 @@ async def add_mcp_to_skill_set(
         runtime_engine,
         effective_entity_type,
         is_desktop,
-    ) = _get_path_params(
-        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    ) = _get_skill_set_path_params(
+        ctx,
+        set_id=skill_set_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     await control_plane.add_mcp(
@@ -1854,8 +1912,15 @@ async def remove_mcp_from_skill_set(
         runtime_engine,
         effective_entity_type,
         is_desktop,
-    ) = _get_path_params(
-        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    ) = _get_skill_set_path_params(
+        ctx,
+        set_id=skill_set_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     await control_plane.remove_mcp(

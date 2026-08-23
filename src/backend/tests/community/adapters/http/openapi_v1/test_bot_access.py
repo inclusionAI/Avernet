@@ -62,8 +62,12 @@ class _Bots:
         self, *, exists: bool = True, raises: bool = False, owner: str = OWNER
     ) -> None:
         self.exists, self.raises, self.owner = exists, raises, owner
+        self.threads: list[int] = []
 
     def get_by_id_and_owner(self, bot_id, owner_id, **_):
+        # Recorded so ``test_the_level_lookup_runs_off_the_event_loop`` can
+        # assert *where* this ran, not merely that it ran.
+        self.threads.append(threading.get_ident())
         if self.raises:
             raise RuntimeError("database is unavailable")
         if not self.exists or (bot_id, owner_id) != (BOT, self.owner):
@@ -417,6 +421,95 @@ def test_the_audit_write_does_not_run_on_the_event_loop():
     assert audit.loop_thread, "the handler never ran"
     assert audit.threads[0] != audit.loop_thread[0], (
         "the audit write ran on the event loop thread, blocking the worker"
+    )
+
+
+def test_the_seam_asks_the_space_aware_policy_not_the_raw_role():
+    """A revoked Team-Space editor is refused, and that is a real policy change.
+
+    ``_level`` resolves through ``resolve_operable_permission_level``, which
+    prefers ``CollaboratorService.get_operable_permission_level`` — the raw role
+    **plus** a live Team-Space membership check. A user who keeps a MEMBER
+    collaborator row after being removed from the Space resolves to ``NONE``.
+
+    That is stricter than what several migrating groups enforced. ``skill_centre``
+    (via ``check_collaborator_permission``), ``bot_skill_asset_service`` and the
+    engine-runtime gate (via ``get_permission_level``) all asked for the raw role
+    and admitted such a caller; 58 of the 82 ``Check`` rows therefore refuse
+    someone today who was admitted before. Recorded in ``spec.md`` and the
+    README changelog as the third caller-visible change, after a review round
+    caught that it was going in unstated.
+
+    It is a *convergence*, not an invention: render-screens, editors and the
+    publication facade already used the Space-aware policy before this feature,
+    and ``get_operable_permission_level``'s own COSEC note says Space removal
+    "revokes operation immediately". Reverting the seam to the raw role would
+    have loosened those three rather than preserving one prior policy — there
+    was no single prior policy to preserve.
+
+    Asserted through the protocol resolver rather than by mocking, so it fails
+    if the seam is ever pointed at ``get_permission_level`` instead.
+    """
+    from agentclaw.community.core.bot_collaborator.protocols import (
+        resolve_operable_permission_level,
+    )
+
+    class _SpaceRevokedEditor:
+        """Keeps a MEMBER role, but the Space check has revoked them."""
+
+        def get_operable_permission_level(self, *, bot, user_id, env=None):
+            return PermissionLevel.NONE
+
+        def get_permission_level(self, *a, **k):  # the raw role, still MEMBER
+            return PermissionLevel.MEMBER
+
+    level = resolve_operable_permission_level(
+        _SpaceRevokedEditor(),
+        bot={"id": 7, "bot_id": BOT, "owner_id": OWNER},
+        user_id=CALLER,
+        owner_id=OWNER,
+    )
+
+    assert level is PermissionLevel.NONE, (
+        "the seam resolved the raw collaborator role instead of the Space-aware "
+        "level; a Team-Space editor removed from the Space would be admitted "
+        "again on all 58 rows that migrated from a raw-role check"
+    )
+
+    # And the caller really is refused end to end at the MEMBER bar.
+    client, _ = _surface(level=PermissionLevel.NONE, bar=PermissionLevel.MEMBER)
+    assert _get(client).status_code == 404
+
+
+def test_the_level_lookup_runs_off_the_event_loop():
+    """The adjudication's database reads must not block the worker either.
+
+    The gate is an ``async`` dependency, and ``_level``'s two lookups — the
+    owner-scoped bot read and the collaborator query — are synchronous
+    repository calls. Awaiting them inline parks the event loop for a database
+    round trip and stalls every unrelated request on that worker.
+
+    This is the audit write's problem one layer earlier, and strictly worse:
+    the audit runs only on a non-owner mutation, while this runs on **every**
+    request to an adjudicated operation. ``EngineRuntimeRelay`` reached the same
+    conclusion for the same pair of reads and offloads them in
+    ``resolve_bot_off_loop``.
+
+    Asserted on the thread the read actually ran on, for the reason the audit
+    test gives: the claim is about where the blocking call executes, and mocking
+    ``asyncio.to_thread`` would pass just as happily if it were awaited on the
+    loop.
+    """
+    bots = _Bots()
+    client, audit = _surface(level=PermissionLevel.ADMIN, bots=bots, bar=PermissionLevel.MEMBER)
+
+    assert _post(client).status_code == 200
+
+    assert bots.threads, "the bot lookup never happened"
+    assert audit.loop_thread, "the handler never ran"
+    assert bots.threads[0] != audit.loop_thread[0], (
+        "the level lookup ran on the event loop thread, blocking the worker "
+        "for the length of a database read on every adjudicated request"
     )
 
 

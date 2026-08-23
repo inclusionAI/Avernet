@@ -91,6 +91,9 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     UploadSkillResponse,
     VersionListResponse,
 )
+from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
+    recover_legacy_skill_set_scope,
+)
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.skill_set_control_plane import (
     SkillSetControlPlaneServiceProtocol,
@@ -382,6 +385,35 @@ def _get_path_params(
         runtime_engine,
         effective_entity_type,
         is_desktop,
+    )
+
+
+def _get_skill_set_path_params(
+    ctx: RequestContext,
+    *,
+    set_id: str,
+    entity_id: str | None,
+    entity_type: str | None,
+    bot_id: str | None,
+    engine_type: str | None,
+    bot_repo: BotRepository,
+    control_plane: SkillSetControlPlaneServiceProtocol,
+) -> tuple:
+    """Recover the deprecated SkillSet Bot address before path normalization."""
+    entity_id, bot_id = recover_legacy_skill_set_scope(
+        set_id=set_id,
+        actor_id=ctx.user_id,
+        owner_id_hint=entity_id,
+        bot_id_hint=bot_id,
+        control_plane=control_plane,
+    )
+    return _get_path_params(
+        ctx,
+        entity_id,
+        entity_type,
+        bot_id,
+        engine_type,
+        bot_repo=bot_repo,
     )
 
 
@@ -1112,8 +1144,15 @@ async def switch_skill_set(
         runtime_engine,
         effective_entity_type,
         is_desktop,
-    ) = _get_path_params(
-        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    ) = _get_skill_set_path_params(
+        ctx,
+        set_id=request.skill_set_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     result = await control_plane.switch(
@@ -1160,8 +1199,15 @@ async def sync_skill_set(
         runtime_engine,
         effective_entity_type,
         is_desktop,
-    ) = _get_path_params(
-        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    ) = _get_skill_set_path_params(
+        ctx,
+        set_id=request.skill_set_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        bot_id=bot_id,
+        engine_type=engine_type,
+        bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     result = await control_plane.sync(
@@ -1218,13 +1264,15 @@ async def activate_skill_set(
         runtime_engine,
         effective_entity_type,
         is_desktop,
-    ) = _get_path_params(
+    ) = _get_skill_set_path_params(
         ctx,
-        request.entity_id,
-        request.entity_type,
-        request.bot_id,
-        request.engine_type,
+        set_id=request.skill_set_id,
+        entity_id=request.entity_id,
+        entity_type=request.entity_type,
+        bot_id=request.bot_id,
+        engine_type=request.engine_type,
         bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     item = await control_plane.activate(
@@ -1275,13 +1323,15 @@ async def deactivate_skill_set(
         runtime_engine,
         effective_entity_type,
         is_desktop,
-    ) = _get_path_params(
+    ) = _get_skill_set_path_params(
         ctx,
-        request.entity_id,
-        request.entity_type,
-        request.bot_id,
-        request.engine_type,
+        set_id=request.skill_set_id,
+        entity_id=request.entity_id,
+        entity_type=request.entity_type,
+        bot_id=request.bot_id,
+        engine_type=request.engine_type,
         bot_repo=bot_repo,
+        control_plane=control_plane,
     )
 
     item = await control_plane.deactivate(

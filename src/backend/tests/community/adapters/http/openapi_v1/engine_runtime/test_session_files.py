@@ -17,9 +17,12 @@ from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayPro
 from agentclaw.community.api.session_resource_service import SessionResourceServiceProtocol
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
 from agentclaw.community.core.session_resources.types import SessionResourceStatus
-from tests.community.adapters.http.openapi_v1.conftest import user_scoped_client
+from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
+    user_scoped_client,
+)
 
-from .conftest import BOT, OWNER, FakeRelay, fails, ok
+from .conftest import BOT, OWNER, FakeRelay, bind_seam_from_relay, fails, ok
 
 SESSION_ID = "session:file-test:user:1"
 
@@ -168,10 +171,14 @@ def client(relay, resources, runtime_bindings):
             binder.bind(EngineRuntimeRelayProtocol, to=relay)
             binder.bind(SessionResourceServiceProtocol, to=resources)
             binder.bind(RuntimeBindingResolutionService, to=runtime_bindings)
+            # These six file operations are ``Check(MEMBER)``; the gate runs
+            # ahead of every one of them.
+            bind_seam_from_relay(binder, relay)
 
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": OWNER}
+    mount_public_error_handlers(app)
     attach_injector(app, Injector([_Bindings()]))
     return user_scoped_client(app, OWNER)
 

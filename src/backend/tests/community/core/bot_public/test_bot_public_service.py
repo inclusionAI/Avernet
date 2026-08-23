@@ -126,6 +126,36 @@ class TestPublicBcsBot:
         assert "同学正在开放" in ctx["publishHint"]
         assert "bot到加好友场景，" in ctx["publishHint"]
 
+    def test_context_carries_bot_id_and_owner_id_for_callback_echo(self):
+        # antprocess echoes the ticket context back on the /callback POST
+        # (snake→camel: bot_id→botId, owner_id→ownerId). The new-version
+        # callback path uses bot_id verbatim as the BCS bot_uuid
+        # (_apply_callback_decision → get_attributes(bot_uuid=bot_id)) and
+        # owner_id for the legacy branch; without them in the context the
+        # callback arrives with botId/ownerId=None and the AGREE visibility
+        # flip is a no-op.
+        process = MagicMock()
+        process.start_approval.return_value = {
+            "success": True, "puid": "p1", "state": "PROCESSING",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+        svc = _make_service(process_service=process, bot_repository=bot_repo)
+
+        # bot_uid is the full BCS identity "{backend_bot_id}:{entity_id}"; it
+        # must echo back unchanged so the callback addresses the right bot —
+        # backend_bot_id alone would not resolve via BCS get_attributes.
+        svc.public_bcs_bot(
+            bot_uid="b1:entity1",
+            owner_id="u1",
+            public_scope="user",
+            operator=_make_operator(staff_id="op_user"),
+        )
+
+        ctx = process.start_approval.call_args.kwargs["context"]
+        assert ctx["bot_id"] == "b1:entity1"
+        assert ctx["owner_id"] == "u1"
+
     def test_completed_runs_callback_inline_with_public_scope(self):
         process = MagicMock()
         process.start_approval.return_value = {

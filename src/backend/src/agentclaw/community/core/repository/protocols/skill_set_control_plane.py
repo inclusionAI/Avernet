@@ -6,6 +6,9 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
+        LegacySkillSetScope,
+    )
     from agentclaw.community.core.repository.skill_set_control_plane_types import (
         SkillSetDesiredState,
         SkillSetMutation,
@@ -24,6 +27,12 @@ class SkillSetControlPlaneRepositoryProtocol(Protocol):
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> list[dict]: ...
+    @abstractmethod
+    def resolve_legacy_set_scope(
+        self, *, set_id: str
+    ) -> LegacySkillSetScope | None:
+        """Resolve an ordinary Set address; return ``None`` for System Default."""
+        ...
     @abstractmethod
     def ensure_active_skillset_installations(
         self,
