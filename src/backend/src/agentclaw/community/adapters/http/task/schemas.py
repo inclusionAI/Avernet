@@ -19,51 +19,69 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class MetadataDTO(BaseModel):
+    """任务元数据(标识 + 标题 + 核心指令)。"""
+
     task_id: str = Field(..., description="任务ID")
     title: str = Field("", description="任务标题")
     instruction: str = Field("", description="核心执行指令(Prompt)")
 
 
 class ContextDTO(BaseModel):
+    """任务执行上下文(背景 + 扩展属性)。"""
+
     background: str = Field("", description="任务背景信息")
     extend_props: dict[str, Any] = Field(default_factory=dict, description="上下文扩展属性")
 
 
 class AcceptanceCriteriaDTO(BaseModel):
+    """单条验收标准(标识 + 描述)。"""
+
     id: str = Field(..., description="验收标准唯一标识")
     description: str = Field("", description="验收标准具体描述")
 
 
 class GoalDTO(BaseModel):
+    """任务目标(目标描述 + 验收标准列表)。"""
+
     objective: str = Field("", description="任务目标描述")
     acceptances: list[AcceptanceCriteriaDTO] = Field(default_factory=list, description="验收标准列表")
 
 
 class TaskSpecDTO(BaseModel):
-    metadata: MetadataDTO
-    context: ContextDTO = Field(default_factory=ContextDTO)
-    goal: GoalDTO = Field(default_factory=GoalDTO)
+    """任务规格(元数据 + 上下文 + 目标);response 面与 Request* 同构。"""
+
+    metadata: MetadataDTO = Field(..., description="任务元数据(标识/标题/指令)")
+    context: ContextDTO = Field(default_factory=ContextDTO, description="任务执行上下文")
+    goal: GoalDTO = Field(default_factory=GoalDTO, description="任务目标与验收标准")
 
 
 class RequestMetadataDTO(BaseModel):
+    """提交任务的元数据(标题 + 指令;task_id 服务端生成)。"""
+
     title: str = Field("", description="任务标题")
     instruction: str = Field("", description="核心执行指令(Prompt)")
 
 
 class RequestAcceptanceDTO(BaseModel):
+    """提交单条验收标准(标识 + 描述)。"""
+
     id: str = Field(..., description="验收标准唯一标识")
     acceptance: str = Field("", description="验收标准具体描述")
 
 
 class RequestGoalDTO(BaseModel):
+    """提交任务目标(目标描述 + 验收标准列表)。"""
+
     objective: str = Field("", description="任务目标描述")
     acceptances: list[RequestAcceptanceDTO] = Field(default_factory=list, description="验收标准列表")
 
 
 class RequestTaskSpecDTO(BaseModel):
-    metadata: RequestMetadataDTO
-    context: ContextDTO = Field(default_factory=ContextDTO)
-    goal: RequestGoalDTO = Field(default_factory=GoalDTO)
+    """提交任务规格(元数据 + 上下文 + 目标)。"""
+
+    metadata: RequestMetadataDTO = Field(..., description="任务元数据(标题/指令)")
+    context: ContextDTO = Field(default_factory=ContextDTO, description="任务执行上下文")
+    goal: RequestGoalDTO = Field(default_factory=GoalDTO, description="任务目标与验收标准")
 
 
 class ExecutionConfigDTO(BaseModel):
@@ -78,7 +96,7 @@ class ExecutionConfigDTO(BaseModel):
 class TaskInfoRequestDTO(BaseModel):
     """POST .../collaboration/tasks/execute 请求体(对外扁平契约;task_id 服务端生成)。"""
 
-    task_spec: RequestTaskSpecDTO
+    task_spec: RequestTaskSpecDTO = Field(..., description="任务规格(元数据/上下文/目标)")
     source_type: Literal["bot", "coop_group", "api"] = Field("bot", description="触发渠道类型")
     owner_user_id: str = Field(..., description="userId")
     owner_bot_id: str = Field(..., description="botId")
@@ -135,63 +153,72 @@ class TaskCallbackDataDTO(BaseModel):
 
 
 class TaskOpResultDTO(BaseModel):
-    task_id: str
-    success: bool
+    """任务操作结果(execute 提交 / op 级动作返回)。"""
+
+    task_id: str = Field(..., description="任务ID(服务端生成)")
+    success: bool = Field(..., description="操作是否成功")
     run_id: int = Field(0, description="图运行实例ID")
-    message: str | None = None
+    message: str | None = Field(None, description="失败原因(success=false 时透出 error,便于排查)")
     extend_props: dict[str, Any] = Field(default_factory=dict, description="操作结果扩展属性")
 
 
 class AcceptanceResultDTO(BaseModel):
+    """验收结论(PASS/FAIL + 通过项与缺口)。"""
+
     verdict: str = Field(..., description="PASS / FAIL")
-    acceptances_metric: list[str] = Field(default_factory=list)
-    gaps: list[str] = Field(default_factory=list)
+    acceptances_metric: list[str] = Field(default_factory=list, description="通过的验收项标识列表")
+    gaps: list[str] = Field(default_factory=list, description="未通过的验收项标识列表(gap)")
 
 
 class NodeActionEventDTO(BaseModel):
     """节点动作级历史快照(诊断用;默认不序列化,include_action_log=true 时返回)。"""
-    seq: int
-    ts: int
-    action: str
-    loop_round: int = 0
-    attempt: int = 0
-    status_from: str | None = None
-    status_to: str | None = None
-    payload: dict[str, Any] = Field(default_factory=dict)
+
+    seq: int = Field(..., description="动作序号(同节点内单调递增)")
+    ts: int = Field(..., description="动作发生时间戳(毫秒)")
+    action: str = Field(..., description="动作类型(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/TRANSITION)")
+    loop_round: int = Field(0, description="所属 loop 轮次")
+    attempt: int = Field(0, description="本动作的重试次数")
+    status_from: str | None = Field(None, description="动作前的节点状态")
+    status_to: str | None = Field(None, description="动作后的节点状态")
+    payload: dict[str, Any] = Field(default_factory=dict, description="动作 payload(全量)")
 
 
 class RuntimeInfoDTO(BaseModel):
-    run_mode: str | None = None
-    assignee: str | None = None
-    start_time: int | None = None
-    end_time: int | None = None
-    output: dict[str, Any] = Field(default_factory=dict)
-    acceptance_result: AcceptanceResultDTO | None = None
-    extend_props: dict[str, Any] = Field(default_factory=dict)
-    action_log: list[NodeActionEventDTO] = Field(default_factory=list)
+    """节点运行时信息(执行态 + 输出 + 验收 + 动作历史)。"""
+
+    run_mode: str | None = Field(None, description="运行模式(single_bot / bbs 等)")
+    assignee: str | None = Field(None, description="当前承接节点执行的 bot id")
+    start_time: int | None = Field(None, description="执行开始时间戳(毫秒)")
+    end_time: int | None = Field(None, description="执行结束时间戳(毫秒)")
+    output: dict[str, Any] = Field(default_factory=dict, description="节点输出(checkpoint fold)")
+    acceptance_result: AcceptanceResultDTO | None = Field(None, description="验收结论")
+    extend_props: dict[str, Any] = Field(default_factory=dict, description="运行时扩展属性")
+    action_log: list[NodeActionEventDTO] = Field(default_factory=list, description="节点动作历史(include_action_log=true 时填充)")
 
 
 class TaskNodeDTO(BaseModel):
-    node_id: str
-    task_id: str
-    status: str
-    task_spec: TaskSpecDTO
-    run_info: RuntimeInfoDTO = Field(default_factory=RuntimeInfoDTO)
+    """分解树中的单个任务节点(规格 + 运行时信息)。"""
+
+    node_id: str = Field(..., description="节点ID(分解树内唯一)")
+    task_id: str = Field(..., description="所属任务ID")
+    status: str = Field(..., description="节点状态(product 态:DEFINED/EXECUTING/REVIEWING/DONE/FAILED/CANCELLED)")
+    task_spec: TaskSpecDTO = Field(..., description="节点任务规格")
+    run_info: RuntimeInfoDTO = Field(default_factory=RuntimeInfoDTO, description="节点运行时信息")
 
 
 class TaskInfoRecordDTO(BaseModel):
     """GET .../collaboration/tasks/list 返回的持久化任务记录。"""
 
-    id: int
-    task_id: str
-    source_type: str
-    owner_user_id: str
-    owner_bot_id: str
-    execution_config: dict[str, Any] | None = None
-    task_spec: dict[str, Any]
-    status: str
-    gmt_create: datetime | None = None
-    gmt_modified: datetime | None = None
+    id: int = Field(..., description="持久化记录自增主键")
+    task_id: str = Field(..., description="任务ID")
+    source_type: str = Field(..., description="触发渠道类型(bot/coop_group/api)")
+    owner_user_id: str = Field(..., description="归属 userId")
+    owner_bot_id: str = Field(..., description="归属 botId")
+    execution_config: dict[str, Any] | None = Field(None, description="执行配置(task_type/yaml/workflow_id + 透传键)")
+    task_spec: dict[str, Any] = Field(..., description="任务规格(元数据/上下文/目标)")
+    status: str = Field(..., description="任务状态(product 态)")
+    gmt_create: datetime | None = Field(None, description="记录创建时间")
+    gmt_modified: datetime | None = Field(None, description="记录最后修改时间")
 
 
 class TaskRelationDTO(BaseModel):
@@ -204,14 +231,19 @@ class TaskRelationDTO(BaseModel):
 
 
 class TaskExecutionGraphDTO(BaseModel):
-    run_id: int
-    loop_round: int
-    status: str
-    output: dict[str, Any] = Field(default_factory=dict)
-    tasks: list[TaskNodeDTO] = Field(default_factory=list)
+    """任务执行图(图级运行态 + 节点表 + 分解树边 + 审计 DAG)。"""
+
+    run_id: int = Field(..., description="图运行实例ID")
+    loop_round: int = Field(..., description="当前 loop 轮次")
+    status: str = Field(..., description="图状态(product 态)")
+    output: dict[str, Any] = Field(default_factory=dict, description="图级输出")
+    tasks: list[TaskNodeDTO] = Field(default_factory=list, description="分解树节点列表")
     relations: list[TaskRelationDTO] = Field(default_factory=list, description="依赖关系(分解树)")
-    extend_props: dict[str, Any] = Field(default_factory=dict)
-    execution_graph: dict[str, Any] | None = None  # 回调审计 DAG 快照(按 root session_id 从 task_callback 反查挂图级)
+    extend_props: dict[str, Any] = Field(default_factory=dict, description="图级扩展属性")
+    execution_graph: dict[str, Any] | None = Field(
+        None,
+        description="回调审计 DAG 快照(按 root session_id 从 task_callback 反查挂图级)",
+    )
 
 
 def runtime_status_to_product_status(status: Any) -> str:

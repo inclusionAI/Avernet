@@ -539,12 +539,14 @@ def build_public_router() -> APIRouter:
     )
     # Task public surface (execute/dashboard/list) — served at the external
     # contract path the gateway's `collaboration-tasks` domain routes to the
-    # backend (pulled out of the broad collaboration→bcs namespace). Same
-    # shape as `collaboration_public_router` above: not bot-scoped, no grant
-    # gate; caller identity via _PUBLIC_AUTH/UserIdDep, authz via the table.
+    # backend (pulled out of the broad collaboration→bcs namespace). Not
+    # bot-scoped, no grant gate; caller identity via _PUBLIC_AUTH/UserIdDep,
+    # authz via the table. Mixed group: execute/dashboard have no user dimension
+    # (no 403), only `list` is user-scoped and declares its 403 per-route — so
+    # the mount uses the base ERROR_RESPONSES, not USER_SCOPED_ERROR_RESPONSES.
     public.include_router(
         task_router,
-        responses=USER_SCOPED_ERROR_RESPONSES,
+        responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
     # The two failures `PublicAPIRoute` cannot see itself: a router built

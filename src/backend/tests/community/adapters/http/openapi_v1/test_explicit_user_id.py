@@ -296,6 +296,11 @@ _NO_USER_DIMENSION = {
     # endpoint measuring the shared path must not be the one exception that
     # measures a dependency the path does not have.
     ("get", f"{PUBLIC_API_PREFIX}/bots/loadtest/hello"),
+    # Task public surface: execute submits (owner in body), dashboard reads by
+    # task_id — neither scopes to a caller-supplied user_id. list does, so it
+    # is NOT here.
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/execute"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/dashboard"),
 }
 
 #: Bot Logs is excluded for a different reason and must stay that way — see the
@@ -373,7 +378,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: publish-to-users route moved from /bots/{bot_id}/public-bcs to the external
 #: /collaboration/bots/{bot_uuid}/public, so one path-addressed {bot_id}
 #: operation became a {bot_uuid}-named one: path -1, none +1.
-_BOT_ID_PLACEMENT = {"path": 140, "query": 1, "none": 59}
+_BOT_ID_PLACEMENT = {"path": 140, "query": 1, "none": 62}
 
 
 def _schema() -> dict:
@@ -472,7 +477,9 @@ def test_the_pinned_number_of_operations_take_it():
     # Bot editor requests add one. The BCS publish-to-users route moved from the
     # internal /bots/{bot_id}/public-bcs path to the external contract path
     # /collaboration/bots/{bot_uuid}/public (same op count, {bot_uuid} not {bot_id}).
-    assert len(taking) == 181
+    # The task public surface adds one more: GET .../collaboration/tasks/list
+    # (execute/dashboard have no user dimension — see _NO_USER_DIMENSION).
+    assert len(taking) == 182
 
 
 def test_the_exempt_operations_take_none():
