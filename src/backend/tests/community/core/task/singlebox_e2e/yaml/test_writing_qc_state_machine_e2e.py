@@ -303,7 +303,7 @@ class TestWritingQcStateMachineE2E(unittest.TestCase):
                          f"根验收未 PASS:{acceptance} (BCS 回投 success=false?)")
         output = ri.get("output")
         self.assertTrue(output, "根无最终输出(output 为空)")
-        print(f"[result] output={str(output)[:400]!r}")
+        print(f"[result] output={str(output)!r}")
 
 
 if __name__ == "__main__":
