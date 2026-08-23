@@ -65,3 +65,14 @@ class TaskServiceProtocol(Protocol):
         exec_error(执行报错 fold)。bot_id 须为当前 bbs_owner,否则 TaskStateError。委托 ExecutionEngine.on_bbs_report。
         """
         ...
+
+    async def converge_by_session(
+        self, session_id: str, *, success: bool, output: object = None,
+    ) -> bool:
+        """BCN/ClawMind 终态回调后收敛:按 ``session_id`` 查 ``task_node_run_info`` →
+        框架 ``(task_id, node_id)`` → ``report_result`` → ``on_report`` → 翻态(引擎验收+传播+根收敛)。
+
+        ``session_id`` = BCN 回调 ``scope.session_id`` / ClawMind ``flow_runs.origin_session_id``,
+        与 ``task_node_run_info.session_id``(派发时写入 BCS session)同源。
+        """
+        ...

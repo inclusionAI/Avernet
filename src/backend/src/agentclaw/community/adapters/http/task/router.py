@@ -504,6 +504,7 @@ async def _dispatch(
             return envelope({"ok": True}, request, message="bcn event not handled")
         # 从 CloudEvent 取 scope.run_id → 经 BCS GET /state-machine-runs/{run_id} 查 run 明细
         # → 把明细覆盖 _raw_callback_body,落 task_callback.orig_callback_data(而非原始 CloudEvent)。
+        _run_detail: dict | None = None
         _run_id = ((_raw_obj.get("scope") or {}).get("run_id")) if isinstance(_raw_obj, dict) else None
         if _run_id:
             try:
@@ -528,6 +529,20 @@ async def _dispatch(
             except Exception as exc:  # noqa: BLE001 查 BCS 明细/DAG 失败不阻断落库(fallback 存原始 CloudEvent)
                 logger.warning("[callback] 查 BCS run 明细/DAG 失败 run_id=%s: %s", _run_id, exc)
         await svc.callback.ingest(_tc.data)
+        # 终态收敛:run.status in (completed/failed/aborted) → 按 session_id 查 task_node_run_info
+        # → 框架 (task_id, node_id) → svc.converge_by_session → on_report → 翻态(引擎验收+传播+根 DONE)。
+        if _run_detail:
+            _run_status = ((_run_detail.get("run") or {}).get("status"))
+            if _run_status in ("completed", "failed", "aborted"):
+                _session_id = ((_raw_obj.get("scope") or {}).get("session_id")) if isinstance(_raw_obj, dict) else None
+                if _session_id:
+                    _success = _run_status == "completed"
+                    _run_output = ((_run_detail.get("run") or {}).get("output"))
+                    try:
+                        await svc.converge_by_session(_session_id, success=_success, output=_run_output)
+                        logger.info("[callback] 终态收敛已触发 session_id=%s success=%s", _session_id, _success)
+                    except Exception as exc:  # noqa: BLE001 收敛失败不阻断(回调查询/落库已完成)
+                        logger.warning("[callback] 终态收敛失败 session_id=%s: %s", _session_id, exc)
         return envelope({"ok": True}, request)
     # 羽雀/框架节点级回投:先按 schema_cls(TaskCallbackRequest 富 schema)校验 → translate → report_result/start_run;
     # 不符合则兜底 TaskCallbackDataDTO(loop_task_id+result,report_callback 旧契约)→ callback_from_dto → report_result。

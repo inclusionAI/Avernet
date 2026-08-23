@@ -22,8 +22,6 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskNodeRunInfoRepositoryProtocol,
 )
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceResult, NodeOpResult, Status, TaskExecutionGraph, TaskNode, TaskNodePatch,
-    TaskOpResult, TaskSpec, TaskType,
     AcceptanceResult, NodeOpResult, Status, TaskCallbackData, TaskExecutionGraph, TaskNode, TaskNodePatch,
     TaskOpResult, TaskSpec, TaskSummary, TaskType,
 )
