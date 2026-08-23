@@ -56,7 +56,6 @@ class TaskModule(Module):
         discover: BotDiscoverServiceProtocol,
         bot_public: BotPublicServiceProtocol,
         injector: Injector,
-        task_info_repo: TaskInfoRepositoryProtocol,
     ) -> TaskService:
         """构造 TaskService facade(引擎自当 ResultSink/TaskContextBuilder;构造期收端口)。
 
@@ -81,6 +80,13 @@ class TaskModule(Module):
         # harness 旁路常驻巡检(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推);
         # facade 内部 set_on_harness 回填编排核入口并启动 daemon 巡检线程。
         harness = TaskHarness(graph)
+        # TaskPersistenceModule is optional for the pure-core and lightweight DI
+        # test paths. Resolve every persistence port lazily so Injector never
+        # attempts to instantiate an abstract repository protocol.
+        try:
+            task_info_repo = injector.get(TaskInfoRepositoryProtocol)
+        except Exception:  # noqa: BLE101 未绑定 → execute 跳过 task_info 落库
+            task_info_repo = None
         # 回投落库:TaskPersistenceModule 装了即取到(与 task_info_repo 同模块绑定);测试/纯内核
         # fixture 若未装则取不到 → 跳过回投落库(与 task_info_repo 缺省同语义,不阻断编排核推进)。
         try:
@@ -144,18 +150,12 @@ class TaskModule(Module):
 
     @staticmethod
     def _resolve_api_base_url() -> str:
-        """按环境解析后端 API base URL(singlebox→环境变量;prod/pre→线上地址;dev→localhost)。"""
+        """Resolve the backend callback base URL from composition-root configuration."""
         import os
         from agentclaw.community.di.profile import DeployProfile
-        from agentclaw.community.utils.env_utils import get_current_env
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
             return os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-        env = get_current_env()
-        if env == "prod":
-            return "https://secbaas-prod.alipay.com/"
-        if env == "pre":
-            return "https://secbaas-pre.alipay.com/"
-        return "http://localhost:8888"
+        return os.environ.get("TASK_API_BASE_URL", "http://localhost:8888")
 
     @staticmethod
     def _resolve_ports():
@@ -168,7 +168,7 @@ class TaskModule(Module):
           覆写本 provider。
         """
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
-            return None, None, ""
+            return None, None
         from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
             LocalBcsTokenProvider,
         )
