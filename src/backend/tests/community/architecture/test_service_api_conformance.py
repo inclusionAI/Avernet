@@ -5,14 +5,17 @@ layer was introduced — it was never written, so nothing checked that a concret
 service still satisfies the Protocol adapters inject. The README states the
 contract:
 
-    Conformance is **structural**: concrete services under
-    ``core/<module>/services/`` do *not* inherit from the Protocol (that would
-    force a ``core → api`` import, which the layering rule forbids). Instead
-    ``test_service_api_conformance.py`` parametrizes over every
-    ``(Protocol, ConcreteService)`` pair and asserts ``issubclass`` against the
-    ``@runtime_checkable`` Protocol — so a missing or renamed method on the
-    concrete class fails CI rather than only showing up as a router-time
-    ``AttributeError``.
+    Conformance is checked **structurally**, and a concrete service *may* also
+    inherit its Protocol. Either way ``test_service_api_conformance.py``
+    parametrizes over every ``(Protocol, ConcreteService)`` pair and asserts
+    ``issubclass`` against the ``@runtime_checkable`` Protocol — so a missing
+    or renamed method on the concrete class fails CI rather than only showing
+    up as a router-time ``AttributeError``.
+
+An inheriting service whose Protocol members are all ``@abstractmethod`` already
+fails at construction, so for those pairs this file is a backstop; it stays the
+only gate for the structural-only services, and its signature check below
+catches drift that inheritance does not.
 
 Two checks per pair, because ``issubclass`` on a ``runtime_checkable`` Protocol
 verifies method **names only**:

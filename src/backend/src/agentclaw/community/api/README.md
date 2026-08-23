@@ -18,14 +18,32 @@ api/
 └── …
 ```
 
-Conformance is **structural**: concrete services under
-`core/<module>/services/` do *not* inherit from the Protocol (that
-would force a `core → api` import, which the layering rule forbids).
-Instead `tests/architecture/test_service_api_conformance.py` parametrizes
-over every `(Protocol, ConcreteService)` pair and asserts
+Conformance is checked **structurally**, and a concrete service *may*
+also inherit its Protocol. `core → api` is forbidden by default —
+`tests/architecture/test_architecture_compliance.py::test_core_layer_does_not_import_api`
+enforces it — but that gate carries a documented per-file allowlist for
+service implementations that bridge to their own Protocol, so a service
+under `core/<module>/services/` may declare
+`class XService(XServiceProtocol)` by adding itself there. Prefer that
+over structural-only: it makes the contract navigable in an IDE (jump
+from Protocol to implementation and back) and, when every Protocol member
+is `@abstractmethod`, turns a missing member into a construction-time
+`TypeError` naming it instead of a silently inherited `...` body that
+returns `None`. Two edits come with it — the allowlist entry above, and
+the import declared in the module's `## Context Boundary`.
+
+Services that predate this — and those whose Protocol still declares
+`*args: Any, **kwargs: Any`, against which inheritance would assert
+nothing — remain structural-only. Both forms are supported.
+
+Either way `tests/architecture/test_service_api_conformance.py`
+parametrizes over every `(Protocol, ConcreteService)` pair and asserts
 `issubclass(ConcreteService, Protocol)` against the `@runtime_checkable`
 Protocol — so a missing or renamed method on the concrete class fails
-CI rather than only showing up as a router-time `AttributeError`.
+CI rather than only showing up as a router-time `AttributeError`. That
+gate stays the backstop for the structural-only services, and its
+signature check still catches drift (a renamed keyword, `async`→`def`)
+that inheritance alone does not.
 
 Two enforcement gates live under `tests/architecture/`:
 
