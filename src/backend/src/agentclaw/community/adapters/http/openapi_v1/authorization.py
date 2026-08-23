@@ -187,50 +187,33 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"):
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.authorized_apps.router"),
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/channels"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.channels.router"),
-    ("POST", "/openapi/v1/bots/{bot_id}/channels"):
-        ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.channels.router"),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"):
-        ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.channels.router"),
-    ("GET", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.channels.router"),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"):
-        ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.channels.router"),
-    ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"):
-        ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.channels.router"),
+    ("GET", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.ADMIN),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN),
+    ("GET", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.MEMBER),
+    ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN),
+    ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"): Check(PermissionLevel.ADMIN),
     ("GET", "/openapi/v1/bots/{bot_id}/chats"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.bot_chat.service"),
     ("GET", "/openapi/v1/bots/{bot_id}/chats/{trace_id}"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.bot_chat.service"),
     ("GET", "/openapi/v1/bots/{bot_id}/connection"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.engine_runtime.connection"),
-    ("GET", "/openapi/v1/bots/{bot_id}/containers"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
-    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"):
-        ServiceChecked(PermissionLevel.OWNER, "…core.service_bot.services.service_publication_facade"),
+    ("GET", "/openapi/v1/bots/{bot_id}/containers"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"): Check(PermissionLevel.OWNER),
     ("GET", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/diagnostics/health"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"): Check(PermissionLevel.MEMBER),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
-    ("GET", "/openapi/v1/bots/{bot_id}/edit-lock"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
-    ("POST", "/openapi/v1/bots/{bot_id}/edit-lock"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
-    ("POST", "/openapi/v1/bots/{bot_id}/edit-lock/steal"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
-    ("GET", "/openapi/v1/bots/{bot_id}/editors"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.bot_collaborator.services.collaborator_service"),
-    ("POST", "/openapi/v1/bots/{bot_id}/editors"):
-        ServiceChecked(PermissionLevel.ADMIN, "…core.bot_collaborator.services.collaborator_service"),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/editors/me"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.bot_collaborator.services.collaborator_service"),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"):
-        ServiceChecked(PermissionLevel.ADMIN, "…core.bot_collaborator.services.collaborator_service"),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"):
-        ServiceChecked(PermissionLevel.ADMIN, "…core.bot_collaborator.services.collaborator_service"),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/edit-lock/steal"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/editors"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/editors"): Check(PermissionLevel.ADMIN),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/editors/me"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"): Check(PermissionLevel.ADMIN),
+    ("PATCH", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"): Check(PermissionLevel.ADMIN),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/available"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/capabilities"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
@@ -252,26 +235,16 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/identity"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): OWNER_SCOPED,
-    ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"):
-        ServiceChecked(PermissionLevel.OWNER, "…core.service_bot.services.service_publication_facade"),
-    ("GET", "/openapi/v1/bots/{bot_id}/lifecycle"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
-    ("GET", "/openapi/v1/bots/{bot_id}/lifecycle/approval"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
-    ("PUT", "/openapi/v1/bots/{bot_id}/lifecycle/approval"):
-        ServiceChecked(PermissionLevel.OWNER, "…core.service_bot.services.service_publication_facade"),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/offline"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/restart"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.service_bot.services.service_publication_facade"),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"):
-        ServiceChecked(PermissionLevel.OWNER, "…core.service_bot.services.service_publication_facade"),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.OWNER),
+    ("GET", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/lifecycle/approval"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/lifecycle/approval"): Check(PermissionLevel.OWNER),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/offline"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/restart"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"): Check(PermissionLevel.OWNER),
     ("DELETE", "/openapi/v1/bots/{bot_id}/local"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local/auth-status"): OWNER_SCOPED,

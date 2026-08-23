@@ -169,45 +169,47 @@ deletion is known to change no caller's answer.
 - **Goal:** 16 rows at two different bars, without breaking the edit lock that reads the same value.
 - **Files:** `core/service_bot/services/service_publication_facade.py`, `.../openapi_v1/authorization.py`
 - **Done when:**
-  - [ ] Each row's bar is derived from the `required_level=` argument its handler passes (`MEMBER` by default; `OWNER` at `:361`, `:429`, `:498`, `:699`) and recorded per row.
-  - [ ] All 16 rows are `Check(MEMBER)` or `Check(OWNER)` to match.
-  - [ ] Only `if level < required_level: raise ServicePublicationNotFoundError` is deleted from `_resolve_bot`. **`level` stays computed** — `:242`–`:266` use it for lock applicability and an OWNER branch — and the `require_service` bot-type refusal stays.
-  - [ ] `_require_draft_lock` (`:544`) is untouched and still refuses when another collaborator holds the lock.
-  - [ ] Tests: the lock still refuses; an OWNER-barred operation still refuses an ADMIN collaborator; `_actions` (`:245`, `:250`) reports the same list it does today, since it branches on the `level` this task keeps computing. The facade writes no audit rows of its own, so the seam's is the only one.
+  - [x] Each row's bar is derived from the `required_level=` argument its handler passes (`MEMBER` by default; `OWNER` for container restart, convert-to-service, service-config update and initial-draft delete) and recorded per row — verified against the routers, not assumed from the table: all 16 matched.
+  - [x] All 16 rows are `Check(MEMBER)` or `Check(OWNER)` to match. `test_the_four_owner_operations_kept_their_bar` reads every one of them back, because `required_level` was the only record of which sat where and deleting it would otherwise have left that nowhere.
+  - [x] The bar is deleted from `_resolve_bot` — and so is the `required_level` parameter itself, along with its forwarding through `_resolve_publication` and `_resolve_action_record` and the five explicit call sites. A parameter nobody reads is the second place for a bar to drift. **`level` stays computed and returned** — `_actions` branches on it to decide whether a caller sees `delete` on an unpublished draft, which is a projection, not a permission — and the `require_service` bot-type refusal stays.
+  - [x] `_require_draft_lock` is untouched and still refuses when another collaborator holds the lock.
+  - [x] The COSEC note on lock takeover moved rather than vanished: it now sits at `steal_lock`'s call site and names the row that carries its MEMBER bar.
+  - [x] Tests: the lock still refuses; the six tests that drove the bar are rewritten to read it off the rows, keeping the domain refusals they also asserted (convert rejects a local or already-service bot, delete honours the domain rule, the legacy `ext` shape still parses); the owner-scoped resolve is still a not-found from the facade. The facade writes no audit rows of its own, so the seam's is the only one.
 - **Depends on:** Task 11
 
 ## Task 13: Move the channels group onto the seam
 - **Goal:** 6 rows at two bars, keeping the edit lock #1323 promised to leave alone.
 - **Files:** `.../openapi_v1/channels/router.py`, `.../openapi_v1/authorization.py`
 - **Done when:**
-  - [ ] Bars derived from `_require_admin(..., required_level=PermissionLevel.ADMIN)` (`:165`) for writes and from the read path for `GET`, recorded per row.
-  - [ ] The 6 rows are `Check(MEMBER)` / `Check(ADMIN)` to match.
-  - [ ] Every `_require_admin` call is deleted and the helper with them; **`_require_edit_lock` (`:173`) stays**, along with the documented 423 response.
-  - [ ] `_authorize` (`:136`) survives if the lock still needs the resolved bot.
-  - [ ] Tests: the lock still returns 423 when another collaborator holds it; a MEMBER is refused a write and admitted a read.
+  - [x] Bars derived from `_require_admin(..., required_level=PermissionLevel.ADMIN)` for the four writes and from `_authorize`'s member-level bot resolve for the two reads, recorded per row.
+  - [x] The 6 rows are `Check(MEMBER)` / `Check(ADMIN)` to match.
+  - [x] Every `_require_admin` call is deleted and the helper with them, along with the `CollaboratorServiceProtocol` parameter the four writes only had for it. **`_require_edit_lock` stays**, with its 423 — it asks who holds the draft, which is a concurrency question, not a permission one.
+  - [x] `_authorize` survives: the handlers call it for the **resolved owner** every write is scoped by, and for the bot-type refusal the shared engine-runtime gate performs. The module docstring now says which half of the old pair went where.
+  - [x] Tests: the lock still returns 423 when another collaborator holds it; the admin-bar test is rewritten to read the four write rows and the two read rows back, since there is no longer a collaborator double to refuse with.
 - **Depends on:** Task 12
 
 ## Task 14: Move the editors group onto the seam
 - **Goal:** 5 rows, checked by the very service the endpoints manage.
 - **Files:** `core/bot_collaborator/services/collaborator_service.py`, `.../openapi_v1/authorization.py`
 - **Done when:**
-  - [ ] Bars derived from each method's `required_level=` (`ADMIN` at `:325`, `:389`; `MEMBER` at `:419`; and the remaining sites the task enumerates) and recorded per row.
-  - [ ] The 5 rows are `Check(MEMBER)` / `Check(ADMIN)` to match.
-  - [ ] Only `_check_operable_permission` calls are deleted. **`_editor_policy.require_capability` (`:392`) and `require_team_space_member` (`:393`) stay** — they are capability and space checks, not collaborator bars.
-  - [ ] The gate reading levels from the same service whose rows the handlers write is exercised by a test that adds an editor and immediately re-adjudicates.
-  - [ ] Tests: refusal byte-identical to an absent bot; `DELETE /editors/me` still lets a MEMBER remove themselves. `collaborator_service` writes no audit rows of its own, so the seam's is the only one.
+  - [x] Bars derived per method: `add_editor` and `update_editor` at ADMIN, `list_editors` at MEMBER, `remove_editor` at ADMIN (spelled inline rather than through the helper), `leave_editors` at MEMBER (through the public `check_permission`). All five matched the table.
+  - [x] The 5 rows are `Check(MEMBER)` / `Check(ADMIN)` to match.
+  - [x] Only the bar calls are deleted, and `_check_operable_permission` with them once nothing called it. **`require_capability` and `require_team_space_member` stay** — they are capability and space checks, not collaborator bars. `remove_editor` still resolves `operator_level`, because it answers a second question: an ADMIN may not remove themselves while an OWNER may. `check_permission` stays public — the internal `/api` collaborator methods still use it, and `add_collaborator` still re-checks ADMIN underneath `add_editor`.
+  - [x] Verified single-surface first: nothing outside `openapi_v1/editors/router.py` calls the five editor methods, and none of the five addresses has a retiring twin.
+  - [x] Tests: `test_an_unsupported_bot_is_not_disclosed_before_the_caller_is_admitted` replaces the ordering test that pinned "authorization before bot-type disclosure" — the ordering is unassertable from inside the service now, and the disclosure is closed harder, since a stranger's masked 404 no longer confirms the Bot exists. It reads all five bars back, `DELETE /editors/me` included, because leaving is the one editor operation whose caller is not an admin and a bar that drifted upward would trap a member on the Bot. `collaborator_service` writes no audit rows of its own, so the seam's is the only one.
 - **Depends on:** Task 13
 
 ## Task 15: Tests & Verification
 - **Goal:** Ensure the feature meets every spec acceptance criterion.
 - **Files:** `tests/community/adapters/http/openapi_v1/`, `src/backend/docs/openapi-v1/README.md`
 - **Done when:**
-  - [ ] Task 2's burn-down is un-`xfail`ed and passes as a strict equality: the rows still `ServiceChecked` are exactly the ten in `_DEFERRED_OPERATIONS` (6 harness, 3 skills, 1 connection), and every one cites the module that really checks it.
-  - [ ] `scaffolding_row_count()` has fallen from 181 to **77** — 89 `ServiceChecked` rows leave (87 to `Check`, 2 to `NoCheck`) and 15 `INHERITED` twins become `Check`, so 104 in total. The end state is 10 `ServiceChecked` (6 harness, 3 skills, 1 connection), 67 `NoCheck`, 40 `OWNER_SCOPED`, 27 `INHERITED`, 102 `Check`, summing to the table's 246. The numbers are asserted, not described.
-  - [ ] Every `Check` row's handler declares `OwnerIdDep` and its route declares `{bot_id}` on the path — both enforced at assembly by Task 1, now also asserted over the live surface.
-  - [ ] No operation outside the migrated set changed which callers it admits or refuses.
-  - [ ] `docs/openapi-v1/README.md`: the five-modes table, the burn-down numbers and a new dated changelog entry all reflect the end state.
-  - [ ] Full backend suite and `scripts/ci/python_sast_local.sh` in changed-files mode both clean.
+  - [x] Task 2's burn-down is un-`xfail`ed and passes as a strict equality. It reported the finish itself: the day the last migrating row left `ServiceChecked` the marker failed as an `XPASS(strict)` and had to be removed deliberately, which is what the marker was for.
+  - [x] The rows still `ServiceChecked` are exactly the **25** in `_DEFERRED_OPERATIONS`, and every one cites the module that really checks it. Fifteen more than the ten this plan predicted, and each addition is a trace finding rather than a retreat: the 10 session operations (a disjunction, not a level — Task 10), the 2 product-chat reads (they discard the addressed owner the seam adjudicates against), and the 3 authorized-app operations (`REFUSED` admission against an `OwnerIdDep` that publishes a grant dependency).
+  - [x] `scaffolding_row_count()` has fallen from **181 to 99**. End state: 82 `Check`, 65 `NoCheck`, 40 `OWNER_SCOPED`, 34 `INHERITED`, 25 `ServiceChecked` — 246 rows. The plan predicted 77; the 22 difference is exactly the 15 extra deferrals plus the 7 sessions twins that follow them. The numbers are asserted by the burn-down test, not described.
+  - [x] Every `Check` row's route declares `{bot_id}` on its path and its gate resolves `OwnerIdDep` — both refused at assembly time by Task 1, so a row that could not be keyed cannot be added at all.
+  - [x] No operation outside the migrated set changed which callers it admits or refuses. Two changes *inside* it are caller-visible and stated where they happen: the 19 skill-centre operations move a denied collaborator from 403 to the masked 404, and the 7 bot-skill ones change error code within 404.
+  - [x] `docs/openapi-v1/README.md`: the stale *Adopting it (the follow-up work)* section — which still said "No row is `Check` yet" and pointed at a deleted test — is replaced by what the migration actually found, and a dated changelog entry carries the end-state numbers. The five-modes table needed no change: all five still exist, and three are still scaffolding.
+  - [x] `scripts/ci/python_sast_local.sh` clean in changed-files mode — run under the project's Python 3.12 via `PYTHON_SAST_CMD`, because the system `flake8` is 3.11 and reports a spurious `E999` on `contracts.py`'s PEP 695 `class Envelope[T]`. That finding is pre-existing: the pre-change file fails identically.
 - **Depends on:** Task 14
 
 ---

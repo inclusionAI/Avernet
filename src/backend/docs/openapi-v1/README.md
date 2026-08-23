@@ -1039,25 +1039,43 @@ would have let the surface grow an unchecked group the day someone wired it up.
 A test asserts none of those operations is live, so mounting one must delete
 its entry.
 
-### Adopting it (the follow-up work)
+### Adopting it: what the migration found
 
-No row is `Check` yet — this change built the mechanism, and moving each group
-onto it is its own session. Two kinds of move, and they are not the same size:
+82 rows are `Check` today. `ServiceChecked` fell from 92 to **25**, and those
+25 are named in `_DEFERRED_OPERATIONS` with a reason each — the burn-down test
+asserts that set exactly, so a row cannot join it quietly.
 
-- **A `ServiceChecked` group** — delete the service-local check, flip the row to
-  `Check` at the same level, prove the answers are unchanged. Mechanical, but
-  re-read the cited module first: the recorded level is *documentation*, and
-  nothing proves it.
+The plan expected 10 deferrals and got 25. Every addition came from tracing a
+group rather than reading its row, which is the lesson worth keeping:
+
+- **A recorded level is documentation, and documentation is wrong sometimes.**
+  Three skills rows cited a module that never checked them. Re-read the cited
+  code before flipping; a keyword search is not a trace.
+- **A bar is not always a level.** Ten session operations ask for
+  owner-or-collaborator **or**, at draft stage, a BCN-verified friendship. The
+  seam adjudicates one level, so `Check` there would have closed a real path
+  instead of relocating it.
+- **A check with more than one caller does not move, it gets joined.**
+  `bot_skill_asset_service` is reached from `/openapi/v1`, from the retiring
+  twins, and from `/api/skills` — which no row governs. Deleting its check to
+  "finish" the migration would have stripped authorization from two surfaces.
+  The row still moves: it names who the *declared* authority is.
+- **Two gates at one bar cannot be told apart by their answers.** Where a
+  service check stays, a test makes the two disagree and asserts the seam is
+  the one that decided.
+
+What did not move, and why, is in that feature's `spec.md` *Out of Scope*:
+6 harness, 10 sessions, 3 skills, 3 authorized-apps, 2 product chats, 1
+connection.
+
 - **An `OWNER_SCOPED` group** ([#906](https://github.com/inclusionAI/Avernet/issues/906),
-  [#907](https://github.com/inclusionAI/Avernet/issues/907)) — decide the bar
-  per operation, then flip. This **changes behaviour**: collaborators start
-  getting through where they used to get a 404. That is the policy decision
-  those issues exist for, not a migration.
+  [#907](https://github.com/inclusionAI/Avernet/issues/907)) is still ahead, and
+  is **not** a migration: it changes behaviour, because collaborators start
+  getting through where they used to get a 404.
 
-`test_no_row_is_check_yet` is what says the seam is unadopted. Delete it when
-the first group lands; do not weaken it.
-
-Spec: `specs/2026-08-21-openapi-v1-collaborator-authorization-seam/`.
+Specs: `specs/2026-08-21-openapi-v1-collaborator-authorization-seam/` (the
+mechanism) and `specs/2026-08-22-openapi-v1-adopt-collaborator-seam/` (the
+adoption).
 
 ## Addressing rule
 
@@ -1775,6 +1793,22 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 ---
 
 ## Changelog (append a dated line whenever you move the board)
+
+- **2026-08-23** — **The seam gets its adopters.** 60 `ServiceChecked` rows and
+  8 `INHERITED` twins become `Check`, so `ServiceChecked` falls from 92 to 25
+  and `Check` rises from 0 to 82; `scaffolding_row_count()` goes 181 → 99.
+  Migrated: render-screens (3), the skill-centre capability hook (19), the
+  bot-skill `{skill_id}` assets (7), engine-runtime and diagnostics (16) with
+  eight path-addressed twins, the service-publication facade (16), channels (6)
+  and editors (5). Each group's service-local check was deleted only where the
+  seam is its sole caller; where it also serves a retiring twin or a surface
+  outside `/openapi/v1`, the check stays and the row records that the seam is
+  the *declared* authority. Two caller-visible changes, both intended: the 19
+  skill-centre operations move a denied collaborator from **403** to the seam's
+  masked **404** (closing a probing oracle), and the 7 bot-skill operations
+  change error code within 404. The burn-down assertion stops being an `xfail`
+  and becomes a strict equality against `_DEFERRED_OPERATIONS`. See **Adopting
+  it** above.
 
 - **2026-08-22** — **`SELF_CHECKED` renamed to `INHERITED`.** Naming only; no
   row changed mode, no route changed behaviour, and the count in each mode is

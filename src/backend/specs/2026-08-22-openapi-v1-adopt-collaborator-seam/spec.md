@@ -175,8 +175,27 @@ rather than the deprecation schedule's.
   ruled out. The six session **file** operations under the same prefix are not
   affected — they call `resolve_operable_bot` directly, with no fallback — and
   did migrate.
-  **`ServiceChecked` therefore does not reach zero in this feature**; it reaches
-  20 — these 10, the 6 harness rows, the 3 skills rows, and connection.
+  **`ServiceChecked` therefore does not reach zero in this feature.**
+- **The two product-chat reads** (`GET /bots/{bot_id}/chats` and
+  `.../chats/{trace_id}`). Their handlers `del owner_id`: the addressed owner is
+  consumed by the grant dependency and then deliberately discarded, and the
+  service is called with the *acting user* as the scope. A collaborator calling
+  without naming an owner is served today; the seam would refuse them, because
+  it resolves the bot through `get_by_id_and_owner(bot_id, owner_id)` and
+  `owner_id` defaults to the caller. Adjudicating these means first making them
+  address an owner — a wire change for every existing caller. The checks also
+  differ in kind: `BotChatService` asks `has_bot_access`, which matches any
+  collaborator row on `bot_id` alone, where the seam resolves an *operable*
+  level under a named owner. Stricter, and for a removed team editor it answers
+  differently.
+- **The three authorized-app operations.** Blocked on a fork rather than a
+  trace: their admission mode is `REFUSED` — no application caller may reach
+  them at all — while `OwnerIdDep`, which the gate requires, transitively
+  declares `require_granted_addressed_bot`. Attaching the seam therefore
+  publishes a grant dependency on three operations that refuse grant-holders by
+  construction, and `test_admission_inventory` says so. Resolving it means
+  either a human-only owner resolver or revisiting whether a `REFUSED`
+  operation may publish `owner_id` — a seam/admission decision, not a group's.
 - **The 40 `OWNER_SCOPED` operations.** Blocked on #906 / #907, and a policy
   change rather than a consolidation: collaborators start getting through.
 - **The remaining `INHERITED` operations.** Most twin `OWNER_SCOPED` addresses

@@ -6,6 +6,10 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from agentclaw.community.adapters.http.openapi_v1.authorization import (
+    AUTHORIZATION,
+    Check,
+)
 from agentclaw.community.api.publish_approval import ApprovalResult
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.service_bot.repository.models import (
@@ -221,18 +225,28 @@ def test_restart_container_refuses_healthy_instance(deps):
         )
 
 
-def test_restart_container_requires_owner(deps):
-    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.MEMBER
+def test_restart_container_still_carries_the_owner_bar():
+    """The bar this facade enforced, asserted where it is enforced now.
 
-    with pytest.raises(ServicePublicationNotFoundError):
-        deps.facade.restart_container(
-            "bot-1",
-            "DEVICE-001",
-            actor_id="member",
-            owner_id="owner",
-        )
+    ``_resolve_bot`` took ``required_level`` and refused below it; the four
+    OWNER operations passed ``PermissionLevel.OWNER`` explicitly. That
+    parameter is gone — every route reaching the facade declares its bar as a
+    ``Check`` row and ``bot_access`` enforces it before the handler runs, with
+    the same masked answer a missing bot gets.
 
-    deps.device_service.get_instances_by_bot.assert_not_called()
+    So a MEMBER can no longer be refused *here*, and asserting they are would
+    be asserting against a facade that does not exist. What is still this
+    group's to state is that the bar did not quietly become MEMBER on the way
+    across — hence the row, read back.
+    """
+    key = ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart")
+    rule = AUTHORIZATION[key]
+
+    assert isinstance(rule, Check), "container restart is no longer adjudicated"
+    assert rule.level is PermissionLevel.OWNER, (
+        "container restart moved off OWNER, which _resolve_bot enforced before "
+        "the seam took it over"
+    )
 
 
 @pytest.mark.parametrize(
@@ -344,18 +358,20 @@ def test_publication_must_belong_to_resolved_bot_and_env(
         deps.facade.get_publication("bot-1", 1, actor_id="member", owner_id="owner")
 
 
-def test_bot_absence_and_insufficient_permission_are_both_masked(deps):
-    deps.bot_repo.get_by_id_and_owner.return_value = None
-    with pytest.raises(ServicePublicationNotFoundError):
-        deps.facade.list_publications("bot-1", actor_id="stranger", owner_id="owner")
+def test_a_bot_absent_under_the_addressed_owner_is_still_not_found(deps):
+    """Half of what this used to assert; the other half moved.
 
-    deps.bot_repo.get_by_id_and_owner.return_value = {
-        "id": 10,
-        "bot_id": "bot-1",
-        "owner_id": "owner",
-        "bot_type": "service",
-    }
-    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.NONE
+    It drove both masked answers — a bot that is not there, and a caller below
+    the bar — and asserted they were the same. The second is the seam's now,
+    and ``bot_access`` answers it with a 404 byte-identical to an absent bot's,
+    which is the same guarantee stated one layer up (``test_bot_access.py``).
+
+    The owner-scoped resolve stays here, and stays a not-found: it is what
+    keeps a bot id from resolving under an owner it does not belong to, and no
+    route-level check replaces it.
+    """
+    deps.bot_repo.get_by_id_and_owner.return_value = None
+
     with pytest.raises(ServicePublicationNotFoundError):
         deps.facade.list_publications("bot-1", actor_id="stranger", owner_id="owner")
 
@@ -366,11 +382,10 @@ def test_non_service_bot_is_rejected_from_publication_reads(deps):
         deps.facade.list_publications("bot-1", actor_id="owner", owner_id="owner")
 
 
-def test_convert_requires_owner_and_rejects_local_or_existing_service(deps):
-    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.MEMBER
-    with pytest.raises(ServicePublicationNotFoundError):
-        deps.facade.convert_to_service("bot-1", actor_id="member", owner_id="owner")
-
+def test_convert_rejects_local_or_existing_service(deps):
+    """The OWNER bar it also asserted is on the row now — see
+    ``test_the_four_owner_operations_kept_their_bar``. What is left is the
+    domain refusals, which never were authorization."""
     deps.collaborator_service.get_permission_level.return_value = PermissionLevel.OWNER
     with pytest.raises(ServicePublicationConflictError):
         deps.facade.convert_to_service("bot-1", actor_id="owner", owner_id="owner")
@@ -460,7 +475,7 @@ def test_service_config_read_and_owner_update_preserve_other_fields(deps):
     )
 
 
-def test_service_config_update_requires_owner_and_handles_legacy_ext(deps):
+def test_service_config_read_handles_legacy_ext(deps):
     deps.bot_repo.get_by_id_and_owner.return_value["ext"] = {
         "service_bot_config": {"should_approval": "false"}
     }
@@ -471,15 +486,8 @@ def test_service_config_update_requires_owner_and_handles_legacy_ext(deps):
         is False
     )
 
-    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.MEMBER
-    with pytest.raises(ServicePublicationNotFoundError):
-        deps.facade.update_service_config(
-            "bot-1",
-            actor_id="member",
-            owner_id="owner",
-            should_approval=True,
-        )
-    deps.bot_service.update_bot_ext.assert_not_called()
+    # The OWNER bar this also drove is on the row now — see
+    # ``test_the_four_owner_operations_kept_their_bar``.
 
 
 @pytest.mark.asyncio
@@ -671,17 +679,15 @@ async def test_offline_honors_approval_then_executes_when_skipped(deps, monkeypa
     deps.publish_service.offline_publish.assert_awaited_once_with(3)
 
 
-def test_delete_is_owner_only_and_delegates_domain_rule(deps, monkeypatch):
+def test_delete_delegates_the_domain_rule(deps, monkeypatch):
     monkeypatch.setattr(
         "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
         lambda: "dev",
     )
     row = record(1, PublishStatus.DRAFT)
     deps.publish_repo.list_by_source_bot.return_value = [row]
-    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.MEMBER
-    with pytest.raises(ServicePublicationNotFoundError):
-        deps.facade.delete_initial_draft("bot-1", actor_id="member", owner_id="owner")
-
+    # The OWNER bar this also drove is on the row now — see
+    # ``test_the_four_owner_operations_kept_their_bar``.
     deps.collaborator_service.get_permission_level.return_value = PermissionLevel.OWNER
     deps.publish_service.can_delete_bot.return_value = False
     with pytest.raises(ServicePublicationConflictError):
@@ -744,13 +750,60 @@ def test_lock_projection_does_not_require_lock_without_draft(deps):
     assert info.need_lock is False
 
 
-def test_lock_takeover_requires_bot_membership(deps):
-    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.NONE
+def test_lock_takeover_still_requires_bot_membership():
+    """Takeover is the forceful operation, so its bar is worth stating twice.
 
-    with pytest.raises(ServicePublicationNotFoundError):
-        deps.facade.steal_lock("bot-1", actor_id="member", owner_id="owner")
+    The lock service assumes authorization already happened, and PD grants
+    takeover to every Bot member — which is why ``steal_lock`` used to pass
+    ``required_level=PermissionLevel.MEMBER`` explicitly, with a COSEC comment
+    saying so. The parameter is gone; the comment moved to the call site and
+    points here, and the bar itself is the row.
+    """
+    rule = AUTHORIZATION[("POST", "/openapi/v1/bots/{bot_id}/edit-lock/steal")]
 
-    deps.lock_service.steal_lock.assert_not_called()
+    assert isinstance(rule, Check), "lock takeover is no longer adjudicated"
+    assert rule.level is PermissionLevel.MEMBER
+
+
+def test_the_four_owner_operations_kept_their_bar():
+    """The four that were OWNER, and the twelve that were MEMBER, still are.
+
+    ``_resolve_bot``'s ``required_level`` was the only record of which
+    operation sat at which bar, and deleting it would have left that record
+    nowhere if the rows had not picked it up. This reads all sixteen back.
+    """
+    owner_only = {
+        ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"),
+    }
+    member = {
+        ("GET", "/openapi/v1/bots/{bot_id}/containers"),
+        ("GET", "/openapi/v1/bots/{bot_id}/lifecycle"),
+        ("GET", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/offline"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/restart"),
+        ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"),
+        ("GET", "/openapi/v1/bots/{bot_id}/edit-lock"),
+        ("POST", "/openapi/v1/bots/{bot_id}/edit-lock"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"),
+        ("POST", "/openapi/v1/bots/{bot_id}/edit-lock/steal"),
+    }
+    assert len(owner_only) + len(member) == 16
+
+    for key in owner_only:
+        rule = AUTHORIZATION[key]
+        assert isinstance(rule, Check) and rule.level is PermissionLevel.OWNER, (
+            f"{key[0]} {key[1]} was OWNER in _resolve_bot and is not now"
+        )
+    for key in member:
+        rule = AUTHORIZATION[key]
+        assert isinstance(rule, Check) and rule.level is PermissionLevel.MEMBER, (
+            f"{key[0]} {key[1]} was MEMBER in _resolve_bot and is not now"
+        )
 
 
 def test_lock_is_rejected_without_an_editable_draft(deps):

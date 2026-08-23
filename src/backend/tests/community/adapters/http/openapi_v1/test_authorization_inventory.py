@@ -318,8 +318,10 @@ def test_scaffolding_burn_down_is_reported():
 
 
 #: The exact operations that may still be ``ServiceChecked`` once this feature
-#: lands — ten of them, deferred for three reasons recorded in ``spec.md``'s
-#: *Out of Scope*.
+#: lands — twenty-five of them, deferred for six reasons recorded in
+#: ``spec.md``'s *Out of Scope*. It was ten when the plan was written; the
+#: engine-runtime and bot-chat traces added the rest, each for a reason the
+#: table could not have shown. That is what this set is for.
 #:
 #: Keyed on the **operation**, not on the module its row cites. Citing a module
 #: is not a commitment: Task 9 rewrites three of these rows to name a different
@@ -377,6 +379,34 @@ _DEFERRED_OPERATIONS = frozenset(
         ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
+        # The two product-chat reads. Their handlers ``del owner_id`` — the
+        # addressed owner is consumed by the grant dependency and then
+        # deliberately discarded, and the service is called with the *acting
+        # user* as the scope. So a collaborator calling without naming an owner
+        # is served today, and the seam would refuse them: it resolves the bot
+        # through ``get_by_id_and_owner(bot_id, owner_id)``, and ``owner_id``
+        # defaults to the caller. Adjudicating them means first making them
+        # address an owner, which is a wire change for every existing caller.
+        #
+        # The underlying check differs in a second way worth recording: the
+        # service asks ``has_bot_access``, which matches **any** collaborator
+        # row on ``bot_id`` alone, while the seam resolves an *operable* level
+        # under a named owner — stricter, and for a removed team editor it
+        # answers differently.
+        ("GET", "/openapi/v1/bots/{bot_id}/chats"),
+        ("GET", "/openapi/v1/bots/{bot_id}/chats/{trace_id}"),
+        # The three authorized-app operations. Blocked on a fork rather than a
+        # trace: their admission mode is ``REFUSED`` — no application caller may
+        # reach them at all — while ``OwnerIdDep``, which the gate requires,
+        # transitively declares ``require_granted_addressed_bot``. Attaching the
+        # seam therefore publishes a grant dependency on three operations that
+        # refuse grant-holders by construction, and the admission inventory says
+        # so. Resolving it means either a human-only owner resolver or
+        # revisiting whether a ``REFUSED`` operation may publish ``owner_id`` —
+        # a seam/admission decision, not this group's to make.
+        ("GET", "/openapi/v1/bots/{bot_id}/authorized-apps"),
+        ("POST", "/openapi/v1/bots/{bot_id}/authorized-apps"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"),
     }
 )
 
@@ -403,15 +433,6 @@ def test_no_deferred_operation_migrates_early():
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Adopting the seam is in progress — see "
-        "specs/2026-08-22-openapi-v1-adopt-collaborator-seam. Flips to a real "
-        "assertion in that feature's last group, once every migrating row has "
-        "left ServiceChecked."
-    ),
-    strict=True,
-)
 def test_only_the_deferred_operations_remain_service_checked():
     """The burn-down, asserted rather than described.
 
@@ -420,6 +441,11 @@ def test_only_the_deferred_operations_remain_service_checked():
     nowhere, and false from this feature's first migrating group onward. Deleted
     rather than weakened: a test asserting "no adopter" cannot be made to mean
     "the right adopters" by loosening it.
+
+    Carried an ``xfail(strict=True)`` for the length of the migration, so that
+    finishing it would be reported rather than assumed: the day the last
+    migrating row left ``ServiceChecked``, the marker failed as an XPASS and had
+    to be removed deliberately. This is that removal.
 
     Equality, not containment. A subset check would pass while rows that should
     have migrated sat waiting, which is the failure this is here to catch.

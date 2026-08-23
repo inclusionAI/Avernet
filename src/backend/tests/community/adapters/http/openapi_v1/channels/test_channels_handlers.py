@@ -10,6 +10,11 @@ import pytest
 from fastapi import Request
 from pydantic import ValidationError
 
+from agentclaw.community.adapters.http.openapi_v1.authorization import (
+    AUTHORIZATION,
+    Check,
+)
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.adapters.http.openapi_v1.channels.router import (
     create_channel,
     delete_channel,
@@ -77,16 +82,6 @@ class _Relay:
             active_engine="openclaw",
             owner_id=owner_id,
         )
-
-
-class _Collaborators:
-    def __init__(self, allowed: bool = True):
-        self.allowed = allowed
-        self.calls: list[dict] = []
-
-    def check_collaborator_permission(self, **kwargs):
-        self.calls.append(kwargs)
-        return {"has_permission": self.allowed}
 
 
 class _Locks:
@@ -220,7 +215,6 @@ async def test_list_preserves_an_explicitly_empty_allowlist():
 @pytest.mark.asyncio
 async def test_create_derives_scope_stores_secret_and_returns_safe_projection():
     service = _Channels()
-    collaborators = _Collaborators()
     body = ChannelCreate.model_validate(
         {
             "type": "dingding",
@@ -237,7 +231,6 @@ async def test_create_derives_scope_stores_secret_and_returns_safe_projection():
         owner_id="owner-1",
         relay=_Relay(),
         service=service,
-        collaborators=collaborators,
         locks=_Locks(),
         aix_config=AixConfig(preview_url="https://preview.example"),
     )
@@ -278,7 +271,6 @@ async def test_update_preserves_null_secret_clears_nullable_fields_and_syncs_act
         owner_id="owner-1",
         relay=_Relay(),
         service=service,
-        collaborators=_Collaborators(),
         locks=_Locks(),
         aix_config=AixConfig(preview_url="https://preview.example"),
     )
@@ -306,7 +298,6 @@ async def test_status_maps_public_values_to_internal_values():
         owner_id="owner-1",
         relay=_Relay(),
         service=service,
-        collaborators=_Collaborators(),
         locks=_Locks(),
     )
 
@@ -325,7 +316,6 @@ async def test_runtime_bot_lookup_failure_is_normalized_to_upstream_error():
         owner_id="owner-1",
         relay=_Relay(),
         service=_MissingBotChannels([_record()]),
-        collaborators=_Collaborators(),
         locks=_Locks(),
     )
 
@@ -345,7 +335,6 @@ async def test_delete_deactivates_active_channel_before_deleting():
         owner_id="owner-1",
         relay=_Relay(),
         service=service,
-        collaborators=_Collaborators(),
         locks=_Locks(),
     )
 
@@ -372,25 +361,41 @@ async def test_get_masks_channel_from_another_bot_as_not_found():
     assert json.loads(response.body)["message"] == "Not found"
 
 
-@pytest.mark.asyncio
-async def test_write_requires_bot_admin_permission():
-    service = _Channels([_record()])
+def test_the_four_writes_still_require_bot_admin():
+    """The bar ``_require_admin`` enforced, asserted where it is enforced now.
 
-    response = await update_channel_status(
-        bot_id="bot-1",
-        channel_id=1,
-        body=ChannelStatusUpdate(status="active"),
-        request=_request(),
-        user_id="member-1",
-        owner_id="owner-1",
-        relay=_Relay(),
-        service=service,
-        collaborators=_Collaborators(allowed=False),
-    )
+    This drove ``update_channel_status`` with a collaborator double that said
+    no and asserted a masked 404 plus an untouched service. The helper is gone:
+    the four writes declare ``Check(PermissionLevel.ADMIN)`` and ``bot_access``
+    refuses ahead of the handler, with the same masked 404 — so there is no
+    longer a double to say no with, and the refusal itself is covered by
+    ``test_bot_access.py``.
 
-    assert response.status_code == 404
-    assert json.loads(response.body)["message"] == "Not found"
-    assert not any(name == "status" for name, _ in service.calls)
+    What is still this group's own is that the writes really carry ADMIN while
+    the reads carry MEMBER. A write that slipped to MEMBER would let any
+    collaborator rebind a Bot's DingTalk channel.
+    """
+    writes = [
+        ("POST", "/openapi/v1/bots/{bot_id}/channels"),
+        ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
+    ]
+    reads = [
+        ("GET", "/openapi/v1/bots/{bot_id}/channels"),
+        ("GET", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
+    ]
+    for key in writes:
+        rule = AUTHORIZATION[key]
+        assert isinstance(rule, Check), f"{key[0]} {key[1]} is not adjudicated"
+        assert rule.level is PermissionLevel.ADMIN, (
+            f"{key[0]} {key[1]} moved off the ADMIN bar _require_admin enforced"
+        )
+    for key in reads:
+        rule = AUTHORIZATION[key]
+        assert isinstance(rule, Check) and rule.level is PermissionLevel.MEMBER, (
+            f"{key[0]} {key[1]} is not the member-level read it was"
+        )
 
 
 @pytest.mark.asyncio
@@ -407,7 +412,6 @@ async def test_write_requires_edit_lock_when_bot_has_collaborators():
         owner_id="owner-1",
         relay=_Relay(),
         service=service,
-        collaborators=_Collaborators(),
         locks=locks,
     )
 
@@ -432,7 +436,6 @@ async def test_write_succeeds_when_caller_holds_edit_lock():
         owner_id="owner-1",
         relay=_Relay(),
         service=service,
-        collaborators=_Collaborators(),
         locks=_Locks(has_collaborators=True, holder_user_id="admin-1"),
     )
 
