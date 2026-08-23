@@ -16,12 +16,6 @@ class BotServiceBcsBotIdentityResolver(BcsBotIdentityResolver):
         ids = list(dict.fromkeys(str(bot_id).strip() for bot_id in product_bot_ids if str(bot_id).strip()))
         if not ids:
             raise BotIdentityResolutionError("BCS identity resolution requires at least one bot_id")
-        invalid = [bot_id for bot_id in ids if ":" in bot_id]
-        if invalid:
-            raise BotIdentityResolutionError(
-                f"task domain must provide product bot ids, got BCS-like ids: {invalid}"
-            )
-
         page = self._bot_service.list_bots_by_conditions(
             bot_ids=ids,
             page=1,
