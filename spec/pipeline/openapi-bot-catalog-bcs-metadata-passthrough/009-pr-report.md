@@ -1,6 +1,6 @@
 ---
 agent: tc-pr
-status: pending
+status: open
 created: 2026-08-23T00:00:00+08:00
 ---
 
@@ -11,7 +11,8 @@ created: 2026-08-23T00:00:00+08:00
 - Repository: `inclusionAI/Avernet`
 - Base: `origin/dev_refactory_collaboration@53e4c961af5e28644e5b40e08f6886132477b53c`
 - Topic branch: `rebase/openapi-bot-catalog-bcs-metadata-on-dev_refactory_collaboration`
-- PR: 创建后补充链接和最终 head SHA。
+- Initial PR head: `3a3284906cd54d999f65f33a49f3558fbc089303`
+- PR: [#1376](https://github.com/inclusionAI/Avernet/pull/1376) (OPEN, non-draft)
 
 ## 改动摘要
 
@@ -32,4 +33,10 @@ created: 2026-08-23T00:00:00+08:00
 
 ## 远端检查
 
-PR 创建后以 GitHub 实际检查状态为准；本地通过不代表远端 ACI 通过。
+| 检查 | 状态 |
+|---|---|
+| BCS e2e (coverage gated) | SUCCESS |
+| Singlebox coverage | IN_PROGRESS |
+| BCS / Backend / Engine / BaaS / Gateway unit tests | IN_PROGRESS |
+
+远端检查仍在执行；本地通过不代表远端 ACI 通过。
