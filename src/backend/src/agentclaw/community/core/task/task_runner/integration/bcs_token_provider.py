@@ -24,7 +24,7 @@ class BcsTokenProvider(Protocol):
     def provider_admin_token(self) -> str: ...
 
 
-@dataclass(frozen=True)
+@dataclass
 class LocalBcsTokenProvider:
     """singlebox 本地 BCS 凭据:复用 BcsHttpAdapter 直连本地 BCS(:21000)。
 
@@ -41,6 +41,10 @@ class LocalBcsTokenProvider:
     secret: str = ""
     provider_id: str = ""
     provider_admin_token: str = ""
+    provider_name: str = "singlebox-task-bbs"
+    provider_owner_id: str = "146836"
+    provider_webhook_url: str = "https://example.com/singlebox-task-provider-webhook"
+    provider_state_file: str = ""
 
     @classmethod
     def from_env(cls) -> "LocalBcsTokenProvider":
@@ -48,4 +52,14 @@ class LocalBcsTokenProvider:
             base_url=os.environ.get("SINGLEBOX_BCS_URL", "http://localhost:21000"),
             provider_id=os.environ.get("SINGLEBOX_BCS_PROVIDER_ID", ""),
             provider_admin_token=os.environ.get("SINGLEBOX_BCS_PROVIDER_ADMIN_TOKEN", ""),
+            provider_name=os.environ.get("SINGLEBOX_BCS_PROVIDER_NAME", "singlebox-task-bbs"),
+            provider_owner_id=os.environ.get("SINGLEBOX_USER_ID", "146836"),
+            provider_webhook_url=os.environ.get(
+                "SINGLEBOX_BCS_PROVIDER_WEBHOOK_URL",
+                "https://example.com/singlebox-task-provider-webhook",
+            ),
+            provider_state_file=os.environ.get(
+                "SINGLEBOX_BCS_PROVIDER_STATE_FILE",
+                "/tmp/agentclaw-singlebox-task-provider.json",
+            ),
         )
