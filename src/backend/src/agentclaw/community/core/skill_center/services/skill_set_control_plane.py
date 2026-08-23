@@ -31,6 +31,7 @@ from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
     LegacySkillSetCompatibilityFactoryProtocol,
+    LegacySkillSetScope,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectionReconcilerProtocol,
@@ -162,6 +163,29 @@ class SkillSetControlPlaneService:
             bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
+        )
+
+    def resolve_legacy_set_scope(
+        self,
+        *,
+        set_id: str,
+        actor_id: str,
+        owner_id_hint: str | None,
+    ) -> LegacySkillSetScope | None:
+        """Recover a deprecated wire's omitted Bot without weakening strict reads."""
+        scope = self._repository.resolve_legacy_set_scope(set_id=set_id)
+        if scope is None:
+            return None
+        if owner_id_hint is not None and owner_id_hint != scope.owner_id:
+            raise SkillSetControlPlaneNotFoundError()
+        bot = self._bot(
+            bot_id=scope.bot_id,
+            owner_id=scope.owner_id,
+            user_id=actor_id,
+        )
+        return LegacySkillSetScope(
+            owner_id=str(bot["owner_id"]),
+            bot_id=scope.bot_id,
         )
 
     def update_set(
