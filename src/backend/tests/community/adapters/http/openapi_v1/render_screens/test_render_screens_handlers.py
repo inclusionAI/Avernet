@@ -14,8 +14,12 @@ from agentclaw.community.adapters.http.openapi_v1.admission import (
     AdmissionMode,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.authorization import (
+    AUTHORIZATION,
+    Check,
+    NoCheck,
+)
 from agentclaw.community.adapters.http.openapi_v1.render_screens.gating import (
-    require_editable_bot,
     require_scoped_record,
 )
 from agentclaw.community.adapters.http.openapi_v1.render_screens.router import (
@@ -114,8 +118,9 @@ async def test_list_is_readable_without_editor_permission():
 async def test_member_editor_can_create_update_and_delete():
     bots = Mock()
     bots.get_bot.return_value = _bot()
-    collaborators = Mock()
-    collaborators.get_operable_permission_level.return_value = PermissionLevel.MEMBER
+    # No collaborator double: the handlers no longer resolve a level themselves.
+    # The seam adjudicates Check(MEMBER) before they run, and these three assert
+    # what the handler does *once admitted*.
     created_record = _record()
     updated_record = _record(
         name="dashboard-v2",
@@ -140,7 +145,6 @@ async def test_member_editor_can_create_update_and_delete():
         actor_id="member-1",
         owner_id="owner-1",
         bot_service=bots,
-        collaborators=collaborators,
         service=service,
     )
     updated_response = await update_render_screen(
@@ -154,7 +158,6 @@ async def test_member_editor_can_create_update_and_delete():
         actor_id="member-1",
         owner_id="owner-1",
         bot_service=bots,
-        collaborators=collaborators,
         service=service,
     )
     deleted_response = await delete_render_screen(
@@ -164,7 +167,6 @@ async def test_member_editor_can_create_update_and_delete():
         actor_id="member-1",
         owner_id="owner-1",
         bot_service=bots,
-        collaborators=collaborators,
         service=service,
     )
 
@@ -187,19 +189,36 @@ async def test_member_editor_can_create_update_and_delete():
 
 
 def test_removed_team_editor_cannot_mutate():
-    bots = Mock()
-    bots.get_bot.return_value = _bot()
-    collaborators = Mock()
-    collaborators.get_operable_permission_level.return_value = PermissionLevel.NONE
+    """The bar that kept a removed editor out, now stated where it is enforced.
 
-    with pytest.raises(RenderScreenNotFoundError):
-        require_editable_bot(
-            bots,
-            collaborators,
-            bot_id="bot-1",
-            owner_id="owner-1",
-            actor_id="removed-editor",
+    This used to drive ``require_editable_bot`` directly and assert it refused a
+    caller at ``PermissionLevel.NONE``. That helper is gone: the three mutating
+    operations declare ``Check(MEMBER)`` and the seam adjudicates them before
+    the handler runs, so the refusal itself is ``bot_access``'s and is covered
+    by ``test_bot_access.py``.
+
+    What is render-screens' own to assert is that the three operations really
+    carry that bar — and that the read does not, since group and share viewers
+    hold no Editor relation and must still reach the CDN mapping.
+    """
+    mutations = [
+        ("POST", "/openapi/v1/bots/{bot_id}/render-screens"),
+        ("PATCH", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"),
+    ]
+    for key in mutations:
+        rule = AUTHORIZATION[key]
+        assert isinstance(rule, Check), f"{key[0]} {key[1]} is no longer adjudicated"
+        assert rule.level is PermissionLevel.MEMBER, (
+            f"{key[0]} {key[1]} moved off the MEMBER bar require_editable_bot "
+            "enforced before the seam took it over"
         )
+
+    read = AUTHORIZATION[("GET", "/openapi/v1/bots/{bot_id}/render-screens")]
+    assert isinstance(read, NoCheck), (
+        "the read must stay unadjudicated — share and group viewers hold no "
+        "Editor relation and still need the mapping to render panels"
+    )
 
 
 @pytest.mark.parametrize(

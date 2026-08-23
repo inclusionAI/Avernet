@@ -5,9 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.render_screen_service import RenderScreenServiceProtocol
-from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_management.render_screen.errors import (
     RenderScreenNotFoundError,
 )
@@ -41,27 +39,6 @@ def resolve_readable_bot(
     return bot
 
 
-def require_editable_bot(
-    bots: BotServiceProtocol,
-    collaborators: CollaboratorServiceProtocol,
-    *,
-    bot_id: str,
-    owner_id: str,
-    actor_id: str,
-) -> Mapping[str, Any]:
-    """Resolve the Bot and require its live effective Editor permission."""
-    bot = resolve_readable_bot(bots, bot_id=bot_id, owner_id=owner_id)
-    level = collaborators.get_operable_permission_level(
-        bot=bot,
-        user_id=actor_id,
-    )
-    if level < PermissionLevel.MEMBER:
-        # COSEC: mask edit authorization failures as absence to prevent Bot-ID
-        # probing while still allowing authenticated viewers to use the GET.
-        raise RenderScreenNotFoundError("render screen not found")
-    return bot
-
-
 def require_scoped_record(
     service: RenderScreenServiceProtocol,
     *,
@@ -84,7 +61,6 @@ def require_scoped_record(
 
 
 __all__ = [
-    "require_editable_bot",
     "require_scoped_record",
     "resolve_readable_bot",
 ]

@@ -302,12 +302,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/public-bcs"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/render-screens"):
         NoCheck("share and group viewers must render panels without an Editor relation"),
-    ("POST", "/openapi/v1/bots/{bot_id}/render-screens"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.render_screens.gating"),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.render_screens.gating"),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"):
-        ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.render_screens.gating"),
+    ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(PermissionLevel.MEMBER),
+    ("PATCH", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(PermissionLevel.MEMBER),
     ("DELETE", "/openapi/v1/bots/{bot_id}/resources"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/resources"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/resources/download"): OWNER_SCOPED,

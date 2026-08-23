@@ -290,17 +290,6 @@ def test_every_service_checked_row_cites_a_real_enforcer():
     assert unverifiable == []
 
 
-def test_no_row_is_check_yet():
-    """This change builds the seam; adopting it is per-group follow-up work.
-
-    When the first group migrates this test is what says so, and it should be
-    deleted then rather than weakened.
-    """
-    adopted = [key for key, rule in AUTHORIZATION.items() if isinstance(rule, Check)]
-
-    assert adopted == [], "a group adopted the seam — see spec.md Decisions 4"
-
-
 def test_scaffolding_burn_down_is_reported():
     """The migration's remaining distance is a number, and it only goes down.
 
@@ -312,9 +301,16 @@ def test_scaffolding_burn_down_is_reported():
     )
 
     assert scaffolding_row_count() == counted
-    assert counted == len(AUTHORIZATION) - sum(
-        1 for rule in AUTHORIZATION.values() if isinstance(rule, NoCheck)
+    # Every row is scaffolding, or one of the two settled modes. ``Check`` was
+    # absent from this sum until the render-screens group became the seam's
+    # first adopter; before that, "not NoCheck" and "scaffolding" were the same
+    # set, and the identity held by accident of there being nothing else.
+    settled = sum(
+        1
+        for rule in AUTHORIZATION.values()
+        if isinstance(rule, (NoCheck, Check))
     )
+    assert counted == len(AUTHORIZATION) - settled
 
 
 # ── burn-down ────────────────────────────────────────────────────────────────

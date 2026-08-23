@@ -53,7 +53,7 @@ deletion is known to change no caller's answer.
 - **Depends on:** Task 2
 
 ## Task 4: Move the diagnostics group onto the seam
-- **Goal:** First real adopter — 2 rows, router-local check, no lock, no audit, no twins.
+- **Goal:** 2 rows. **TRACED 2026-08-23 and the plan was wrong about this group:** its check is *not* router-local. `_authorize` (`diagnostics/router.py:151`) calls `resolve_operable_bot` → `relay.resolve_bot_off_loop` → `relay.resolve_bot` → `require_bot_operator` (`gate.py:OPERATOR_LEVEL`, MEMBER) — the *same* deletion site as engine-runtime's 26 rows. Migrating the two groups separately leaves one of them unguarded in between, so **this task moves into Group F and lands with Task 10**. Keep the bot-type gate in `_authorize` (`active_engine != DEFAULT_ENGINE_TYPE` → 501).
 - **Files:** `.../openapi_v1/diagnostics/router.py`, `.../openapi_v1/authorization.py`
 - **Done when:**
   - [ ] The bar is derived from `diagnostics/router.py:_authorize` and the evidence recorded.
@@ -65,9 +65,9 @@ deletion is known to change no caller's answer.
 - **Goal:** 3 rows behind `require_editable_bot`, with a deliberate `NoCheck` sibling to preserve.
 - **Files:** `.../openapi_v1/render_screens/gating.py`, `.../openapi_v1/authorization.py`
 - **Done when:**
-  - [ ] The bar is derived from `render_screens/gating.py:58` (`level < PermissionLevel.MEMBER`) and recorded.
-  - [ ] The three write rows are `Check(MEMBER)`; `require_editable_bot`'s level check is deleted while `resolve_readable_bot` stays.
-  - [ ] The `GET /render-screens` row stays `NoCheck` — share and group viewers hold no Editor relation — and a test pins that it is still reachable by a viewer the three writes refuse.
+  - [x] The bar is derived from `render_screens/gating.py:58` (`level < PermissionLevel.MEMBER`) and recorded.
+  - [x] The three write rows are `Check(MEMBER)`; `require_editable_bot`'s level check is deleted while `resolve_readable_bot` stays.
+  - [x] The `GET /render-screens` row stays `NoCheck` — share and group viewers hold no Editor relation — and a test pins that it is still reachable by a viewer the three writes refuse.
 - **Depends on:** Task 4
 
 ## Task 6: Give the authorized-apps handlers the owner they adjudicate
@@ -185,13 +185,13 @@ deletion is known to change no caller's answer.
   - Theme: The prerequisite, and it does **not** touch the seam. Assembly starts refusing a `Check` row the gate could not key on, and the no-adopter assertion becomes a burn-down one. No row changes mode; nothing about the surface changes yet.
 - **Group B — Say what the bot-chat operations really do:** Task 3
   - Theme: A correction, not a migration. Two rows stop claiming a check that does not exist.
-- **Group C — First adopters:** Tasks 4, 5
+- **Group C — First adopter:** Task 5
   - Theme: The smallest, least entangled groups — no lock, no audit, no twins — put the `Check` path in front of real callers.
 - **Group D — Authorized apps:** Tasks 6, 7
   - Theme: The one group needing a handler change before its rows can flip; the change lands separately from the flip so each is reviewable alone.
 - **Group E — Skill centre:** Tasks 8, 9
   - Theme: 19 hook rows plus the 7 `{skill_id}` asset rows, `skill_set_control_plane`'s audit write reconciled, and three rows deliberately left behind with their citation corrected — because the modules that check them also check six retiring addresses this feature will not touch.
-- **Group F — Engine runtime:** Tasks 10, 11
+- **Group F — Engine runtime:** Tasks 4, 10, 11
   - Theme: The largest group and its fifteen path-addressed twins, keeping bot-type gating intact. The connection row and its twin are deferred — their check guards credential composition rather than route access, and that trade-off is not settled inside a migration.
 - **Group G — The entangled three:** Tasks 12, 13, 14
   - Theme: The groups where the permission check shares code with something that must survive it — a computed level, an edit lock, a capability policy.
