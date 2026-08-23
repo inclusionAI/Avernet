@@ -6,8 +6,8 @@ use axum::{
 };
 use bcs_protocol::{
     BCN_PROVIDER_ID_HEADER, PatchProviderRequest, ProviderAuthModeDto,
-    ProviderCoordinationConfigDto, ProviderCoordinationModeDto, ProviderInfoResponse,
-    ProviderOrganizationManagementConfigDto, RegisterProviderBotRequest,
+    ProviderBotConnectionModeDto, ProviderCoordinationConfigDto, ProviderCoordinationModeDto,
+    ProviderInfoResponse, ProviderOrganizationManagementConfigDto, RegisterProviderBotRequest,
     RegisterProviderBotResponse, RegisterProviderRequest, RegisterProviderResponse,
 };
 use bcs_service_api::application::v1::{
@@ -16,9 +16,9 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::{
     BotUseCaseError, CoordinationMode, DeleteProviderBotCommand, ProviderAuthMode,
-    ProviderBotBinding, ProviderBotRosterItem, ProviderBotTaskModesFilter,
-    ProviderCoordinationConfig, ProviderOrganizationManagementConfig, ProviderRecord,
-    RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
+    ProviderBotBinding, ProviderBotConnectionMode, ProviderBotRosterItem,
+    ProviderBotTaskModesFilter, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
+    ProviderRecord, RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
     SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult, TaskModeMatch,
     UpdateProviderCommand,
 };
@@ -222,6 +222,16 @@ pub async fn register_provider_bot(
 ) -> Result<Json<RegisterProviderBotResponse>, ProviderRouteError> {
     let provider_admin_token = bearer_token(&headers)?;
     let allowed_switch_provider = state.allowed_switch_provider_ids.contains(&provider_id);
+    let connection_mode = req
+        .connection_mode
+        .unwrap_or(ProviderBotConnectionModeDto::Gateway);
+    // plugin mode is accepted only for allow-listed providers (§3.0 admission gate).
+    if matches!(connection_mode, ProviderBotConnectionModeDto::Plugin) && !allowed_switch_provider {
+        return Err(ProviderRouteError::bad_request(
+            "connection_mode plugin requires an allow-listed provider",
+        ));
+    }
+    let plugin_mode = matches!(connection_mode, ProviderBotConnectionModeDto::Plugin);
     let bot_uuid = allowed_switch_provider.then(|| req.provider_bot_ref.clone());
     let outcome = state
         .services
@@ -237,7 +247,12 @@ pub async fn register_provider_bot(
             skills: req.skills.into_iter().map(to_core_skill).collect(),
             scopes: req.scopes,
             bot_uuid,
-            reject_existing_bot_uuid: allowed_switch_provider,
+            // Gateway mode over an allow-listed provider rejects a collision where
+            // provider_bot_ref is already used as a bot_uuid; plugin mode relaxes
+            // this so W-before-P /补注册 over an existing real-token bot proceeds to
+            // the token-preserving soft-merge path.
+            reject_existing_bot_uuid: allowed_switch_provider && !plugin_mode,
+            connection_mode: connection_mode_from_wire(connection_mode),
         })
         .await
         .map_err(provider_error)?;
@@ -505,6 +520,13 @@ fn auth_mode_from_wire(mode: ProviderAuthModeDto) -> ProviderAuthMode {
         ProviderAuthModeDto::StaticBearer => ProviderAuthMode::StaticBearer,
         ProviderAuthModeDto::AgentPass => ProviderAuthMode::AgentPass,
         ProviderAuthModeDto::ProviderAdmin => ProviderAuthMode::ProviderAdmin,
+    }
+}
+
+fn connection_mode_from_wire(mode: ProviderBotConnectionModeDto) -> ProviderBotConnectionMode {
+    match mode {
+        ProviderBotConnectionModeDto::Gateway => ProviderBotConnectionMode::Gateway,
+        ProviderBotConnectionModeDto::Plugin => ProviderBotConnectionMode::Plugin,
     }
 }
 

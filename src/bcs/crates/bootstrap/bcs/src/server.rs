@@ -5271,6 +5271,7 @@ mod tests {
                 scopes: Vec::new(),
                 bot_uuid: None,
                 reject_existing_bot_uuid: false,
+                connection_mode: bcs_service_api::ProviderBotConnectionMode::Gateway,
             })
             .await
             .expect("register provider bot");
