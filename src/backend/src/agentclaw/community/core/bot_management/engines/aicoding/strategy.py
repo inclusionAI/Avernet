@@ -14,6 +14,9 @@ from typing import Any, Dict
 from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
 )
+from agentclaw.community.core.workspace.runtime_identity import (
+    claude_code_uses_aicoding_runtime,
+)
 
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils import secret_utils
@@ -30,7 +33,6 @@ from ..provisioning import BotProvisioningContext, EngineProvisioningStrategy
 CODING_TEMPLATE_TYPES = frozenset({"applicationCoding", "personalCoding"})
 AICODING_ENGINE_TYPE = "aicoding"
 CLAUDE_CODE_ENGINE_TYPE = "claude_code"
-NORMAL_CC_TEMPLATE_TYPE = "normalcc"
 TEMPLATE_CONFIG_CONSUMING_ENGINES = frozenset(
     {AICODING_ENGINE_TYPE, CLAUDE_CODE_ENGINE_TYPE}
 )
@@ -97,10 +99,6 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         return (engine_type or default).strip().lower().replace("-", "_")
 
     @staticmethod
-    def normalize_template_type(template_type: str | None) -> str:
-        return (template_type or "").strip().lower()
-
-    @staticmethod
     def is_coding_template(template_type: str | None) -> bool:
         return template_type in CODING_TEMPLATE_TYPES
 
@@ -112,15 +110,9 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         template_type: str | None,
     ) -> bool:
         """Whether this bot should use the aicoding runtime engine."""
-        if (
-            cls.normalize_engine_type(active_engine, default="")
-            != CLAUDE_CODE_ENGINE_TYPE
-        ):
-            return False
-        normalized_template_type = cls.normalize_template_type(template_type)
-        return bool(
-            normalized_template_type
-            and normalized_template_type != NORMAL_CC_TEMPLATE_TYPE
+        return claude_code_uses_aicoding_runtime(
+            active_engine=active_engine,
+            template_type=template_type,
         )
 
     @classmethod
