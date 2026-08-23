@@ -11,7 +11,7 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import Callable
+from typing import Any, Callable
 
 from sqlalchemy.exc import IntegrityError
 
@@ -24,6 +24,8 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult, NodeOpResult, Status, TaskExecutionGraph, TaskNode, TaskNodePatch,
     TaskOpResult, TaskSpec, TaskType,
+    AcceptanceResult, NodeOpResult, Status, TaskCallbackData, TaskExecutionGraph, TaskNode, TaskNodePatch,
+    TaskOpResult, TaskSpec, TaskSummary, TaskType,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.repository.types import (
@@ -90,6 +92,7 @@ class TaskService:
         return ExecutionEngine(
             self._graph, bot=bot, bcs=bcs, discover=discover,
             bcs_identity=self._bcs_identity,
+            api_base_url=self._api_base_url,
         )
 
     @property
@@ -218,6 +221,38 @@ class TaskService:
                 id=0, node_id=task_id, task_id=task_id, run_mode=run_mode, assignee=assignee,
                 output=None, acceptance_result=None, retry=0, session_id=session_id,
                 extend_props=extend_props, start_time=now_ms, update_time=now_ms, end_time=None))
+
+    async def converge_by_session(self, session_id: str, *, success: bool, output: Any = None) -> bool:
+        """BCN/ClawMind 终态回调后收敛:按 ``session_id`` 查 ``task_node_run_info`` → 框架
+        ``(task_id, node_id)`` → 构造 ``TaskCallbackData`` (``loop_task_id``)→ ``report_result``
+        → ``on_report`` → 翻态(引擎验收 + 传播 + 根收敛)。
+
+        ``session_id`` = BCN 回调 ``scope.session_id`` / ClawMind ``ext_info.flow_runs.origin_session_id``,
+        与 ``task_node_run_info.session_id`` (派发时由 ``_persist_node_run`` 写入 BCS session) 同源,
+        据此反查框架节点 → 走标准 ``on_report`` 收敛(非直接改图)。"""
+        if not session_id or self._run_info_repo is None:
+            return False
+        rec = self._run_info_repo.get_by_session_id(session_id)
+        if rec is None:
+            logger.warning("[converge] session_id=%s 在 task_node_run_info 中未找到", session_id)
+            return False
+        loop_task_id = f"{rec.task_id}::{rec.node_id}"
+        result: dict[str, Any] = {"success": success}
+        if output is not None:
+            result["data"] = output
+        data = TaskCallbackData(data={
+            "loop_task_id": loop_task_id,
+            "workflow_source": "bcn",
+            "result": result,
+        })
+        try:
+            await self._callback.report_result(data)
+            logger.info("[converge] session_id=%s → loop_task_id=%s success=%s → on_report 收敛已触发",
+                        session_id, loop_task_id, success)
+            return True
+        except Exception as exc:  # noqa: BLE001 收敛失败不阻断落库(回调查询/落库已完成)
+            logger.warning("[converge] session_id=%s → on_report 失败: %s", session_id, exc)
+            return False
 
     def _on_bg_done(self, bg: "asyncio.Task") -> None:
         """后台 on_execute 完成:脱离跟踪集 + 异常可见(记 log,不抛)。"""

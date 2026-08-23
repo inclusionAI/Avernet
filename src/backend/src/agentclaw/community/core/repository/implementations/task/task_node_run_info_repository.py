@@ -146,6 +146,17 @@ class TaskNodeRunInfoRepository(TaskNodeRunInfoRepositoryProtocol):
             )
             return [r.to_record() for r in rows]
 
+    def get_by_session_id(self, session_id: str) -> Optional[TaskNodeRunInfoRecord]:
+        """按 ``session_id`` 查 ``task_node_run_info``(BCN/ClawMind 回调收敛用)。"""
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self._model)
+                .filter(self._model.session_id == session_id)
+                .order_by(self._model.retry.desc())
+                .first()
+            )
+            return row.to_record() if row else None
+
     def list_by_run_mode(
         self,
         run_mode: str,

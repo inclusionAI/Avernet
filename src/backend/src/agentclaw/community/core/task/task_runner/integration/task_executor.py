@@ -36,11 +36,13 @@ _BCN_EVENT_CALLBACK_PATH = "/api/v1/collaboration/tasks/callback/report"
 
 
 class TaskExecutor:
-    def __init__(self, *, bot, bcs, formatter, context, sink, poller, identity_resolver=None, graph=None) -> None:
+    def __init__(self, *, bot, bcs, formatter, context, sink, poller,
+                 identity_resolver=None, graph=None, api_base_url: str = "") -> None:
         """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
         context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
         graph: TaskGraphService|None,动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props
-        (dashboard 可见);None 时跳过(单测/无图路径)。R0 骨架允许 None;bbs 路径不依赖任何端口。"""
+        (dashboard 可见);None 时跳过(单测/无图路径)。R0 骨架允许 None;bbs 路径不依赖任何端口。
+        api_base_url: 任务后端 base url,传给 bbs_runner 拼发给胜出 bot 的任务消息。"""
         self._bot = bot
         self._bcs = bcs
         self._formatter = formatter
@@ -49,6 +51,7 @@ class TaskExecutor:
         self._poller = poller
         self._identity_resolver = identity_resolver
         self._graph = graph
+        self._api_base_url = api_base_url
         self._group_meta: dict[str, dict[str, Any]] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
 
     async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[bool]:
@@ -332,6 +335,18 @@ class TaskExecutor:
             detail = await self._bcs.get_group(group_id)
             sid = (detail or {}).get("latest_running_session_id")
         return sid
+
+    async def run_bbs(self, execution_graph) -> None:
+        """升 BBS 可恢复态后主动 bid→select→claim→dispatch(委托 bbs_runner)。
+        延迟导入 bbs_runner 避免顶层循环依赖;bbs_runner 自身 best-effort 不抛。"""
+        from agentclaw.community.core.task.task_runner.integration import bbs_runner
+        await bbs_runner.notify(
+            execution_graph=execution_graph,
+            bcs=self._bcs, bot=self._bot,
+            graph=self._graph,
+            backend_url=self._api_base_url,
+            skill_name=bbs_runner._BBS_SKILL_NAME,
+        )
 
     @staticmethod
     def _state_machine_bindings(gf: GroupFormation) -> dict[str, dict[str, Any]]:

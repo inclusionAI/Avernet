@@ -6,6 +6,7 @@ Avernet 阶段:form_coop_group stub(不真实 BCS)、start_run stub 投递(记�
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import Any, Protocol
 
@@ -16,6 +17,8 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+
+logger = logging.getLogger(__name__)
 
 
 class DeliveryPort(Protocol):
@@ -129,6 +132,14 @@ class TaskRunner:
         if self._execution_backend is not None:
             return await self._execution_backend.get_group_session(group_id)
         return None
+
+    async def run_bbs(self, execution_graph) -> None:
+        """升 BBS 可恢复态后主动通知 dream-mode bot 抢单(委托 execution_backend)。
+        注入 execution_backend 时委托其 run_bbs(→ TaskExecutor.run_bbs → bbs_runner.notify);
+        否则 stub 记日志(Avernet 无后端兜底,不抛)。"""
+        if self._execution_backend is not None:
+            return await self._execution_backend.run_bbs(execution_graph)
+        logger.info("[runner] run_bbs stub (no execution_backend) task=%s", execution_graph.task_id)
 
     def _build_context(self, task_id: str, node_id: str) -> dict[str, Any]:
         """上下文组装(Runner 内聚;内部自动判定,无 NODE/SUBTREE/TASK scope 入参)。

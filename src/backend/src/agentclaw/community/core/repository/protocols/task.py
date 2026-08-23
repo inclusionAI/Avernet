@@ -148,6 +148,15 @@ class TaskNodeRunInfoRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def get_by_session_id(self, session_id: str) -> Optional["TaskNodeRunInfoRecord"]:
+        """按 BCS ``session_id`` 查 ``task_node_run_info``(BCN/ClawMind 回调收敛用)。
+
+        ``task_node_run_info.session_id`` = BCS 建群/建 session 返的 session_id;
+        BCN/ClawMind 回调的 ``main_session_id`` 同源。据此反查框架 (task_id, node_id)。
+        """
+        ...
+
+    @abstractmethod
     def list_by_run_mode(
         self,
         run_mode: str,
