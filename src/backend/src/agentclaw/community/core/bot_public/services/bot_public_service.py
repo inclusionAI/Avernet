@@ -3,6 +3,7 @@
 纯业务逻辑层，不包含任何 HTTP 关注点。
 """
 import json
+import re
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -497,7 +498,14 @@ class BotPublicService:
         context["viewFriendDeps"] = self._build_view_friend_deps(view_depts)
         approval_result = self._process_service.start_approval(
             applicant=operator_id,
-            biz_id=f"{bot_uid}{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            # biz_id flows into the approval service's puid, which only accepts
+            # alphanumeric + hyphen. bot_uid is the BCS identity
+            # "{backend_bot_id}:{entity_id}" and may carry ":" and "_" (the
+            # backend bot id has its own underscores) — both rejected by the
+            # approval service's PARAM_CHECKED. Sanitize every non-alphanumeric
+            # char to "-" so the puid carries the identity without the colon/_
+            # that would break its "-" / "_" field delimiters.
+            biz_id=f"{re.sub(r'[^a-zA-Z0-9-]', '-', bot_uid)}{datetime.now().strftime('%Y%m%d%H%M%S')}",
             biz_type="botpublic",
             context=context,
         )
