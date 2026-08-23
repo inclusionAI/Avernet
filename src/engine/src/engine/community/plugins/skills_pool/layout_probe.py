@@ -264,20 +264,35 @@ def _marker_contract_valid(
             and bridge.get("target") == str(layout.pool_repo)
             and bridge.get("valid") is True
         )
-    bridges_valid = summary.get("structural_bridges") == [
+    expected_bridges = [
         {
             "name": "stable_local_bridge",
             "path": str(layout.local_bridge),
             "target": str(layout.legacy_local),
             "valid": True,
-        },
+        }
+    ]
+    if expected_engine == "claude_code":
+        repo_target = layout.legacy_repo
+    else:
+        repo_target = layout.pool_repo
+    expected_bridges.append(
         {
             "name": "stable_repo_bridge",
             "path": str(layout.repo_bridge),
-            "target": str(layout.pool_repo),
+            "target": str(repo_target),
             "valid": True,
-        },
-    ]
+        }
+    )
+    bridges_valid = summary.get("structural_bridges") == expected_bridges
+    if expected_engine == "claude_code":
+        legacy_repo = summary.get("legacy_repo")
+        bridges_valid = bridges_valid and (
+            isinstance(legacy_repo, dict)
+            and legacy_repo.get("path") == str(layout.legacy_repo)
+            and legacy_repo.get("actual_directory") is True
+            and legacy_repo.get("valid") is True
+        )
     if expected_engine == "hermes":
         return bridges_valid and summary.get("legacy_bridge_verified") is True
     return bridges_valid
@@ -829,6 +844,52 @@ def inspect_runtime_layout(
                 checks=active_checks,
             ),
         )
+    if engine == "claude_code" and effective_repo_delivery is RepoDelivery.MOUNT:
+        try:
+            legacy_repo_stat = layout.legacy_repo.lstat()
+        except (FileNotFoundError, NotADirectoryError, PermissionError):
+            legacy_repo_stat = None
+        except OSError as error:
+            return _transient(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="legacy_repo_temporarily_unavailable",
+                error=error,
+                preparation_id=preparation_id,
+            )
+        if (
+            legacy_repo_stat is None
+            or stat.S_ISLNK(legacy_repo_stat.st_mode)
+            or not stat.S_ISDIR(legacy_repo_stat.st_mode)
+        ):
+            return _invalid(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="legacy_repo_not_independent",
+                preparation_id=preparation_id,
+            )
+        try:
+            legacy_repo_mounted = repo_is_mounted(layout.legacy_repo)
+        except OSError as error:
+            return _transient(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="legacy_repo_temporarily_unavailable",
+                error=error,
+                preparation_id=preparation_id,
+            )
+        if not legacy_repo_mounted:
+            return _invalid(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="legacy_repo_not_mounted",
+                preparation_id=preparation_id,
+            )
+
     if effective_repo_delivery is RepoDelivery.DOWNLOAD:
         required_bridges = [
             ("legacy_repo_delivery", layout.legacy_repo, layout.pool_repo)
@@ -843,7 +904,12 @@ def inspect_runtime_layout(
             )
     else:
         required_bridges = [("legacy_repo", layout.repo_bridge, layout.pool_repo)]
-        if engine != "openclaw":
+        if engine == "claude_code":
+            required_bridges = [
+                ("stable_local", layout.local_bridge, layout.legacy_local),
+                ("stable_repo", layout.repo_bridge, layout.legacy_repo),
+            ]
+        elif engine != "openclaw":
             required_bridges = [
                 ("stable_local", layout.local_bridge, layout.legacy_local),
                 ("stable_repo", layout.repo_bridge, layout.pool_repo),
@@ -927,6 +993,8 @@ def inspect_runtime_layout(
             checks["stable_local_bridge_valid"] = True
         if effective_repo_delivery is RepoDelivery.MOUNT:
             checks["stable_repo_bridge_valid"] = True
+            if engine == "claude_code":
+                checks["legacy_repo_mounted"] = True
         if engine == "hermes":
             checks["legacy_local_bridge_valid"] = True
     return RuntimeLayoutInspection(

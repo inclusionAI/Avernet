@@ -209,15 +209,17 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/friends/requests/{id}/reject",
             post(routes::friends::reject_friend_request),
         )
-        .route("/v2/friends/request", post(routes::v2_friends::create_friend_request))
-        .route("/v2/friends/requests", get(routes::v2_friends::list_friend_requests))
-        .route("/v2/friends/requests/{id}/accept", post(routes::v2_friends::accept_friend_request))
-        .route("/v2/friends/requests/{id}/reject", post(routes::v2_friends::reject_friend_request))
-        .route("/v2/friends/requests/{id}/cancel", post(routes::v2_friends::cancel_friend_request))
-        .route("/v2/friends/{actor}/revoke", post(routes::v2_friends::revoke_friend))
-        .route("/v2/friends", get(routes::v2_friends::list_friends_by_actor))
-        .route("/v2/bots/{id}/friends", get(routes::v2_friends::list_friends))
-        .route("/v2/bots/search", get(routes::bots::search_bots))
+        .route(
+            "/collaboration/friend-connections/requests",
+            post(routes::friend_connections::create_friend_request)
+                .get(routes::friend_connections::list_friend_requests),
+        )
+        .route("/collaboration/friend-connections/requests/{id}/accept", post(routes::friend_connections::accept_friend_request))
+        .route("/collaboration/friend-connections/requests/{id}/reject", post(routes::friend_connections::reject_friend_request))
+        .route("/collaboration/friend-connections/requests/{id}/cancel", post(routes::friend_connections::cancel_friend_request))
+        .route("/collaboration/friend-connections/{actor}", delete(routes::friend_connections::revoke_friend))
+        .route("/collaboration/friend-connections", get(routes::friend_connections::list_friends_by_actor))
+        .route("/bots/search", get(routes::bots::search_bots))
         .route(
             "/bots/{id}/admission",
             get(routes::admission::get_admission),

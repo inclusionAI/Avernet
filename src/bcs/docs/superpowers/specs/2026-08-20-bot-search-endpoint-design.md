@@ -1,6 +1,6 @@
 # Bot Search 接口设计
 
-> 状态：已实现（`GET /v2/bots/search`，commit `feat(bots): implement GET /v2/bots/search with filtering + tc_bot`）
+> 状态：已实现（`GET /bots/search`，commit `feat(bots): implement GET /bots/search with filtering + tc_bot`）
 > 日期：2026-08-20
 > 范围：为好友申请页面提供 bot 列表查询接口，支持名称模糊搜索 + 其他关键字过滤 + 分页 + friend 状态。
 
@@ -28,7 +28,7 @@
 ### 3.1 基本信息
 
 ```
-GET /v2/bots/search
+GET /bots/search
 ```
 
 ### 3.2 查询参数（全部可选，可任意组合）
@@ -111,7 +111,7 @@ GET /v2/bots/search
 ## 4. 兼容性 & 可扩展性
 
 ### 兼容性
-- `GET /v2/bots/search` 新路径，不 modifies 任何现有端点。
+- `GET /bots/search` 新路径，不 modifies 任何现有端点。
 - 老 `/bots/discover` 保持不变（老前端继续用）。
 - 响应结构独立，不依赖老 `{success,data}` envelope。
 
@@ -133,7 +133,7 @@ GET /v2/bots/search
 |---|---|---|
 | **wire** | `BotSearchQuery`（含 `tc_bot`）+ `BotSearchEntry` response struct；crate root re-export | `bcs-protocol/src/http/bots.rs`、`http/mod.rs`、`lib.rs` |
 | **handler** | `search_bots` handler：参数校验（limit/visibility/status → 400）、caller 解析、可见性规则、is_friend 后过滤 + 分页、`BotSearchEntry` 组装 | `bcs-http/src/routes/bots.rs` |
-| **router** | 注册 `.route("/v2/bots/search", get(routes::bots::search_bots))` | `bcs-http/src/router.rs` |
+| **router** | 注册 `.route("/bots/search", get(routes::bots::search_bots))` | `bcs-http/src/router.rs` |
 | **service** | 新增 `BotQueryService::search_bots(SearchBotsCommand) -> BotSearchResult`（默认 impl 兜底），基于 `list_active()` 过滤 `q`/`visibility`/`status`/`tc_bot` + name 排序，经 `bot_to_query_entry` 带 status/online；`is_tc_bot` helper | `bcs-service-api/.../bot_query.rs`（trait）、`bcs-bot/src/application/bot.rs`（impl） |
 | **friend** | `is_friend` 在 handler 调 `ConnectService::list_friends` 取集合判定 | 复用现有，无新增 |
 | **store** | 无改动（复用 `bcs-bot-store` 现有 query 能力） | — |
@@ -152,18 +152,18 @@ GET /v2/bots/search
 
 ```
 # 搜索名称含"研"的 bot
-GET /v2/bots/search?q=研
+GET /bots/search?q=研
 
 # 搜索所有 public bot，第二页
-GET /v2/bots/search?visibility=public&offset=20&limit=20
+GET /bots/search?visibility=public&offset=20&limit=20
 
 # 搜索非好友的 protected bot
-GET /v2/bots/search?visibility=protected&is_friend=false
+GET /bots/search?visibility=protected&is_friend=false
   Authorization: Bearer <bot_token>
 
 # 仅返回 TeamClaw backend 过来的 bot
-GET /v2/bots/search?tc_bot=true
+GET /bots/search?tc_bot=true
 
 # 无认证 → 仅返回 public bot
-GET /v2/bots/search?q=助手
+GET /bots/search?q=助手
 ```

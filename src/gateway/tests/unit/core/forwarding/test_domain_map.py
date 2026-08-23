@@ -115,10 +115,26 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     )
     assert collaboration.schema.location == "schemas/bcn.openapi.json"
 
+    friend_connections = dm.http_domain_for(
+        "/openapi/v1/collaboration/friend-connections/requests"
+    )
+    assert friend_connections is not None
+    assert friend_connections.server.name == "bcs"
+    assert friend_connections.rewrite is None
+    assert friend_connections.upstream_path(
+        "/openapi/v1/collaboration/friend-connections/requests"
+    ) == "/openapi/v1/collaboration/friend-connections/requests"
+
     security = RouteSecurity.from_table(raw["user_config"]["route_security"])
     requirement = security.resolve("GET", "/openapi/v1/collaboration/groups/group-1")
     assert requirement is not None
     assert requirement[PrincipalType.USER] is Presence.REQUIRED
+
+    friend_requirement = security.resolve(
+        "POST", "/openapi/v1/collaboration/friend-connections/requests"
+    )
+    assert friend_requirement is not None
+    assert friend_requirement[PrincipalType.USER] is Presence.REQUIRED
 
     websocket_requirement = security.resolve(
         "WEBSOCKET", "/openapi/v1/collaboration/messages/ws"

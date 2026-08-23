@@ -2535,6 +2535,122 @@ async fn register_provider_bot(
     response_json(response).await
 }
 
+/// Register a provider bot with an explicit `connection_mode` and return the
+/// raw response (status not asserted — caller decides).
+async fn register_provider_bot_mode(
+    app: &Router,
+    provider_id: &str,
+    admin_token: &str,
+    provider_bot_ref: &str,
+    mode: &str,
+) -> (StatusCode, Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/providers/{provider_id}/bots"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "name": "Plugin Bot",
+                        "summary": "Connected via BCN plugin",
+                        "owners": ["11111111"],
+                        "provider_bot_ref": provider_bot_ref,
+                        "connection_mode": mode
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    (status, response_json(response).await)
+}
+
+#[tokio::test]
+async fn register_provider_bot_plugin_mode_rejected_for_non_allow_listed_provider() {
+    // The default test_app is NOT allow-listed, so plugin mode must be
+    // refused with 400 before reaching the service layer.
+    let app = test_app().app;
+    let provider = register_provider(&app, json!({ "mode": "static_bearer" })).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+
+    let (status, body) =
+        register_provider_bot_mode(&app, provider_id, admin_token, "plugin-bot-1", "plugin").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let msg = body["error"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("connection_mode plugin requires an allow-listed provider"),
+        "unexpected rejection message: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn register_provider_bot_plugin_mode_accepted_for_allow_listed_provider() {
+    let provider_id = "prv_plugin_allowed".to_string();
+    let admin_token = "admin-token";
+    let TestApp {
+        app,
+        provider_repo,
+        provider_credentials,
+        ..
+    } = test_app_with_allowed_switch_provider_ids(vec![provider_id.clone()]);
+    provider_repo
+        .insert_provider(ProviderRecord {
+            provider_id: provider_id.clone(),
+            name: "Provider".to_string(),
+            config: json!({
+                "downlink": {
+                    "enabled": true,
+                    "webhook_url": "https://provider.example.com/bcs/webhook",
+                    "auth_mode": "static_bearer",
+                    "protocol_version": "1.0"
+                }
+            })
+            .to_string(),
+            created_by: "11111111".to_string(),
+            owners: r#"["11111111"]"#.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed plugin provider record");
+    provider_credentials
+        .insert_credential(ProviderCredential {
+            provider_id: provider_id.clone(),
+            credential_kind: "provider_admin".to_string(),
+            secret_value: admin_token.to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .await
+        .expect("seed plugin provider admin credential");
+
+    let bot_ref = "plugin-bot:alice";
+    let (status, body) =
+        register_provider_bot_mode(&app, &provider_id, admin_token, bot_ref, "plugin").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "plugin mode should be accepted for allow-listed provider: {body}"
+    );
+    // deterministic id == provider_bot_ref (allow-listed + plugin)
+    assert_eq!(body["bot_uuid"].as_str(), Some(bot_ref));
+    // plugin mode never writes a binding → response carries no runtime token
+    // (the real token comes from the WS handshake); the MOCK sentinel is not
+    // exposed.
+    assert!(
+        body["bot_runtime_token"].is_null(),
+        "plugin mode response must not expose a runtime token, got: {body}"
+    );
+}
+
 async fn response_json(response: axum::response::Response) -> Value {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&body).unwrap()

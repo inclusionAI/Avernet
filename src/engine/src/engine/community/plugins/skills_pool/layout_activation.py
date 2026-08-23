@@ -680,9 +680,12 @@ def _source_failure(
     source_layout: MappingSourceLayout,
 ) -> str | None:
     if source_layout is MappingSourceLayout.LEGACY:
+        roots = [layout.legacy_local, layout.legacy_repo, layout.pool_center]
+        if layout.engine_type == "claude_code":
+            roots.append(layout.repo_bridge)
         return _managed_source_failure(
             source,
-        roots=(layout.legacy_local, layout.legacy_repo, layout.pool_center),
+            roots=tuple(roots),
             outside_reason="source_outside_legacy",
         )
     return _managed_source_failure(
