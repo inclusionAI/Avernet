@@ -1,7 +1,7 @@
 """OpenApiBotAdapter:BaaS Open API 单 bot 派发(httpx async,对齐 send_bot_message.py)。
 
 ensure_grant:GET allowed-bots → 缺则 POST grant(Cookie+Referer 登录态,非 Bearer)。
-send_message:POST /openapi/v1/messages(Bearer)→ message_id(=run_id)。
+send_message:POST /openapi/v1/messages(Bearer)→ message_id(=run_id);顺带回包 session_id(BaaS 当前未返时前向兼容为 None,将来补字段自动落库)。
 get_run:GET /openapi/v1/messages/{id}→ {status,result,error}(status 大小写不敏感)。
 """
 from __future__ import annotations
@@ -89,8 +89,9 @@ class OpenApiBotAdapter(OpenApiBotPort):  # pragma: no cover — live BaaS OpenA
                                     json={"bot_id": bot_id, "message": message},
                                     headers={"Authorization": f"Bearer {self._k.api_key}"})
         _map_status(r)
-        message_id = (r.json().get("data") or {}).get("message_id")
-        return BotSendResult(run_id=message_id, session_id=None)
+        data = r.json().get("data") or {}
+        # message_id 即 run_id;session_id 前向兼容——当前 BaaS 回包未提供时为 None,将来 BaaS 补字段自动落库。
+        return BotSendResult(run_id=data.get("message_id"), session_id=data.get("session_id"))
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         r = await self._client.get(f"/openapi/v1/messages/{run_id}",

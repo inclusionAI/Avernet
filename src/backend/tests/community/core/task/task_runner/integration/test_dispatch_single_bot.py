@@ -17,8 +17,9 @@ def _node(assignee="bot9:ent1"):
 
 
 class _Bot:
-    def __init__(self, run_id="mid_1", grant_fail=False):
+    def __init__(self, run_id="mid_1", session_id=None, grant_fail=False):
         self._rid = run_id
+        self._sid = session_id
         self._gf = grant_fail
         self.sent = []
 
@@ -29,7 +30,20 @@ class _Bot:
     async def send_message(self, *, bot_id, message, metadata):
         from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
         self.sent.append((bot_id, message, metadata))
-        return BotSendResult(run_id=self._rid, session_id=None)
+        return BotSendResult(run_id=self._rid, session_id=self._sid)
+
+
+class _Graph:
+    """Capture _persist_dispatch_ids patches for assertion."""
+
+    def __init__(self):
+        self.patches = []
+
+    def update_task_node_info(self, patch):
+        self.patches.append(patch)
+
+    def query_task_dashboard(self, task_id, node_id=None):
+        return None
 
 
 class _Poller:
@@ -81,3 +95,21 @@ def test_prompt_formatter_uses_context_and_node_spec():
     assert "验收标准" in s
     assert '"success"' in s
     assert '"gaps"' in s
+
+
+def test_dispatch_single_bot_persists_session_and_run_id_to_extend_props():
+    bot = _Bot(run_id="r_1", session_id="s_1")
+    poller = _Poller()
+    graph = _Graph()
+    exe = TaskExecutor(bot=bot, bcs=None, formatter=PromptFormatterImpl(),
+                       context=_Ctx(), sink=None, poller=poller, graph=graph)
+    ok = _run(exe.dispatch([_node()]))
+    assert ok == [True]
+    assert len(graph.patches) == 1
+    patch = graph.patches[0]
+    assert patch.task_id == "t1"
+    assert patch.node_id == "c1"
+    ep = patch.extend_props_patch
+    assert ep.get("session_id") == "s_1"
+    assert ep.get("run_id") == "r_1"
+    assert "group_id" not in ep  # 单 bot 无群 id,不写 group_id 键

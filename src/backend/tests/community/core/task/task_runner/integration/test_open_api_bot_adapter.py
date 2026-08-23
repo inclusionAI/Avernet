@@ -105,6 +105,15 @@ def test_send_message_returns_run_id_and_uses_bearer():
     assert rid.session_id is None
 
 
+def test_send_message_forwards_session_id_when_present():
+    def h(req):
+        return httpx.Response(200, json={"data": {"message_id": "mid_77", "session_id": "s_99"}})
+
+    rid = _run(_adapter(h).send_message(bot_id="bot9:ent1", message="hi", metadata={}))
+    assert rid.run_id == "mid_77"
+    assert rid.session_id == "s_99"
+
+
 def test_get_run_status_case_insensitive():
     def h(req):
         assert req.url.path == "/openapi/v1/messages/mid_77"

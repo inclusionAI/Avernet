@@ -92,6 +92,7 @@ class TaskExecutor:
                 loop_task_id=loop_task_id, run_id=run_id, bot_id=bot_id,
                 registered_at=time.monotonic(), session_id=session_id,
             ))
+            self._persist_dispatch_ids(node, session_id=session_id, run_id=run_id)
             return True
 
     async def _dispatch_coop_group(self, node: TaskNode, sem: asyncio.Semaphore) -> bool:
@@ -127,14 +128,17 @@ class TaskExecutor:
         self._persist_dispatch_ids(node, group_id=group_id, session_id=None, run_id=run_id)
         return True
 
-    def _persist_dispatch_ids(self, node: TaskNode, *, group_id: str,
-                              session_id: str | None, run_id: str | None) -> None:
+    def _persist_dispatch_ids(self, node: TaskNode, *, group_id: str | None = None,
+                              session_id: str | None = None, run_id: str | None = None) -> None:
         """动态派发后把 group_id/session_id/run_id 落进节点 run_info.extend_props(dashboard 可见)。
-        yaml 路径(``_run_yaml``)已写 group_id/session_id;动态派发路径在此补齐:chat/manager_worker
-        写 session_id,state_machine 写 run_id。仅 extend_props fold,不翻态(节点已由 _drain 置 RUNNING)。"""
+        协作群(``coop_group``)写 group_id+session_id(chat/manager_worker)或 group_id+run_id(state_machine);
+        单 bot(``single_bot``)无群,只写 session_id 与 run_id(group_id 留空不落键),与协作群链路对齐,
+        便于 dashboard 观测及将来按 session_id 回调收敛。仅 extend_props fold,不翻态(节点已由 _drain 置 RUNNING)。"""
         if self._graph is None:
             return
-        ep: dict[str, Any] = {"group_id": group_id}
+        ep: dict[str, Any] = {}
+        if group_id is not None:
+            ep["group_id"] = group_id
         if session_id is not None:
             ep["session_id"] = session_id
         if run_id is not None:

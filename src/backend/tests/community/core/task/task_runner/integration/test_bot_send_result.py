@@ -41,6 +41,7 @@ def test_dispatch_single_bot_reads_bot_send_result_and_carries_session_id():
     ex._formatter = _FakeFormatter()
     ex._context = _FakeContext()
     ex._poller = poller
+    ex._graph = None  # __new__ 跳过 __init__;补 __init__ 默认(无图→_persist_dispatch_ids 跳过落库)
 
     ok = asyncio.new_event_loop().run_until_complete(
         ex._dispatch_single_bot(_root_node(), asyncio.Semaphore(1))
