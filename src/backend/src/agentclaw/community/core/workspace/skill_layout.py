@@ -59,10 +59,6 @@ PoolPaths = (
 )
 FILESYSTEM_POOL_ENGINES = ("openclaw", "claude_code", "aicoding", "hermes")
 
-_CLAUDE_CODE_AICODING_TEMPLATES = frozenset(
-    {"personalCoding", "applicationCoding"}
-)
-
 
 def runtime_layout_engine_for_bot(bot: Mapping[str, object]) -> str:
     """Return the filesystem identity for a Bot's Skill runtime.
@@ -78,10 +74,10 @@ def runtime_layout_engine_for_bot(bot: Mapping[str, object]) -> str:
     """
 
     engine = str(bot.get("active_engine") or "")
-    if (
-        engine == "claude_code"
-        and str(bot.get("template_type") or "")
-        in _CLAUDE_CODE_AICODING_TEMPLATES
+    template_type = str(bot.get("template_type") or "")
+    if claude_code_uses_aicoding_runtime(
+        active_engine=engine,
+        template_type=template_type,
     ):
         return "aicoding"
     return engine
