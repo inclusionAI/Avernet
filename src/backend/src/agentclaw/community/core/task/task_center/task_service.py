@@ -253,6 +253,50 @@ class TaskService:
             logger.warning("[converge] session_id=%s → on_report 失败: %s", session_id, exc)
             return False
 
+    async def apply_manager_worker_event(self, raw: dict) -> None:
+        """manager_worker(BCN 任务协作群)CloudEvent 回调处理。
+
+        parse → merge 进 latest session 行的 ``execution_graph`` → upsert ``task_callback``(单 session 行,
+        ``(run_id=session_id, node_id="")``);``session.completed`` → ``converge_by_session`` 收敛整协作。
+        非 manager_worker 事件(parse None)→ no-op。幂等:同 session 单行 upsert、重复 ``session.completed``
+        重投由 ``converge_by_session → on_report`` 终态幂等吞错兜底。"""
+        import json as _json
+        from agentclaw.community.adapters.http.task.translator import (
+            merge_manager_worker_execution_graph, parse_manager_worker_bcn,
+        )
+        from agentclaw.community.core.task.repository.types import TaskCallbackRecord
+
+        parsed = parse_manager_worker_bcn(raw)
+        if parsed is None:
+            return
+        sid = parsed.get("session_id") or ""
+        et = parsed.get("event_type") or ""
+        data = parsed.get("data") or {}
+        if sid and self._callback_repo is not None:
+            try:
+                existing_rec = self._callback_repo.get_latest_by_session(sid)
+                existing_graph = (existing_rec.execution_graph
+                                  if existing_rec is not None else None)
+                merged = merge_manager_worker_execution_graph(existing_graph, parsed)
+                rec = TaskCallbackRecord(
+                    id=0, invoker="bcn_manager_worker", run_id=sid, node_id="",
+                    main_session_id=sid, status=et,
+                    orig_callback_data=_json.dumps(raw, ensure_ascii=False, default=str),
+                    execution_graph=merged,
+                    result=None, result_success=None, exec_error=None,
+                    extend_props=({"event_id": parsed.get("event_id")}
+                                   if parsed.get("event_id") else None),
+                )
+                self._callback_repo.upsert(rec)
+            except Exception as exc:  # noqa: BLE001 落库失败不阻断收敛
+                logger.warning("[manager_worker] upsert task_callback 失败 session_id=%s: %s", sid, exc)
+        if et == "session.completed" and sid:
+            try:
+                success = (data.get("reason") == "completed")
+                await self.converge_by_session(sid, success=success, output=data.get("summary"))
+            except Exception as exc:  # noqa: BLE001 收敛失败不阻断落库
+                logger.warning("[manager_worker] session.completed 收敛失败 session_id=%s: %s", sid, exc)
+
     def _on_bg_done(self, bg: "asyncio.Task") -> None:
         """后台 on_execute 完成:脱离跟踪集 + 异常可见(记 log,不抛)。"""
         self._bg_tasks.discard(bg)

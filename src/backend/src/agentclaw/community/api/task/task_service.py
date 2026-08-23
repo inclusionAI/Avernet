@@ -76,3 +76,10 @@ class TaskServiceProtocol(Protocol):
         与 ``task_node_run_info.session_id``(派发时写入 BCS session)同源。
         """
         ...
+
+    async def apply_manager_worker_event(self, raw: dict) -> None:
+        """manager_worker(BCN 任务协作群)CloudEvent 回调处理:按 ``scope.session_id`` 把事件 merge 进
+        ``execution_graph`` 并 upsert ``task_callback`` 单 session 行;``session.completed`` →
+        ``converge_by_session`` 收敛整协作(ManagerWorker 无整协作级 run,终态由 session.completed 表征)。
+        非 manager_worker 事件 → no-op。"""
+        ...

@@ -269,13 +269,18 @@ class TaskExecutor:
         service_spec = gf.extend_props.get("service_spec")
         if service_spec:
             req_kwargs["service_spec"] = service_spec
-        # BCN 事件回调订阅(创建协作群入参 event_subscriptions):BCS 把 state_machine.* 等 CloudEvent
-        # 推到本后端 task 模块回调路径。sink.url = api_base_url + 回调路径(api_base_url 去尾斜杠)。
+        # BCN 事件回调订阅(创建协作群入参 event_subscriptions):BCS 把协作事件 CloudEvent 推到本后端
+        # task 模块回调路径。sink.url = api_base_url + 回调路径(api_base_url 去尾斜杠)。
+        # event_filters 按 collab_mode 分流:state_machine 订阅 state_machine.*;manager_worker/chat
+        # 无状态机 run,去 state_machine.*、保留 group/session/task/message(§4 生命周期事件)。
         _api_base = gf.extend_props.get("api_base_url")
         if _api_base:
+            _event_filters = (["group.*", "session.*", "task.*", "state_machine.*", "message.created"]
+                              if mode == "state_machine"
+                              else ["group.*", "session.*", "task.*", "message.created"])
             req_kwargs["event_subscriptions"] = [{
                 "name": "group-webhook",
-                "event_filters": ["group.*", "session.*", "task.*", "state_machine.*", "message.created"],
+                "event_filters": _event_filters,
                 "payload": {"mode": "metadata_only"},
                 "sink": {
                     "type": "webhook",

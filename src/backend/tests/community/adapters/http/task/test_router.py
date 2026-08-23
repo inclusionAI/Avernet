@@ -68,6 +68,10 @@ class _StubService:
                 g.tasks.append(_make_node(tid, nid, st))
         return g
 
+    async def apply_manager_worker_event(self, raw):  # noqa: ANN001 stub
+        """manager_worker 分流回调 stub:router BCN 分支调它;记录便于断言。"""
+        self.callback.calls.append(("manager_worker", raw))
+
 
 class _StubTaskModule(Module):
     """绑定 callback router 三个 Protocol 到 stub/Noop/InMemory。"""
@@ -206,8 +210,8 @@ class TestRouter:
 
     def test_bcn_unhandled_event_acks_without_ingest(self, client):
         c, svc = client
-        evt = {"spec_version": "1.0", "event_id": "e2", "event_type": "group.created",
-               "source": "bcs", "scope": {"group_id": "g1"},
+        evt = {"spec_version": "1.0", "event_id": "e2", "event_type": "message.created",
+               "source": "bcs", "scope": {"group_id": "g1", "session_id": "s1"},
                "stream": {"key": "k", "sequence": 1}, "actor": {}, "data": {}}
         r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=evt)
         assert r.status_code == 200, r.text

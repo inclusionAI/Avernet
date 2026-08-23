@@ -60,7 +60,8 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_spec_from_dto,
 )
 from agentclaw.community.adapters.http.task.translator import (
-    is_bcn_event_payload, is_claw_mind_payload, translate, translate_bcn, translate_claw_mind,
+    is_bcn_event_payload, is_claw_mind_payload, parse_manager_worker_bcn,
+    translate, translate_bcn, translate_claw_mind,
 )
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
@@ -499,6 +500,11 @@ async def _dispatch(
     if is_bcn_event_payload(_raw_obj):
         auth.verify(source="bcn", headers=request.headers, raw_body=raw,
                     method=request.method, path=request.url.path)
+        # manager_worker(任务协作群)事件:走 manager_worker 分流(parse+merge 进单 session 行 +
+        # session.completed 收敛),不进 state_machine 的 translate_bcn/run_detail 路径。
+        if parse_manager_worker_bcn(_raw_obj) is not None:
+            await svc.apply_manager_worker_event(_raw_obj)
+            return envelope({"ok": True}, request)
         _tc = translate_bcn(_raw_obj)
         if _tc is None:
             return envelope({"ok": True}, request, message="bcn event not handled")

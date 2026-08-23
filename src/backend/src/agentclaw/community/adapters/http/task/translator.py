@@ -228,3 +228,103 @@ def translate_bcn(raw: dict) -> TranslatedCallback | None:
             "result": result,
         }),
     )
+
+
+# ===== BCN manager_worker(任务协作群)事件解析 + execution_graph 累积 merge(语雀 §4) =====
+# manager_worker 群无 state_machine run;子任务由 Manager 分配给 Worker,各自持有 task_id 与独立 stream。
+# 跨 stream 无全局顺序(group.created/session.created/task.*/session.completed 分属不同 stream),
+# 接入方用 scope.{group_id,session_id,task_id} 关联整条链、容忍乱序;同一事件可能重投(event_id 去重)。
+# 框架按 (run_id=session_id, node_id="") 单 session 行 upsert,把事件 merge 进 execution_graph。
+
+_BCN_MANAGER_WORKER_EVENTS = frozenset({
+    "group.created",
+    "session.created",
+    "task.assigned",
+    "task.completed",
+    "session.completed",
+})
+
+
+def parse_manager_worker_bcn(raw) -> dict | None:
+    """manager_worker CloudEvent → 落库/merge 所需字段 dict;非 manager_worker 事件返 ``None``。
+
+    ``event_id``/``event_type`` 取自带元,``group_id``/``session_id``/``task_id`` 取自 scope,``data``
+    取原始事件体(供 merge 按 event_type 取字段)。session_id 可空(如 group.created 前的 session.created
+    理论上带 session_id;极端缺失时留空字符串不阻断)。"""
+    if not isinstance(raw, dict):
+        return None
+    event_type = raw.get("event_type")
+    if event_type not in _BCN_MANAGER_WORKER_EVENTS:
+        return None
+    scope = raw.get("scope") if isinstance(raw.get("scope"), dict) else {}
+    data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
+    return {
+        "event_id": raw.get("event_id"),
+        "event_type": event_type,
+        "group_id": scope.get("group_id") or "",
+        "session_id": scope.get("session_id") or "",
+        "task_id": scope.get("task_id") or "",
+        "data": data,
+    }
+
+
+def _upsert_task_entry(tasks: list, entry: dict) -> None:
+    """按 ``task_id`` upsert 子任务条目(后到自己覆盖;``None`` 值不覆盖以保留前一个事件已写的信息)。"""
+    tid = entry.get("task_id")
+    idx = next((i for i, t in enumerate(tasks) if t.get("task_id") == tid), None)
+    if idx is not None:
+        merged = dict(tasks[idx])
+        for k, v in entry.items():
+            if v is not None:
+                merged[k] = v
+        tasks[idx] = merged
+    else:
+        tasks.append({k: v for k, v in entry.items() if v is not None})
+
+
+def merge_manager_worker_execution_graph(
+    existing: dict | None, parsed: dict,
+) -> dict:
+    """把单次 manager_worker 事件 merge 进(按 session_id 累积的)任务状态图谱。
+
+    累积结构:``{session_id, group_id, group_status, session_status,
+    tasks:[{task_id, manager_id, worker_id, status, assignment?, result?, completed_at?}],
+    session_completed_by, session_summary, last_event_type}``。``existing`` 为 ``None`` → 初始化新图谱。
+    ``task.assigned``/``task.completed`` 按 ``task_id`` upsert(乱序容忍、后到自己)。"""
+    state: dict[str, Any] = dict(existing) if existing else {}
+    state.setdefault("tasks", [])
+    state.setdefault("group_status", None)
+    state.setdefault("session_status", None)
+    et = parsed.get("event_type")
+    data = parsed.get("data") or {}
+    sid = parsed.get("session_id") or ""
+    gid = parsed.get("group_id") or ""
+    if sid:
+        state["session_id"] = sid
+    if gid:
+        state["group_id"] = gid
+    state["last_event_type"] = et
+    if et == "group.created":
+        state["group_status"] = data.get("status")
+    elif et == "session.created":
+        state["session_status"] = data.get("status") or "active"
+    elif et == "task.assigned":
+        tid = parsed.get("task_id") or data.get("task_id")
+        _upsert_task_entry(state["tasks"], {
+            "task_id": tid, "manager_id": data.get("manager_id"),
+            "worker_id": data.get("worker_id"), "status": "assigned",
+            "assignment": data.get("assignment"), "session_id": sid,
+        })
+    elif et == "task.completed":
+        tid = parsed.get("task_id") or data.get("task_id")
+        _upsert_task_entry(state["tasks"], {
+            "task_id": tid, "manager_id": data.get("manager_id"),
+            "worker_id": data.get("worker_id"), "status": "completed",
+            "result": data.get("result"), "completed_at": data.get("completed_at"),
+            "session_id": sid,
+        })
+    elif et == "session.completed":
+        state["session_status"] = data.get("reason") or "completed"
+        state["session_completed_by"] = data.get("completed_by")
+        state["session_summary"] = data.get("summary")
+    return state

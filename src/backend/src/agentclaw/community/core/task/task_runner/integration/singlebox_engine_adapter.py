@@ -462,6 +462,64 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
             )
         return r.json() if r.text else {}
 
+    async def set_bbs_task_dream_mode(self, bot_id: str, enabled: bool = True) -> dict[str, Any]:
+        """开启单个 bot 的 BCS ``task_dream_mode``(BBS 主动 bid roster 入选开关)。
+
+        唯一 setter 是 principal-gated 的 BCS openapi ``PATCH /openapi/v1/collaboration/bots/{bot_id}``
+        (``bcs-api-http`` openapi v1,经 ``GatewayPrincipalTokenVerifier`` 校验)。``task_dream_mode`` 的
+        读写与 ``set_bcs_visibility`` 不同:visibility 走 bcs-http mock-auth 面,无 token;dream-mode 只在
+        openapi v1 面,必须带 gateway principal token。
+
+        singlebox launcher 已设 ``AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE``(默认
+        ``avernet-dev-signing-key-NOT-FOR-PROD``,见 ``scripts/modules/bcs.sh:884`` /
+        ``scripts/modules/backend.sh:86``)。本方法自铸一个 gateway principal token:
+        HS256 / iss=gateway / aud=bcs / kid=bare / principals=[user(subject.id=user_id)]。
+        token claim shape 对齐 BCS ``wire.rs:GatewayUserPrincipal``(与 Avernet gateway_principal 共享
+        gateway 签发契约)。user_id 即 bot 的 owner staff_no(创建时 ``entity_id=user_id``),经 BCS
+        ``authorize_bot_management`` 的 owner 匹配(``caller_actor_id == created_by``)放行。
+
+        bot_uuid=``{bot_id}:{user_id}``(同 ``set_bcs_visibility``)。PATCH 只传 task_dream_mode
+        (BCS ``UpdateBotRequest`` 各字段 Option,仅更新传入项)。非 2xx 抛错带 status/body,
+        便于定位 principal 形状 / owner 匹配问题(若 403 可调 principal subject.id)。
+        """
+        import time as _t
+
+        import jwt  # PyJWT(Avernet gateway_principal verifier 同库;HS256)
+
+        bcs_url = os.environ.get("BCS_API_BASE_URL", "http://127.0.0.1:21000").rstrip("/")
+        key = os.environ.get(
+            "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE", "avernet-dev-signing-key-NOT-FOR-PROD")
+        bot_uuid = f"{bot_id}:{self._user_id}"
+        now = int(_t.time())
+        claims: dict[str, Any] = {
+            "iss": "gateway", "aud": "bcs", "iat": now, "exp": now + 300,
+            "principals": [{
+                "type": "user",
+                "subject": {
+                    "id": self._user_id, "username": self._user_id,
+                    "display_name": "singlebox-e2e", "full_name": None,
+                    "tenant_id": "default",
+                },
+            }],
+        }
+        token = jwt.encode(claims, key, algorithm="HS256", headers={"kid": "bare"})
+        r = await self._http.patch(
+            f"{bcs_url}/openapi/v1/collaboration/bots/{bot_uuid}",
+            headers={
+                "accept": "application/json",
+                "content-type": "application/json",
+                "Authorization": f"Bearer {token}",
+            },
+            json={"task_dream_mode": enabled},
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(
+                f"set_bbs_task_dream_mode failed (PATCH "
+                f"{bcs_url}/openapi/v1/collaboration/bots/{bot_uuid} "
+                f"task_dream_mode={enabled}): {r.status_code} {r.text[:300]}"
+            )
+        return r.json() if r.text else {}
+
     # ===== install skills =====
     async def install_skills(
         self,
