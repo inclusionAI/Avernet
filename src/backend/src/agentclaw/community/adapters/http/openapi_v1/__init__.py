@@ -235,7 +235,12 @@ from .token import token_router
 # Every public route lives under this prefix. Exported so app-level handlers can
 # tell a public request from an internal one (e.g. to envelope validation errors
 # only on this surface).
-PUBLIC_API_PREFIX = "/openapi/v1"
+#: Re-exported so existing callers keep importing it from here; the
+#: definition lives in ``contracts`` so ``access_log`` can read it at module
+#: scope without closing an import loop back through this package.
+from agentclaw.community.adapters.http.openapi_v1.contracts import (  # noqa: E402
+    PUBLIC_API_PREFIX,
+)
 
 # The groups that answer no 403, because no route in them is scoped by the
 # *caller's* user: Bot Logs never derived a user from the credential at all, and
