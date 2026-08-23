@@ -33,6 +33,11 @@ _DECLARED_PREFIXES = (
     # broad collaboration→bcs namespace). Declared with its gateway domain +
     # route_security entry.
     "/openapi/v1/collaboration/bots",
+    # Task public surface (execute/dashboard/list) — the external contract path
+    # the gateway's `collaboration-tasks` domain routes to the backend (pulled
+    # out of the broad collaboration→bcs namespace). Declared with its gateway
+    # domain + route_security entry.
+    "/openapi/v1/collaboration/tasks",
 )
 
 

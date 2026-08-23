@@ -462,13 +462,18 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the named user's own work orders and notifications"),
     ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/reject"):
         NoCheck("the named user's own work orders and notifications"),
-    # ── Declared but not mounted (see UNMOUNTED_OPERATIONS) ───────────────
+    # ── Task public surface (execute/dashboard/list; mounted via the gateway
+    # ── `collaboration-tasks` domain → backend). Tasks address no bot, so the
+    # ── bot-level `Check` does not apply; the caller identity is resolved by
+    # ── the gateway spanner + `_PUBLIC_AUTH`, and `list` is scoped by
+    # ── `UserIdDep` (owner_user_id). `NoCheck` is the settled mode here, not a
+    # ── placeholder — see `admission.py` for the machine-caller decision.
     ("POST", "/openapi/v1/collaboration/tasks/execute"):
-        NoCheck("a task, not a bot; the surface is not mounted"),
+        NoCheck("a task, not a bot; the submitter is the task owner"),
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"):
-        NoCheck("a task, not a bot; the surface is not mounted"),
+        NoCheck("a task, not a bot; read-only task graph by task_id"),
     ("GET", "/openapi/v1/collaboration/tasks/list"):
-        NoCheck("a task, not a bot; the surface is not mounted"),
+        NoCheck("a task, not a bot; scoped to the named user's own tasks"),
 
     # ── Retiring addresses in ``deprecated/`` ─────────────────────────────
     ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),
@@ -518,10 +523,14 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
 #: Operations whose router exists but which ``build_public_router`` does not
 #: mount, so they are in the table without being on the surface.
 #:
-#: Only ``openapi_v1/task`` today: the collaboration surface answers under
-#: ``/api/v1`` in ``adapters/http/task``, and its ``/openapi/v1`` twin stays
-#: unmounted until the gateway's configuration declares that domain (see the
-#: comment at ``adapters/http/app.py``'s task import).
+#: Empty today. The ``openapi_v1/task`` surface used to live here: its twin
+#: ``/api/v1`` router answered under ``/api/v1/collaboration/tasks`` in
+#: ``adapters/http/task``, while the ``/openapi/v1`` twin stayed unmounted until
+#: the gateway's configuration declared the collaboration-tasks domain. That
+#: domain is now declared (gateway ``collaboration-tasks`` → backend) and the
+#: ``/openapi/v1`` twin is mounted in ``build_public_router``, so the three
+#: task operations became live and their rows are real decisions, not
+#: placeholders.
 #:
 #: They carry rows anyway, and that is the point. The router is built with
 #: ``PublicAPIRoute`` like every other, so **whoever mounts it later cannot do
@@ -532,13 +541,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
 #: :func:`assert_every_route_authorized` subtracts these before reporting
 #: orphans, so an unmounted row is not mistaken for a decision left behind by a
 #: rename. Delete an entry the moment its operation is mounted.
-UNMOUNTED_OPERATIONS = frozenset(
-    {
-        ("POST", "/openapi/v1/collaboration/tasks/execute"),
-        ("GET", "/openapi/v1/collaboration/tasks/dashboard"),
-        ("GET", "/openapi/v1/collaboration/tasks/list"),
-    }
-)
+UNMOUNTED_OPERATIONS = frozenset()
 
 
 def scaffolding_row_count() -> int:

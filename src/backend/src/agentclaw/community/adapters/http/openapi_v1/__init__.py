@@ -177,6 +177,7 @@ from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
 from .collaboration_bots import public_router as collaboration_public_router
+from .task import task_router
 from .bots.engine_config import router as engine_config_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
@@ -533,6 +534,16 @@ def build_public_router() -> APIRouter:
     # via _PUBLIC_AUTH/UserIdDep, no grant check yet).
     public.include_router(
         collaboration_public_router,
+        responses=USER_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Task public surface (execute/dashboard/list) — served at the external
+    # contract path the gateway's `collaboration-tasks` domain routes to the
+    # backend (pulled out of the broad collaboration→bcs namespace). Same
+    # shape as `collaboration_public_router` above: not bot-scoped, no grant
+    # gate; caller identity via _PUBLIC_AUTH/UserIdDep, authz via the table.
+    public.include_router(
+        task_router,
         responses=USER_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
