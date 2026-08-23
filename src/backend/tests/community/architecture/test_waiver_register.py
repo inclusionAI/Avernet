@@ -8,7 +8,7 @@ this file is the smallest Phase 3 slice that keeps the Phase 2 register honest.
 Without it a ``Review by`` date is decorative: nothing reads the file, so a
 lapsed exception stays permanent and silent.
 
-Three checks:
+The checks, in the order the loopholes were found and closed:
 
 1. **Shape** — every waiver carries all required fields and prose sections.
    A waiver missing its owner or removal plan is not a waiver.
@@ -16,19 +16,27 @@ Three checks:
    is designed to start failing on that date; that failure *is* the review
    trigger, and the fix is to remove the exception or re-date the waiver with a
    fresh decision, never to bump the date to silence CI.
-3. **Coupling** — each Active waiver's declared exception actually appears in
-   the gate it claims to waive, so the register cannot drift from the
-   allowlist it governs.
+3. **Coupling (waiver → gate)** — each Active waiver's declared exception
+   actually appears in the gate it claims to waive.
+4. **Release on retire** — a ``Retired`` waiver's exception must be *gone* from
+   the gate. Otherwise ``Status: Retired`` is an escape hatch that skips checks
+   2 and 3 while the exception lives on.
+5. **Coupling (gate → waiver)** — every ``W-###`` the gate cites must resolve to
+   an Active waiver, and every ``core → api`` exception must be waived or
+   explicitly grandfathered. Without the second half, an entry added without
+   citing a waiver would be seen by none of the above.
 
-Note the coupling is deliberately one-directional (waiver → gate, not
-gate → waiver). The ``core → api`` allowlist carries six entries that predate
-this register and hold no waiver; requiring the reverse would fail them all,
-which is a governance decision for their owners rather than something this
-gate should force.
+Together these mean an exception cannot become permanent by editing one field,
+deleting a block, or simply never mentioning the register.
+
+``_GRANDFATHERED_API_EXCEPTIONS`` holds the six ``core → api`` entries that
+predate this register. They are exempt so that introducing it did not break
+them — not endorsed, and the set must never grow.
 """
 
 from __future__ import annotations
 
+import ast
 import datetime
 import pathlib
 import re
@@ -106,6 +114,69 @@ def _exception_pair(block: str) -> tuple[str, str] | None:
 
 def _gate_source() -> str:
     return _COMPLIANCE_GATE.read_text(encoding="utf-8")
+
+
+#: ``core → api`` exceptions that predate the waiver register (W-001, 2026-08-23).
+#: They are grandfathered so introducing the register did not break them —
+#: **not** endorsed. Requiring waivers for these is a governance decision for
+#: their owners; see the scope note in ``docs/arch/waivers.md``.
+#:
+#: This set is append-*never*. A new ``core → api`` exception must carry an
+#: active waiver instead; that is what ``arch.rules.md`` Rule 6 already
+#: requires. Removing an entry here (because the exception was fixed, or a
+#: waiver was written for it) is the only edit this set should ever see.
+_GRANDFATHERED_API_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset({
+    ("core/service_bot/services/bot_build_service.py", "agentclaw.community.api.channel_service"),
+    ("core/bot_management/services/bot_service.py", "agentclaw.community.api.policy_service"),
+    ("core/common_config/beta_quota_service.py", "agentclaw.community.api.policy_service"),
+    ("core/service_bot/services/publish_approval_service.py", "agentclaw.community.api.publish_approval"),
+    ("core/skill_center/services/space_skill_query_service.py", "agentclaw.community.api.space_skill_query_service"),
+    ("core/bot_startup_script/services/startup_script_service.py", "agentclaw.community.api.bot_startup_script_service"),
+})
+
+_API_PREFIX = "agentclaw.community.api."
+
+
+def _gate_api_exceptions() -> set[tuple[str, str]]:
+    """Every ``core → api`` pair in the gate's ``_IMPORT_EXCEPTIONS``.
+
+    Parsed from the AST rather than by regex so a reformat, added comment or
+    reordering cannot quietly hide an entry from this check. Pairs targeting
+    ``core``/``plugins`` are out of scope — this file governs the ``core → api``
+    boundary only.
+    """
+    tree = ast.parse(_gate_source(), filename=str(_COMPLIANCE_GATE))
+    pairs: set[tuple[str, str]] = set()
+    for node in ast.walk(tree):
+        target = None
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target = node.target.id
+        elif isinstance(node, ast.Assign) and node.targets and isinstance(node.targets[0], ast.Name):
+            target = node.targets[0].id
+        if target != "_IMPORT_EXCEPTIONS":
+            continue
+        for item in ast.walk(node):
+            if (
+                isinstance(item, ast.Tuple)
+                and len(item.elts) == 2
+                and all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in item.elts)
+            ):
+                rel_path, module = (e.value for e in item.elts)
+                if module.startswith(_API_PREFIX):
+                    pairs.add((rel_path, module))
+    return pairs
+
+
+def _active_waived_exceptions() -> set[tuple[str, str]]:
+    """The ``(file, module)`` pairs governed by an ``Active`` waiver."""
+    out: set[tuple[str, str]] = set()
+    for block in _waiver_blocks().values():
+        if _fields(block).get("Status") != "Active":
+            continue
+        pair = _exception_pair(block)
+        if pair is not None:
+            out.add(pair)
+    return out
 
 
 @pytest.mark.unit
@@ -263,3 +334,48 @@ def test_waivers_the_gate_cites_exist_and_are_active() -> None:
             )
     if failures:
         pytest.fail("\n".join(failures))
+
+
+@pytest.mark.unit
+def test_every_core_to_api_exception_is_waived_or_grandfathered() -> None:
+    """No new ``core → api`` exception may be added without an active waiver.
+
+    The reverse map in the previous test only sees exceptions that *cite* a
+    ``W-###`` id, so an entry added without one would slip past every check
+    here. This closes that: each ``core → api`` pair in the gate must either be
+    covered by an Active waiver or appear in the grandfathered set above.
+
+    This enforces what ``arch.rules.md`` Rule 6 already requires — it is not a
+    new rule. The grandfathered set exists so introducing the register did not
+    break six pre-existing entries, and it must never grow.
+    """
+    waived = _active_waived_exceptions()
+    ungoverned = sorted(
+        pair
+        for pair in _gate_api_exceptions()
+        if pair not in waived and pair not in _GRANDFATHERED_API_EXCEPTIONS
+    )
+    assert not ungoverned, (
+        "core → api exception(s) with no active waiver:\n  "
+        + "\n  ".join(f"{f} → {m}" for f, m in ungoverned)
+        + f"\n\nAdd a waiver to {_REGISTER.name} (see W-001) and cite its id in "
+        f"{_COMPLIANCE_GATE.name}. Do not add to _GRANDFATHERED_API_EXCEPTIONS — "
+        "that set records pre-existing debt and must never grow."
+    )
+
+
+@pytest.mark.unit
+def test_grandfathered_set_has_no_stale_entries() -> None:
+    """A grandfathered exception that is gone must leave this set too.
+
+    Keeps the set shrinking toward empty. Without this a fixed or waived legacy
+    entry would linger here, and a future exception reusing that same
+    ``(file, module)`` pair would be silently exempted.
+    """
+    stale = sorted(_GRANDFATHERED_API_EXCEPTIONS - _gate_api_exceptions())
+    assert not stale, (
+        "_GRANDFATHERED_API_EXCEPTIONS lists exception(s) no longer in "
+        f"{_COMPLIANCE_GATE.name}:\n  "
+        + "\n  ".join(f"{f} → {m}" for f, m in stale)
+        + "\n\nDelete them from the set — the debt is paid."
+    )

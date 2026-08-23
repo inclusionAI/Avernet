@@ -31,7 +31,11 @@ Both are the same evasion as bumping the date, by a different field.
 > waiver — `bot_build_service`, `bot_service`, `beta_quota_service`,
 > `publish_approval_service`, `space_skill_query_service` and
 > `startup_script_service`. Backfilling those is deliberately out of scope for
-> W-001; do not read this file as governing them.
+> W-001; do not read this file as governing them. They are grandfathered in
+> `test_waiver_register.py::_GRANDFATHERED_API_EXCEPTIONS` so that introducing
+> this register did not break them — that set must never grow. Every *new*
+> `core → api` exception must carry an Active waiver here, which is what
+> `arch.rules.md` Rule 6 already requires.
 
 ---
 
