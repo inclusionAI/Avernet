@@ -165,7 +165,7 @@ class TestBbsBidTwoDreamBotsE2E(unittest.TestCase):
                         await fn(bid)
                     except Exception as exc:  # noqa: BLE001 已就绪/竟态 → 跳过
                         print(f"[provision] {meth}({bid}) 跳过:{exc!r}")
-                await prov.set_bbs_task_dream_mode(bid)  # 进 dream roster;失败即抛(带诊断)
+                #await prov.set_bbs_task_dream_mode(bid)  # 进 dream roster;失败即抛(带诊断)
         finally:
             try:
                 await prov._aclose()

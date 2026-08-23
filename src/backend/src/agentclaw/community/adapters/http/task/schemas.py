@@ -217,12 +217,14 @@ class TaskExecutionGraphDTO(BaseModel):
 def runtime_status_to_product_status(status: Any) -> str:
     """Map runtime task states to product-facing dashboard states.
 
-    ``DRAFTING`` and ``DEFINED`` belong to the authoring layer and are not
-    produced by the runtime dashboard. Runtime ``HUNG`` is exposed as
-    ``REVIEWING``; all other non-terminal runtime states are ``EXECUTING``.
+    ``PENDING`` is exposed as product ``DEFINED``. ``DRAFTING`` remains an
+    authoring-layer state and is not produced by the runtime dashboard.
+    Runtime ``HUNG`` is exposed as ``REVIEWING``; other active runtime states
+    are ``EXECUTING``.
     """
     value = status.value if hasattr(status, "value") else str(status)
     return {
+        "PENDING": "DEFINED",
         "HUNG": "REVIEWING",
         "DONE": "DONE",
         "FAILED": "FAILED",
