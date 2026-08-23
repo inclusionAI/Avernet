@@ -522,6 +522,142 @@ async fn friend_connection_list_by_actor_uses_requested_actor() {
     assert_eq!(calls.as_slice(), &["target-bot".to_string()]);
 }
 
+#[tokio::test]
+async fn friend_connection_list_by_actor_translates_human_actor_kind() {
+    let connect = Arc::new(RecordingConnectService::default());
+    let temp_dir = TempDir::new().unwrap();
+    let app = build_app(
+        &temp_dir,
+        connect.clone(),
+        Arc::new(RecordingBotQueryService::default()),
+        None,
+        Some(("caller-token", "caller-bot")),
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/collaboration/friend-connections?actor=10001&actor_kind=human")
+                .header("authorization", "Bearer caller-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let calls = connect.list_friends_commands.lock().await;
+    assert_eq!(calls.as_slice(), &["human_10001".to_string()]);
+}
+
+#[tokio::test]
+async fn friend_connection_request_maps_connect_status_variants_and_accepted_alias() {
+    let connect_approved = Arc::new(RecordingConnectService {
+        create_result: ConnectResult {
+            request_ids: vec!["req-approved".to_string()],
+            edge_ids: vec!["edge-approved".to_string()],
+            status: ConnectStatus::Approved,
+            auto_accepted: true,
+        },
+        ..RecordingConnectService::default()
+    });
+    let temp_dir = TempDir::new().unwrap();
+    let app = build_app(
+        &temp_dir,
+        connect_approved.clone(),
+        Arc::new(RecordingBotQueryService::default()),
+        None,
+        Some(("caller-token", "caller-bot")),
+    )
+    .await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/collaboration/friend-connections/requests")
+                .header("authorization", "Bearer caller-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "to_bot": "peer-bot"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"]["status"], "approved");
+
+    let connect_public = Arc::new(RecordingConnectService {
+        create_result: ConnectResult {
+            request_ids: vec!["req-public".to_string()],
+            edge_ids: vec!["edge-public".to_string()],
+            status: ConnectStatus::PublicNoEdge,
+            auto_accepted: true,
+        },
+        ..RecordingConnectService::default()
+    });
+    let app = build_app(
+        &temp_dir,
+        connect_public.clone(),
+        Arc::new(RecordingBotQueryService::default()),
+        None,
+        Some(("caller-token", "caller-bot")),
+    )
+    .await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/collaboration/friend-connections/requests")
+                .header("authorization", "Bearer caller-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "to_bot": "peer-bot"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"]["status"], "public_no_edge");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/collaboration/friend-connections/requests?direction=all&status=accepted&page=2&page_size=10")
+                .header("authorization", "Bearer caller-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let calls = connect_public.list_requests_commands.lock().await;
+    assert_eq!(calls.len(), 1);
+    let (_, direction, status, page, page_size) = &calls[0];
+    assert!(matches!(direction, RequestDirection::All));
+    assert!(matches!(status, Some(RequestStatus::Approved)));
+    assert_eq!((*page, *page_size), (2, 10));
+}
+
 
 #[tokio::test]
 async fn friend_connection_request_accepts_via_recorded_service() {
@@ -755,4 +891,81 @@ async fn friend_connection_requests_list_routes_through_service() {
     assert!(matches!(direction, RequestDirection::Sent));
     assert!(matches!(status, Some(RequestStatus::Approved)));
     assert_eq!((*page, *page_size), (2, 10));
+}
+
+#[tokio::test]
+async fn friend_connection_list_by_actor_defaults_to_raw_actor_when_kind_is_missing() {
+    let connect = Arc::new(RecordingConnectService::default());
+    let temp_dir = TempDir::new().unwrap();
+    let app = build_app(
+        &temp_dir,
+        connect.clone(),
+        Arc::new(RecordingBotQueryService::default()),
+        None,
+        Some(("caller-token", "caller-bot")),
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/collaboration/friend-connections?actor=bot-raw")
+                .header("authorization", "Bearer caller-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let calls = connect.list_friends_commands.lock().await;
+    assert_eq!(calls.as_slice(), &["bot-raw".to_string()]);
+}
+
+#[tokio::test]
+async fn friend_connection_requests_route_maps_status_filters_and_default_direction() {
+    let connect = Arc::new(RecordingConnectService::default());
+    let temp_dir = TempDir::new().unwrap();
+    let app = build_app(
+        &temp_dir,
+        connect.clone(),
+        Arc::new(RecordingBotQueryService::default()),
+        None,
+        Some(("caller-token", "caller-bot")),
+    )
+    .await;
+
+    let cases = [
+        ("", None),
+        ("?status=pending", Some(RequestStatus::Pending)),
+        ("?status=approved", Some(RequestStatus::Approved)),
+        ("?status=rejected", Some(RequestStatus::Rejected)),
+        ("?status=cancelled", Some(RequestStatus::Cancelled)),
+        ("?status=accepted", Some(RequestStatus::Approved)),
+        ("?status=unknown", None),
+    ];
+
+    for (suffix, expected_status) in cases {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/collaboration/friend-connections/requests{suffix}"))
+                    .header("authorization", "Bearer caller-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let calls = connect.list_requests_commands.lock().await;
+        let (_, direction, status, _, _) = calls.last().expect("list request command");
+        if suffix.is_empty() {
+            assert!(matches!(direction, RequestDirection::Received));
+        }
+        assert_eq!(status, &expected_status);
+    }
 }

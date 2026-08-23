@@ -242,6 +242,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn constructor_rejects_blank_and_non_http_base_urls() {
+        assert!(HttpFriendConnectNotificationPort::new("").is_err());
+        assert!(HttpFriendConnectNotificationPort::new("ftp://backend.example.com").is_err());
+    }
+
+    #[tokio::test]
+    async fn notify_returns_ok_when_recipient_list_is_empty() {
+        let adapter = HttpFriendConnectNotificationPort::new("http://127.0.0.1:9").expect("valid url");
+        adapter
+            .notify(FriendConnectNotificationCommand {
+                kind: FriendConnectNotificationKind::Reviewed,
+                env: "dev".to_string(),
+                request_ids: vec!["req_3".to_string()],
+                applicant_actor_id: "bot_1001".to_string(),
+                target_bot_id: "bot_2001".to_string(),
+                recipient_user_ids: Vec::new(),
+                message: Some("ignored".to_string()),
+            })
+            .await
+            .expect("empty recipients should short-circuit");
+    }
+
+    #[tokio::test]
+    async fn notify_returns_internal_error_when_backend_unreachable() {
+        let adapter = HttpFriendConnectNotificationPort::new("http://127.0.0.1:9").expect("valid url");
+        let result = adapter
+            .notify(FriendConnectNotificationCommand {
+                kind: FriendConnectNotificationKind::ApprovalRequested,
+                env: "dev".to_string(),
+                request_ids: vec!["req_1".to_string()],
+                applicant_actor_id: "human_1001".to_string(),
+                target_bot_id: "bot_2001".to_string(),
+                recipient_user_ids: vec!["user_2001".to_string()],
+                message: Some("please add me".to_string()),
+            })
+            .await;
+        assert!(matches!(result, Err(ServiceError::InternalError(message)) if message.contains("friend work-order create request failed")));
+    }
+
+    #[test]
     fn builds_pending_friend_request_payload() {
         let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::ApprovalRequested,
@@ -299,6 +339,56 @@ mod tests {
     }
 
     #[test]
+    fn builds_bot_to_bot_pending_payload() {
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::ApprovalRequested,
+            env: "dev".to_string(),
+            request_ids: vec!["req_4".to_string()],
+            applicant_actor_id: "bot_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["user_2001".to_string()],
+            message: Some("bot-to-bot".to_string()),
+        });
+
+        assert_eq!(payload.event_category, "APPROVAL");
+        assert_eq!(payload.event_type, "BOT2BOT_FRIEND_APPLIED");
+        assert_eq!(payload.applicant_user_id.as_deref(), Some("bot_1001"));
+        assert_eq!(payload.approver_user_ids, vec!["user_2001".to_string()]);
+        assert!(payload.recipient_user_ids.is_empty());
+        assert_eq!(payload.title, "好友添加申请待审批");
+        assert_eq!(payload.apply_reason.as_deref(), Some("bot-to-bot"));
+        assert_eq!(
+            payload.content.as_deref(),
+            Some("bot_1001 申请添加 Bot bot_2001 为好友，请在好友申请列表中处理。")
+        );
+    }
+
+    #[test]
+    fn builds_reviewed_notice_payload_for_human_actor() {
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::Reviewed,
+            env: "dev".to_string(),
+            request_ids: vec!["req_5".to_string()],
+            applicant_actor_id: "human_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["user_2001".to_string()],
+            message: Some("handled".to_string()),
+        });
+
+        assert_eq!(payload.event_category, "NOTICE");
+        assert_eq!(payload.event_type, "HUMAN2BOT_FRIEND_REVIEWED");
+        assert_eq!(payload.applicant_user_id, None);
+        assert!(payload.approver_user_ids.is_empty());
+        assert_eq!(payload.recipient_user_ids, vec!["user_2001".to_string()]);
+        assert_eq!(payload.title, "好友添加申请已处理");
+        assert_eq!(payload.apply_reason.as_deref(), Some("handled"));
+        assert_eq!(
+            payload.content.as_deref(),
+            Some("human_1001 与 Bot bot_2001 的好友申请已处理。")
+        );
+    }
+
+    #[test]
     fn appends_user_id_to_work_order_event_url() {
         let adapter = HttpFriendConnectNotificationPort::new("https://backend.example.com/api/")
             .expect("valid url");
@@ -332,5 +422,11 @@ mod tests {
             message: None,
         };
         assert_eq!(event_actor_user_id(&notice), "user_2001");
+    }
+
+    #[test]
+    fn applicant_user_id_handles_non_human_actor() {
+        assert_eq!(applicant_user_id("bot_1001"), None);
+        assert_eq!(applicant_user_id("human_"), None);
     }
 }
