@@ -76,6 +76,7 @@ if __name__ == "__main__":  # pragma: no cover - entrypoint wiring; profile gate
             ),
             handlers=[logging.StreamHandler(sys.stderr)],
         )
+
         logger.info("env: %s", env)
         logger.info("Starting in LOCAL mode (no MOSN)")
 

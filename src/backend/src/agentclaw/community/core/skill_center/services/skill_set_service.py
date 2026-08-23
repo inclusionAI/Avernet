@@ -541,25 +541,10 @@ class SkillSetService:
         the sum of them.
         """
         try:
-            # Engine defaults are provisioned by the runtime image. Singlebox's
-            # offline MCP catalog therefore may not have their remote metadata;
-            # they still belong in the complete allow-list declaration, but do
-            # not require a per-server config push. Non-default MCPs are user /
-            # Skill-selected and remain fail-closed when their detail is absent.
-            default_codes = set(get_default_mcp_server_codes(self.engine_type))
             entries: list[dict[str, Any]] = []
             for server_code in sorted(server_codes):
                 detail = self.mcp_center.get_mcp_detail(server_code)
                 if not detail:
-                    if server_code in default_codes:
-                        entries.append({"server_code": server_code})
-                        continue
-                    logger.error(
-                        "[sync_mcp_desired_state] MCP detail missing: "
-                        "bot_id=%s server_code=%s",
-                        self.bot_id,
-                        server_code,
-                    )
                     return False
                 entries.append(detail)
             if not await self._deliver_mcp_details(entries):

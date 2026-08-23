@@ -54,29 +54,6 @@ class _McpPortMixin:
         text = json.dumps(root, ensure_ascii=False, indent=2) + "\n"
         path.write_text(text, encoding="utf-8")
 
-    def _mcp_filter_servers_in_process(self, codes: list[str]) -> list[str]:
-        """Apply an MCP server allow-list directly to ``mcporter.json``.
-
-        Official mcporter releases do not expose the legacy/custom
-        ``filter-servers`` command.  This compatibility path preserves the
-        command's existing semantics by toggling each configured server's
-        ``enabled`` flag.  Unknown allowed codes are reported to the caller but
-        are not synthesized because their connection details are unavailable.
-        """
-        root, key, servers = self._mcp_load()
-        allowed = set(codes)
-        configured: set[str] = set()
-
-        for code, raw in servers.items():
-            if not isinstance(raw, dict):
-                continue
-            configured.add(code)
-            raw["enabled"] = code in allowed
-
-        root[key] = servers
-        self._mcp_save(root)
-        return sorted(allowed - configured)
-
     @staticmethod
     def _mcp_serialize_entry(
         entry: dict[str, Any], existing_raw: dict[str, Any] | None = None,
@@ -300,26 +277,6 @@ class _McpPortMixin:
 
         stdout = (proc.stdout or "").strip()
         stderr = (proc.stderr or "").strip()
-        unsupported_command = "Unknown MCP server 'filter-servers'."
-        if proc.returncode != 0 and unsupported_command in stderr:
-            missing_codes = self._mcp_filter_servers_in_process(normalized)
-            if missing_codes:
-                log.warning(
-                    "mcporter filter-servers compatibility fallback could not "
-                    "find configured servers: %s",
-                    ", ".join(missing_codes),
-                )
-            log.warning(
-                "mcporter does not support filter-servers; applied allow-list "
-                "directly to mcporter.json"
-            )
-            return {
-                "server_codes": normalized,
-                "command": command,
-                "return_code": 0,
-                "stdout": "Applied server allow-list directly to mcporter.json",
-                "stderr": stderr,
-            }
         if proc.returncode != 0:
             raise RuntimeError(
                 f"mcporter filter-servers 执行失败: code={proc.returncode}, stderr={stderr}"
