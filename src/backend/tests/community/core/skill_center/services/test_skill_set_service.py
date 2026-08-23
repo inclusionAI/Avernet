@@ -1550,13 +1550,16 @@ class TestSyncMcpDesiredState:
             return {"success": True}
 
         svc, plugin = self._make_svc(sync_mcp_detail=sync_mcp_detail)
-        codes = {f"mcp.s{i}" for i in range(12)}
+        # Twice the bound, so the semaphore is genuinely exercised whatever the
+        # bound is tuned to.
+        total = mod._MCP_DETAIL_SYNC_CONCURRENCY * 2
+        codes = {f"mcp.s{i}" for i in range(total)}
 
         assert await svc.sync_mcp_desired_state(server_codes=codes) is True
 
         assert peak > 1, "detail delivery ran serially"
         assert peak == mod._MCP_DETAIL_SYNC_CONCURRENCY
-        assert svc._mcp_sync_service.sync_mcp_detail.await_count == 12
+        assert svc._mcp_sync_service.sync_mcp_detail.await_count == total
         # The allow-list declaration still carries every entry, in sorted order.
         plugin.sync_all_mcp_servers.assert_called_once_with(
             [{"server_code": code} for code in sorted(codes)]
