@@ -8,6 +8,18 @@ carries every field required by `arch.rules.md` § *Waiver Requirement* and
 `ci.enforce.md` § H (*Waiver Enforcement*): the exact rule, reason, risk,
 compensating controls, owner, review date, and removal plan.
 
+**This register is enforced, not decorative.**
+`src/backend/tests/community/architecture/test_waiver_register.py` parses it on
+every run and fails when a waiver is missing a required field, when an `Active`
+waiver is past its `Review by` date, or when the exception a waiver names is no
+longer in the gate it claims to waive. `ci.enforce.md` § L schedules automated
+expiry in Phase 3; that gate is the slice of it this register needs to be real.
+
+When the expiry check fails, the waiver has outlived its review date. Remove the
+exception, or re-date the waiver as a fresh, owned decision. Do **not** bump the
+date purely to turn CI green — that is the one move the whole mechanism exists
+to prevent.
+
 > **Scope note.** This register was created with W-001. The `core → api`
 > allowlist in `tests/community/architecture/test_architecture_compliance.py`
 > already carried six entries that predate it and are **not** covered by any
