@@ -64,6 +64,7 @@ def _seed_task_service(world) -> None:
             task_id=task_info.task_spec.metadata.task_id,
             success=True,
             run_id=1,
+            extend_props={"group_id": "bcs_grp_endpoint_1"},
         )
 
     def dashboard(_self, _task_id, _node_id=None):
@@ -153,7 +154,16 @@ def _seed_scheduled_trigger_error(world) -> None:
     scenario="happy_ok",
     seed=_seed_task_service,
     input=CaseInput(json_body=_EXECUTE_BODY),
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"task_id": "task-endpoint-1"}}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "task_id": "task-endpoint-1",
+                "extend_props": {"group_id": "bcs_grp_endpoint_1"},
+            },
+        },
+    ),
 )
 def execute_happy():
     pass
