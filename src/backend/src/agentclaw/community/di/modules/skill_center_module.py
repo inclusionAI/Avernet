@@ -110,6 +110,10 @@ from agentclaw.community.core.repository.protocols.skills_pool import (
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolSkillRepositoryProtocol,
 )
+from agentclaw.community.core.skill_center.authorization_hook import (
+    BotCapabilityAuthorizationHookProtocol,
+    CollaboratorBotCapabilityAuthorizationHook,
+)
 from agentclaw.community.core.skill_center.factories import (
     SkillParameterServiceFactory,
     SkillServiceFactory,
@@ -319,6 +323,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         binder.bind(
             ActiveSkillSetInstallationMaterializer,
             to=ActiveSkillSetInstallationMaterializer,
+            scope=singleton,
+        )
+        binder.bind(
+            BotCapabilityAuthorizationHookProtocol,
+            to=CollaboratorBotCapabilityAuthorizationHook,
             scope=singleton,
         )
         binder.bind(

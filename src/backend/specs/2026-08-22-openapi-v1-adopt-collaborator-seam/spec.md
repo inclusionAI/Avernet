@@ -206,6 +206,14 @@ rather than the deprecation schedule's.
 - **Introducing an edit lock where none exists today.** #1323 *Decisions* 1
   stands: locks stay exactly where they are, and this feature must preserve them
   rather than extend or remove them.
+- **Deleting a service check that a non-`/openapi/v1` surface still relies on.**
+  A row moving to `Check` means the seam is the *declared* authority for that
+  operation — it does not mean the service check is now unreachable. Before
+  deleting one, ask who else calls it. Two services in this feature turned out to
+  have callers the seam does not cover and kept their checks:
+  `bot_skill_asset_service` (traced up front) and `skill_set_control_plane`
+  (traced only after a P1 review finding, having been deleted first —
+  `/api/skillsets` reaches it on four routes with no interceptor of their own).
 - **Changing what is audited.** Reads stay unaudited, mutations stay audited.
 - Retiring or deleting any `deprecated/` address ahead of its schedule.
 

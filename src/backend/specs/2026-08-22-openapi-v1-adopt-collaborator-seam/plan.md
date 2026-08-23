@@ -216,7 +216,9 @@ No flag, no migration. Order is a dependency order, not a preference:
 # 3. diagnostics   (2 → Check)        router-local, no lock, no audit, no twins
 # 4. render_screens(3 → Check)        same shape, one bar
 # 5. authorized_apps(3 → Check)       needs OwnerIdDep on 3 handlers first
-# 6. skill_center hook (19 → Check)   audit write kept — see the risk above
+# 6. skill_center hook (19 → Check)   audit write kept — see the risk above;
+#                                     can_manage_bot kept too — /api/skillsets
+#                                     reaches the service with four ungated routes
 # 7. bot_skill_assets  (7 → Check)    the {skill_id} operations only; the
 #                                     collection/upload rows are deferred, so
 #                                     nothing they share with the retiring

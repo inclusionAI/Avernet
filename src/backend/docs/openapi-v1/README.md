@@ -1060,6 +1060,13 @@ group rather than reading its row, which is the lesson worth keeping:
   twins, and from `/api/skills` — which no row governs. Deleting its check to
   "finish" the migration would have stripped authorization from two surfaces.
   The row still moves: it names who the *declared* authority is.
+  **Ask this of every group, every time.** `skill_set_control_plane` got the
+  same treatment as an afterthought and its check was deleted; `/api/skillsets`
+  reaches it on four routes with no `CollaboratorPermissionInterceptor`, taking
+  `entity_id` and `bot_id` from the query string, so the deletion opened another
+  owner's SkillSet to any authenticated caller — a read on three routes and a
+  write on one. A P1 review finding caught it. The difference between the two
+  groups was one question asked and not asked: *who else calls this?*
 - **Two gates at one bar cannot be told apart by their answers.** Where a
   service check stays, a test makes the two disagree and asserts the seam is
   the one that decided.
@@ -1803,7 +1810,11 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   and editors (5). Each group's service-local check was deleted only where the
   seam is its sole caller; where it also serves a retiring twin or a surface
   outside `/openapi/v1`, the check stays and the row records that the seam is
-  the *declared* authority. Two caller-visible changes, both intended: the 19
+  the *declared* authority. Two services fall in that second class —
+  `bot_skill_asset_service` and `skill_set_control_plane`, the latter only after
+  a P1 review finding caught its check being deleted while `/api/skillsets` was
+  still relying on it. Two caller-visible changes on the public surface, both
+  intended: the 19
   skill-centre operations move a denied collaborator from **403** to the seam's
   masked **404** (closing a probing oracle), and the 7 bot-skill operations
   change error code within 404. The burn-down assertion stops being an `xfail`
