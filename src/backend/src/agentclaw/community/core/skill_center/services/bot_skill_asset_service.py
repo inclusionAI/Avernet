@@ -11,6 +11,9 @@ from typing import Any, Callable, Protocol, TYPE_CHECKING
 
 from injector import inject
 
+from agentclaw.community.api.bot_skill_asset_service import (
+    BotSkillAssetServiceProtocol,
+)
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
@@ -67,7 +70,7 @@ class _LocalSkillStatePort(Protocol):
     ) -> dict[str, Any]: ...
 
 
-class BotSkillAssetService:
+class BotSkillAssetService(BotSkillAssetServiceProtocol):
     """Resolve one public ``skill_id`` before invoking its registered reader."""
 
     @inject
