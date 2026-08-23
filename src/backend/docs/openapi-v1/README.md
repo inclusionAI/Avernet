@@ -1825,9 +1825,15 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   `bot_skill_asset_service` and `skill_set_control_plane`, the latter only after
   a P1 review finding caught its check being deleted while `/api/skillsets` was
   still relying on it. Two caller-visible changes on the public surface, both
-  intended: the 19
-  skill-centre operations move a denied collaborator from **403** to the seam's
-  masked **404** (closing a probing oracle), and the 7 bot-skill operations
+  intended. **A revoked Team-Space
+  editor is now refused on 58 of the 82 rows**: the seam resolves through
+  `resolve_operable_permission_level`, which checks live Space membership on top
+  of the collaborator role, where skill-centre, bot-skill, channels and
+  engine-runtime previously asked for the raw role alone. A convergence rather
+  than a new policy — render-screens, editors and the publication facade were
+  already strict, so there was no single prior behaviour to preserve. The 19
+  skill-centre operations also move a denied collaborator from **403** to the
+  seam's masked **404** (closing a probing oracle), and the 7 bot-skill operations
   change error code within 404. The burn-down assertion stops being an `xfail`
   and becomes a strict equality against `_DEFERRED_OPERATIONS`. See **Adopting
   it** above.

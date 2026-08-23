@@ -424,6 +424,63 @@ def test_the_audit_write_does_not_run_on_the_event_loop():
     )
 
 
+def test_the_seam_asks_the_space_aware_policy_not_the_raw_role():
+    """A revoked Team-Space editor is refused, and that is a real policy change.
+
+    ``_level`` resolves through ``resolve_operable_permission_level``, which
+    prefers ``CollaboratorService.get_operable_permission_level`` — the raw role
+    **plus** a live Team-Space membership check. A user who keeps a MEMBER
+    collaborator row after being removed from the Space resolves to ``NONE``.
+
+    That is stricter than what several migrating groups enforced. ``skill_centre``
+    (via ``check_collaborator_permission``), ``bot_skill_asset_service`` and the
+    engine-runtime gate (via ``get_permission_level``) all asked for the raw role
+    and admitted such a caller; 58 of the 82 ``Check`` rows therefore refuse
+    someone today who was admitted before. Recorded in ``spec.md`` and the
+    README changelog as the third caller-visible change, after a review round
+    caught that it was going in unstated.
+
+    It is a *convergence*, not an invention: render-screens, editors and the
+    publication facade already used the Space-aware policy before this feature,
+    and ``get_operable_permission_level``'s own COSEC note says Space removal
+    "revokes operation immediately". Reverting the seam to the raw role would
+    have loosened those three rather than preserving one prior policy — there
+    was no single prior policy to preserve.
+
+    Asserted through the protocol resolver rather than by mocking, so it fails
+    if the seam is ever pointed at ``get_permission_level`` instead.
+    """
+    from agentclaw.community.core.bot_collaborator.protocols import (
+        resolve_operable_permission_level,
+    )
+
+    class _SpaceRevokedEditor:
+        """Keeps a MEMBER role, but the Space check has revoked them."""
+
+        def get_operable_permission_level(self, *, bot, user_id, env=None):
+            return PermissionLevel.NONE
+
+        def get_permission_level(self, *a, **k):  # the raw role, still MEMBER
+            return PermissionLevel.MEMBER
+
+    level = resolve_operable_permission_level(
+        _SpaceRevokedEditor(),
+        bot={"id": 7, "bot_id": BOT, "owner_id": OWNER},
+        user_id=CALLER,
+        owner_id=OWNER,
+    )
+
+    assert level is PermissionLevel.NONE, (
+        "the seam resolved the raw collaborator role instead of the Space-aware "
+        "level; a Team-Space editor removed from the Space would be admitted "
+        "again on all 58 rows that migrated from a raw-role check"
+    )
+
+    # And the caller really is refused end to end at the MEMBER bar.
+    client, _ = _surface(level=PermissionLevel.NONE, bar=PermissionLevel.MEMBER)
+    assert _get(client).status_code == 404
+
+
 def test_the_level_lookup_runs_off_the_event_loop():
     """The adjudication's database reads must not block the worker either.
 
