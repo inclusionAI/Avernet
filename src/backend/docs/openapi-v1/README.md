@@ -1064,9 +1064,12 @@ group rather than reading its row, which is the lesson worth keeping:
   wrong place to delete from.** `ServicePublicationFacadeProtocol` has no caller
   outside `/openapi/v1`, but its Service API contract says "Resolve, authorize
   and orchestrate" — deleting the refusal left the contract promising a
-  behaviour the implementation had lost, to every future caller. Contracts are
-  the authority for inter-component behaviour; reachability today is not the
-  test.
+  behaviour the implementation had lost, to every future caller.
+  `CollaboratorService`'s editor methods are the same story without even the
+  docstring to catch it: who may remove an editor is collaboration policy, and
+  `AGENTS.md` says delivery adapters do not own domain policy, so an HTTP table
+  cannot be its only home. Contracts and layering are the authority;
+  **reachability today is not the test.**
 
   **Ask this of every group, every time.** `skill_set_control_plane` got the
   same treatment as an afterthought and its check was deleted; `/api/skillsets`

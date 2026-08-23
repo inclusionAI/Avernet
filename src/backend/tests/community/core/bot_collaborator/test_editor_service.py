@@ -12,6 +12,7 @@ from agentclaw.community.core.bot_collaborator.errors import (
     CollaboratorNotFoundError,
     CollaboratorSpaceMembershipError,
     InvalidCollaboratorRoleError,
+    PermissionDeniedError,
 )
 from agentclaw.community.core.bot_collaborator.models import (
     CollaboratorRecord,
@@ -102,49 +103,95 @@ def test_add_editor_requires_live_team_space_membership(dependencies):
     collaborator_repo.insert.assert_not_called()
 
 
-def test_an_unsupported_bot_is_not_disclosed_before_the_caller_is_admitted():
-    """The ordering this pinned, restated where the order now is.
+def test_unsupported_bot_is_masked_until_after_actor_authorization(dependencies):
+    """A caller with no relation must not learn the Bot's type from the failure.
 
-    It drove ``list_editors`` as a stranger against a personal Bot and asserted
-    ``PermissionDeniedError`` rather than the unsupported-Bot error — the point
-    being that a caller with no relation to the Bot must not learn its type
-    from the failure they get.
+    ``list_editors`` authorizes before it asks ``require_capability`` whether the
+    Bot supports member management, so a stranger gets ``PermissionDeniedError``
+    rather than ``BotNotServiceTypeError``. Order matters: the reverse would let
+    anyone probe a Bot's type by asking for its editors.
 
-    The service no longer checks the caller at all. The five editor rows are
-    ``Check`` and ``bot_access`` refuses ahead of the handler with a 404
-    byte-identical to an absent Bot, so a stranger reaches neither error and
-    the disclosure is closed harder than it was: the old answer at least
-    confirmed the Bot existed.
+    This test was briefly rewritten to assert only the ``Check`` rows, on the
+    grounds that the service no longer authorized. It does again — the bars were
+    restored after #1366 round 5 — so the ordering is assertable here once more,
+    which is the right place for it.
+    """
+    service, collaborator_repo, bot_repo, _ = dependencies
+    bot_repo.get_by_id_and_owner.return_value = _bot(bot_type="personal")
+    collaborator_repo.get_user_role.return_value = None
 
-    That makes the ordering unassertable from inside the service, so what is
-    asserted is the thing the ordering depended on — that the read really does
-    carry a bar, and that the writes carry the higher one.
+    with pytest.raises(PermissionDeniedError):
+        service.list_editors("bot-1", OWNER, "stranger", env="dev")
+
+
+def test_the_service_itself_refuses_below_each_editor_bar(dependencies):
+    """The bars, driven through the service with no seam in front of it.
+
+    That is the position a second adapter or a background consumer would be in,
+    and it is why these refusals are not redundant with the ``Check`` rows: an
+    HTTP table cannot be the only home of collaboration policy (``AGENTS.md`` —
+    delivery adapters do not own domain policy).
+
+    ``add_editor`` is covered too, though it was never actually exposed: it
+    delegates to ``add_collaborator``, which checks ADMIN itself.
+    """
+    service, collaborator_repo, _, _ = dependencies
+    collaborator_repo.get_user_role.return_value = CollaboratorRole.MEMBER
+    collaborator_repo.get_by_id.return_value = _record(user_id="someone-else")
+
+    # ADMIN-barred: a MEMBER may not add, change or remove another editor.
+    with pytest.raises(PermissionDeniedError):
+        service.add_editor("bot-1", OWNER, "new-user", MEMBER, env="dev")
+    with pytest.raises(PermissionDeniedError):
+        service.update_editor(
+            "bot-1", OWNER, 7, MEMBER, CollaboratorRole.ADMIN, env="dev"
+        )
+    with pytest.raises(PermissionDeniedError):
+        service.remove_editor("bot-1", OWNER, 7, MEMBER, env="dev")
+    collaborator_repo.update.assert_not_called()
+    collaborator_repo.delete.assert_not_called()
+
+    # MEMBER-barred: a caller with no relation may not read the roster or leave.
+    collaborator_repo.get_user_role.return_value = None
+    with pytest.raises(PermissionDeniedError):
+        service.list_editors("bot-1", OWNER, "stranger", env="dev")
+    with pytest.raises(PermissionDeniedError):
+        service.leave_editors("bot-1", OWNER, "stranger", env="dev")
+
+
+def test_the_five_editor_rows_declare_the_same_bars():
+    """And the seam declares them too, so it can refuse first on /openapi/v1.
+
+    The service test above and this one cover different halves — a service that
+    refuses with no row would leave the public surface unguarded until the
+    handler ran, and a row with no service refusal is what round 5 flagged.
     """
     from agentclaw.community.adapters.http.openapi_v1.authorization import (
         AUTHORIZATION,
         Check,
     )
-    from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
-    read = AUTHORIZATION[("GET", "/openapi/v1/bots/{bot_id}/editors")]
-    assert isinstance(read, Check) and read.level is PermissionLevel.MEMBER, (
-        "the editor list stopped being adjudicated, so a stranger now reaches "
-        "the handler and learns the Bot's type from the error it raises"
-    )
-    for key in (
+    admin = {
         ("POST", "/openapi/v1/bots/{bot_id}/editors"),
         ("PATCH", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"),
-    ):
+    }
+    member = {
+        ("GET", "/openapi/v1/bots/{bot_id}/editors"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/editors/me"),
+    }
+    for key in admin:
         rule = AUTHORIZATION[key]
         assert isinstance(rule, Check) and rule.level is PermissionLevel.ADMIN, (
-            f"{key[0]} {key[1]} moved off the ADMIN bar the service enforced"
+            f"{key[0]} {key[1]} moved off the ADMIN bar the service enforces"
         )
-    leave = AUTHORIZATION[("DELETE", "/openapi/v1/bots/{bot_id}/editors/me")]
-    assert isinstance(leave, Check) and leave.level is PermissionLevel.MEMBER, (
-        "leaving is the one editor operation whose caller is not an admin; a "
-        "bar that drifted upward would trap a member on the Bot"
-    )
+    for key in member:
+        rule = AUTHORIZATION[key]
+        assert isinstance(rule, Check) and rule.level is PermissionLevel.MEMBER, (
+            f"{key[0]} {key[1]} is not the member-level operation it was; "
+            "leaving is the one editor action whose caller is not an admin, and "
+            "a bar that drifted upward would trap a member on the Bot"
+        )
 
 
 @pytest.mark.parametrize(

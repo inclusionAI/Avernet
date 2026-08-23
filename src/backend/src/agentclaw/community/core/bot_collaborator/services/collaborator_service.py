@@ -219,6 +219,39 @@ class CollaboratorService:
             result[bot_pk] = level
         return result
 
+    def _check_operable_permission(
+        self,
+        *,
+        bot: Mapping[str, Any],
+        user_id: str,
+        required_level: PermissionLevel,
+        env: Optional[str] = None,
+    ) -> None:
+        """Refuse a caller below *required_level* on the resolved bot.
+
+        **Kept even though the five editor rows are ``Check`` in
+        ``openapi_v1/authorization.py``.** These calls were deleted on the
+        reasoning that ``bot_access`` adjudicates first and only
+        ``openapi_v1/editors/router.py`` reaches these methods — both true, and
+        neither sufficient. ``AGENTS.md`` says delivery adapters translate
+        protocol details and do not own domain policy; who may remove an editor
+        is collaboration policy, not a transport concern, so an HTTP table
+        cannot be its only home. Raised as a P2 in #1366 round 5, after the same
+        argument had already been made for
+        ``ServicePublicationFacadeProtocol`` in round 4.
+
+        The row still migrates and still means what it says: for
+        ``/openapi/v1`` the seam is the *declared* authority and refuses first,
+        at this same bar. This is the gate every other caller gets. Fourth
+        instance of one rule in this feature — see
+        ``docs/openapi-v1/README.md``.
+        """
+        level = self.get_operable_permission_level(bot=bot, user_id=user_id, env=env)
+        if level < required_level:
+            raise PermissionDeniedError(
+                f"权限不足: 需要 {required_level.name} 权限，当前用户 {user_id} 权限为 {level.name}"
+            )
+
     def check_permission(
         self,
         bot_pk: int,
@@ -369,10 +402,12 @@ class CollaboratorService:
         """Add an editor after enforcing the public Team Space invariant."""
         resolved_env = env or get_current_env()
         bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
-        # The ADMIN bar is ``Check(PermissionLevel.ADMIN)`` on
-        # ``POST /openapi/v1/bots/{bot_id}/editors`` now, enforced by
-        # ``bot_access`` ahead of the handler. ``add_collaborator`` below still
-        # checks it too, for the internal surface that also calls it.
+        self._check_operable_permission(
+            bot=bot,
+            user_id=operator_id,
+            required_level=PermissionLevel.ADMIN,
+            env=resolved_env,
+        )
         self._editor_policy.require_capability(bot=bot, bot_id=bot_id)
         self._editor_policy.require_team_space_member(bot=bot, user_id=user_id)
         return self.add_collaborator(
@@ -397,7 +432,12 @@ class CollaboratorService:
         resolved_env = env or get_current_env()
         bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
         normalized_role = self._normalize_role(role) if role is not None else None
-        # The MEMBER bar is on the row; see ``add_editor``.
+        self._check_operable_permission(
+            bot=bot,
+            user_id=user_id,
+            required_level=PermissionLevel.MEMBER,
+            env=resolved_env,
+        )
         self._editor_policy.require_capability(bot=bot, bot_id=bot_id)
         return self._collaborator_repo.list_by_bot(
             bot_id=bot_id,
@@ -419,7 +459,12 @@ class CollaboratorService:
         resolved_env = env or get_current_env()
         normalized_role = self._normalize_role(role)
         bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
-        # The ADMIN bar is on the row; see ``add_editor``.
+        self._check_operable_permission(
+            bot=bot,
+            user_id=operator_id,
+            required_level=PermissionLevel.ADMIN,
+            env=resolved_env,
+        )
         self._editor_policy.require_capability(bot=bot, bot_id=bot_id)
         record = self._editor_policy.resolve_record(
             bot=bot,
@@ -448,12 +493,14 @@ class CollaboratorService:
         """Remove one editor after exact Bot/owner/env rebinding."""
         resolved_env = env or get_current_env()
         bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
-        # Still resolved, because it answers a second question below: an ADMIN
-        # may not remove *themselves* while an OWNER may. The ADMIN bar itself
-        # is on the row; see ``add_editor``.
+        # Resolved rather than delegated to _check_operable_permission because
+        # it answers a second question below: an ADMIN may not remove
+        # *themselves* while an OWNER may.
         operator_level = self.get_operable_permission_level(
             bot=bot, user_id=operator_id, env=resolved_env
         )
+        if operator_level < PermissionLevel.ADMIN:
+            raise PermissionDeniedError("权限不足: 需要 ADMIN 权限才能移除协作者")
         self._editor_policy.require_capability(bot=bot, bot_id=bot_id)
         record = self._editor_policy.resolve_record(
             bot=bot,
@@ -478,9 +525,16 @@ class CollaboratorService:
         """Leave the addressed Bot's editor set as the current member."""
         resolved_env = env or get_current_env()
         bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
-        # The MEMBER bar is on the row; see ``add_editor``. This one mattered
-        # most: a member removing themselves is the one editor operation whose
-        # caller is not an admin, so a bar that drifted upward would trap them.
+        # A member removing themselves is the one editor operation whose caller
+        # is not an admin, so this bar is MEMBER and must stay MEMBER — drifting
+        # it upward would trap a member on the Bot.
+        self.check_permission(
+            bot_pk=bot["id"],
+            user_id=user_id,
+            owner_id=bot["owner_id"],
+            required_level=PermissionLevel.MEMBER,
+            env=resolved_env,
+        )
         self._editor_policy.require_capability(bot=bot, bot_id=bot_id)
         return self.leave_collaboration(
             bot_id=bot_id,
