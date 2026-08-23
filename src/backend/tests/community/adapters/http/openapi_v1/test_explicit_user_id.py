@@ -369,8 +369,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: existing Caller path was renamed while the account-level IAM read went away,
 #: so ``path`` stays unchanged and ``none`` decreases by one. Bot editor
 #: requests then add one path-addressed Bot operation. The metadata query
-#: added alongside it is user-scoped but has no ``bot_id`` parameter.
-_BOT_ID_PLACEMENT = {"path": 141, "query": 1, "none": 58}
+#: added alongside it is user-scoped but has no ``bot_id`` parameter. The BCS
+#: publish-to-users route moved from /bots/{bot_id}/public-bcs to the external
+#: /collaboration/bots/{bot_uuid}/public, so one path-addressed {bot_id}
+#: operation became a {bot_uuid}-named one: path -1, none +1.
+_BOT_ID_PLACEMENT = {"path": 140, "query": 1, "none": 59}
 
 
 def _schema() -> dict:
@@ -466,7 +469,9 @@ def test_the_pinned_number_of_operations_take_it():
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
     # MCP adds eight operations, the Harness surface adds six Bot-addressed
     # operations, Session File adds six more, Bot metadata queries add one, and
-    # Bot editor requests add one.
+    # Bot editor requests add one. The BCS publish-to-users route moved from the
+    # internal /bots/{bot_id}/public-bcs path to the external contract path
+    # /collaboration/bots/{bot_uuid}/public (same op count, {bot_uuid} not {bot_id}).
     assert len(taking) == 181
 
 

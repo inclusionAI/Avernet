@@ -1,6 +1,6 @@
 """Endpoint-framework coverage for the BCS publish-to-users operation.
 
-``POST /openapi/v1/bots/{bot_id}/public-bcs`` opens a botpublish approval
+``POST /openapi/v1/collaboration/bots/{bot_uuid}/public`` opens a botpublish approval
 ticket — it talks to an external approval system, a step no test host can run.
 So both cases stand the service in through the sanctioned DI seam (``bind``
 helpers), not a class-level mock that would outlive the case or lie about
@@ -39,7 +39,7 @@ from tests.community.framework import (
 )
 from tests.community.framework.di_seams import bind_failing_method, bind_method
 
-_PATH = "/openapi/v1/bots/{bot_id}/public-bcs"
+_PATH = "/openapi/v1/collaboration/bots/{bot_uuid}/public"
 _CALLER = "bcs-publisher"
 _KEY = "public-bcs-framework-signing-key-32b"
 
@@ -104,7 +104,7 @@ def _happy(_self, *_args, **_kwargs) -> BcsPublishResult:
     path=_PATH,
     scenario="starts_the_publish_approval_ticket",
     input=CaseInput(
-        path_params={"bot_id": "bcs-target-bot"},
+        path_params={"bot_uuid": "bcs-target-bot"},
         headers={PRINCIPAL_HEADER: _principal()},
         query_params={"user_id": _CALLER},
         json_body={"public_scope": "user"},
@@ -131,7 +131,7 @@ def public_bcs_opens_approval():
     path=_PATH,
     scenario="unknown_bot_surfaces_not_found",
     input=CaseInput(
-        path_params={"bot_id": "no-such-bot"},
+        path_params={"bot_uuid": "no-such-bot"},
         headers={PRINCIPAL_HEADER: _principal()},
         query_params={"user_id": _CALLER},
         json_body={"public_scope": "user"},
