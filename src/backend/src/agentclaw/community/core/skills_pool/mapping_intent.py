@@ -222,6 +222,17 @@ def local_locators_from_evidence(
     names: list[str],
     evidence: dict[str, object] | None,
 ) -> dict[int, str]:
+    # ``local_locators`` carries no information when this Bot has no Local
+    # Skills.  Older runtime mapping consumers omit that empty field, so retain
+    # compatibility with their valid zero-Local-Skill response shape.  An
+    # explicit null or a malformed value remains invalid evidence.
+    if (
+        not assets
+        and not names
+        and isinstance(evidence, dict)
+        and "local_locators" not in evidence
+    ):
+        return {}
     raw_locators = (
         evidence.get("local_locators") if isinstance(evidence, dict) else None
     )
