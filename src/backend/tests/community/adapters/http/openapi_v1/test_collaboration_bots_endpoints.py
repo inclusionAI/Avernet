@@ -14,7 +14,7 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from agentclaw.community.adapters.http.openapi_v1.collaboration_bots import (
-    router as collaboration_bots_router,
+    public_router as collaboration_public_router,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
@@ -59,7 +59,7 @@ def make_client():
                 binder.bind(BotPublicServiceProtocol, to=svc)
 
         app = FastAPI()
-        app.include_router(collaboration_bots_router)
+        app.include_router(collaboration_public_router)
         app.dependency_overrides[require_principal] = _caller_with_user
         attach_injector(app, Injector([_M()]))
         mount_public_error_handlers(app)
@@ -76,7 +76,7 @@ def test_publish_endpoint_mounted_and_returns_envelope(make_client):
     client, svc = make_client(result)
 
     response = client.post(
-        "/openapi/v1/bots/b1:entity1/public-bcs",
+        "/openapi/v1/collaboration/bots/b1:entity1/public",
         json={
             "public_scope": "user",
             "visibility": "public",
@@ -89,7 +89,7 @@ def test_publish_endpoint_mounted_and_returns_envelope(make_client):
     body = response.json()
     assert body["data"]["success"] is True, body
     assert body["data"]["puid"] == "p1", body
-    # the {bot_id} wire param reaches the service as bot_uid (BCS identity, not split)
+    # the {bot_uuid} wire param reaches the service as bot_uid (BCS identity, not split)
     assert svc.captured["kwargs"]["bot_uid"] == "b1:entity1"
     assert svc.captured["kwargs"]["public_scope"] == "user"
     assert svc.captured["kwargs"]["visibility"] == "public"
@@ -99,7 +99,7 @@ def test_publish_endpoint_rejects_invalid_public_scope(make_client):
     client, _svc = make_client({"success": True, "puid": "p1", "state": "PROCESSING"})
 
     response = client.post(
-        "/openapi/v1/bots/b1/public-bcs",
+        "/openapi/v1/collaboration/bots/b1/public",
         json={"public_scope": "team"},  # not in Literal["user","agent"]
     )
 
