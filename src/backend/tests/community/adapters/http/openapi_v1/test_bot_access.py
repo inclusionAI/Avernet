@@ -62,8 +62,12 @@ class _Bots:
         self, *, exists: bool = True, raises: bool = False, owner: str = OWNER
     ) -> None:
         self.exists, self.raises, self.owner = exists, raises, owner
+        self.threads: list[int] = []
 
     def get_by_id_and_owner(self, bot_id, owner_id, **_):
+        # Recorded so ``test_the_level_lookup_runs_off_the_event_loop`` can
+        # assert *where* this ran, not merely that it ran.
+        self.threads.append(threading.get_ident())
         if self.raises:
             raise RuntimeError("database is unavailable")
         if not self.exists or (bot_id, owner_id) != (BOT, self.owner):
@@ -417,6 +421,38 @@ def test_the_audit_write_does_not_run_on_the_event_loop():
     assert audit.loop_thread, "the handler never ran"
     assert audit.threads[0] != audit.loop_thread[0], (
         "the audit write ran on the event loop thread, blocking the worker"
+    )
+
+
+def test_the_level_lookup_runs_off_the_event_loop():
+    """The adjudication's database reads must not block the worker either.
+
+    The gate is an ``async`` dependency, and ``_level``'s two lookups — the
+    owner-scoped bot read and the collaborator query — are synchronous
+    repository calls. Awaiting them inline parks the event loop for a database
+    round trip and stalls every unrelated request on that worker.
+
+    This is the audit write's problem one layer earlier, and strictly worse:
+    the audit runs only on a non-owner mutation, while this runs on **every**
+    request to an adjudicated operation. ``EngineRuntimeRelay`` reached the same
+    conclusion for the same pair of reads and offloads them in
+    ``resolve_bot_off_loop``.
+
+    Asserted on the thread the read actually ran on, for the reason the audit
+    test gives: the claim is about where the blocking call executes, and mocking
+    ``asyncio.to_thread`` would pass just as happily if it were awaited on the
+    loop.
+    """
+    bots = _Bots()
+    client, audit = _surface(level=PermissionLevel.ADMIN, bots=bots, bar=PermissionLevel.MEMBER)
+
+    assert _post(client).status_code == 200
+
+    assert bots.threads, "the bot lookup never happened"
+    assert audit.loop_thread, "the handler never ran"
+    assert bots.threads[0] != audit.loop_thread[0], (
+        "the level lookup ran on the event loop thread, blocking the worker "
+        "for the length of a database read on every adjudicated request"
     )
 
 
