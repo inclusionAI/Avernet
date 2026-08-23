@@ -6,6 +6,10 @@ no ``@plugin_impl``), the handler registry, the enqueue service, and the
 ``discover_lifecycle_participants`` finds it at app startup and runs its
 ``startup()`` / ``shutdown()`` — no explicit lifecycle list to maintain.
 
+A task type opts into immediate execution at registration
+(``registry.register(handler, wake_on_enqueue=True)``); the default is off, so
+existing task types keep their poll-interval timing unchanged.
+
 The ``HandlerRegistry`` singleton is created empty. BaaS and Teclaw register
 their production handlers in their own ``Lifecycle.bootstrap()`` methods
 (which the lifespan runner completes before any ``startup()``), so the worker
@@ -18,6 +22,7 @@ from injector import Binder, Module, singleton
 from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.task_queue.services.worker import TaskWorker
 from agentclaw.community.core.repository.implementations.platform.task_queue import TaskQueueRepository
 
@@ -37,5 +42,9 @@ class TaskQueueModule(Module):
         binder.bind(HandlerRegistry, to=HandlerRegistry, scope=singleton)
         # Enqueue facade for adopters.
         binder.bind(TaskQueueService, to=TaskQueueService, scope=singleton)
+        # The wake latch shared by the enqueue path and the worker's poll
+        # loop. A singleton so both see the same one; binding it separately
+        # keeps TaskQueueService from having to depend on TaskWorker.
+        binder.bind(WorkerWakeup, to=WorkerWakeup, scope=singleton)
         # The in-process worker — a Lifecycle singleton, auto-discovered.
         binder.bind(TaskWorker, to=TaskWorker, scope=singleton)

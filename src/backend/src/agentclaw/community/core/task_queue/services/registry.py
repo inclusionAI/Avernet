@@ -15,7 +15,7 @@ so every participant sees the same instance.
 """
 from __future__ import annotations
 
-from typing import Dict, Optional, Protocol, runtime_checkable
+from typing import Dict, Optional, Protocol, Set, runtime_checkable
 
 from agentclaw.community.core.task_queue.types import TaskOutcome
 
@@ -50,6 +50,10 @@ class HandlerRegistry:
         #: Normalized ``task_type`` → the exact spelling registered under it.
         #: Only used to reject near-collisions; lookup stays exact.
         self._normalized: Dict[str, str] = {}
+        #: Task types whose enqueues wake the worker immediately instead of
+        #: waiting out the idle poll. Opt-in per type — a type absent from this
+        #: set (every existing one) keeps the poll-interval behaviour exactly.
+        self._wake_on_enqueue: Set[str] = set()
 
     @staticmethod
     def _normalize(task_type: str) -> str:
@@ -60,7 +64,7 @@ class HandlerRegistry:
         """
         return task_type.casefold()
 
-    def register(self, handler: TaskHandler) -> None:
+    def register(self, handler: TaskHandler, *, wake_on_enqueue: bool = False) -> None:
         """Register ``handler`` under its ``task_type``.
 
         Raises :class:`ValueError` on a duplicate ``task_type`` — two handlers
@@ -93,6 +97,17 @@ class HandlerRegistry:
 
         Lookup stays **exact**: rows store ``task_type`` verbatim, so the worker
         dispatches on the spelling that was enqueued.
+
+        **``wake_on_enqueue``** opts this task type into immediate execution: a
+        due enqueue of this type signals the worker to poll at once rather than
+        waiting out ``poll_interval_seconds``. It defaults to ``False`` so every
+        already-registered type keeps its current timing untouched; turn it on
+        for work a user is waiting on, and leave it off for background and
+        recurring work where a couple of seconds costs nothing.
+
+        The flag lives here, at the wiring site, rather than on the handler:
+        how eagerly a queue is drained is a deployment concern, and one grep
+        for ``wake_on_enqueue=True`` then lists every type that opted in.
         """
         task_type = handler.task_type
         if task_type != task_type.strip():
@@ -120,7 +135,20 @@ class HandlerRegistry:
             )
         self._handlers[task_type] = handler
         self._normalized[normalized] = task_type
+        if wake_on_enqueue:
+            self._wake_on_enqueue.add(task_type)
 
     def get(self, task_type: str) -> Optional[TaskHandler]:
         """Return the handler for ``task_type``, or ``None`` if unregistered."""
         return self._handlers.get(task_type)
+
+    def wakes_on_enqueue(self, task_type: str) -> bool:
+        """Whether ``task_type`` opted into immediate execution at registration.
+
+        ``False`` for an unregistered type, which is the honest answer rather
+        than an error: an enqueue for a type this process has no handler for is
+        pointless to wake for, since only a process that *can* run it benefits.
+        Matched exactly, like :meth:`get` — rows carry the spelling that was
+        enqueued.
+        """
+        return task_type in self._wake_on_enqueue
