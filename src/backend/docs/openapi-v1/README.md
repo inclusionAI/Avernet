@@ -1081,6 +1081,21 @@ group rather than reading its row, which is the lesson worth keeping:
 - **Two gates at one bar cannot be told apart by their answers.** Where a
   service check stays, a test makes the two disagree and asserts the seam is
   the one that decided.
+- **A joined check is paid for twice, so price it rather than assume it.** The
+  26 engine-runtime rows resolve the bot in the seam and again in
+  `EngineRuntimeRelay.resolve_bot`. Per admitted request that is one extra
+  `BotService.get_bot` — row read, device-binding fetch, template fetch — plus,
+  **for a collaborator only**, one role query; both level resolvers
+  short-circuit on `user_id == owner_id`, so the owner path adds no
+  adjudication query at all. Caching the seam's read would recover only the row
+  read, because `BotFacts` is built from the binding and template the seam
+  never fetches. The removable half is the relay's `require_bot_operator`, and
+  it is load-bearing for the **deferred** session rows: `_resolve_session_backend`
+  turns its refusal into the draft-stage friendship check. So the redundancy
+  ends when those rows migrate — not through a cache, and not through a
+  "the seam already checked" flag, which is the bypass argument this whole
+  mechanism exists to remove. `engine_runtime/gating.py` carries the accounting
+  at the call site.
 
 What did not move, and why, is in that feature's `spec.md` *Out of Scope*:
 6 harness, 10 sessions, 3 skills, 3 authorized-apps, 2 product chats, 1

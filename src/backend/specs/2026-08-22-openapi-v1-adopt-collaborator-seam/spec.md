@@ -176,6 +176,18 @@ rather than the deprecation schedule's.
   affected — they call `resolve_operable_bot` directly, with no fallback — and
   did migrate.
   **`ServiceChecked` therefore does not reach zero in this feature.**
+  **The deferral has a running cost, named here so it is a decision rather than
+  an omission.** Keeping the disjunction in the handler keeps
+  `require_bot_operator` alive inside `EngineRuntimeRelay.resolve_bot`, which is
+  what `_resolve_session_backend` catches to reach BCN. The 26 engine-runtime
+  rows that *did* migrate therefore resolve the bot twice per admitted request —
+  once in the seam, once in the relay. Measured: one extra `BotService.get_bot`
+  (row read, device-binding fetch, template fetch) for every caller, plus one
+  collaborator-role query for a collaborator only, since both level resolvers
+  short-circuit on `user_id == owner_id`. It is not removable by caching (the
+  seam never fetches the binding or template `BotFacts` needs) and will not be
+  removed by a skip flag, which would reintroduce the bypass argument this
+  mechanism exists to delete. It ends when these ten rows migrate.
 - **The two product-chat reads** (`GET /bots/{bot_id}/chats` and
   `.../chats/{trace_id}`). Their handlers `del owner_id`: the addressed owner is
   consumed by the grant dependency and then deliberately discarded, and the
