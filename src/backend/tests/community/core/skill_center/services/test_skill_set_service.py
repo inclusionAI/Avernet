@@ -1495,80 +1495,158 @@ class TestSyncSkillSetToActiveOwnerIdResolution:
         )
 
 
+# ── TestSyncMcpDesiredState ──────────────────────────────────────────
+
+
 class TestSyncMcpDesiredState:
-    @staticmethod
-    def _service():
-        from agentclaw.community.core.skill_center.services.skill_set_service import (
-            SkillSetService,
-        )
+    """sync_mcp_desired_state: bounded concurrent detail delivery + projection contract."""
 
-        service = SkillSetService.__new__(SkillSetService)
-        service.user_id = "owner-1"
-        service.entity_id = "owner-1"
-        service.bot_id = "bot-1"
-        service.engine_type = "openclaw"
-        service.mcp_center = MagicMock()
-        service._mcp_sync_service = MagicMock()
-        service._mcp_sync_service.sync_mcp_detail = AsyncMock(
-            return_value={"success": True}
-        )
-        service._resolver = MagicMock()
-        service._resolver.resolve_for_bot.return_value = object()
+    def _make_svc(self, *, sync_mcp_detail):
+        from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
+
+        with patch("agentclaw.community.core.skill_center.services.skill_set_service.WorkspacePathFactory"):
+            svc = SkillSetService(
+                skill_repo=MagicMock(),
+                skill_set_repo=MagicMock(),
+                mcp_center=MagicMock(),
+                mcp_config_service=MagicMock(),
+                skill_service=MagicMock(),
+                bot_repo=MagicMock(),
+                path_factory=MagicMock(),
+            )
+        svc.bot_id = "bot1"
+        svc.user_id = "user1"
+        svc.entity_id = "staff_user1"
+        svc.engine_type = "moltis"
+        svc.mcp_center = MagicMock()
+        svc.mcp_center.get_mcp_detail.side_effect = lambda code: {"server_code": code}
+        svc._mcp_sync_service = MagicMock()
+        svc._mcp_sync_service.sync_mcp_detail = AsyncMock(side_effect=sync_mcp_detail)
+
         plugin = MagicMock()
-        plugin.sync_all_mcp_servers.return_value = True
-        service._device_sync_dispatcher = MagicMock()
-        service._device_sync_dispatcher.dispatch.return_value = plugin
-        return service, plugin
+        plugin.sync_all_mcp_servers = MagicMock(return_value=True)
+        svc._resolver = MagicMock()
+        svc._device_sync_dispatcher = MagicMock()
+        svc._device_sync_dispatcher.dispatch.return_value = plugin
+        return svc, plugin
 
     @pytest.mark.asyncio
-    async def test_missing_default_detail_still_declares_complete_allow_list(self):
-        service, plugin = self._service()
-        installed_detail = {
-            "serverCode": "mcp.user-installed",
-            "name": "Installed",
-        }
-        service.mcp_center.get_mcp_detail.side_effect = lambda code: (
-            installed_detail if code == "mcp.user-installed" else None
-        )
+    async def test_details_are_delivered_concurrently_within_the_bound(self):
+        """The serial loop delivered one MCP at a time; delivery now overlaps,
+        capped at _MCP_DETAIL_SYNC_CONCURRENCY so the device is not flooded."""
+        import asyncio
 
-        with patch(
-            "agentclaw.community.core.skill_center.services.skill_set_service."
-            "get_default_mcp_server_codes",
-            return_value=["mcp.default"],
-        ):
-            result = await service.sync_mcp_desired_state(
-                server_codes={"mcp.default", "mcp.user-installed"}
-            )
+        from agentclaw.community.core.skill_center.services import skill_set_service as mod
 
-        assert result is True
-        service._mcp_sync_service.sync_mcp_detail.assert_awaited_once_with(
-            user_id="owner-1",
-            mcp_data=installed_detail,
-            bot_id="bot-1",
-            entity_id="owner-1",
-            engine_type="openclaw",
-        )
+        inflight = 0
+        peak = 0
+
+        async def sync_mcp_detail(**_kwargs):
+            nonlocal inflight, peak
+            inflight += 1
+            peak = max(peak, inflight)
+            await asyncio.sleep(0.01)
+            inflight -= 1
+            return {"success": True}
+
+        svc, plugin = self._make_svc(sync_mcp_detail=sync_mcp_detail)
+        # Twice the bound, so the semaphore is genuinely exercised whatever the
+        # bound is tuned to.
+        total = mod._MCP_DETAIL_SYNC_CONCURRENCY * 2
+        codes = {f"mcp.s{i}" for i in range(total)}
+
+        assert await svc.sync_mcp_desired_state(server_codes=codes) is True
+
+        assert peak > 1, "detail delivery ran serially"
+        assert peak == mod._MCP_DETAIL_SYNC_CONCURRENCY
+        assert svc._mcp_sync_service.sync_mcp_detail.await_count == total
+        # The allow-list declaration still carries every entry, in sorted order.
         plugin.sync_all_mcp_servers.assert_called_once_with(
-            [
-                {"server_code": "mcp.default"},
-                installed_detail,
-            ]
+            [{"server_code": code} for code in sorted(codes)]
         )
 
     @pytest.mark.asyncio
-    async def test_missing_non_default_detail_remains_fail_closed(self):
-        service, plugin = self._service()
-        service.mcp_center.get_mcp_detail.return_value = None
+    async def test_failed_detail_withholds_the_allow_list_declaration(self):
+        delivered: list[str] = []
 
-        with patch(
-            "agentclaw.community.core.skill_center.services.skill_set_service."
-            "get_default_mcp_server_codes",
-            return_value=["mcp.default"],
-        ):
-            result = await service.sync_mcp_desired_state(
-                server_codes={"mcp.user-installed"}
-            )
+        async def sync_mcp_detail(*, mcp_data, **_kwargs):
+            code = mcp_data["server_code"]
+            delivered.append(code)
+            return {"success": code != "mcp.s1"}
+
+        svc, plugin = self._make_svc(sync_mcp_detail=sync_mcp_detail)
+
+        result = await svc.sync_mcp_desired_state(
+            server_codes={"mcp.s0", "mcp.s1", "mcp.s2"}
+        )
 
         assert result is False
-        service._mcp_sync_service.sync_mcp_detail.assert_not_awaited()
         plugin.sync_all_mcp_servers.assert_not_called()
+        # Fan-out attempts every entry; only the projection is withheld.
+        assert sorted(delivered) == ["mcp.s0", "mcp.s1", "mcp.s2"]
+
+    @pytest.mark.asyncio
+    async def test_raising_detail_fails_the_projection_without_escaping(self):
+        delivered: list[str] = []
+
+        async def sync_mcp_detail(*, mcp_data, **_kwargs):
+            code = mcp_data["server_code"]
+            delivered.append(code)
+            if code == "mcp.s1":
+                raise RuntimeError("device refused the payload")
+            return {"success": True}
+
+        svc, plugin = self._make_svc(sync_mcp_detail=sync_mcp_detail)
+
+        result = await svc.sync_mcp_desired_state(
+            server_codes={"mcp.s0", "mcp.s1", "mcp.s2"}
+        )
+
+        assert result is False
+        plugin.sync_all_mcp_servers.assert_not_called()
+        assert sorted(delivered) == ["mcp.s0", "mcp.s1", "mcp.s2"]
+
+    @pytest.mark.asyncio
+    async def test_cancellation_propagates_instead_of_reporting_failure(self):
+        """A cancelled run is the caller's decision, not a per-MCP failure."""
+        import asyncio
+
+        async def sync_mcp_detail(*, mcp_data, **_kwargs):
+            if mcp_data["server_code"] == "mcp.s1":
+                raise asyncio.CancelledError()
+            return {"success": True}
+
+        svc, plugin = self._make_svc(sync_mcp_detail=sync_mcp_detail)
+
+        with pytest.raises(asyncio.CancelledError):
+            await svc.sync_mcp_desired_state(server_codes={"mcp.s0", "mcp.s1"})
+
+        plugin.sync_all_mcp_servers.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_missing_mcp_center_detail_skips_delivery_entirely(self):
+        async def sync_mcp_detail(**_kwargs):
+            return {"success": True}
+
+        svc, plugin = self._make_svc(sync_mcp_detail=sync_mcp_detail)
+        svc.mcp_center.get_mcp_detail.side_effect = (
+            lambda code: None if code == "mcp.s1" else {"server_code": code}
+        )
+
+        result = await svc.sync_mcp_desired_state(server_codes={"mcp.s0", "mcp.s1"})
+
+        assert result is False
+        svc._mcp_sync_service.sync_mcp_detail.assert_not_awaited()
+        plugin.sync_all_mcp_servers.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_empty_desired_state_still_declares_the_empty_allow_list(self):
+        async def sync_mcp_detail(**_kwargs):
+            raise AssertionError("no MCP to deliver")
+
+        svc, plugin = self._make_svc(sync_mcp_detail=sync_mcp_detail)
+
+        assert await svc.sync_mcp_desired_state(server_codes=set()) is True
+
+        svc._mcp_sync_service.sync_mcp_detail.assert_not_awaited()
+        plugin.sync_all_mcp_servers.assert_called_once_with([])

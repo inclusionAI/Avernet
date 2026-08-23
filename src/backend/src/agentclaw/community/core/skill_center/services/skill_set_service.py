@@ -61,6 +61,14 @@ SKILLS_DIR = Path("/home/admin/.openclaw/workspace/skills")
 SKILLS_REPO_DIR = SKILLS_DIR / "skills-repo"
 SKILLS_LOCAL_DIR = SKILLS_DIR / "skills-local"
 
+# MCP 详情投递的并发上限。每条投递最终是一次设备侧阻塞 HTTP(插件内含 3 次重试),
+# 经 ``asyncio.to_thread`` 落到 event loop 的默认线程池,所以这个值同时约束两头:
+# 对单台设备的突发请求数,以及本路径占用的共享线程数。默认池只有
+# ``min(32, cpu_count + 4)`` 个线程(4 核容器 = 8)且全进程共用,取值再大只会排队
+# 并挤占其它 ``to_thread`` 调用方。``MCPSyncService._sync_mcp_details`` 的同名上限
+# 仍是 5——那条链路是同一台设备的另一个入口,两者可能并发。
+_MCP_DETAIL_SYNC_CONCURRENCY = 10
+
 logger = get_logger()
 
 
@@ -526,6 +534,11 @@ class SkillSetService:
         set: it is the device-level reconciliation command that clears stale
         allow-list entries.  Per-server detail delivery precedes that full
         declaration so all newly allowed MCPs have their configured payload.
+
+        Detail delivery fans out instead of running one MCP at a time: every
+        ``sync_mcp_detail`` ends in a blocking device HTTP call that carries its
+        own retries, so a bot with many MCPs used to make the caller wait for
+        the sum of them.
         """
         try:
             # Engine defaults are provisioned by the runtime image. Singlebox's
@@ -549,15 +562,8 @@ class SkillSetService:
                     )
                     return False
                 entries.append(detail)
-                result = await self._mcp_sync_service.sync_mcp_detail(
-                    user_id=self.user_id or self.entity_id or "",
-                    mcp_data=detail,
-                    bot_id=self.bot_id,
-                    entity_id=self.entity_id,
-                    engine_type=self.engine_type,
-                )
-                if not result.get("success"):
-                    return False
+            if not await self._deliver_mcp_details(entries):
+                return False
             ctx = self._resolver.resolve_for_bot(
                 self.bot_id, self.entity_id or self.user_id or ""
             )
@@ -571,6 +577,54 @@ class SkillSetService:
                 exc_info=True,
             )
             return False
+
+    async def _deliver_mcp_details(self, entries: list[dict[str, Any]]) -> bool:
+        """Push every MCP payload to the device concurrently.
+
+        Bounded by a semaphore for the same reason
+        ``MCPSyncService._sync_mcp_details`` bounds its own fan-out: an
+        unbounded burst of device HTTP requests overwhelms the engine.  Unlike
+        the previous serial loop this attempts every entry even after one
+        fails; a failed run still withholds ``sync_all_mcp_servers``, so no
+        extra MCP becomes reachable and the reconciler retries the whole
+        projection.
+        """
+        semaphore = asyncio.Semaphore(_MCP_DETAIL_SYNC_CONCURRENCY)
+
+        async def deliver(detail: dict[str, Any]) -> bool:
+            async with semaphore:
+                result = await self._mcp_sync_service.sync_mcp_detail(
+                    user_id=self.user_id or self.entity_id or "",
+                    mcp_data=detail,
+                    bot_id=self.bot_id,
+                    entity_id=self.entity_id,
+                    engine_type=self.engine_type,
+                )
+                return bool(result.get("success"))
+
+        # return_exceptions=True: 单条失败不能让其余任务变成 orphan——否则它们会在
+        # 本方法返回后继续往设备投递。
+        results = await asyncio.gather(
+            *(deliver(entry) for entry in entries), return_exceptions=True
+        )
+
+        delivered = True
+        for entry, result in zip(entries, results, strict=True):
+            if isinstance(result, asyncio.CancelledError):
+                # 取消来自上层,不是单条 MCP 失败,必须向上抛。
+                raise result
+            if isinstance(result, Exception):
+                logger.warning(
+                    "[sync_mcp_desired_state] MCP detail delivery raised for "
+                    "bot_id=%s server_code=%s",
+                    self.bot_id,
+                    entry.get("serverCode") or entry.get("server_code"),
+                    exc_info=result,
+                )
+                delivered = False
+            elif not result:
+                delivered = False
+        return delivered
 
     def _validate_name(self, name: str) -> None:
         """Validate skill set name (cannot contain underscore)."""
