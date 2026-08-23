@@ -166,7 +166,7 @@ class TestTaskList:
         assert record["task_spec"]["metadata"]["task_id"] == task_id
         assert record["task_spec"]["goal"]["objective"] == "产出尽调报告"
         assert record["execution_config"]["task_type"] == "dynamic"
-        assert record["status"] == Status.PENDING.value
+        assert record["status"] == "EXECUTING"
         assert record["gmt_create"] is not None
 
     def test_public_list_is_scoped_to_authenticated_user(self, client):

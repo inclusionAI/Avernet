@@ -32,7 +32,9 @@ _TASK_SPEC = {
 _EXECUTE_BODY = {
     "task_spec": _TASK_SPEC,
     "source_type": "bot",
+    "owner_user_id": "user-endpoint-1",
     "owner_bot_id": "bot-endpoint-1",
+    "execution_config": {"task_type": "dynamic"},
 }
 _CALLBACK_BODY = {
     "task_id": "task-endpoint-1",
@@ -59,9 +61,9 @@ class _CallbackTaskService:
 
 
 def _seed_task_service(world) -> None:
-    async def execute(_self, task_info):
+    async def execute(_self, _task_info):
         return TaskOpResult(
-            task_id=task_info.task_spec.metadata.task_id,
+            task_id="task-endpoint-1",
             success=True,
             run_id=1,
             extend_props={"group_id": "bcs_grp_endpoint_1"},
@@ -119,14 +121,9 @@ def _seed_callback_service(world) -> None:
 
 
 def _seed_callback_report(world) -> None:
-    async def report_result(_self, _data) -> None:
-        return None
-
-    bind_overrides(
-        world,
-        TaskLoopCallbackProtocol,
-        {"report_result": report_result},
-    )
+    # /callback/report resolves TaskServiceProtocol and invokes svc.callback;
+    # binding TaskLoopCallbackProtocol alone does not affect that dependency.
+    _seed_callback_service(world)
 
 
 def _seed_scheduler_error(world) -> None:

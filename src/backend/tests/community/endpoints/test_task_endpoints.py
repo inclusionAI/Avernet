@@ -79,6 +79,13 @@ def _seed_graph(world, task_id: str) -> None:
     world.get(TaskGraphService).initialize_graph(_task_info(task_id))
 
 
+def _seed_execute_conflict(world) -> None:
+    """Pin the server-generated task id so re-execute exercises the 409 path."""
+    task_id = "t_exec_conflict"
+    _seed_graph(world, task_id)
+    world.get(TaskServiceProtocol)._task_id_provider = lambda: task_id  # type: ignore[attr-defined]
+
+
 def _seed_graph_bbs(world, task_id: str, *, claim_bot: str | None = None) -> None:
     """A bbs-ready graph: bbs_mode on, optionally claimed by ``claim_bot``."""
     gs = world.get(TaskGraphService)
@@ -111,8 +118,9 @@ def _run_root(world, task_id: str) -> None:
                      "acceptances": [{"id": "ac1", "description": "d1"}]},
         },
         "source_type": "bot",
+        "owner_user_id": "owner_user",
         "owner_bot_id": "owner_bot",
-        "execution_config": {"MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3},
+        "execution_config": {"task_type": "dynamic", "MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3},
     }),
     expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
 )
@@ -131,10 +139,11 @@ def execute_ok():
             "goal": {"objective": "", "acceptances": []},
         },
         "source_type": "bot",
+        "owner_user_id": "owner_user",
         "owner_bot_id": "owner_bot",
-        "execution_config": {},
+        "execution_config": {"task_type": "dynamic"},
     }),
-    seed=lambda w: _seed_graph(w, "t_exec_conflict"),
+    seed=_seed_execute_conflict,
     expect=ExpectError(status=409),
 )
 def execute_conflict_on_reexecute():
