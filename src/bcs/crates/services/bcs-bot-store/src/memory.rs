@@ -1534,7 +1534,22 @@ impl BotRepoPort for MemoryBotRepo {
             (true, true, _) => {
                 let previous_mock = existing_token.clone();
                 let session_token = uuid::Uuid::new_v4().to_string();
-                {
+                // Persist FIRST (disk file): if this fails, surface the error
+                // before any in-memory mutation, so memory and the persisted
+                // file never split into a half-state that only surfaces as a
+                // stale-MOCK reconnect after a restart. Persisting before the
+                // `bots.write()` lock also sidesteps the prior deadlock:
+                // `save_token` re-acquires `bots.write()`.
+                if let Err(err) = self.save_token(&bot_id, &session_token).await {
+                    warn!(
+                        bot_id = %bot_id,
+                        error = %err,
+                        "connect_or_promote_streaming: promote_mock disk persist failed; refusing ws"
+                    );
+                    return Err(ConnectStreamError::InternalError(format!(
+                        "promote_mock: failed to persist promoted token: {err}"
+                    )));
+                }
                 let mut bots = self.bots.write().await;
                 if let Some(bot) = bots.get_mut(&bot_id) {
                     bot.ws_connection = Some(BotConnection {
@@ -1551,12 +1566,6 @@ impl BotRepoPort for MemoryBotRepo {
                             last_heartbeat: Instant::now(),
                             capabilities: BotCapabilities::default(),
                             dynamic_status: BotDynamicStatus::default(),
-                            ws_connection: Some(BotConnection {
-                                session_token: session_token.clone(),
-                                connected_at: Instant::now(),
-                            }),
-                            session_token: Some(session_token.clone()),
-                            env: Some(resolve_env()),
                             status: bcs_service_api::ActorStatus::Online,
                             actor_kind: bcs_service_api::ActorKind::Bot,
                             created_by: None,
@@ -1564,15 +1573,13 @@ impl BotRepoPort for MemoryBotRepo {
                             user_visibility: UserVisibility::default(),
                             friend_ext: serde_json::Map::new(),
                             friend_check_in_strategy: FriendCheckInStrategy::default(),
+                            env: Some(resolve_env()),
+                            ws_connection: Some(BotConnection {
+                                session_token: session_token.clone(),
+                                connected_at: Instant::now(),
+                            }),
+                            session_token: Some(session_token.clone()),
                         },
-                    );
-                }
-                } // end bots.write() scope (drop before save_token re-acquires it)
-                if let Err(err) = self.save_token(&bot_id, &session_token).await {
-                    warn!(
-                        bot_id = %bot_id,
-                        error = %err,
-                        "connect_or_promote_streaming: promote_mock disk repair failed"
                     );
                 }
                 let mut token_to_bot = self.token_to_bot.write().await;

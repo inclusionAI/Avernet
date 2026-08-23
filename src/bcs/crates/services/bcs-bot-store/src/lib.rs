@@ -2418,6 +2418,20 @@ impl BotRepoPort for PersistentBotRepo {
             (true, true, _) => {
                 let previous_mock = existing_token.clone();
                 let session_token = uuid::Uuid::new_v4().to_string();
+                // Persist FIRST: if this fails, surface the error before any
+                // in-memory mutation, so memory and DB never split into a
+                // "real-token in memory, MOCK in DB" half-state that only
+                // surfaces as a stale-MOCK reconnect after a BCS restart.
+                if let Err(err) = self.save_token_to_db(&bot_id, &session_token).await {
+                    warn!(
+                        bot_id = %bot_id,
+                        error = %err,
+                        "connect_or_promote_streaming: promote_mock DB persist failed; refusing ws"
+                    );
+                    return Err(ConnectStreamError::InternalError(format!(
+                        "promote_mock: failed to persist promoted token: {err}"
+                    )));
+                }
                 let mut bots = self.bots.write().await;
                 if let Some(bot) = bots.get_mut(&bot_id) {
                     bot.ws_connection = Some(BotConnection {
@@ -2447,15 +2461,6 @@ impl BotRepoPort for PersistentBotRepo {
                             hidden: false,
                             created_by: None,
                         },
-                    );
-                }
-                // Repair DB: write the real token over the stale MOCK so a
-                // later restart resolves the bot by token (scenario 3 fix).
-                if let Err(err) = self.save_token_to_db(&bot_id, &session_token).await {
-                    warn!(
-                        bot_id = %bot_id,
-                        error = %err,
-                        "connect_or_promote_streaming: promote_mock DB repair failed"
                     );
                 }
                 let mut token_to_bot = self.token_to_bot.write().await;

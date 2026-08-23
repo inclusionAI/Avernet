@@ -275,6 +275,51 @@ async fn connect_or_promote_streaming_promotes_mock_to_real() {
 }
 
 #[tokio::test]
+async fn connect_or_promote_streaming_promote_persists_real_token_to_db_survives_restart() {
+    // Scenario-3 / promote_mock durability: after promotion, the real token must
+    // be in `bcs_bots` (not the stale MOCK), so a fresh repo built on the same DB
+    // resolves the bot by the promoted token — i.e. no half-state where memory
+    // holds the real token while the DB still keeps the MOCK.
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let db = sqlite_db().await;
+    let repo = PersistentBotRepo::with_plugins(cache.clone(), db.clone());
+
+    // provider pre-registers a plugin bot → DB holds MOCK
+    let mock = mock_token();
+    repo.register_with_owner_and_token(
+        "plugin-bot:alice".to_string(),
+        BotCapabilities {
+            name: Some("Plugin Bot".to_string()),
+            visibility: "protected".to_string(),
+            ..Default::default()
+        },
+        "11111111",
+        &mock,
+    )
+    .await
+    .expect("register plugin bot with mock token");
+    assert!(bcs_service_api::is_mock_token(&mock));
+
+    // plugin reconnects → promote MOCK to a real token
+    let promoted = repo
+        .connect_or_promote_streaming("plugin-bot:alice".to_string())
+        .await
+        .expect("promote");
+    assert!(!bcs_service_api::is_mock_token(&promoted));
+
+    // Simulate a BCS restart: a fresh repo reading the SAME DB.
+    let repo_after = PersistentBotRepo::with_plugins(cache.clone(), db);
+    let persisted = repo_after
+        .load_token("plugin-bot:alice")
+        .await
+        .expect("token present after restart");
+    assert_eq!(
+        persisted, promoted,
+        "DB keeps the real promoted token (not the stale MOCK) across a restart"
+    );
+}
+
+#[tokio::test]
 async fn connect_or_promote_streaming_refuses_real_token_claim_with_already_registered() {
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let repo = MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf());
