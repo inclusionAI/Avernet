@@ -765,6 +765,50 @@ def test_lock_takeover_still_requires_bot_membership():
     assert rule.level is PermissionLevel.MEMBER
 
 
+def test_the_facade_itself_refuses_below_the_bar(deps, monkeypatch):
+    """The Service API contract promises to authorize, so drive it directly.
+
+    ``ServicePublicationFacadeProtocol``'s docstring says *"Resolve, authorize
+    and orchestrate"*. This PR briefly deleted that refusal on the reasoning
+    that ``bot_access`` adjudicates first — true for ``/openapi/v1``, and beside
+    the point for a contract, which promises future callers too. A P2 in round 4
+    caught the divergence; this is what keeps it caught.
+
+    Driven through the facade with **no seam in front of it**, which is exactly
+    the position a background consumer or a second adapter would be in. The row
+    assertions in the sibling test cover the other half — that the seam declares
+    the same bars — and neither test can substitute for the other.
+    """
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services."
+        "service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    deps.publish_repo.list_by_source_bot.return_value = [record(1, PublishStatus.DRAFT)]
+
+    # An ADMIN collaborator is below OWNER, so every owner-only operation is a
+    # masked not-found — not a 403, which would confirm the bot exists.
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.ADMIN
+    for label, call in (
+        ("restart_container", lambda: deps.facade.restart_container(
+            "bot-1", "DEVICE-001", actor_id="admin", owner_id="owner")),
+        ("convert_to_service", lambda: deps.facade.convert_to_service(
+            "bot-1", actor_id="admin", owner_id="owner")),
+        ("update_service_config", lambda: deps.facade.update_service_config(
+            "bot-1", actor_id="admin", owner_id="owner", should_approval=True)),
+        ("delete_initial_draft", lambda: deps.facade.delete_initial_draft(
+            "bot-1", actor_id="admin", owner_id="owner")),
+    ):
+        with pytest.raises(ServicePublicationNotFoundError):
+            call()
+        assert True, label
+
+    # And a caller with no relation at all is refused the MEMBER-barred read.
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.NONE
+    with pytest.raises(ServicePublicationNotFoundError):
+        deps.facade.list_publications("bot-1", actor_id="stranger", owner_id="owner")
+
+
 def test_the_four_owner_operations_kept_their_bar():
     """The four that were OWNER, and the twelve that were MEMBER, still are.
 

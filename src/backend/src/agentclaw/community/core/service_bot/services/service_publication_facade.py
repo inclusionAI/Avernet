@@ -124,27 +124,43 @@ class ServicePublicationFacade:
         *,
         actor_id: str,
         owner_id: str,
+        required_level: PermissionLevel = PermissionLevel.MEMBER,
         require_service: bool = True,
     ) -> tuple[dict[str, Any], PermissionLevel]:
-        """Resolve the bot and the caller's level on it — and adjudicate neither.
+        """Resolve the bot, adjudicate the caller, and return both.
 
-        This used to take ``required_level`` and refuse below it, at MEMBER by
-        default and OWNER for four operations. Every route that reaches this
-        method now declares that same bar as ``Check`` in
-        ``openapi_v1/authorization.py``, and ``bot_access`` enforces it before
-        the handler runs, with the identical masked answer. Keeping the
-        parameter would leave the bar written in two places for the two to
-        drift apart, and a row claiming the seam decides while this really did
-        would have been a false claim.
+        **The bar stays here even though all 16 routes now declare it as a
+        ``Check`` row.** It was removed on the reasoning that ``bot_access``
+        adjudicates first and a bar written twice is a bar that can drift —
+        which is true, and not the whole picture. This method sits behind
+        :class:`ServicePublicationFacadeProtocol`, whose Service API contract
+        says in as many words: *"Resolve, authorize and orchestrate service-Bot
+        publication operations."* Deleting the refusal left that contract
+        claiming a behaviour the implementation no longer had, while every
+        signature kept the ``actor_id`` that implies it. ``AGENTS.md`` makes
+        contracts the authority for inter-component behaviour, so the
+        divergence is the defect — not the duplication.
 
-        ``level`` is still computed and still returned, because it answers a
-        second question the bar does not: :meth:`_actions` reports what the
-        caller may *do* with a publication, and an OWNER sees ``delete`` on an
-        unpublished draft where a MEMBER does not. That projection is not
-        authorization — it never permits anything — so it did not move.
+        Verified before restoring: nothing outside ``openapi_v1`` calls this
+        protocol today, so no caller was actually unguarded. That is a reason
+        the removal was not an incident, not a reason it was correct — a
+        contract is a promise to future callers too, and a background consumer
+        or a second adapter would inherit the gap silently. Raised as a P2 in
+        #1366 round 4.
 
-        The ``require_service`` refusal is untouched: it is a bot-type answer,
-        not a collaborator one, and the surface still reports it separately.
+        So both gates run, at the same bar, and the row is still honest: for
+        ``/openapi/v1`` the seam is the *declared* authority and refuses first;
+        this is the transport-agnostic one the Service API promises. Same shape
+        as ``bot_skill_asset_service`` and ``skill_set_control_plane``.
+
+        ``level`` is returned as well as enforced, because it answers a second
+        question the bar does not: :meth:`_actions` reports what the caller may
+        *do* with a publication, and an OWNER sees ``delete`` on an unpublished
+        draft where a MEMBER does not. That projection is not authorization —
+        it never permits anything.
+
+        The ``require_service`` refusal is a bot-type answer, not a
+        collaborator one, and the surface still reports it separately.
         """
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if not bot:
@@ -157,6 +173,9 @@ class ServicePublicationFacade:
             owner_id=owner_id,
             env=get_current_env(),
         )
+        if level < required_level:
+            # COSEC: mask authorization failures as absence to prevent Bot-ID probing.
+            raise ServicePublicationNotFoundError("bot not found")
         if require_service and bot.get("bot_type") != "service":
             raise ServicePublicationUnsupportedError("bot is not a service bot")
         return bot, level
@@ -168,11 +187,13 @@ class ServicePublicationFacade:
         *,
         actor_id: str,
         owner_id: str,
+        required_level: PermissionLevel = PermissionLevel.MEMBER,
     ) -> tuple[dict[str, Any], BotPublishRecord, PermissionLevel]:
         bot, level = self._resolve_bot(
             bot_id,
             actor_id=actor_id,
             owner_id=owner_id,
+            required_level=required_level,
         )
         publication = self._publish_repo.get_by_id(publication_id)
         # COSEC: a publication id is never authority. Bind it to the already
@@ -372,6 +393,7 @@ class ServicePublicationFacade:
             bot_id,
             actor_id=actor_id,
             owner_id=owner_id,
+            required_level=PermissionLevel.OWNER,
         )
         current = self.list_containers(
             bot_id,
@@ -439,6 +461,7 @@ class ServicePublicationFacade:
             bot_id,
             actor_id=actor_id,
             owner_id=owner_id,
+            required_level=PermissionLevel.OWNER,
             require_service=False,
         )
         if bot.get("bot_type") == "service":
@@ -507,6 +530,7 @@ class ServicePublicationFacade:
             bot_id,
             actor_id=actor_id,
             owner_id=owner_id,
+            required_level=PermissionLevel.OWNER,
         )
         config = {
             **self._service_config(bot),
@@ -533,11 +557,13 @@ class ServicePublicationFacade:
         *statuses: PublishStatus,
         actor_id: str,
         owner_id: str,
+        required_level: PermissionLevel = PermissionLevel.MEMBER,
     ) -> tuple[dict[str, Any], BotPublishRecord]:
         bot, _ = self._resolve_bot(
             bot_id,
             actor_id=actor_id,
             owner_id=owner_id,
+            required_level=required_level,
         )
         allowed = {status.value for status in statuses}
         records = self._publish_repo.list_by_source_bot(bot["id"], get_current_env())
@@ -705,6 +731,7 @@ class ServicePublicationFacade:
             PublishStatus.DRAFT,
             actor_id=actor_id,
             owner_id=owner_id,
+            required_level=PermissionLevel.OWNER,
         )
         if not self._publish_service.can_delete_bot(record.id):
             raise ServicePublicationConflictError("service bot cannot be deleted")
@@ -758,17 +785,17 @@ class ServicePublicationFacade:
         )
 
     def steal_lock(self, bot_id: str, *, actor_id: str, owner_id: str) -> Any:
-        # COSEC: the lock service assumes authorization was already checked, and
-        # this is the forceful operation — PD grants takeover to every Bot
-        # member, so that relationship has to be proven before it runs. It is,
-        # by ``Check(PermissionLevel.MEMBER)`` on
-        # ``POST /openapi/v1/bots/{bot_id}/edit-lock/steal``, which ``bot_access``
-        # enforces ahead of this handler. The bar used to be spelled here as
-        # ``required_level=PermissionLevel.MEMBER``; it moved, it did not go.
         bot, _ = self._resolve_bot(
             bot_id,
             actor_id=actor_id,
             owner_id=owner_id,
+            # COSEC: the lock service assumes authorization was already checked.
+            # PD explicitly grants lock takeover to every Bot member, so prove
+            # that relationship here before invoking the forceful operation.
+            # ``Check(PermissionLevel.MEMBER)`` on the route says the same thing
+            # for ``/openapi/v1`` callers and refuses first; this is the gate the
+            # Service API contract promises to anyone else.
+            required_level=PermissionLevel.MEMBER,
         )
         if not self._lockable_draft(bot, actor_id=actor_id):
             return None

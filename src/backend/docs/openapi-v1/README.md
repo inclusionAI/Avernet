@@ -1060,6 +1060,14 @@ group rather than reading its row, which is the lesson worth keeping:
   twins, and from `/api/skills` — which no row governs. Deleting its check to
   "finish" the migration would have stripped authorization from two surfaces.
   The row still moves: it names who the *declared* authority is.
+  **And a service that is reached only through the seam today can still be the
+  wrong place to delete from.** `ServicePublicationFacadeProtocol` has no caller
+  outside `/openapi/v1`, but its Service API contract says "Resolve, authorize
+  and orchestrate" — deleting the refusal left the contract promising a
+  behaviour the implementation had lost, to every future caller. Contracts are
+  the authority for inter-component behaviour; reachability today is not the
+  test.
+
   **Ask this of every group, every time.** `skill_set_control_plane` got the
   same treatment as an afterthought and its check was deleted; `/api/skillsets`
   reaches it on four routes with no `CollaboratorPermissionInterceptor`, taking
