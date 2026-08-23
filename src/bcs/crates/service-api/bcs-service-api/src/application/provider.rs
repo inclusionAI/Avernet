@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use bcs_domain::{
-    ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig,
+    ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode, ProviderCoordinationConfig,
     ProviderOrganizationManagementConfig, ProviderRecord, Skill,
 };
 use serde::{Deserialize, Serialize};
@@ -86,6 +86,7 @@ pub struct RegisterProviderBotCommand {
     pub scopes: Vec<String>,
     pub bot_uuid: Option<String>,
     pub reject_existing_bot_uuid: bool,
+    pub connection_mode: ProviderBotConnectionMode,
 }
 
 #[derive(Debug, Clone)]
