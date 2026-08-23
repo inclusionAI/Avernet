@@ -1330,6 +1330,75 @@ class TestSearchPublicBotsByKeyword:
             page_size=2,
         )
 
+    def test_catalog_search_preserves_bcs_is_friend_on_its_exact_address(self):
+        metadata = MagicMock()
+        bcs_item = BotCatalogMetadata(
+            BotCatalogAddress("shared", "entity-a"), "bot", is_friend=False
+        )
+        metadata.search_public_bot_metadata.return_value = [bcs_item]
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (
+            1,
+            [_make_catalog_bot("shared", "entity-a")],
+        )
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-friend",
+        )
+
+        assert result["items"] == [
+            {**_make_catalog_bot("shared", "entity-a"), "is_friend": False}
+        ]
+
+    def test_catalog_search_preserves_requested_bcs_metadata_on_its_exact_address(self):
+        metadata = MagicMock()
+        friend_ext = {"public_user_approval": {"status": "PROCESSING"}}
+        bcs_item = BotCatalogMetadata(
+            BotCatalogAddress("shared", "entity-a"),
+            "bot",
+            is_friend=False,
+            visibility="protected",
+            is_online=False,
+            actor_kind="bot",
+            friend_ext=friend_ext,
+            friend_check_in_strategy={},
+            user_visibility="private",
+        )
+        metadata.search_public_bot_metadata.return_value = [bcs_item]
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (
+            2,
+            [
+                _make_catalog_bot("shared", "entity-a"),
+                _make_catalog_bot("shared", "entity-b"),
+            ],
+        )
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-metadata",
+        )
+
+        assert result["items"] == [
+            {
+                **_make_catalog_bot("shared", "entity-a"),
+                "is_friend": False,
+                "visibility": "protected",
+                "is_online": False,
+                "actor_kind": "bot",
+                "friend_ext": friend_ext,
+                "friend_check_in_strategy": {},
+                "user_visibility": "private",
+            }
+        ]
+
     def test_catalog_search_restores_bcs_order_and_isolates_same_bot_id_by_entity(self):
         metadata = MagicMock()
         metadata.search_public_bot_metadata.return_value = [

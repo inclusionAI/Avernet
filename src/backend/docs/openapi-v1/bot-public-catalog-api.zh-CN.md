@@ -13,7 +13,9 @@ GET /openapi/v1/bots/catalog/search
 GET /openapi/v1/bots/catalog/discover
 ```
 
-目录响应不包含用户关系状态，也不返回 `binding_id`、数据库内部 ID、设备信息、`ext`、运行环境、实例标识或凭据。
+目录响应不返回 `binding_id`、数据库内部 ID、设备信息、`ext`、运行环境、实例标识或凭据。Catalog Search 对 BCS 当前目录项
+可选透传 `visibility`、`is_online`、`actor_kind`、`is_friend`、`friend_ext`、`friend_check_in_strategy` 和
+`user_visibility`；除此之外不返回 BCS 原始字段。
 
 ## 2. 搜索 Catalog Bot
 
@@ -21,7 +23,7 @@ GET /openapi/v1/bots/catalog/discover
 GET /openapi/v1/bots/catalog/search
 ```
 
-Backend 将 `search`、`page` 和 `page_size` 映射到 BCS `/v2/bots/search` 的 `q`、`offset` 和
+Backend 将 `search`、`page` 和 `page_size` 映射到 BCS `/bots/search` 的 `q`、`offset` 和
 `limit`，并固定传 `tc_bot=true`，只读取当前 BCS 页。该标识仅保留由 TeamClaw Backend onboard 的
 Bot。BCS 的 `bot_uuid` 按 `<bot_id>:<entity_id>` 解析后，Backend 在当前租户、当前环境内以精确二元组查询未删除的 live
 Bot 并内连接；Catalog Search 不再以 Backend `public="1"` 作为过滤条件，Backend 是全部对外字段的唯一权威来源。
@@ -30,6 +32,10 @@ BCS 的排序和分页边界保持不变。`tc_bot=true` 使正常数据下 BCS 
 这里的 `total` 是**当前页 join 后数量**，不是跨 BCS 页的总数。若迁移或数据同步暂时不一致，接口仍只
 返回实际 join 的记录。BCS 不可用或返回非法记录时固定返回 `502000 / Catalog service unavailable`，
 不会回退为 Backend-only 搜索。
+
+若 BCS 当前目录项提供 `visibility`、`is_online`、`actor_kind`、`is_friend`、`friend_ext`、
+`friend_check_in_strategy` 或 `user_visibility`，Backend 在精确 `(bot_id, entity_id)` join 后原样返回；字段缺失或为
+`null` 时响应中省略。`friend_ext` 不删除内部键，前端可按需使用。Backend 不重新查询、推导或覆盖这些 BCS 值。
 
 | 参数 | 必填 | 规则 |
 |---|---:|---|
@@ -72,6 +78,13 @@ type PublicBot = {
   name: string;
   description: string;
   owner_name?: unknown;
+  visibility?: unknown; // 仅 Catalog Search 中 BCS 提供时返回
+  is_online?: unknown;
+  actor_kind?: string;
+  is_friend?: boolean;
+  friend_ext?: unknown;
+  friend_check_in_strategy?: unknown;
+  user_visibility?: unknown;
   engine: string;
   status: string;
 };

@@ -1439,6 +1439,7 @@ class BotPublicService:
                 request_id=request_id,
             )
             addresses = self._validated_catalog_addresses(metadata)
+            metadata_by_address = {item.address: item for item in metadata}
         except BotCatalogMetadataUnavailableError as exc:
             logger.warning(
                 "[BotPublicService.catalog_search] request_id=%s "
@@ -1462,7 +1463,25 @@ class BotPublicService:
             for bot in backend_bots
             if (address := self._catalog_address(bot)) in addresses
         }
-        items = [bots_by_address[address] for address in addresses if address in bots_by_address]
+        items = []
+        for address in addresses:
+            bot = bots_by_address.get(address)
+            if bot is None:
+                continue
+            metadata_item = metadata_by_address[address]
+            for field_name in (
+                "is_friend",
+                "visibility",
+                "is_online",
+                "actor_kind",
+                "friend_ext",
+                "friend_check_in_strategy",
+                "user_visibility",
+            ):
+                value = getattr(metadata_item, field_name)
+                if value is not None:
+                    bot[field_name] = value
+            items.append(bot)
         # Sanitize sensitive fields before pagination and public projection.
         EXT_SENSITIVE_KEYS = {"iam_token"}
         for bot in items:

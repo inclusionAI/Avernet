@@ -24,7 +24,7 @@ def _response(status_code: int, payload: object) -> httpx.Response:
     return httpx.Response(
         status_code,
         json=payload,
-        request=httpx.Request("GET", "http://bcs.test/v2/bots/search"),
+        request=httpx.Request("GET", "http://bcs.test/bots/search"),
     )
 
 
@@ -71,10 +71,12 @@ def test_bcs_catalog_search_maps_current_page_and_parses_exact_address() -> None
     )
 
     assert result == [
-        BotCatalogMetadata(BotCatalogAddress("bot-1", "owner-1"), "bot")
+        BotCatalogMetadata(
+            BotCatalogAddress("bot-1", "owner-1"), "bot", actor_kind="bot"
+        )
     ]
     call = http.calls_to("get")[0]
-    assert call.args[0] == "/v2/bots/search"
+    assert call.args[0] == "/bots/search"
     assert call.kwargs["params"] == {
         "q": "agent",
         "offset": 20,
@@ -82,6 +84,82 @@ def test_bcs_catalog_search_maps_current_page_and_parses_exact_address() -> None
         "tc_bot": True,
     }
     assert "headers" not in call.kwargs
+
+
+def test_bcs_catalog_search_preserves_optional_is_friend_false() -> None:
+    """A BCS false value is meaningful and must not be dropped as falsy."""
+    service, http = _make_service()
+    http.set_response(
+        "get",
+        _response(
+            200,
+            {
+                "items": [
+                    {
+                        "bot_uuid": "bot-1:owner-1",
+                        "actor_kind": "bot",
+                        "is_friend": False,
+                    }
+                ]
+            },
+        ),
+    )
+
+    result = service.search_public_bot_metadata(
+        search=None, page=1, page_size=20, caller=_caller(), request_id="trace-friend"
+    )
+
+    assert getattr(result[0], "is_friend", None) is False
+
+
+def test_bcs_catalog_search_preserves_requested_optional_metadata_fields() -> None:
+    """Catalog Search must retain the explicitly supported BCS item fields."""
+    service, http = _make_service()
+    friend_ext = {
+        "public_user_approval": {
+            "status": "PROCESSING",
+            "view_friend_deps": [{"deptNo": "D1"}],
+        }
+    }
+    friend_check_in_strategy = {}
+    http.set_response(
+        "get",
+        _response(
+            200,
+            {
+                "items": [
+                    {
+                        "bot_uuid": "bot-1:owner-1",
+                        "actor_kind": "bot",
+                        "visibility": "protected",
+                        "is_online": False,
+                        "is_friend": False,
+                        "friend_ext": friend_ext,
+                        "friend_check_in_strategy": friend_check_in_strategy,
+                        "user_visibility": "private",
+                    }
+                ]
+            },
+        ),
+    )
+
+    result = service.search_public_bot_metadata(
+        search=None, page=1, page_size=20, caller=_caller(), request_id="trace-metadata"
+    )
+
+    assert result == [
+        BotCatalogMetadata(
+            BotCatalogAddress("bot-1", "owner-1"),
+            "bot",
+            is_friend=False,
+            visibility="protected",
+            is_online=False,
+            actor_kind="bot",
+            friend_ext=friend_ext,
+            friend_check_in_strategy=friend_check_in_strategy,
+            user_visibility="private",
+        )
+    ]
 
 
 def test_bcs_catalog_search_omits_blank_query_and_keeps_page_boundary() -> None:
@@ -109,6 +187,7 @@ def test_bcs_catalog_search_omits_blank_query_and_keeps_page_boundary() -> None:
         {"bot_uuid": "bot-1:", "actor_kind": "bot"},
         {"bot_uuid": 1, "actor_kind": "bot"},
         {"bot_uuid": "bot-1:owner-1", "actor_kind": "human"},
+        {"bot_uuid": "bot-1:owner-1", "actor_kind": "bot", "is_friend": "false"},
     ],
 )
 def test_bcs_catalog_search_fails_closed_for_invalid_item(
