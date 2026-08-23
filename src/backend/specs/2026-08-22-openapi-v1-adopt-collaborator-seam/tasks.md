@@ -71,7 +71,30 @@ deletion is known to change no caller's answer.
 - **Depends on:** Task 4
 
 ## Task 6: Give the authorized-apps handlers the owner they adjudicate
-- **Goal:** Satisfy `_assert_check_rows_are_enforceable`, which refuses a `Check` row whose handler does not itself declare `OwnerIdDep`.
+- **Status: `[!]` BLOCKED — needs a design decision, recorded 2026-08-23.**
+- **What the trace found.** The swap itself is behaviour-preserving: these three
+  operations are human-only (`refuse_app_only_caller` on the router, and all
+  three rows are admission `REFUSED`), and for a human `OwnerIdDep` resolves to
+  `owner_id or caller` — identical to `resolve_delegable_bot`'s
+  `addressed_owner = owner_id or caller_id`. Verified along the whole path:
+  `resolve_owner_id` → `AddressedBotGrantDep` → `require_granted_addressed_bot`
+  → `_require_granted_bot` → `ActingCaller.require_bot`, whose docstring states
+  "a **human** caller is not governed by a grant, so there is nothing to check
+  and the addressed owner passes straight through."
+- **Why it is blocked anyway.** `OwnerIdDep` transitively declares
+  `require_granted_addressed_bot`, which is an **admission** dependency.
+  `test_every_grant_checked_operation_declares_its_modes_dependency` refuses an
+  operation that declares it while its admission mode is not
+  `GRANT_CHECKED_ADDRESSED_BOT` — and these three are `REFUSED`. The failure is
+  correct: the declaration and the table would be saying different things.
+- **The fork.** `OwnerIdDep` does two jobs — resolve *which* owner, and check
+  the app's grant. A human-only operation needs the first and must not carry the
+  second. Options: (a) a human-only owner resolver that
+  `_assert_check_rows_are_enforceable`'s `_consumes` also accepts, which changes
+  the seam's dependency contract; (b) leave these 3 rows `ServiceChecked` and
+  move on; (c) revisit whether `REFUSED` operations should publish `owner_id` at
+  all. This is architecturally significant, so it is not being improvised.
+- **Original goal:** Satisfy `_assert_check_rows_are_enforceable`, which refuses a `Check` row whose handler does not itself declare `OwnerIdDep`.
 - **Files:** `.../openapi_v1/authorized_apps/router.py`
 - **Done when:**
   - [ ] All three handlers take `OwnerIdDep` in place of whatever names the owner today, and act on that resolved value.
@@ -187,7 +210,7 @@ deletion is known to change no caller's answer.
   - Theme: A correction, not a migration. Two rows stop claiming a check that does not exist.
 - **Group C — First adopter:** Task 5
   - Theme: The smallest, least entangled groups — no lock, no audit, no twins — put the `Check` path in front of real callers.
-- **Group D — Authorized apps:** Tasks 6, 7
+- **Group D — Authorized apps:** Tasks 6, 7 — **BLOCKED**, see Task 6
   - Theme: The one group needing a handler change before its rows can flip; the change lands separately from the flip so each is reviewable alone.
 - **Group E — Skill centre:** Tasks 8, 9
   - Theme: 19 hook rows plus the 7 `{skill_id}` asset rows, `skill_set_control_plane`'s audit write reconciled, and three rows deliberately left behind with their citation corrected — because the modules that check them also check six retiring addresses this feature will not touch.
