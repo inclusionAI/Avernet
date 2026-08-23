@@ -98,3 +98,14 @@ class TaskCallbackRepository(TaskCallbackRepositoryProtocol):
                 .all()
             )
             return [r.to_record() for r in rows]
+
+    def get_latest_by_session(self, main_session_id: str) -> Optional[TaskCallbackRecord]:
+        """按 ``main_session_id`` 取最新一条回调(``gmt_modified`` desc、``id`` desc),供 dashboard 反查 execution_graph。"""
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self._model)
+                .filter(self._model.main_session_id == main_session_id)
+                .order_by(self._model.gmt_modified.desc(), self._model.id.desc())
+                .first()
+            )
+            return row.to_record() if row else None

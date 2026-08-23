@@ -207,6 +207,10 @@ class TaskExecutionGraph:
     tasks: list[TaskNode] = field(default_factory=list)
     relations: list[Relation] = field(default_factory=list)   # 依赖关系(分解树,一等公民)
     extend_props: dict[str, Any] = field(default_factory=dict)
+    execution_graph: dict[str, Any] | None = None  # 回调审计图快照(BCN/ClawMind DAG,按 session_id 反查挂图级;只读投影)
+    task_id: str = ""   # 整图所属任务 ID(initialize 透传;query_task_dashboard 子树投影复制;
+                        # 供 bbs_runner.notify 经 _schedule_bbs_notify→run_bbs 取 task_id,
+                        # 因 run_bbs 链路只拿到 execution_graph、无法回溯 task_id)
     # 派生不持久: depth / child_tasks / parent_task(均从 relations 分解树派生)
 
 

@@ -71,6 +71,7 @@ class TaskService:
         self._task_id_provider = task_id_provider or (lambda: str(uuid.uuid4()))
         self._task_node_repo = task_node_repo
         self._run_info_repo = task_node_run_info_repo
+        self._callback_repo = callback_repo
         self._api_base_url = api_base_url
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
@@ -273,8 +274,23 @@ class TaskService:
     def get_task_dashboard(
         self, task_id: str, node_id: str | None = None
     ) -> TaskExecutionGraph:
-        """任务执行详情可视化(整图或按 node_id 子树投影),只读。"""
-        return self._graph.query_task_dashboard(task_id, node_id)
+        """任务执行详情可视化(整图或按 node_id 子树投影),只读。
+
+        按 root(node_id==task_id)的 ``run_info.extend_props['session_id']`` 反查 ``task_callback`` 最新回调,
+        把回调审计的 ``execution_graph``(BCN/ClawMind DAG 快照)挂在图级,便于 dashboard 可见;无 session_id /
+        无 callback / 未配 ``callback_repo`` → 留 ``None``。子树投影(node_id 入参)不挂(root 不在投影内)。"""
+        graph = self._graph.query_task_dashboard(task_id, node_id)
+        root = next((n for n in graph.tasks if n.node_id == task_id), None)
+        sid = (root.run_info.extend_props.get("session_id") if root else None)
+        if sid and self._callback_repo is not None:
+            try:
+                rec = self._callback_repo.get_latest_by_session(sid)
+            except Exception as exc:  # noqa: BLE001 反查失败不阻断只读 dashboard
+                logger.warning("[dashboard] execution_graph 反查失败 session_id=%s: %s", sid, exc)
+                rec = None
+            if rec is not None and rec.execution_graph is not None:
+                graph.execution_graph = rec.execution_graph
+        return graph
 
     def list_tasks(
         self,

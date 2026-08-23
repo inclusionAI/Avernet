@@ -224,3 +224,12 @@ class TaskCallbackRepositoryProtocol(Protocol):
     ) -> list["TaskCallbackRecord"]:
         """Callbacks for ``main_session_id`` (backs ``idx_session_id``)."""
         ...
+
+    @abstractmethod
+    def get_latest_by_session(
+        self, main_session_id: str,
+    ) -> Optional["TaskCallbackRecord"]:
+        """Latest callback for ``main_session_id`` (``gmt_modified``/``id`` desc); ``None`` if absent.
+
+        dashboard 按 root 节点的 BCS ``session_id`` 反查 ``task_callback.execution_graph`` 挂图级用。"""
+        ...

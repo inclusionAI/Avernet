@@ -147,6 +147,7 @@ class TaskGraphService:
                 status=Status.RUNNING,
                 tasks=[root],
                 relations=[],
+                task_id=task_id,
             )
             root.node_run_graph = graph  # 回填循环引用(in-memory)
             graph.extend_props["execution_config"] = dict(task_info.execution_config)
@@ -510,6 +511,7 @@ class TaskGraphService:
                     if r.src_id in subtree and r.dst_id in subtree
                 ],
                 extend_props=dict(graph.extend_props),
+                task_id=graph.task_id,
             )
 
     # ===== 派生只读查询(均从 relations 分解树派生)=====

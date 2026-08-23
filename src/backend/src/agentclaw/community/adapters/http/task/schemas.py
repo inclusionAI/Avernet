@@ -211,6 +211,7 @@ class TaskExecutionGraphDTO(BaseModel):
     tasks: list[TaskNodeDTO] = Field(default_factory=list)
     relations: list[TaskRelationDTO] = Field(default_factory=list, description="依赖关系(分解树)")
     extend_props: dict[str, Any] = Field(default_factory=dict)
+    execution_graph: dict[str, Any] | None = None  # 回调审计 DAG 快照(按 root session_id 从 task_callback 反查挂图级)
 
 
 # ===== DTO <-> domain conversion(Rule 22:adapter 唯一写/读翻译位) =====
@@ -326,6 +327,7 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
         run_id=graph.run_id, loop_round=graph.loop_round, status=graph.status.value,
         output=dict(graph.output), tasks=nodes, relations=relations,
         extend_props=dict(graph.extend_props),
+        execution_graph=graph.execution_graph,
     )
 
 

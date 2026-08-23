@@ -59,3 +59,14 @@ def test_upsert_inserts_then_refreshes_same_row(db):
     assert stored.result_success is True
     # 仍是同一行(upsert 未新增)
     assert sum(1 for r in repo.list_by_session("S-1") if r.run_id == "R-1" and r.node_id == "N-1") == 1
+
+
+def test_get_latest_by_session_returns_newest(db):
+    repo = TaskCallbackRepository(db)
+    repo.insert(_cb(run_id="R-1", node_id="N-1", session="S-1", execution_graph={"v": 1}))
+    repo.insert(_cb(run_id="R-2", node_id="N-2", session="S-1", execution_graph={"v": 2}))
+    repo.insert(_cb(run_id="R-3", node_id="N-3", session="S-2", execution_graph={"v": 9}))
+    latest = repo.get_latest_by_session("S-1")
+    assert latest is not None
+    assert latest.execution_graph == {"v": 2}
+    assert repo.get_latest_by_session("missing") is None
