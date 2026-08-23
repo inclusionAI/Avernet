@@ -32,8 +32,11 @@ _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip().lower() in {"1", "true"
 
 
 @pytest.mark.skipif(not _LIVE, reason="requires a running Singlebox stack")
-def test_singlebox_bcs_lists_claim_and_dream_bots() -> None:
-    os.environ.setdefault("DEPLOY_PROFILE", "singlebox")
+def test_singlebox_bcs_lists_claim_and_dream_bots(monkeypatch: pytest.MonkeyPatch) -> None:
+    # tests/community/conftest.py defaults the profile to ``test`` during
+    # collection. Override it explicitly for this live Singlebox test rather
+    # than using setdefault(), which would leave the test profile in place.
+    monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
     bot, bcs = TaskModule._resolve_ports()
     assert bot is not None
     assert bcs is not None
