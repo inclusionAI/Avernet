@@ -37,11 +37,14 @@ _BCN_EVENT_CALLBACK_PATH = "/api/v1/collaboration/tasks/callback/report"
 
 class TaskExecutor:
     def __init__(self, *, bot, bcs, formatter, context, sink, poller,
-                 identity_resolver=None, graph=None, api_base_url: str = "") -> None:
+                 identity_resolver=None, graph=None, bot_public=None,
+                 api_base_url: str = "") -> None:
         """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
         context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
         graph: TaskGraphService|None,动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props
         (dashboard 可见);None 时跳过(单测/无图路径)。R0 骨架允许 None;bbs 路径不依赖任何端口。
+        bot_public: BotPublicServiceProtocol|None(TEMP e2e),供 bbs_runner ``notify`` 按关键字取 dream bot roster
+        (替代 bcs.list_bots_by_task_modes,免 provider_id + task_dream_mode PATCH)。
         api_base_url: 任务后端 base url,传给 bbs_runner 拼发给胜出 bot 的任务消息。"""
         self._bot = bot
         self._bcs = bcs
@@ -51,6 +54,7 @@ class TaskExecutor:
         self._poller = poller
         self._identity_resolver = identity_resolver
         self._graph = graph
+        self._bot_public = bot_public
         self._api_base_url = api_base_url
         self._group_meta: dict[str, dict[str, Any]] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
 
@@ -351,7 +355,7 @@ class TaskExecutor:
         from agentclaw.community.core.task.task_runner.integration import bbs_runner
         await bbs_runner.notify(
             execution_graph=execution_graph,
-            bcs=self._bcs, bot=self._bot,
+            bot_public=self._bot_public, bot=self._bot,
             graph=self._graph,
             backend_url=self._api_base_url,
             skill_name=bbs_runner._BBS_SKILL_NAME,

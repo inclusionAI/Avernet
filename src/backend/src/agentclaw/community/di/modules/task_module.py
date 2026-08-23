@@ -107,7 +107,7 @@ class TaskModule(Module):
             bcs_identity=bcs_identity, task_info_repo=task_info_repo,
             callback_repo=callback_repo, task_node_repo=task_node_repo,
             task_node_run_info_repo=task_node_run_info_repo,
-            bot_service=bot_service,
+            bot_service=bot_service, bot_public=bot_public,
             api_base_url=self._resolve_api_base_url(),
         )
 

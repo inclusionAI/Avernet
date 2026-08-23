@@ -1,11 +1,19 @@
 """BBS 主动触发:bid→select→claim→dispatch。
-升 BBS 可恢复态后,向 dream-mode roster 广播评估消息;从回复中选 completion_rate 最高的 bot;
-引擎服务端 claim_bbs_owner;发任务消息给胜出 bot(best-effort,不抛)。"""
+
+升 BBS 可恢复态后,向 dream bot roster 广播评估消息;从回复中选 completion_rate 最高的 bot;
+引擎服务端 claim_bbs_owner;发任务消息给胜出 bot(best-effort,不抛)。
+
+TEMP(e2e):roster 取数临时改走 ``BotPublicServiceProtocol.search_public_bots_by_keyword``,
+按关键字 ``_BBS_BID_DREAM_KEYWORD`` 命中命名的 e2e dream bot(替代需 provider_id +
+task_dream_mode PATCH 的 ``bcs.list_bots_by_task_modes``)。**全局生效**——prod/corp 的
+BBS active-relay roster 路径在位期间失效(只搜 e2e 命名 bot),跑完 e2e 需回退,或换成
+per-profile 的 ``BbsRosterPort`` 抽象(singlebox 走 keyword、prod 走 bcs.provider_id 过滤)。"""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -13,24 +21,45 @@ logger = logging.getLogger(__name__)
 _BBS_SKILL_NAME = "bbs-relay-single-task"
 _BID_TIMEOUT = 170.0
 _OVERALL_TIMEOUT = 180.0
+# TEMP(e2e):关键词命中 e2e 用例命名的 dream bot(e2e-bbs-bid-dream-a / -b);owner e2e-bbs-bid-owner 不命中。
+_BBS_BID_DREAM_KEYWORD = "e2e-bbs-bid-dream"
+_BBS_BID_ROSTER_PAGE_SIZE = 20
 
 
-async def notify(execution_graph, *, bcs, bot, graph, backend_url: str,
+@dataclass
+class _RosterEntry:
+    """bbs_runner 内部用:BotPublicServiceProtocol 搜索返回的 bot,透出 bid/claim 消费的 bot_id。"""
+
+    bot_id: str
+    name: str = ""
+
+
+async def notify(execution_graph, *, bot_public, bot, graph, backend_url: str,
                  skill_name: str = _BBS_SKILL_NAME) -> None:
-    """bid→select→claim→dispatch 给胜出 bot(best-effort,不抛)。"""
+    """bid→select→claim→dispatch 给胜出 bot(best-effort,不抛)。
+    roster 取数经 ``bot_public.search_public_bots_by_keyword`` 按关键字
+    ``_BBS_BID_DREAM_KEYWORD`` 命中 e2e dream bot(TEMP,见模块 docstring)。"""
     task_id = execution_graph.task_id
-    if bcs is None or bot is None:
-        logger.info("[bbs-runner] skip: bcs/bot 缺失 task=%s", task_id)
+    if bot_public is None or bot is None:
+        logger.info("[bbs-runner] skip: bot_public/bot 缺失 task=%s", task_id)
         return
     try:
-        roster = await bcs.list_bots_by_task_modes(claim=False, dream=False, match="any")
-        if roster and len(roster) > 10:
+        # TEMP(e2e):关键字搜 public bot 替代 bcs.list_bots_by_task_modes(免 provider_id + dream-mode PATCH)
+        res = bot_public.search_public_bots_by_keyword(
+            search=_BBS_BID_DREAM_KEYWORD, page=1, page_size=_BBS_BID_ROSTER_PAGE_SIZE,
+        ) or {}
+        roster = [
+            _RosterEntry(bot_id=str(it.get("bot_id", "")), name=str(it.get("bot_name", "")))
+            for it in (res.get("items") or [])
+            if it.get("bot_id")
+        ]
+        if len(roster) > 10:
             roster = roster[:10]
     except Exception as exc:
         logger.warning("[bbs-runner] roster 取失败 task=%s:%s", task_id, exc)
         return
     if not roster:
-        logger.info("[bbs-runner] 无 dream-mode bot task=%s,留可恢复态", task_id)
+        logger.info("[bbs-runner] 无 dream bot 命中 task=%s,留可恢复态", task_id)
         return
 
     logger.info("[bbs-runner] roster 取成功 task=%s, roster=%s, num=%d", task_id, roster, len(roster))

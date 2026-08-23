@@ -66,8 +66,10 @@ class ExecutionEngine:
     测试可经 facade/engine 子类覆写 ``_build_*`` 注入 stub 策略/投递(测试 seam)。"""
 
     def __init__(self, graph, *, bot=None, bcs=None, discover=None, bcs_identity=None,
-                 api_base_url: str = "") -> None:
+                 bot_public=None, api_base_url: str = "") -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
+        bot_public: BotPublicServiceProtocol|None(TEMP e2e)供 bbs_runner 按关键字取 dream bot roster(替代
+        bcs.list_bots_by_task_modes)。
         端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
         ``_build_*`` 注入 stub 策略/投递时可省略(走 super 路径默认 berth)。
 
@@ -81,6 +83,7 @@ class ExecutionEngine:
         self._bcs = bcs
         self._discover = discover
         self._bcs_identity = bcs_identity
+        self._bot_public = bot_public
         self._api_base_url = api_base_url
         self._bg_tasks: set[asyncio.Task] = set()
         self._locks: dict[str, threading.RLock] = {}
@@ -122,7 +125,7 @@ class ExecutionEngine:
         exe = TaskExecutor(
             bot=self._bot, bcs=self._bcs, formatter=PromptFormatterImpl(),
             context=self, sink=self, poller=poller, identity_resolver=self._bcs_identity,
-            graph=self._graph, api_base_url=self._api_base_url,
+            graph=self._graph, bot_public=self._bot_public, api_base_url=self._api_base_url,
         )
         import threading as _t
         self._poller_thread = _t.Thread(target=poller.run_poll_loop, daemon=True, name="task-exec-poller")
