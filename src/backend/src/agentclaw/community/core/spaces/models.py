@@ -14,8 +14,12 @@ class SpaceType(StrEnum):
 
 
 class SpaceRole(StrEnum):
-    OWNER = "OWNER"
+    # Canonical role used by all new business logic and persisted writes.
+    ADMIN = "ADMIN"
     MEMBER = "MEMBER"
+    # Compatibility-only aliases. Do not use these for new data or business rules.
+    OWNER = "OWNER"
+    ADMINISTRATOR = "ADMINISTRATOR"
 
 
 class SpaceJoinStatus(StrEnum):
@@ -49,6 +53,7 @@ class SpaceMemberRecord(BaseModel):
     id: int
     space_id: int
     user_id: str
+    user_name: str | None = None
     role: SpaceRole
     env: str
     created_by: str
@@ -67,7 +72,6 @@ class SpaceSummaryRecord(BaseModel):
 class SpaceMemberSummaryRecord(BaseModel):
     member: SpaceMemberRecord
     is_creator: bool
-    user_name: str | None = None
     display_name: str | None = None
 
 

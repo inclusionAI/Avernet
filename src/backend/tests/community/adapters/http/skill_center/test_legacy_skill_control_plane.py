@@ -355,7 +355,9 @@ async def test_legacy_skill_set_batch_validates_target_before_materialising_asse
             return "7"
 
     control_plane = _ControlPlane()
-    with pytest.raises(HTTPException) as failure:
+    # The route raises the situation, not a status: ``adapters.http.app``
+    # answers 404 for this class. See test_skillset_error_status_mapping.py.
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
         await add_skills_to_set(
             "missing-set",
             AddSkillsRequest(skill_ids=["7"], user_id="owner", bot_id="bot"),
@@ -368,7 +370,6 @@ async def test_legacy_skill_set_batch_validates_target_before_materialising_asse
             control_plane=control_plane,
         )
 
-    assert failure.value.status_code == 404
     assert control_plane.resolved is False
 
 
@@ -384,7 +385,12 @@ async def test_legacy_skill_set_batch_propagates_infrastructure_failure() -> Non
         async def add_skill(self, **_kwargs):
             raise RuntimeError("database unavailable")
 
-    with pytest.raises(HTTPException) as failure:
+    # The route used to catch this and return a 500 reading "Skill set
+    # operation failed", which named the endpoint rather than the fault and
+    # left "database unavailable" nowhere in the response or the traceback the
+    # caller could act on. It now escapes to the app's catch-all, which logs
+    # the real exception with its traceback before answering 500.
+    with pytest.raises(RuntimeError, match="database unavailable"):
         await add_skills_to_set(
             "set-1",
             AddSkillsRequest(skill_ids=["7"], user_id="owner", bot_id="bot"),
@@ -396,9 +402,6 @@ async def test_legacy_skill_set_batch_propagates_infrastructure_failure() -> Non
             bot_repo=_Bots(),
             control_plane=_ControlPlane(),
         )
-
-    assert failure.value.status_code == 500
-    assert failure.value.detail == "Skill set operation failed"
 
 
 @pytest.mark.asyncio
@@ -413,7 +416,10 @@ async def test_legacy_skill_set_batch_does_not_hide_mutation_busy() -> None:
         async def add_skill(self, **_kwargs):
             raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY")
 
-    with pytest.raises(HTTPException) as failure:
+    # A busy fence is not one of the two per-skill conflicts the batch records
+    # as a partial failure, so it must abort the request. The reason code is
+    # the published wire and survives to the caller as the error detail.
+    with pytest.raises(SkillSetControlPlaneConflictError) as failure:
         await add_skills_to_set(
             "set-1",
             AddSkillsRequest(skill_ids=["7"], user_id="owner", bot_id="bot"),
@@ -426,8 +432,7 @@ async def test_legacy_skill_set_batch_does_not_hide_mutation_busy() -> None:
             control_plane=_ControlPlane(),
         )
 
-    assert failure.value.status_code == 400
-    assert failure.value.detail == "BOT_MUTATION_BUSY"
+    assert str(failure.value) == "BOT_MUTATION_BUSY"
 
 
 @pytest.mark.asyncio

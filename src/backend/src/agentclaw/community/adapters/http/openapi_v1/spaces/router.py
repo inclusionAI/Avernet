@@ -71,9 +71,12 @@ from agentclaw.community.core.repository.protocols.skill_center_types import (
     SpaceSkillSummaryRecord,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 
-router = APIRouter(prefix="/openapi/v1/bots/spaces", tags=["spaces"])
+router = APIRouter(
+    prefix="/openapi/v1/bots/spaces", tags=["spaces"], route_class=PublicAPIRoute
+)
 SpaceIdPath = Annotated[int, Path(ge=1, description="Space primary identifier.")]
 PageNoQuery = Annotated[int, Query(ge=1, description="One-based page number.")]
 PageSizeQuery = Annotated[
@@ -97,6 +100,7 @@ def _space_item(record: SpaceSummaryRecord) -> SpaceItem:
         space_code=record.space.space_code,
         space_name=record.space.name,
         space_type=record.space.space_type,
+        creator_user_id=record.space.created_by,
         current_user_role=record.current_user_role,
         join_status=record.join_status,
         member_count=record.member_count,
@@ -111,7 +115,7 @@ def _created_space(record) -> SpaceCreated:
         space_code=record.space_code,
         space_name=record.name,
         space_type=record.space_type,
-        current_user_role=SpaceRole.OWNER,
+        current_user_role=SpaceRole.ADMIN,
         is_creator=True,
         member_count=1,
         owner_count=1,
@@ -123,7 +127,7 @@ def _created_space(record) -> SpaceCreated:
 def _member_item(record: SpaceMemberSummaryRecord) -> SpaceMemberItem:
     return SpaceMemberItem(
         user_id=record.member.user_id,
-        user_name=record.user_name,
+        user_name=record.member.user_name,
         display_name=record.display_name,
         role=record.member.role,
         is_creator=record.is_creator,
@@ -266,9 +270,7 @@ async def list_space_skills(
     ] = None,
     page_no: PageNoQuery = 1,
     page_size: PageSizeQuery = 20,
-    service: SpaceSkillQueryServiceProtocol = Injected(
-        SpaceSkillQueryServiceProtocol
-    ),
+    service: SpaceSkillQueryServiceProtocol = Injected(SpaceSkillQueryServiceProtocol),
 ) -> Envelope[Page[SpaceSkillItem]]:
     actor_id = _require_user_delegation(caller)
     total, records = service.list_space_skills(
@@ -299,6 +301,7 @@ async def add_space_member(
         space_id=space_id,
         actor_id=user_id,
         user_id=body.member_user_id,
+        user_name=body.member_user_name,
         role=DomainSpaceRole(body.role),
     )
     return created(

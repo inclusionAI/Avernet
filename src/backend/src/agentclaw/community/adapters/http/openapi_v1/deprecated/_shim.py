@@ -15,6 +15,7 @@ import re
 from typing import Any, Callable
 
 from fastapi import APIRouter
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 #: Every ``(METHOD, legacy path)`` this package registers, mapped to the address
 #: that replaced it. Filled in as routes are declared.
@@ -35,7 +36,7 @@ def legacy_router(prefix: str, tag: str) -> APIRouter:
     published document sorts every retiring operation together and a reader
     scanning tags sees at a glance which are on the way out.
     """
-    return APIRouter(prefix=prefix, tags=[f"{tag} (deprecated)"])
+    return APIRouter(prefix=prefix, tags=[f"{tag} (deprecated)"], route_class=PublicAPIRoute)
 
 
 def legacy_operation_id(name: str, path: str, method: str) -> str:

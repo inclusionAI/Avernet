@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 
+use crate::core::registry::ConnectStreamError;
 use crate::types::{
     ActorStatus, AgentCredentials, BotCapabilities, BotDynamicStatus, EnsureHumanResult,
     RegisteredBot, ServiceResult,
@@ -245,6 +246,25 @@ pub trait BotRepoPort: Send + Sync {
     }
 
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()>;
+    /// Connect or promote a streaming connection by `bot_id`, deciding
+    /// atomically inside the store:
+    /// - bot absent            → create with a fresh real token + attach ws
+    /// - bot exists, MOCK token → promote: replace MOCK with a real token +
+    ///   attach ws (and persist the real token back to `bcs_bots`)
+    /// - bot exists, real token, no ws → `AlreadyRegistered` (anti-hijack)
+    /// - bot exists, real token, ws present → `AlreadyConnected`
+    ///
+    /// Default impl delegates to [`register_streaming_connection`]
+    /// (preserving legacy semantics for noop/test repos).
+    async fn connect_or_promote_streaming(
+        &self,
+        bot_id: String,
+    ) -> Result<String, ConnectStreamError> {
+        let id = bot_id.clone();
+        self.register_streaming_connection(bot_id)
+            .await
+            .map_err(|_| ConnectStreamError::AlreadyConnected(id))
+    }
     async fn reconnect_streaming(&self, existing_token: String) -> Result<(String, String), ()>;
     async fn disconnect_streaming(&self, bot_id: &str);
     async fn is_connected(&self, bot_id: &str) -> bool;

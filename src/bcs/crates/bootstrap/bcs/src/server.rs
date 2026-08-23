@@ -31,6 +31,7 @@ use crate::config::{
     LlmConfig, LlmProviderType,
 };
 use crate::lifecycle::LifecycleOrchestrator;
+use crate::friend_connect_notification::HttpFriendConnectNotificationPort;
 use crate::plugins::{
     DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
     build_registered_channel_provider, build_registered_leader_election,
@@ -43,6 +44,8 @@ use bcs_api_http::{ApiState, PrincipalVerifier};
 use bcs_app_bot::{BotServiceConfig, BotServiceImpl, InternalBotAttributesServiceImpl};
 use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
 use bcs_app_invitation::{InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl};
+use bcs_app_collaboration_definition::CollaborationDefinitionServiceImpl as V1CollaborationDefinitionServiceImpl;
+use bcs_app_collaboration_template::CollaborationTemplateServiceImpl as V1CollaborationTemplateServiceImpl;
 use bcs_app_session::{
     GroupSessionConnectionServiceImpl, SessionFileApplicationServiceImpl, SessionServiceConfig,
     SessionServiceImpl,
@@ -1032,6 +1035,16 @@ pub struct BcsServerState {
 
     /// Process-local organization-admin invocation callback associations.
     pub admin_invocation_runs: Arc<AdminInvocationStore>,
+
+    /// Edge-permission ConnectService (real DB-backed impl in the production
+    /// path; Noop in the in-memory/dev path). Injected into the HTTP adapter
+    /// `HttpAppState` for the `/friends/*` connect endpoints.
+    pub connect_service: Arc<dyn bcs_service_api::application::ConnectService>,
+
+    /// Edge-permission AdmissionService (real DB-backed impl in the production
+    /// path; Noop in the in-memory/dev path). Injected into the HTTP adapter
+    /// `HttpAppState` for collaboration authorization decisions.
+    pub admission_service: Arc<dyn bcs_service_api::application::AdmissionService>,
 }
 
 impl std::fmt::Debug for BcsServerState {
@@ -1068,6 +1081,8 @@ impl std::fmt::Debug for BcsServerState {
             )
             .field("group_session_secret_access", &"<SecretAccessPort>")
             .field("outbound_url_guard", &self.outbound_url_guard)
+            .field("connect_service", &"<ConnectService>")
+            .field("admission_service", &"<AdmissionService>")
             .finish()
     }
 }
@@ -1463,11 +1478,14 @@ fn build_openapi_v1_state(
     session_launch: Arc<dyn bcs_service_api::SessionLaunchService>,
     group_management: Arc<dyn GroupManagementService>,
     collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
+    judge_available: bool,
     session_repo: Arc<dyn SessionRepoPort>,
     group_message_history: Arc<dyn GroupMessageHistoryService>,
     session_files: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
     system_message: Arc<dyn SystemMessageService>,
+    collaboration_templates: Arc<dyn CollaborationTemplateService>,
     principal_verifier: Arc<dyn PrincipalVerifier>,
+    connect_service: Arc<dyn bcs_service_api::application::ConnectService>,
     event_subscription_service: Arc<dyn bcs_service_api::application::v1::EventSubscriptionService>,
     group_event_subscription_provisioner: Arc<
         dyn bcs_service_api::application::v1::GroupEventSubscriptionProvisioner,
@@ -1523,7 +1541,7 @@ fn build_openapi_v1_state(
         relation,
         session_repo,
         group_message_history,
-        collaboration_runtime,
+        collaboration_runtime.clone(),
         system_message.clone(),
         SessionServiceConfig { relation_env },
     ));
@@ -1555,17 +1573,29 @@ fn build_openapi_v1_state(
             group_link_url: config.invite.group_link_url.clone(),
             session_link_url: config.invite.session_link_url.clone(),
         });
-    let invitation_service = Arc::new(InvitationFriendshipServiceImpl::new(
-        friends,
-        friend_requests,
-        invitation_groups,
-        invitation_sessions,
-        registry,
-        invite,
-        invite_token_secret,
-        InvitationFriendshipServiceConfig {
-            default_ttl_seconds: config.invite.default_ttl_seconds,
-        },
+let invitation_service = Arc::new(
+        InvitationFriendshipServiceImpl::new(
+            friends,
+            friend_requests,
+            invitation_groups,
+            invitation_sessions,
+            registry,
+            invite,
+            invite_token_secret,
+            InvitationFriendshipServiceConfig {
+                default_ttl_seconds: config.invite.default_ttl_seconds,
+            },
+        )
+        .with_friend_connection_service(connect_service),
+    );
+    let collaboration_template_service: Arc<
+        dyn bcs_service_api::application::v1::CollaborationTemplateService,
+    > = Arc::new(V1CollaborationTemplateServiceImpl::new(collaboration_templates));
+    let collaboration_definition_service: Arc<
+        dyn bcs_service_api::application::v1::CollaborationDefinitionService,
+    > = Arc::new(V1CollaborationDefinitionServiceImpl::new(
+        collaboration_runtime.clone(),
+        judge_available,
     ));
 
     (
@@ -1574,12 +1604,15 @@ fn build_openapi_v1_state(
             session_service.clone(),
             session_service,
             invitation_service.clone(),
-            invitation_service,
+            invitation_service.clone(),
             principal_verifier,
         )
         .with_bot_service(bot_service)
+        .with_friend_connection_service(invitation_service)
         .with_session_file_service(session_file_service, session_file_url_projector)
-        .with_event_subscription_service(event_subscription_service),
+        .with_event_subscription_service(event_subscription_service)
+        .with_collaboration_template_service(collaboration_template_service)
+        .with_collaboration_definition_service(collaboration_definition_service),
         internal_bot_attributes_service,
     )
 }
@@ -2082,6 +2115,7 @@ impl Default for BcsServerState {
                 candidate_search.legacy,
             ),
         );
+let collaboration_templates = build_standalone_collaboration_template_service(&config);
         let eventing_runtime = build_eventing_runtime_blocking(
             &config,
             event_repo,
@@ -2108,11 +2142,14 @@ impl Default for BcsServerState {
             session_launch.clone(),
             group_management_v1.clone(),
             collaboration_runtime.clone(),
+            config.llm.is_enabled(),
             session_repo.clone(),
             group_message_history.clone(),
             session_file_service.clone(),
             system_message.clone(),
+            collaboration_templates.clone(),
             gateway_principal_verifier.clone(),
+            Arc::new(bcs_test_support::NoopConnectService),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
         );
@@ -2171,7 +2208,7 @@ impl Default for BcsServerState {
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
             .collaboration_runtime(collaboration_runtime)
-            .collaboration_templates(build_standalone_collaboration_template_service(&config))
+            .collaboration_templates(collaboration_templates)
             .actor_directory(actor_directory)
             .bot_query(bot_use_cases.clone())
             .bot_management(bot_use_cases.clone())
@@ -2261,6 +2298,8 @@ impl Default for BcsServerState {
             user_identity_port,
             outbound_url_guard,
             admin_invocation_runs,
+            connect_service: Arc::new(bcs_test_support::NoopConnectService),
+            admission_service: Arc::new(bcs_test_support::NoopAdmissionService),
         }
     }
 }
@@ -2499,6 +2538,7 @@ fn build_use_case_bundle(
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     callback_url_guard: OutboundUrlGuard,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
+    profile_store: Arc<dyn bcs_service_api::port::repo::PermissionProfileRepoPort>,
 ) -> UseCaseBundle {
     let candidate_search =
         build_candidate_search_bindings(config, bot_registry.clone(), friend.clone(), fuse_client);
@@ -2602,7 +2642,8 @@ fn build_use_case_bundle(
             relation,
             config.onboard_binding_enabled,
             config.default_visibility.clone(),
-        )),
+        )
+        .with_profiles(profile_store)),
         bot_query: bot_use_cases.clone(),
         bot_management: bot_use_cases.clone(),
         bot_runtime: bot_use_cases.clone(),
@@ -3472,6 +3513,7 @@ impl BcsServer {
             Some(message_repo.clone()),
             callback_url_guard.clone(),
             provider_stream_gray_list.clone(),
+            Arc::new(bcs_test_support::NoopPermissionProfileRepo),
         );
         let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
         let terminal_observer: Arc<dyn BotTerminalObserverPort> =
@@ -3569,6 +3611,7 @@ impl BcsServer {
                 collaboration_runtime.clone(),
             )),
         );
+let collaboration_templates = build_standalone_collaboration_template_service(&config);
         let eventing_runtime = build_eventing_runtime_blocking(
             &config,
             event_repo,
@@ -3595,11 +3638,14 @@ impl BcsServer {
             session_launch.clone(),
             group_management_v1.clone(),
             collaboration_runtime.clone(),
+            config.llm.is_enabled(),
             session_repo.clone(),
             group_message_history.clone(),
             session_file_service.clone(),
             use_cases.system_message.clone(),
+            collaboration_templates.clone(),
             gateway_principal_verifier.clone(),
+            Arc::new(bcs_test_support::NoopConnectService),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
         );
@@ -3668,7 +3714,7 @@ impl BcsServer {
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
             .collaboration_runtime(collaboration_runtime)
-            .collaboration_templates(build_standalone_collaboration_template_service(&config))
+            .collaboration_templates(collaboration_templates)
             .actor_directory(use_cases.actor_directory)
             .friend_use_cases(use_cases.friend_use_cases)
             .human_actors(use_cases.human_actors)
@@ -3753,6 +3799,8 @@ impl BcsServer {
             user_identity_port,
             outbound_url_guard: callback_url_guard,
             admin_invocation_runs,
+            connect_service: Arc::new(bcs_test_support::NoopConnectService),
+            admission_service: Arc::new(bcs_test_support::NoopAdmissionService),
         });
 
         Self { config, state }
@@ -3942,7 +3990,7 @@ impl BcsServer {
         );
 
         // Create SQLite-backed friend services.
-        let (friend_svc, friend_request_svc): (
+        let (legacy_friend_core, friend_request_svc): (
             Arc<dyn bcs_service_api::FriendCoreService>,
             Arc<dyn bcs_service_api::FriendRequestCoreService>,
         ) = {
@@ -3983,6 +4031,108 @@ impl BcsServer {
 
             (friend_store, friend_request_store)
         };
+
+        // Edge-permission stores + services (T16): real DB-backed impls back
+        // the `connect`/`admission` `HttpAppState` fields. Stores follow the
+        // same `db_kind` match as the relation/friend stores above; services
+        // hold the env-isolation string the composition root resolved.
+        let (edge_grant_store, profile_store, request_store, bot_config_store): (
+            Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>,
+            Arc<dyn bcs_service_api::port::repo::PermissionProfileRepoPort>,
+            Arc<dyn bcs_service_api::port::repo::PermissionRequestRepoPort>,
+            Arc<dyn bcs_service_api::port::repo::BotActorConfigRepoPort>,
+        ) = {
+            let edge_grant_repo = match db_kind {
+                DbPluginKind::LocalSqlite => {
+                    Arc::new(bcs_edge_permission_store::DbEdgeGrantStore::sqlite(
+                        db_plugin.clone(),
+                    ))
+                }
+                DbPluginKind::Mysql => {
+                    Arc::new(bcs_edge_permission_store::DbEdgeGrantStore::mysql(
+                        db_plugin.clone(),
+                    ))
+                }
+                DbPluginKind::External(provider) => {
+                    panic!(
+                        "external database plugin '{}' has no edge-grant store wiring",
+                        provider
+                    )
+                }
+            };
+            let profile_repo = match db_kind {
+                DbPluginKind::LocalSqlite => Arc::new(
+                    bcs_edge_permission_store::DbPermissionProfileStore::sqlite(db_plugin.clone()),
+                ),
+                DbPluginKind::Mysql => Arc::new(
+                    bcs_edge_permission_store::DbPermissionProfileStore::mysql(db_plugin.clone()),
+                ),
+                DbPluginKind::External(provider) => {
+                    panic!(
+                        "external database plugin '{}' has no permission-profile store wiring",
+                        provider
+                    )
+                }
+            };
+            let request_repo = match db_kind {
+                DbPluginKind::LocalSqlite => Arc::new(
+                    bcs_edge_permission_store::DbPermissionRequestStore::sqlite(db_plugin.clone()),
+                ),
+                DbPluginKind::Mysql => Arc::new(
+                    bcs_edge_permission_store::DbPermissionRequestStore::mysql(db_plugin.clone()),
+                ),
+                DbPluginKind::External(provider) => {
+                    panic!(
+                        "external database plugin '{}' has no permission-request store wiring",
+                        provider
+                    )
+                }
+            };
+            let bot_config_repo = match db_kind {
+                DbPluginKind::LocalSqlite => Arc::new(
+                    bcs_edge_permission_store::DbBotActorConfigStore::sqlite(db_plugin.clone()),
+                ),
+                DbPluginKind::Mysql => Arc::new(
+                    bcs_edge_permission_store::DbBotActorConfigStore::mysql(db_plugin.clone()),
+                ),
+                DbPluginKind::External(provider) => {
+                    panic!(
+                        "external database plugin '{}' has no bot-actor-config store wiring",
+                        provider
+                    )
+                }
+            };
+            (edge_grant_repo, profile_repo, request_repo, bot_config_repo)
+        };
+        let edge_permission_env = crate::env::resolve_env();
+        // friend_svc = legacy FriendCore (reads bcs_friendships/old tables).
+        // Gates (group/proposal/a2a) use this until edge_grants data is migrated.
+        // See docs/superpowers/plans/2026-08-19-v2-friends-parallel-interface.md.
+        let friend_svc: Arc<dyn bcs_service_api::FriendCoreService> =
+            legacy_friend_core.clone();
+        let friend_connect_notification: Arc<dyn bcs_service_api::FriendConnectNotificationPort> =
+            match config.friend_work_order_base_url.as_deref() {
+                Some(base_url) => Arc::new(
+                    HttpFriendConnectNotificationPort::new(base_url)
+                        .expect("friend_work_order_base_url must be a valid HTTP(S) URL"),
+                ),
+                None => Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
+            };
+        let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
+            Arc::new(bcs_edge_permission::DbConnectService::new(
+                edge_grant_store.clone(),
+                profile_store.clone(),
+                request_store.clone(),
+                bot_config_store.clone(),
+                friend_connect_notification,
+                edge_permission_env,
+            ));
+        let admission_service: Arc<dyn bcs_service_api::application::AdmissionService> =
+            Arc::new(bcs_edge_permission::DbAdmissionService::new(
+                edge_grant_store.clone(),
+                bot_config_store.clone(),
+                profile_store.clone(),
+            ));
         let bot_connections = Arc::new(BotConnectionRegistry::new());
         let mut bot_runtime_for_session =
             Bot::new_with_friend(bot_registry.clone(), friend_svc.clone())
@@ -4143,6 +4293,7 @@ impl BcsServer {
             Some(message_repo.clone()),
             outbound_url_guard.clone(),
             provider_stream_gray_list.clone(),
+            profile_store.clone(),
         );
         let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
         let terminal_observer: Arc<dyn BotTerminalObserverPort> =
@@ -4253,6 +4404,11 @@ impl BcsServer {
                 collaboration_runtime.clone(),
             )),
         );
+let collaboration_templates = build_collaboration_template_service_with_storage(
+            &config,
+            &infrastructure_plugins,
+            config.llm.is_enabled() || extensions.llm_provider.is_some(),
+        )?;
         let eventing_runtime = crate::eventing_wiring::build_eventing_runtime(
             &config,
             event_repo,
@@ -4284,11 +4440,14 @@ impl BcsServer {
             session_launch.clone(),
             group_management_v1.clone(),
             collaboration_runtime.clone(),
+            config.llm.is_enabled() || extensions.llm_provider.is_some(),
             session_repo.clone(),
             group_message_history.clone(),
             session_file_service.clone(),
             use_cases.system_message.clone(),
+            collaboration_templates.clone(),
             gateway_principal_verifier.clone(),
+            connect_service.clone(),
             eventing_runtime.service,
             eventing_runtime.group_provisioner,
         );
@@ -4362,11 +4521,7 @@ impl BcsServer {
             .a2a_chat(a2a_chat)
             .a2a_chat_runs(a2a_chat_runs)
             .collaboration_runtime(collaboration_runtime)
-            .collaboration_templates(build_collaboration_template_service_with_storage(
-                &config,
-                &infrastructure_plugins,
-                config.llm.is_enabled() || extensions.llm_provider.is_some(),
-            )?)
+            .collaboration_templates(collaboration_templates)
             .actor_directory(use_cases.actor_directory)
             .friend_use_cases(use_cases.friend_use_cases)
             .human_actors(use_cases.human_actors)
@@ -4453,6 +4608,8 @@ impl BcsServer {
             user_identity_port,
             outbound_url_guard,
             admin_invocation_runs,
+            connect_service,
+            admission_service,
         });
 
         Ok(Self { config, state })
@@ -5114,6 +5271,7 @@ mod tests {
                 scopes: Vec::new(),
                 bot_uuid: None,
                 reject_existing_bot_uuid: false,
+                connection_mode: bcs_service_api::ProviderBotConnectionMode::Gateway,
             })
             .await
             .expect("register provider bot");

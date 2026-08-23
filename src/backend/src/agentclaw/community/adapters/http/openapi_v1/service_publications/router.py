@@ -39,10 +39,11 @@ from .schemas import (
     ServicePublicationList,
     ServicePublicationOperation,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/lifecycle")
-edit_lock_router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/edit-lock")
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/lifecycle", route_class=PublicAPIRoute)
+edit_lock_router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/edit-lock", route_class=PublicAPIRoute)
 
 
 def _lock_payload(info: Any, *, acquired: bool | None = None) -> EditLock:

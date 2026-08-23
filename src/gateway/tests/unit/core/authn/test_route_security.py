@@ -61,7 +61,7 @@ def test_shipped_config_admits_app_only_market_queries(method: str, path: str) -
 #: packages, so the agreement is kept by these tests plus the backend's own
 #: enumeration rather than by a shared import.
 _HUMAN_ONLY = [
-    ("GET", "/openapi/v1/caller"),
+    ("GET", "/openapi/v1/org/user"),
     ("GET", "/openapi/v1/bots/spaces"),
     ("POST", "/openapi/v1/bots/spaces/personal/initialize"),
     ("POST", "/openapi/v1/bots/spaces/create"),
@@ -73,8 +73,7 @@ _HUMAN_ONLY = [
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/cancel"),
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/search"),
     ("GET", "/openapi/v1/bots/spaces/1/skills"),
-    ("GET", "/openapi/v1/org/user/iam-token"),
-    ("POST", "/openapi/v1/bots/bot-123/caller-identity"),
+    ("POST", "/openapi/v1/bots/bot-123/iam-token"),
     ("POST", "/openapi/v1/bots"),
     ("POST", "/openapi/v1/bots/local"),
     ("GET", "/openapi/v1/bots/bot-123/local/auth-status"),
@@ -113,8 +112,7 @@ def test_shipped_config_still_requires_a_user_where_a_human_is_required(
 @pytest.mark.parametrize(
     ("method", "path"),
     [
-        ("GET", "/openapi/v1/org/user/iam-token"),
-        ("POST", "/openapi/v1/bots/bot-123/caller-identity"),
+        ("POST", "/openapi/v1/bots/bot-123/iam-token"),
     ],
 )
 def test_iam_operations_do_not_resolve_an_app_identity(

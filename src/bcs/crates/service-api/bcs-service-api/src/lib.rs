@@ -114,9 +114,10 @@ pub use bot_use_cases::{
     OrganizationMemberSummary,
     BotLeaveResult, BotListCommand, BotListEntry, BotListResult, BotManagementService,
     BotPagedListCommand, BotPagedListResult, BotQueryByIdsCommand, BotQueryByIdsResult,
-    BotQueryEntry, BotQueryService, BotStatusUpdateCommand, BotStatusUpdateResult, BotUseCaseError,
-    BotVisibilityCommand, BotVisibilityQueryCommand, BotVisibilityQueryResult, BotVisibilityResult,
-    MyBotsCommand, SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult,
+    BotQueryEntry, BotQueryService, BotSearchResult, BotStatusUpdateCommand, BotStatusUpdateResult,
+    BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryCommand, BotVisibilityQueryResult,
+    BotVisibilityResult, MyBotsCommand, SearchBotsCommand, SwitchDeliveryToProviderCommand,
+    SwitchDeliveryToProviderResult,
 };
 pub use friends::{
     CreateFriendRequestCommand, FriendListEntry, FriendRequestDecisionCommand, FriendService,
@@ -157,7 +158,7 @@ pub use message_flow::{
 };
 pub use onboard::{
     AdminBotOnboardCommand, BotOnboardCommand, BotOnboardResult, BotOnboardingService,
-    OnboardActorIdentity,
+    EnsureBotCommand, EnsureBotResult, OnboardActorIdentity,
 };
 pub use application::{
     DeleteProviderBotCommand, DeleteProviderBotOutcome, ProviderBotCoordinationCommand,
@@ -188,6 +189,8 @@ pub use port::{
     ChannelOutboundEvent, ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
     ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,
     HumanInputRequestRepoPort,
+    FriendConnectNotificationCommand, FriendConnectNotificationKind,
+    FriendConnectNotificationPort, NoopFriendConnectNotificationPort,
     FriendRepoPort, FriendRequestRepoPort, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupDispatchContextPort,
     GroupHistoryBotRequestPort, GroupMetricCount, GroupMetricsSnapshotPort, GroupRepoPort,
@@ -222,8 +225,9 @@ pub use types::{
     BotControlPlanePatch, BotControlPlaneRecord,
     BotTaskModesQuery, TaskModeMatch,
     BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, CoordinationMode,
-    CoordinationSurface, ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig,
-    ProviderCredential, ProviderOrganizationManagementConfig, ProviderRecord, RedactedToken,
+    CoordinationSurface, ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode,
+    ProviderCoordinationConfig, ProviderCredential, ProviderOrganizationManagementConfig,
+    ProviderRecord, RedactedToken,
     ChatRuntimeProfile, CollaborationDefinition,
     CollaborationDefinitionRef, CollaborationMetadata, CollaborationParticipantBinding,
     CollaborationRequirements, CollaborationRuntimeDefinition, GroupRuntimeBinding,
@@ -242,8 +246,8 @@ pub use core::{
     BotConnectResult, BotControlPlaneCandidate,
     BotControlPlaneCoreService, BotControlPlaneProvider, BotControlPlaneView, BotDynamicStatus,
     BotRegistryCoreService,
-    BotSendResult, ChatEventRouting, ConnectError, ConnectionKind, ContextBotSummary, HiddenMentionInfo,
-    ContextBotSummary as BotContextSummary, ContextConflict, ContextConflictPosition,
+    BotSendResult, ChatEventRouting, ConnectError, ConnectStreamError, ConnectionKind,
+    ContextBotSummary, HiddenMentionInfo, ContextBotSummary as BotContextSummary, ContextConflict, ContextConflictPosition,
     ContextFusionRequest, ContextFusionResponse, ContextParticipantPerspective, DefaultDelivery,
     DeliveryType, DmActorSpec, DynamicStatusResponse, EnsureHumanResult, EnsureOwnerEdgesResult,
     FriendCoreService, FriendRequest, FriendRequestCoreService, FriendRequestDirection,
@@ -260,7 +264,7 @@ pub use core::{
     RouteParticipantOverlay, RouteSelectorWire, RoutingCoreService, RoutingDecision,
     RoutingMode, RoutingPolicy, RoutingTarget, RuntimeBotIdentity, SenderRoutesValidationError,
     ServiceError, ServiceResult, ServiceSpec, Session, SessionKind, SessionStatus, Skill,
-    StructuredRoutingError,
+    StructuredRoutingError, MOCK_TOKEN_PREFIX, mock_token, is_mock_token,
     SystemGroupMessage, SystemMessageDispatchOutcome, SystemMessageDispatcherService,
     SystemMessageEvent, SystemMessageEventKind, SystemMessageProducerService,
     SystemMessageRecipientResult, Task, TaskStatus, Workspace, backfill_bot_names,

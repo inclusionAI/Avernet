@@ -29,10 +29,11 @@ from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
 from .schemas import DiscoveredPublicBot, PublicBot, RuntimeState
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
-router = APIRouter(prefix="/openapi/v1/bots/catalog", tags=["bot-catalog"])
+router = APIRouter(prefix="/openapi/v1/bots/catalog", tags=["bot-catalog"], route_class=PublicAPIRoute)
 
 
 def _request_id(request: Request) -> str:
@@ -58,8 +59,8 @@ def _log_failure(operation: str, request: Request, category: str) -> None:
 
 
 def _public_bot(record: Mapping[str, Any]) -> PublicBot:
-    # COSEC: Explicitly project only catalog fields so service records cannot
-    # expose bindings, device data, extensions, credentials, or environment data.
+    # COSEC: Explicitly project only catalog fields and approved BCS metadata so
+    # service records cannot expose bindings, device data, credentials, or environment data.
     return PublicBot(
         bot_id=str(record.get("bot_id") or ""),
         entity_id=str(record.get("entity_id") or record.get("owner_id") or ""),
@@ -67,6 +68,13 @@ def _public_bot(record: Mapping[str, Any]) -> PublicBot:
         name=str(record.get("bot_name") or ""),
         description=str(record.get("bot_desc") or ""),
         owner_name=record.get("owner_name"),
+        is_friend=record.get("is_friend"),
+        visibility=record.get("visibility"),
+        is_online=record.get("is_online"),
+        actor_kind=record.get("actor_kind"),
+        friend_ext=record.get("friend_ext"),
+        friend_check_in_strategy=record.get("friend_check_in_strategy"),
+        user_visibility=record.get("user_visibility"),
         engine=str(record.get("active_engine") or ""),
         status=str(record.get("status") or ""),
     )
@@ -170,7 +178,7 @@ async def discover_public_bots(
                     **_public_bot(record).model_dump(),
                     recommendation={
                         "score": recommendation.get("score", 0),
-                        "reasons": recommendation.get("reasons") or [],
+                        "reasons": recommendation.get("reasons", []),
                         "short_profile": recommendation.get("short_profile"),
                     },
                 )

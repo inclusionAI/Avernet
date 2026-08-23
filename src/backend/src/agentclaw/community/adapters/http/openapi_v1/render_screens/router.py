@@ -40,11 +40,13 @@ from .schemas import (
     RenderScreenList,
     RenderScreenUpdate,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/render-screens",
     tags=["render-screens"],
+    route_class=PublicAPIRoute,
 )
 RenderScreenIdPath = Annotated[
     int,

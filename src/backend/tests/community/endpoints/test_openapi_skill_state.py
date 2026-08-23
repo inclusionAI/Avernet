@@ -17,9 +17,6 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.services.local_skill_state_service import (
     LocalSkillStateService,
 )
-from agentclaw.community.core.skill_center.services.bot_capability_mutation_guard import (
-    BotCapabilityMutationGuard,
-)
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
 )
@@ -53,15 +50,6 @@ class _Secret:
 class _Resolver:
     def get_secret(self, _secret_name: str) -> _Secret:
         return _Secret()
-
-
-class _Guard:
-    def acquire_for_edit(self, *, scope):
-        assert (scope.env, scope.entity_id, scope.bot_id) == ("dev", _OWNER, _BOT_ID)
-        return object()
-
-    def release(self, _lease):
-        return True
 
 
 class _Runtime:
@@ -179,8 +167,6 @@ def _seed_state(world, *, runtime_success: bool) -> None:
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             runtime_factory,
-            world.get(BotCapabilityMutationGuard),
-            _Guard(),
             world.get(SkillRepository),
             world.get(SkillSetRepository),
             runtime_factory._runtime,

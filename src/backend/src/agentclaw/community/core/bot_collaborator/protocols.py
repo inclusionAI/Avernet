@@ -47,6 +47,10 @@ class CollaboratorServiceProtocol(Protocol):
         """获取叠加实时 Space 成员关系后的有效 Bot 权限."""
         ...
 
+    def on_collaboration_changed(self, *args: Any, **kwargs: Any) -> Any:
+        """Run best-effort downstream synchronization after a relation change."""
+        ...
+
 
 def resolve_operable_permission_level(
     collaborators: CollaboratorServiceProtocol,

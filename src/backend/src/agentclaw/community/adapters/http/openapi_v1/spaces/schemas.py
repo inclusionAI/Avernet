@@ -24,12 +24,19 @@ class SpaceType(_DocumentedEnum):
 class SpaceRole(_DocumentedEnum):
     """Role held by a user in a Space."""
 
-    OWNER = "OWNER"
+    # Canonical role for the current API contract.
+    ADMIN = "ADMIN"
     MEMBER = "MEMBER"
+    # Compatibility-only input aliases for old clients and historical rows.
+    # New clients and new writes must use ADMIN; responses are canonical ADMIN.
+    OWNER = "OWNER"
+    ADMINISTRATOR = "ADMINISTRATOR"
 
     __descriptions__ = {
-        "OWNER": "May manage the Space and its membership.",
+        "ADMIN": "May manage the Space and its membership.",
         "MEMBER": "May use the Space without managing its membership.",
+        "OWNER": "Legacy alias for ADMIN.",
+        "ADMINISTRATOR": "Legacy alias for ADMIN.",
     }
 
 
@@ -111,6 +118,9 @@ class SpaceItem(_UtcResponseModel):
     space_code: str = Field(description="Stable external code of the Space.")
     space_name: str = Field(description="Display name of the Space.")
     space_type: SpaceType = Field(description="Ownership model of the Space.")
+    creator_user_id: str = Field(
+        description="Identifier of the user who created the Space."
+    )
     current_user_role: SpaceRole | None = Field(
         description="Current user's role, or null when the user has not joined."
     )
@@ -207,9 +217,7 @@ class SpaceSkillItem(_UtcResponseModel):
         default=None,
         description="Current user's active Skill grant, or null when ungranted.",
     )
-    can_edit: bool = Field(
-        description="Whether the current user may edit this Skill."
-    )
+    can_edit: bool = Field(description="Whether the current user may edit this Skill.")
     can_grant: bool = Field(
         description="Whether the current user may grant team Skill edit access."
     )
@@ -234,6 +242,11 @@ class AddSpaceMemberRequest(BaseModel):
 
     member_user_id: str = Field(
         min_length=1, max_length=256, description="Identifier of the user to add."
+    )
+    member_user_name: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Snapshot of the member's user name; may be omitted.",
     )
     role: SpaceRole = Field(
         default=SpaceRole.MEMBER,

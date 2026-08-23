@@ -391,3 +391,462 @@ RejectFriendRequestPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
+CreateFriendConnectionRequestRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - to_actor
+  properties:
+    from_actor:
+      $ref: ../domain-models.yaml#/FriendConnectionActor
+      description: >-
+        Optional acting actor. When omitted, BCS derives it from the signed
+        Gateway Principal.
+    to_actor:
+      $ref: ../domain-models.yaml#/FriendConnectionActor
+    message:
+      type: string
+
+RejectFriendConnectionRequestRequest:
+  type: object
+  additionalProperties: false
+  properties:
+    reason:
+      type: string
+
+FriendConnectionRequestsPath:
+  post:
+    operationId: create_friend_connection_request
+    tags: ["Collaboration / Friendships"]
+    summary: Create a Human-to-Bot or Bot-to-Bot friend-connection request.
+    description: >-
+      Creates an edge-permission friend connection request. The receiver's
+      visibility and friend approval policy decide whether the request is
+      approved immediately or remains pending for review.
+    x-avernet-security:
+      user: required
+      app: required
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/CreateFriendConnectionRequestRequest"
+    responses:
+      "201":
+        description: Created friend-connection request or auto-approved connection.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/CreatedFriendConnectionRequestEnvelope
+      "400":
+        description: Invalid friend-connection request.
+        x-error-codes:
+          - invalid_request
+          - cannot_add_self
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot act as the source actor or target cannot be added.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Referenced Bot is missing.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: A conflicting request or friendship already exists.
+        x-error-codes:
+          - conflict
+          - friend_request_already_exists
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+  get:
+    operationId: list_friend_connection_requests
+    tags: ["Collaboration / Friendships"]
+    summary: List friend-connection requests for an actor.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - name: actor_type
+        in: query
+        schema:
+          $ref: ../domain-models.yaml#/FriendConnectionActorType
+      - name: actor_id
+        in: query
+        schema:
+          type: string
+          minLength: 1
+      - name: direction
+        in: query
+        schema:
+          allOf:
+            - $ref: ../domain-models.yaml#/FriendConnectionRequestDirection
+          default: received
+      - name: status
+        in: query
+        schema:
+          $ref: ../domain-models.yaml#/FriendConnectionRequestStatus
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: page_size
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+    responses:
+      "200":
+        description: Friend-connection requests ordered by the service default ordering.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/FriendConnectionRequestPageEnvelope
+      "400":
+        description: Invalid filter.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot act as the requested actor.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+FriendConnectionAcceptPath:
+  post:
+    operationId: accept_friend_connection_request
+    tags: ["Collaboration / Friendships"]
+    summary: Accept a pending friend-connection request as the receiver.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: ../shared.yaml#/FriendRequestIdPath
+    responses:
+      "200":
+        description: Accepted friend-connection request.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/FriendConnectionRequestDecisionEnvelope
+      "400":
+        description: Invalid identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal is not allowed to decide the request.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Friend-connection request is missing.
+        x-error-codes:
+          - friend_request_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Request state conflicts with acceptance.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+FriendConnectionRejectPath:
+  post:
+    operationId: reject_friend_connection_request
+    tags: ["Collaboration / Friendships"]
+    summary: Reject a pending friend-connection request as the receiver.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: ../shared.yaml#/FriendRequestIdPath
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: "#/RejectFriendConnectionRequestRequest"
+    responses:
+      "200":
+        description: Rejected friend-connection request.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/FriendConnectionRequestDecisionEnvelope
+      "400":
+        description: Invalid identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal is not allowed to decide the request.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Friend-connection request is missing.
+        x-error-codes:
+          - friend_request_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Request state conflicts with rejection.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+FriendConnectionCancelPath:
+  post:
+    operationId: cancel_friend_connection_request
+    tags: ["Collaboration / Friendships"]
+    summary: Cancel a pending friend-connection request as the sender.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: ../shared.yaml#/FriendRequestIdPath
+    responses:
+      "200":
+        description: Cancelled friend-connection request.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/FriendConnectionRequestDecisionEnvelope
+      "400":
+        description: Invalid identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal is not allowed to cancel the request.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Friend-connection request is missing.
+        x-error-codes:
+          - friend_request_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Request state conflicts with cancellation.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+FriendConnectionsPath:
+  get:
+    operationId: list_friend_connections
+    tags: ["Collaboration / Friendships"]
+    summary: List accepted friend connections for an actor.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - name: actor_type
+        in: query
+        required: true
+        schema:
+          $ref: ../domain-models.yaml#/FriendConnectionActorType
+      - name: actor_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    responses:
+      "200":
+        description: Accepted friend connections.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/FriendConnectionPageEnvelope
+      "400":
+        description: Invalid filter.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot act as the requested actor.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+  delete:
+    operationId: delete_friend_connection
+    tags: ["Collaboration / Friendships"]
+    summary: Remove a friend connection from the caller to a target actor.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - name: target_actor_type
+        in: query
+        required: true
+        schema:
+          $ref: ../domain-models.yaml#/FriendConnectionActorType
+      - name: target_actor_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    responses:
+      "200":
+        description: Idempotent remove result.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/DeleteResultEnvelope
+      "400":
+        description: Invalid target actor.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot remove the friend connection.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse

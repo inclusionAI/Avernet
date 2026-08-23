@@ -13,6 +13,7 @@ from agentclaw.community.core.repository.protocols.spaces import SpaceRepository
 from agentclaw.community.core.spaces.errors import (
     SpaceAlreadyExistsError,
     SpaceMemberAlreadyExistsError,
+    SpaceNotFoundError,
 )
 from agentclaw.community.core.spaces.models import (
     PersonalSpaceLookupRecord,
@@ -48,23 +49,46 @@ class SpaceRepository(SpaceRepositoryProtocol):
 
     @staticmethod
     def _stored_role(role: SpaceRole) -> str:
-        """Keep the existing OWNER projection over the final ADMINISTRATOR row."""
-        return "ADMINISTRATOR" if role is SpaceRole.OWNER else SpaceRole.MEMBER.value
+        """Persist only ADMIN/MEMBER; OWNER and ADMINISTRATOR are input aliases."""
+        return (
+            SpaceRole.ADMIN.value
+            if role in (SpaceRole.ADMIN, SpaceRole.OWNER, SpaceRole.ADMINISTRATOR)
+            else SpaceRole.MEMBER.value
+        )
 
     def initialize_personal(self, *, user_id: str, env: str):
+        existing = self.get_personal_space(user_id=user_id, env=env)
+        if existing is not None:
+            return existing, False
+        try:
+            with self.create_personal_transaction(user_id=user_id, env=env) as record:
+                return record, True
+        except SpaceAlreadyExistsError:
+            # Concurrent initialization: the unique personal-owner key decides
+            # the winner; the loser returns the same established space.
+            existing = self.get_personal_space(user_id=user_id, env=env)
+            if existing is None:
+                raise
+            return existing, False
+
+    def get_personal_space(self, *, user_id: str, env: str):
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self._Space)
+                .filter(
+                    self._Space.personal_owner_id == user_id,
+                    self._Space.space_type == SpaceType.PERSONAL.value,
+                    self._Space.env == env,
+                    self._Space.deleted_at.is_(None),
+                )
+                .one_or_none()
+            )
+            return row.to_record() if row is not None else None
+
+    @contextmanager
+    def create_personal_transaction(self, *, user_id: str, env: str):
         try:
             with self._db.transactional_orm_session() as db:
-                existing = (
-                    db.query(self._Space)
-                    .filter(
-                        self._Space.personal_owner_id == user_id,
-                        self._Space.env == env,
-                    )
-                    .one_or_none()
-                )
-                if existing is not None:
-                    return existing.to_record(), False
-
                 space = self._Space(
                     space_code=self._new_code(),
                     space_type=SpaceType.PERSONAL.value,
@@ -80,29 +104,46 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member(
                         space_id=space.id,
                         user_id=user_id,
-                        role=self._stored_role(SpaceRole.OWNER),
+                        role=self._stored_role(SpaceRole.ADMIN),
                         env=env,
                         created_by=user_id,
                     )
                 )
                 db.flush()
                 db.refresh(space)
-                return space.to_record(), True
-        except IntegrityError:
-            # Concurrent initialization: the unique personal-owner key decides
-            # the winner; the loser returns the same established space.
-            with self._db.orm_session() as db:
-                existing = (
-                    db.query(self._Space)
-                    .filter(
-                        self._Space.personal_owner_id == user_id,
-                        self._Space.env == env,
-                    )
-                    .one_or_none()
+                record = space.to_record()
+                yield record
+                space.sc_team_id = record.sc_team_id
+                db.flush()
+        except IntegrityError as exc:
+            # Only translate the personal-space uniqueness race. Other write
+            # failures must remain database errors rather than being mislabeled
+            # as an already-existing personal Space.
+            existing = self.get_personal_space(user_id=user_id, env=env)
+            if existing is None:
+                raise
+            raise SpaceAlreadyExistsError("personal space already exists") from exc
+
+    @contextmanager
+    def personal_sc_team_binding_transaction(self, *, space_id: int, env: str):
+        with self._db.transactional_orm_session() as db:
+            space = (
+                db.query(self._Space)
+                .filter(
+                    self._Space.id == space_id,
+                    self._Space.space_type == SpaceType.PERSONAL.value,
+                    self._Space.env == env,
+                    self._Space.deleted_at.is_(None),
                 )
-                if existing is None:
-                    raise
-                return existing.to_record(), False
+                .with_for_update()
+                .one_or_none()
+            )
+            if space is None:
+                raise SpaceNotFoundError(f"personal space {space_id} not found")
+            record = space.to_record()
+            yield record
+            space.sc_team_id = record.sc_team_id
+            db.flush()
 
     @contextmanager
     def create_team_transaction(self, *, name: str, creator_id: str, env: str):
@@ -123,7 +164,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member(
                         space_id=space.id,
                         user_id=creator_id,
-                        role=self._stored_role(SpaceRole.OWNER),
+                        role=self._stored_role(SpaceRole.ADMIN),
                         env=env,
                         created_by=creator_id,
                     )
@@ -294,7 +335,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     db.query(func.count(self._Member.id))
                     .filter(
                         self._Member.space_id == row.id,
-                        self._Member.role == self._stored_role(SpaceRole.OWNER),
+                        self._Member.role == self._stored_role(SpaceRole.ADMIN),
                         self._Member.env == env,
                         self._Member.status == "ACTIVE",
                     )
@@ -381,37 +422,22 @@ class SpaceRepository(SpaceRepositoryProtocol):
         *,
         space_id: int,
         user_id: str,
+        user_name: str | None = None,
         role: SpaceRole,
         creator_id: str,
         env: str,
     ):
         try:
             with self._db.orm_session() as db:
-                row = (
-                    db.query(self._Member)
-                    .filter(
-                        self._Member.space_id == space_id,
-                        self._Member.user_id == user_id,
-                        self._Member.env == env,
-                    )
-                    .one_or_none()
+                row = self._Member(
+                    space_id=space_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                    role=self._stored_role(role),
+                    env=env,
+                    created_by=creator_id,
                 )
-                if row is not None and row.status == "ACTIVE":
-                    raise SpaceMemberAlreadyExistsError("space member already exists")
-                if row is None:
-                    row = self._Member(
-                        space_id=space_id,
-                        user_id=user_id,
-                        role=self._stored_role(role),
-                        env=env,
-                        created_by=creator_id,
-                    )
-                    db.add(row)
-                else:
-                    row.role = self._stored_role(role)
-                    row.status = "ACTIVE"
-                    row.removed_at = None
-                    row.removed_by = None
+                db.add(row)
                 db.flush()
                 db.refresh(row)
                 return row.to_record()
@@ -428,15 +454,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                     self._Member.env == env,
                     self._Member.status == "ACTIVE",
                 )
-                .update(
-                    {
-                        self._Member.status: "INACTIVE",
-                        self._Member.removed_at: func.now(),
-                        self._Member.removed_by: user_id,
-                        self._Member.gmt_modified: func.now(),
-                    },
-                    synchronize_session=False,
-                )
+                .delete(synchronize_session=False)
             )
             return deleted > 0
 

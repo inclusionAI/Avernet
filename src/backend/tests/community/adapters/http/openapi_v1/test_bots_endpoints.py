@@ -88,6 +88,7 @@ def svc():
     m = MagicMock()
     m.get_bot.return_value = BOT
     m.list_bots_by_conditions.return_value = {"total": 1, "items": [BOT]}
+    m.list_bots_by_owner_bot_pairs.return_value = {"total": 1, "items": [BOT]}
     m.check_bot_name_exists.return_value = True
     m.update_bot.return_value = {**BOT, "bot_name": "Renamed"}
     m.restart_bot.return_value = {**BOT, "status": "PENDING"}
@@ -237,6 +238,56 @@ def test_list_bots_filters_reach_service(client, svc):
     assert kw["engine"] == "teclaw"
     assert kw["status"] == "ACTIVE"
     assert kw["page"] == 2 and kw["page_size"] == 5
+
+
+def test_search_bot_metadata_returns_only_display_fields(client, svc):
+    response = client.post(
+        "/openapi/v1/bots/metadata/queries?page=2&page_size=5",
+        json={
+            "bots": [
+                {"bot_id": "b1", "owner_id": "u1"},
+                {"bot_id": "b1", "owner_id": "u1"},
+                {"bot_id": "b2", "owner_id": "u2"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "total": 1,
+        "items": [
+            {
+                "bot_id": "b1",
+                "owner_id": "u1",
+                "bot_name": "N",
+                "bot_desc": "D",
+                "engine": "teclaw",
+                "bot_type": "personal",
+                "status": "ACTIVE",
+            }
+        ],
+    }
+    assert svc.list_bots_by_owner_bot_pairs.call_args.kwargs == {
+        "page": 2,
+        "page_size": 5,
+        "pairs": [("b1", "u1"), ("b2", "u2")],
+    }
+
+
+@pytest.mark.parametrize(
+    "bots",
+    [
+        [],
+        [{"bot_id": f"b{i}", "owner_id": f"u{i}"} for i in range(101)],
+    ],
+)
+def test_search_bot_metadata_rejects_invalid_batch_size(client, bots):
+    response = client.post(
+        "/openapi/v1/bots/metadata/queries",
+        json={"bots": bots},
+    )
+
+    assert response.status_code == 422
 
 
 def test_check_name_needs_no_user_id(client):

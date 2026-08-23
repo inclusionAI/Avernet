@@ -26,6 +26,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skills_pool    # repository contracts consumed by this module
+  - agentclaw.community.core.skill_center.services.active_skillset_installation_materializer # lazy active SkillSet Installation materialization before a new artifact build
   - agentclaw.community.core.common_config
   - agentclaw.community.core.bot_collaborator    # collaborator permission and edit-lock enforcement for public lifecycle operations
   - agentclaw.community.core.bot_inventory.policies    # shared engine/deploy-mode combination policy for service upgrades
@@ -35,6 +36,7 @@ internal_dependencies:
   - agentclaw.community.core.config_compose
   - agentclaw.community.core.caller_identity.credential  # CallerToken used by BaaS outbound-rule update
   - agentclaw.community.core.devices
+  - agentclaw.community.core.engine_runtime.stage    # canonical live-stage publish binding resolution for Caller identity updates
   - agentclaw.community.core.quality.services
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.system_config

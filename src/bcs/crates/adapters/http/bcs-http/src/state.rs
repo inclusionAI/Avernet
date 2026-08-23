@@ -477,6 +477,12 @@ pub struct HttpAppState {
     pub auth_config: bcs_auth_api::AuthConfig,
     pub outbound_url_guard: OutboundUrlGuard,
     pub admin_invocation_runs: Arc<AdminInvocationStore>,
+    /// Edge-permission connect use case (friend request lifecycle).
+    /// Transitional: Noop until Installment 3 wires the real service.
+    pub connect: Arc<dyn bcs_service_api::application::ConnectService>,
+    /// Edge-permission admission use case (`GET /bots/{id}/admission`).
+    /// Transitional: Noop until Installment 3 wires the real service.
+    pub admission: Arc<dyn bcs_service_api::application::AdmissionService>,
 }
 
 impl HttpAppState {
@@ -529,6 +535,8 @@ impl HttpAppState {
             auth_config: bcs_auth_api::AuthConfig::default(),
             outbound_url_guard: OutboundUrlGuard::strict(),
             admin_invocation_runs: Arc::new(AdminInvocationStore::default()),
+            connect: Arc::new(bcs_test_support::NoopConnectService),
+            admission: Arc::new(bcs_test_support::NoopAdmissionService),
         }
     }
 
@@ -748,6 +756,26 @@ impl HttpAppState {
 
     pub fn with_admin_invocation_runs(mut self, runs: Arc<AdminInvocationStore>) -> Self {
         self.admin_invocation_runs = runs;
+        self
+    }
+
+    /// Inject the edge-permission `ConnectService` (friend request lifecycle).
+    /// Transitional: defaults to Noop; real impl wired in Installment 3.
+    pub fn with_connect(
+        mut self,
+        connect: Arc<dyn bcs_service_api::application::ConnectService>,
+    ) -> Self {
+        self.connect = connect;
+        self
+    }
+
+    /// Inject the edge-permission `AdmissionService` (`GET /bots/{id}/admission`).
+    /// Transitional: defaults to Noop; real impl wired in Installment 3.
+    pub fn with_admission(
+        mut self,
+        admission: Arc<dyn bcs_service_api::application::AdmissionService>,
+    ) -> Self {
+        self.admission = admission;
         self
     }
 

@@ -271,6 +271,52 @@ def multipart_upload_is_an_explicit_error_case():
     """The public endpoint accepts only raw ``application/zip`` bodies."""
 
 
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/skills/upload-folder",
+    scenario="directory_created_in_verified_tenant",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _OWNER},
+        headers={PRINCIPAL_HEADER: _principal()},
+        form_data={"file_paths": '["SKILL.md"]'},
+        files=[("files", ("SKILL.md", b"name: folder-upload\ndescription: folder coverage\n"))],
+    ),
+    seed=_seed_uploadable_bot,
+    extra_assertions=(_assert_created_inactive_without_default_membership,),
+    expect=ExpectSuccess(
+        status=201,
+        json_contains={
+            "code": 201000,
+            "data": {
+                "operation": "created",
+                "skill": {"name": "folder-upload", "active": False},
+            },
+        },
+    ),
+)
+def folder_upload_creates_an_inactive_skill():
+    """A multipart directory upload follows the same inactive Local contract."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/skills/upload-folder",
+    scenario="directory_rejects_misaligned_relative_paths",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _OWNER},
+        headers={PRINCIPAL_HEADER: _principal()},
+        form_data={"file_paths": '["SKILL.md", "extra.py"]'},
+        files=[("files", ("SKILL.md", b"name: folder-upload\n"))],
+    ),
+    seed=_seed_uploadable_bot,
+    expect=ExpectError(status=400),
+)
+def folder_upload_rejects_misaligned_relative_paths():
+    """The declared paths must remain one-to-one with uploaded files."""
+
+
 # The retiring address. `POST /openapi/v1/bots/skills/upload?bot_id=` is what
 # clients call today, and it is not a re-registration: the shim publishes
 # `bot_id` in the query and `owner_entity_id` where the current address

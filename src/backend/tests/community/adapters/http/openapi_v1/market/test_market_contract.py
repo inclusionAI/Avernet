@@ -74,6 +74,27 @@ class _SkillCenter:
             ),
         )
 
+    def get_market_tags(self):
+        return [
+            {
+                "id": 1,
+                "name": "研发效能",
+                "description": None,
+                "iconUrl": None,
+                "parentId": None,
+                "tagLevel": 1,
+                "children": [
+                    {
+                        "id": 2,
+                        "name": "代码质量",
+                        "parentId": 1,
+                        "tagLevel": 2,
+                        "children": [],
+                    }
+                ],
+            }
+        ]
+
 
 class _Bindings(Module):
     def __init__(self, skill, mcp, sc) -> None:
@@ -187,3 +208,35 @@ def test_skill_center_market_rejects_caller_supplied_team_id():
 
     assert response.status_code == 422
     assert sc.request is None
+
+
+def test_skill_center_tags_returns_nested_tag_tree_without_changing_search_contract():
+    client, _, _, _ = _client()
+
+    response = client.get(
+        "/openapi/v1/bots/market/skill-center/tags",
+        params={"user_id": "user-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == [
+        {
+            "id": 1,
+            "name": "研发效能",
+            "description": None,
+            "iconUrl": None,
+            "parentId": None,
+            "tagLevel": 1,
+            "children": [
+                {
+                    "id": 2,
+                    "name": "代码质量",
+                    "description": None,
+                    "iconUrl": None,
+                    "parentId": 1,
+                    "tagLevel": 2,
+                    "children": [],
+                }
+            ],
+        }
+    ]

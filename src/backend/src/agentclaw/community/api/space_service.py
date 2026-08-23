@@ -74,6 +74,7 @@ class SpaceMemberServiceProtocol(Protocol):
         space_id: int,
         actor_id: str,
         user_id: str,
+        user_name: str | None = None,
         role: SpaceRole,
     ) -> SpaceMemberRecord: ...
 

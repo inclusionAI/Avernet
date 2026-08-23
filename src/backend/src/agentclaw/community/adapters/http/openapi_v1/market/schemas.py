@@ -100,6 +100,30 @@ class SkillCenterMarketSearchRequest(BaseModel):
     )
 
 
+class SkillCenterTag(BaseModel):
+    """A tag returned by Skill Center, including its nested children."""
+
+    model_config = _UPSTREAM_ITEM
+
+    id: int = Field(description="Skill Center tag identifier.")
+    name: str = Field(description="Display name of the tag.")
+    description: str | None = Field(
+        default=None, description="Optional description of the tag."
+    )
+    icon_url: str | None = Field(
+        default=None, alias="iconUrl", description="Optional tag icon URL."
+    )
+    parent_id: int | None = Field(
+        default=None, alias="parentId", description="Parent tag identifier."
+    )
+    tag_level: int = Field(
+        alias="tagLevel", ge=1, description="Tag depth, starting at level one."
+    )
+    children: list["SkillCenterTag"] = Field(
+        default_factory=list, description="Nested child tags."
+    )
+
+
 class SkillMarketItem(BaseModel):
     """A Skill record from the built-in marketplace."""
 
@@ -133,7 +157,8 @@ class McpMarketItem(BaseModel):
         default=None, description="Human-readable purpose of the MCP server."
     )
     network_types: list[str] = Field(
-        default_factory=list, description="Network environments supported by the server."
+        default_factory=list,
+        description="Network environments supported by the server.",
     )
     transport_protocol: str | None = Field(
         default=None, description="Transport protocol advertised by the MCP server."

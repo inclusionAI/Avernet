@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bcs_domain::{
-    ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig, ProviderCredential,
-    ProviderOrganizationManagementConfig, ProviderRecord, Skill,
+    ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode, ProviderCoordinationConfig,
+    ProviderCredential, ProviderOrganizationManagementConfig, ProviderRecord, Skill,
 };
 
 use crate::{ServiceError, ServiceResult};
@@ -33,6 +33,7 @@ pub struct RegisterProviderBotParams {
     pub skills: Vec<Skill>,
     pub scopes: Vec<String>,
     pub bot_uuid: Option<String>,
+    pub connection_mode: ProviderBotConnectionMode,
 }
 
 #[async_trait]

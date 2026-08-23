@@ -111,6 +111,17 @@ because its share token is the credential. The two download operations use
 `x-avernet-raw-response: true` to document `200` byte streams and `302`
 redirects instead of JSON success envelopes.
 
+Collaboration templates moved to the internal contract as two read-only
+operations under `/api/v1/collaboration/templates` and
+`/api/v1/collaboration/templates/{template_id}`. They are the versioned
+projection of legacy `GET /collaboration/templates` and
+`GET /collaboration/templates/{template_id}`: the list returns the registry
+catalog with localized text, the single-template read returns the raw
+collaboration-definition YAML as `text/yaml` by default (`format=yaml`) or the
+detail wrapped in the standard envelope (`format=json`). Catalog reads are not
+scoped to a Bot or Session and declare optional User, App, and Bot Gateway
+identities; the `text/yaml` success uses `x-avernet-raw-response: true`.
+
 Validate the contract:
 
 ```bash

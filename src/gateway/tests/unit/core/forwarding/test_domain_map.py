@@ -91,13 +91,11 @@ def test_shipped_config_routes_org_user_verbatim_to_backend() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
 
-    org = dm.http_domain_for("/openapi/v1/org/user/iam-token")
+    org = dm.http_domain_for("/openapi/v1/org/user")
 
     assert org is not None
     assert org.server.name == "backend"
-    assert org.upstream_path("/openapi/v1/org/user/iam-token") == (
-        "/openapi/v1/org/user/iam-token"
-    )
+    assert org.upstream_path("/openapi/v1/org/user") == "/openapi/v1/org/user"
     assert org.schema.location == "schemas/bots.openapi.json"
 
 
@@ -117,10 +115,26 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     )
     assert collaboration.schema.location == "schemas/bcn.openapi.json"
 
+    friend_connections = dm.http_domain_for(
+        "/openapi/v1/collaboration/friend-connections/requests"
+    )
+    assert friend_connections is not None
+    assert friend_connections.server.name == "bcs"
+    assert friend_connections.rewrite is None
+    assert friend_connections.upstream_path(
+        "/openapi/v1/collaboration/friend-connections/requests"
+    ) == "/openapi/v1/collaboration/friend-connections/requests"
+
     security = RouteSecurity.from_table(raw["user_config"]["route_security"])
     requirement = security.resolve("GET", "/openapi/v1/collaboration/groups/group-1")
     assert requirement is not None
     assert requirement[PrincipalType.USER] is Presence.REQUIRED
+
+    friend_requirement = security.resolve(
+        "POST", "/openapi/v1/collaboration/friend-connections/requests"
+    )
+    assert friend_requirement is not None
+    assert friend_requirement[PrincipalType.USER] is Presence.REQUIRED
 
     websocket_requirement = security.resolve(
         "WEBSOCKET", "/openapi/v1/collaboration/messages/ws"

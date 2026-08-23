@@ -27,9 +27,10 @@ from .schemas import (
     ContainerStatus,
     InstanceIdPath,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/containers")
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/containers", route_class=PublicAPIRoute)
 
 _STATUS_MAP: dict[str, ContainerStatus] = {
     "ACTIVE": "healthy",

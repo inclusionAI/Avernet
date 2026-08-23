@@ -24,13 +24,17 @@ from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.human_bot_friendship_service import (
+    HumanBotFriendshipServiceProtocol,
+)
 from agentclaw.community.core.engine_runtime.models import (
     ConnectionResult,
     EngineResult,
     SocketInfo,
 )
 
-from .conftest import BOT, OWNER, FakeRelay
+from .conftest import BOT, OWNER, FakeExpertChat, FakeFriendships, FakeRelay
 
 COLLABORATOR = "u-collab"
 STRANGER = "u-stranger"
@@ -112,7 +116,7 @@ def connections(relay) -> _Connections:
 
 
 @pytest.fixture
-def make_caller(relay, connections):
+def make_caller(relay, connections, friendships, expert):
     """A client for ``caller`` across all engine-runtime groups."""
 
     def _build(caller: str):
@@ -120,6 +124,8 @@ def make_caller(relay, connections):
             def configure(self, binder):
                 binder.bind(EngineRuntimeRelayProtocol, to=relay)
                 binder.bind(EngineConnectionServiceProtocol, to=connections)
+                binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
+                binder.bind(ExpertChatServiceProtocol, to=expert)
 
         app = FastAPI()
         for router in _ENGINE_RUNTIME_GROUPS:

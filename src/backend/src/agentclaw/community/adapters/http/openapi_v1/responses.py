@@ -45,10 +45,12 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    BotAccessRefusedError,
     CallerIdentityConflictError,
     CallerIdentityForbiddenError,
     CallerIdentityInvalidError,
     CallerIdentityOpenApiError,
+    DeptLookupError,
     ClusterMismatchError,
     GrantNotResolvableError,
     IamTokenUnavailableError,
@@ -91,6 +93,10 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotPermissionError,
     BotServiceError,
     DeviceLimitError,
+)
+from agentclaw.community.core.bot_public.services.bot_public_service import (
+    BotNotFoundError as BotPublicBotNotFoundError,
+    BotPublicServiceError,
 )
 from agentclaw.community.core.channel.errors import (
     ChannelEditLockedError,
@@ -159,8 +165,11 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
     WorkOrderAlreadyPendingError,
     WorkOrderAlreadyProcessedError,
+    WorkOrderApplicantAlreadyEditorError,
     WorkOrderApplicantAlreadyMemberError,
+    WorkOrderBotEditorRequestNotAllowedError,
     WorkOrderInvalidReasonError,
+    WorkOrderInvalidEventError,
     WorkOrderInvalidRemarkError,
     WorkOrderJoinNotAllowedError,
     WorkOrderNoReviewerError,
@@ -249,6 +258,7 @@ from agentclaw.community.core.service_bot.errors import (
 )
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterMarketSearchError,
+    SkillCenterPublishStatusError,
     SkillCenterTeamCreateError,
 )
 
@@ -336,12 +346,20 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
     ),
     SkillCenterMarketSearchError: (502, "Skill Center marketplace unavailable"),
+    SkillCenterPublishStatusError: (502, "Skill Center publish status unavailable"),
+    # Staff directory infra failure (master-data service unreachable/errored).
+    # 502, not 200-null: "directory down" must stay distinct from "no dept" so an
+    # operator can tell the two apart; the org/user + org/dept lookups raise this
+    # and ``@envelope_errors`` maps it. Fixed message — the cause is logged, never
+    # returned (mirrors MissingPrincipalError keeping its reason off the wire).
+    DeptLookupError: (502, "Department directory unavailable"),
     WorkOrderAccessDeniedError: (403, WorkOrderPublicErrorMessage.FORBIDDEN),
     WorkOrderNotFoundError: (404, WorkOrderPublicErrorMessage.NOT_FOUND),
     WorkOrderNotificationNotFoundError: (
         404,
         WorkOrderPublicErrorMessage.NOT_FOUND,
     ),
+    WorkOrderInvalidEventError: (400, "Invalid work-order event"),
     WorkOrderInvalidReasonError: (
         400,
         WorkOrderPublicErrorMessage.INVALID_REASON,
@@ -362,9 +380,17 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         409,
         WorkOrderPublicErrorMessage.APPLICANT_ALREADY_MEMBER,
     ),
+    WorkOrderApplicantAlreadyEditorError: (
+        409,
+        WorkOrderPublicErrorMessage.APPLICANT_ALREADY_EDITOR,
+    ),
     WorkOrderJoinNotAllowedError: (
         409,
         WorkOrderPublicErrorMessage.JOIN_NOT_ALLOWED,
+    ),
+    WorkOrderBotEditorRequestNotAllowedError: (
+        409,
+        WorkOrderPublicErrorMessage.BOT_EDITOR_REQUEST_NOT_ALLOWED,
     ),
     WorkOrderNoReviewerError: (
         409,
@@ -380,6 +406,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # enumeration oracle for every bot id in the tenant, so the refusal must be
     # the *same* refusal — same status, same message, same envelope.
     GrantNotResolvableError: (404, "Not found"),
+    # And byte-identical again, for the person rather than the application. The
+    # seam refuses a caller below an operation's collaborator level with this,
+    # and a caller who could tell "not permitted" from "no such bot" would have
+    # the same enumeration oracle. Registering it here is what makes that true:
+    # the app-level handler asks this table first, and an unmapped error falls
+    # through to the raw ``{"detail": ...}`` shape — a *different* body from the
+    # envelope a genuinely absent bot returns, which is the tell.
+    BotAccessRefusedError: (404, "Not found"),
     # Withdrawing an authorization that is not there. Shares the 404 shape with
     # an absent bot, and that is not a collision worth avoiding: an owner
     # reconciling their records needs "there was nothing to remove" to read
@@ -401,6 +435,20 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Another authorization for this bot id is already live",
     ),
     CollaboratorBotNotFoundError: (404, "Not found"),
+    # The bot-public service's own ``BotNotFoundError`` — a distinct class from
+    # the bot-management and collaborator ones above, raised by the BCS
+    # publish-to-users flow — is the same outcome (a missing bot addressed on a
+    # public route), so it answers the same 404 the surface answers everywhere a
+    # bot is addressed that does not exist.
+    BotPublicBotNotFoundError: (404, "Not found"),
+    # The bot-public service's own ``BotPublicServiceError`` — a server-side
+    # failure of the BCS publish-to-users flow (approval-ticket submit rejected
+    # by the approval service, e.g. a malformed biz_id/puid, or any other
+    # invariant the service guards). Distinct from the not-found case above: the
+    # bot was addressed and found, the publish itself failed. Mapped here so it
+    # surfaces as a business-coded 5xx through ``@envelope_errors`` rather than
+    # escaping as a bare 500; the cause is logged at the raise site.
+    BotPublicServiceError: (500, "Publish failed"),
     CollaboratorPermissionDeniedError: (404, "Not found"),
     CollaboratorNotFoundError: (404, "Not found"),
     CollaboratorAlreadyExistsError: (409, "Editor already exists"),
@@ -489,9 +537,16 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         409,
         "SkillSet state conflicts with this operation",
     ),
+    # 409, not 503. Two of this error's three raise sites are a lease this
+    # request held being lost mid-mutation, and the third is the fence refusing
+    # to be taken — in every one of them the service is up and answering, and
+    # the command simply lost a race for one Bot's fence. A 503 would tell
+    # proxies and client retry layers the whole surface is out of rotation over
+    # a per-Bot conflict. The internal /api/skillsets mapping in
+    # ``adapters.http.app`` answers 409 for the same reason.
     SkillSetControlPlaneLockUnavailableError: (
-        503,
-        "SkillSet mutation service is temporarily unavailable",
+        409,
+        "Another SkillSet mutation holds this Bot's fence",
     ),
     SkillSetRuntimeReconcileError: (502, "Skill runtime synchronization failed"),
     SkillSetManagedResourceError: (409, "Skill is managed by a SkillSet"),
@@ -667,6 +722,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
+    WorkOrderInvalidEventError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidReasonError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidRemarkError: WorkOrderErrorCode.INVALID_REMARK,
     WorkOrderAccessDeniedError: WorkOrderErrorCode.ACCESS_DENIED,
@@ -675,8 +731,10 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     WorkOrderAlreadyPendingError: WorkOrderErrorCode.ALREADY_PENDING,
     WorkOrderAlreadyProcessedError: WorkOrderErrorCode.ALREADY_PROCESSED,
     WorkOrderApplicantAlreadyMemberError: WorkOrderErrorCode.APPLICANT_ALREADY_MEMBER,
+    WorkOrderApplicantAlreadyEditorError: WorkOrderErrorCode.APPLICANT_ALREADY_EDITOR,
     WorkOrderNoReviewerError: WorkOrderErrorCode.NO_REVIEWER,
     WorkOrderJoinNotAllowedError: WorkOrderErrorCode.JOIN_NOT_ALLOWED,
+    WorkOrderBotEditorRequestNotAllowedError: WorkOrderErrorCode.BOT_EDITOR_REQUEST_NOT_ALLOWED,
     LocalSkillOwnerAmbiguousError: 409104,
     LocalSkillInvalidPackageError: 400101,
     LocalSkillNotReadyError: 409101,
@@ -692,7 +750,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     RepositoryCatalogSyncInProgressError: 409108,
     RepositoryCatalogSyncFailedError: 502103,
     SkillSetManagedResourceError: 409202,
-    SkillSetControlPlaneLockUnavailableError: 503201,
+    SkillSetControlPlaneLockUnavailableError: 409209,
     SkillSetAccessDeniedError: 403201,
     McpPermissionDeniedError: 403202,
 }

@@ -5,16 +5,19 @@ layer was introduced — it was never written, so nothing checked that a concret
 service still satisfies the Protocol adapters inject. The README states the
 contract:
 
-    Conformance is **structural**: concrete services under
-    ``core/<module>/services/`` do *not* inherit from the Protocol (that would
-    force a ``core → api`` import, which the layering rule forbids). Instead
-    ``test_service_api_conformance.py`` parametrizes over every
-    ``(Protocol, ConcreteService)`` pair and asserts ``issubclass`` against the
-    ``@runtime_checkable`` Protocol — so a missing or renamed method on the
-    concrete class fails CI rather than only showing up as a router-time
-    ``AttributeError``.
+    Conformance is checked **structurally**, and a concrete service *may* also
+    inherit its Protocol. Either way ``test_service_api_conformance.py``
+    parametrizes over every ``(Protocol, ConcreteService)`` pair and asserts
+    ``issubclass`` against the ``@runtime_checkable`` Protocol — so a missing
+    or renamed method on the concrete class fails CI rather than only showing
+    up as a router-time ``AttributeError``.
 
-Two checks per pair, because ``issubclass`` on a ``runtime_checkable`` Protocol
+An inheriting service whose Protocol members are all ``@abstractmethod`` already
+fails at construction, so for those pairs this file is a backstop; it stays the
+only gate for the structural-only services, and its signature check below
+catches drift that inheritance does not.
+
+Three checks per pair, because ``issubclass`` on a ``runtime_checkable`` Protocol
 verifies method **names only**:
 
 1. ``issubclass`` — catches a removed or renamed method (the README's contract).
@@ -24,6 +27,12 @@ verifies method **names only**:
    when a keyword-only parameter becomes positional-only (the adapter then
    calls it by keyword). Both fail every affected request while the gate stays
    green, so the comparison has to cover the whole shape.
+
+3. No leftover ``__abstractmethods__``. Checks 1 and 2 are *blind* for a
+   service that inherits its Protocol: drop a method and the Protocol's own
+   ``...`` stub is inherited in its place, so the name still resolves and the
+   signature is compared against itself. Both pass on a class that cannot even
+   be constructed, moving the failure from CI to DI startup.
 
 ``_PAIRS`` starts with the contract added in this PR. It is a registry, not a
 discovery walk: most Protocols in ``api/`` still declare
@@ -260,3 +269,25 @@ def test_protocol_signatures_match_the_implementation(protocol, concrete) -> Non
 def test_registry_is_not_empty() -> None:
     """Guard the guard — an emptied registry would pass everything silently."""
     assert _PAIRS, "no (Protocol, ConcreteService) pairs registered"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("protocol", "concrete"), _PAIRS, ids=_IDS)
+def test_concrete_service_is_not_left_abstract(protocol, concrete) -> None:
+    """A service that inherits its Protocol must implement every member.
+
+    ``api/README.md`` permits a concrete service to inherit its Protocol. That
+    creates a blind spot in the two checks above — a dropped method is silently
+    replaced by the Protocol's inherited ``...`` stub, which satisfies both — so
+    check the ABC side too: anything left abstract cannot be constructed and
+    would fail at DI startup instead of here.
+
+    Structural services are unaffected; they inherit nothing and have no
+    ``__abstractmethods__``.
+    """
+    left_abstract = sorted(getattr(concrete, "__abstractmethods__", frozenset()))
+    assert not left_abstract, (
+        f"{concrete.__name__} inherits {protocol.__name__} but leaves "
+        f"{left_abstract} unimplemented — the class is abstract and DI would "
+        "fail at startup."
+    )

@@ -152,6 +152,7 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     )
 
     paths = document["paths"]
+    collaboration_http_security = {"user": "required", "app": "required"}
     assert "/openapi/v1/bots" in paths
     # REL #748 renamed the BaaS chat/session surface to /openapi/v1/chat/**;
     # the shipped baas artifact now serves the sessions path under chat.
@@ -162,6 +163,15 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     collection = paths["/openapi/v1/collaboration/sessions/{session_id}/collect"]
     assert set(collection) == {"delete", "post"}
     assert "get" in paths["/openapi/v1/collaboration/messages/ws"]
+    assert "post" in paths["/openapi/v1/collaboration/friend-connections/requests"]
+    assert "get" in paths["/openapi/v1/collaboration/friend-connections/requests"]
+    assert "delete" in paths["/openapi/v1/collaboration/friend-connections"]
+    assert (
+        paths["/openapi/v1/collaboration/friend-connections/requests"]["post"][
+            "x-avernet-security"
+        ]
+        == collaboration_http_security
+    )
     message_data = paths["/openapi/v1/collaboration/sessions/{session_id}/messages"][
         "get"
     ]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["data"]
@@ -175,7 +185,6 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
         "run_id",
     }.issubset(message_data["items"]["properties"])
     assert {"messages", "next_cursor", "has_more"}.isdisjoint(message_data)
-    collaboration_http_security = {"user": "required", "app": "required"}
     assert collection["post"]["x-avernet-security"] == collaboration_http_security
     assert collection["delete"]["x-avernet-security"] == collaboration_http_security
     assert (

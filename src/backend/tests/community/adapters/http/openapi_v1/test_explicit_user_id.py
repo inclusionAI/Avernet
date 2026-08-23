@@ -268,24 +268,29 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
-    # The caller-identity read is how a client LEARNS the id it must thread
+    # The user-identity read is how a client LEARNS the id it must thread
     # everywhere else — requiring the parameter here would make the id a
     # precondition of discovering it. The answer is read off the verified
     # principal, so there is no caller-supplied user to compare against and no
     # 403 to answer.
-    ("get", f"{PUBLIC_API_PREFIX}/caller"),
+    ("get", f"{PUBLIC_API_PREFIX}/org/user"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
     # The marketplace catalogue is identical for every caller in the tenant.
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers/{{server_code}}"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
+    # The department directory is a tenant-wide catalogue — not the caller's.
+    ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
     # Tenant-identical marketplace searches expose no user-scoped state.
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/skills"),
+    # Public Skill Center status and tag catalogues are tenant-wide reads.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/skills/{{skill_code}}/publish/status"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/tags"),
     # The load-test endpoint answers a constant. It reads nothing and writes
     # nothing, so there is no scope for a user id to name — and a synthetic
     # endpoint measuring the shared path must not be the one exception that
@@ -334,16 +339,16 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: ``path`` then moved 54 → 56 when the two Bot Chats operations were added.
 #:
-#: ``none`` then moved 35 → 36 with the caller-identity read: it answers who
+#: ``none`` then moved 35 → 36 with the user-identity read: it answers who
 #: the caller is and addresses no bot.
 #:
 #: The combined Bot Workshop surface then adds a net 27 bot-addressed operations
 #: and five account-level operations. The trace filter remains the sole query
-#: placement. Together with the caller-identity read, the combined contract is
+#: placement. Together with the user-identity read, the combined contract is
 #: 83/1/45. Channels adds six Bot-addressed operations, and the Bot Space
 #: reassignment endpoint adds one more, yielding 90/1/45. Session Favorites then
-#: adds three Bot-addressed operations, Caller preparation adds one more, and the
-#: account-level IAM-token read adds one operation with no ``bot_id``. The Space
+#: adds three Bot-addressed operations. IAM-token retrieval and optional Caller
+#: preparation share one Bot-addressed operation. The Space
 #: Skill list adds one more account-level operation. Editors and render screens
 #: add another nine Bot-addressed operations, while the Bot catalog contributes
 #: two account-level reads, and the read-only Node inventory adds one more
@@ -353,7 +358,22 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: The merged contract contains 132 path-addressed Bots, one legacy
 #: query-addressed operation, and 53 non-Bot operations — the six Harness
 #: operations are Bot-addressed under ``/bots/{bot_id}/harness``.
-_BOT_ID_PLACEMENT = {"path": 132, "query": 1, "none": 53}
+#:
+#: ``none`` then moved 53 → 54 with the department directory search
+#: (``/openapi/v1/org/dept``), an account-level catalogue read that addresses no bot.
+#:
+#: ``path`` then moved 132 → 133 with the BCS publish-to-users operation
+#: (``POST /openapi/v1/bots/{bot_id}/public-bcs``): it addresses a bot and acts
+#: for the operator, so it is bot-path-addressed like the rest of the surface.
+#: The two IAM operations then merged into one Bot-addressed operation: the
+#: existing Caller path was renamed while the account-level IAM read went away,
+#: so ``path`` stays unchanged and ``none`` decreases by one. Bot editor
+#: requests then add one path-addressed Bot operation. The metadata query
+#: added alongside it is user-scoped but has no ``bot_id`` parameter. The BCS
+#: publish-to-users route moved from /bots/{bot_id}/public-bcs to the external
+#: /collaboration/bots/{bot_uuid}/public, so one path-addressed {bot_id}
+#: operation became a {bot_uuid}-named one: path -1, none +1.
+_BOT_ID_PLACEMENT = {"path": 140, "query": 1, "none": 59}
 
 
 def _schema() -> dict:
@@ -443,13 +463,16 @@ def test_the_pinned_number_of_operations_take_it():
     # further net 32 user-scoped operations (27 bot-addressed and five
     # account-level operations), then +6 for Bot-scoped Channels CRUD/status,
     # then +1 for Bot Space reassignment, +3 for Session Favorites, +2 for
-    # IAM-token retrieval and Caller preparation, +1 for Space Skill list, then
+    # the merged IAM-token/Caller preparation operation, +1 for Space Skill list, then
     # +5 for Editors and +4 for render screens. The read-only Node inventory adds
     # the final operation. Skill Installation adds three further Bot-addressed
     # operations, Repo Catalog adds seven operations, SkillSet adds eleven, and
-    # MCP adds eight operations, and the Harness surface adds six
-    # Bot-addressed operations.
-    assert len(taking) == 170
+    # MCP adds eight operations, the Harness surface adds six Bot-addressed
+    # operations, Session File adds six more, Bot metadata queries add one, and
+    # Bot editor requests add one. The BCS publish-to-users route moved from the
+    # internal /bots/{bot_id}/public-bcs path to the external contract path
+    # /collaboration/bots/{bot_uuid}/public (same op count, {bot_uuid} not {bot_id}).
+    assert len(taking) == 181
 
 
 def test_the_exempt_operations_take_none():

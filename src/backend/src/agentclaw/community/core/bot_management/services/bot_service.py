@@ -2224,6 +2224,21 @@ class BotService:
         items = (page or {}).get("items") or []
         return items[0] if items else None
 
+    def list_bots_by_owner_bot_pairs(
+        self,
+        *,
+        pairs: List[tuple[str, str]],
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """Return display-source records for exact Bot and owner pairs."""
+        total, items = self._repository.list_bots_by_owner_bot_pairs(
+            pairs,
+            page=page,
+            page_size=page_size,
+        )
+        return {"total": total, "items": items}
+
     def list_bots_by_search(
         self,
         public: Optional[str] = None,

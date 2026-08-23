@@ -32,6 +32,19 @@ class SpaceMemberService:
             raise SpaceMemberInvalidError("member user id is empty")
         return normalized
 
+    @staticmethod
+    def _user_name(value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if len(normalized) > 128:
+            raise SpaceMemberInvalidError(
+                "member user name must contain at most 128 characters"
+            )
+        return normalized
+
     @inject
     def __init__(
         self,
@@ -65,12 +78,14 @@ class SpaceMemberService:
         space_id: int,
         actor_id: str,
         user_id: str,
+        user_name: str | None = None,
         role: SpaceRole,
     ) -> SpaceMemberRecord:
         space, _ = self._access.require_space_owner(space_id=space_id, user_id=actor_id)
         if space.space_type is SpaceType.PERSONAL:
             raise PersonalSpaceInvariantError("personal space cannot add members")
         normalized = self._user_id(user_id)
+        normalized_user_name = self._user_name(user_name)
         if (
             self._repository.get_member(
                 space_id=space_id, user_id=normalized, env=get_current_env()
@@ -81,6 +96,7 @@ class SpaceMemberService:
         return self._repository.add_member(
             space_id=space_id,
             user_id=normalized,
+            user_name=normalized_user_name,
             role=role,
             creator_id=actor_id,
             env=get_current_env(),
@@ -105,7 +121,11 @@ class SpaceMemberService:
         if space.space_type is SpaceType.PERSONAL:
             raise PersonalSpaceInvariantError("personal space role is immutable")
         normalized = self._user_id(user_id)
-        if normalized == space.created_by and role is not SpaceRole.OWNER:
+        if normalized == space.created_by and role not in (
+            SpaceRole.ADMIN,
+            SpaceRole.OWNER,
+            SpaceRole.ADMINISTRATOR,
+        ):
             raise SpaceCreatorInvariantError("space creator cannot be demoted")
         updated = self._repository.update_member_role(
             space_id=space_id,

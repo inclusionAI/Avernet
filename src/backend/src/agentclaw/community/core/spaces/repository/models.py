@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Index, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
@@ -76,6 +84,7 @@ class SpaceMemberModel(Base):
     id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
     space_id = Column(AutoIncrementBigInteger, nullable=False)
     user_id = Column(String(128), nullable=False)
+    user_name = Column(String(128), nullable=True)
     role = Column(String(24), nullable=False)
     status = Column(String(16), nullable=False, server_default="ACTIVE")
     env = Column(String(20), nullable=False, default=get_current_env)
@@ -90,19 +99,25 @@ class SpaceMemberModel(Base):
     __table_args__ = (
         UniqueConstraint("env", "space_id", "user_id", name="uk_space_member"),
         Index("idx_space_member_user", "env", "user_id", "status"),
-        CheckConstraint("role IN ('ADMINISTRATOR', 'MEMBER')", name="ck_space_member_role"),
-        CheckConstraint("status IN ('ACTIVE', 'INACTIVE')", name="ck_space_member_status"),
+        CheckConstraint(
+            "role IN ('ADMIN', 'ADMINISTRATOR', 'MEMBER')", name="ck_space_member_role"
+        ),
+        CheckConstraint(
+            "status IN ('ACTIVE', 'INACTIVE')", name="ck_space_member_status"
+        ),
         CheckConstraint("env <> ''", name="ck_space_member_env_not_empty"),
     )
 
     def to_record(self) -> SpaceMemberRecord:
+        # Historical ADMINISTRATOR rows are exposed as the canonical ADMIN role.
         return SpaceMemberRecord(
             id=self.id,
             space_id=self.space_id,
             user_id=self.user_id,
+            user_name=self.user_name,
             role=(
-                SpaceRole.OWNER
-                if self.role == "ADMINISTRATOR"
+                SpaceRole.ADMIN
+                if self.role in ("ADMIN", "ADMINISTRATOR")
                 else SpaceRole.MEMBER
             ),
             env=self.env,

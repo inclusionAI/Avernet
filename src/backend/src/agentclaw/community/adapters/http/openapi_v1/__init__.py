@@ -176,8 +176,10 @@ from fastapi import APIRouter, Depends
 from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
+from .collaboration_bots import public_router as collaboration_public_router
 from .bots.engine_config import router as engine_config_router
-from .caller import router as caller_router
+from .org import dept_router as org_dept_router
+from .org import router as org_router
 from .channels import router as channels_router
 from .containers import router as containers_router
 from .diagnostics import router as diagnostics_router
@@ -215,6 +217,7 @@ from .resources import router as resources_router
 from .render_screens import router as render_screens_router
 from .repository_catalog import router as repository_catalog_router
 from .routines import router as routines_router
+from .skills import publish_status_router as skill_publish_status_router
 from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
 from .service_publications import (
@@ -223,7 +226,11 @@ from .service_publications import (
 )
 from .spaces import router as spaces_router
 from .work_orders import router as work_orders_router
-from .token import caller_identity_router, token_router
+from agentclaw.community.adapters.http.openapi_v1.authorization import (
+    PublicAPIRoute,
+    assert_every_route_authorized,
+)
+from .token import token_router
 
 # Every public route lives under this prefix. Exported so app-level handlers can
 # tell a public request from an internal one (e.g. to envelope validation errors
@@ -264,9 +271,13 @@ _MIXED_GROUPS = [
 # retiring addresses. See "Mount order" above. Splitting them across lists is
 # about which *response table* each gets; it does not change that they all
 # precede `bots`.
+_OPEN_SUBGROUPS = [
+    # Skill Workbench status is tenant-identical and app-admissible.
+    skill_publish_status_router,
+]
+
 _SUBGROUPS = [
     token_router,
-    caller_identity_router,
     # Both authorization groups precede `bots` below. `authorized_apps_router`
     # sits *under* `{bot_id}` so path shape already keeps it distinct, but
     # `authorized_bots_router` is a top-level literal and genuinely depends on
@@ -397,13 +408,20 @@ def build_public_router() -> APIRouter:
     ``user_id`` parameter itself is always per handler (see "Naming the end
     user" above).
     """
-    public = APIRouter()
+    public = APIRouter(route_class=PublicAPIRoute)
     # The caller's own identity — the one operation whose answer IS the user,
     # so it takes no ``user_id`` and can answer no 403: it gets the base error
     # table, not the user-scoped one. The caller is the sole top-level public
     # resource here because it describes the authenticated principal itself.
     public.include_router(
-        caller_router,
+        org_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Department directory search — a tenant-wide catalogue read (no ``user_id``),
+    # backed by the same StaffDeptPlugin as the whoami's dept fields.
+    public.include_router(
+        org_dept_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
@@ -420,6 +438,10 @@ def build_public_router() -> APIRouter:
         responses=SPACE_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
+    for router in _OPEN_SUBGROUPS:
+        public.include_router(
+            router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+        )
     # Tenant-identical marketplace queries. This literal group must be mounted
     # before the ``{bot_id}`` wildcard router below.
     public.include_router(
@@ -498,6 +520,22 @@ def build_public_router() -> APIRouter:
     public.include_router(
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
     )
+    # New-version bcs publish-to-users: served at the external contract path
+    # POST /openapi/v1/collaboration/bots/{bot_uuid}/public. The gateway's
+    # collaboration-publish domain verbatim-forwards it here (no rewrite), so the
+    # backend serves the public address directly. user-scoped responses for the
+    # openapi_v1 admission contract; authz deferred per design (caller identity
+    # via _PUBLIC_AUTH/UserIdDep, no grant check yet).
+    public.include_router(
+        collaboration_public_router,
+        responses=USER_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # The two failures `PublicAPIRoute` cannot see itself: a router built
+    # without it (whose routes never ran its `__init__`), and a table row left
+    # behind by a rename. Raising here means the application does not start,
+    # which is the point — an operation nothing governs is never served.
+    assert_every_route_authorized(public)
     return public
 
 

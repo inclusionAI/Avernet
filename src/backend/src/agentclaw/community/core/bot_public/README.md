@@ -12,7 +12,7 @@ provides:
   - "Bot-public SQLAlchemy models"
 consumes:
   - "BotManagement repo + service"
-  - "BotCatalogMetadata port (membership-only, joined by (bot_id, entity_id))"
+  - "BotCatalogMetadata port (current BCS page, joined by (bot_id, entity_id))"
   - "AntProcess plugins (auth_relationship, bot_publish_approval, antprocess)"
   - "PassportPlugin"
   - "SkillCenter factories"
@@ -30,6 +30,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.auth_relationship
   - agentclaw.community.plugin_api.bot_publish_approval
   - agentclaw.community.plugin_api.device_sync
+  - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.passport
   - agentclaw.community.utils.avernet_tenant

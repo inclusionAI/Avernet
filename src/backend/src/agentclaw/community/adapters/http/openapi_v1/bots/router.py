@@ -121,6 +121,8 @@ from .startup_script_support import (
 )
 from .schemas import (
     Bot,
+    BotMetadata,
+    BotMetadataQueries,
     BotActivateResult,
     BotAuthPending,
     BotAuthStatus,
@@ -140,6 +142,7 @@ from .schemas import (
     StartupScript,
     StartupScriptWrite,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
 
@@ -162,7 +165,7 @@ _GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
 #: entry were ever mislabelled. See ``refuse_app_only_caller``.
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
-router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
+router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"], route_class=PublicAPIRoute)
 
 
 def _require_service_capable_engine(bot_type: str, engine: str) -> None:
@@ -187,6 +190,19 @@ def _to_bot(d: dict[str, Any]) -> Bot:
         bot_type=d.get("bot_type") or "",
         status=d.get("status") or "",
         owner_entity_id=d.get("owner_id") or "",
+    )
+
+
+def _to_bot_metadata(d: dict[str, Any]) -> BotMetadata:
+    """Project a Bot record onto the deliberately display-only batch contract."""
+    return BotMetadata(
+        bot_id=d["bot_id"],
+        owner_id=d.get("owner_id") or "",
+        bot_name=d.get("bot_name") or "",
+        bot_desc=d.get("bot_desc") or "",
+        engine=d.get("active_engine") or "",
+        bot_type=d.get("bot_type") or "",
+        status=d.get("status") or "",
     )
 
 
@@ -482,6 +498,43 @@ async def list_bots(
         bot_ids=sorted(granted) if granted is not None else None,
     )
     items = [_to_bot(b) for b in result["items"]]
+    return page(result["total"], items, request)
+
+
+@router.post(
+    "/metadata/queries",
+    response_model=Envelope[Page[BotMetadata]],
+    responses=USER_SCOPED_403,
+)
+@envelope_errors
+async def query_bot_metadata(
+    body: BotMetadataQueries,
+    page_params: PageParamsDep,
+    request: Request,
+    user_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+) -> Envelope[Page[BotMetadata]]:
+    """Resolve display metadata for caller-supplied Bot and owner pairs.
+
+    The identifiers may originate from BCN, search, recommendations, persisted
+    client state, or another source. The user_id parameter names the authenticated
+    user performing this tenant-wide metadata lookup; each owner_id in the body
+    is part of a target Bot identity, not the caller identity. The response is
+    intentionally limited to display fields and the owner id the request already
+    named; it never exposes device bindings, runtime configuration, credentials,
+    or extension payloads.
+
+    Unknown identifiers are omitted. Filtering happens in the repository before
+    pagination, so total is the number of matching Bot records.
+    """
+    del user_id  # UserIdDep has already enforced equality with the Principal.
+    pairs = list(dict.fromkeys((item.bot_id, item.owner_id) for item in body.bots))
+    result = bot_service.list_bots_by_owner_bot_pairs(
+        page=page_params.page,
+        page_size=page_params.page_size,
+        pairs=pairs,
+    )
+    items = [_to_bot_metadata(item) for item in result["items"]]
     return page(result["total"], items, request)
 
 

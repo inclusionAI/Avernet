@@ -292,7 +292,7 @@ def initialize_personal_space_wrong_user():
         status=201,
         json_contains={
             "code": 201000,
-            "data": {"space_name": "Endpoint Team", "current_user_role": "OWNER"},
+            "data": {"space_name": "Endpoint Team", "current_user_role": "ADMIN"},
         },
     ),
 )
@@ -436,7 +436,7 @@ def delete_space_member_wrong_user():
         status=200,
         json_contains={
             "code": 200000,
-            "data": {"user_id": _MEMBER_ID, "role": "OWNER"},
+            "data": {"user_id": _MEMBER_ID, "role": "ADMIN"},
         },
     ),
 )

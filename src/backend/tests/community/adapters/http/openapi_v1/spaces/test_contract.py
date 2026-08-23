@@ -57,6 +57,11 @@ def member_service():
         id=2,
         space_id=kwargs["space_id"],
         user_id=kwargs["user_id"].strip(),
+        user_name=(
+            kwargs["user_name"].strip()
+            if kwargs["user_name"] and kwargs["user_name"].strip()
+            else None
+        ),
         role=kwargs["role"],
         env="test",
         created_by="owner-1",
@@ -127,7 +132,9 @@ def test_endpoint_serializes_persisted_datetime_with_utc_marker(client, space_se
     response = client.get("/openapi/v1/bots/spaces")
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"][0]["gmt_modified"] == "2026-08-17T07:50:45Z"
+    item = response.json()["data"]["items"][0]
+    assert item["creator_user_id"] == "owner-1"
+    assert item["gmt_modified"] == "2026-08-17T07:50:45Z"
 
 
 def test_naive_persisted_datetime_is_serialized_as_explicit_utc():
@@ -181,6 +188,36 @@ def test_add_member_accepts_an_optional_role(
     assert member_service.add_member.call_args.kwargs["role"] is expected_role
 
 
+@pytest.mark.parametrize(
+    ("member_user_name", "expected"),
+    [
+        (None, None),
+        ("", ""),
+        ("  Zhang San  ", "  Zhang San  "),
+    ],
+)
+def test_add_member_maps_member_user_name_to_service(
+    client, member_service, member_user_name, expected
+):
+    payload = {"member_user_id": "member-1", "role": "MEMBER"}
+    if member_user_name is not None:
+        payload["member_user_name"] = member_user_name
+
+    response = client.post("/openapi/v1/bots/spaces/7/members", json=payload)
+
+    assert response.status_code == 201
+    assert member_service.add_member.call_args.kwargs["user_name"] == expected
+
+
+def test_add_member_rejects_member_user_name_over_128_characters(client):
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/members",
+        json={"member_user_id": "member-1", "member_user_name": "x" * 129},
+    )
+
+    assert response.status_code == 422
+
+
 def test_openapi_advertises_nullable_member_profile_fields(client):
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
 
@@ -189,6 +226,13 @@ def test_openapi_advertises_nullable_member_profile_fields(client):
     assert "display_name" in member_properties
     assert "membership relation" in member_properties["gmt_modified"]["description"]
     assert member_properties["gmt_modified"]["format"] == "date-time"
+
+    add_member_properties = schemas["AddSpaceMemberRequest"]["properties"]
+    user_name_schema = add_member_properties["member_user_name"]
+    assert any(
+        option.get("type") == "string" and option.get("maxLength") == 128
+        for option in user_name_schema["anyOf"]
+    )
 
     favorite_properties = schemas["MarketFavoriteItem"]["properties"]
     assert set(favorite_properties) == {
@@ -220,9 +264,7 @@ def test_cancel_missing_favorite_returns_idempotent_success(client, favorite_ser
     assert body["data"]["changed"] is False
 
 
-def test_list_space_skills_maps_page_and_forwards_search(
-    client, skill_query_service
-):
+def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_service):
     timestamp = datetime(2026, 8, 20, 3, 40)
     skill_query_service.list_space_skills.return_value = (
         1,
@@ -343,6 +385,7 @@ def _member_summary(
             id=2,
             space_id=7,
             user_id=user_id,
+            user_name=user_name,
             role=role,
             env="test",
             created_by="owner-1",
@@ -350,7 +393,6 @@ def _member_summary(
             gmt_modified=timestamp,
         ),
         is_creator=user_id == "owner-1",
-        user_name=user_name,
         display_name=display_name,
     )
 
@@ -416,7 +458,7 @@ def test_initialize_personal_space_exposes_created_state(
     data = response.json()["data"]
     assert data["space_type"] == "PERSONAL"
     assert data["created"] is was_created
-    assert data["current_user_role"] == "OWNER"
+    assert data["current_user_role"] == "ADMIN"
     space_service.initialize_personal.assert_called_once_with(user_id="owner-1")
 
 

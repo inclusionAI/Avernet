@@ -168,7 +168,7 @@ class TaskModule(Module):
           覆写本 provider。
         """
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
-            return None, None
+            return None, None, ""
         from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
             LocalBcsTokenProvider,
         )

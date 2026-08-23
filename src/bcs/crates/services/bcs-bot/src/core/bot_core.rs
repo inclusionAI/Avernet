@@ -10,9 +10,9 @@ use bcs_service_api::port::repo::{
 };
 use bcs_service_api::{
     ActorStatus, AgentCredentials, BotCapabilities, BotConnectParams, BotConnectResult,
-    BotDeliveryTarget, BotDynamicStatus, BotRegistryCoreService, ConnectError, ConnectionKind,
-    CoordinationSurface, EnsureHumanResult, RedactedToken, RegisteredBot, ServiceError,
-    ServiceResult,
+    BotDeliveryTarget, BotDynamicStatus, BotRegistryCoreService, ConnectError,
+    ConnectStreamError, ConnectionKind, CoordinationSurface, EnsureHumanResult, RedactedToken,
+    RegisteredBot, ServiceError, ServiceResult,
 };
 use tracing::{debug, info, warn};
 
@@ -502,6 +502,13 @@ impl BotRegistryCoreService for BotCore {
         self.repo.register_streaming_connection(bot_id).await
     }
 
+    async fn connect_or_promote_streaming(
+        &self,
+        bot_id: String,
+    ) -> Result<String, ConnectStreamError> {
+        self.repo.connect_or_promote_streaming(bot_id).await
+    }
+
     async fn reconnect_streaming(&self, existing_token: String) -> Result<(String, String), ()> {
         self.repo.reconnect_streaming(existing_token).await
     }
@@ -709,8 +716,25 @@ impl BotRegistryCoreService for BotCore {
                 if provided_bot_id.is_empty() {
                     return Err(ConnectError::InvalidBotId);
                 }
+                // Reject a provided bot_id that already exists, EXCEPT for the
+                // plugin connection_mode promote path: if the existing bot's
+                // stored token is the MOCK sentinel, a streaming connect is
+                // allowed to promote it to a real token (§3.5). Everything else
+                // (Http connections; real-token bots) keeps the historical
+                // `AlreadyRegistered` refusal so duplicate ids cannot hijack.
                 if self.repo.get(provided_bot_id).await.is_some() {
-                    return Err(ConnectError::AlreadyRegistered(provided_bot_id.clone()));
+                    let allow_promote = matches!(kind, ConnectionKind::Streaming)
+                        && self
+                            .repo
+                            .load_token(provided_bot_id)
+                            .await
+                            .map(|t| bcs_service_api::is_mock_token(&t))
+                            .unwrap_or(false);
+                    if !allow_promote {
+                        return Err(ConnectError::AlreadyRegistered(
+                            provided_bot_id.clone(),
+                        ));
+                    }
                 }
                 info!(bot_id = %provided_bot_id, "Using preconfigured bot_id");
                 provided_bot_id.clone()
@@ -721,11 +745,24 @@ impl BotRegistryCoreService for BotCore {
             };
 
             let registered_token = match kind {
-                ConnectionKind::Streaming => self
-                    .repo
-                    .register_streaming_connection(connect_bot_id.clone())
-                    .await
-                    .map_err(|_| ConnectError::AlreadyConnected(connect_bot_id.clone()))?,
+                ConnectionKind::Streaming => {
+                    // Delegate create / MOCK-promote / already registered+connected
+                    // to the store, which decides atomically under its write lock
+                    // (the lock-free `repo.get` check that used to fire
+                    // `AlreadyRegistered` here is moved into that lock).
+                    self.repo
+                        .connect_or_promote_streaming(connect_bot_id.clone())
+                        .await
+                        .map_err(|e| match e {
+                            ConnectStreamError::AlreadyConnected(id) => {
+                                ConnectError::AlreadyConnected(id)
+                            }
+                            ConnectStreamError::AlreadyRegistered(id) => {
+                                ConnectError::AlreadyRegistered(id)
+                            }
+                            ConnectStreamError::InternalError(m) => ConnectError::InternalError(m),
+                        })?
+                }
                 ConnectionKind::Http => {
                     self.repo
                         .register_http_connection(connect_bot_id.clone(), token.clone())

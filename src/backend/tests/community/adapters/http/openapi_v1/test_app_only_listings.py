@@ -706,12 +706,41 @@ _UNGRANTED_APP_CASES = {
         ),
         "assert_starved": lambda response: response.status_code == 404,
     },
+    ("POST", "/openapi/v1/bots/{bot_id}/editor-requests"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/bot-1/editor-requests",
+            params={"owner_id": "owner-1"},
+            json={"reason": "joint editing"},
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("GET", "/openapi/v1/bots/work-orders"): {
         "request": lambda client: client.get("/openapi/v1/bots/work-orders"),
         "assert_starved": lambda response: response.status_code == 404,
     },
     ("GET", "/openapi/v1/bots/work-orders/{work_order_id}"): {
         "request": lambda client: client.get("/openapi/v1/bots/work-orders/1"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/work-orders/events"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/work-orders/events",
+            json={
+                "event_category": "NOTICE",
+                "biz_type": "TEST",
+                "biz_id": "1",
+                "event_type": "SPACE_JOIN_REVIEWED",
+                "recipient_user_ids": ["u-2"],
+                "title": "notice",
+            },
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/approval"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/work-orders/1/approval",
+            json={"decision": "APPROVED", "review_remark": "approve"},
+        ),
         "assert_starved": lambda response: response.status_code == 404,
     },
     ("GET", "/openapi/v1/bots/work-order-notifications/unread-count"): {

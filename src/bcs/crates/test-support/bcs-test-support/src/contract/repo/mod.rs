@@ -3,6 +3,14 @@
 //! Concrete repository implementations call these functions from
 //! `tests/conformance_*.rs`.
 
+pub mod edge_grant;
+pub mod permission_profile;
+pub mod permission_request;
+
+pub use edge_grant::run_edge_grant_repo_contract;
+pub use permission_profile::run_permission_profile_repo_contract;
+pub use permission_request::run_permission_request_repo_contract;
+
 use bcs_domain::{MessageOwnerFilter, MessageQuery, NewMessage, SenderType};
 use bcs_service_api::ServiceError;
 use bcs_service_api::port::repo::{

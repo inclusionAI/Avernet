@@ -43,8 +43,9 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineUpstreamError,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/approvals", tags=["approvals"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/approvals", tags=["approvals"], route_class=PublicAPIRoute)
 
 
 #: Engine capability a mode *change* needs. ``approval.get`` is defined

@@ -3,8 +3,8 @@
 The gateway forwards ``/openapi/v1/*`` transparently, so nothing internal may
 live under that prefix — every public route must sit under a prefix the
 gateway's shipped configuration routes and secures. Those prefixes are the
-bots domain plus the caller-identity exception (``upstreams.domains`` and
-``route_security`` in ``src/gateway/configs/application.yaml``); a route under
+declared upstream domains (``upstreams.domains`` and ``route_security`` in
+``src/gateway/configs/application.yaml``); a route under
 any other ``/openapi/v1`` prefix is a leak, not a new domain, until that
 configuration declares it.
 """
@@ -20,11 +20,19 @@ _DECLARED_PREFIXES = (
     "/openapi/v1/bots",
     # The verified caller's own identity — the one operation whose answer is
     # the user. Declared with its gateway domain + route_security entries.
-    "/openapi/v1/caller",
     "/openapi/v1/org",
     "/openapi/v1/spaces",
     "/openapi/v1/work-orders",
     "/openapi/v1/work-order-notifications",
+    "/openapi/v1/org/user",
+    # Department directory search — a tenant-wide catalogue read, declared with
+    # its own gateway domain + route_security entry.
+    "/openapi/v1/org/dept",
+    # BCS publish-to-users — the external contract path the gateway's
+    # `collaboration-publish` domain routes to the backend (pulled out of the
+    # broad collaboration→bcs namespace). Declared with its gateway domain +
+    # route_security entry.
+    "/openapi/v1/collaboration/bots",
 )
 
 

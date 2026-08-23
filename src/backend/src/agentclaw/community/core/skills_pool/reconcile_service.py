@@ -704,6 +704,7 @@ class SkillsPoolReconcileService:
             )
         if not self._layouts.commit_pool_active(
             scope=scope,
+            owner_id=user_id,
             migration_generation=generation,
             lease_owner=lease_owner,
             preparation_id=probe.preparation_id,

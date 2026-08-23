@@ -10,7 +10,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import UploadFile
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 
 class Skill(BaseModel):
@@ -77,6 +78,68 @@ class Skill(BaseModel):
     )
 
 
+class SkillPublishStatus(BaseModel):
+    """Publish workflow status returned by Skill Center."""
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        extra="allow",
+        json_schema_extra={
+            "example": {
+                "skillCode": "demo-skill",
+                "name": "Demo Skill",
+                "status": "PUBLISHED",
+                "statusDesc": "发布成功",
+                "source": "teamclaw",
+                "version": "1.0.0",
+                "isCompleted": True,
+                "isSuccess": True,
+                "errorMsg": "",
+                "releaseTime": "2026-08-20 20:00:00",
+                "standardCheckResult": {},
+                "securityCheckReport": {},
+            }
+        },
+    )
+
+    skill_code: str | None = Field(
+        default=None, alias="skillCode", description="Skill Center skill code."
+    )
+    name: str | None = Field(default=None, description="Skill display name.")
+    status: str | None = Field(default=None, description="Current publish status.")
+    status_desc: str | None = Field(
+        default=None,
+        alias="statusDesc",
+        description="Human-readable status description.",
+    )
+    source: str | None = Field(default=None, description="Publishing source.")
+    version: str | None = Field(default=None, description="Published version.")
+    is_completed: bool = Field(
+        default=False,
+        alias="isCompleted",
+        description="Whether the publish workflow ended.",
+    )
+    is_success: bool = Field(
+        default=False,
+        alias="isSuccess",
+        description="Whether the publish workflow succeeded.",
+    )
+    error_msg: str | None = Field(
+        default=None,
+        alias="errorMsg",
+        description="Failure detail when provided by Skill Center.",
+    )
+    release_time: str | None = Field(
+        default=None, alias="releaseTime", description="Publish completion time."
+    )
+    standard_check_result: dict[str, Any] | None = Field(
+        default=None, alias="standardCheckResult", description="Standard-check report."
+    )
+    security_check_report: dict[str, Any] | None = Field(
+        default=None, alias="securityCheckReport", description="Security-check report."
+    )
+
+
 class SkillUpload(BaseModel):
     """Response for a Skill create or same-name package replacement."""
 
@@ -105,6 +168,30 @@ class SkillUpload(BaseModel):
         "keeping its id and active state; answers 200."
     )
     skill: Skill = Field(description="The skill as stored after the upload.")
+
+
+# Keep this pre-existing generated component name stable for clients that have
+# already generated multipart request types from the Gateway OpenAPI document.
+SkillFolderUpload = create_model(
+    "Body_upload_skill_folder_openapi_v1_bots__bot_id__skills_upload_folder_post",
+    __base__=BaseModel,
+    __config__=ConfigDict(
+        json_schema_extra={
+            "description": "Files and optional relative paths for one local Skill directory."
+        }
+    ),
+    files=(
+        list[UploadFile],
+        Field(description="All files from the selected local Skill directory."),
+    ),
+    file_paths=(
+        str | None,
+        Field(
+            default=None,
+            description="Optional JSON array of relative paths aligned one-to-one with files.",
+        ),
+    ),
+)
 
 
 class SkillState(BaseModel):

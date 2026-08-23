@@ -342,6 +342,7 @@ from agentclaw.community.adapters.http.error_logging import (  # noqa: E402
     params_suffix,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (  # noqa: E402
+    BotAccessRefusedError,
     GrantNotResolvableError,
     MissingPrincipalError,
     UserIdMismatchError,
@@ -359,6 +360,13 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerLockEpochError,
     CallerMcpNotFoundError,
     CallerMcpSyncError,
+)
+from agentclaw.community.core.skill_center.errors import (  # noqa: E402
+    SkillSetAccessDeniedError,
+    SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneLockUnavailableError,
+    SkillSetControlPlaneNotFoundError,
+    SkillSetRuntimeReconcileError,
 )
 
 _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
@@ -380,6 +388,25 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     CallerMcpNotFoundError: 404,
     CallerMcpSyncError: 500,
     CallerCallTypeInvalidError: 500,
+    # ── SkillSet control plane ────────────────────────────────────────────
+    # The legacy /api/skillsets routes used to translate these themselves, in a
+    # router-level helper that returned a hand-built HTTPException. That put the
+    # status decision inside the route and replaced the raised exception with a
+    # fresh one, so the ``__cause__`` chain never reached a log. Mapping them
+    # here instead means the route raises the situation and this layer alone
+    # decides the wire, exactly as every other domain error already works.
+    SkillSetControlPlaneNotFoundError: 404,
+    SkillSetAccessDeniedError: 403,
+    # 400, not 409: the published wire echoes the reason code as a rejected
+    # request and clients already parse it that way. Kept as-is deliberately.
+    SkillSetControlPlaneConflictError: 400,
+    # 409, not 503. The mutation fence could not be taken, so the command never
+    # ran and the caller may retry — but the service itself is up and serving,
+    # which is the only thing a 503 is allowed to mean. Answering 503 also tells
+    # proxies and clients to back off the whole endpoint over what is a
+    # per-Bot lock conflict.
+    SkillSetControlPlaneLockUnavailableError: 409,
+    SkillSetRuntimeReconcileError: 500,
 }
 
 _DATA_PROXY_ERROR_STATUS_MAP: dict[type[DataProxyError], int] = {
@@ -435,15 +462,15 @@ def _public_mapped_error(request: Request, exc: Exception) -> JSONResponse | Non
 @app.exception_handler(DomainError)
 async def _domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     status = _DOMAIN_ERROR_STATUS_MAP.get(type(exc), 500)
-    # 5xx means a core service signalled an internal failure; emit a full
-    # traceback so the cause is recoverable from logs. 4xx is expected
-    # client-side flow (bad input, missing auth), so it gets one compact line
-    # without a traceback: enough to see that the request was refused and with
-    # what arguments, without a per-401 stack in the log file. It used to get
-    # nothing at all, which is why a refused request could not be traced.
+    # Every DomainError that reaches here is logged with its traceback,
+    # whatever status it maps to. The status is what the *caller* is told; it
+    # says nothing about how much an operator needs to reconstruct the failure.
+    # Keying the traceback off it lost real diagnostics: a lock error answering
+    # 409 is raised ``from`` the cache failure underneath, and the log recorded
+    # that the fence was unavailable while dropping the reason.
     #
-    # 3xx stays silent: the only one is ``LoginRedirectRequired``, an ordinary
-    # step in the login flow rather than a failure to diagnose.
+    # Level still tracks status — 5xx is ours, 4xx is usually the caller's — so
+    # existing alerting keyed on level is unaffected. Only the traceback is new.
     #
     # ``params_suffix`` is empty unless the public surface's ``@envelope_errors``
     # captured the handler's arguments on the way past, so the message shape is
@@ -459,6 +486,18 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
             "[DomainError %s] %s on %s %s: %s%s",
             status, type(exc).__name__, request.method, request.url.path,
             exc.detail, params_suffix(request),
+            exc_info=exc,
+        )
+    else:
+        # 3xx is only ``LoginRedirectRequired``, an ordinary step in the login
+        # flow rather than a failure. It used to be silent; it is logged at
+        # info so "all errors carry a stack" holds without a redirect looking
+        # like a fault to anything reading warnings.
+        logger.info(
+            "[DomainError %s] %s on %s %s: %s%s",
+            status, type(exc).__name__, request.method, request.url.path,
+            exc.detail, params_suffix(request),
+            exc_info=exc,
         )
     if _is_public_api(request):
         return _public_error_envelope(status, request)
@@ -497,20 +536,33 @@ async def _http_exception_handler(
         # public handler: ``@envelope_errors`` does not map that type, so it
         # arrives here with the handler's arguments already stashed.
         #
-        # 5xx carries the traceback like every other 5xx path here, because a
-        # handler-raised one ("Upload storage failed", "cron service returned no
-        # data") is diagnosed by its raise site. 4xx does not: the common case is
-        # Starlette's own routing 404/405, raised before any handler, whose stack
-        # is framework internals rather than anything we would read.
+        # Every status carries the traceback. For a handler-raised one ("Upload
+        # storage failed", "cron service returned no data") the raise site is
+        # the diagnosis. For Starlette's own routing 404/405, raised before any
+        # handler, the stack is framework internals and adds little — but the
+        # two are indistinguishable from here, and a handler-raised 4xx is the
+        # one worth keeping, so this does not try to tell them apart.
         is_server_error = exc.status_code >= 500
         log = logger.error if is_server_error else logger.warning
         log(
             "[Public %s] HTTPException on %s %s: %s%s",
             exc.status_code, request.method, request.url.path, exc.detail,
             params_suffix(request),
-            exc_info=exc if is_server_error else None,
+            exc_info=exc,
         )
         return _public_error_envelope(exc.status_code, request, exc.headers)
+    # Internal ``/api`` routes keep FastAPI's response shape, but its default
+    # handler logs nothing at all — an ``HTTPException`` raised inside a route
+    # left no record whatsoever. Log it here before delegating, so the response
+    # is unchanged and the raise site is still recoverable.
+    is_server_error = exc.status_code >= 500
+    log = logger.error if is_server_error else logger.warning
+    log(
+        "[HTTPException %s] on %s %s: %s%s",
+        exc.status_code, request.method, request.url.path, exc.detail,
+        params_suffix(request),
+        exc_info=exc,
+    )
     return await http_exception_handler(request, exc)
 
 
@@ -544,8 +596,22 @@ async def _validation_error_handler(
                 {"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")}
                 for e in exc.errors()
             ],
+            exc_info=exc,
         )
         return error_response(422, "Invalid request", request)
+    # Internal routes keep FastAPI's ``{"detail": [...]}`` body, whose default
+    # handler logs nothing. Same treatment as above: log, then delegate. The
+    # ``input`` each error carries is the caller's raw payload, so only
+    # ``loc``/``type``/``msg`` are recorded here too.
+    logger.warning(
+        "[422] validation failed on %s %s: %s",
+        request.method, request.url.path,
+        [
+            {"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")}
+            for e in exc.errors()
+        ],
+        exc_info=exc,
+    )
     return await request_validation_exception_handler(request, exc)
 
 
@@ -567,6 +633,13 @@ async def _data_proxy_error_handler(
             "[DataProxyError 5xx] %s on %s %s: %s%s",
             type(exc).__name__, request.method, request.url.path, exc.message,
             params_suffix(request),
+        )
+    else:
+        logger.warning(
+            "[DataProxyError %s] %s on %s %s: %s%s",
+            status, type(exc).__name__, request.method, request.url.path,
+            exc.message, params_suffix(request),
+            exc_info=exc,
         )
     return JSONResponse(
         status_code=status,
@@ -592,14 +665,21 @@ async def _principal_error_handler(request: Request, exc: Exception) -> JSONResp
     and then unconditionally re-raises ("We always continue to raise the
     exception", ``starlette/middleware/errors.py``) so the server can log a
     crash. The result was a correct 401 on the wire followed by a hundred-odd
-    lines of ASGI traceback per request — precisely what the catch-all's
-    warning-without-a-traceback was written to avoid, and ruinous on this path
-    because an auth misconfiguration makes *every* request take it.
+    lines of ASGI traceback per request, ruinous on this path because an auth
+    misconfiguration makes *every* request take it.
 
     Registering the concrete types instead puts them in the inner
     ``ExceptionMiddleware``, which answers and does not re-raise. The status
     and body still come from ``ENVELOPE_ERRORS`` via ``_public_mapped_error``,
     so this adds a route out of the stack, not a second opinion on the answer.
+
+    The log line below does now carry ``exc_info``, so a misconfiguration still
+    puts a traceback behind every request — a deliberate trade, and a much
+    smaller one than what this handler was written to stop: the framework's
+    re-raise dumped the whole ASGI stack twice per request, while this is one
+    formatted chain for the exception itself. If the volume ever does bite, the
+    fix is to drop ``exc_info`` here specifically rather than to unregister
+    these types, which would bring the re-raise back.
     """
     # ``exc`` carries the operator-facing diagnosis on the verification path —
     # the token's ``alg``/``kid`` and the fingerprint of the key we judged it
@@ -610,6 +690,7 @@ async def _principal_error_handler(request: Request, exc: Exception) -> JSONResp
         "[Public 401] %s on %s %s: %s%s",
         type(exc).__name__, request.method, request.url.path, exc,
         params_suffix(request),
+        exc_info=exc,
     )
     mapped = _public_mapped_error(request, exc)
     if mapped is not None:
@@ -643,6 +724,7 @@ async def _user_id_mismatch_handler(
         "[Public 403] %s on %s %s: %s%s",
         type(exc).__name__, request.method, request.url.path, exc,
         params_suffix(request),
+        exc_info=exc,
     )
     mapped = _public_mapped_error(request, exc)
     if mapped is not None:
@@ -679,6 +761,38 @@ async def _grant_not_resolvable_handler(
         "[Public 404] %s on %s %s: %s%s",
         type(exc).__name__, request.method, request.url.path, exc,
         params_suffix(request),
+        exc_info=exc,
+    )
+    mapped = _public_mapped_error(request, exc)
+    if mapped is not None:
+        return mapped
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Not found"},
+        headers=_trace_headers(request),
+    )
+
+
+@app.exception_handler(BotAccessRefusedError)
+async def _bot_access_refused_handler(
+    request: Request, exc: BotAccessRefusedError,
+) -> JSONResponse:
+    """Answer a caller below an operation's collaborator level — 404.
+
+    Registered as a concrete type for the same reason as the handler above: it
+    is raised in a **dependency**, so ``@envelope_errors`` never sees it.
+
+    **The body must be byte-identical to a nonexistent bot's**, which is why
+    this goes through ``_public_mapped_error`` with the same status rather than
+    composing its own. A caller who could tell "not permitted" from "no such
+    bot" would have an enumeration oracle over every bot in the tenant — and
+    the check would leak precisely what it exists to protect.
+    """
+    logger.warning(
+        "[Public 404] %s on %s %s: %s%s",
+        type(exc).__name__, request.method, request.url.path, exc,
+        params_suffix(request),
+        exc_info=exc,
     )
     mapped = _public_mapped_error(request, exc)
     if mapped is not None:
@@ -712,15 +826,15 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
     # they are rare, where an unverifiable caller is not.
     mapped = _public_mapped_error(request, exc)
     if mapped is not None:
-        # Expected client-side flow (missing/invalid credentials, bad input).
-        # A traceback per unauthenticated request would bury the real 5xx ones,
-        # so log at warning without one — matching how the DomainError handler
-        # treats 4xx.
+        # Level still tracks status — an expected client-side refusal is not a
+        # 5xx — but the traceback is emitted either way, matching how the
+        # DomainError handler now treats every status.
         if mapped.status_code < 500:
             logger.warning(
                 "[Public %s] %s on %s %s%s",
                 mapped.status_code, type(exc).__name__, request.method,
                 request.url.path, params_suffix(request),
+                exc_info=exc,
             )
             return mapped
         logger.exception(

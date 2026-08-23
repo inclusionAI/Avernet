@@ -55,8 +55,9 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.errors import EngineUpstreamError
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/engine", tags=["engine"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/engine", tags=["engine"], route_class=PublicAPIRoute)
 
 
 def _names(raw: Any) -> list[str]:

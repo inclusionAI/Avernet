@@ -13,7 +13,10 @@ provides:
   - WorkOrderNotificationService
   - WorkOrderModel
   - WorkOrderNotificationModel
+  - WorkOrderApproverModel
   - WorkOrderStatus
+  - WorkOrderDecision
+  - WorkOrderApproverStatus
   - WorkOrderBizType
   - WorkOrderEventType
   - NotificationCategory
@@ -41,8 +44,10 @@ internal_dependencies:
 
 Event values, statuses, titles, and content templates are persisted public
 semantics. Rename or wording changes require coordinated client and data
-compatibility review. Approval, membership creation, and result-notification
-creation are one transaction and must not be split across best-effort writes.
+compatibility review. Approval state and result-notification creation are one transaction and
+must not be split across best-effort writes. The unified Service API does not
+perform business-object mutation; the owning business module handles that
+step according to its own transaction boundary.
 
 ## Stable enum contract
 
@@ -53,28 +58,44 @@ and client compatibility plan.
 | Contract | Values |
 | --- | --- |
 | Work-order status | `PENDING`, `APPROVED`, `REJECTED` |
+| Approver status | `PENDING`, `APPROVED`, `REJECTED`, `CANCELLED` |
 | Persisted notification category | `APPROVAL`, `NOTICE` |
 | List category filter | `ALL`, `APPROVAL`, `NOTICE` |
 | List query type | `PENDING_FOR_ME`, `INITIATED_BY_ME`, `PROCESSED_BY_ME` |
-| Supported business type | `SPACE_JOIN` |
+| Supported business type | `SPACE_JOIN` for the currently implemented Space handler; the unified Service API accepts business-module-defined `biz_type` values. |
 
 `ALL` is a query-only filter and must never be persisted as a notification
-category. `WorkOrderEventType` is also a persisted whitelist. This phase
-implements only the `SPACE_JOIN` handler; the remaining event values reserve
-the names defined by the system design for later business handlers.
+category. `WorkOrderEventType` is also a persisted whitelist. Approval events are
+classified centrally in `APPROVAL_EVENT_TYPES` and currently include
+`SPACE_JOIN_APPLIED`, `BOT_COLLABORATOR_APPLIED`,
+`SKILL_COLLABORATOR_APPLIED`, `HUMAN2BOT_FRIEND_APPLIED`, and
+`BOT2BOT_FRIEND_APPLIED`; all reviewed/member-added/public-order events are
+classified as `NOTICE`. This phase implements only the `SPACE_JOIN` handler;
+the remaining event values reserve the names defined by the system design for
+later business handlers.
 
 ## Space-join message templates
 
-Titles and content are generated only from `WorkOrderMessageTitle` and
-`WorkOrderMessageContent`, then the final rendered text is stored on the
-notification row. Clients display the stored text directly.
+Space-join notification titles are persisted as stable, language-independent
+`WorkOrderTitleKey` values. The OpenAPI adapter translates the known keys into
+Chinese display copy and also recognizes historical Chinese titles and the
+former `SPACE_JOIN APPROVED` / `SPACE_JOIN REJECTED` formats. Unknown custom
+titles pass through unchanged.
 
-| Scenario | Event | Category | Title | Content |
-| --- | --- | --- | --- | --- |
-| Waiting for review | `SPACE_JOIN_APPLIED` | `APPROVAL` | `空间加入申请待审批` | `用户「{applicant_name}」申请加入空间「{space_name}」，请及时处理。` |
-| Approved | `SPACE_JOIN_REVIEWED` | `NOTICE` | `空间加入申请已通过` | `你加入空间「{space_name}」的申请已通过。` |
-| Rejected | `SPACE_JOIN_REVIEWED` | `NOTICE` | `空间加入申请未通过` | `你加入空间「{space_name}」的申请未通过。拒绝原因：{review_remark}` |
-| Added directly | `SPACE_MEMBER_ADDED` | `NOTICE` | `你已被添加到空间` | `你已被添加到空间「{space_name}」。` |
+`content` and `biz_data` have separate ownership. Notification `content` comes
+from `ac_work_order_notification.content`; work-order `biz_data` comes from
+`ac_work_order.biz_data`. Generic OpenAPI event inputs accept a JSON object or
+`null`, persist the object as JSON text, and deserialize the same object on
+read. The adapter never derives one field from the other or reconstructs either
+payload based on `biz_type`. Historical scalar or plain-text rows are exposed
+under `legacy_value` so the response remains object-shaped without losing data.
+
+| Scenario | Event | Category | Persisted title | API title | Content |
+| --- | --- | --- | --- | --- | --- |
+| Waiting for review | `SPACE_JOIN_APPLIED` | `APPROVAL` | `SPACE_JOIN_PENDING` | `空间加入申请待审批` | `用户「{applicant_name}」申请加入空间「{space_name}」，请及时处理。` |
+| Approved | `SPACE_JOIN_REVIEWED` | `NOTICE` | `SPACE_JOIN_APPROVED` | `空间加入申请已通过` | `你加入空间「{space_name}」的申请已通过。` |
+| Rejected | `SPACE_JOIN_REVIEWED` | `NOTICE` | `SPACE_JOIN_REJECTED` | `空间加入申请未通过` | `你加入空间「{space_name}」的申请未通过。拒绝原因：{review_remark}` |
+| Added directly | `SPACE_MEMBER_ADDED` | `NOTICE` | `你已被添加到空间` | `你已被添加到空间` | `你已被添加到空间「{space_name}」。` |
 
 `SPACE_JOIN_REVIEWED` deliberately uses one event value for both outcomes;
 the associated work-order status selects the approved or rejected template.
@@ -83,8 +104,8 @@ the associated work-order status selects the approved or rejected template.
 
 - `PENDING_FOR_ME` contains pending approval notifications and unread notices.
 - `PROCESSED_BY_ME` contains approved/rejected approval notifications and read notices.
-- `pending_approval_count` counts distinct pending Space-join work orders that
-  the recipient can still approve as an active Space administrator.
+- `pending_approval_count` counts distinct pending work orders for which the
+  recipient has a `PENDING` approver record.
 - `unread_notice_count` counts unread `NOTICE` notifications only.
 - `badge_count` is `pending_approval_count + unread_notice_count`; notification
   read state never removes a still-actionable approval from the badge.

@@ -37,9 +37,21 @@ class WorkOrderApplicantAlreadyMemberError(WorkOrderError):
     pass
 
 
+class WorkOrderApplicantAlreadyEditorError(WorkOrderError):
+    pass
+
+
 class WorkOrderJoinNotAllowedError(WorkOrderError):
     pass
 
 
+class WorkOrderBotEditorRequestNotAllowedError(WorkOrderError):
+    pass
+
+
 class WorkOrderNoReviewerError(WorkOrderError):
+    pass
+
+
+class WorkOrderInvalidEventError(WorkOrderError):
     pass

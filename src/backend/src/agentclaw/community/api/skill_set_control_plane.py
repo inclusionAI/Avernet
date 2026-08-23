@@ -27,6 +27,10 @@ class SkillSetControlPlaneServiceProtocol(Protocol):
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> dict[str, Any]: ...
 
+    def resolve_legacy_skill_id(
+        self, *, bot_id: str, owner_id: str, actor_id: str, identifier: str
+    ) -> str: ...
+
     def update_set(
         self,
         *,
@@ -122,6 +126,14 @@ class SkillSetControlPlaneServiceProtocol(Protocol):
 
     async def deactivate(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
+    ) -> dict[str, Any]: ...
+
+    async def switch(
+        self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
+    ) -> dict[str, Any]: ...
+
+    async def sync(
+        self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
     ) -> dict[str, Any]: ...
 
     def resources(

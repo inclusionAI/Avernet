@@ -589,6 +589,13 @@ Bot 的**拥有者**，或 **member 级及以上的协作者** —— 与内部�
 `user_id` 不匹配的唯一含义。协作者查询失败时拒绝（fail closed）。拒绝点会把两个 id
 写入日志；响应不携带任何一个。
 
+**sessions** 组额外允许与目标 Bot 在 BCN 中存在已接受好友关系的人类调用者访问。这是
+聊天通道，不授予运维权限：仅支持 draft，只能看到该用户在 Backend Expert Chat 中拥有
+的会话，并继续复用 Expert Chat 现有的 Session、消息、连接和 Runtime 适配器。每次请求
+都以 BCN 为好友关系权威来源；BCN 查询失败时关闭访问，Backend 旧聊天列表记录仅作为兼容
+投影。其他 engine-runtime 分组仍只允许拥有者/协作者。由于 BCN 尚无按 Bot 精确查询并
+解析 `{bot_id}:{owner_id}` 的接口，好友调用者目前必须显式传 `owner_id`。
+
 两个可选的 query 参数指定目标，遵循与 `user_id` 相同的放置规则（query string，从不
 放在 body 或路径段）：
 
@@ -684,17 +691,19 @@ id 恰好等于该段上的某个字面量，它在该地址上就不可达。�
 
 <!-- reserved-component-names -->
 ```text
-approvals  authorized  all  ceiling  check-name  connection  engine  identity
-loadtest  local  logs  mcp  models  resources  routines  sessions
-skills
+all  approvals  authorized  catalog  ceiling  check-name  connection  engine  identity
+loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
+work-order-notifications  work-orders
 ```
 
-其中九个 —— `approvals`、`connection`、`engine`、`identity`、`models`、`resources`、
-`routines`、`sessions`、`skills` —— **只被待退役的旧地址占着**。Agent 在前的寻址已把每个
-带 Agent 作用域的组件移出了那一段，因此旧地址删除之后，清单只剩下六个：
+其中八个 —— `approvals`、`connection`、`engine`、`identity`、`models`、`resources`、
+`routines`、`sessions` —— **只被待退役的旧地址占着**。Agent 在前的寻址已把每个
+带 Agent 作用域的组件移出了那一段；租户级 Skill Workbench 状态接口仍占用 `skills`，
+因此旧地址删除之后，清单只剩下十五个：
 
 ```text
-authorized  ceiling  check-name  loadtest  logs  mcp
+all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  metadata  mcp  skills  spaces
+work-order-notifications  work-orders
 ```
 
 在旧地址还在应答的这段时间里，上面那份长清单才是准确的：id 为 `sessions` 的 Agent 在
@@ -1135,12 +1144,11 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   地址，因为此前没有可供退役的公共路径。本次生成的 Gateway `bots.openapi.json` 是该公共面的
   发布产物，必须原样同步到独立 OCB Gateway。
 
-- **2026-08-18** —— 将旧 `/api/v1/token/iam` 的两种能力拆分迁移到 OpenAPI：
-  `GET /openapi/v1/org/user/iam-token` 返回第一方聊天所需 IAM Token，
-  `POST /openapi/v1/bots/{bot_id}/caller-identity` 为 Bot 准备 Caller 身份。两条操作均
-  要求 Gateway 用户身份并在 Backend 复核 `user_id`，应用单独调用按 `REFUSED` 拒绝；
-  响应统一使用 Envelope，敏感响应由统一中间件禁止缓存。Avernet Gateway 增加 `org` 转发域和
-  精确用户鉴权规则；实际发布前仍需同步 OCB Gateway SOFA 配置。
+- **2026-08-18** —— 将旧 `/api/v1/token/iam` 的 IAM Token 返回和按需 Caller
+  身份准备能力合并迁移为 `POST /openapi/v1/bots/{bot_id}/iam-token`。前端只传
+  Bot 与运行时上下文，Backend 判断是否需要 Caller Exchange；该操作要求 Gateway
+  用户身份并复核 `user_id`，应用单独调用按 `REFUSED` 拒绝。响应统一使用 Envelope，
+  敏感响应由统一中间件禁止缓存；实际发布前仍需同步 OCB Gateway SOFA 配置。
 
 - **2026-08-15** —— **Agent 在前的寻址。** 每个带 Agent 作用域的操作都迁到
   `/openapi/v1/bots/{bot_id}/<component>/…`，推翻了 2026-08-03 的组件在前规则。原先九个

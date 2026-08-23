@@ -1,4 +1,5 @@
 """Unified public marketplace endpoints under ``/openapi/v1/bots/market``."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
@@ -9,7 +10,11 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.mcp.router import _to_server
-from agentclaw.community.adapters.http.openapi_v1.responses import envelope_errors, page
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    envelope,
+    envelope_errors,
+    page,
+)
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.skill_market_service import (
     SkillMarketSearchQuery,
@@ -28,11 +33,13 @@ from .schemas import (
     McpMarketSearchRequest,
     SkillCenterMarketItem,
     SkillCenterMarketSearchRequest,
+    SkillCenterTag,
     SkillMarketItem,
     SkillMarketSearchRequest,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/market", tags=["market"])
+router = APIRouter(prefix="/openapi/v1/bots/market", tags=["market"], route_class=PublicAPIRoute)
 _AUTH = [Depends(require_principal)]
 
 
@@ -116,3 +123,19 @@ async def search_skill_center_skills(
     )
     items = [SkillCenterMarketItem.model_validate(item) for item in result.items]
     return page(result.total, items, request)
+
+
+@router.get(
+    "/skill-center/tags",
+    response_model=Envelope[list[SkillCenterTag]],
+    dependencies=_AUTH,
+)
+@envelope_errors
+async def list_skill_center_tags(
+    request: Request,
+    client: SkillCenterClient = Injected(SkillCenterClient),
+) -> Envelope[list[SkillCenterTag]]:
+    """List Skill Center tags for marketplace filter initialization."""
+    result = client.get_market_tags()
+    items = [SkillCenterTag.model_validate(item) for item in result]
+    return envelope(items, request)

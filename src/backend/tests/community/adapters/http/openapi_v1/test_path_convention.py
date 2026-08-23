@@ -104,6 +104,7 @@ _BOT_FREE = frozenset(
         "local",
         "logs",
         "market",
+        "metadata",
         "mcp",
         "spaces",
         # Repo catalog is tenant-wide but follows the Skill namespace as

@@ -149,7 +149,7 @@ class ExecutionEngine:
         pool = [DirectDispatchStrategy()]
         if self._bot is not None and self._discover is not None:
             pool.append(SearchBasedDispatchStrategy(
-                self._bot, self._discover))
+                self._bot, self._discover, bcs=self._bcs))
         else:
             pool.append(SearchBasedDispatchStrategy())
         return TaskDispatcher(self._graph, pool=pool)

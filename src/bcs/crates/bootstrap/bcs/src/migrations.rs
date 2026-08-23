@@ -43,7 +43,10 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         is_deleted INTEGER NOT NULL DEFAULT 0,
         agent_code TEXT DEFAULT NULL,
         task_claim_mode INTEGER NOT NULL DEFAULT 0,
-        task_dream_mode INTEGER NOT NULL DEFAULT 0
+        task_dream_mode INTEGER NOT NULL DEFAULT 0,
+        user_visibility TEXT NOT NULL DEFAULT 'protected',
+        friend_ext TEXT DEFAULT NULL,
+        friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL'
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_session_token ON bcs_bots(session_token)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_bot_env ON bcs_bots(bot_uuid, env)",
@@ -930,6 +933,14 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 12,
         name: "add_bot_task_modes",
     },
+    SqliteMigration {
+        version: 13,
+        name: "edge_permission",
+    },
+    SqliteMigration {
+        version: 14,
+        name: "add_bot_internal_attributes",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1032,6 +1043,7 @@ pub async fn run_sqlite_bootstrap_tables(db: &dyn DbPlugin) -> DbResult<()> {
     ensure_sqlite_session_collected_column(db).await?;
     ensure_bcs_session_files(db).await?;
     ensure_sqlite_bot_task_modes(db).await?;
+    ensure_sqlite_bot_internal_attributes(db).await?;
     Ok(())
 }
 
@@ -1102,6 +1114,35 @@ async fn ensure_sqlite_bot_task_modes(db: &dyn DbPlugin) -> DbResult<()> {
     if !has_dream {
         db.execute(DbStatement::new(
             "ALTER TABLE bcs_bots ADD COLUMN task_dream_mode INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await?;
+    }
+    Ok(())
+}
+
+async fn ensure_sqlite_bot_internal_attributes(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_bots").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_bots").await?;
+    if !columns.iter().any(|column| column == "user_visibility") {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN user_visibility TEXT NOT NULL DEFAULT 'protected'",
+        ))
+        .await?;
+    }
+    if !columns.iter().any(|column| column == "friend_ext") {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN friend_ext TEXT DEFAULT NULL",
+        ))
+        .await?;
+    }
+    if !columns
+        .iter()
+        .any(|column| column == "friend_check_in_strategy")
+    {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_bots ADD COLUMN friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL'",
         ))
         .await?;
     }
@@ -1261,6 +1302,12 @@ async fn apply_sqlite_migration_body(
         // ensure_sqlite_bot_task_modes in run_sqlite_bootstrap_tables;
         // version 12 only records progress.
         12 => Ok(()),
+        // Edge-permission tables (friend unification) + bcs_bots config columns.
+        13 => add_sqlite_edge_permission_schema(db).await,
+        // Internal Bot attribute columns are added by
+        // ensure_sqlite_bot_internal_attributes in run_sqlite_bootstrap_tables;
+        // version 14 only records progress.
+        14 => Ok(()),
         _ => Ok(()),
     }
 }
@@ -1332,6 +1379,57 @@ async fn add_sqlite_human_input_output_metadata_schema(db: &dyn DbPlugin) -> DbR
             if !columns.iter().any(|column| column == name) {
                 db.execute(DbStatement::new(format!(
                     "ALTER TABLE bcs_state_machine_node_runs ADD COLUMN {name} {definition}"
+                )))
+                .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn add_sqlite_edge_permission_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    // Five edge-permission tables (idempotent; spec §3.1).
+    for stmt in [
+        "CREATE TABLE IF NOT EXISTS edge_grants (edge_id TEXT PRIMARY KEY, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, grant_kind TEXT NOT NULL, grant_ref_id TEXT NOT NULL, rules TEXT, status TEXT NOT NULL DEFAULT 'approved', originator_policy_type TEXT NOT NULL DEFAULT 'any', originator_policy_data TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_edge_from_to_env_ref ON edge_grants(from_id, to_id, env, grant_ref_id)",
+        "CREATE INDEX IF NOT EXISTS idx_edge_from_env_status ON edge_grants(from_id, env, status)",
+        "CREATE INDEX IF NOT EXISTS idx_edge_to_env_status ON edge_grants(to_id, env, status)",
+        "CREATE TABLE IF NOT EXISTS permission_profiles (permission_profile_id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, env TEXT NOT NULL, name TEXT NOT NULL DEFAULT 'default', description TEXT, rules_template TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, digest TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', created_by TEXT NOT NULL, updated_by TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_profile_bot_env_default ON permission_profiles(bot_id, env, is_default) WHERE status = 'active'",
+        "CREATE INDEX IF NOT EXISTS idx_profile_bot_env ON permission_profiles(bot_id, env, status)",
+        "CREATE TABLE IF NOT EXISTS permission_requests (request_id TEXT PRIMARY KEY, edge_id TEXT, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, request_kind TEXT NOT NULL, requested_ref_id TEXT, requested_rules TEXT, message TEXT, status TEXT NOT NULL DEFAULT 'pending', decision_reason TEXT, created_by TEXT NOT NULL, decided_by TEXT, decided_at TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE INDEX IF NOT EXISTS idx_req_to_env_status ON permission_requests(to_id, env, status)",
+        "CREATE INDEX IF NOT EXISTS idx_req_from_env_status ON permission_requests(from_id, env, status)",
+        "CREATE INDEX IF NOT EXISTS idx_req_edge ON permission_requests(edge_id)",
+        "CREATE TABLE IF NOT EXISTS capabilities (capability_id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, env TEXT NOT NULL, tool TEXT NOT NULL, operation TEXT, specifier_schema TEXT, source TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', raw_metadata TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE INDEX IF NOT EXISTS idx_cap_bot_env ON capabilities(bot_id, env, status)",
+        "CREATE TABLE IF NOT EXISTS authz_decision_logs (decision_id TEXT PRIMARY KEY, env TEXT NOT NULL, task_id TEXT, run_id TEXT, from_id TEXT NOT NULL, to_id TEXT NOT NULL, originator TEXT, context_type TEXT NOT NULL, decision TEXT NOT NULL, reason_code TEXT NOT NULL, grant_refs TEXT NOT NULL, context_json TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE INDEX IF NOT EXISTS idx_adl_env_from_to ON authz_decision_logs(env, from_id, to_id)",
+    ] {
+        db.execute(DbStatement::new(stmt)).await?;
+    }
+    // Edge tables: backfill gmt_create / gmt_modified audit columns for DBs
+    // that created the tables before the audit-column requirement landed.
+    // CREATE TABLE IF NOT EXISTS will not add columns to an existing table,
+    // so ALTER them in idempotently (spec §3.1 — 建表要求 gmt_create/gmt_modified).
+    for table in [
+        "edge_grants",
+        "permission_profiles",
+        "permission_requests",
+        "capabilities",
+        "authz_decision_logs",
+    ] {
+        if !table_exists(db, table).await? {
+            continue;
+        }
+        let columns = sqlite_table_columns(db, table).await?;
+        for (name, definition) in [
+            ("gmt_create", "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+            ("gmt_modified", "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+        ] {
+            if !columns.iter().any(|column| column == name) {
+                db.execute(DbStatement::new(format!(
+                    "ALTER TABLE {table} ADD COLUMN {name} {definition}"
                 )))
                 .await?;
             }
@@ -1541,6 +1639,13 @@ mod tests {
         assert!(columns.iter().any(|column| column == "agent_code"));
         assert!(columns.iter().any(|column| column == "task_claim_mode"));
         assert!(columns.iter().any(|column| column == "task_dream_mode"));
+        assert!(columns.iter().any(|column| column == "user_visibility"));
+        assert!(columns.iter().any(|column| column == "friend_ext"));
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == "friend_check_in_strategy")
+        );
         let node_columns = column_names(&db, "bcs_state_machine_node_runs").await?;
         assert!(node_columns.iter().any(|column| column == "outcome"));
         assert!(node_columns.iter().any(|column| column == "responded_by"));
@@ -1587,7 +1692,7 @@ mod tests {
                     "human_input_im_requests".to_string(),
                     "sqlite".to_string()
                 ),
-                (9, "eventing".to_string(), "sqlite".to_string()),
+(9, "eventing".to_string(), "sqlite".to_string()),
                 (
                     10,
                     "eventing_plaintext_endpoint".to_string(),
@@ -1600,7 +1705,17 @@ mod tests {
                 ),
                 (
                     12,
-                    "add_bot_task_modes".to_string(),
+"add_bot_task_modes".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    13,
+                    "edge_permission".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    14,
+                    "add_bot_internal_attributes".to_string(),
                     "sqlite".to_string()
                 )
             ]
@@ -1614,7 +1729,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 12);
+        assert_eq!(report.pending_versions.len(), 14);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1649,10 +1764,17 @@ mod tests {
             report.pending_versions[9].name,
             "eventing_plaintext_endpoint"
         );
-        assert_eq!(report.pending_versions[10].version, 11);
+assert_eq!(report.pending_versions[10].version, 11);
         assert_eq!(report.pending_versions[10].name, "group_opening_message");
         assert_eq!(report.pending_versions[11].version, 12);
         assert_eq!(report.pending_versions[11].name, "add_bot_task_modes");
+        assert_eq!(report.pending_versions[12].version, 13);
+        assert_eq!(report.pending_versions[12].name, "edge_permission");
+        assert_eq!(report.pending_versions[13].version, 14);
+        assert_eq!(
+            report.pending_versions[13].name,
+            "add_bot_internal_attributes"
+        );
         Ok(())
     }
 
@@ -1694,7 +1816,7 @@ mod tests {
                     "human_input_im_requests".to_string(),
                     "sqlite".to_string()
                 ),
-                (9, "eventing".to_string(), "sqlite".to_string()),
+(9, "eventing".to_string(), "sqlite".to_string()),
                 (
                     10,
                     "eventing_plaintext_endpoint".to_string(),
@@ -1707,7 +1829,17 @@ mod tests {
                 ),
                 (
                     12,
-                    "add_bot_task_modes".to_string(),
+"add_bot_task_modes".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    13,
+                    "edge_permission".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    14,
+                    "add_bot_internal_attributes".to_string(),
                     "sqlite".to_string()
                 )
             ]
@@ -1729,12 +1861,10 @@ mod tests {
         .await?;
 
         let before = check_sqlite_migrations(&db).await?;
-        // v12 (add_bot_task_modes) stays applied after we delete only v11
-        // (group_opening_message), so max applied is now 12 even though v11 is
-        // the sole pending migration. origin's version had group_opening_message
-        // as the tail; the merge appends task_modes at v12, so current_version
-        // drops to 12 (not 10) and v11 remains the only pending re-apply.
-        assert_eq!(before.current_version, Some(12));
+        // Deleting only the v11 (group_opening_message) record leaves later
+        // migrations applied, so the max applied version stays 14 even though
+        // v11 is the sole pending re-apply.
+        assert_eq!(before.current_version, Some(14));
         assert_eq!(
             before
                 .pending_versions
@@ -1752,7 +1882,7 @@ mod tests {
                 .iter()
                 .any(|column| column == "opening_message_json")
         );
-        // group_opening_message is no longer the tail migration (task_modes at v12
+// group_opening_message is no longer the tail migration (task_modes at v12
         // follows it), so assert it was re-applied as the version-11 row rather than
         // as the last row. The column check above already proves the migration
         // re-added opening_message_json; this row check pins it to the right version.
@@ -1865,6 +1995,99 @@ mod tests {
             .expect_err("checksum mismatch should fail startup");
 
         assert!(err.to_string().contains("checksum mismatch"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_bootstrap_adds_internal_attributes_to_legacy_bots() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_bots (bot_uuid TEXT NOT NULL, env TEXT NOT NULL, PRIMARY KEY (bot_uuid, env))",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "INSERT INTO bcs_bots (bot_uuid, env) VALUES ('legacy-bot', 'dev')",
+        ))
+        .await?;
+
+        ensure_sqlite_bot_internal_attributes(&db).await?;
+
+        let columns = column_names(&db, "bcs_bots").await?;
+        assert!(columns.iter().any(|column| column == "user_visibility"));
+        assert!(columns.iter().any(|column| column == "friend_ext"));
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == "friend_check_in_strategy")
+        );
+        let rows = db
+            .query(DbStatement::new(
+                "SELECT user_visibility, friend_check_in_strategy FROM bcs_bots WHERE bot_uuid = 'legacy-bot'",
+            ))
+            .await?;
+        let row = rows.first().expect("legacy Bot row");
+        assert_eq!(
+            db_get_column::<String>(row, "user_visibility")?,
+            "protected"
+        );
+        assert_eq!(
+            db_get_column::<String>(row, "friend_check_in_strategy")?,
+            "APPROVAL"
+        );
+        Ok(())
+    }
+
+    // 建表要求: every edge-permission table must carry gmt_create / gmt_modified.
+    #[tokio::test]
+    async fn fresh_migrations_create_edge_tables_with_gmt_audit_columns() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        run_sqlite_migrations(&db).await?;
+        for table in [
+            "edge_grants",
+            "permission_profiles",
+            "permission_requests",
+            "capabilities",
+            "authz_decision_logs",
+        ] {
+            let columns = column_names(&db, table).await?;
+            assert!(
+                columns.iter().any(|c| c == "gmt_create"),
+                "{table} missing gmt_create"
+            );
+            assert!(
+                columns.iter().any(|c| c == "gmt_modified"),
+                "{table} missing gmt_modified"
+            );
+        }
+        Ok(())
+    }
+
+    // Repair path: a legacy DB that created the edge tables without gmt_* must
+    // get the audit columns backfilled by the idempotent ALTER in the migration.
+    #[tokio::test]
+    async fn edge_table_audit_columns_backfilled_for_legacy_db() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        // Legacy shape: edge_grants as built before the gmt_* audit-column
+        // requirement landed (full real columns, minus gmt_create/gmt_modified).
+        db.execute(DbStatement::new(
+            "CREATE TABLE edge_grants (edge_id TEXT PRIMARY KEY, env TEXT NOT NULL, \
+             from_id TEXT NOT NULL, to_id TEXT NOT NULL, grant_kind TEXT NOT NULL, \
+             grant_ref_id TEXT NOT NULL, rules TEXT, status TEXT NOT NULL DEFAULT 'approved', \
+             originator_policy_type TEXT NOT NULL DEFAULT 'any', originator_policy_data TEXT)",
+        ))
+        .await?;
+        // add_sqlite_edge_permission_schema also ALTERs bcs_bots; give it a stub.
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_bots (bot_uuid TEXT NOT NULL, env TEXT NOT NULL, \
+             PRIMARY KEY (bot_uuid, env))",
+        ))
+        .await?;
+        // Re-running the edge-permission migration (v9) must ADD the gmt columns
+        // via the idempotent ALTER repair (CREATE TABLE IF NOT EXISTS is a no-op).
+        add_sqlite_edge_permission_schema(&db).await?;
+        let columns = column_names(&db, "edge_grants").await?;
+        assert!(columns.iter().any(|c| c == "gmt_create"));
+        assert!(columns.iter().any(|c| c == "gmt_modified"));
         Ok(())
     }
 }

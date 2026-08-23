@@ -66,3 +66,37 @@ pub struct OnboardResponse {
     #[serde(default)]
     pub unbound: Vec<String>,
 }
+
+/// Phase 0 backfill request for `POST /admin/bots/{bot_uuid}/ensure`
+/// (spec §4.2 Step 0b). Authenticated by a service credential
+/// (`X-BCS-Service-Key`), NOT a user JWT.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EnsureBotRequest {
+    /// Bot display name. Required for a newly-created bot; preserved on
+    /// re-ensure when omitted.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Bot capability summary.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// Creator's staff number. Required to bind owner edges; an empty value
+    /// skips the owner-edge binding (registration only).
+    #[serde(default)]
+    pub staff_no: String,
+    /// Optional creator nick name persisted on the human actor.
+    #[serde(default)]
+    pub nick_name: Option<String>,
+    /// Bot visibility (`public` / `protected`). Empty preserves existing.
+    #[serde(default)]
+    pub visibility: String,
+}
+
+/// Response from the Phase 0 ensure endpoint.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EnsureBotResponse {
+    pub bot_uuid: String,
+    pub ensured: bool,
+    /// `true` when a new `bcs_bots` row was created; `false` when the bot
+    /// already existed.
+    pub created: bool,
+}

@@ -1,0 +1,18 @@
+[package]
+name = "bcs-app-collaboration-template"
+description = "Versioned collaboration-template application facade for the BCN V1 internal API"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-service-api = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

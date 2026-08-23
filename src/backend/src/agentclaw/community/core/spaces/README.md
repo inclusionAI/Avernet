@@ -2,7 +2,11 @@
 
 Owns Space lifecycle, membership, roles, and the centralized authorization rules
 used by every Space-scoped feature. Personal-space initialization and team-space
-creation persist the Space and its creator OWNER membership in one transaction.
+creation persist the Space and its creator ADMIN membership in one transaction.
+
+`ADMIN` is the only canonical role. `OWNER` and `ADMINISTRATOR` are retained
+only as compatibility aliases for old clients and historical rows; they must not
+be used for new writes.
 
 Application-only OpenAPI access is deliberately not decided here. The HTTP
 adapter inventories every operation as `AdmissionMode.REFUSED` until a

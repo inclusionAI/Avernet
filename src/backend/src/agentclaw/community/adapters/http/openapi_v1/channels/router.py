@@ -58,11 +58,13 @@ from .schemas import (
     ChannelUpdate,
     DingTalkChannelConfig,
 )
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/channels",
     tags=["channels"],
+    route_class=PublicAPIRoute,
 )
 
 # Keep the admission mode visible at the route boundary. ``OwnerIdDep`` also

@@ -49,8 +49,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 
 from .schemas import HelloWorld
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/loadtest", tags=["loadtest"])
+router = APIRouter(prefix="/openapi/v1/bots/loadtest", tags=["loadtest"], route_class=PublicAPIRoute)
 
 #: The one thing this group says. A constant rather than a literal in two
 #: places, so the test asserts the same bytes the handler returns.

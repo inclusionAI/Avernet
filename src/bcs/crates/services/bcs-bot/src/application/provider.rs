@@ -277,6 +277,7 @@ impl ProviderManagementService for ProviderManagement {
                     skills: command.skills,
                     scopes: command.scopes,
                     bot_uuid: command.bot_uuid,
+                    connection_mode: command.connection_mode,
                 },
             )
             .await?;

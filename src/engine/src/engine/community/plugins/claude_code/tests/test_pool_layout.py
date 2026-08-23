@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import threading
 from pathlib import Path
 
@@ -35,6 +36,7 @@ def _prepared_home(
     active_root = home / ".claude" / "skills"
     local_bridge = active_root / "skills-local"
     repo_bridge = active_root / "skills-repo"
+    legacy_repo = home / ".claude_code" / "skills-repo"
     pool_root = home / ".claude_code" / "workspace" / "skills-pool"
     pool_local = pool_root / "skills-local"
     pool_repo = pool_root / "skills-repo"
@@ -45,9 +47,11 @@ def _prepared_home(
     (pool_local / "handmade" / "SKILL.md").write_text("prepared")
     (pool_repo / "business" / "shared").mkdir(parents=True)
     (pool_repo / "business" / "shared" / "SKILL.md").write_text("repo")
+    (legacy_repo / "business" / "shared").mkdir(parents=True)
+    (legacy_repo / "business" / "shared" / "SKILL.md").write_text("legacy repo")
     active_root.mkdir(parents=True, exist_ok=True)
     local_bridge.symlink_to(legacy_local, target_is_directory=True)
-    repo_bridge.symlink_to(pool_repo, target_is_directory=True)
+    repo_bridge.symlink_to(legacy_repo, target_is_directory=True)
 
     marker = {
         "engine": "claude_code",
@@ -74,10 +78,15 @@ def _prepared_home(
                 {
                     "name": "stable_repo_bridge",
                     "path": str(repo_bridge),
-                    "target": str(pool_repo),
+                    "target": str(legacy_repo),
                     "valid": True,
                 },
             ],
+            "legacy_repo": {
+                "path": str(legacy_repo),
+                "actual_directory": True,
+                "valid": True,
+            },
             "managed_active_entries": [],
             "external_active_entry_count": 0,
         },
@@ -95,10 +104,11 @@ def _prepared_home(
 
 def test_claude_code_probe_requires_both_stable_bridges(tmp_path: Path) -> None:
     home, _, _, repo_bridge, _, pool_repo = _prepared_home(tmp_path)
+    legacy_repo = home / ".claude_code" / "skills-repo"
 
     ready = inspect_claude_code_runtime_layout(
         home=home,
-        repo_is_mounted=lambda path: path == pool_repo,
+        repo_is_mounted=lambda path: path in {legacy_repo, pool_repo},
     )
 
     assert ready.status is RuntimeLayoutInspectionStatus.READY
@@ -111,11 +121,74 @@ def test_claude_code_probe_requires_both_stable_bridges(tmp_path: Path) -> None:
     repo_bridge.symlink_to(home / "wrong", target_is_directory=True)
     invalid = inspect_claude_code_runtime_layout(
         home=home,
-        repo_is_mounted=lambda path: path == pool_repo,
+        repo_is_mounted=lambda path: path in {legacy_repo, pool_repo},
     )
 
     assert invalid.status is RuntimeLayoutInspectionStatus.INVALID
     assert invalid.evidence["reason"] == "stable_repo_bridge_invalid"
+
+
+def test_claude_code_probe_rejects_legacy_repo_redirected_to_pool(
+    tmp_path: Path,
+) -> None:
+    home, _, _, _, _, pool_repo = _prepared_home(tmp_path)
+    legacy_repo = home / ".claude_code" / "skills-repo"
+    shutil.rmtree(legacy_repo)
+    legacy_repo.symlink_to(pool_repo, target_is_directory=True)
+
+    invalid = inspect_claude_code_runtime_layout(
+        home=home,
+        repo_is_mounted=lambda path: path in {legacy_repo, pool_repo},
+    )
+
+    assert invalid.status is RuntimeLayoutInspectionStatus.INVALID
+    assert invalid.evidence["reason"] == "legacy_repo_not_independent"
+
+
+def test_claude_code_probe_rejects_missing_legacy_repo(tmp_path: Path) -> None:
+    home, _, _, _, _, pool_repo = _prepared_home(tmp_path)
+    legacy_repo = home / ".claude_code" / "skills-repo"
+    shutil.rmtree(legacy_repo)
+
+    invalid = inspect_claude_code_runtime_layout(
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert invalid.status is RuntimeLayoutInspectionStatus.INVALID
+    assert invalid.evidence["reason"] == "legacy_repo_not_independent"
+
+
+def test_claude_code_probe_reports_legacy_mount_transient_error(
+    tmp_path: Path,
+) -> None:
+    home, _, _, _, _, pool_repo = _prepared_home(tmp_path)
+    legacy_repo = home / ".claude_code" / "skills-repo"
+
+    def repo_is_mounted(path: Path) -> bool:
+        if path == legacy_repo:
+            raise OSError("mount table unavailable")
+        return path == pool_repo
+
+    transient = inspect_claude_code_runtime_layout(
+        home=home,
+        repo_is_mounted=repo_is_mounted,
+    )
+
+    assert transient.status is RuntimeLayoutInspectionStatus.TRANSIENT_ERROR
+    assert transient.evidence["reason"] == "legacy_repo_temporarily_unavailable"
+
+
+def test_claude_code_probe_requires_legacy_repo_mount(tmp_path: Path) -> None:
+    home, _, _, _, _, pool_repo = _prepared_home(tmp_path)
+
+    invalid = inspect_claude_code_runtime_layout(
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert invalid.status is RuntimeLayoutInspectionStatus.INVALID
+    assert invalid.evidence["reason"] == "legacy_repo_not_mounted"
 
 
 def test_claude_code_probe_rejects_non_file_marker(tmp_path: Path) -> None:
@@ -146,6 +219,7 @@ def test_claude_code_activation_retires_physical_legacy_local(
         pool_local,
         pool_repo,
     ) = _prepared_home(tmp_path)
+    legacy_repo = home / ".claude_code" / "skills-repo"
     mappings = [
         SkillMapping(
             source=str(pool_local / "handmade"),
@@ -163,7 +237,7 @@ def test_claude_code_activation_retires_physical_legacy_local(
         registered_local_names=["handmade"],
         mappings=mappings,
         home=home,
-        repo_is_mounted=lambda path: path == pool_repo,
+        repo_is_mounted=lambda path: path in {legacy_repo, pool_repo},
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
@@ -209,6 +283,32 @@ def test_claude_code_publishes_and_verifies_pool_mappings(tmp_path: Path) -> Non
 
     assert mismatch.valid is False
     assert mismatch.evidence["failures"][0]["reason"] == "managed_source_conflict"
+
+
+def test_claude_code_accepts_active_repo_alias_for_legacy_mappings(
+    tmp_path: Path,
+) -> None:
+    home, _, _, repo_bridge, _, _ = _prepared_home(tmp_path)
+    source = repo_bridge / "business" / "shared"
+    target = repo_bridge.parent / "shared"
+    mapping = SkillMapping(source=str(source), target=str(target))
+
+    published = publish_claude_code_pool_mappings(
+        mappings=[mapping],
+        source_layout=MappingSourceLayout.LEGACY,
+        home=home,
+    )
+    verified = verify_claude_code_pool_mappings(
+        mappings=[mapping],
+        source_layout=MappingSourceLayout.LEGACY,
+        home=home,
+    )
+
+    assert published.published is True
+    assert target.is_symlink()
+    legacy_repo = home / ".claude_code" / "skills-repo"
+    assert target.resolve() == (legacy_repo / "business" / "shared").resolve()
+    assert verified.valid is True
 
 
 @pytest.mark.asyncio

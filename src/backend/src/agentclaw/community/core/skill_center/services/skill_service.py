@@ -1043,7 +1043,7 @@ class SkillService:
                     # 只有包含 SKILL.md 的目录才被认为是技能
                     if SkillParser.has_skill_file(item):
                         # 是技能目录，解析并缓存
-                        skill_info = SkillParser.parse(item)
+                        skill_info = SkillParser.parse_repository(item)
                         if skill_info:
                             index[rel_path] = skill_info
                     else:
@@ -1078,7 +1078,7 @@ class SkillService:
 
         # 检查是否是技能目录（不在索引中的情况）- 只有 SKILL.md 才算
         if SkillParser.has_skill_file(path):
-            skill_info = SkillParser.parse(path)
+            skill_info = SkillParser.parse_repository(path)
             if skill_info:
                 # 添加到索引
                 skills_index[rel_path] = skill_info
@@ -1116,7 +1116,7 @@ class SkillService:
 
         # 只有包含 SKILL.md 的目录才被认为是技能
         if SkillParser.has_skill_file(path):
-            skill_info = SkillParser.parse(path)
+            skill_info = SkillParser.parse_repository(path)
             return SkillTreeNode(
                 name=skill_info.get("name", path.name) if skill_info else path.name,
                 path=str(path.relative_to(market_repo_dir)),
@@ -1345,7 +1345,8 @@ class SkillService:
                 # 不透传会导致 sync_market 把 "Distributed lock held" 当成 500 错误抛出。
                 "error": result.get("error"),
                 "message": "Sync completed" if result.get("success") else result.get("error", "Sync failed"),
-                "subtrees": result.get("subtrees", {})
+                "subtrees": result.get("subtrees", {}),
+                "database": result.get("database"),
             }
         except Exception as e:
             logger.error(f"[sync_repo_with_lock] Error: {e}")
@@ -1595,7 +1596,7 @@ class SkillService:
 
     def _parse_skill_md_for_db(self, skill_path: Path) -> dict[str, Any] | None:
         """解析技能文件，返回数据库需要的格式"""
-        base_info = SkillParser.parse(skill_path)
+        base_info = SkillParser.parse_repository(skill_path)
         if not base_info:
             return None
 

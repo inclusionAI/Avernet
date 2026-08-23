@@ -22,18 +22,29 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     CreateSpaceJoinRequest,
+    CreateWorkOrderEventRequest,
+    WorkOrderEventCreated,
+    WorkOrderEventStatus,
+    CreateBotEditorRequest,
+    BotEditorRequestCreated,
     NotificationDetailResponse,
     NotificationReadResponse,
     NotificationsReadAllResponse,
     SpaceJoinRequestCreated,
     UnreadCountResponse,
-    WorkOrderDetailContent,
     WorkOrderDetailResponse,
     WorkOrderItemType,
     WorkOrderListItem,
     WorkOrderQueryType,
     WorkOrderReviewRequest,
+    WorkOrderApprovalRequest,
+    WorkOrderDecision,
     WorkOrderReviewResponse,
+    WorkOrderLegacyReviewResponse,
+)
+from agentclaw.community.adapters.http.openapi_v1.work_orders.converter import (
+    display_title,
+    json_object,
 )
 from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
@@ -43,12 +54,17 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderItemType as DomainWorkOrderItemType,
     WorkOrderListItem as DomainListItem,
     WorkOrderQueryType as DomainWorkOrderQueryType,
+    NotificationCategory as DomainNotificationCategory,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 
-router = APIRouter(tags=["work-orders"])
+router = APIRouter(tags=["work-orders"], route_class=PublicAPIRoute)
 PositiveIdPath = Annotated[int, Path(ge=1, description="Positive numeric identifier.")]
+BotIdPath = Annotated[
+    str, Path(min_length=1, max_length=64, description="Identifier of the Bot.")
+]
 PageNoQuery = Annotated[int, Query(ge=1, description="One-based page number.")]
 PageSizeQuery = Annotated[
     int, Query(ge=1, le=100, description="Maximum items returned per page.")
@@ -68,6 +84,34 @@ def _require_user_delegation(caller: ActingCaller) -> str:
 def _list_item(item: DomainListItem) -> WorkOrderListItem:
     work_order = item.work_order
     notification = item.notification
+    if work_order is None:
+        assert notification is not None
+        return WorkOrderListItem(
+            item_id=f"NOTIFICATION_{notification.id}",
+            item_type=WorkOrderItemType.NOTICE,
+            work_order_id=None,
+            work_order_no=None,
+            notification_id=notification.id,
+            notification_category=notification.notification_category,
+            biz_type=notification.biz_type,
+            biz_id=notification.biz_id,
+            applicant_user_id=None,
+            apply_reason=None,
+            reviewer_user_id=None,
+            review_remark=None,
+            reviewed_at=None,
+            recipient_user_id=notification.recipient_user_id,
+            event_type=notification.event_type,
+            title=display_title(notification.title),
+            content=json_object(notification.content),
+            status=None,
+            is_read=notification.is_read,
+            read_at=notification.read_at,
+            env=notification.env,
+            can_approve=False,
+            gmt_created=notification.gmt_created,
+            gmt_modified=notification.gmt_modified,
+        )
     modified = (
         notification.gmt_modified
         if notification is not None
@@ -79,6 +123,12 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         if category is not None
         else WorkOrderItemType.APPROVAL
     )
+    title = display_title(
+        notification.title if notification is not None else None,
+        biz_type=work_order.biz_type,
+        status=work_order.status,
+    )
+    content = json_object(notification.content) if notification is not None else None
     return WorkOrderListItem(
         item_id=(
             f"NOTIFICATION_{notification.id}"
@@ -97,12 +147,12 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         reviewer_user_id=work_order.reviewer_user_id,
         review_remark=work_order.review_remark,
         reviewed_at=work_order.reviewed_at,
-        recipient_user_id=(
-            notification.recipient_user_id if notification is not None else None
-        ),
+        recipient_user_id=notification.recipient_user_id
+        if notification is not None
+        else None,
         event_type=notification.event_type if notification is not None else None,
-        title=notification.title if notification is not None else None,
-        content=notification.content if notification is not None else None,
+        title=title,
+        content=content,
         status=work_order.status,
         is_read=notification.is_read if notification is not None else None,
         read_at=notification.read_at if notification is not None else None,
@@ -110,6 +160,43 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         can_approve=item.can_approve,
         gmt_created=work_order.gmt_created,
         gmt_modified=modified,
+    )
+
+
+@router.post(
+    "/openapi/v1/bots/{bot_id}/editor-requests",
+    status_code=201,
+    response_model=Envelope[BotEditorRequestCreated],
+)
+@envelope_errors
+async def create_bot_editor_request(
+    bot_id: BotIdPath,
+    body: CreateBotEditorRequest,
+    request: Request,
+    caller: ActingCallerDep,
+    owner_id: Annotated[
+        str | None,
+        Query(
+            max_length=256,
+            description="Owner of the Bot. Defaults to the current user.",
+        ),
+    ] = None,
+    service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
+) -> Envelope[BotEditorRequestCreated]:
+    actor_id = _require_user_delegation(caller)
+    record = service.create_bot_editor_request(
+        bot_id=bot_id,
+        owner_id=owner_id or actor_id,
+        applicant_user_id=actor_id,
+        reason=body.reason,
+    )
+    return created(
+        BotEditorRequestCreated(
+            work_order_id=record.id,
+            work_order_no=record.work_order_no,
+            status=record.status,
+        ),
+        request,
     )
 
 
@@ -142,6 +229,45 @@ async def create_space_join_request(
     )
 
 
+@router.post(
+    "/openapi/v1/bots/work-orders/events",
+    status_code=201,
+    response_model=Envelope[WorkOrderEventCreated],
+)
+@envelope_errors
+async def create_work_order_event(
+    body: CreateWorkOrderEventRequest,
+    request: Request,
+    caller: ActingCallerDep,
+    service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
+) -> Envelope[WorkOrderEventCreated]:
+    actor_id = _require_user_delegation(caller)
+    result = service.create_work_order_event(
+        event_category=DomainNotificationCategory(body.event_category),
+        biz_type=body.biz_type,
+        biz_id=body.biz_id,
+        event_type=body.event_type,
+        applicant_user_id=body.applicant_user_id,
+        approver_user_ids=body.approver_user_ids,
+        recipient_user_ids=body.recipient_user_ids,
+        title=body.title,
+        content=body.content,
+        apply_reason=body.apply_reason,
+        biz_data=body.biz_data,
+        actor_id=actor_id,
+    )
+    return created(
+        WorkOrderEventCreated(
+            event_category=result.event_category,
+            work_order_id=result.work_order_id,
+            work_order_no=result.work_order_no,
+            notification_ids=result.notification_ids,
+            status=WorkOrderEventStatus(result.status),
+        ),
+        request,
+    )
+
+
 @router.get(
     "/openapi/v1/bots/work-orders",
     response_model=Envelope[Page[WorkOrderListItem]],
@@ -157,6 +283,17 @@ async def list_work_orders(
     item_type: Annotated[
         WorkOrderItemType, Query(description="Category of inbox item to return.")
     ] = WorkOrderItemType.ALL,
+    biz_type: Annotated[
+        str | None,
+        Query(
+            max_length=64,
+            description="Business type to return, or all business types.",
+        ),
+    ] = None,
+    biz_id: Annotated[
+        str | None,
+        Query(max_length=128, description="Business identifier to return."),
+    ] = None,
     page_no: PageNoQuery = 1,
     page_size: PageSizeQuery = 20,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
@@ -166,6 +303,8 @@ async def list_work_orders(
         actor_id=actor_id,
         query_type=DomainWorkOrderQueryType(query_type),
         item_type=DomainWorkOrderItemType(item_type),
+        biz_type=biz_type,
+        biz_id=biz_id,
         page_no=page_no,
         page_size=page_size,
     )
@@ -191,20 +330,21 @@ async def get_work_order(
             work_order_id=work_order.id,
             work_order_no=work_order.work_order_no,
             biz_type=work_order.biz_type,
-            biz_id=detail.space_id,
+            biz_id=detail.space_id
+            if work_order.biz_type == "SPACE_JOIN"
+            else work_order.biz_id,
             event_type=detail.event_type,
-            title=detail.title,
-            content=WorkOrderDetailContent(
-                space_id=detail.space_id,
-                space_name=detail.space_name,
-                applicant_user_id=work_order.applicant_user_id,
-                applicant_name=detail.applicant_name,
-                reason=work_order.apply_reason,
+            title=display_title(
+                detail.title,
+                biz_type=work_order.biz_type,
+                status=work_order.status,
             ),
+            content=json_object(detail.content),
             status=work_order.status,
             reviewer_user_id=work_order.reviewer_user_id,
             review_remark=work_order.review_remark,
             reviewed_at=work_order.reviewed_at,
+            biz_data=json_object(work_order.biz_data),
             can_approve=detail.can_approve,
         ),
         request,
@@ -215,6 +355,17 @@ def _review_response(result) -> WorkOrderReviewResponse:
     return WorkOrderReviewResponse(
         work_order_id=result.work_order_id,
         status=result.status,
+        decision=result.decision,
+        reviewer_user_id=result.reviewer_user_id,
+        review_remark=result.review_remark,
+        reviewed_at=result.reviewed_at,
+    )
+
+
+def _legacy_review_response(result) -> WorkOrderLegacyReviewResponse:
+    return WorkOrderLegacyReviewResponse(
+        work_order_id=result.work_order_id,
+        status=result.status,
         reviewer_user_id=result.reviewer_user_id,
         review_remark=result.review_remark,
         reviewed_at=result.reviewed_at,
@@ -222,8 +373,30 @@ def _review_response(result) -> WorkOrderReviewResponse:
 
 
 @router.post(
-    "/openapi/v1/bots/work-orders/{work_order_id}/approve",
+    "/openapi/v1/bots/work-orders/{work_order_id}/approval",
     response_model=Envelope[WorkOrderReviewResponse],
+)
+@envelope_errors
+async def process_work_order_approval(
+    work_order_id: PositiveIdPath,
+    body: WorkOrderApprovalRequest,
+    request: Request,
+    caller: ActingCallerDep,
+    service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
+) -> Envelope[WorkOrderReviewResponse]:
+    actor_id = _require_user_delegation(caller)
+    result = service.process_approval(
+        work_order_id=work_order_id,
+        actor_id=actor_id,
+        decision=WorkOrderDecision(body.decision),
+        review_remark=body.review_remark,
+    )
+    return envelope(_review_response(result), request)
+
+
+@router.post(
+    "/openapi/v1/bots/work-orders/{work_order_id}/approve",
+    response_model=Envelope[WorkOrderLegacyReviewResponse],
     dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
@@ -235,16 +408,14 @@ async def approve_work_order(
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderReviewResponse]:
     result = service.approve(
-        work_order_id=work_order_id,
-        actor_id=user_id,
-        review_remark=body.review_remark,
+        work_order_id=work_order_id, actor_id=user_id, review_remark=body.review_remark
     )
-    return envelope(_review_response(result), request)
+    return envelope(_legacy_review_response(result), request)
 
 
 @router.post(
     "/openapi/v1/bots/work-orders/{work_order_id}/reject",
-    response_model=Envelope[WorkOrderReviewResponse],
+    response_model=Envelope[WorkOrderLegacyReviewResponse],
     dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
@@ -256,11 +427,9 @@ async def reject_work_order(
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderReviewResponse]:
     result = service.reject(
-        work_order_id=work_order_id,
-        actor_id=user_id,
-        review_remark=body.review_remark,
+        work_order_id=work_order_id, actor_id=user_id, review_remark=body.review_remark
     )
-    return envelope(_review_response(result), request)
+    return envelope(_legacy_review_response(result), request)
 
 
 @router.get(
@@ -319,8 +488,12 @@ async def get_notification(
             work_order_id=record.work_order_id,
             notification_category=record.notification_category,
             event_type=record.event_type,
-            title=record.title,
-            content=record.content,
+            title=display_title(
+                record.title,
+                biz_type=record.biz_type,
+                status=detail.work_order_status,
+            ),
+            content=json_object(record.content),
             is_read=record.is_read,
             work_order_status=detail.work_order_status,
             can_approve=detail.can_approve,

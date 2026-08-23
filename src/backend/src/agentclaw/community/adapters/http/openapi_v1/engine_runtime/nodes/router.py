@@ -34,8 +34,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.errors import EngineUpstreamError
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/nodes", tags=["nodes"])
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/nodes", tags=["nodes"], route_class=PublicAPIRoute)
 
 NodeStatusQuery = Annotated[
     str | None,

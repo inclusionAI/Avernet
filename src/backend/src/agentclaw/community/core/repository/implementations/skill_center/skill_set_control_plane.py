@@ -8,7 +8,7 @@ would make a SkillSet only *eventually* atomic.
 from __future__ import annotations
 
 from injector import inject
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
     Skill,
@@ -19,8 +19,21 @@ from agentclaw.community.core.models.mcp import (
     BotMCPInstallation,
     SkillSetMCPServer,
 )
+from agentclaw.community.core.repository.implementations.skill_center.default_skillset_projection import (
+    excluded_skill_ids,
+    global_default_scope,
+)
+from agentclaw.community.core.repository.implementations.skill_center.skill_set_projection import (
+    skill_set_item as _item,
+)
 from agentclaw.community.core.repository.protocols.skill_set_control_plane import (
     SkillSetControlPlaneRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.skill_installation import (
+    SkillInstallationRepositoryProtocol,
+)
+from agentclaw.community.core.repository.implementations.skill_center.installation import (
+    SkillInstallationRepository,
 )
 from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_set_control_plane import (
     McpSkillSetControlPlaneCommands,
@@ -41,35 +54,23 @@ from agentclaw.community.core.skill_center.errors import (
 )
 
 
-def _item(row: SkillSet) -> dict:
-    return {
-        "id": str(row.id),
-        "name": row.name,
-        "description": row.description,
-        "is_default": bool(row.is_default),
-        "is_builtin": bool(row.is_builtin),
-        # System Default is a platform projection, not mutable desired state.
-        # Historical rows may contain false from the old storage model, but the
-        # public contract must always expose Default as active.
-        "is_active": True if row.is_default else bool(row.is_active),
-        "user_id": row.user_id,
-        "bolt_id": row.bolt_id,
-        "engine_type": row.engine_type,
-        "gmt_created": row.gmt_created.isoformat() if row.gmt_created else "",
-        "gmt_modified": row.gmt_modified.isoformat() if row.gmt_modified else "",
-        "env": row.env,
-        "type": "default" if row.is_default else "custom",
-    }
-
-
 class SkillSetControlPlaneRepository(
     McpSkillSetControlPlaneCommands, SkillSetControlPlaneRepositoryProtocol
 ):
     """Desired-state UoW for SkillSet Membership and Installations."""
 
     @inject
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(
+        self,
+        db: DatabasePlugin,
+        installation_repository: SkillInstallationRepositoryProtocol | None = None,
+    ) -> None:
         self._db = db
+        # Direct construction remains a supported test seam; the fallback
+        # preserves the same Install-or-already-present repository semantics.
+        self._installation_repository = (
+            installation_repository or SkillInstallationRepository(db)
+        )
 
     @staticmethod
     def _as_item(row: SkillSet) -> dict:
@@ -82,22 +83,90 @@ class SkillSetControlPlaneRepository(
             model.env == get_current_env(),
         )
 
-    def list_sets(self, *, bot_id: str, engine_type: str | None = None) -> list[dict]:
+    def list_sets(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> list[dict]:
         with self._db.orm_session() as session:
-            query = self._scope(session.query(SkillSet), SkillSet).filter(
-                SkillSet.bolt_id == bot_id
+            owned = self._owned_set_scope(
+                bot_id=bot_id, owner_id=owner_id, engine_type=engine_type
             )
-            if engine_type is not None:
-                query = query.filter(SkillSet.engine_type == engine_type)
-            rows = query.order_by(SkillSet.is_default.desc(), SkillSet.id).all()
+            ordinary = self._scope(session.query(SkillSet), SkillSet).filter(
+                owned, SkillSet.is_default.is_(False)
+            )
+            defaults: list[SkillSet] = []
+            for candidate in default_engine_types or ((engine_type,) if engine_type else ()):
+                defaults = (
+                    self._scope(session.query(SkillSet), SkillSet)
+                    .filter(global_default_scope((candidate,)))
+                    .order_by(SkillSet.id)
+                    .all()
+                )
+                if defaults:
+                    break
+            rows = [*defaults, *ordinary.order_by(SkillSet.id).all()]
             return [_item(row) for row in rows]
 
+    def ensure_active_skillset_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None = None,
+    ) -> int:
+        """Insert only missing rows for legacy active ordinary SkillSet members.
+
+        The canonical mutation commands already keep Installation rows in sync.
+        This is intentionally a narrow cutover repair: it never reads the
+        Default Set, never removes rows, and never changes existing Direct
+        desired state.
+        """
+        with self._db.orm_session() as session:
+            sets = self._scope(session.query(SkillSet), SkillSet).filter(
+                SkillSet.bolt_id == bot_id,
+                SkillSet.user_id == owner_id,
+                SkillSet.is_default.is_(False),
+                SkillSet.is_active.is_(True),
+            )
+            if engine_type is not None:
+                sets = sets.filter(SkillSet.engine_type == engine_type)
+            active_set_ids = {int(row.id) for row in sets.all()}
+            if not active_set_ids:
+                return 0
+
+            member_ids = {
+                int(row.skill_id)
+                for row in self._scope(
+                    session.query(SkillSetSkill), SkillSetSkill
+                )
+                .filter(SkillSetSkill.skill_set_id.in_(active_set_ids))
+                .all()
+            }
+            if not member_ids:
+                return 0
+
+        return sum(
+            self._installation_repository.install(
+                env=get_current_env(),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                skill_id=skill_id,
+            )
+            for skill_id in member_ids
+        )
+
     def get_set(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> dict:
         with self._db.orm_session() as session:
             row = self._set(
-                session, bot_id=bot_id, set_id=set_id, engine_type=engine_type
+                session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type,
+                default_engine_types=default_engine_types,
             )
             return _item(row)
 
@@ -113,7 +182,11 @@ class SkillSetControlPlaneRepository(
         with self._db.transactional_orm_session() as session:
             duplicate = (
                 self._scope(session.query(SkillSet), SkillSet)
-                .filter(SkillSet.bolt_id == bot_id, SkillSet.name == name)
+                .filter(
+                    SkillSet.bolt_id == bot_id,
+                    SkillSet.user_id == owner_id,
+                    SkillSet.name == name,
+                )
                 .first()
             )
             if duplicate is not None:
@@ -138,26 +211,31 @@ class SkillSetControlPlaneRepository(
         self,
         *,
         bot_id: str,
+        owner_id: str,
         set_id: str,
         name: str | None,
         description: str | None,
         engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> dict:
         with self._db.transactional_orm_session() as session:
             row = self._set(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 set_id=set_id,
                 engine_type=engine_type,
+                default_engine_types=default_engine_types,
                 locked=True,
             )
-            if row.is_default and name is not None:
+            if row.is_default:
                 raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
             if name is not None and name != row.name:
                 duplicate = (
                     self._scope(session.query(SkillSet), SkillSet)
                     .filter(
                         SkillSet.bolt_id == bot_id,
+                        SkillSet.user_id == owner_id,
                         SkillSet.name == name,
                         SkillSet.id != row.id,
                     )
@@ -172,14 +250,17 @@ class SkillSetControlPlaneRepository(
             return _item(row)
 
     def delete_set(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> None:
         with self._db.transactional_orm_session() as session:
             row = self._set(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 set_id=set_id,
                 engine_type=engine_type,
+                default_engine_types=default_engine_types,
                 locked=True,
             )
             if row.is_default:
@@ -195,11 +276,13 @@ class SkillSetControlPlaneRepository(
             session.delete(row)
 
     def list_skills(
-        self, *, bot_id: str, set_id: str, engine_type: str | None = None
+        self, *, bot_id: str, owner_id: str, set_id: str, engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> list[dict]:
         with self._db.orm_session() as session:
             row = self._set(
-                session, bot_id=bot_id, set_id=set_id, engine_type=engine_type
+                session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type,
+                default_engine_types=default_engine_types,
             )
             rows = (
                 self._scope(session.query(Skill), Skill)
@@ -208,6 +291,11 @@ class SkillSetControlPlaneRepository(
                 .order_by(Skill.id)
                 .all()
             )
+            if row.is_default:
+                excluded = excluded_skill_ids(
+                    session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+                )
+                rows = [skill for skill in rows if int(skill.id) not in excluded]
             return [
                 {
                     "id": str(skill.id),
@@ -255,13 +343,16 @@ class SkillSetControlPlaneRepository(
         set_id: str,
         skill_id: str,
         engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 set_id=set_id,
                 engine_type=engine_type,
+                default_engine_types=default_engine_types,
                 locked=True,
             )
             self._ordinary(row)
@@ -297,6 +388,7 @@ class SkillSetControlPlaneRepository(
                 .join(SkillSetSkill, SkillSetSkill.skill_set_id == SkillSet.id)
                 .filter(
                     SkillSet.bolt_id == bot_id,
+                    SkillSet.user_id == owner_id,
                     SkillSet.is_default.is_(False),
                     SkillSetSkill.skill_id == skill.id,
                 )
@@ -343,13 +435,16 @@ class SkillSetControlPlaneRepository(
         set_id: str,
         skill_id: str,
         engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 set_id=set_id,
                 engine_type=engine_type,
+                default_engine_types=default_engine_types,
                 locked=True,
             )
             self._ordinary(row)
@@ -386,13 +481,16 @@ class SkillSetControlPlaneRepository(
         set_id: str,
         active: bool,
         engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation:
         with self._db.transactional_orm_session() as session:
             row = self._set(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 set_id=set_id,
                 engine_type=engine_type,
+                default_engine_types=default_engine_types,
                 locked=True,
             )
             if row.is_default:
@@ -478,6 +576,7 @@ class SkillSetControlPlaneRepository(
         owner_id: str,
         set_id: str,
         engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> SkillSetMutation:
         """Atomically replace all ordinary active sets with ``set_id``.
 
@@ -490,8 +589,10 @@ class SkillSetControlPlaneRepository(
             target = self._set(
                 session,
                 bot_id=bot_id,
+                owner_id=owner_id,
                 set_id=set_id,
                 engine_type=engine_type,
+                default_engine_types=default_engine_types,
                 locked=True,
             )
             self._ordinary(target)
@@ -499,7 +600,9 @@ class SkillSetControlPlaneRepository(
                 session, bot_id, owner_id, engine_type=engine_type
             )
             query = self._scope(session.query(SkillSet), SkillSet).filter(
-                SkillSet.bolt_id == bot_id, SkillSet.is_default.is_(False)
+                SkillSet.bolt_id == bot_id,
+                SkillSet.user_id == owner_id,
+                SkillSet.is_default.is_(False),
             )
             if engine_type is not None:
                 query = query.filter(SkillSet.engine_type == engine_type)
@@ -625,7 +728,9 @@ class SkillSetControlPlaneRepository(
         """Atomically restore Membership, set-state and Installation facts."""
         with self._db.transactional_orm_session() as session:
             query = self._scope(session.query(SkillSet), SkillSet).filter(
-                SkillSet.bolt_id == bot_id, SkillSet.is_default.is_(False)
+                SkillSet.bolt_id == bot_id,
+                SkillSet.user_id == owner_id,
+                SkillSet.is_default.is_(False),
             )
             if engine_type is not None:
                 query = query.filter(SkillSet.engine_type == engine_type)
@@ -721,21 +826,45 @@ class SkillSetControlPlaneRepository(
         session,
         *,
         bot_id: str,
+        owner_id: str,
         set_id: str,
         engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
         locked: bool = False,
     ) -> SkillSet:
         query = self._scope(session.query(SkillSet), SkillSet).filter(
-            SkillSet.id == int(set_id), SkillSet.bolt_id == bot_id
+            SkillSet.id == int(set_id),
+            self._owned_set_scope(
+                bot_id=bot_id, owner_id=owner_id, engine_type=engine_type
+            ),
         )
-        if engine_type is not None:
-            query = query.filter(SkillSet.engine_type == engine_type)
         if locked:
             query = query.with_for_update()
         row = query.one_or_none()
-        if row is None:
-            raise SkillSetControlPlaneNotFoundError()
-        return row
+        if row is not None:
+            return row
+
+        # A fallback id cannot bypass a higher-priority runtime Default.
+        for candidate in default_engine_types or ((engine_type,) if engine_type else ()):
+            defaults = self._scope(session.query(SkillSet), SkillSet).filter(
+                global_default_scope((candidate,))
+            )
+            if locked:
+                defaults = defaults.with_for_update()
+            rows = defaults.order_by(SkillSet.id).all()
+            if rows:
+                for default in rows:
+                    if int(default.id) == int(set_id):
+                        return default
+                break
+        raise SkillSetControlPlaneNotFoundError()
+
+    @staticmethod
+    def _owned_set_scope(*, bot_id: str, owner_id: str, engine_type: str | None):
+        filters = [SkillSet.bolt_id == bot_id, SkillSet.user_id == owner_id]
+        if engine_type is not None:
+            filters.append(SkillSet.engine_type == engine_type)
+        return and_(*filters)
 
     @staticmethod
     def _ordinary(row: SkillSet) -> None:
@@ -776,6 +905,7 @@ class SkillSetControlPlaneRepository(
             .join(SkillSet, SkillSet.id == SkillSetMCPServer.skill_set_id)
             .filter(
                 SkillSet.bolt_id == bot_id,
+                SkillSet.user_id == owner_id,
                 SkillSet.is_default.is_(False),
                 SkillSetMCPServer.server_code == server_code,
             )
@@ -822,6 +952,7 @@ class SkillSetControlPlaneRepository(
         """Lock and capture every ordinary-set desired fact for this Bot."""
         query = self._scope(session.query(SkillSet), SkillSet).filter(
             SkillSet.bolt_id == bot_id,
+            SkillSet.user_id == owner_id,
             SkillSet.is_default.is_(False),
         )
         if engine_type is not None:

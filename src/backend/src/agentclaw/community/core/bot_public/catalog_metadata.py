@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, Sequence, runtime_checkable
+from typing import Any, Protocol, Sequence, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -25,10 +25,17 @@ class BotCatalogCaller:
 
 @dataclass(frozen=True)
 class BotCatalogMetadata:
-    """Membership-only metadata returned by the catalog metadata port."""
+    """BCS metadata retained for one catalog Bot after transport validation."""
 
     address: BotCatalogAddress
     kind: str
+    is_friend: bool | None = None
+    visibility: Any = None
+    is_online: Any = None
+    actor_kind: str | None = None
+    friend_ext: Any = None
+    friend_check_in_strategy: Any = None
+    user_visibility: Any = None
 
 
 class BotCatalogMetadataUnavailableError(Exception):
@@ -37,12 +44,14 @@ class BotCatalogMetadataUnavailableError(Exception):
 
 @runtime_checkable
 class BotCatalogMetadataServiceProtocol(Protocol):
-    """Authoritative membership lookup for tenant-scoped catalog Bots."""
+    """Authoritative BCS page lookup for tenant-scoped catalog Bots."""
 
-    def query_public_bot_metadata(
+    def search_public_bot_metadata(
         self,
         *,
-        addresses: Sequence[BotCatalogAddress],
+        search: str | None,
+        page: int,
+        page_size: int,
         caller: BotCatalogCaller,
         request_id: str,
     ) -> Sequence[BotCatalogMetadata]: ...

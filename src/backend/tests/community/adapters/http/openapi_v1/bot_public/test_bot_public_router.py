@@ -170,6 +170,62 @@ def test_search_projects_only_catalog_fields(
     ]
 
 
+def test_search_projects_bcs_is_friend_when_present(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    services[0].result["items"][0]["is_friend"] = False
+
+    response = client.get(_SEARCH_PATH)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["items"][0]["is_friend"] is False
+
+
+def test_search_projects_requested_bcs_metadata_when_present(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    friend_ext = {
+        "public_user_approval": {
+            "status": "PROCESSING",
+            "view_friend_deps": [{"deptNo": "D1"}],
+        }
+    }
+    services[0].result["items"][0].update(
+        {
+            "visibility": "protected",
+            "is_online": False,
+            "actor_kind": "bot",
+            "is_friend": False,
+            "friend_ext": friend_ext,
+            "friend_check_in_strategy": {},
+            "user_visibility": "private",
+            "unexpected_bcs_field": "must-not-be-public",
+        }
+    )
+
+    response = client.get(_SEARCH_PATH)
+
+    assert response.status_code == 200, response.text
+    item = response.json()["data"]["items"][0]
+    assert item["visibility"] == "protected"
+    assert item["is_online"] is False
+    assert item["actor_kind"] == "bot"
+    assert item["is_friend"] is False
+    assert item["friend_ext"] == friend_ext
+    assert item["friend_check_in_strategy"] == {}
+    assert item["user_visibility"] == "private"
+    assert "unexpected_bcs_field" not in item
+
+
+def test_search_omits_is_friend_when_bcs_did_not_return_it(
+    client: TestClient,
+) -> None:
+    response = client.get(_SEARCH_PATH)
+
+    assert response.status_code == 200, response.text
+    assert "is_friend" not in response.json()["data"]["items"][0]
+
+
 def test_search_openapi_declares_the_fixed_catalog_unavailable_envelope(
     app: FastAPI,
 ) -> None:
@@ -184,6 +240,38 @@ def test_search_openapi_declares_the_fixed_catalog_unavailable_envelope(
         "message": "Catalog service unavailable",
         "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
     }
+
+
+def test_search_openapi_declares_optional_bcs_is_friend(app: FastAPI) -> None:
+    is_friend = app.openapi()["components"]["schemas"]["PublicBot"]["properties"][
+        "is_friend"
+    ]
+
+    assert is_friend["anyOf"] == [{"type": "boolean"}, {"type": "null"}]
+
+
+def test_search_openapi_declares_optional_bcs_metadata_fields(app: FastAPI) -> None:
+    properties = app.openapi()["components"]["schemas"]["PublicBot"]["properties"]
+
+    assert properties["visibility"]["description"] == (
+        "BCS visibility returned by Catalog Search when available."
+    )
+    assert properties["is_online"]["description"] == (
+        "BCS online state returned by Catalog Search when available."
+    )
+    assert properties["actor_kind"]["anyOf"] == [
+        {"type": "string"},
+        {"type": "null"},
+    ]
+    assert properties["friend_ext"]["description"] == (
+        "BCS friend extension returned by Catalog Search when available."
+    )
+    assert properties["friend_check_in_strategy"]["description"] == (
+        "BCS friend check-in strategy returned by Catalog Search when available."
+    )
+    assert properties["user_visibility"]["description"] == (
+        "BCS user visibility returned by Catalog Search when available."
+    )
 
 
 @pytest.mark.parametrize(
@@ -267,6 +355,56 @@ def test_discover_uses_online_filter_by_default(
     item = response.json()["data"]["items"][0]
     assert "friendship" not in item
     assert item["recommendation"]["score"] == 0.92
+
+
+def test_discover_preserves_allowlisted_legacy_json_values(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    services[1].result["items"][0].update(
+        {
+            "bot_type": {"legacy": "service"},
+            "owner_name": {"display": "Owner"},
+            "recommend": {
+                "score": 0.92,
+                "reasons": ["matches capability", {"legacy": "reason"}],
+                "short_profile": {"summary": "Short public profile"},
+                "profile_key": "private-profile-key",
+            },
+        }
+    )
+
+    response = client.get(_DISCOVER_PATH, params={"keyword": "automation"})
+
+    assert response.status_code == 200, response.text
+    item = response.json()["data"]["items"][0]
+    assert item["bot_type"] == {"legacy": "service"}
+    assert item["owner_name"] == {"display": "Owner"}
+    assert item["recommendation"] == {
+        "score": 0.92,
+        "reasons": ["matches capability", {"legacy": "reason"}],
+        "short_profile": {"summary": "Short public profile"},
+    }
+    rendered = str(item)
+    for forbidden in (
+        "binding_id",
+        "device_id",
+        "iam_token",
+        "instance_selector",
+        "profile_key",
+    ):
+        assert forbidden not in rendered
+
+
+def test_discover_openapi_allows_legacy_json_values(app: FastAPI) -> None:
+    schemas = app.openapi()["components"]["schemas"]
+    public_bot = schemas["PublicBot"]["properties"]
+    recommendation = schemas["Recommendation"]["properties"]
+
+    assert "enum" not in public_bot["bot_type"]
+    assert "type" not in public_bot["bot_type"]
+    assert "type" not in public_bot["owner_name"]
+    assert "type" not in recommendation["reasons"]
+    assert "type" not in recommendation["short_profile"]
 
 
 

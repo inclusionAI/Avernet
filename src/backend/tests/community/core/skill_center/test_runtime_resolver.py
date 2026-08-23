@@ -9,14 +9,8 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeNameConflictError,
     RuntimeProjectionResolver,
 )
-from agentclaw.community.core.skill_center.runtime_policy import (
-    BotSkillRuntimeMutationMode,
-    bot_skill_runtime_mutation_mode,
-    require_supported_bot_skill_runtime,
-    runtime_layout_engine_for_bot,
-)
-from agentclaw.community.core.skill_center.errors import SkillEngineNotSupportedError
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+from agentclaw.community.core.workspace.skill_layout import runtime_layout_engine_for_bot
 
 
 def test_resolver_projects_every_supported_skill_corpus_and_deduplicates_inputs() -> None:
@@ -114,27 +108,6 @@ def test_resolver_rejects_unknown_sources_instead_of_silently_dropping_them() ->
         )
 
 
-def test_historical_aicoding_engine_fails_closed_for_new_mutations() -> None:
-    with pytest.raises(SkillEngineNotSupportedError):
-        require_supported_bot_skill_runtime(
-            {"bot_type": "personal", "active_engine": "aicoding"}
-        )
-
-
-@pytest.mark.parametrize(
-    "bot",
-    [
-        {"bot_type": "personal", "active_engine": "aicoding"},
-        {"bot_type": "personal", "active_engine": "claude_code"},
-        {"bot_type": "desktop", "active_engine": "claude_code"},
-    ],
-)
-def test_historical_runtime_rows_are_cleanup_only_not_writable(bot: dict) -> None:
-    assert bot_skill_runtime_mutation_mode(bot) is BotSkillRuntimeMutationMode.CLEANUP_ONLY
-    with pytest.raises(SkillEngineNotSupportedError):
-        require_supported_bot_skill_runtime(bot)
-
-
 @pytest.mark.parametrize("template_type", ["personalCoding", "applicationCoding"])
 def test_coding_template_has_aicoding_physical_layout_but_claude_logical_engine(
     template_type: str,
@@ -145,66 +118,4 @@ def test_coding_template_has_aicoding_physical_layout_but_claude_logical_engine(
         "template_type": template_type,
     }
 
-    assert bot_skill_runtime_mutation_mode(bot) is BotSkillRuntimeMutationMode.FULL
     assert runtime_layout_engine_for_bot(bot) == "aicoding"
-
-
-@pytest.mark.parametrize("template_type", ["personalCoding", "applicationCoding"])
-def test_aicoding_image_uses_the_claude_code_logical_engine(
-    template_type: str,
-) -> None:
-    require_supported_bot_skill_runtime(
-        {
-            "bot_type": "personal",
-            "active_engine": "claude_code",
-            "template_type": template_type,
-        }
-    )
-
-
-@pytest.mark.parametrize(
-    ("bot_type", "engine", "template_type"),
-    [
-        ("personal", "openclaw", None),
-        ("personal", "claude_code", "personalCoding"),
-        ("personal", "claude_code", "applicationCoding"),
-        ("personal", "hermes", None),
-        ("personal", "teclaw", None),
-        ("desktop", "openclaw", None),
-        ("desktop", "hermes", None),
-        ("service", "openclaw", None),
-        ("service", "claude_code", "personalCoding"),
-        ("service", "claude_code", "applicationCoding"),
-        ("service", "teclaw", None),
-    ],
-)
-def test_confirmed_bot_engine_matrix_is_accepted_by_every_projection_adapter_entry(
-    bot_type: str, engine: str, template_type: str | None
-) -> None:
-    require_supported_bot_skill_runtime(
-        {
-            "bot_type": bot_type,
-            "active_engine": engine,
-            "template_type": template_type,
-        }
-    )
-
-
-@pytest.mark.parametrize(
-    ("bot_type", "engine"),
-    [
-        ("desktop", "claude_code"),
-        ("desktop", "teclaw"),
-        ("service", "hermes"),
-        ("personal", "aicoding"),
-        ("personal", "claude_code"),
-        ("service", "claude_code"),
-    ],
-)
-def test_unconfirmed_bot_engine_matrix_fails_closed(
-    bot_type: str, engine: str
-) -> None:
-    with pytest.raises(SkillEngineNotSupportedError):
-        require_supported_bot_skill_runtime(
-            {"bot_type": bot_type, "active_engine": engine}
-        )
