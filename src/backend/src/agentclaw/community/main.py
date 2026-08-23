@@ -15,7 +15,7 @@ import os
 import sys
 
 from agentclaw.community.di import DeployProfile, validate_deploy_environment
-from agentclaw.community.log import configure_task_file_logging, get_logger
+from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
@@ -76,10 +76,6 @@ if __name__ == "__main__":  # pragma: no cover - entrypoint wiring; profile gate
             ),
             handlers=[logging.StreamHandler(sys.stderr)],
         )
-        _task_log_file = os.getenv("AGENTCLAW_TASK_LOG_FILE")
-        if _task_log_file:
-            configure_task_file_logging(_task_log_file)
-
         logger.info("env: %s", env)
         logger.info("Starting in LOCAL mode (no MOSN)")
 

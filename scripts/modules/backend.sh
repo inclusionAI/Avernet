@@ -100,7 +100,6 @@ backend_start() {
         # gateway signs with (gateway.sh) and BCS verifies with (bcs.sh), so
         # locally forwarded /openapi/v1 requests verify instead of all-401.
         SERVER_ENV=dev DEPLOY_PROFILE=singlebox \
-            AGENTCLAW_TASK_LOG_FILE="${LOG_DIR}/task-execution.log" \
             AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="${AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}" \
             DATABASE_URL="sqlite:///${RUNTIME_DATA_DIR}/backend.db" \
             ENABLE_OSS_SYNC=false \

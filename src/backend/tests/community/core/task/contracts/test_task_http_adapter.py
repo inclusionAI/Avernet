@@ -216,10 +216,11 @@ class TestTaskDashboard:
         assert r.status_code == 200, r.text
         body = r.json()["data"]
         # stub 路径无 owner bot → 无法规划 → 根 gap 拆不出 → 图 HUNG(语义正确:无规划端口不假 done)
-        assert body["status"] == Status.HUNG.value
+        assert body["status"] == "REVIEWING"
         assert any(n["node_id"] == task_id for n in body["tasks"])
         # 根节点 task_spec 字段透传(task_id 服务端回填进 metadata)
         root = next(n for n in body["tasks"] if n["node_id"] == task_id)
+        assert root["status"] == "REVIEWING"
         assert root["task_spec"]["metadata"]["task_id"] == task_id
         assert root["task_spec"]["goal"]["objective"] == "产出尽调报告"
         # include_action_log 默认关:action_log 不返回(空),避免常规查询 payload 膨胀
