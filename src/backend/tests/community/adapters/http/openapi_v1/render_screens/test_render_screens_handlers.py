@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+import json
 from datetime import datetime
 from unittest.mock import Mock
 
@@ -14,8 +16,12 @@ from agentclaw.community.adapters.http.openapi_v1.admission import (
     AdmissionMode,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.authorization import (
+    AUTHORIZATION,
+    Check,
+    NoCheck,
+)
 from agentclaw.community.adapters.http.openapi_v1.render_screens.gating import (
-    require_editable_bot,
     require_scoped_record,
 )
 from agentclaw.community.adapters.http.openapi_v1.render_screens.router import (
@@ -34,6 +40,9 @@ from agentclaw.community.core.bot_management.render_screen.errors import (
 )
 from agentclaw.community.core.bot_management.render_screen.models import (
     RenderScreenRecord,
+)
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotNotFoundError,
 )
 from agentclaw.community.core.bot_management.render_screen.sqlite_models import (
     RenderScreenModel,
@@ -112,10 +121,10 @@ async def test_list_is_readable_without_editor_permission():
 
 @pytest.mark.asyncio
 async def test_member_editor_can_create_update_and_delete():
-    bots = Mock()
-    bots.get_bot.return_value = _bot()
-    collaborators = Mock()
-    collaborators.get_operable_permission_level.return_value = PermissionLevel.MEMBER
+    # Neither a collaborator nor a Bot double: the three mutations resolve
+    # nothing themselves. Their rows are ``Check(MEMBER)``, so the seam has
+    # already resolved ``(bot_id, owner_id)`` and adjudicated the caller before
+    # they run; these assert what the handler does *once admitted*.
     created_record = _record()
     updated_record = _record(
         name="dashboard-v2",
@@ -139,8 +148,6 @@ async def test_member_editor_can_create_update_and_delete():
         request=_request("POST"),
         actor_id="member-1",
         owner_id="owner-1",
-        bot_service=bots,
-        collaborators=collaborators,
         service=service,
     )
     updated_response = await update_render_screen(
@@ -153,8 +160,6 @@ async def test_member_editor_can_create_update_and_delete():
         request=_request("PATCH"),
         actor_id="member-1",
         owner_id="owner-1",
-        bot_service=bots,
-        collaborators=collaborators,
         service=service,
     )
     deleted_response = await delete_render_screen(
@@ -163,8 +168,6 @@ async def test_member_editor_can_create_update_and_delete():
         request=_request("DELETE"),
         actor_id="member-1",
         owner_id="owner-1",
-        bot_service=bots,
-        collaborators=collaborators,
         service=service,
     )
 
@@ -186,20 +189,100 @@ async def test_member_editor_can_create_update_and_delete():
     service.delete_render_screen.assert_called_once_with(record_id=7)
 
 
-def test_removed_team_editor_cannot_mutate():
-    bots = Mock()
-    bots.get_bot.return_value = _bot()
-    collaborators = Mock()
-    collaborators.get_operable_permission_level.return_value = PermissionLevel.NONE
+@pytest.mark.asyncio
+async def test_the_read_refuses_a_bot_that_is_not_the_owners():
+    """The read's own resolve is the only gate it has, so it must really gate.
 
-    with pytest.raises(RenderScreenNotFoundError):
-        require_editable_bot(
-            bots,
-            collaborators,
+    ``GET`` is the one operation here whose row is ``NoCheck`` — the seam
+    adjudicates nothing, because share and group viewers hold no Editor
+    relation. That leaves ``resolve_readable_bot`` as the sole proof the
+    addressed Bot exists under the named owner. Both absence shapes are driven:
+    the service raising, and the service answering with nothing.
+    """
+    for absent in (BotNotFoundError("no such bot"), None):
+        bots = Mock()
+        if isinstance(absent, Exception):
+            bots.get_bot.side_effect = absent
+        else:
+            bots.get_bot.return_value = absent
+        service = Mock()
+
+        response = await list_render_screens(
             bot_id="bot-1",
+            request=_request(),
+            actor_id="viewer-1",
             owner_id="owner-1",
-            actor_id="removed-editor",
+            bot_service=bots,
+            service=service,
         )
+
+        # ``envelope_errors`` turns the refusal into the public envelope, so the
+        # assertion is on what a caller sees rather than on the exception type.
+        assert response.status_code == 404
+        assert json.loads(response.body) == {
+            "code": 404000,
+            # Masked: an absent Bot and an unreadable one answer identically.
+            "message": "Not found",
+            "data": None,
+            "request_id": "trace-render-screens",
+        }
+        service.list_render_screens.assert_not_called()
+
+
+def test_only_the_unadjudicated_read_resolves_the_bot_itself():
+    """The three mutations must not repeat the resolve the seam already did.
+
+    ``bot_access._level`` runs ``get_by_id_and_owner`` and returns ``NONE`` when
+    the Bot is absent, so a ``Check(MEMBER)`` handler is only ever entered for a
+    Bot that exists under the addressed owner. A second ``BotService.get_bot``
+    there buys nothing and costs a row read, a device-binding fetch and a
+    template fetch on every admitted mutation.
+
+    Asserted on the signature rather than on a call count, because the point is
+    that the dependency is *gone* — a handler that still declared it could
+    resolve again tomorrow without a test noticing.
+    """
+    assert "bot_service" in inspect.signature(list_render_screens).parameters, (
+        "the NoCheck read must keep resolving the Bot itself — nothing else does"
+    )
+    for handler in (create_render_screen, update_render_screen, delete_render_screen):
+        assert "bot_service" not in inspect.signature(handler).parameters, (
+            f"{handler.__name__} resolves the Bot again after the seam already "
+            "did; its row is Check(MEMBER), so the resolve is redundant"
+        )
+
+
+def test_removed_team_editor_cannot_mutate():
+    """The bar that kept a removed editor out, now stated where it is enforced.
+
+    This used to drive ``require_editable_bot`` directly and assert it refused a
+    caller at ``PermissionLevel.NONE``. That helper is gone: the three mutating
+    operations declare ``Check(MEMBER)`` and the seam adjudicates them before
+    the handler runs, so the refusal itself is ``bot_access``'s and is covered
+    by ``test_bot_access.py``.
+
+    What is render-screens' own to assert is that the three operations really
+    carry that bar — and that the read does not, since group and share viewers
+    hold no Editor relation and must still reach the CDN mapping.
+    """
+    mutations = [
+        ("POST", "/openapi/v1/bots/{bot_id}/render-screens"),
+        ("PATCH", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"),
+    ]
+    for key in mutations:
+        rule = AUTHORIZATION[key]
+        assert isinstance(rule, Check), f"{key[0]} {key[1]} is no longer adjudicated"
+        assert rule.level is PermissionLevel.MEMBER, (
+            f"{key[0]} {key[1]} moved off the MEMBER bar require_editable_bot "
+            "enforced before the seam took it over"
+        )
+
+    read = AUTHORIZATION[("GET", "/openapi/v1/bots/{bot_id}/render-screens")]
+    assert isinstance(read, NoCheck), (
+        "the read must stay unadjudicated — share and group viewers hold no "
+        "Editor relation and still need the mapping to render panels"
+    )
 
 
 @pytest.mark.parametrize(

@@ -10,6 +10,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_
 from agentclaw.community.api.bot_skill_asset_service import BotSkillAssetServiceProtocol
 from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
+from tests.community.factories.bot_collaborator import make_bot
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
 
 
@@ -82,6 +83,11 @@ _HEADERS = {PRINCIPAL_HEADER: _principal()}
 
 def _seed_asset(world, *, missing: bool = False) -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    # The seven ``{skill_id}`` operations declare ``Check(MEMBER)``, so
+    # ``bot_access`` resolves ``(bot_id, owner_id)`` against the real
+    # ``BotRepository`` before the handler runs. The asset service below is a
+    # double and can answer without a Bot row; the gate cannot, and refuses.
+    make_bot(world, bot_id=_BOT_ID, owner_id=_OWNER)
     world.injector.binder.bind(
         BotSkillAssetServiceProtocol, to=_Asset(missing=missing), scope=None
     )

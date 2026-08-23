@@ -15,6 +15,7 @@ from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResul
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
+from tests.community.factories.bot_collaborator import make_bot
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -94,6 +95,12 @@ class _NodeRelay:
 
 def _seed(world) -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    # ``GET /bots/{bot_id}/nodes`` declares ``Check(MEMBER)``, so ``bot_access``
+    # resolves ``(bot_id, owner_id)`` against the real ``BotRepository`` before
+    # the handler runs. The relay double answers without a Bot row; the gate
+    # does not. ``_MISSING_BOT`` is deliberately left unseeded, so its case
+    # still gets the 404 it expects — now from the gate rather than the relay.
+    make_bot(world, bot_id=_BOT, owner_id=_OWNER)
     world.injector.binder.bind(
         EngineRuntimeRelayProtocol,
         to=_NodeRelay(),

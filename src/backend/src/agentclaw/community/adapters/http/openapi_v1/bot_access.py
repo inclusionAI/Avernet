@@ -94,7 +94,9 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
         caller_id: UserIdDep,
         owner_id: OwnerIdDep,
     ) -> AsyncIterator[None]:
-        level = _level(request, bot_id=bot_id, caller_id=caller_id, owner_id=owner_id)
+        level = await _resolve_level(
+            request, bot_id=bot_id, caller_id=caller_id, owner_id=owner_id
+        )
         if level < rule.level:
             # The ids go to the log because the response cannot carry them: it
             # is a fixed "Not found", so this line is the only record of who
@@ -145,15 +147,31 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
     return gate
 
 
-def _level(
+async def _resolve_level(
     request: Request, *, bot_id: str, caller_id: str, owner_id: str
 ) -> PermissionLevel:
-    """The caller's level on the addressed bot, or ``NONE`` if anything failed.
+    """:func:`_level`, with its database work off the event loop.
 
-    ``NONE`` is the answer to every question this cannot resolve — the bot does
-    not exist under that owner, the repository is unavailable, the collaborator
-    table cannot be read. Fail-closed is the whole contract; see the module
-    docstring for why the internal interceptor's opposite choice is not ported.
+    The two lookups below are synchronous repository reads, and this runs inside
+    an ``async`` dependency that FastAPI solves on the event-loop thread. Calling
+    them inline parks that loop for the length of a database round trip and
+    stalls every unrelated request the worker is serving — and unlike the audit
+    write, this runs on **every** request to an adjudicated operation, not only
+    on a non-owner mutation.
+
+    Two places in this codebase already made the same call for the same reason:
+    :func:`_audit` below (``asyncio.to_thread(log_repo.insert, ...)``) and
+    ``EngineRuntimeRelay.resolve_bot_off_loop``, whose docstring spells out that
+    an owner-scoped row read plus a collaborator query is "not cheap". The gate
+    was written before it had a single adopter, so nothing ran here; adopting it
+    across 82 routes — sessions and messages among them — is what put it on the
+    hot path, and what makes this worth the thread.
+
+    **Resolving the services stays on the loop.** Only the reads are offloaded,
+    so nothing touches the injector off the event-loop thread — the same split
+    :func:`_audit` documents. ``asyncio.to_thread`` copies the current
+    ``contextvars.Context``, so the tenant and environment bindings the ORM
+    guard reads survive the hop; the audit write has relied on that since #1323.
     """
     bots = _service(request, BotRepository)
     collaborators = _service(request, CollaboratorServiceProtocol)
@@ -164,6 +182,35 @@ def _level(
             for_log(bot_id),
         )
         return PermissionLevel.NONE
+    return await asyncio.to_thread(
+        _level,
+        bots,
+        collaborators,
+        bot_id=bot_id,
+        caller_id=caller_id,
+        owner_id=owner_id,
+    )
+
+
+def _level(
+    bots: BotRepository,
+    collaborators: CollaboratorServiceProtocol,
+    *,
+    bot_id: str,
+    caller_id: str,
+    owner_id: str,
+) -> PermissionLevel:
+    """The caller's level on the addressed bot, or ``NONE`` if anything failed.
+
+    ``NONE`` is the answer to every question this cannot resolve — the bot does
+    not exist under that owner, the repository is unavailable, the collaborator
+    table cannot be read. Fail-closed is the whole contract; see the module
+    docstring for why the internal interceptor's opposite choice is not ported.
+
+    Synchronous and blocking by design: :func:`_resolve_level` is what keeps it
+    off the event loop, and it takes its services as arguments so that this
+    function never reaches for the injector from a worker thread.
+    """
     try:
         bot = bots.get_by_id_and_owner(bot_id, owner_id)
     except Exception:
@@ -235,6 +282,24 @@ async def _audit(
     The cost is a silently incomplete trail, so the failure is loud here. If
     completeness ever becomes a hard requirement the answer is a durable
     outbox, not a synchronous write that can fail a request.
+
+    **This is a considered exception to a binding repo rule, not an oversight.**
+    ``AGENTS.md`` says: *"Propagate database and persistence write failures as
+    errors; never silently swallow failed writes and return success."* That rule
+    is right for a write the caller is asking for — its failure means the thing
+    they requested did not happen, and saying otherwise is a lie. This write is
+    the opposite case: the thing the caller requested *did* happen, and the
+    record of it is a side effect. Applying the rule literally here would make a
+    failed audit turn a successful mutation into an error response, and a client
+    retrying it would apply the mutation twice — trading an incomplete log for
+    duplicated state changes, which is the worse of the two.
+
+    So the rule's real requirement — never *silently* swallow — is met by the
+    ``logger.exception`` below rather than by failing the request. Recorded here
+    because a reviewer reasonably read the code against that rule and flagged it
+    (#1366, round 3); the reconciliation lived only in the seam feature's
+    ``spec.md`` *Decisions* 2, which is not where anyone reading this function
+    would look.
     """
     try:
         log_repo = _service(request, BotCollabLogRepositoryProtocol)

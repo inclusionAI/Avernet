@@ -75,6 +75,32 @@ class SkillSetControlPlaneService:
             # adapter maps a single family: an invisible Bot scope is a SkillSet
             # not-found, not a Local Skill one.
             raise SkillSetControlPlaneNotFoundError()
+        # **Stays, even though the nineteen /openapi/v1 rows are Check(MEMBER).**
+        #
+        # This service is reached from two surfaces, and the seam covers one.
+        # ``adapters/http/skill_center/skillsets.py`` is mounted at
+        # ``/api/skillsets``, outside ``/openapi/v1`` entirely and governed by no
+        # row in ``AUTHORIZATION`` — and four of its routes carry no
+        # ``CollaboratorPermissionInterceptor`` of their own:
+        #
+        #     GET  /api/skillsets/{skill_set_id}          -> get_set
+        #     PUT  /api/skillsets/{skill_set_id}          -> update_set
+        #     GET  /api/skillsets/{skill_set_id}/skills   -> list_skills
+        #     GET  /api/skillsets/{skill_set_id}/mcps     -> get_set, list_mcps
+        #
+        # All four take ``entity_id`` and ``bot_id`` as caller-supplied query
+        # parameters, so this call is the only thing standing between an
+        # authenticated stranger and another owner's SkillSet — a read on three
+        # of them and a **write** on the ``PUT``.
+        #
+        # Deleting it to "finish" the migration was tried and was wrong; a P1
+        # review finding caught it. The row still migrates, and means what it
+        # says: for the ``/openapi/v1`` operations ``bot_access`` is the declared
+        # authority and adjudicates first, at this same MEMBER bar. Here that
+        # makes this a redundant second gate; at ``/api/skillsets`` it is the
+        # only one. See ``bot_skill_asset_service._resolve_local`` for the same
+        # shape, and ``test_the_control_plane_check_the_legacy_surface_relies_on
+        # _still_exists``, which pins it.
         if not self._authorization.can_manage_bot(
             bot_id=bot_id,
             owner_id=owner_id,
