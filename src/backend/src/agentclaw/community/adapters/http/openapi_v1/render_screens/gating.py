@@ -29,6 +29,15 @@ def resolve_readable_bot(
     Authentication and, for an application caller, its Bot grant are enforced
     by route dependencies. Human reads deliberately do not require an Editor
     relation because group/share viewers need the CDN mapping to render panels.
+
+    **Called by the read alone, and that is the whole point.** ``GET`` is the
+    only operation in this group whose row is ``NoCheck``, so it is the only one
+    the seam does not resolve for — which makes this the sole proof that the
+    addressed Bot exists under the named owner. The three mutations carry
+    ``Check(MEMBER)``: ``bot_access._level`` has already run
+    ``get_by_id_and_owner`` and refused on absence before their handlers are
+    entered, so calling this there would re-read the Bot to learn what the seam
+    just proved. If a mutation ever moves off ``Check``, it needs this back.
     """
     try:
         bot = bots.get_bot(bot_id, owner_id)

@@ -1097,6 +1097,17 @@ group rather than reading its row, which is the lesson worth keeping:
   mechanism exists to remove. `engine_runtime/gating.py` carries the accounting
   at the call site.
 
+  **Price it, then delete the ones nothing depends on.** Render-screens is the
+  other half of the same rule: its handlers each called `resolve_readable_bot`,
+  discarding the result, and on the three `Check(MEMBER)` mutations that was a
+  pure re-read of what the seam had just proved. Removable where engine-runtime
+  was not, because nothing else stood on it — one caller, no retiring twin, and
+  an adapter-local helper rather than a Service API contract. The read keeps it:
+  its row is `NoCheck` by design, so it is the only gate that route has. **The
+  question to ask of a duplicate is not "is it redundant today" but "what
+  breaks when it is gone"** — for `require_bot_operator` the answer was the
+  deferred sessions fallback; here it was nothing.
+
 What did not move, and why, is in that feature's `spec.md` *Out of Scope*:
 6 harness, 10 sessions, 3 skills, 3 authorized-apps, 2 product chats, 1
 connection.
