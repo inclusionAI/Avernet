@@ -97,6 +97,17 @@ def _strip_code_ticks(value: str) -> str:
     return value.replace("`", "").strip()
 
 
+def _exception_pair(block: str) -> tuple[str, str] | None:
+    """Parse an ``Exception`` row of the form "`<rel path>` → `<module>`"."""
+    exception = _fields(block).get("Exception", "")
+    parts = [_strip_code_ticks(p) for p in re.split(r"[→>]", exception) if p.strip()]
+    return (parts[0], parts[1]) if len(parts) == 2 else None
+
+
+def _gate_source() -> str:
+    return _COMPLIANCE_GATE.read_text(encoding="utf-8")
+
+
 @pytest.mark.unit
 def test_register_exists_and_is_not_empty() -> None:
     """Guard the guard — a moved or emptied register would pass everything."""
@@ -167,26 +178,88 @@ def test_active_waivers_match_a_real_allowlist_entry() -> None:
     Catches a waiver that outlives the allowlist entry it governs, or one that
     describes an exception nobody ever added.
     """
-    gate_source = _COMPLIANCE_GATE.read_text(encoding="utf-8")
+    gate_source = _gate_source()
     failures: list[str] = []
     for waiver_id, block in sorted(_waiver_blocks().items()):
-        fields = _fields(block)
-        if fields.get("Status") != "Active":
+        if _fields(block).get("Status") != "Active":
             continue
-        exception = fields.get("Exception", "")
-        # "`<rel path>` → `<imported module>`"
-        parts = [_strip_code_ticks(p) for p in re.split(r"[→>]", exception) if p.strip()]
-        if len(parts) != 2:
+        pair = _exception_pair(block)
+        if pair is None:
             failures.append(
-                f"{waiver_id}: 'Exception' must read '`<file>` → `<module>`', got {exception!r}"
+                f"{waiver_id}: 'Exception' must read '`<file>` → `<module>`', "
+                f"got {_fields(block).get('Exception', '')!r}"
             )
             continue
-        rel_path, module = parts
+        rel_path, module = pair
         for needle, label in ((rel_path, "file"), (module, "module")):
             if f'"{needle}"' not in gate_source:
                 failures.append(
                     f"{waiver_id}: {label} {needle!r} is not present in "
                     f"{_COMPLIANCE_GATE.name} — the waiver and the gate disagree"
                 )
+    if failures:
+        pytest.fail("\n".join(failures))
+
+
+@pytest.mark.unit
+def test_retired_waivers_have_released_their_exceptions() -> None:
+    """Retiring a waiver must remove the exception, not just relabel the row.
+
+    Without this, ``Status: Retired`` is an escape hatch: the expiry and
+    active-coupling checks both skip non-Active waivers, so flipping the field
+    would leave the allowlist entry in place, permanently and ungoverned —
+    the same move as bumping a review date to silence CI, by another field.
+    """
+    gate_source = _gate_source()
+    failures: list[str] = []
+    for waiver_id, block in sorted(_waiver_blocks().items()):
+        if _fields(block).get("Status") != "Retired":
+            continue
+        pair = _exception_pair(block)
+        if pair is None:
+            continue  # shape is reported by the field test
+        rel_path, module = pair
+        still_present = [n for n in (rel_path, module) if f'"{n}"' in gate_source]
+        if still_present:
+            failures.append(
+                f"{waiver_id} is Retired but its exception is still allowlisted in "
+                f"{_COMPLIANCE_GATE.name}: {still_present}. Remove the allowlist "
+                "entry (and the import it permits), or set the waiver back to "
+                "Active with a fresh review date."
+            )
+    if failures:
+        pytest.fail("\n".join(failures))
+
+
+@pytest.mark.unit
+def test_waivers_the_gate_cites_exist_and_are_active() -> None:
+    """Every ``W-###`` the gate names must resolve to an Active waiver.
+
+    Closes the deletion path: without this, removing W-001's block from the
+    register while leaving its allowlist entry — which advertises itself as
+    "Governed by waiver W-001" — would silently pass every other check.
+
+    This reverse-maps only exceptions that *claim* governance, so the six
+    pre-existing ``core → api`` entries that cite no waiver are untouched.
+    Requiring a waiver for those is a governance decision for their owners.
+    """
+    cited = set(re.findall(r"W-\d{3}", _gate_source()))
+    blocks = _waiver_blocks()
+    failures: list[str] = []
+    for waiver_id in sorted(cited):
+        block = blocks.get(waiver_id)
+        if block is None:
+            failures.append(
+                f"{_COMPLIANCE_GATE.name} cites {waiver_id}, but no such waiver "
+                f"exists in {_REGISTER.name} — the exception is ungoverned"
+            )
+            continue
+        status = _fields(block).get("Status")
+        if status != "Active":
+            failures.append(
+                f"{_COMPLIANCE_GATE.name} cites {waiver_id}, but its Status is "
+                f"{status!r}, not 'Active' — an allowlist entry may not cite a "
+                "non-active waiver"
+            )
     if failures:
         pytest.fail("\n".join(failures))

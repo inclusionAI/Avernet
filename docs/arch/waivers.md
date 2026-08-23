@@ -20,6 +20,11 @@ exception, or re-date the waiver as a fresh, owned decision. Do **not** bump the
 date purely to turn CI green — that is the one move the whole mechanism exists
 to prevent.
 
+Retiring a waiver means **removing the exception it governed**, not relabelling
+the row: setting `Status: Retired` while the allowlist entry survives fails the
+register↔gate checks, as does deleting a waiver an allowlist entry still cites.
+Both are the same evasion as bumping the date, by a different field.
+
 > **Scope note.** This register was created with W-001. The `core → api`
 > allowlist in `tests/community/architecture/test_architecture_compliance.py`
 > already carried six entries that predate it and are **not** covered by any
