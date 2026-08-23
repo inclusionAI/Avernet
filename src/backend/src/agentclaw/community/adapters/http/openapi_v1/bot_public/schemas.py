@@ -16,6 +16,29 @@ class PublicBot(BaseModel):
     name: str = Field(description="Public Bot display name.")
     description: str = Field(description="Public Bot description.")
     owner_name: Any = Field(default=None, description="Optional public owner name.")
+    is_friend: bool | None = Field(
+        default=None,
+        description="Caller-relative friendship state returned by BCS when available.",
+    )
+    visibility: Any = Field(
+        default=None, description="BCS visibility returned by Catalog Search when available."
+    )
+    is_online: Any = Field(
+        default=None, description="BCS online state returned by Catalog Search when available."
+    )
+    actor_kind: str | None = Field(
+        default=None, description="BCS actor kind returned by Catalog Search when available."
+    )
+    friend_ext: Any = Field(
+        default=None, description="BCS friend extension returned by Catalog Search when available."
+    )
+    friend_check_in_strategy: Any = Field(
+        default=None,
+        description="BCS friend check-in strategy returned by Catalog Search when available.",
+    )
+    user_visibility: Any = Field(
+        default=None, description="BCS user visibility returned by Catalog Search when available."
+    )
     engine: str = Field(description="Engine that runs the Bot.")
     status: str = Field(description="Public Bot lifecycle status.")
 
