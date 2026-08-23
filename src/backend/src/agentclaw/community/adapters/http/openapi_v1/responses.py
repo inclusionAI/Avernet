@@ -96,6 +96,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 )
 from agentclaw.community.core.bot_public.services.bot_public_service import (
     BotNotFoundError as BotPublicBotNotFoundError,
+    BotPublicServiceError,
 )
 from agentclaw.community.core.channel.errors import (
     ChannelEditLockedError,
@@ -440,6 +441,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # public route), so it answers the same 404 the surface answers everywhere a
     # bot is addressed that does not exist.
     BotPublicBotNotFoundError: (404, "Not found"),
+    # The bot-public service's own ``BotPublicServiceError`` — a server-side
+    # failure of the BCS publish-to-users flow (approval-ticket submit rejected
+    # by the approval service, e.g. a malformed biz_id/puid, or any other
+    # invariant the service guards). Distinct from the not-found case above: the
+    # bot was addressed and found, the publish itself failed. Mapped here so it
+    # surfaces as a business-coded 5xx through ``@envelope_errors`` rather than
+    # escaping as a bare 500; the cause is logged at the raise site.
+    BotPublicServiceError: (500, "Publish failed"),
     CollaboratorPermissionDeniedError: (404, "Not found"),
     CollaboratorNotFoundError: (404, "Not found"),
     CollaboratorAlreadyExistsError: (409, "Editor already exists"),
