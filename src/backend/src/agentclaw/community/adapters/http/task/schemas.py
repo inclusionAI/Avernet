@@ -214,6 +214,22 @@ class TaskExecutionGraphDTO(BaseModel):
     execution_graph: dict[str, Any] | None = None  # 回调审计 DAG 快照(按 root session_id 从 task_callback 反查挂图级)
 
 
+def runtime_status_to_product_status(status: Any) -> str:
+    """Map runtime task states to product-facing dashboard states.
+
+    ``DRAFTING`` and ``DEFINED`` belong to the authoring layer and are not
+    produced by the runtime dashboard. Runtime ``HUNG`` is exposed as
+    ``REVIEWING``; all other non-terminal runtime states are ``EXECUTING``.
+    """
+    value = status.value if hasattr(status, "value") else str(status)
+    return {
+        "HUNG": "REVIEWING",
+        "DONE": "DONE",
+        "FAILED": "FAILED",
+        "CANCELLED": "CANCELLED",
+    }.get(value, "EXECUTING")
+
+
 # ===== DTO <-> domain conversion(Rule 22:adapter 唯一写/读翻译位) =====
 
 
@@ -291,7 +307,8 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
                                       gaps=list(ar.gaps))
                   if ar is not None else None)
         nodes.append(TaskNodeDTO(
-            node_id=n.node_id, task_id=n.task_id, status=n.status.value,
+            node_id=n.node_id, task_id=n.task_id,
+            status=runtime_status_to_product_status(n.status),
             task_spec=TaskSpecDTO(
                 metadata=MetadataDTO(task_id=n.task_spec.metadata.task_id,
                                      title=n.task_spec.metadata.title,
@@ -324,7 +341,8 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
         for r in graph.relations
     ]
     return TaskExecutionGraphDTO(
-        run_id=graph.run_id, loop_round=graph.loop_round, status=graph.status.value,
+        run_id=graph.run_id, loop_round=graph.loop_round,
+        status=runtime_status_to_product_status(graph.status),
         output=dict(graph.output), tasks=nodes, relations=relations,
         extend_props=dict(graph.extend_props),
         execution_graph=graph.execution_graph,
@@ -343,7 +361,7 @@ def task_info_record_to_dto(record) -> TaskInfoRecordDTO:
         execution_config=(dict(record.execution_config)
                           if record.execution_config is not None else None),
         task_spec=dict(record.task_spec),
-        status=record.status.value,
+        status=runtime_status_to_product_status(record.status),
         gmt_create=record.gmt_create,
         gmt_modified=record.gmt_modified,
     )

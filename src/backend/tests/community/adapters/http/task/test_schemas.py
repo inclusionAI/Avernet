@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskNodeCallbackRequest, op_result_to_dto,
+    runtime_status_to_product_status,
 )
 from agentclaw.community.core.task.domain.models import TaskOpResult
 
@@ -46,3 +47,19 @@ def test_op_result_to_dto_returns_extend_props():
     ))
 
     assert dto.extend_props == {"group_id": "bcs_grp_1"}
+
+
+@pytest.mark.parametrize(
+    ("runtime", "product"),
+    [
+        ("PENDING", "EXECUTING"),
+        ("PLANNING", "EXECUTING"),
+        ("RUNNING", "EXECUTING"),
+        ("HUNG", "REVIEWING"),
+        ("DONE", "DONE"),
+        ("FAILED", "FAILED"),
+        ("CANCELLED", "CANCELLED"),
+    ],
+)
+def test_runtime_status_to_product_status(runtime, product):
+    assert runtime_status_to_product_status(runtime) == product
