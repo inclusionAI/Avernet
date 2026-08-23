@@ -193,12 +193,22 @@ class TaskInfoRecordDTO(BaseModel):
     gmt_modified: datetime | None = None
 
 
+class TaskRelationDTO(BaseModel):
+    """分解树边(一等公民);承载结构归属,单入(每非根节点恰好 1 入边=结构父)。"""
+
+    src_id: str = Field(..., description="结构父(分解源/被依赖)")
+    dst_id: str = Field(..., description="结构子(分解产物/依赖方)")
+    type: str = Field("DEPENDENCY", description="关系类型")
+    extend_props: dict[str, Any] = Field(default_factory=dict, description="关系扩展属性")
+
+
 class TaskExecutionGraphDTO(BaseModel):
     run_id: int
     loop_round: int
     status: str
     output: dict[str, Any] = Field(default_factory=dict)
     tasks: list[TaskNodeDTO] = Field(default_factory=list)
+    relations: list[TaskRelationDTO] = Field(default_factory=list, description="依赖关系(分解树)")
     extend_props: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -306,9 +316,15 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
                                     ) for e in n.run_info.action_log]
                                     if include_action_log else [])),
         ))
+    relations = [
+        TaskRelationDTO(src_id=r.src_id, dst_id=r.dst_id, type=r.type.value,
+                        extend_props=dict(r.extend_props))
+        for r in graph.relations
+    ]
     return TaskExecutionGraphDTO(
         run_id=graph.run_id, loop_round=graph.loop_round, status=graph.status.value,
-        output=dict(graph.output), tasks=nodes, extend_props=dict(graph.extend_props),
+        output=dict(graph.output), tasks=nodes, relations=relations,
+        extend_props=dict(graph.extend_props),
     )
 
 

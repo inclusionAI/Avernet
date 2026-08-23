@@ -277,6 +277,14 @@ class TestTaskCallbackReport:
         g = graph_svc.query_task_dashboard("t_http")
         n = next(n for n in g.tasks if n.node_id == "N_http")
         assert n.status == Status.DONE, f"回投未翻 DONE: {n.status}"
+        # dashboard DTO 透传 relations 分解树:http 边界 graph_to_dto 不再丢 relations(回归 guard)
+        d = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": "t_http"})
+        assert d.status_code == 200, d.text
+        rels = d.json()["data"]["relations"]
+        assert rels, "dashboard 未返回 relations"
+        assert rels[0]["src_id"] == "t_http"
+        assert rels[0]["dst_id"] == "N_http"
+        assert rels[0]["type"] == "DEPENDENCY"
 
 
 class TestProtocolConformance:
