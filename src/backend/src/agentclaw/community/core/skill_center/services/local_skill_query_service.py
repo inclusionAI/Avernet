@@ -10,6 +10,9 @@ from typing import Any
 
 from injector import inject
 
+from agentclaw.community.api.local_skill_query_service import (
+    LocalSkillQueryServiceProtocol,
+)
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
@@ -22,7 +25,7 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
 
-class LocalSkillQueryService:
+class LocalSkillQueryService(LocalSkillQueryServiceProtocol):
     """Authorize a Bot scope then project only exact ``local://`` rows."""
 
     @inject

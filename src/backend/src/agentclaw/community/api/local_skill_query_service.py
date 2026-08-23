@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -9,6 +10,7 @@ from typing import Any, Protocol, runtime_checkable
 class LocalSkillQueryServiceProtocol(Protocol):
     """Read desired-state metadata for Local Skills visible to one actor."""
 
+    @abstractmethod
     def list_local_skills(
         self,
         *,
@@ -21,4 +23,5 @@ class LocalSkillQueryServiceProtocol(Protocol):
         keyword: str | None,
     ) -> tuple[int, list[dict[str, Any]]]: ...
 
+    @abstractmethod
     def get_local_skill(self, *, skill_id: str, actor_id: str) -> dict[str, Any]: ...
