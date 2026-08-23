@@ -1,12 +1,10 @@
-//! Edge-permission `/friends/*` route handlers.
+//! Edge-permission `/collaboration/friend-connections/*` route handlers.
 //!
 //! These handlers call the Task-2 application traits (`ConnectService`) on
 //! `HttpAppState.connect`. Caller resolution reuses `routes::caller`
 //! (`caller_actor_id_from_headers`): Bearer bot token first, then human
-//! identity (`human_<staff_no>`), then `from_bot` body fallback. The
-//! edge-permission service layer (wired in Installment 3) owns the authz.
-//!
-//! Transitional: `state.connect` is `NoopConnectService` until Installment 3.
+//! identity (`human_<staff_no>`). The edge-permission service layer owns the
+//! final relationship policy and this adapter owns caller impersonation guards.
 //!
 //! # Wire-shape note
 //! Responses are wrapped in the legacy `{success,data}` envelope
@@ -31,7 +29,7 @@ use crate::state::HttpAppState;
 
 use super::{bots::bot_use_case_error_to_http, caller::caller_actor_id_from_headers};
 
-/// `POST /friends/request` — create a friend (connect) request.
+/// `POST /collaboration/friend-connections/requests` — create a friend connection request.
 pub async fn create_friend_request(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -56,7 +54,7 @@ pub async fn create_friend_request(
     })))
 }
 
-/// `POST /friends/requests/{id}/accept` — approve a pending request.
+/// `POST /collaboration/friend-connections/requests/{id}/accept` — approve a pending request.
 pub async fn accept_friend_request(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -68,7 +66,7 @@ pub async fn accept_friend_request(
     Ok(Json(envelope(&AcceptFriendRequestResponse { edge_ids })))
 }
 
-/// `POST /friends/requests/{id}/reject` — reject a pending request.
+/// `POST /collaboration/friend-connections/requests/{id}/reject` — reject a pending request.
 pub async fn reject_friend_request(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -85,7 +83,7 @@ pub async fn reject_friend_request(
     })))
 }
 
-/// `POST /friends/requests/{id}/cancel` — caller withdraws a pending request.
+/// `POST /collaboration/friend-connections/requests/{id}/cancel` — caller withdraws a pending request.
 pub async fn cancel_friend_request(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -108,7 +106,7 @@ pub async fn cancel_friend_request(
     })))
 }
 
-/// `GET /friends/requests` — paginated inbox/sent list.
+/// `GET /collaboration/friend-connections/requests` — paginated inbox/sent list.
 pub async fn list_friend_requests(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -135,7 +133,7 @@ pub async fn list_friend_requests(
     Ok(Json(envelope(&payload)))
 }
 
-/// `POST /friends/{actor}/revoke` — unfriend (revoke friend edges only).
+/// `DELETE /collaboration/friend-connections/{actor}` — unfriend (revoke friend edges only).
 pub async fn revoke_friend(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -150,7 +148,7 @@ pub async fn revoke_friend(
     Ok(Json(envelope(&RevokeFriendResponse { revoked_edges })))
 }
 
-/// `GET /bots/{id}/friends` — friend list for a bot.
+/// Friend list for a bot. Kept as a handler helper only; the canonical route is `GET /collaboration/friend-connections?actor=...&actor_kind=bot`.
 pub async fn list_friends(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -165,7 +163,7 @@ pub async fn list_friends(
     Ok(Json(envelope(&FriendListResponse { items, total })))
 }
 
-/// `GET /friends?actor=` — friend list for any actor, human or bot (api-contract ⑦).
+/// `GET /collaboration/friend-connections?actor=` — friend list for any actor, human or bot.
 pub async fn list_friends_by_actor(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -184,9 +182,9 @@ pub async fn list_friends_by_actor(
     Ok(Json(envelope(&FriendListResponse { items, total })))
 }
 
-/// Resolve the caller actor id from request context for v2 endpoints.
+/// Resolve the caller actor id from request context for friend-connections endpoints.
 ///
-/// v2 security model (stricter than old `/friends/*`):
+/// friend-connections security model (stricter than old `/friends/*`):
 /// 1. **Bearer** (primary): token resolves to a human (`human_<staff>`) or bot
 ///    identity → authenticated, safe.
 /// 2. **from_actor fallback**: only when Bearer resolves AND the caller wants
@@ -209,7 +207,7 @@ async fn resolve_caller(
 
     let Some(bearer) = bearer_id else {
         return Err(HttpAdapterError::Unauthorized(
-            "v2 endpoints require Bearer authentication; from_actor fallback without Bearer is not allowed".to_string(),
+            "friend-connections endpoints require Bearer authentication; from_actor fallback without Bearer is not allowed".to_string(),
         ));
     };
 

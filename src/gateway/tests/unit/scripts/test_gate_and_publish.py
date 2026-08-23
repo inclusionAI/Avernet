@@ -87,9 +87,9 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
 
     assert public_document["openapi"] == "3.1.0"
     assert internal_document["openapi"] == "3.1.0"
-    assert public_operations == 49
-    assert internal_operations == 12
-    assert public_operations + internal_operations == 61
+    assert public_operations == 56
+    assert internal_operations == 13
+    assert public_operations + internal_operations == 69
     assert all(
         path.startswith("/openapi/v1/collaboration/")
         for path in public_document["paths"]
@@ -123,6 +123,18 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
         ]
     )
     assert (
+        "post"
+        in public_document["paths"][
+            "/openapi/v1/collaboration/friend-connections/requests"
+        ]
+    )
+    assert (
+        "delete"
+        in public_document["paths"][
+            "/openapi/v1/collaboration/friend-connections"
+        ]
+    )
+    assert (
         "/openapi/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
         not in public_document["paths"]
     )
@@ -140,6 +152,10 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
         in internal_document["paths"][
             "/api/v1/collaboration/sessions/{session_id}/files/{file_id}/content"
         ]
+    )
+    assert (
+        "post"
+        in internal_document["paths"]["/api/v1/collaboration/definitions/validate"]
     )
     assert (
         "/api/v1/collaboration/bots/{bot_id}/candidates"

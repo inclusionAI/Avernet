@@ -5,19 +5,24 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
-    AcceptFriendRequest, AcceptInvitation, AddGroupParticipant, AddSessionParticipant,
-    ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, CompleteSession,
-    CreateBotFriendRequest, CreateGroup, CreateGroupInvitation,
-    CreateSession, CreateSessionInvitation, CreateSessionOutcome, DeleteGroup,
-    DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, Friendship,
-    FriendshipService, FriendRequest, FriendRequestDirection, FriendRequestStatus, GetGroup,
-    GetSession, GroupDetail, GroupService, GroupSummary, Invitation, InvitationAcceptResult,
-    InvitationService, ListGroups, ListBotFriendRequests, ListBotFriendships,
-    ListSessionMessages, ListSessions, Page, RejectFriendRequest, DeleteBotFriendship,
-    SessionCompletionResult,
-    SessionDetail, SessionMessageService, SessionParticipant, SessionService,
-    SessionSummary, UpdateGroup, UpdateGroupParticipant, UpdateSession,
-    UpdateSessionParticipant,
+    AcceptFriendRequest, AcceptFriendConnectionRequest, AcceptInvitation, AddGroupParticipant,
+    AddSessionParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
+    CancelFriendConnectionRequest, CompleteSession, CreateBotFriendRequest,
+    CreateFriendConnectionRequest, CreateGroup, CreateGroupInvitation, CreateSession,
+    CreateSessionInvitation, CreateSessionOutcome, DeleteFriendConnection,
+    DeleteGroup, DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
+    Friendship, FriendshipService, FriendConnectionActor, FriendConnectionActorType,
+    FriendConnectionCreateResult, FriendConnectionCreateStatus, FriendConnectionPage,
+    FriendConnectionRequestDirection, FriendConnectionRequestPage,
+    FriendConnectionRequestStatus, FriendConnectionRequestView, FriendConnectionService,
+    FriendConnectionView,
+    FriendRequest, FriendRequestDirection, FriendRequestStatus, GetGroup, GetSession, GroupDetail,
+    GroupService, GroupSummary, Invitation, InvitationAcceptResult, InvitationService, ListGroups,
+    ListBotFriendRequests, ListBotFriendships, ListFriendConnectionRequests,
+    ListFriendConnections, ListSessionMessages, ListSessions, Page, RejectFriendConnectionRequest,
+    RejectFriendRequest, DeleteBotFriendship, SessionCompletionResult, SessionDetail,
+    SessionMessageService, SessionParticipant, SessionService, SessionSummary, UpdateGroup,
+    UpdateGroupParticipant, UpdateSession, UpdateSessionParticipant,
 };
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -350,8 +355,163 @@ impl FriendshipService for FakeFriendshipService {
 }
 
 // ---------------------------------------------------------------------------
+// Fake friend-connection service.
+// ---------------------------------------------------------------------------
+
+struct FakeFriendConnectionService {
+    created_request: Mutex<Option<CreateFriendConnectionRequest>>,
+    listed_requests: Mutex<Option<ListFriendConnectionRequests>>,
+    accepted_request: Mutex<Option<AcceptFriendConnectionRequest>>,
+    rejected_request: Mutex<Option<RejectFriendConnectionRequest>>,
+    cancelled_request: Mutex<Option<CancelFriendConnectionRequest>>,
+    listed_connections: Mutex<Option<ListFriendConnections>>,
+    deleted_connection: Mutex<Option<DeleteFriendConnection>>,
+    create_result: Mutex<FriendConnectionCreateResult>,
+    request_page: Mutex<FriendConnectionRequestPage>,
+    request_view: Mutex<FriendConnectionRequestView>,
+    connection_page: Mutex<FriendConnectionPage>,
+    delete_result: Mutex<DeleteResult>,
+}
+
+impl Default for FakeFriendConnectionService {
+    fn default() -> Self {
+        Self {
+            created_request: Mutex::new(None),
+            listed_requests: Mutex::new(None),
+            accepted_request: Mutex::new(None),
+            rejected_request: Mutex::new(None),
+            cancelled_request: Mutex::new(None),
+            listed_connections: Mutex::new(None),
+            deleted_connection: Mutex::new(None),
+            create_result: Mutex::new(friend_connection_create_result()),
+            request_page: Mutex::new(friend_connection_request_page()),
+            request_view: Mutex::new(friend_connection_request_view()),
+            connection_page: Mutex::new(friend_connection_page()),
+            delete_result: Mutex::new(DeleteResult { deleted: true }),
+        }
+    }
+}
+
+
+#[async_trait]
+impl FriendConnectionService for FakeFriendConnectionService {
+    async fn create_friend_connection_request(
+        &self,
+        command: CreateFriendConnectionRequest,
+    ) -> Result<FriendConnectionCreateResult, ApplicationError> {
+        *self.created_request.lock().expect("create request lock") = Some(command);
+        Ok(self.create_result.lock().expect("create result lock").clone())
+    }
+
+    async fn list_friend_connection_requests(
+        &self,
+        command: ListFriendConnectionRequests,
+    ) -> Result<FriendConnectionRequestPage, ApplicationError> {
+        *self.listed_requests.lock().expect("list requests lock") = Some(command);
+        Ok(self.request_page.lock().expect("request page lock").clone())
+    }
+
+    async fn accept_friend_connection_request(
+        &self,
+        command: AcceptFriendConnectionRequest,
+    ) -> Result<FriendConnectionRequestView, ApplicationError> {
+        *self.accepted_request.lock().expect("accept request lock") = Some(command);
+        Ok(self.request_view.lock().expect("request view lock").clone())
+    }
+
+    async fn reject_friend_connection_request(
+        &self,
+        command: RejectFriendConnectionRequest,
+    ) -> Result<FriendConnectionRequestView, ApplicationError> {
+        *self.rejected_request.lock().expect("reject request lock") = Some(command);
+        Ok(self.request_view.lock().expect("request view lock").clone())
+    }
+
+    async fn cancel_friend_connection_request(
+        &self,
+        command: CancelFriendConnectionRequest,
+    ) -> Result<FriendConnectionRequestView, ApplicationError> {
+        *self.cancelled_request.lock().expect("cancel request lock") = Some(command);
+        Ok(self.request_view.lock().expect("request view lock").clone())
+    }
+
+    async fn list_friend_connections(
+        &self,
+        command: ListFriendConnections,
+    ) -> Result<FriendConnectionPage, ApplicationError> {
+        *self.listed_connections.lock().expect("list connections lock") = Some(command);
+        Ok(self.connection_page.lock().expect("connection page lock").clone())
+    }
+
+    async fn delete_friend_connection(
+        &self,
+        command: DeleteFriendConnection,
+    ) -> Result<DeleteResult, ApplicationError> {
+        *self.deleted_connection.lock().expect("delete connection lock") = Some(command);
+        Ok(self.delete_result.lock().expect("delete result lock").clone())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Canned data.
 // ---------------------------------------------------------------------------
+
+fn friend_connection_create_result() -> FriendConnectionCreateResult {
+    FriendConnectionCreateResult {
+        request_ids: vec!["req-1".into()],
+        edge_ids: vec!["edge-1".into()],
+        status: FriendConnectionCreateStatus::Pending,
+        auto_accepted: false,
+    }
+}
+
+fn friend_connection_request_view() -> FriendConnectionRequestView {
+    FriendConnectionRequestView {
+        request_id: "req-1".into(),
+        edge_id: Some("edge-1".into()),
+        from_actor: FriendConnectionActor {
+            actor_type: FriendConnectionActorType::Bot,
+            id: "bot-1".into(),
+        },
+        to_actor: FriendConnectionActor {
+            actor_type: FriendConnectionActorType::Bot,
+            id: "bot-2".into(),
+        },
+        message: Some("hi".into()),
+        status: FriendConnectionRequestStatus::Pending,
+        decision_reason: None,
+        created_by: FriendConnectionActor {
+            actor_type: FriendConnectionActorType::Bot,
+            id: "bot-1".into(),
+        },
+        decided_by: None,
+        decided_at: None,
+    }
+}
+
+fn friend_connection_request_page() -> FriendConnectionRequestPage {
+    FriendConnectionRequestPage {
+        items: vec![friend_connection_request_view()],
+        total: 1,
+        page: 1,
+        page_size: 20,
+    }
+}
+
+fn friend_connection_page() -> FriendConnectionPage {
+    FriendConnectionPage {
+        items: vec![FriendConnectionView {
+            actor: FriendConnectionActor {
+                actor_type: FriendConnectionActorType::Bot,
+                id: "friend-bot".into(),
+            },
+            name: Some("Friend Bot".into()),
+            summary: Some("friend summary".into()),
+            is_online: true,
+        }],
+        total: 1,
+    }
+}
 
 fn friendship() -> Friendship {
     Friendship {
@@ -671,6 +831,278 @@ async fn unknown_fields_rejected_with_invalid_request() {
     assert_eq!(unknown_query.status(), StatusCode::BAD_REQUEST);
     let body = response_json(unknown_query).await;
     assert_eq!(body["data"]["error_code"], "invalid_request");
+}
+
+fn openapi_test_router(service: Arc<FakeFriendConnectionService>) -> axum::Router {
+    router(ApiState::new(
+        Arc::new(NoopGroupService),
+        Arc::new(NoopSessionService),
+        Arc::new(NoopSessionMessageService),
+        Arc::new(NoopInvitationService),
+        Arc::new(FakeFriendshipService::default()),
+        Arc::new(HeaderVerifier {
+            caller: caller(),
+        }),
+    )
+    .with_friend_connection_service(service))
+}
+
+#[tokio::test]
+async fn openapi_friend_connection_routes_forward_commands_and_serialize_responses() {
+    let service = Arc::new(FakeFriendConnectionService::default());
+    *service.create_result.lock().expect("create result lock") = FriendConnectionCreateResult {
+        request_ids: vec!["req-99".into()],
+        edge_ids: vec!["edge-99".into()],
+        status: FriendConnectionCreateStatus::Approved,
+        auto_accepted: true,
+    };
+    let app = openapi_test_router(service.clone());
+
+    let create_response = app
+        .clone()
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/friend-connections/requests",
+            serde_json::json!({
+                "from_actor": {"type": "bot", "id": "bot-9"},
+                "to_actor": {"type": "bot", "id": "bot-2"},
+                "message": "hello"
+            }),
+        ))
+        .await
+        .expect("create response");
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let body = response_json(create_response).await;
+    assert_eq!(body["code"], 20_100);
+    assert_eq!(body["data"]["status"], "approved");
+    assert_eq!(body["data"]["request_ids"], serde_json::json!(["req-99"]));
+    assert_eq!(body["data"]["edge_ids"], serde_json::json!(["edge-99"]));
+    assert_eq!(body["data"]["auto_accepted"], true);
+    {
+        let created = service.created_request.lock().expect("create request lock");
+        let created = created.as_ref().expect("create command");
+        assert_eq!(created.caller.user.as_ref().expect("user").id, "staff-1");
+        assert_eq!(created.from_actor.as_ref().expect("from").id, "bot-9");
+        assert_eq!(created.to_actor.id, "bot-2");
+        assert_eq!(created.message.as_deref(), Some("hello"));
+    }
+
+    let list_response = app
+        .clone()
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/friend-connections/requests?actor_type=bot&actor_id=bot-9&direction=sent&status=approved&page=2&page_size=10",
+            Value::Null,
+        ))
+        .await
+        .expect("list requests response");
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let body = response_json(list_response).await;
+    assert_eq!(body["data"]["page"], 1);
+    assert_eq!(body["data"]["page_size"], 20);
+    {
+        let listed = service.listed_requests.lock().expect("list requests lock");
+        let listed = listed.as_ref().expect("list command");
+        assert_eq!(listed.caller.user.as_ref().expect("user").id, "staff-1");
+        assert_eq!(listed.actor.as_ref().expect("actor").id, "bot-9");
+        assert!(matches!(listed.direction, FriendConnectionRequestDirection::Sent));
+        assert_eq!(listed.status, Some(FriendConnectionRequestStatus::Approved));
+        assert_eq!((listed.page, listed.page_size), (2, 10));
+    }
+
+    let connections_response = app
+        .clone()
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/friend-connections?actor_type=human&actor_id=1001",
+            Value::Null,
+        ))
+        .await
+        .expect("list connections response");
+    assert_eq!(connections_response.status(), StatusCode::OK);
+    let body = response_json(connections_response).await;
+    assert_eq!(body["data"]["items"][0]["actor"]["id"], "friend-bot");
+    {
+        let listed = service.listed_connections.lock().expect("list connections lock");
+        let listed = listed.as_ref().expect("list connections command");
+        assert_eq!(listed.actor.actor_type, FriendConnectionActorType::Human);
+        assert_eq!(listed.actor.id, "1001");
+    }
+}
+
+#[tokio::test]
+async fn openapi_friend_connection_routes_support_default_query_values_and_optional_reject_reason() {
+    let service = Arc::new(FakeFriendConnectionService::default());
+    let app = openapi_test_router(service.clone());
+
+    let create_response = app
+        .clone()
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/friend-connections/requests",
+            serde_json::json!({
+                "to_actor": {"type": "bot", "id": "bot-2"}
+            }),
+        ))
+        .await
+        .expect("create response with implicit from_actor");
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    {
+        let created = service.created_request.lock().expect("create request lock");
+        let created = created.as_ref().expect("create command");
+        assert!(created.from_actor.is_none());
+    }
+
+    let list_response = app
+        .clone()
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/friend-connections/requests",
+            Value::Null,
+        ))
+        .await
+        .expect("default list requests response");
+    assert_eq!(list_response.status(), StatusCode::OK);
+    {
+        let listed = service.listed_requests.lock().expect("list requests lock");
+        let listed = listed.as_ref().expect("list command");
+        assert_eq!((listed.page, listed.page_size), (1, 20));
+    }
+
+    let reject_response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/friend-connections/requests/req-2/reject",
+            serde_json::json!({"reason": "no thanks"}),
+        ))
+        .await
+        .expect("reject response with reason");
+    assert_eq!(reject_response.status(), StatusCode::OK);
+    {
+        let rejected = service.rejected_request.lock().expect("reject lock");
+        let rejected = rejected.as_ref().expect("reject command");
+        assert_eq!(rejected.reason.as_deref(), Some("no thanks"));
+        assert_eq!(rejected.request_id, "req-2");
+    }
+}
+
+#[tokio::test]
+async fn openapi_friend_connection_routes_forward_decisions_and_delete() {
+    let service = Arc::new(FakeFriendConnectionService::default());
+    let app = openapi_test_router(service.clone());
+
+    let accept_response = app
+        .clone()
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/friend-connections/requests/req-1/accept",
+            Value::Null,
+        ))
+        .await
+        .expect("accept response");
+    assert_eq!(accept_response.status(), StatusCode::OK);
+    let body = response_json(accept_response).await;
+    assert_eq!(body["data"]["request_id"], "req-1");
+    {
+        let accepted = service.accepted_request.lock().expect("accept lock");
+        let accepted = accepted.as_ref().expect("accept command");
+        assert_eq!(accepted.caller.user.as_ref().expect("user").id, "staff-1");
+        assert_eq!(accepted.request_id, "req-1");
+    }
+
+    let reject_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/openapi/v1/collaboration/friend-connections/requests/req-1/reject")
+                .header("x-test-auth", "yes")
+                .header("x-request-id", "request-123")
+                .body(Body::empty())
+                .expect("reject request"),
+        )
+        .await
+        .expect("reject response");
+    assert_eq!(reject_response.status(), StatusCode::OK);
+    {
+        let rejected = service.rejected_request.lock().expect("reject lock");
+        let rejected = rejected.as_ref().expect("reject command");
+        assert!(rejected.reason.is_none());
+    }
+
+    let cancel_response = app
+        .clone()
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/friend-connections/requests/req-1/cancel",
+            Value::Null,
+        ))
+        .await
+        .expect("cancel response");
+    assert_eq!(cancel_response.status(), StatusCode::OK);
+    {
+        let cancelled = service.cancelled_request.lock().expect("cancel lock");
+        let cancelled = cancelled.as_ref().expect("cancel command");
+        assert_eq!(cancelled.request_id, "req-1");
+    }
+
+    let delete_response = app
+        .oneshot(authenticated_request(
+            "DELETE",
+            "/openapi/v1/collaboration/friend-connections?target_actor_type=bot&target_actor_id=bot-2",
+            Value::Null,
+        ))
+        .await
+        .expect("delete response");
+    assert_eq!(delete_response.status(), StatusCode::OK);
+    let body = response_json(delete_response).await;
+    assert_eq!(body["data"]["deleted"], true);
+    {
+        let deleted = service.deleted_connection.lock().expect("delete lock");
+        let deleted = deleted.as_ref().expect("delete command");
+        assert_eq!(deleted.target_actor.actor_type, FriendConnectionActorType::Bot);
+        assert_eq!(deleted.target_actor.id, "bot-2");
+    }
+}
+
+#[tokio::test]
+async fn openapi_friend_connection_routes_fail_closed_when_service_missing_or_payload_invalid() {
+    let app = router(ApiState::new(
+        Arc::new(NoopGroupService),
+        Arc::new(NoopSessionService),
+        Arc::new(NoopSessionMessageService),
+        Arc::new(NoopInvitationService),
+        Arc::new(FakeFriendshipService::default()),
+        Arc::new(HeaderVerifier { caller: caller() }),
+    ));
+
+    let missing_service = app
+        .clone()
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/friend-connections/requests",
+            serde_json::json!({
+                "to_actor": {"type": "bot", "id": "bot-2"}
+            }),
+        ))
+        .await
+        .expect("missing service response");
+    assert_eq!(missing_service.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let invalid_body = openapi_test_router(Arc::new(FakeFriendConnectionService::default()))
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/openapi/v1/collaboration/friend-connections/requests")
+                .header("content-type", "application/json")
+                .header("x-test-auth", "yes")
+                .header("x-request-id", "request-123")
+                .body(Body::from("{"))
+                .expect("request"),
+        )
+        .await
+        .expect("invalid body response");
+    assert_eq!(invalid_body.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

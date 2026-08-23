@@ -1,4 +1,4 @@
-//! Contract tests for `BotQueryService::search_bots` (the `/v2/bots/search`
+//! Contract tests for `BotQueryService::search_bots` (the `/bots/search`
 //! data source), focused on the TC (TeamClaw backend) bot filter.
 
 use std::sync::Arc;

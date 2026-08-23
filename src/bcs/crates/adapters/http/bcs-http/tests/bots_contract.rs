@@ -1141,7 +1141,7 @@ async fn search_bots_route_rejects_oversized_limit() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/v2/bots/search?limit=101")
+                .uri("/bots/search?limit=101")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1164,7 +1164,7 @@ async fn search_bots_route_rejects_invalid_visibility() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/v2/bots/search?visibility=internet")
+                .uri("/bots/search?visibility=internet")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1193,7 +1193,7 @@ async fn search_bots_route_forces_public_scope_without_bearer() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/v2/bots/search?visibility=protected&offset=0&limit=20")
+                .uri("/bots/search?visibility=protected&offset=0&limit=20")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1241,7 +1241,7 @@ async fn search_bots_route_includes_is_friend_field_with_bearer() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/v2/bots/search?offset=0&limit=20")
+                .uri("/bots/search?offset=0&limit=20")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1273,7 +1273,7 @@ async fn search_bots_route_forwards_tc_bot_filter_param() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/v2/bots/search?tc_bot=true")
+                .uri("/bots/search?tc_bot=true")
                 .body(Body::empty())
                 .unwrap(),
         )

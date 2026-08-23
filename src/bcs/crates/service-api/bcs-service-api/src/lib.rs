@@ -189,6 +189,8 @@ pub use port::{
     ChannelOutboundEvent, ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
     ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,
     HumanInputRequestRepoPort,
+    FriendConnectNotificationCommand, FriendConnectNotificationKind,
+    FriendConnectNotificationPort, NoopFriendConnectNotificationPort,
     FriendRepoPort, FriendRequestRepoPort, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupDispatchContextPort,
     GroupHistoryBotRequestPort, GroupMetricCount, GroupMetricsSnapshotPort, GroupRepoPort,
