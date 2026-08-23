@@ -159,6 +159,10 @@ _IMPORT_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset({
     # @abstractmethod, so omitting one fails at construction naming the member.
     # Inheriting it also makes the contract navigable from Protocol to
     # implementation in an IDE.
+    # Governed by waiver W-001 (docs/arch/waivers.md) — Rule 6 is an Invariant,
+    # so this cross-layer exception carries an owner, a review date and a
+    # removal plan. The six entries above predate that register and are not
+    # covered by it.
     (
         "core/skill_center/services/local_skill_query_service.py",
         "agentclaw.community.api.local_skill_query_service",

@@ -29,8 +29,23 @@ over structural-only: it makes the contract navigable in an IDE (jump
 from Protocol to implementation and back) and, when every Protocol member
 is `@abstractmethod`, turns a missing member into a construction-time
 `TypeError` naming it instead of a silently inherited `...` body that
-returns `None`. Two edits come with it — the allowlist entry above, and
-the import declared in the module's `## Context Boundary`.
+returns `None`.
+
+Three edits come with it. `arch.rules.md` Rule 6 is an **Invariant**, so
+the exception is not free:
+
+1. A waiver in [`docs/arch/waivers.md`](../../../../../../docs/arch/waivers.md)
+   naming the rule, owner, review date and removal plan (W-001 is the
+   worked example).
+2. The allowlist entry in `test_architecture_compliance.py`, pointing at
+   that waiver.
+3. The import declared in the module's `## Context Boundary`.
+
+The cleaner long-term shape is to define the Protocol in `core/` and
+re-export it from `api/` — then `core` imports its own abstraction and
+there is no exception to waive. `governance_service.py` documents that
+pattern. It needs `test_api_layer_is_protocols_only.py` taught about
+re-export-only modules first; see W-001's removal plan.
 
 Services that predate this — and those whose Protocol still declares
 `*args: Any, **kwargs: Any`, against which inheritance would assert
