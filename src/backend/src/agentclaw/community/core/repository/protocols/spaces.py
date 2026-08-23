@@ -24,6 +24,19 @@ class SpaceRepositoryProtocol(Protocol):
     ) -> tuple[SpaceRecord, bool]: ...
 
     @abstractmethod
+    def get_personal_space(self, *, user_id: str, env: str) -> SpaceRecord | None: ...
+
+    @abstractmethod
+    def create_personal_transaction(
+        self, *, user_id: str, env: str
+    ) -> ContextManager[SpaceRecord]: ...
+
+    @abstractmethod
+    def personal_sc_team_binding_transaction(
+        self, *, space_id: int, env: str
+    ) -> ContextManager[SpaceRecord]: ...
+
+    @abstractmethod
     def create_team_transaction(
         self, *, name: str, creator_id: str, env: str
     ) -> ContextManager[SpaceRecord]: ...
@@ -78,6 +91,7 @@ class SpaceRepositoryProtocol(Protocol):
         *,
         space_id: int,
         user_id: str,
+        user_name: str | None = None,
         role: SpaceRole,
         creator_id: str,
         env: str,

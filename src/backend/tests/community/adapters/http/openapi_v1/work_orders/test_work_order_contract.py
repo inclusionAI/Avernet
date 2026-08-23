@@ -10,6 +10,10 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.work_orders.converter import (
+    display_title,
+    json_object,
+)
 from agentclaw.community.adapters.http.openapi_v1.work_orders.router import router
 from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
@@ -20,6 +24,8 @@ from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderBizType,
     WorkOrderDetail,
+    WorkOrderEventCreatedResult,
+    WorkOrderEventStatus,
     WorkOrderEventType,
     WorkOrderListItem,
     WorkOrderNotificationDetail,
@@ -72,8 +78,8 @@ def _notification(
         event_type=WorkOrderEventType.SPACE_JOIN_REVIEWED,
         biz_type=WorkOrderBizType.SPACE_JOIN,
         biz_id="7",
-        title="reviewed",
-        content="approved",
+        title="SPACE_JOIN_APPROVED",
+        content=json.dumps({"message": "approved"}),
         is_read=False,
         read_at=None,
         env="dev",
@@ -127,15 +133,15 @@ def test_create_join_request_uses_principal_and_returns_created(
     )
 
 
-@pytest.mark.parametrize("payload", [{}, {"reason": None}, {"reason": ""}, {"reason": "   "}])
+@pytest.mark.parametrize(
+    "payload", [{}, {"reason": None}, {"reason": ""}, {"reason": "   "}]
+)
 def test_create_join_request_accepts_optional_reason(
     client, work_order_service, payload
 ):
     work_order_service.create_space_join_request.return_value = _work_order()
 
-    response = client.post(
-        "/openapi/v1/bots/spaces/7/join-requests", json=payload
-    )
+    response = client.post("/openapi/v1/bots/spaces/7/join-requests", json=payload)
 
     assert response.status_code == 201
     assert response.json()["data"]["status"] == "PENDING"
@@ -181,21 +187,80 @@ def test_create_bot_editor_request_uses_principal_and_named_owner(
     )
 
 
-def _space_join_display_data() -> str:
-    return json.dumps(
-        {
-            "display_title": {
-                "PENDING": "空间加入申请待审批",
-                "APPROVED": "空间加入申请已通过",
-                "REJECTED": "空间加入申请未通过",
-            },
-            "display_content": {
-                "PENDING": "空间加入申请正在等待审批。",
-                "APPROVED": "空间加入申请已通过。",
-                "REJECTED": "空间加入申请未通过。",
-            },
-        }
+def test_create_work_order_event_accepts_json_objects(client, work_order_service):
+    work_order_service.create_work_order_event.return_value = (
+        WorkOrderEventCreatedResult(
+            event_category=NotificationCategory.APPROVAL,
+            work_order_id=11,
+            work_order_no="WO-11",
+            notification_ids=[21],
+            status=WorkOrderEventStatus.PENDING,
+        )
     )
+    payload = {
+        "event_category": "APPROVAL",
+        "biz_type": "SPACE_JOIN",
+        "biz_id": "7",
+        "event_type": "SPACE_JOIN_APPLIED",
+        "applicant_user_id": "owner-1",
+        "approver_user_ids": ["approver-1"],
+        "recipient_user_ids": [],
+        "title": "ignored display title",
+        "content": {"message": "apply", "items": [1, True]},
+        "biz_data": {"space_id": 7, "meta": {"source": "web"}},
+    }
+
+    response = client.post("/openapi/v1/bots/work-orders/events", json=payload)
+
+    assert response.status_code == 201
+    work_order_service.create_work_order_event.assert_called_once_with(
+        event_category=NotificationCategory.APPROVAL,
+        biz_type="SPACE_JOIN",
+        biz_id="7",
+        event_type="SPACE_JOIN_APPLIED",
+        applicant_user_id="owner-1",
+        approver_user_ids=["approver-1"],
+        recipient_user_ids=[],
+        title="ignored display title",
+        content={"message": "apply", "items": [1, True]},
+        apply_reason=None,
+        biz_data={"space_id": 7, "meta": {"source": "web"}},
+        actor_id="owner-1",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("content", [1, 2, 3]),
+        ("content", "text"),
+        ("content", 123),
+        ("content", True),
+        ("biz_data", [1, 2, 3]),
+        ("biz_data", "text"),
+        ("biz_data", 123),
+        ("biz_data", True),
+    ],
+)
+def test_create_work_order_event_rejects_non_object_json(
+    client, work_order_service, field, value
+):
+    payload = {
+        "event_category": "APPROVAL",
+        "biz_type": "SPACE_JOIN",
+        "biz_id": "7",
+        "event_type": "SPACE_JOIN_APPLIED",
+        "applicant_user_id": "owner-1",
+        "approver_user_ids": ["approver-1"],
+        "recipient_user_ids": [],
+        "title": "title",
+        field: value,
+    }
+
+    response = client.post("/openapi/v1/bots/work-orders/events", json=payload)
+
+    assert response.status_code == 422
+    work_order_service.create_work_order_event.assert_not_called()
 
 
 def test_list_work_orders_maps_plain_and_notification_items(client, work_order_service):
@@ -203,7 +268,7 @@ def test_list_work_orders_maps_plain_and_notification_items(client, work_order_s
         2,
         [
             WorkOrderListItem(
-                work_order=_work_order(biz_data=_space_join_display_data()),
+                work_order=_work_order(),
                 notification=None,
                 can_approve=True,
             ),
@@ -231,11 +296,13 @@ def test_list_work_orders_maps_plain_and_notification_items(client, work_order_s
     assert items[0]["item_type"] == "APPROVAL"
     assert items[0]["notification_id"] is None
     assert items[0]["title"] == "空间加入申请待审批"
-    assert items[0]["content"] == "空间加入申请正在等待审批。"
+    assert items[0]["content"] is None
     assert items[0]["gmt_modified"] == "2026-08-18T02:03:04Z"
     assert items[1]["item_id"] == "NOTIFICATION_21"
     assert items[1]["item_type"] == "NOTICE"
     assert items[1]["notification_id"] == 21
+    assert items[1]["title"] == "空间加入申请已通过"
+    assert items[1]["content"] == {"message": "approved"}
     assert items[1]["gmt_modified"] == "2026-08-18T03:04:05Z"
     work_order_service.list_items.assert_called_once()
     assert work_order_service.list_items.call_args.kwargs == {
@@ -250,33 +317,21 @@ def test_list_work_orders_maps_plain_and_notification_items(client, work_order_s
 
 
 @pytest.mark.parametrize(
-    ("status", "title", "content"),
+    ("status", "title"),
     [
-        (
-            WorkOrderStatus.PENDING,
-            "空间加入申请待审批",
-            "空间加入申请正在等待审批。",
-        ),
-        (
-            WorkOrderStatus.APPROVED,
-            "空间加入申请已通过",
-            "空间加入申请已通过。",
-        ),
-        (
-            WorkOrderStatus.REJECTED,
-            "空间加入申请未通过",
-            "空间加入申请未通过。",
-        ),
+        (WorkOrderStatus.PENDING, "空间加入申请待审批"),
+        (WorkOrderStatus.APPROVED, "空间加入申请已通过"),
+        (WorkOrderStatus.REJECTED, "空间加入申请未通过"),
     ],
 )
-def test_list_work_orders_provides_copy_for_approval_without_notification(
-    client, work_order_service, status, title, content
+def test_list_work_orders_derives_space_title_without_notification(
+    client, work_order_service, status, title
 ):
     work_order_service.list_items.return_value = (
         1,
         [
             WorkOrderListItem(
-                work_order=_work_order(status, biz_data=_space_join_display_data()),
+                work_order=_work_order(status),
                 notification=None,
                 can_approve=False,
             )
@@ -287,44 +342,51 @@ def test_list_work_orders_provides_copy_for_approval_without_notification(
 
     assert response.status_code == 200
     item = response.json()["data"]["items"][0]
-    assert item["item_type"] == "APPROVAL"
-    assert item["notification_id"] is None
-    assert item["notification_category"] is None
     assert item["title"] == title
-    assert item["content"] == content
+    assert item["content"] is None
 
 
-def test_list_work_orders_uses_business_copy_without_shared_biz_type_enum(
-    client, work_order_service
+@pytest.mark.parametrize(
+    ("stored_title", "expected"),
+    [
+        ("空间加入申请待审批", "空间加入申请待审批"),
+        ("空间加入申请已通过", "空间加入申请已通过"),
+        ("空间加入申请未通过", "空间加入申请未通过"),
+        ("SPACE_JOIN APPROVED", "空间加入申请已通过"),
+        ("SPACE_JOIN REJECTED", "空间加入申请未通过"),
+        ("SPACE_JOIN_PENDING", "空间加入申请待审批"),
+        ("SPACE_JOIN_APPROVED", "空间加入申请已通过"),
+        ("SPACE_JOIN_REJECTED", "空间加入申请未通过"),
+        ("custom title", "custom title"),
+    ],
+)
+def test_list_work_orders_translates_compatible_titles(
+    client, work_order_service, stored_title, expected
 ):
-    order = _work_order(
-        biz_data=json.dumps(
-            {
-                "display_title": {"PENDING": "机器人协作申请"},
-                "display_content": {"PENDING": "请处理机器人协作申请。"},
-            }
-        )
-    )
-    order.biz_type = "BOT_COLLABORATOR"
+    notification = _notification().model_copy(update={"title": stored_title})
     work_order_service.list_items.return_value = (
         1,
-        [WorkOrderListItem(work_order=order, notification=None, can_approve=False)],
+        [
+            WorkOrderListItem(
+                work_order=_work_order(WorkOrderStatus.APPROVED),
+                notification=notification,
+                can_approve=False,
+            )
+        ],
     )
 
     response = client.get("/openapi/v1/bots/work-orders")
 
     assert response.status_code == 200
-    item = response.json()["data"]["items"][0]
-    assert item["biz_type"] == "BOT_COLLABORATOR"
-    assert item["title"] == "机器人协作申请"
-    assert item["content"] == "请处理机器人协作申请。"
+    assert response.json()["data"]["items"][0]["title"] == expected
 
 
 def test_get_work_order_maps_nested_content(client, work_order_service):
     work_order_service.get_detail.return_value = WorkOrderDetail(
-        work_order=_work_order(),
+        work_order=_work_order(biz_data=json.dumps({"space_id": 7, "tags": ["a"]})),
         event_type=WorkOrderEventType.SPACE_JOIN_APPLIED,
-        title="pending",
+        title="SPACE_JOIN_PENDING",
+        content=json.dumps({"message": "pending", "meta": {"priority": 1}}),
         space_id=7,
         space_name="Team",
         applicant_name="Applicant",
@@ -337,13 +399,9 @@ def test_get_work_order_maps_nested_content(client, work_order_service):
     data = response.json()["data"]
     assert data["work_order_id"] == 11
     assert data["biz_id"] == 7
-    assert data["content"] == {
-        "space_id": 7,
-        "space_name": "Team",
-        "applicant_user_id": "applicant-1",
-        "applicant_name": "Applicant",
-        "reason": "join",
-    }
+    assert data["title"] == "空间加入申请待审批"
+    assert data["content"] == {"message": "pending", "meta": {"priority": 1}}
+    assert data["biz_data"] == {"space_id": 7, "tags": ["a"]}
     assert data["can_approve"] is True
     work_order_service.get_detail.assert_called_once_with(
         work_order_id=11, actor_id="owner-1"
@@ -369,6 +427,7 @@ def test_get_bot_editor_work_order_maps_business_content(client, work_order_serv
         work_order=record,
         event_type=WorkOrderEventType.BOT_COLLABORATOR_APPLIED,
         title="pending",
+        content=json.dumps({"message": "raw bot content"}),
         space_id=0,
         space_name="",
         applicant_name="applicant-1",
@@ -378,15 +437,15 @@ def test_get_bot_editor_work_order_maps_business_content(client, work_order_serv
     response = client.get("/openapi/v1/bots/work-orders/11")
 
     assert response.status_code == 200
-    assert response.json()["data"]["content"] == {
+    data = response.json()["data"]
+    assert data["content"] == {"message": "raw bot content"}
+    assert data["biz_data"] == {
         "bot_id": "bot-7",
         "bot_name": "Data Bot",
         "owner_id": "owner-1",
         "space_id": 7,
-        "applicant_user_id": "applicant-1",
         "applicant_name": "Applicant",
         "requested_role": "member",
-        "reason": "join",
     }
 
 
@@ -491,8 +550,8 @@ def test_notification_detail_and_mark_read(client, notification_service):
         "work_order_id": 11,
         "notification_category": "APPROVAL",
         "event_type": "SPACE_JOIN_REVIEWED",
-        "title": "reviewed",
-        "content": "approved",
+        "title": "空间加入申请已通过",
+        "content": {"message": "approved"},
         "is_read": False,
         "work_order_status": "PENDING",
         "can_approve": True,
@@ -511,6 +570,22 @@ def test_notification_detail_and_mark_read(client, notification_service):
     notification_service.mark_read.assert_called_once_with(
         notification_id=21, actor_id="owner-1"
     )
+
+
+def test_notification_detail_wraps_historical_plain_text(client, notification_service):
+    notification_service.get_detail.return_value = WorkOrderNotificationDetail(
+        notification=_notification(NotificationCategory.NOTICE).model_copy(
+            update={"title": "SPACE_JOIN APPROVED", "content": "approved"}
+        ),
+        work_order_status=WorkOrderStatus.APPROVED,
+        can_approve=False,
+    )
+
+    response = client.get("/openapi/v1/bots/work-order-notifications/21")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["title"] == "空间加入申请已通过"
+    assert response.json()["data"]["content"] == {"legacy_value": "approved"}
 
 
 def test_domain_error_is_mapped_to_public_work_order_contract(
@@ -544,3 +619,8 @@ def test_request_validation_rejects_invalid_contract(client, path, method, paylo
         else getattr(client, method)(path)
     )
     assert response.status_code == 422
+
+
+def test_presentation_helpers_preserve_empty_values() -> None:
+    assert display_title(None, biz_type="CUSTOM", status=None) is None
+    assert json_object(None) is None

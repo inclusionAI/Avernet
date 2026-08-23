@@ -38,6 +38,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderRecord,
     WorkOrderReviewResult,
     WorkOrderStatus,
+    WorkOrderTitleKey,
 )
 from agentclaw.community.core.work_orders.services.work_order_service import (
     WorkOrderNotificationService,
@@ -309,7 +310,9 @@ def test_create_rejects_invalid_reason(value: str) -> None:
 
 
 @pytest.mark.parametrize("reason", [None, "", "   "])
-def test_create_space_join_request_allows_blank_reason_as_null(reason: str | None) -> None:
+def test_create_space_join_request_allows_blank_reason_as_null(
+    reason: str | None,
+) -> None:
     service, repository, spaces, access, _ = _service()
     access.require_space.return_value = _space()
     spaces.get_member.return_value = None
@@ -534,12 +537,12 @@ def test_review_maps_space_access_denied_to_work_order_error() -> None:
     [
         (
             WorkOrderStatus.APPROVED,
-            "空间加入申请已通过",
+            WorkOrderTitleKey.SPACE_JOIN_APPROVED.value,
             "你加入空间「Team」的申请已通过。",
         ),
         (
             WorkOrderStatus.REJECTED,
-            "空间加入申请未通过",
+            WorkOrderTitleKey.SPACE_JOIN_REJECTED.value,
             "你加入空间「Team」的申请未通过。拒绝原因：capacity",
         ),
     ],
@@ -682,7 +685,7 @@ def test_create_work_order_event_normalizes_and_delegates(
         approver_user_ids=approvers,
         recipient_user_ids=recipients,
         title="  title  ",
-        content="content",
+        content={"message": "content", "items": [1, True]},
         apply_reason="  reason  ",
         biz_data={"space_id": 7},
         actor_id="actor-1",
@@ -694,11 +697,17 @@ def test_create_work_order_event_normalizes_and_delegates(
         biz_type="SPACE_JOIN",
         biz_id="7",
         event_type=event_type,
-        applicant_user_id="actor-1" if category is NotificationCategory.APPROVAL else None,
-        approver_user_ids=approvers[:1] if category is NotificationCategory.APPROVAL else [],
-        recipient_user_ids=recipients[:1] if category is NotificationCategory.NOTICE else [],
-        title="title",
-        content="content",
+        applicant_user_id="actor-1"
+        if category is NotificationCategory.APPROVAL
+        else None,
+        approver_user_ids=approvers[:1]
+        if category is NotificationCategory.APPROVAL
+        else [],
+        recipient_user_ids=recipients[:1]
+        if category is NotificationCategory.NOTICE
+        else [],
+        title=("SPACE_JOIN_PENDING" if event_type == "SPACE_JOIN_APPLIED" else "title"),
+        content='{"message": "content", "items": [1, true]}',
         apply_reason="reason",
         biz_data='{"space_id": 7}',
         env="dev",
@@ -709,8 +718,21 @@ def test_create_work_order_event_normalizes_and_delegates(
     ("overrides", "message"),
     [
         ({"event_type": "UNKNOWN"}, "not registered"),
-        ({"event_category": NotificationCategory.APPROVAL, "event_type": "SPACE_JOIN_REVIEWED"}, "does not match"),
-        ({"event_category": NotificationCategory.APPROVAL, "approver_user_ids": [], "recipient_user_ids": ["recipient-1"]}, "require approvers"),
+        (
+            {
+                "event_category": NotificationCategory.APPROVAL,
+                "event_type": "SPACE_JOIN_REVIEWED",
+            },
+            "does not match",
+        ),
+        (
+            {
+                "event_category": NotificationCategory.APPROVAL,
+                "approver_user_ids": [],
+                "recipient_user_ids": ["recipient-1"],
+            },
+            "require approvers",
+        ),
         ({"applicant_user_id": "other-user"}, "applicant must be"),
         ({"apply_reason": "x" * 513}, "no more than 512"),
     ],
@@ -735,7 +757,9 @@ def test_create_work_order_event_rejects_invalid_input(
     }
     payload.update(overrides)
 
-    with pytest.raises((WorkOrderInvalidEventError, WorkOrderAccessDeniedError), match=message):
+    with pytest.raises(
+        (WorkOrderInvalidEventError, WorkOrderAccessDeniedError), match=message
+    ):
         service.create_work_order_event(**payload)  # type: ignore[arg-type]
 
     repository.create_work_order_event.assert_not_called()

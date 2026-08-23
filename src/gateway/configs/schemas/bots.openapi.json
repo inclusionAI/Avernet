@@ -11,6 +11,19 @@
             "title": "Member User Id",
             "type": "string"
           },
+          "member_user_name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Snapshot of the member's user name; may be omitted.",
+            "title": "Member User Name"
+          },
           "role": {
             "$ref": "#/components/schemas/SpaceRole",
             "default": "MEMBER",
@@ -737,6 +750,32 @@
           "bot_type"
         ],
         "title": "BotCreate",
+        "type": "object"
+      },
+      "BotEditorRequestCreated": {
+        "description": "Work-order identity returned for a Bot editor request.",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/WorkOrderStatus",
+            "description": "Initial work-order status."
+          },
+          "work_order_id": {
+            "description": "Identifier of the created work order.",
+            "title": "Work Order Id",
+            "type": "integer"
+          },
+          "work_order_no": {
+            "description": "Human-readable work-order number.",
+            "title": "Work Order No",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_order_id",
+          "work_order_no",
+          "status"
+        ],
+        "title": "BotEditorRequestCreated",
         "type": "object"
       },
       "BotHealth": {
@@ -2387,6 +2426,23 @@
         "title": "ConversationSession",
         "type": "object"
       },
+      "CreateBotEditorRequest": {
+        "description": "Request for jointly editing a Team Space Bot.",
+        "properties": {
+          "reason": {
+            "description": "Reason for requesting edit access.",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "CreateBotEditorRequest",
+        "type": "object"
+      },
       "CreateSpaceJoinRequest": {
         "description": "Request for joining a Space.",
         "properties": {
@@ -2471,7 +2527,7 @@
                 "type": "null"
               }
             ],
-            "description": "Business-specific event data, when supplied.",
+            "description": "JSON object stored as work-order business data without business reshaping.",
             "title": "Biz Data"
           },
           "biz_id": {
@@ -2491,13 +2547,14 @@
           "content": {
             "anyOf": [
               {
-                "type": "string"
+                "additionalProperties": true,
+                "type": "object"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Display content of the event, when supplied.",
+            "description": "JSON object stored as notification content without business reshaping.",
             "title": "Content"
           },
           "event_category": {
@@ -3558,13 +3615,7 @@
           },
           "bot_type": {
             "description": "Published kind of Bot.",
-            "enum": [
-              "personal",
-              "service",
-              "desktop"
-            ],
-            "title": "Bot Type",
-            "type": "string"
+            "title": "Bot Type"
           },
           "description": {
             "description": "Public Bot description.",
@@ -3587,14 +3638,6 @@
             "type": "string"
           },
           "owner_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Optional public owner name.",
             "title": "Owner Name"
           },
@@ -4284,6 +4327,48 @@
           "request_id"
         ],
         "title": "Envelope[BotAuthStatus]",
+        "type": "object"
+      },
+      "Envelope_BotEditorRequestCreated_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotEditorRequestCreated"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[BotEditorRequestCreated]",
         "type": "object"
       },
       "Envelope_BotHealth_": {
@@ -11715,13 +11800,14 @@
           "content": {
             "anyOf": [
               {
-                "type": "string"
+                "additionalProperties": true,
+                "type": "object"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Notification message content, when present.",
+            "description": "Notification JSON object, when present.",
             "title": "Content"
           },
           "event_type": {
@@ -16304,65 +16390,20 @@
           "REJECTED"
         ]
       },
-      "WorkOrderDetailContent": {
-        "description": "Business details for a Space join work order.",
-        "properties": {
-          "applicant_name": {
-            "description": "Display name of the applicant.",
-            "title": "Applicant Name",
-            "type": "string"
-          },
-          "applicant_user_id": {
-            "description": "Identifier of the applicant.",
-            "title": "Applicant User Id",
-            "type": "string"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Applicant's reason, when supplied.",
-            "title": "Reason"
-          },
-          "space_id": {
-            "description": "Identifier of the requested Space.",
-            "title": "Space Id",
-            "type": "integer"
-          },
-          "space_name": {
-            "description": "Display name of the requested Space.",
-            "title": "Space Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "space_id",
-          "space_name",
-          "applicant_user_id",
-          "applicant_name",
-          "reason"
-        ],
-        "title": "WorkOrderDetailContent",
-        "type": "object"
-      },
       "WorkOrderDetailResponse": {
         "description": "Detailed view of one work order.",
         "properties": {
           "biz_data": {
             "anyOf": [
               {
-                "type": "string"
+                "additionalProperties": true,
+                "type": "object"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Business detail JSON payload.",
+            "description": "Work-order business JSON object, when available.",
             "title": "Biz Data"
           },
           "biz_id": {
@@ -16390,9 +16431,6 @@
           "content": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/WorkOrderDetailContent"
-              },
-              {
                 "additionalProperties": true,
                 "type": "object"
               },
@@ -16400,7 +16438,7 @@
                 "type": "null"
               }
             ],
-            "description": "Business detail payload.",
+            "description": "Notification JSON object, when available.",
             "title": "Content"
           },
           "event_type": {
@@ -16690,13 +16728,14 @@
           "content": {
             "anyOf": [
               {
-                "type": "string"
+                "additionalProperties": true,
+                "type": "object"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Notification content, when available.",
+            "description": "Notification JSON object, or null when unavailable.",
             "title": "Content"
           },
           "env": {
@@ -34332,6 +34371,44 @@
             }
           },
           {
+            "description": "Business type to return, or all business types.",
+            "in": "query",
+            "name": "biz_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Business type to return, or all business types.",
+              "title": "Biz Type"
+            }
+          },
+          {
+            "description": "Business identifier to return.",
+            "in": "query",
+            "name": "biz_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Business identifier to return.",
+              "title": "Biz Id"
+            }
+          },
+          {
             "description": "One-based page number.",
             "in": "query",
             "name": "page_no",
@@ -41753,6 +41830,203 @@
           }
         },
         "summary": "Steal Edit Lock"
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/editor-requests": {
+      "post": {
+        "operationId": "create_bot_editor_request_openapi_v1_bots__bot_id__editor_requests_post",
+        "parameters": [
+          {
+            "description": "Identifier of the Bot.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Identifier of the Bot.",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Owner of the Bot. Defaults to the current user.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Owner of the Bot. Defaults to the current user.",
+              "title": "Owner Id"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBotEditorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotEditorRequestCreated_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Create Bot Editor Request",
+        "tags": [
+          "work-orders"
+        ]
       }
     },
     "/openapi/v1/bots/{bot_id}/editors": {
@@ -57530,7 +57804,10 @@
                 "schema": {}
               }
             },
-            "description": "Successful Response"
+            "description": "File content or a ready external-download descriptor."
+          },
+          "202": {
+            "description": "Large attachment download is being prepared."
           },
           "400": {
             "content": {
@@ -57606,6 +57883,9 @@
               }
             },
             "description": "Conflicts with current state"
+          },
+          "413": {
+            "description": "Inline preview is too large."
           },
           "422": {
             "content": {

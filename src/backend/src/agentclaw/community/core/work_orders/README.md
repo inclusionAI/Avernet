@@ -76,33 +76,26 @@ later business handlers.
 
 ## Space-join message templates
 
-Titles and content for the currently implemented Space handler are
-maintained by `WorkOrderMessageTitle` and `WorkOrderMessageContent`. The
-rendered approval copy is also stored in the work order's `biz_data`, so the
-applicant's initiated-work-order list can display it even though no approval
-notification row is created for the applicant. The OpenAPI adapter reads the
-status-specific `display_title` and `display_content` values from `biz_data`;
-it does not maintain a shared business-type-to-copy enum. Each new business
-module owns its own wording and supplies the same display payload when it
-creates a work order.
+Space-join notification titles are persisted as stable, language-independent
+`WorkOrderTitleKey` values. The OpenAPI adapter translates the known keys into
+Chinese display copy and also recognizes historical Chinese titles and the
+former `SPACE_JOIN APPROVED` / `SPACE_JOIN REJECTED` formats. Unknown custom
+titles pass through unchanged.
 
-Example `biz_data` display payload:
+`content` and `biz_data` have separate ownership. Notification `content` comes
+from `ac_work_order_notification.content`; work-order `biz_data` comes from
+`ac_work_order.biz_data`. Generic OpenAPI event inputs accept a JSON object or
+`null`, persist the object as JSON text, and deserialize the same object on
+read. The adapter never derives one field from the other or reconstructs either
+payload based on `biz_type`. Historical scalar or plain-text rows are exposed
+under `legacy_value` so the response remains object-shaped without losing data.
 
-```json
-{
-  "display_title": {"PENDING": "...", "APPROVED": "...", "REJECTED": "..."},
-  "display_content": {"PENDING": "...", "APPROVED": "...", "REJECTED": "..."}
-}
-```
-
-Clients display the final stored text directly.
-
-| Scenario | Event | Category | Title | Content |
-| --- | --- | --- | --- | --- |
-| Waiting for review | `SPACE_JOIN_APPLIED` | `APPROVAL` | `空间加入申请待审批` | `用户「{applicant_name}」申请加入空间「{space_name}」，请及时处理。` |
-| Approved | `SPACE_JOIN_REVIEWED` | `NOTICE` | `空间加入申请已通过` | `你加入空间「{space_name}」的申请已通过。` |
-| Rejected | `SPACE_JOIN_REVIEWED` | `NOTICE` | `空间加入申请未通过` | `你加入空间「{space_name}」的申请未通过。拒绝原因：{review_remark}` |
-| Added directly | `SPACE_MEMBER_ADDED` | `NOTICE` | `你已被添加到空间` | `你已被添加到空间「{space_name}」。` |
+| Scenario | Event | Category | Persisted title | API title | Content |
+| --- | --- | --- | --- | --- | --- |
+| Waiting for review | `SPACE_JOIN_APPLIED` | `APPROVAL` | `SPACE_JOIN_PENDING` | `空间加入申请待审批` | `用户「{applicant_name}」申请加入空间「{space_name}」，请及时处理。` |
+| Approved | `SPACE_JOIN_REVIEWED` | `NOTICE` | `SPACE_JOIN_APPROVED` | `空间加入申请已通过` | `你加入空间「{space_name}」的申请已通过。` |
+| Rejected | `SPACE_JOIN_REVIEWED` | `NOTICE` | `SPACE_JOIN_REJECTED` | `空间加入申请未通过` | `你加入空间「{space_name}」的申请未通过。拒绝原因：{review_remark}` |
+| Added directly | `SPACE_MEMBER_ADDED` | `NOTICE` | `你已被添加到空间` | `你已被添加到空间` | `你已被添加到空间「{space_name}」。` |
 
 `SPACE_JOIN_REVIEWED` deliberately uses one event value for both outcomes;
 the associated work-order status selects the approved or rejected template.

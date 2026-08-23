@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from agentclaw.community.core.spaces.repository.models import SpaceMemberModel, SpaceModel
+from agentclaw.community.core.spaces.repository.models import (
+    SpaceMemberModel,
+    SpaceModel,
+)
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAlreadyPendingError,
     WorkOrderNoReviewerError,
@@ -21,7 +23,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderStatus,
     WorkOrderEventType,
     WorkOrderMessageContent,
-    WorkOrderMessageTitle,
+    WorkOrderTitleKey,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
@@ -244,20 +246,7 @@ class _WorkOrderCreationRepository:
                 work_order_no=self._new_no(),
                 biz_type=WorkOrderBizType.SPACE_JOIN.value,
                 biz_id=str(space_id),
-                biz_data=json.dumps(
-                    {
-                        "display_title": {
-                            WorkOrderStatus.PENDING.value: WorkOrderMessageTitle.SPACE_JOIN_PENDING.value,
-                        },
-                        "display_content": {
-                            WorkOrderStatus.PENDING.value: WorkOrderMessageContent.SPACE_JOIN_PENDING.value.format(
-                                applicant_name=applicant_name,
-                                space_name=space.name,
-                            ),
-                        },
-                    },
-                    ensure_ascii=False,
-                ),
+                biz_data=None,
                 applicant_user_id=applicant_user_id,
                 apply_reason=apply_reason,
                 status=WorkOrderStatus.PENDING.value,
@@ -265,7 +254,7 @@ class _WorkOrderCreationRepository:
             )
             db.add(row)
             db.flush()
-            title = WorkOrderMessageTitle.SPACE_JOIN_PENDING.value
+            title = WorkOrderTitleKey.SPACE_JOIN_PENDING.value
             content = WorkOrderMessageContent.SPACE_JOIN_PENDING.value.format(
                 applicant_name=applicant_name, space_name=space.name
             )

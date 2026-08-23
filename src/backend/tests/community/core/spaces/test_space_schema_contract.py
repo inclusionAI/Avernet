@@ -5,7 +5,10 @@ import re
 
 from sqlalchemy import UniqueConstraint
 
-from agentclaw.community.core.spaces.repository.models import SpaceModel
+from agentclaw.community.core.spaces.repository.models import (
+    SpaceMemberModel,
+    SpaceModel,
+)
 
 
 _DDL_PATH = (
@@ -42,3 +45,17 @@ def test_sc_team_id_contract_is_present_in_orm_and_bootstrap_ddl() -> None:
         "COMMENT 'SkillCenter团队ID，团队空间同步SC成功后写入'"
     ) in ddl
     assert "UNIQUE KEY uk_sc_team_id_env (sc_team_id, env)" in ddl
+
+
+def test_member_user_name_contract_is_present_in_orm_and_ddl() -> None:
+    column = SpaceMemberModel.__table__.c.user_name
+    assert column.type.length == 128
+    assert column.nullable is True
+
+    ddl = _normalized_ddl()
+    assert ("user_name VARCHAR(128) NULL DEFAULT NULL COMMENT '成员用户名快照'") in ddl
+
+    migration = _DDL_PATH.with_name("2026_08_22_add_space_member_user_name.sql")
+    migration_ddl = re.sub(r"\s+", " ", migration.read_text(encoding="utf-8"))
+    assert "ADD COLUMN IF NOT EXISTS user_name VARCHAR(128) NULL" in migration_ddl
+    assert "DELETE FROM ac_space_member WHERE status = 'INACTIVE'" in migration_ddl

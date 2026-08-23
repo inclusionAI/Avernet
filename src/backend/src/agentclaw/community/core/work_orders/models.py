@@ -107,7 +107,22 @@ NOTICE_EVENT_TYPES: frozenset[WorkOrderEventType] = frozenset(
 )
 
 
+class WorkOrderTitleKey(StrEnum):
+    """Stable title codes persisted for Space-join notifications.
+
+    The database stores these language-independent codes. Delivery adapters
+    translate them into display copy and retain compatibility with historical
+    Chinese titles and the former ``SPACE_JOIN APPROVED`` format.
+    """
+
+    SPACE_JOIN_PENDING = "SPACE_JOIN_PENDING"
+    SPACE_JOIN_APPROVED = "SPACE_JOIN_APPROVED"
+    SPACE_JOIN_REJECTED = "SPACE_JOIN_REJECTED"
+
+
 class WorkOrderMessageTitle(StrEnum):
+    """Chinese display copy returned by delivery adapters."""
+
     SPACE_JOIN_PENDING = "空间加入申请待审批"
     SPACE_JOIN_APPROVED = "空间加入申请已通过"
     SPACE_JOIN_REJECTED = "空间加入申请未通过"
@@ -214,6 +229,7 @@ class WorkOrderDetail(BaseModel):
     work_order: WorkOrderRecord
     event_type: str
     title: str
+    content: str | None = None
     space_id: int
     space_name: str
     applicant_name: str

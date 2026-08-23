@@ -143,7 +143,7 @@ def _mismatched_user(path_params: dict | None = None, json_body: dict | None = N
             "event_type": "SPACE_MEMBER_ADDED",
             "recipient_user_ids": [_USER_ID],
             "title": "Member added",
-            "content": "A member was added to the Space.",
+            "content": {"message": "A member was added to the Space."},
         },
         headers=_principal_headers(),
     ),

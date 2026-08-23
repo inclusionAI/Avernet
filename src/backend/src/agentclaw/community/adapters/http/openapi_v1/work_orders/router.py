@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
@@ -28,16 +27,13 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     WorkOrderEventStatus,
     CreateBotEditorRequest,
     BotEditorRequestCreated,
-    BotEditorWorkOrderDetailContent,
     NotificationDetailResponse,
     NotificationReadResponse,
     NotificationsReadAllResponse,
     SpaceJoinRequestCreated,
     UnreadCountResponse,
-    WorkOrderDetailContent,
     WorkOrderDetailResponse,
     WorkOrderItemType,
-    WorkOrderBizType,
     WorkOrderListItem,
     WorkOrderQueryType,
     WorkOrderReviewRequest,
@@ -45,6 +41,10 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     WorkOrderDecision,
     WorkOrderReviewResponse,
     WorkOrderLegacyReviewResponse,
+)
+from agentclaw.community.adapters.http.openapi_v1.work_orders.converter import (
+    display_title,
+    json_object,
 )
 from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
@@ -81,55 +81,6 @@ def _require_user_delegation(caller: ActingCaller) -> str:
     return caller.user_id
 
 
-def _approval_display(work_order) -> tuple[str, str | None]:
-    """Return display copy for an approval item without a recipient notice.
-
-    A work order initiated by the current user has no notification row for
-    that user: approval notifications belong to the approvers.  Keep the
-    notification identifier/category nullable, but still provide the same
-    display copy that the frontend receives for notification items.
-
-    Business modules provide display copy in ``biz_data``.  The shared
-    adapter does not maintain a business-type-to-copy enum, so new business
-    types can define their own wording without changing this endpoint.
-    """
-    data: dict[str, object] = {}
-    if work_order.biz_data:
-        try:
-            parsed = json.loads(work_order.biz_data)
-        except (TypeError, ValueError):
-            parsed = None
-        if isinstance(parsed, dict):
-            data = parsed
-
-    status = work_order.status.value
-    display_title = data.get("display_title")
-    display_content = data.get("display_content")
-    if isinstance(display_title, dict):
-        display_title = display_title.get(status)
-    if isinstance(display_content, dict):
-        display_content = display_content.get(status)
-    if isinstance(display_title, str) and display_title:
-        return display_title, display_content if isinstance(
-            display_content, str
-        ) else None
-
-    # Compatibility fallback for work orders created before display copy was
-    # included in biz_data.  New business types must provide their own copy
-    # through biz_data rather than being added to this shared adapter.
-    return work_order.biz_type, work_order.apply_reason
-
-
-def _biz_data(raw: str | None) -> dict[str, object]:
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except (TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
 def _list_item(item: DomainListItem) -> WorkOrderListItem:
     work_order = item.work_order
     notification = item.notification
@@ -151,8 +102,8 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
             reviewed_at=None,
             recipient_user_id=notification.recipient_user_id,
             event_type=notification.event_type,
-            title=notification.title,
-            content=notification.content,
+            title=display_title(notification.title),
+            content=json_object(notification.content),
             status=None,
             is_read=notification.is_read,
             read_at=notification.read_at,
@@ -161,17 +112,23 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
             gmt_created=notification.gmt_created,
             gmt_modified=notification.gmt_modified,
         )
-    modified = notification.gmt_modified if notification is not None else work_order.gmt_modified
+    modified = (
+        notification.gmt_modified
+        if notification is not None
+        else work_order.gmt_modified
+    )
     category = notification.notification_category if notification is not None else None
     item_type = (
         WorkOrderItemType(category.value)
         if category is not None
         else WorkOrderItemType.APPROVAL
     )
-    title = notification.title if notification is not None else None
-    content = notification.content if notification is not None else None
-    if notification is None:
-        title, content = _approval_display(work_order)
+    title = display_title(
+        notification.title if notification is not None else None,
+        biz_type=work_order.biz_type,
+        status=work_order.status,
+    )
+    content = json_object(notification.content) if notification is not None else None
     return WorkOrderListItem(
         item_id=(
             f"NOTIFICATION_{notification.id}"
@@ -190,7 +147,9 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         reviewer_user_id=work_order.reviewer_user_id,
         review_remark=work_order.review_remark,
         reviewed_at=work_order.reviewed_at,
-        recipient_user_id=notification.recipient_user_id if notification is not None else None,
+        recipient_user_id=notification.recipient_user_id
+        if notification is not None
+        else None,
         event_type=notification.event_type if notification is not None else None,
         title=title,
         content=content,
@@ -366,28 +325,6 @@ async def get_work_order(
     actor_id = _require_user_delegation(caller)
     detail = service.get_detail(work_order_id=work_order_id, actor_id=actor_id)
     work_order = detail.work_order
-    if work_order.biz_type == WorkOrderBizType.BOT_COLLABORATOR.value:
-        data = _biz_data(work_order.biz_data)
-        content = BotEditorWorkOrderDetailContent(
-            bot_id=str(data.get("bot_id") or work_order.biz_id),
-            bot_name=str(data.get("bot_name") or work_order.biz_id),
-            owner_id=str(data.get("owner_id") or ""),
-            space_id=int(data.get("space_id") or 0),
-            applicant_user_id=work_order.applicant_user_id,
-            applicant_name=str(
-                data.get("applicant_name") or work_order.applicant_user_id
-            ),
-            requested_role=str(data.get("requested_role") or "member"),
-            reason=work_order.apply_reason,
-        )
-    else:
-        content = WorkOrderDetailContent(
-            space_id=detail.space_id,
-            space_name=detail.space_name,
-            applicant_user_id=work_order.applicant_user_id,
-            applicant_name=detail.applicant_name,
-            reason=work_order.apply_reason,
-        )
     return envelope(
         WorkOrderDetailResponse(
             work_order_id=work_order.id,
@@ -397,13 +334,17 @@ async def get_work_order(
             if work_order.biz_type == "SPACE_JOIN"
             else work_order.biz_id,
             event_type=detail.event_type,
-            title=detail.title,
-            content=content,
+            title=display_title(
+                detail.title,
+                biz_type=work_order.biz_type,
+                status=work_order.status,
+            ),
+            content=json_object(detail.content),
             status=work_order.status,
             reviewer_user_id=work_order.reviewer_user_id,
             review_remark=work_order.review_remark,
             reviewed_at=work_order.reviewed_at,
-            biz_data=work_order.biz_data,
+            biz_data=json_object(work_order.biz_data),
             can_approve=detail.can_approve,
         ),
         request,
@@ -547,8 +488,12 @@ async def get_notification(
             work_order_id=record.work_order_id,
             notification_category=record.notification_category,
             event_type=record.event_type,
-            title=record.title,
-            content=record.content,
+            title=display_title(
+                record.title,
+                biz_type=record.biz_type,
+                status=detail.work_order_status,
+            ),
+            content=json_object(record.content),
             is_read=record.is_read,
             work_order_status=detail.work_order_status,
             can_approve=detail.can_approve,
