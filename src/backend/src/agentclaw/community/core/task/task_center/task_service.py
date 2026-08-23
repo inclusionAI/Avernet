@@ -76,7 +76,13 @@ class TaskService:
         self._callback_repo = callback_repo
         self._bot_service = bot_service
         self._api_base_url = api_base_url
-        self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover, bot_public=bot_public)
+        engine_kwargs = {"bot": bot, "bcs": bcs, "discover": discover}
+        # ``_build_engine`` is an intentional test seam. Preserve existing
+        # overrides that implement the original three-port signature when no
+        # optional public catalog is supplied.
+        if bot_public is not None:
+            engine_kwargs["bot_public"] = bot_public
+        self._engine = self._build_engine(**engine_kwargs)
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
         self._bg_tasks: set[asyncio.Task] = set()
         # 回投适配层:执行实体 PUSH → 适配 → 编排核 on_report
