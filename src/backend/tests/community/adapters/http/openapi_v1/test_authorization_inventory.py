@@ -842,6 +842,64 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
     )
 
 
+def test_the_asset_service_check_the_unseamed_surfaces_rely_on_still_exists():
+    """The seven ``{skill_id}`` rows moved; their service check deliberately did not.
+
+    Task 8 deleted ``can_manage_bot`` outright, because the hook had exactly one
+    caller family and the seam replaced all of it. ``bot_skill_asset_service``
+    is not that: its two permission sites are reached from three surfaces and
+    the seam covers only one of them.
+
+    * ``/openapi/v1/bots/{bot_id}/skills/{skill_id}/…`` — now ``Check(MEMBER)``,
+      adjudicated by the seam before the handler runs.
+    * The retiring twins in ``deprecated/skills.py``. Their router *is* built
+      with ``route_class=PublicAPIRoute``, so a twin does read its own row —
+      but its address is ``/openapi/v1/bots/skills/{skill_id}``, with no
+      ``{bot_id}`` on the path, so ``Check`` is unassignable there and the
+      ``unkeyable`` refusal says so at assembly time. They are the four already
+      exempted in ``_TWINS_CHECKED_INDEPENDENTLY``.
+    * ``adapters/http/skill_center/skills.py``, mounted at **``/api/skills``** —
+      outside ``/openapi/v1`` entirely, governed by no row in this table, and it
+      calls ``get_skill`` and ``set_active`` straight through.
+
+    Deleting the check to "finish" the migration would strip authorization from
+    the last two. So it stays, and this pins it: the row says the seam is the
+    authority for the seven, and this says the other two surfaces still have one
+    at the same bar.
+    """
+    asset_service = importlib.import_module(
+        "agentclaw.community.core.skill_center.services.bot_skill_asset_service"
+    )
+
+    guarded = {
+        "_resolve_local": inspect.getsource(
+            asset_service.BotSkillAssetService._resolve_local
+        ),
+        "_RepoAssetAdapter.resolve": inspect.getsource(
+            asset_service._RepoAssetAdapter.resolve
+        ),
+    }
+    for name, source in guarded.items():
+        assert "check_collaborator_permission" in source, (
+            f"{name} no longer performs a collaborator check. The seven "
+            "{skill_id} rows are fine — the seam adjudicates them — but the "
+            "retiring twins cannot carry a Check at all and /api/skills is not "
+            "in this table, so both now reach this code unguarded"
+        )
+        assert "PermissionLevel.MEMBER" in source, (
+            f"{name} no longer checks at MEMBER, which is the bar the seven "
+            "migrated rows were derived from; re-derive before changing it"
+        )
+
+    legacy_skills = importlib.import_module(
+        "agentclaw.community.adapters.http.skill_center.skills"
+    )
+    assert legacy_skills.router.prefix == "/api/skills", (
+        "the legacy skills router moved; if it now lives under /openapi/v1 it "
+        "is governed by AUTHORIZATION and this reasoning has to be redone"
+    )
+
+
 def test_the_twin_guard_catches_an_abandoned_twin():
     """The guard above is vacuous until a row migrates; prove it can still fire.
 

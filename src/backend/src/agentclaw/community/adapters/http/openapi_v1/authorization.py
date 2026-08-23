@@ -368,25 +368,18 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skills"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
+        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_query_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
+        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_upload_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/upload-folder"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
-    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
-    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
-    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
-    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
-    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
-    ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"):
-        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.bot_skill_asset_service"),
+        ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_upload_service"),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/space"): OWNER_SCOPED,
     ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,

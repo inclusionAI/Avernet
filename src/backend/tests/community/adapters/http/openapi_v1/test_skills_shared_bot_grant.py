@@ -45,13 +45,19 @@ from agentclaw.community.api.bot_skill_asset_service import (
     BotSkillAssetServiceProtocol,
 )
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.gateway_principal import (
     AppPrincipal,
     GatewayApp,
     VerifiedCaller,
 )
 
-from .conftest import mount_public_error_handlers, user_scoped_client
+from .conftest import (
+    SeamCollaborators,
+    bind_bot_access_seam,
+    mount_public_error_handlers,
+    user_scoped_client,
+)
 
 APP_ID = 42
 #: The delegating user — a collaborator on the bot, not its owner.
@@ -178,6 +184,18 @@ def client():
                 BotSkillAssetServiceProtocol,
             ):
                 binder.bind(protocol, to=skills)
+            # The four ``{skill_id}`` operations and the two asset ones now
+            # declare ``Check(MEMBER)``, so the seam adjudicates them before
+            # the handler runs — and here the caller is **not** the owner, so
+            # it really consults the collaborator service rather than
+            # short-circuiting. ``CALLER`` is a collaborator on ``OWNER``'s
+            # bot, which is the premise of this whole file, so MEMBER is what
+            # that relation is. This does not weaken what is asserted below:
+            # the grant is still the thing that has to be looked up against
+            # the addressed owner, and a wrong lookup still answers 404.
+            bind_bot_access_seam(
+                binder, collaborators=SeamCollaborators(PermissionLevel.MEMBER)
+            )
 
     app = FastAPI()
     # The assembled router, not a hand-mounted subset: what is under test is

@@ -54,6 +54,7 @@ from agentclaw.community.core.gateway_principal import (
     VerifiedCaller,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
+    bind_bot_access_seam,
     mount_public_error_handlers,
     user_scoped_client,
 )
@@ -202,6 +203,14 @@ def client(skills, cron):
             binder.bind(LocalSkillUploadServiceProtocol, to=skills)
             binder.bind(BotSkillAssetServiceProtocol, to=skills)
             binder.bind(CronRelayServiceProtocol, to=cron)
+            # The four ``{skill_id}`` operations declare ``Check(MEMBER)``
+            # now, so the seam runs on them. It is not what this file is
+            # about — the grant check is — but it fails closed against an
+            # unwired app and would answer 404 for every case below,
+            # including the ones that must be served. ``USER`` is the
+            # granted owner here, so the level resolves to OWNER and the
+            # grant stays the only thing deciding these outcomes.
+            bind_bot_access_seam(binder)
 
     # Mounted exactly as build_public_router mounts them, because this file is
     # about what an application caller may reach and the mount is half of that.
