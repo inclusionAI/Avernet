@@ -488,7 +488,7 @@ class BotPublicService:
             raise BotNotFoundError(f"Bot not found: {bot_uid}")
         operator_id = operator.staff_id if operator else owner_id
         # Context mirrors the normal-bot publish (publishHint/botSkills/botMcps
-        # via _build_public_approval_context) plus the two new-version fields.
+        # via _build_public_approval_context) plus the new-version fields.
         # All values are str -> stays dict[str, str] for the antprocess echo.
         context: Dict[str, str] = self._build_public_approval_context(bot, operator)
         # BCS publish uses its own approval prompt (发布→开放, scene resolved
@@ -496,6 +496,14 @@ class BotPublicService:
         context["publishHint"] = self._build_bcs_publish_hint(bot, operator, public_scope)
         context["public_scope"] = public_scope
         context["viewFriendDeps"] = self._build_view_friend_deps(view_depts)
+        # bot_id (the full BCS identity "{backend_bot_id}:{entity_id}", used
+        # verbatim as bot_uuid by the callback's _apply_callback_decision) and
+        # owner_id ride the context so antprocess echoes them back (snake→camel:
+        # bot_id→botId, owner_id→ownerId) on the /callback POST — without
+        # bot_id the callback can't resolve the bot and the AGREE visibility
+        # flip is a no-op.
+        context["bot_id"] = bot_uid
+        context["owner_id"] = owner_id
         approval_result = self._process_service.start_approval(
             applicant=operator_id,
             # biz_id flows into the approval service's puid, which only accepts

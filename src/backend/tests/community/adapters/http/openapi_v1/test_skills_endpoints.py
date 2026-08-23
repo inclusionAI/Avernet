@@ -63,6 +63,8 @@ from agentclaw.community.utils.gateway_principal_config import (
     reset_principal_verifier_config_cache,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
+    bind_bot_access_seam,
+    mount_public_error_handlers,
     user_scoped_client,
 )
 
@@ -196,6 +198,11 @@ def _client(
             binder.bind(LocalSkillStateServiceProtocol, to=state_service)
             binder.bind(LocalSkillDeleteServiceProtocol, to=delete or _Delete())
             binder.bind(BotSkillAssetServiceProtocol, to=asset_service)
+            # The seven ``{skill_id}`` operations declare ``Check(MEMBER)``
+            # now and the gate fails closed against an unwired app. ``actor``
+            # owns ``bot-1`` in these tests, so the level is OWNER and the
+            # questions below stay the handler's own.
+            bind_bot_access_seam(binder)
 
     app = FastAPI()
     app.include_router(router)
@@ -632,6 +639,20 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
                 "bolt_id": "default",
             }
         )
+        # The ``default`` Bot has to exist for the third request below to
+        # test what it says. That address is ``Check(MEMBER)`` now, so the
+        # seam resolves ``(default, owner)`` before the handler runs; without
+        # a row it refuses with the same 404 the handler would have produced,
+        # and the git-market masking underneath would never be exercised.
+        bots.insert(
+            {
+                "bot_id": "default",
+                "entity_id": "owner",
+                "entity_type": "staff",
+                "creator_id": "owner",
+                "owner_id": "owner",
+            }
+        )
 
         class Bindings(Module):
             def configure(self, binder):
@@ -648,6 +669,12 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
                         )
 
                 binder.bind(BotSkillAssetServiceProtocol, to=Assets())
+                # The real repository, not ``SeamBots``: this test is about a
+                # tenant-guarded ORM query, and a double that answers "the bot
+                # exists" would put a fake in the middle of the one path it
+                # exists to drive. ``owner`` owns both bots here, so the level
+                # is OWNER and the seam admits.
+                bind_bot_access_seam(binder, bots=bots)
 
     now = int(time.time())
 
@@ -839,3 +866,64 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
                 skill_id=skill["id"], actor_id="owner", active=True
             )
     assert factory.runtime.calls == 0
+
+
+@pytest.mark.parametrize(
+    ("method", "template"),
+    [
+        ("get", "/openapi/v1/bots/bot-1/skills/{skill}"),
+        ("delete", "/openapi/v1/bots/bot-1/skills/{skill}"),
+        ("get", "/openapi/v1/bots/bot-1/skills/{skill}/content"),
+        ("get", "/openapi/v1/bots/bot-1/skills/{skill}/parameters"),
+        ("post", "/openapi/v1/bots/bot-1/skills/{skill}/activate"),
+        ("post", "/openapi/v1/bots/bot-1/skills/{skill}/deactivate"),
+    ],
+)
+def test_a_caller_with_no_relation_is_refused_before_the_asset_service_runs(
+    method, template
+):
+    """The seven ``{skill_id}`` rows are ``Check(MEMBER)``; this is what that buys.
+
+    ``bot_skill_asset_service`` still performs its own MEMBER check — it has to,
+    because ``/api/skills`` and the retiring twins reach it with no route-level
+    gate — so this is not asserting that the only check exists. It is asserting
+    that the *declared* one runs, and runs first: the row says the seam is the
+    authority for these addresses, and a row that said so while the refusal
+    still came from three frames down would be a false claim.
+
+    Both refusals are a masked 404, so a caller sees no difference. What
+    changes is the code, and where the decision is made — which is the whole
+    of what this feature moves.
+
+    ``PUT /parameters`` is left out only because it needs a body; the ``GET``
+    beside it shares the row's bar and the same gate.
+    """
+    query = _Query()
+    asset = _Asset()
+
+    class Bindings(Module):
+        def configure(self, binder):
+            binder.bind(LocalSkillQueryServiceProtocol, to=query)
+            binder.bind(LocalSkillUploadServiceProtocol, to=_Upload())
+            binder.bind(LocalSkillStateServiceProtocol, to=_State())
+            binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
+            binder.bind(BotSkillAssetServiceProtocol, to=asset)
+            # Default level is NONE, and ``stranger`` does not own the bot, so
+            # nothing short-circuits to OWNER.
+            bind_bot_access_seam(binder)
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "stranger"}
+    mount_public_error_handlers(app)
+    attach_injector(app, Injector([Bindings()]))
+    client = user_scoped_client(app, "stranger")
+
+    response = getattr(client, method)(
+        template.format(skill="8") + "?owner_id=someone-else"
+    )
+
+    assert response.status_code == 404, response.json()
+    assert response.json()["message"] == "Not found"
+    assert response.json()["data"] is None
+    assert asset.query is None, "the asset service was reached despite the refusal"

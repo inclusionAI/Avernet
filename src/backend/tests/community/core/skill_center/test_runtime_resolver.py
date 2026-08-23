@@ -10,7 +10,9 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeProjectionResolver,
 )
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
-from agentclaw.community.core.workspace.skill_layout import runtime_layout_engine_for_bot
+from agentclaw.community.core.workspace.skill_layout import (
+    runtime_layout_engine_for_bot,
+)
 
 
 def test_resolver_projects_every_supported_skill_corpus_and_deduplicates_inputs() -> None:
@@ -108,7 +110,10 @@ def test_resolver_rejects_unknown_sources_instead_of_silently_dropping_them() ->
         )
 
 
-@pytest.mark.parametrize("template_type", ["personalCoding", "applicationCoding"])
+@pytest.mark.parametrize(
+    "template_type",
+    ["personalCoding", "applicationCoding", "architect", "customCC"],
+)
 def test_coding_template_has_aicoding_physical_layout_but_claude_logical_engine(
     template_type: str,
 ) -> None:
@@ -119,3 +124,16 @@ def test_coding_template_has_aicoding_physical_layout_but_claude_logical_engine(
     }
 
     assert runtime_layout_engine_for_bot(bot) == "aicoding"
+
+
+@pytest.mark.parametrize("template_type", [None, "", "normalCC", " NormalCC "])
+def test_native_claude_template_keeps_claude_code_physical_layout(
+    template_type: str | None,
+) -> None:
+    bot = {
+        "bot_type": "personal",
+        "active_engine": "claude_code",
+        "template_type": template_type,
+    }
+
+    assert runtime_layout_engine_for_bot(bot) == "claude_code"

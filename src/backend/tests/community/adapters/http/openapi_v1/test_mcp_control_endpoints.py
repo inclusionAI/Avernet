@@ -11,7 +11,10 @@ from agentclaw.community.adapters.http.openapi_v1.mcp.router import bot_mcp_rout
 from agentclaw.community.api.skill_set_control_plane import (
     SkillSetControlPlaneServiceProtocol,
 )
-from tests.community.adapters.http.openapi_v1.conftest import user_scoped_client
+from tests.community.adapters.http.openapi_v1.conftest import (
+    bind_bot_access_seam,
+    user_scoped_client,
+)
 
 
 class _ControlPlane:
@@ -34,6 +37,9 @@ def _client(control: _ControlPlane):
     class Bindings(Module):
         def configure(self, binder):
             binder.bind(SkillSetControlPlaneServiceProtocol, to=control)
+            # The MCP rows declare ``Check(MEMBER)`` now, so the seam is on
+            # every route here and fails closed against an unwired app.
+            bind_bot_access_seam(binder)
 
     app = FastAPI()
     app.include_router(bot_mcp_router)

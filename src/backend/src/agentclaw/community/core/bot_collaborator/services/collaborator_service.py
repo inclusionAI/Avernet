@@ -227,6 +227,25 @@ class CollaboratorService:
         required_level: PermissionLevel,
         env: Optional[str] = None,
     ) -> None:
+        """Refuse a caller below *required_level* on the resolved bot.
+
+        **Kept even though the five editor rows are ``Check`` in
+        ``openapi_v1/authorization.py``.** These calls were deleted on the
+        reasoning that ``bot_access`` adjudicates first and only
+        ``openapi_v1/editors/router.py`` reaches these methods — both true, and
+        neither sufficient. ``AGENTS.md`` says delivery adapters translate
+        protocol details and do not own domain policy; who may remove an editor
+        is collaboration policy, not a transport concern, so an HTTP table
+        cannot be its only home. Raised as a P2 in #1366 round 5, after the same
+        argument had already been made for
+        ``ServicePublicationFacadeProtocol`` in round 4.
+
+        The row still migrates and still means what it says: for
+        ``/openapi/v1`` the seam is the *declared* authority and refuses first,
+        at this same bar. This is the gate every other caller gets. Fourth
+        instance of one rule in this feature — see
+        ``docs/openapi-v1/README.md``.
+        """
         level = self.get_operable_permission_level(bot=bot, user_id=user_id, env=env)
         if level < required_level:
             raise PermissionDeniedError(
@@ -474,6 +493,9 @@ class CollaboratorService:
         """Remove one editor after exact Bot/owner/env rebinding."""
         resolved_env = env or get_current_env()
         bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
+        # Resolved rather than delegated to _check_operable_permission because
+        # it answers a second question below: an ADMIN may not remove
+        # *themselves* while an OWNER may.
         operator_level = self.get_operable_permission_level(
             bot=bot, user_id=operator_id, env=resolved_env
         )
@@ -503,6 +525,9 @@ class CollaboratorService:
         """Leave the addressed Bot's editor set as the current member."""
         resolved_env = env or get_current_env()
         bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
+        # A member removing themselves is the one editor operation whose caller
+        # is not an admin, so this bar is MEMBER and must stay MEMBER — drifting
+        # it upward would trap a member on the Bot.
         self.check_permission(
             bot_pk=bot["id"],
             user_id=user_id,

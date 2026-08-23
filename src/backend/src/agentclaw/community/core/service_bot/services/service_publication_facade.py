@@ -127,6 +127,41 @@ class ServicePublicationFacade:
         required_level: PermissionLevel = PermissionLevel.MEMBER,
         require_service: bool = True,
     ) -> tuple[dict[str, Any], PermissionLevel]:
+        """Resolve the bot, adjudicate the caller, and return both.
+
+        **The bar stays here even though all 16 routes now declare it as a
+        ``Check`` row.** It was removed on the reasoning that ``bot_access``
+        adjudicates first and a bar written twice is a bar that can drift —
+        which is true, and not the whole picture. This method sits behind
+        :class:`ServicePublicationFacadeProtocol`, whose Service API contract
+        says in as many words: *"Resolve, authorize and orchestrate service-Bot
+        publication operations."* Deleting the refusal left that contract
+        claiming a behaviour the implementation no longer had, while every
+        signature kept the ``actor_id`` that implies it. ``AGENTS.md`` makes
+        contracts the authority for inter-component behaviour, so the
+        divergence is the defect — not the duplication.
+
+        Verified before restoring: nothing outside ``openapi_v1`` calls this
+        protocol today, so no caller was actually unguarded. That is a reason
+        the removal was not an incident, not a reason it was correct — a
+        contract is a promise to future callers too, and a background consumer
+        or a second adapter would inherit the gap silently. Raised as a P2 in
+        #1366 round 4.
+
+        So both gates run, at the same bar, and the row is still honest: for
+        ``/openapi/v1`` the seam is the *declared* authority and refuses first;
+        this is the transport-agnostic one the Service API promises. Same shape
+        as ``bot_skill_asset_service`` and ``skill_set_control_plane``.
+
+        ``level`` is returned as well as enforced, because it answers a second
+        question the bar does not: :meth:`_actions` reports what the caller may
+        *do* with a publication, and an OWNER sees ``delete`` on an unpublished
+        draft where a MEMBER does not. That projection is not authorization —
+        it never permits anything.
+
+        The ``require_service`` refusal is a bot-type answer, not a
+        collaborator one, and the surface still reports it separately.
+        """
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if not bot:
             raise ServicePublicationNotFoundError("bot not found")
@@ -757,6 +792,9 @@ class ServicePublicationFacade:
             # COSEC: the lock service assumes authorization was already checked.
             # PD explicitly grants lock takeover to every Bot member, so prove
             # that relationship here before invoking the forceful operation.
+            # ``Check(PermissionLevel.MEMBER)`` on the route says the same thing
+            # for ``/openapi/v1`` callers and refuses first; this is the gate the
+            # Service API contract promises to anyone else.
             required_level=PermissionLevel.MEMBER,
         )
         if not self._lockable_draft(bot, actor_id=actor_id):

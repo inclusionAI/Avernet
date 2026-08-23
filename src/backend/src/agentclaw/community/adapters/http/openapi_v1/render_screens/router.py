@@ -22,7 +22,6 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.render_screen_service import RenderScreenServiceProtocol
 from agentclaw.community.core.bot_management.render_screen.errors import (
     RenderScreenConflictError,
@@ -33,7 +32,7 @@ from agentclaw.community.core.bot_management.render_screen.models import (
 )
 from agentclaw.community.di import Injected
 
-from .gating import require_editable_bot, require_scoped_record, resolve_readable_bot
+from .gating import require_scoped_record, resolve_readable_bot
 from .schemas import (
     RenderScreen,
     RenderScreenCreate,
@@ -79,6 +78,16 @@ async def list_render_screens(
     service: RenderScreenServiceProtocol = Injected(RenderScreenServiceProtocol),
 ) -> Envelope[RenderScreenList]:
     """List the non-sensitive CDN mappings needed to render this Bot's panels."""
+    # COSEC: the only operation in this group that resolves the Bot itself, and
+    # the only one whose row is ``NoCheck`` — share and group viewers hold no
+    # Editor relation, so the seam deliberately adjudicates nothing here. That
+    # makes this call the sole proof the addressed Bot exists under the named
+    # owner; without it the read answers for any ``bot_id`` a caller can name.
+    # ``actor_id`` is likewise load-bearing for its dependency rather than its
+    # value: ``UserIdDep`` is what keeps this route authenticated-only.
+    # The three mutations do not repeat it. They declare ``Check(MEMBER)``, so
+    # ``bot_access._level`` has already resolved ``(bot_id, owner_id)`` and
+    # refused on absence before the handler is entered.
     resolve_readable_bot(bot_service, bot_id=bot_id, owner_id=owner_id)
     records = service.list_render_screens(bot_id=bot_id, owner_id=owner_id)
     items = [_screen(record) for record in records]
@@ -97,18 +106,9 @@ async def create_render_screen(
     request: Request,
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     service: RenderScreenServiceProtocol = Injected(RenderScreenServiceProtocol),
 ) -> Envelope[RenderScreen]:
     """Add a CDN mapping; Bot Owner or live Editor Member access is required."""
-    require_editable_bot(
-        bot_service,
-        collaborators,
-        bot_id=bot_id,
-        owner_id=owner_id,
-        actor_id=actor_id,
-    )
     try:
         record_id = service.create_render_screen(
             bot_id=bot_id,
@@ -140,18 +140,9 @@ async def update_render_screen(
     request: Request,
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     service: RenderScreenServiceProtocol = Injected(RenderScreenServiceProtocol),
 ) -> Envelope[RenderScreen]:
     """Replace one mapping after binding its id to the addressed Bot."""
-    require_editable_bot(
-        bot_service,
-        collaborators,
-        bot_id=bot_id,
-        owner_id=owner_id,
-        actor_id=actor_id,
-    )
     require_scoped_record(
         service,
         record_id=render_screen_id,
@@ -186,18 +177,9 @@ async def delete_render_screen(
     request: Request,
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     service: RenderScreenServiceProtocol = Injected(RenderScreenServiceProtocol),
 ) -> Envelope[Deleted]:
     """Soft-delete one mapping after Bot and record authorization."""
-    require_editable_bot(
-        bot_service,
-        collaborators,
-        bot_id=bot_id,
-        owner_id=owner_id,
-        actor_id=actor_id,
-    )
     require_scoped_record(
         service,
         record_id=render_screen_id,

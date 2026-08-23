@@ -59,7 +59,7 @@ import time
 from fastapi import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
+from agentclaw.community.adapters.http.openapi_v1.contracts import PUBLIC_API_PREFIX
 from agentclaw.community.adapters.http.openapi_v1.dependencies import resolve_caller
 from agentclaw.community.core.gateway_principal import (
     AccessKeyPrincipal,
