@@ -282,6 +282,24 @@ async def _audit(
     The cost is a silently incomplete trail, so the failure is loud here. If
     completeness ever becomes a hard requirement the answer is a durable
     outbox, not a synchronous write that can fail a request.
+
+    **This is a considered exception to a binding repo rule, not an oversight.**
+    ``AGENTS.md`` says: *"Propagate database and persistence write failures as
+    errors; never silently swallow failed writes and return success."* That rule
+    is right for a write the caller is asking for — its failure means the thing
+    they requested did not happen, and saying otherwise is a lie. This write is
+    the opposite case: the thing the caller requested *did* happen, and the
+    record of it is a side effect. Applying the rule literally here would make a
+    failed audit turn a successful mutation into an error response, and a client
+    retrying it would apply the mutation twice — trading an incomplete log for
+    duplicated state changes, which is the worse of the two.
+
+    So the rule's real requirement — never *silently* swallow — is met by the
+    ``logger.exception`` below rather than by failing the request. Recorded here
+    because a reviewer reasonably read the code against that rule and flagged it
+    (#1366, round 3); the reconciliation lived only in the seam feature's
+    ``spec.md`` *Decisions* 2, which is not where anyone reading this function
+    would look.
     """
     try:
         log_repo = _service(request, BotCollabLogRepositoryProtocol)
