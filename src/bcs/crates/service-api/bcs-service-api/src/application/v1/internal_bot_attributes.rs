@@ -24,17 +24,31 @@ pub enum FriendCheckInStrategy {
     DeptFree,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BotInternalAttributes {
+    #[serde(default = "default_visibility")]
+    pub visibility: String,
     pub user_visibility: UserVisibility,
     #[serde(default)]
     pub friend_ext: Map<String, Value>,
     pub friend_check_in_strategy: FriendCheckInStrategy,
 }
 
+impl Default for BotInternalAttributes {
+    fn default() -> Self {
+        Self {
+            visibility: default_visibility(),
+            user_visibility: UserVisibility::default(),
+            friend_ext: Map::new(),
+            friend_check_in_strategy: FriendCheckInStrategy::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PatchBotInternalAttributes {
     pub bot_id: String,
+    pub visibility: Option<String>,
     pub user_visibility: Option<UserVisibility>,
     pub friend_ext: Option<Map<String, Value>>,
     pub friend_check_in_strategy: Option<FriendCheckInStrategy>,
@@ -42,10 +56,15 @@ pub struct PatchBotInternalAttributes {
 
 impl PatchBotInternalAttributes {
     pub fn is_empty(&self) -> bool {
-        self.user_visibility.is_none()
+        self.visibility.is_none()
+            && self.user_visibility.is_none()
             && self.friend_ext.is_none()
             && self.friend_check_in_strategy.is_none()
     }
+}
+
+fn default_visibility() -> String {
+    "protected".to_string()
 }
 
 #[async_trait]

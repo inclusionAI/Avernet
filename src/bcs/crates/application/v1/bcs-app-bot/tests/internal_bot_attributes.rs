@@ -49,6 +49,7 @@ async fn internal_attributes_default_and_partial_patch_round_trip_through_contro
     assert_eq!(
         serde_json::to_value(&attributes).expect("serialize attributes"),
         serde_json::json!({
+            "visibility": "protected",
             "user_visibility": "protected",
             "friend_ext": {},
             "friend_check_in_strategy": "APPROVAL"
@@ -58,6 +59,7 @@ async fn internal_attributes_default_and_partial_patch_round_trip_through_contro
     let attributes = service
         .patch(PatchBotInternalAttributes {
             bot_id: "bot-1".to_string(),
+            visibility: Some("private".to_string()),
             user_visibility: Some(UserVisibility::Public),
             friend_ext: Some(serde_json::Map::from_iter([(
                 "department".to_string(),
@@ -67,6 +69,7 @@ async fn internal_attributes_default_and_partial_patch_round_trip_through_contro
         })
         .await
         .expect("set internal attributes");
+    assert_eq!(attributes.visibility, "private");
     assert_eq!(attributes.user_visibility, UserVisibility::Public);
     assert_eq!(
         attributes.friend_check_in_strategy,
@@ -83,6 +86,7 @@ async fn internal_attributes_default_and_partial_patch_round_trip_through_contro
         .await
         .expect("clear friend extension");
     assert_eq!(attributes.friend_ext, serde_json::Map::new());
+    assert_eq!(attributes.visibility, "private");
     assert_eq!(attributes.user_visibility, UserVisibility::Public);
     assert_eq!(
         attributes.friend_check_in_strategy,
@@ -120,6 +124,18 @@ async fn internal_attributes_map_invalid_empty_and_missing_requests_to_applicati
             })
             .await
             .expect_err("empty patch is invalid")
+            .code(),
+        "invalid_request"
+    );
+    assert_eq!(
+        service
+            .patch(PatchBotInternalAttributes {
+                bot_id: "bot-1".to_string(),
+                visibility: Some("friends".to_string()),
+                ..Default::default()
+            })
+            .await
+            .expect_err("invalid visibility is rejected")
             .code(),
         "invalid_request"
     );

@@ -52,6 +52,7 @@ struct RecordingInternalBotAttributesService {
 impl InternalBotAttributesService for RecordingInternalBotAttributesService {
     async fn get(&self, _bot_id: String) -> Result<BotInternalAttributes, ApplicationError> {
         Ok(BotInternalAttributes {
+            visibility: "protected".to_string(),
             user_visibility: UserVisibility::Protected,
             friend_ext: serde_json::Map::new(),
             friend_check_in_strategy: FriendCheckInStrategy::Approval,
@@ -63,6 +64,10 @@ impl InternalBotAttributesService for RecordingInternalBotAttributesService {
         command: PatchBotInternalAttributes,
     ) -> Result<BotInternalAttributes, ApplicationError> {
         let attributes = BotInternalAttributes {
+            visibility: command
+                .visibility
+                .clone()
+                .unwrap_or_else(|| "protected".to_string()),
             user_visibility: command.user_visibility.unwrap_or(UserVisibility::Protected),
             friend_ext: command.friend_ext.clone().unwrap_or_default(),
             friend_check_in_strategy: command
@@ -1930,6 +1935,7 @@ async fn provider_bot_attributes_require_an_allowlisted_provider_admin_and_bound
         .unwrap();
     assert_eq!(get.status(), StatusCode::OK);
     let get_body = response_json(get).await;
+    assert_eq!(get_body["visibility"], "protected");
     assert_eq!(get_body["user_visibility"], "protected");
     assert_eq!(get_body["friend_ext"], json!({}));
     assert_eq!(get_body["friend_check_in_strategy"], "APPROVAL");
@@ -1946,6 +1952,7 @@ async fn provider_bot_attributes_require_an_allowlisted_provider_admin_and_bound
                 .header("authorization", format!("Bearer {admin_token}"))
                 .body(Body::from(
                     json!({
+                        "visibility": "private",
                         "user_visibility": "public",
                         "friend_ext": {"department_code": "TECH"},
                         "friend_check_in_strategy": "DEPT_FREE"
@@ -1958,6 +1965,7 @@ async fn provider_bot_attributes_require_an_allowlisted_provider_admin_and_bound
         .unwrap();
     assert_eq!(patch.status(), StatusCode::OK);
     let patch_body = response_json(patch).await;
+    assert_eq!(patch_body["visibility"], "private");
     assert_eq!(patch_body["user_visibility"], "public");
     assert_eq!(patch_body["friend_ext"]["department_code"], "TECH");
     assert_eq!(patch_body["friend_check_in_strategy"], "DEPT_FREE");
@@ -1989,6 +1997,7 @@ async fn provider_bot_attributes_require_an_allowlisted_provider_admin_and_bound
     let patches = internal_bot_attributes.patches.lock().await;
     assert_eq!(patches.len(), 1);
     assert_eq!(patches[0].bot_id, "teamclaw-bot:alice");
+    assert_eq!(patches[0].visibility.as_deref(), Some("private"));
     assert_eq!(patches[0].user_visibility, Some(UserVisibility::Public));
     assert_eq!(
         patches[0].friend_check_in_strategy,
