@@ -16,8 +16,8 @@ use bcs_service_api::{
     BotDynamicStatus, BotLeaveResult, BotListCommand, BotListEntry, BotListResult,
     BotManagementService, BotPagedListResult, BotQueryByIdsResult, BotQueryEntry, BotQueryService,
     BotRegistryCoreService, BotSearchResult, BotStatusUpdateCommand, BotStatusUpdateResult,
-    BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryResult, BotVisibilityResult,
-    ConnectError, DynamicStatusResponse, ServiceError, Skill,
+    BotTaskModeListEntry, BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryResult,
+    BotVisibilityResult, ConnectError, DynamicStatusResponse, ServiceError, Skill, TaskModeMatch,
 };
 use bcs_services_container::Services;
 use serde_json::Value;
@@ -35,6 +35,153 @@ fn static_auth_chain(staff_no: &str, nick_name: &str) -> Arc<AuthPluginChain> {
     Arc::new(AuthPluginChain::new(vec![Box::new(
         StaticAuthPlugin::with_principal(principal),
     )]))
+}
+
+#[tokio::test]
+async fn task_mode_route_uses_server_env_and_forwards_all_filters() {
+    let query = Arc::new(RecordingBotQueryService {
+        task_mode_result: Ok(vec![BotTaskModeListEntry {
+            bot_id: "bot-task".to_string(),
+            name: "Task Bot".to_string(),
+            env: "pre".to_string(),
+            task_claim_mode: true,
+            task_dream_mode: false,
+        }]),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(
+        HttpAppState::new(services)
+            .with_manifest_config("pre".to_string(), Default::default()),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(
+                    "/bots/by-task-modes?task_claim_mode=true&task_dream_mode=false&match=all",
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["items"][0]["bot_id"], "bot-task");
+    assert_eq!(json["items"][0]["task_claim_mode"], true);
+    assert_eq!(json["items"][0]["task_dream_mode"], false);
+
+    let queries = query.task_mode_queries.lock().await;
+    assert_eq!(queries.len(), 1);
+    assert_eq!(queries[0].env, "pre");
+    assert_eq!(queries[0].task_claim_mode, Some(true));
+    assert_eq!(queries[0].task_dream_mode, Some(false));
+    assert_eq!(queries[0].match_mode, TaskModeMatch::All);
+}
+
+#[tokio::test]
+async fn task_mode_route_defaults_to_unfiltered_any_query() {
+    let query = Arc::new(RecordingBotQueryService {
+        task_mode_result: Ok(Vec::new()),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/by-task-modes")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let queries = query.task_mode_queries.lock().await;
+    assert_eq!(queries.len(), 1);
+    assert_eq!(queries[0].env, "local");
+    assert_eq!(queries[0].task_claim_mode, None);
+    assert_eq!(queries[0].task_dream_mode, None);
+    assert_eq!(queries[0].match_mode, TaskModeMatch::Any);
+}
+
+#[tokio::test]
+async fn task_mode_route_accepts_numeric_toggles_and_explicit_any() {
+    let query = Arc::new(RecordingBotQueryService {
+        task_mode_result: Ok(Vec::new()),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(
+                    "/bots/by-task-modes?task_claim_mode=1&task_dream_mode=0&match=any",
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let queries = query.task_mode_queries.lock().await;
+    assert_eq!(queries[0].task_claim_mode, Some(true));
+    assert_eq!(queries[0].task_dream_mode, Some(false));
+    assert_eq!(queries[0].match_mode, TaskModeMatch::Any);
+}
+
+#[tokio::test]
+async fn task_mode_route_maps_query_service_errors() {
+    let query = Arc::new(RecordingBotQueryService {
+        task_mode_result: Err(BotUseCaseError::Unauthorized("login required".to_string())),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/by-task-modes")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn task_mode_route_rejects_invalid_toggle_and_match_values() {
+    let query = Arc::new(RecordingBotQueryService::default());
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+
+    for uri in [
+        "/bots/by-task-modes?task_claim_mode=maybe",
+        "/bots/by-task-modes?task_dream_mode=maybe",
+        "/bots/by-task-modes?match=invalid",
+    ] {
+        let response = build_router(HttpAppState::new(services.clone()))
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "uri={uri}");
+    }
+    assert!(query.task_mode_queries.lock().await.is_empty());
 }
 
 #[tokio::test]

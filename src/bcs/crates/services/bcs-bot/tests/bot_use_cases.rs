@@ -2,8 +2,9 @@ use std::{collections::HashSet, sync::Arc};
 
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCapabilities, BotDetailCommand, BotDiscoveryCommand,
-    BotDiscoveryService, BotLeaveCommand, BotListCommand, BotManagementService,
-    BotPagedListCommand, BotQueryByIdsCommand, BotQueryService, BotRegistryCoreService,
+    BotControlPlanePatch, BotControlPlaneRepoPort, BotDiscoveryService, BotLeaveCommand,
+    BotListCommand, BotManagementService, BotPagedListCommand, BotQueryByIdsCommand,
+    BotQueryService, BotRegistryCoreService, BotRepoPort, BotTaskModesQuery,
     BotRuntimeConnectCommand, BotRuntimeConnectionService, BotRuntimeDisconnectCommand,
     BotRuntimeStatusCommand, BotStatusUpdateCommand, BotUseCaseError, BotVisibilityCommand,
     BotVisibilityQueryCommand, ConnectError, FriendCoreService, ProviderAuthMode,
@@ -13,6 +14,7 @@ use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationManagementService,
     OrganizationMemberAuth,
     ProviderOrganizationManagementConfig, PutOrganizationMemberCommand, ServiceError, ServiceResult,
+    TaskModeMatch,
 };
 use bcs_bot_store::provider::MemoryProviderStore;
 use bcs_organization::{OrganizationCore, OrganizationManagement};
@@ -21,7 +23,7 @@ use bcs_service_api::types::{Organization, OrganizationMember};
 use bcs_bot_store::MemoryBotRepo;
 use tempfile::TempDir;
 
-use bcs_bot::{Bot, BotCore, ProviderCore};
+use bcs_bot::{Bot, BotControlPlaneCore, BotCore, ProviderCore};
 
 struct RegistryFixture {
     registry: Arc<BotCore>,
@@ -233,6 +235,85 @@ impl FriendCoreService for StaticFriendCoreService {
     async fn remove_all_friendships(&self, _bot_id: &str) -> ServiceResult<usize> {
         Ok(0)
     }
+}
+
+#[tokio::test]
+async fn task_mode_query_maps_control_plane_records_to_application_entries() {
+    let data_dir = tempfile::tempdir().expect("temp data dir");
+    let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(data_dir.path().to_path_buf()));
+    bot_repo
+        .register_with_owner_and_token(
+            "task-mode-bot".to_string(),
+            BotCapabilities {
+                name: Some("Task Mode Bot".to_string()),
+                ..Default::default()
+            },
+            "staff-1",
+            "task-mode-token",
+        )
+        .await
+        .expect("register task-mode bot");
+    let env = bcs_config::resolve_env_str();
+    bot_repo
+        .patch_control_plane(
+            "task-mode-bot",
+            &env,
+            BotControlPlanePatch {
+                task_claim_mode: Some(true),
+                task_dream_mode: Some(false),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("patch task modes")
+        .expect("task-mode bot exists");
+
+    let provider_store = Arc::new(MemoryProviderStore::new());
+    let control_plane = Arc::new(BotControlPlaneCore::new(
+        bot_repo.clone(),
+        provider_store.clone(),
+        provider_store,
+    ));
+    let registry: Arc<dyn BotRegistryCoreService> =
+        Arc::new(BotCore::with_repo(bot_repo));
+    let service = Bot::new(registry).with_control_plane(control_plane);
+
+    let entries = service
+        .list_bots_by_task_modes(BotTaskModesQuery {
+            env: env.clone(),
+            task_claim_mode: Some(true),
+            task_dream_mode: None,
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect("query task-mode bots");
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].bot_id, "task-mode-bot");
+    assert_eq!(entries[0].name, "Task Mode Bot");
+    assert_eq!(entries[0].env, env);
+    assert!(entries[0].task_claim_mode);
+    assert!(!entries[0].task_dream_mode);
+}
+
+#[tokio::test]
+async fn task_mode_query_fails_when_control_plane_is_not_wired() {
+    let fixture = RegistryFixture::new();
+    let error = fixture
+        .service()
+        .list_bots_by_task_modes(BotTaskModesQuery {
+            env: "dev".to_string(),
+            task_claim_mode: None,
+            task_dream_mode: None,
+            match_mode: TaskModeMatch::Any,
+        })
+        .await
+        .expect_err("missing control-plane wiring must fail closed");
+
+    assert!(matches!(
+        error,
+        BotUseCaseError::Service(ServiceError::InvalidOperation { .. })
+    ));
 }
 
 #[derive(Debug, Default)]
